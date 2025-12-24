@@ -47,7 +47,7 @@ Create workflows under `.github/workflows/`:
 
 ## Local Development
 - Install Python deps with `uv pip install -r requirements.txt` (or `uv sync` if using a lockfile) and run lint/tests via `uv run ruff/pytest/mypy` to mirror CI.
-- Frontend: install with `bun install`; run `bun run lint/test/build` matching CI.
+- Frontend (frontend/): install with `bun install`; run `bun run dev` for local preview or `bun run lint/test/build` matching CI.
 - Keep Kaggle notebook entrypoint versioned; ensure data paths/configs are reproducible.
 - API: build and run locally with `docker compose up --build` (expects `app.main:app`).
 
