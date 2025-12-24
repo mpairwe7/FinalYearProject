@@ -16,3 +16,6 @@ dist/
 build/
 artifacts/
 .DS_Store
+frontend/.next
+frontend/node_modules
+backend/__pycache__
