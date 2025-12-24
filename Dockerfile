@@ -8,20 +8,16 @@ WORKDIR /app
 
 # Install system deps (add build-essential if compiling packages)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+  curl \
+  && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps
-COPY requirements.txt ./
-RUN if [ -f requirements.txt ]; then \
-      pip install --no-cache-dir --upgrade pip && \
-      pip install --no-cache-dir -r requirements.txt; \
-    else \
-      echo "requirements.txt not found, skipping deps"; \
-    fi
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+  pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY backend ./
 
 # Expose API port
 EXPOSE 8000
