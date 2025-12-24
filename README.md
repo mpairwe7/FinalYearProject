@@ -9,6 +9,14 @@ This repository describes a CI/CD pipeline for developing and training a custome
 - **CD (Vercel)**: Successful main-branch builds trigger Vercel deployments for the frontend.
 - **API Container**: FastAPI backend packaged via Docker; images pushed to DockerHub for deployment.
 
+## End-to-End CI/CD Flow
+1) **Commit/PR**: Push changes to feature branches; CI runs lint/tests on backend (uv/pytest/mypy/ruff) and frontend (bun lint/test/build).
+2) **Merge to main**: CI re-runs; when green, two deploy jobs can follow:
+	- **Vercel deploy**: `vercel deploy --prod` using org/project IDs and token; publishes the Next.js UI.
+	- **API image push**: Build FastAPI image and push to DockerHub with tags `latest` and commit SHA; downstream infra pulls from DockerHub.
+3) **Training (manual or scheduled)**: Trigger `train.yml` to run Kaggle notebook training; notebooks are synced, job is started via Kaggle API, results are downloaded, then metrics/checkpoints are published (GitHub Release or object store). CI can gate on training success before promoting artifacts.
+4) **Release consumption**: Frontend points to deployed API; API loads the latest validated model from the artifact store or release tag; Docker images from DockerHub are used by runtime (e.g., compose/k8s).
+
 ## URA Chatbot specifics
 - PDF ingestion -> chunking -> embeddings -> database -> retrieval-augmented chatbot UI.
 - Data model, ingestion flow, and evaluation rubric are documented in [docs/data-schema-and-eval.md](docs/data-schema-and-eval.md).
