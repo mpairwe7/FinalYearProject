@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { useChatStore, ChatTurn, SpeechState } from '../store/useChatStore';
 
 // Minimal speech recognition types for browsers that expose them; keeps TS happy in Next.
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
@@ -37,14 +38,6 @@ interface SpeechRecognitionResultList {
   length: number;
 }
 
-interface ChatTurn {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-}
-
-type SpeechState = 'idle' | 'listening' | 'unavailable' | 'error';
-
 const starterPrompts = [
   'What services does URA provide?',
   'How do I submit a document online?',
@@ -53,15 +46,7 @@ const starterPrompts = [
 ];
 
 export default function Page() {
-  const [message, setMessage] = useState('');
-  const [chat, setChat] = useState<ChatTurn[]>([
-    {
-      role: 'assistant',
-      content: 'Hi! I can answer your questions about URA. Type or speak your question to begin.',
-      timestamp: Date.now(),
-    },
-  ]);
-  const [speechState, setSpeechState] = useState<SpeechState>('idle');
+  const { message, setMessage, chat, speechState, setSpeechState, addTurns } = useChatStore();
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
@@ -100,7 +85,7 @@ export default function Page() {
       content: 'Thinking... (stubbed response)',
       timestamp: Date.now(),
     };
-    setChat((prev) => [...prev, userTurn, pendingReply]);
+    addTurns([userTurn, pendingReply]);
     setMessage('');
   };
 
@@ -145,7 +130,7 @@ export default function Page() {
             <span className="small">Context-aware responses (stubbed)</span>
           </div>
           <div className="message-list" aria-live="polite">
-            {chat.map((turn) => (
+            {chat.map((turn: ChatTurn) => (
               <article key={turn.timestamp + turn.role} className={`message ${turn.role}`}>
                 <div className="small" style={{ marginBottom: '0.3rem', textTransform: 'capitalize' }}>
                   {turn.role}
