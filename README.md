@@ -1,6 +1,6 @@
 # FinalYearProject
 
-This repository describes a CI/CD pipeline for developing and training a customer-service conversation AI. The pipeline uses GitHub Actions for automation, Kaggle for model training, and Vercel for hosting the frontend UI.
+This repository describes a CI/CD pipeline for developing and training a customer-service conversation AI. The pipeline uses GitHub Actions for automation, Kaggle for model training, and Vercel for hosting the frontend UI. Backend uses Python/FastAPI with `uv` for dependency management; frontend (Next.js) uses Bun.
 
 ## Pipeline Overview
 - **Code**: Source, data configs, and frontend live in this repo on GitHub.
@@ -46,9 +46,9 @@ Create workflows under `.github/workflows/`:
 - Any additional tokens for artifact storage (e.g., `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or GitHub PAT).
 
 ## Local Development
-- Install Python/Node deps and run lint/tests locally to match CI.
+- Install Python deps with `uv pip install -r requirements.txt` (or `uv sync` if using a lockfile) and run lint/tests via `uv run ruff/pytest/mypy` to mirror CI.
+- Frontend: install with `bun install`; run `bun run lint/test/build` matching CI.
 - Keep Kaggle notebook entrypoint versioned; ensure data paths/configs are reproducible.
-- Frontend uses the same build command locally as in Actions.
 - API: build and run locally with `docker compose up --build` (expects `app.main:app`).
 
 ## Next Steps

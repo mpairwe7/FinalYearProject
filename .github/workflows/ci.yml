@@ -25,43 +25,41 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Install Python dependencies
         run: |
           if [ -f requirements.txt ]; then
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
+            uv pip install -r requirements.txt
           else
             echo "requirements.txt not found; skipping Python deps install"
           fi
 
       - name: Install Python dev tools (ruff/mypy/pytest)
         run: |
-          python -m pip install --upgrade pip
-          pip install ruff mypy pytest
+          uv pip install ruff mypy pytest
 
-      - name: Install Node.js dependencies
-        if: ${{ hashFiles('package-lock.json', 'pnpm-lock.yaml', 'yarn.lock') != '' }}
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        if: ${{ hashFiles('package.json') != '' }}
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          elif [ -f pnpm-lock.yaml ]; then
-            npm install -g pnpm
-            pnpm install --frozen-lockfile
-          elif [ -f yarn.lock ]; then
-            npm install -g yarn
-            yarn install --frozen-lockfile
+          if [ -f package.json ]; then
+            bun install
+          else
+            echo "No package.json found; skipping frontend deps"
           fi
 
       - name: Lint backend (Python)
         run: |
           if ls **/*.py >/dev/null 2>&1; then
-            ruff check .
+            uv run ruff check .
           else
             echo "No Python sources detected; skipping ruff"
           fi
@@ -69,7 +67,7 @@ jobs:
       - name: Test backend (pytest)
         run: |
           if [ -d tests ]; then
-            pytest --maxfail=1 --disable-warnings -q
+            uv run pytest --maxfail=1 --disable-warnings -q
           else
             echo "tests/ not found; skipping pytest"
           fi
@@ -77,7 +75,7 @@ jobs:
       - name: Type-check backend (mypy)
         run: |
           if [ -f mypy.ini ] || [ -f pyproject.toml ]; then
-            mypy .
+            uv run mypy .
           else
             echo "No mypy config found; skipping type-check"
           fi
@@ -85,7 +83,7 @@ jobs:
       - name: Validate data schema/config
         run: |
           if [ -f scripts/validate_schema.py ]; then
-            python scripts/validate_schema.py
+            uv run python scripts/validate_schema.py
           else
             echo "scripts/validate_schema.py not found; skipping schema validation"
           fi
@@ -93,17 +91,59 @@ jobs:
       - name: Lint frontend
         if: ${{ hashFiles('package.json') != '' }}
         run: |
-          npm run lint --if-present
+          if python - <<'PY'
+import json,sys
+from pathlib import Path
+p=Path('package.json')
+try:
+    data=json.load(p.open()) if p.exists() else {}
+except Exception:
+    sys.exit(1)
+sys.exit(0 if 'lint' in data.get('scripts',{}) else 1)
+PY
+          then
+            bun run lint
+          else
+            echo "No lint script; skipping"
+          fi
 
       - name: Test frontend
         if: ${{ hashFiles('package.json') != '' }}
         run: |
-          npm test --if-present -- --watch=false || true
+          if python - <<'PY'
+import json,sys
+from pathlib import Path
+p=Path('package.json')
+try:
+    data=json.load(p.open()) if p.exists() else {}
+except Exception:
+    sys.exit(1)
+sys.exit(0 if 'test' in data.get('scripts',{}) else 1)
+PY
+          then
+            bun run test --watch=false
+          else
+            echo "No test script; skipping"
+          fi
 
       - name: Build frontend
         if: ${{ hashFiles('package.json') != '' }}
         run: |
-          npm run build --if-present
+          if python - <<'PY'
+import json,sys
+from pathlib import Path
+p=Path('package.json')
+try:
+    data=json.load(p.open()) if p.exists() else {}
+except Exception:
+    sys.exit(1)
+sys.exit(0 if 'build' in data.get('scripts',{}) else 1)
+PY
+          then
+            bun run build
+          else
+            echo "No build script; skipping"
+          fi
 
       - name: Upload frontend build artifact
         if: ${{ hashFiles('**/dist/**') != '' }}
