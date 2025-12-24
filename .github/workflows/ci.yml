@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Python dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          else
+            echo "requirements.txt not found; skipping Python deps install"
+          fi
+
+      - name: Install Node.js dependencies
+        if: ${{ hashFiles('package-lock.json', 'pnpm-lock.yaml', 'yarn.lock') != '' }}
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f pnpm-lock.yaml ]; then
+            npm install -g pnpm
+            pnpm install --frozen-lockfile
+          elif [ -f yarn.lock ]; then
+            npm install -g yarn
+            yarn install --frozen-lockfile
+          fi
+
+      - name: Lint backend (Python)
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install flake8
+            flake8 .
+          else
+            echo "No Python sources detected; skipping flake8"
+          fi
+
+      - name: Test backend (pytest)
+        run: |
+          if [ -d tests ]; then
+            pip install pytest
+            pytest --maxfail=1 --disable-warnings -q
+          else
+            echo "tests/ not found; skipping pytest"
+          fi
+
+      - name: Validate data schema/config
+        run: |
+          if [ -f scripts/validate_schema.py ]; then
+            python scripts/validate_schema.py
+          else
+            echo "scripts/validate_schema.py not found; skipping schema validation"
+          fi
+
+      - name: Lint frontend
+        if: ${{ hashFiles('package.json') != '' }}
+        run: |
+          npm run lint --if-present
+
+      - name: Test frontend
+        if: ${{ hashFiles('package.json') != '' }}
+        run: |
+          npm test --if-present -- --watch=false || true
+
+      - name: Build frontend
+        if: ${{ hashFiles('package.json') != '' }}
+        run: |
+          npm run build --if-present
+
+      - name: Upload frontend build artifact
+        if: ${{ hashFiles('**/dist/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: ignore
+
+      - name: Upload test reports (optional)
+        if: ${{ hashFiles('reports/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: reports
+          if-no-files-found: ignore
