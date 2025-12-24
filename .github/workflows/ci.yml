@@ -40,6 +40,11 @@ jobs:
             echo "requirements.txt not found; skipping Python deps install"
           fi
 
+      - name: Install Python dev tools (ruff/mypy/pytest)
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy pytest
+
       - name: Install Node.js dependencies
         if: ${{ hashFiles('package-lock.json', 'pnpm-lock.yaml', 'yarn.lock') != '' }}
         run: |
@@ -55,20 +60,26 @@ jobs:
 
       - name: Lint backend (Python)
         run: |
-          if [ -f requirements.txt ]; then
-            pip install flake8
-            flake8 .
+          if ls **/*.py >/dev/null 2>&1; then
+            ruff check .
           else
-            echo "No Python sources detected; skipping flake8"
+            echo "No Python sources detected; skipping ruff"
           fi
 
       - name: Test backend (pytest)
         run: |
           if [ -d tests ]; then
-            pip install pytest
             pytest --maxfail=1 --disable-warnings -q
           else
             echo "tests/ not found; skipping pytest"
+          fi
+
+      - name: Type-check backend (mypy)
+        run: |
+          if [ -f mypy.ini ] || [ -f pyproject.toml ]; then
+            mypy .
+          else
+            echo "No mypy config found; skipping type-check"
           fi
 
       - name: Validate data schema/config

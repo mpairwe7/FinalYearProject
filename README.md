@@ -7,6 +7,7 @@ This repository describes a CI/CD pipeline for developing and training a custome
 - **CI (GitHub Actions)**: Lint/test backend and UI, validate dataset configs, and build artifacts.
 - **Model Training (Kaggle)**: GitHub Actions launches Kaggle notebook jobs via API for training; artifacts (checkpoints/metrics) are pushed back to GitHub Releases or an object store.
 - **CD (Vercel)**: Successful main-branch builds trigger Vercel deployments for the frontend.
+- **API Container**: FastAPI backend packaged via Docker; images pushed to DockerHub for deployment.
 
 ## URA Chatbot specifics
 - PDF ingestion -> chunking -> embeddings -> database -> retrieval-augmented chatbot UI.
@@ -33,17 +34,24 @@ Create workflows under `.github/workflows/`:
 	- Use `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` secrets to run `vercel deploy --prod`.
 	- Post deployment URL to the commit/PR.
 
+4) **deploy-api.yml** (push to DockerHub):
+	- Checkout repo.
+	- Login to DockerHub with `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`.
+	- Build and push FastAPI image (`landwind/ura-chatbot-api`) tagged with `latest` and commit SHA.
+
 ## Required Secrets
 - `KAGGLE_USERNAME`, `KAGGLE_API_TOKEN`: Kaggle API access for training jobs (API token JSON string).
 - `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`: Vercel deployment auth.
+- `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`: DockerHub push auth (set username to `landwind`, token from DockerHub; do not commit passwords).
 - Any additional tokens for artifact storage (e.g., `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or GitHub PAT).
 
 ## Local Development
 - Install Python/Node deps and run lint/tests locally to match CI.
 - Keep Kaggle notebook entrypoint versioned; ensure data paths/configs are reproducible.
 - Frontend uses the same build command locally as in Actions.
+- API: build and run locally with `docker compose up --build` (expects `app.main:app`).
 
 ## Next Steps
-- Workflows are defined under `.github/workflows/` (CI, Kaggle train, Vercel deploy).
+- Workflows are defined under `.github/workflows/` (CI, Kaggle train, Vercel deploy, DockerHub API deploy).
 - Set repository secrets in GitHub settings before running workflows.
 - Expand data and evaluation documentation as the schema matures.
