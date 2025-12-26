@@ -1,0 +1,11 @@
+question,answer
+"What is the advance tax on the transport sector and why was it introduced?","It simplifies tax payment for transport operators, raises revenue for road construction and maintenance, and widens the tax base. It is collected on motorcycles, passenger vehicles (PSVs/buses), and goods or freight vehicles with loading capacity above 2 tonnes." 
+"Which vehicles must pay and who is responsible?","Owners of motorcycles, passenger vehicles, and goods/freight vehicles above 2 tonnes must pay. The vehicle owner is solely responsible for paying the advance income tax." 
+"How do I determine the loading capacity for goods vehicles?","Use the logbook values: loading capacity = gross weight – net weight." 
+"How much advance tax do I pay by vehicle type?","Goods vehicles above 2 tonnes: UGX 50,000 per tonne of loading capacity per year. Trailers: UGX 50,000 per tonne per year. Passenger vehicles (PSVs) and buses: UGX 20,000 per passenger seat per year. Motorcycles (boda boda): UGX 20,000 per year (licensed to carry one passenger)." 
+"Example: How is advance tax computed for a 7-tonne goods vehicle?","Multiply loading capacity by the rate: 7 tonnes × 50,000 = UGX 350,000 per year." 
+"Example: How is advance tax computed for a 14-seat omnibus?","Multiply seats by the passenger rate: 14 seats × 20,000 = UGX 280,000 per year." 
+"Example: How is advance tax computed for a 67-seat bus?","Multiply seats by the passenger rate: 67 × 20,000 = UGX 1,340,000 per year." 
+"How much does a boda boda pay?","A motorcycle licensed to carry one person pays UGX 20,000 per year as advance income tax." 
+"How do I pay the advance tax?","Steps: 1) Go to the URA website and choose Make a payment. 2) Click “Click here to make a payment.” 3) Select taxpayer details and enter vehicle details. 4) Select Tax Head → Advance Tax for Motor vehicles. 5) Enter payment details, choose mode (e.g., mobile money), complete the captcha, and submit to generate the payment slip." 
+"How is the advance tax treated when filing income tax returns?","When filing your income tax return, deduct the advance income tax paid from the tax payable (it offsets your final income tax)."

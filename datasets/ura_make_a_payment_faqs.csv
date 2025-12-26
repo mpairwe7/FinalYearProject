@@ -1,0 +1,11 @@
+question,answer
+"What is a PRN and why do I need it?","A Payment Registration Number (PRN) uniquely identifies your tax payment. You must quote it when paying at the bank, via mobile money, or online card channels so the payment is matched to your tax account." 
+"How do I generate a PRN?","On the URA portal, go to Make a Payment → Generate a Payment Slip, select the tax type/period, confirm amounts, and submit to obtain the PRN (and slip) to present to your payment channel." 
+"Where can I pay after getting a PRN?","Use partnered banks, mobile money (by quoting the PRN), or online card payments (Visa/Mastercard) available from the Make a Payment section." 
+"Can I pay by Visa or MasterCard online?","Yes. Choose Pay with VISA or Master Card under Make a Payment, enter the PRN and follow the card payment flow." 
+"What if my PRN expired?","Use Reactivate Expired PRN on the Make a Payment page to refresh the reference before paying." 
+"How do I confirm the payment posted?","Use View Payment Status on the URA portal with your PRN to see if the payment was received." 
+"Can I reprint a payment slip?","Yes. Select Print a Payment Slip in the Make a Payment menu and enter the PRN to reprint." 
+"Can I verify an advance income tax payment?","Yes. Use Verify Advance Income Tax Payment in the Make a Payment section and supply the PRN/payment details." 
+"Is there a way to pay park user fees or hospital fees?","Yes. The Make a Payment page includes dedicated options to generate PRNs for park user fees and to pay for hospital fees." 
+"Who can help if a payment fails or is not reflected?","Contact URA support via toll-free 0800 117 000 / 0800 217 000 or WhatsApp 0772 140 000 with your PRN and payment receipt for assistance."
