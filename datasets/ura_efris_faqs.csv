@@ -1,0 +1,12 @@
+question,answer
+"What is EFRIS?","Electronic Fiscal Receipting and Invoicing Solution (EFRIS) is URA’s real-time e-receipting/e-invoicing system using EFDs, e-invoicing, or system-to-system links as per the Tax Procedures Code Act 2014." 
+"Who must use EFRIS?","It is mandatory for all VAT-registered taxpayers. The Commissioner may gazette additional taxpayers (B2B, B2G, B2C) who must issue e-receipts/e-invoices." 
+"Is EFRIS optional for non-VAT taxpayers?","Yes, non-VAT taxpayers are encouraged to adopt EFRIS to enjoy the benefits, though not mandated unless gazetted." 
+"How do I register for EFRIS?","On ura.go.ug → EFRIS → log in with TIN/password → receive OTP → select First time registration → choose e-invoicing and/or EFDs, add business locations → submit for URA approval." 
+"What do I need to register?","A valid TIN and portal password, access to email/phone to receive OTP, internet connectivity, and (if system-to-system) the ability to set up the API link." 
+"What is an e-invoice vs an e-receipt?","An e-invoice is issued by a VAT-registered taxpayer; an e-receipt is issued by a non-VAT taxpayer. Both are generated through EFRIS." 
+"What unique features are on an e-invoice/e-receipt?","They include a fiscal document number, verification code, and QR code for authenticity and validation." 
+"What devices or channels can I use?","Options include Electronic Fiscal Devices (EFDs), the web portal, desktop/mobile client, or system-to-system API integration." 
+"What are the benefits of EFRIS?","Faster refund processing, future prefilled returns, reduced penalties from accurate filing, real-time transaction tracking, secure digital storage of tax invoices, and fairer tax assessments." 
+"How does data reach URA?","When a transaction is initiated in EFRIS (via device, portal, or API), the details are transmitted to URA in real time to generate an e-receipt or e-invoice." 
+"Who can help with EFRIS issues?","Contact URA support: toll-free 0800 117 000 / 0800 217 000 or WhatsApp 0772 140 000."
