@@ -1,0 +1,27 @@
+# Core API backend
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+pydantic==2.7.4
+
+# Data / modeling stack for notebooks (CSV/PDF RAG + tagging + TTS)
+pandas>=2.2.2
+numpy>=1.26.4
+sentence-transformers>=2.6.1
+langchain>=0.2.6
+langchain-community>=0.2.6
+faiss-cpu>=1.8.0
+datasets>=2.20.0
+evaluate>=0.4.2
+transformers>=4.44.0
+accelerate>=0.31.0
+torch>=2.2.0
+huggingface-hub>=0.23.0
+sentencepiece>=0.2.0
+
+# PDF ingestion
+pymupdf4llm>=0.0.15
+pymupdf>=1.24.7
+
+# Text-to-Speech
+TTS>=0.22.0
+pydub>=0.25.1
