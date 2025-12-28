@@ -86,6 +86,12 @@ jobs:
             --gpu ${{ github.event.inputs.gpu || 'true' }} \
             --training-data artifacts/training_data.jsonl
 
+      - name: Overwrite notebook in ml/kaggle with latest from Notebooks
+        run: |
+          cp Notebooks/${{ github.event.inputs.notebook || 'ura-training' }}.ipynb ml/kaggle/
+          ls -l ml/kaggle/${{ github.event.inputs.notebook || 'ura-training' }}.ipynb
+          sha256sum ml/kaggle/${{ github.event.inputs.notebook || 'ura-training' }}.ipynb
+
       - name: Push notebook to Kaggle
         id: push
         run: |

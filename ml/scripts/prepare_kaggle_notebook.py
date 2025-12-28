@@ -44,10 +44,11 @@ def prepare_notebook(notebook_name: str, enable_gpu: bool = True, training_data:
     
     # Create kernel metadata
     kaggle_username = os.environ.get('KAGGLE_USERNAME', 'your-username')
-    
+    import datetime
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
     kernel_metadata = {
-        "id": f"{kaggle_username}/{notebook_name}",
-        "title": notebook_name.replace('-', ' ').title(),
+        "id": f"{kaggle_username}/{notebook_name}-{timestamp}",
+        "title": f"{notebook_name.replace('-', ' ').title()} {timestamp}",
         "code_file": f"{notebook_name}.ipynb",
         "language": "python",
         "kernel_type": "notebook",
