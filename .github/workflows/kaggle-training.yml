@@ -103,6 +103,8 @@ jobs:
         run: |
           mkdir -p artifacts/kaggle
           kaggle kernels output "${{ needs.prepare-kaggle.outputs.kernel-id }}" -p artifacts/kaggle
+          echo "Downloaded files:"
+          find artifacts/kaggle -type f | head -50
 
       - name: Upload Kaggle outputs
         uses: actions/upload-artifact@v4
@@ -120,6 +122,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Kaggle outputs
         uses: actions/download-artifact@v4
@@ -133,7 +137,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install huggingface_hub torch transformers
+        run: pip install huggingface_hub torch transformers joblib
 
       - name: Process and validate model
         run: |
@@ -141,12 +145,104 @@ jobs:
             --input-dir artifacts/kaggle \
             --output-dir artifacts/models
 
+      - name: Copy artifacts to repo folders
+        run: |
+          echo "=========================================="
+          echo "COPYING ARTIFACTS TO REPO FOLDERS"
+          echo "=========================================="
+          
+          # Create directories if they don't exist
+          mkdir -p Model Results/metrics Results/plots Results/reports
+          
+          # Copy model files to Model/ folder
+          echo "📦 Copying model files to Model/..."
+          if [ -d "artifacts/models" ]; then
+            cp -v artifacts/models/*.joblib Model/ 2>/dev/null || true
+            cp -v artifacts/models/*.pth Model/ 2>/dev/null || true
+            cp -v artifacts/models/*.onnx Model/ 2>/dev/null || true
+            cp -v artifacts/models/*.pkl Model/ 2>/dev/null || true
+            cp -v artifacts/models/*.bin Model/ 2>/dev/null || true
+            cp -v artifacts/models/manifest.json Model/ 2>/dev/null || true
+            cp -v artifacts/models/class_labels.json Model/ 2>/dev/null || true
+            cp -v artifacts/models/config.json Model/ 2>/dev/null || true
+          fi
+          
+          # Copy metrics/JSON files to Results/metrics/
+          echo "📊 Copying metrics to Results/metrics/..."
+          find artifacts/kaggle -name "*metrics*.json" -exec cp -v {} Results/metrics/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*results*.json" -exec cp -v {} Results/metrics/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*scores*.json" -exec cp -v {} Results/metrics/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "classification_report*.json" -exec cp -v {} Results/metrics/ \; 2>/dev/null || true
+          
+          # Copy plots/charts/images to Results/plots/
+          echo "📈 Copying plots and charts to Results/plots/..."
+          find artifacts/kaggle -name "*.png" -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*.jpg" -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*.jpeg" -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*.svg" -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*confusion*.png" -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*plot*.png" -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*chart*.png" -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*graph*.png" -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+          
+          # Copy reports/CSVs to Results/reports/
+          echo "📄 Copying reports to Results/reports/..."
+          find artifacts/kaggle -name "*.csv" -exec cp -v {} Results/reports/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*report*.txt" -exec cp -v {} Results/reports/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*summary*.txt" -exec cp -v {} Results/reports/ \; 2>/dev/null || true
+          find artifacts/kaggle -name "*log*.txt" -exec cp -v {} Results/reports/ \; 2>/dev/null || true
+          
+          # Show what was copied
+          echo ""
+          echo "=========================================="
+          echo "COPIED FILES SUMMARY"
+          echo "=========================================="
+          echo "Model/ contents:"
+          ls -la Model/ || echo "  (empty)"
+          echo ""
+          echo "Results/metrics/ contents:"
+          ls -la Results/metrics/ || echo "  (empty)"
+          echo ""
+          echo "Results/plots/ contents:"
+          ls -la Results/plots/ || echo "  (empty)"
+          echo ""
+          echo "Results/reports/ contents:"
+          ls -la Results/reports/ || echo "  (empty)"
+
+      - name: Commit artifacts to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Add all artifacts
+          git add Model/ Results/
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update model and results from Kaggle training
+          
+          Kaggle kernel: ${{ needs.prepare-kaggle.outputs.kernel-id }}
+          Workflow run: ${{ github.run_id }}
+          Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          
+          Files updated:
+          - Model/: trained model artifacts
+          - Results/metrics/: training metrics JSON
+          - Results/plots/: visualizations and charts
+          - Results/reports/: CSV reports and logs"
+            
+            git push
+            echo "✅ Artifacts committed to repository"
+          fi
+
       - name: Push to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python ml/pipelines/push_to_hub.py \
-            --model-path artifacts/models \
+            --model-path Model \
             --repo-id ${{ vars.HF_REPO }} \
             --commit-message "Kaggle training: ${{ github.run_id }}"
 
@@ -157,8 +253,17 @@ jobs:
           tag_name: model-${{ github.run_number }}
           name: Model Release ${{ github.run_number }}
           files: |
-            artifacts/models/**
+            Model/**
+            Results/metrics/**
           body: |
             ## Model Training Complete
             - Kaggle kernel: ${{ needs.prepare-kaggle.outputs.kernel-id }}
             - Run ID: ${{ github.run_id }}
+            
+            ### Artifacts
+            - **Model/**: Trained model files
+            - **Results/**: Metrics, plots, and reports
+            
+            ### Files Included
+            $(ls -1 Model/ 2>/dev/null | sed 's/^/- /')
+
