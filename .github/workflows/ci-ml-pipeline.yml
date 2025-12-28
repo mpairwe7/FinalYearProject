@@ -1,0 +1,323 @@
+# MLOps CI/CD Pipeline for URA Chatbot
+# Based on DataCamp CI/CD for ML best practices
+# Triggers: Push to main/develop, PR, manual dispatch
+
+name: ML Pipeline CI/CD
+
+on:
+  push:
+    branches: [main, develop, feat/*]
+    paths:
+      - 'ml/**'
+      - 'App/backend/**'
+      - 'App/frontend/**'
+      - 'App/**'
+      - 'Data/**'
+      - 'Model/**'
+      - 'requirements.txt'
+      - '.github/workflows/ci-ml-pipeline.yml'
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      run_training:
+        description: 'Run full model training'
+        required: false
+        default: 'false'
+        type: boolean
+      deploy_model:
+        description: 'Deploy model to Hugging Face'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.11'
+  HF_REPO: ${{ vars.HF_REPO || 'mpairweLandwind/ura-chatbot' }}
+  DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'landwind/ura-chatbot-api' }}
+
+jobs:
+  # ============================================
+  # Stage 1: Code Quality & Linting
+  # ============================================
+  lint-and-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pytest pytest-cov black isort mypy
+          pip install -r requirements.txt
+
+      - name: Run Ruff linter
+        run: ruff check ml/ App/backend/ --output-format=github
+
+      - name: Check formatting with Black
+        run: black --check ml/ App/backend/
+
+      - name: Check import sorting
+        run: isort --check-only ml/ App/backend/
+
+      - name: Type checking with MyPy
+        run: mypy ml/ App/backend/ --ignore-missing-imports
+        continue-on-error: true
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --cov=ml --cov=App/backend --cov-report=xml --cov-report=term-missing
+        continue-on-error: true
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ============================================
+  # Stage 2: Data Validation
+  # ============================================
+  data-validation:
+    name: Validate Data Quality
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install validation dependencies
+        run: |
+          pip install pandas great-expectations pydantic
+
+      - name: Run data validation
+        run: python ml/pipelines/validate_data.py
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-validation-report
+          path: Results/reports/data_validation_report.json
+
+  # ============================================
+  # Stage 3: Model Training (Kaggle or Local)
+  # ============================================
+  train-model:
+    name: Train Model
+    runs-on: ubuntu-latest
+    needs: data-validation
+    if: github.event.inputs.run_training == 'true' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install training dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install kaggle mlflow dvc
+
+      - name: Configure Kaggle API
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          mkdir -p ~/.kaggle
+          echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_KEY }}"}' > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Run training pipeline
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python ml/pipelines/train.py \
+            --config ml/configs/training_config.yaml \
+            --output-dir Model
+
+      - name: Upload trained model artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: |
+            Model/
+            Results/metrics/
+
+      - name: Log metrics to summary
+        run: |
+          echo "## Training Metrics" >> $GITHUB_STEP_SUMMARY
+          cat Results/metrics/training_metrics.json >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # Stage 4: Model Evaluation
+  # ============================================
+  evaluate-model:
+    name: Evaluate Model
+    runs-on: ubuntu-latest
+    needs: train-model
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download trained model
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: ./
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install evaluation dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run model evaluation
+        run: |
+          python ml/pipelines/evaluate.py \
+            --model-path Model \
+            --output-dir Results
+
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-results
+          path: Results/
+
+      - name: Check model quality gates
+        run: python ml/pipelines/quality_gates.py
+
+  # ============================================
+  # Stage 5: Push to Hugging Face Hub
+  # ============================================
+  push-to-huggingface:
+    name: Deploy to Hugging Face
+    runs-on: ubuntu-latest
+    needs: evaluate-model
+    if: github.event.inputs.deploy_model == 'true' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: ./
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Hugging Face CLI
+        run: pip install huggingface_hub
+
+      - name: Push model to Hugging Face Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python ml/pipelines/push_to_hub.py \
+            --model-path Model \
+            --repo-id ${{ env.HF_REPO }} \
+            --commit-message "CI/CD: Update model from commit ${{ github.sha }}"
+
+  # ============================================
+  # Stage 6: Build & Push Docker Image
+  # ============================================
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint-and-test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+
+  # ============================================
+  # Stage 7: Deploy Backend
+  # ============================================
+  deploy-backend:
+    name: Deploy Backend API
+    runs-on: ubuntu-latest
+    needs: [build-docker, push-to-huggingface]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: ${{ vars.API_URL }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to production
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          API_HOST: ${{ secrets.API_HOST }}
+        run: |
+          echo "Deploying ${{ env.DOCKER_IMAGE }}:latest to production"
+          # Add your deployment commands here (e.g., SSH, kubectl, etc.)
+          # ssh -i $DEPLOY_KEY user@$API_HOST "docker pull ${{ env.DOCKER_IMAGE }}:latest && docker-compose up -d"
+
+      - name: Health check
+        run: |
+          echo "Running health check..."
+          # curl -f ${{ vars.API_URL }}/health || exit 1

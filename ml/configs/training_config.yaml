@@ -1,0 +1,132 @@
+# ML Pipeline Configuration
+# URA Chatbot - Training & Deployment Settings
+
+# ===========================================
+# Data Configuration
+# ===========================================
+data:
+  datasets_dir: "Data/dataset"
+  pdf_dir: "Data/pdfs"
+  output_dir: "Model"
+  results_dir: "Results"
+  
+  # Data splits
+  test_size: 0.2
+  validation_size: 0.1
+  random_seed: 42
+  
+  # Preprocessing
+  min_question_words: 3
+  min_answer_words: 3
+  max_words: 512
+  chunk_size: 800
+  chunk_overlap: 120
+
+# ===========================================
+# Model Configuration
+# ===========================================
+models:
+  # Embedding model for vectorization
+  embedding:
+    name: "sentence-transformers/all-MiniLM-L6-v2"
+    dimension: 384
+    
+  # Alternative embedding models for comparison
+  embedding_alternatives:
+    - name: "sentence-transformers/all-MiniLM-L3-v2"
+      params: 17M
+      mobile_ready: true
+    - name: "sentence-transformers/all-mpnet-base-v2"
+      params: 110M
+      mobile_ready: false
+      
+  # Generation models
+  generation:
+    web_high_accuracy: "google/gemma-2-2b-it"
+    web_alt: "meta-llama/Llama-3.2-3B-Instruct"
+    mobile_offline: "meta-llama/Llama-3.2-1B-Instruct"
+    background_t5: "google/flan-t5-small"
+    
+  # Tag classifier
+  classifier:
+    type: "SGDClassifier"
+    loss: "log_loss"
+    penalty: "l2"
+    alpha: 0.0001
+    max_iter: 2000
+    early_stopping: true
+    validation_fraction: 0.15
+    n_iter_no_change: 5
+
+# ===========================================
+# Training Configuration
+# ===========================================
+training:
+  # Cross-validation
+  cv_folds: 5
+  
+  # Training parameters
+  batch_size: 16
+  learning_rate: 5e-5
+  num_epochs: 3
+  warmup_steps: 100
+  weight_decay: 0.01
+  
+  # Early stopping
+  patience: 3
+  min_delta: 0.001
+  
+  # Logging
+  logging_steps: 25
+  eval_steps: 100
+  save_steps: 500
+
+# ===========================================
+# Quality Gates
+# ===========================================
+quality_gates:
+  min_accuracy: 0.75
+  min_f1_score: 0.70
+  min_precision: 0.70
+  min_recall: 0.65
+  max_latency_ms: 100
+  
+# ===========================================
+# Deployment Configuration
+# ===========================================
+deployment:
+  # Hugging Face Hub
+  huggingface:
+    repo_id: "mpairweLandwind/ura-chatbot"
+    private: false
+    
+  # Docker
+  docker:
+    image_name: "landwind/ura-chatbot-api"
+    registry: "docker.io"
+    
+  # Export formats
+  export_formats:
+    - joblib    # sklearn
+    - onnx      # cross-platform
+    - pytorch   # web deployment
+    - tflite    # mobile deployment
+
+# ===========================================
+# MLflow Tracking (Optional)
+# ===========================================
+mlflow:
+  tracking_uri: "mlruns"
+  experiment_name: "ura-chatbot"
+  artifact_location: "artifacts/mlflow"
+
+# ===========================================
+# Kaggle Configuration
+# ===========================================
+kaggle:
+  kernel_slug: "ura-training"
+  competition: null
+  datasets:
+    - "mpairwelandwind/ura-faqs"
+  enable_gpu: true
+  enable_internet: true
