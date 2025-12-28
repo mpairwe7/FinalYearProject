@@ -86,9 +86,9 @@ jobs:
           pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm
           mkdir -p artifacts
           python ml/scripts/data_augmentation.py \
-            --csv-dir datasets \
-            --pdf-dir pdfs \
-            --luganda-dir TTT \
+            --csv-dir Data/dataset \
+            --pdf-dir Data/pdfs \
+            --luganda-dir Data/TTT \
             --output artifacts/training_data.jsonl \
             --gemma-output artifacts/gemma_training.jsonl
           
@@ -98,9 +98,10 @@ jobs:
             --gpu ${{ github.event.inputs.gpu || 'true' }} \
             --data artifacts/training_data.jsonl \
             --data artifacts/gemma_training.jsonl \
-            --data datasets \
-            --data pdfs \
-            --data TTT
+            --data Data/dataset \
+            --data Data/pdfs \
+            --data Data/TTT \
+            --data Data/lgaudio
 
       - name: Overwrite notebook in ml/kaggle with latest from Notebooks
         run: |
