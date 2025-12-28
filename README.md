@@ -107,6 +107,35 @@ Three consolidated workflows under `.github/workflows/`:
 | `MLFLOW_TRACKING_URI` | MLflow experiment tracking (optional) |
 | `DEPLOY_KEY`, `API_HOST` | Production server deployment |
 
+## ML Training Pipeline
+
+The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemma/Llama models.
+
+### Scripts
+
+| Script | Description |
+|--------|-------------|
+| `ml/scripts/data_augmentation.py` | Combine CSV FAQs, PDFs, Luganda data into training format |
+| `ml/scripts/teacher_qa_generation.py` | Generate synthetic QA using Llama-3.2-3B teacher |
+| `ml/scripts/fine_tune_gemma.py` | LoRA/QLoRA fine-tuning for Gemma-2-2B |
+| `ml/scripts/run_training_pipeline.sh` | Full pipeline orchestrator |
+
+### Quick Start
+
+```bash
+# Full pipeline (data prep → teacher QA → fine-tuning)
+./ml/scripts/run_training_pipeline.sh --target web_high_accuracy
+
+# Dry run (validate data only)
+./ml/scripts/run_training_pipeline.sh --dry-run
+
+# Individual steps
+python ml/scripts/data_augmentation.py --output artifacts/training_data.jsonl
+python ml/scripts/fine_tune_gemma.py --data artifacts/training_data.jsonl --epochs 3
+```
+
+See [ml/README.md](ml/README.md) for detailed documentation.
+
 ## Local Development
 - Install Python deps with `uv pip install -r requirements.txt` (or `uv sync` if using a lockfile) and run lint/tests via `uv run ruff/pytest/mypy` to mirror CI.
 - Frontend (App/frontend/): install with `bun install`; run `bun run dev` for local preview or `bun run lint/test/build` matching CI.

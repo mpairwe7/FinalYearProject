@@ -55,9 +55,20 @@ jobs:
 
       - name: Prepare notebook metadata
         run: |
+          # First, prepare training data
+          pip install pandas PyPDF2 langchain-text-splitters
+          mkdir -p artifacts
+          python ml/scripts/data_augmentation.py \
+            --csv-dir datasets \
+            --pdf-dir pdfs \
+            --luganda-dir TTT \
+            --output artifacts/training_data.jsonl
+          
+          # Then prepare the notebook
           python ml/scripts/prepare_kaggle_notebook.py \
             --notebook ${{ github.event.inputs.notebook || 'ura-training' }} \
-            --gpu ${{ github.event.inputs.gpu || 'true' }}
+            --gpu ${{ github.event.inputs.gpu || 'true' }} \
+            --training-data artifacts/training_data.jsonl
 
       - name: Push notebook to Kaggle
         id: push
