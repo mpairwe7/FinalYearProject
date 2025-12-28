@@ -45,6 +45,37 @@
 - **Freshness** checks to ensure updated PDFs change answers when content changes.
 
 ## Workflow Hooks
-- CI: run schema and config validation scripts to ensure tables/columns match expectations before deploy.
-- Train (Kaggle): log metrics.json with retrieval and answer scores; artifacts include index snapshots and checkpoints.
-- Deploy: fail if migration scripts are pending or schema drift is detected.
+
+> **📚 See Also**: [MLOps Workflows Documentation](mlops-workflows.md) for comprehensive CI/CD pipeline details.
+
+### CI Pipeline Integration
+- **Data Validation Stage**: Runs `ml/pipelines/validate_data.py` to ensure schema compliance
+- **Quality Gates**: Enforces data quality thresholds before training proceeds
+- **Artifact Storage**: Validation reports stored in `Results/reports/`
+
+### Training Pipeline (Kaggle)
+- **Metrics Logging**: `Results/metrics/training_metrics.json` with retrieval and answer scores
+- **Artifact Management**: Model checkpoints and index snapshots uploaded as GitHub artifacts
+- **MLflow Integration**: Optional experiment tracking via `MLFLOW_TRACKING_URI`
+
+### Deployment Pipeline
+- **Schema Validation**: Fail deployment if migration scripts pending or schema drift detected
+- **Model Versioning**: Automatic versioning on Hugging Face Hub
+- **Health Checks**: Post-deployment API health verification
+
+### Automated Workflows
+| Workflow | Trigger | Data Operations |
+|----------|---------|-----------------|
+| `ci-ml-pipeline.yml` | Push/PR | validate_data.py, quality_gates.py |
+| `kaggle-training.yml` | Schedule/Manual | Full dataset processing on GPU |
+| `frontend-deploy.yml` | Push to main | API URL configuration |
+
+### Data Quality Metrics Tracked
+```yaml
+# ml/pipelines/validate_data.py checks:
+- schema_validation: column types, required fields
+- null_checks: missing value thresholds
+- duplicate_detection: unique constraint validation
+- content_quality: text length, encoding issues
+- freshness: last update timestamps
+```
