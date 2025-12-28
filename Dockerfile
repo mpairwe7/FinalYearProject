@@ -61,12 +61,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /opt/venv /opt/venv
 
 # Copy application code
-COPY App/backend/app ./app
+COPY App/backend/app ./app/
 
-# Copy model artifacts (if present)
-COPY --chown=appuser:appuser artifacts/models ./models/ 2>/dev/null || true
-
-# Create necessary directories
+# Create necessary directories (including models, which may be empty)
+RUN mkdir -p /app/models
 RUN mkdir -p /app/logs /app/cache && \
     chown -R appuser:appuser /app
 
