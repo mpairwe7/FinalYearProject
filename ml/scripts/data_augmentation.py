@@ -96,6 +96,18 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
+def read_csv_with_fallback(path: Path) -> pd.DataFrame:
+    """Read CSV with fallback encodings for non-UTF-8 files."""
+    encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+    for enc in encodings:
+        try:
+            return pd.read_csv(path, encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    # If all fail, let the last one raise the error
+    return pd.read_csv(path)
+
+
 def extract_topic_from_text(text: str, max_words: int = 5) -> str:
     """Extract a topic phrase from text for question generation."""
     # Get first sentence or first N words
@@ -137,7 +149,7 @@ def load_csv_faqs() -> pd.DataFrame:
     frames = []
     for path in csv_files:
         try:
-            df = pd.read_csv(path)
+            df = read_csv_with_fallback(path)
             columns_lower = {c.lower(): c for c in df.columns}
             
             q_col = next((columns_lower[c] for c in columns_lower if c in question_candidates), df.columns[0])
@@ -204,7 +216,7 @@ def load_luganda_translations() -> pd.DataFrame:
     translations = []
     for path in ttt_files:
         try:
-            df = pd.read_csv(path)
+            df = read_csv_with_fallback(path)
             cols_lower = {c.lower(): c for c in df.columns}
             
             en_col = next((cols_lower[c] for c in cols_lower if 'english' in c or 'en' == c), None)
@@ -560,10 +572,11 @@ def main():
     output_path = Path(args.output) if args.output else OUTPUT_DIR / "training_data.jsonl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
+    # Always export the full dataset
+    export_jsonl(augmented_data, output_path)
+    
     if args.split:
         export_train_val_split(augmented_data, output_path.parent)
-    else:
-        export_jsonl(augmented_data, output_path)
     
     # Export Gemma format if requested
     if args.gemma_output:

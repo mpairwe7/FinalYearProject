@@ -83,19 +83,24 @@ jobs:
       - name: Prepare notebook metadata
         run: |
           # First, prepare training data
-          pip install pandas PyPDF2 langchain-text-splitters
+          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm
           mkdir -p artifacts
           python ml/scripts/data_augmentation.py \
-            --csv-dir Data/dataset \
-            --pdf-dir Data/pdfs \
-            --luganda-dir Data/TTT \
-            --output artifacts/training_data.jsonl
+            --csv-dir datasets \
+            --pdf-dir pdfs \
+            --luganda-dir TTT \
+            --output artifacts/training_data.jsonl \
+            --gemma-output artifacts/gemma_training.jsonl
           
           # Then prepare the notebook
           python ml/scripts/prepare_kaggle_notebook.py \
             --notebook ${{ github.event.inputs.notebook || 'ura-training' }} \
             --gpu ${{ github.event.inputs.gpu || 'true' }} \
-            --training-data artifacts/training_data.jsonl
+            --data artifacts/training_data.jsonl \
+            --data artifacts/gemma_training.jsonl \
+            --data datasets \
+            --data pdfs \
+            --data TTT
 
       - name: Overwrite notebook in ml/kaggle with latest from Notebooks
         run: |
