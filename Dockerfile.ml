@@ -26,7 +26,7 @@ RUN pip install --upgrade pip && \
 
 # Copy ML pipeline code
 COPY ml ./ml
-COPY datasets ./datasets
+COPY Data/dataset ./datasets
 
 # Create output directories
 RUN mkdir -p /app/artifacts/models /app/artifacts/metrics
