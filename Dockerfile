@@ -1,26 +1,84 @@
-# FastAPI application container
-FROM python:3.11-slim AS base
+# =============================================================================
+# URA Chatbot API - Production Dockerfile
+# Multi-stage build for optimized image size
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Builder - Install dependencies
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+COPY App/backend/requirements.txt ./requirements.txt
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime - Production image
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+# Labels for container registry
+LABEL org.opencontainers.image.title="URA Chatbot API" \
+      org.opencontainers.image.description="Uganda Revenue Authority Chatbot API" \
+      org.opencontainers.image.vendor="mpairweLandwind" \
+      org.opencontainers.image.source="https://github.com/mpairweLandwind/FinalYearProject"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    # Application config
+    APP_ENV=production \
+    PORT=8000 \
+    WORKERS=4
 
 WORKDIR /app
 
-# Install system deps (add build-essential if compiling packages)
+# Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  curl \
-  && rm -rf /var/lib/apt/lists/*
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash appuser
 
-# Install Python deps
-COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
-  pip install --no-cache-dir -r requirements.txt
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
 
 # Copy application code
-COPY backend ./
+COPY App/backend/app ./app
 
-# Expose API port
-EXPOSE 8000
+# Copy model artifacts (if present)
+COPY --chown=appuser:appuser artifacts/models ./models/ 2>/dev/null || true
 
-# Default command (override in compose/infra as needed)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Create necessary directories
+RUN mkdir -p /app/logs /app/cache && \
+    chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Expose port
+EXPOSE ${PORT}
+
+# Start with gunicorn for production (with uvicorn workers)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers ${WORKERS}"]
