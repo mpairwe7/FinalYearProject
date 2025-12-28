@@ -38,7 +38,7 @@ def prepare_notebook(notebook_name: str, enable_gpu: bool = True, training_data:
             for file in folder.rglob('*'):
                 if file.is_file():
                     # Preserve subfolder structure inside ml/kaggle
-                    rel_path = file.relative_to(PROJECT_ROOT / 'Data')
+                    rel_path = Path('Data') / file.relative_to(PROJECT_ROOT / 'Data')
                     dest_path = kaggle_dir / rel_path
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy(file, dest_path)

@@ -78,10 +78,7 @@ jobs:
           rm -rf "$UPLOAD_DIR"
           mkdir -p "$UPLOAD_DIR"
           # Copy data folders
-          cp -r Data/dataset "$UPLOAD_DIR/dataset" 2>/dev/null || true
-          cp -r Data/pdfs "$UPLOAD_DIR/pdfs" 2>/dev/null || true
-          cp -r Data/TTT "$UPLOAD_DIR/TTT" 2>/dev/null || true
-          cp -r Data/lgaudio "$UPLOAD_DIR/lgaudio" 2>/dev/null || true
+          cp -r Data "$UPLOAD_DIR/" 2>/dev/null || true
 
           # Create dataset metadata
           echo "{\"title\": \"FinalYearProject data\", \"id\": \"${KAGGLE_USERNAME}/finalyearproject-dataset\", \"licenses\": [{\"name\": \"CC0-1.0\"}]}" > "$UPLOAD_DIR/dataset-metadata.json"
