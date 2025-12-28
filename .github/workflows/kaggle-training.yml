@@ -81,6 +81,9 @@ jobs:
           fi
 
       - name: Prepare notebook metadata
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           # First, prepare training data
           pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm
@@ -92,16 +95,29 @@ jobs:
             --output artifacts/training_data.jsonl \
             --gemma-output artifacts/gemma_training.jsonl
           
+          # Create a temporary directory for the dataset
+          mkdir -p kaggle_dataset/Data
+          cp artifacts/*.jsonl kaggle_dataset/
+          cp -r Data/dataset kaggle_dataset/Data/
+          cp -r Data/pdfs kaggle_dataset/Data/
+          cp -r Data/TTT kaggle_dataset/Data/
+          cp -r Data/lgaudio kaggle_dataset/Data/
+          
+          # Initialize or update Kaggle dataset
+          cd kaggle_dataset
+          kaggle datasets init -p .
+          sed -i "s/INSERT_TITLE_HERE/ura-tax-data/g" dataset-metadata.json
+          sed -i "s/INSERT_SLUG_HERE/$KAGGLE_USERNAME\/ura-tax-data/g" dataset-metadata.json
+          
+          # Try to create, if exists update
+          kaggle datasets create -p . || kaggle datasets version -p . -m "Update from GitHub Actions run ${{ github.run_id }}"
+          cd ..
+
           # Then prepare the notebook
           python ml/scripts/prepare_kaggle_notebook.py \
             --notebook ${{ github.event.inputs.notebook || 'ura-training' }} \
             --gpu ${{ github.event.inputs.gpu || 'true' }} \
-            --data artifacts/training_data.jsonl \
-            --data artifacts/gemma_training.jsonl \
-            --data Data/dataset \
-            --data Data/pdfs \
-            --data Data/TTT \
-            --data Data/lgaudio
+            --dataset $KAGGLE_USERNAME/ura-tax-data
 
       - name: Overwrite notebook in ml/kaggle with latest from Notebooks
         run: |

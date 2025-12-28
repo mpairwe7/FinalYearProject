@@ -12,7 +12,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
-def prepare_notebook(notebook_name: str, enable_gpu: bool = True, data_sources: list = None) -> None:
+def prepare_notebook(notebook_name: str, enable_gpu: bool = True, data_sources: list = None, dataset_sources: list = None) -> None:
     """Prepare Kaggle kernel metadata and files."""
     
     kaggle_dir = PROJECT_ROOT / 'ml' / 'kaggle'
@@ -87,7 +87,7 @@ def prepare_notebook(notebook_name: str, enable_gpu: bool = True, data_sources: 
         "accelerator": "nvidiaTeslaT4" if enable_gpu else "none",
         "enable_tpu": False,
         "enable_internet": True,
-        "dataset_sources": [],
+        "dataset_sources": dataset_sources or [],
         "competition_sources": [],
         "kernel_sources": [],
         "model_sources": []
@@ -105,10 +105,11 @@ def main():
     parser.add_argument('--notebook', type=str, default='ura-training')
     parser.add_argument('--gpu', type=str, default='true')
     parser.add_argument('--data', action='append', help='Data files or directories to include')
+    parser.add_argument('--dataset', action='append', help='Kaggle dataset IDs to include')
     args = parser.parse_args()
     
     enable_gpu = args.gpu.lower() == 'true'
-    prepare_notebook(args.notebook, enable_gpu, args.data)
+    prepare_notebook(args.notebook, enable_gpu, args.data, args.dataset)
 
 
 if __name__ == "__main__":
