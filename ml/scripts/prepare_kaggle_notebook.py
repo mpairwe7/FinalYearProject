@@ -25,6 +25,24 @@ def prepare_notebook(notebook_name: str, enable_gpu: bool = True, training_data:
             target_training_data = kaggle_dir / 'training_data.jsonl'
             shutil.copy(training_data_path, target_training_data)
             print(f"✓ Copied training data to {target_training_data}")
+
+    # Recursively copy all files from Data/dataset, Data/TTT, Data/lgaudio, Data/pdfs into ml/kaggle
+    data_folders = [
+        PROJECT_ROOT / 'Data' / 'dataset',
+        PROJECT_ROOT / 'Data' / 'TTT',
+        PROJECT_ROOT / 'Data' / 'lgaudio',
+        PROJECT_ROOT / 'Data' / 'pdfs',
+    ]
+    for folder in data_folders:
+        if folder.exists():
+            for file in folder.rglob('*'):
+                if file.is_file():
+                    # Preserve subfolder structure inside ml/kaggle
+                    rel_path = file.relative_to(PROJECT_ROOT / 'Data')
+                    dest_path = kaggle_dir / rel_path
+                    dest_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(file, dest_path)
+                    print(f"✓ Copied {file} to {dest_path}")
     
     # Define notebook mappings
     notebook_paths = {
