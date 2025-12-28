@@ -89,7 +89,7 @@ jobs:
           if kaggle datasets version -p "$UPLOAD_DIR" -m "CI update" --dir-mode zip; then
             echo "Dataset versioned"
             echo "KAGGLE_DATASET_SLUG=${KAGGLE_USERNAME}/finalyearproject-dataset" >> $GITHUB_ENV
-          elif kaggle datasets create -p "$UPLOAD_DIR" -m "Initial upload from CI" --dir-mode zip; then
+          elif kaggle datasets create -p "$UPLOAD_DIR" --dir-mode zip; then
             echo "Dataset created"
             echo "KAGGLE_DATASET_SLUG=${KAGGLE_USERNAME}/finalyearproject-dataset" >> $GITHUB_ENV
           else
