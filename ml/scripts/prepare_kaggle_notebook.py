@@ -53,6 +53,7 @@ def prepare_notebook(notebook_name: str, enable_gpu: bool = True, training_data:
         "kernel_type": "notebook",
         "is_private": True,
         "enable_gpu": enable_gpu,
+        "accelerator": "nvidiaTeslaT4" if enable_gpu else "none",  # T4 x2 (was P100)
         "enable_tpu": False,
         "enable_internet": True,
         "dataset_sources": [],
