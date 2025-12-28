@@ -59,9 +59,9 @@ jobs:
           pip install pandas PyPDF2 langchain-text-splitters
           mkdir -p artifacts
           python ml/scripts/data_augmentation.py \
-            --csv-dir datasets \
-            --pdf-dir pdfs \
-            --luganda-dir TTT \
+            --csv-dir Data/dataset \
+            --pdf-dir Data/pdfs \
+            --luganda-dir Data/TTT \
             --output artifacts/training_data.jsonl
           
           # Then prepare the notebook

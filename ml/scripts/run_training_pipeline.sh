@@ -125,9 +125,9 @@ else
     else
         echo "Running data augmentation..."
         python ml/scripts/data_augmentation.py \
-            --csv-dir datasets \
-            --pdf-dir pdfs \
-            --luganda-dir TTT \
+            --csv-dir Data/dataset \
+            --pdf-dir Data/pdfs \
+            --luganda-dir Data/TTT \
             --output "$ARTIFACTS_DIR/training_data.jsonl" \
             --gemma-output "$ARTIFACTS_DIR/gemma_format.jsonl" \
             --instruction-output "$ARTIFACTS_DIR/instruction_format.jsonl"
