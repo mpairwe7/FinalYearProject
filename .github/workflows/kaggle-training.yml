@@ -40,10 +40,6 @@ on:
     # Run weekly retraining on Sundays at 2 AM UTC
     - cron: '0 2 * * 0'
 
-env:
-  KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-  KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-
 jobs:
   # ============================================
   # Stage 1: Prepare & Push to Kaggle
