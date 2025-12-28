@@ -139,17 +139,21 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str
 # =============================================================================
 
 def load_csv_faqs() -> pd.DataFrame:
-    """Load all CSV FAQ files."""
-    csv_files = sorted(DATASETS_DIR.glob("*.csv"))
-    print(f"Found {len(csv_files)} CSV files in {DATASETS_DIR}")
+    """Load all CSV/XLSX FAQ files."""
+    data_files = sorted(list(DATASETS_DIR.glob("*.csv")) + list(DATASETS_DIR.glob("*.xlsx")))
+    print(f"Found {len(data_files)} data files in {DATASETS_DIR}")
     
     question_candidates = {'question', 'questions', 'q'}
     answer_candidates = {'answer', 'answers', 'a', 'response', 'resp'}
     
     frames = []
-    for path in csv_files:
+    for path in data_files:
         try:
-            df = read_csv_with_fallback(path)
+            if path.suffix == '.csv':
+                df = read_csv_with_fallback(path)
+            else:
+                df = pd.read_excel(path)
+                
             columns_lower = {c.lower(): c for c in df.columns}
             
             q_col = next((columns_lower[c] for c in columns_lower if c in question_candidates), df.columns[0])
@@ -210,13 +214,17 @@ def load_pdf_content() -> list[dict]:
 
 def load_luganda_translations() -> pd.DataFrame:
     """Load English-Luganda parallel data."""
-    ttt_files = sorted(TTT_DIR.glob("*.csv"))
+    ttt_files = sorted(list(TTT_DIR.glob("*.csv")) + list(TTT_DIR.glob("*.xlsx")))
     print(f"Found {len(ttt_files)} TTT files in {TTT_DIR}")
     
     translations = []
     for path in ttt_files:
         try:
-            df = read_csv_with_fallback(path)
+            if path.suffix == '.csv':
+                df = read_csv_with_fallback(path)
+            else:
+                df = pd.read_excel(path)
+                
             cols_lower = {c.lower(): c for c in df.columns}
             
             en_col = next((cols_lower[c] for c in cols_lower if 'english' in c or 'en' == c), None)
