@@ -56,7 +56,7 @@ Add these secrets in GitHub → Settings → Secrets:
 |--------|-----------------|
 | `HF_TOKEN` | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `KAGGLE_USERNAME` | [kaggle.com/account](https://www.kaggle.com/account) |
-| `KAGGLE_KEY` | [kaggle.com/account](https://www.kaggle.com/account) |
+| `KAGGLE_API_TOKEN` | [kaggle.com/account](https://www.kaggle.com/account) |
 | `DOCKERHUB_USERNAME` | Your Docker Hub username |
 | `DOCKERHUB_TOKEN` | [hub.docker.com/settings/security](https://hub.docker.com/settings/security) |
 | `VERCEL_TOKEN` | [vercel.com/account/tokens](https://vercel.com/account/tokens) |

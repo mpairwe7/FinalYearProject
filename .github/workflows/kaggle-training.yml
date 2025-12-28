@@ -26,7 +26,7 @@ on:
 
 env:
   KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-  KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+  KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
 
 jobs:
   # ============================================
@@ -50,7 +50,7 @@ jobs:
         run: |
           pip install kaggle
           mkdir -p ~/.kaggle
-          echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_KEY }}"}' > ~/.kaggle/kaggle.json
+          echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_API_TOKEN }}"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
       - name: Prepare notebook metadata
@@ -89,7 +89,7 @@ jobs:
       - name: Configure Kaggle
         run: |
           mkdir -p ~/.kaggle
-          echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_KEY }}"}' > ~/.kaggle/kaggle.json
+          echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_API_TOKEN }}"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
       - name: Wait for training completion

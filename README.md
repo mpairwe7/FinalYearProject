@@ -101,7 +101,7 @@ Three consolidated workflows under `.github/workflows/`:
 | Secret | Purpose |
 |--------|---------|
 | `HF_TOKEN` | Hugging Face API token |
-| `KAGGLE_USERNAME`, `KAGGLE_KEY` | Kaggle API access |
+| `KAGGLE_USERNAME`, `KAGGLE_API_TOKEN` | Kaggle API access |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | Vercel deployment |
 | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | DockerHub push |
 | `MLFLOW_TRACKING_URI` | MLflow experiment tracking (optional) |

@@ -193,7 +193,7 @@ Configure these in GitHub repository settings:
 | Secret | Description | Required For |
 |--------|-------------|--------------|
 | `KAGGLE_USERNAME` | Kaggle account username | Kaggle API |
-| `KAGGLE_KEY` | Kaggle API key | Kaggle API |
+| `KAGGLE_API_TOKEN` | Kaggle API key | Kaggle API |
 
 ### Frontend
 | Secret | Description | Required For |

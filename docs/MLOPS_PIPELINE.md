@@ -155,7 +155,7 @@ FinalYearProject/
 
    ```
    KAGGLE_USERNAME      # Kaggle account username
-   KAGGLE_KEY           # Kaggle API key
+   KAGGLE_API_TOKEN     # Kaggle API key
    HF_TOKEN             # Hugging Face write token
    DOCKERHUB_USERNAME   # Docker Hub username
    DOCKERHUB_TOKEN      # Docker Hub access token
