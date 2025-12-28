@@ -66,7 +66,7 @@ def prepare_notebook(notebook_name: str, enable_gpu: bool = True, training_data:
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
     # Allow attaching a Kaggle dataset created via CI by reading the slug from env
     dataset_slug = os.environ.get('KAGGLE_DATASET_SLUG')
-    dataset_sources = [dataset_slug] if dataset_slug else []
+    dataset_sources = []  # dataset_slug] if dataset_slug else []
 
     kernel_metadata = {
         "id": f"{kaggle_username}/{notebook_name}-{timestamp}",
