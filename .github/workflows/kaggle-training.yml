@@ -4,6 +4,22 @@
 name: Kaggle Training Pipeline
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Notebooks/**'
+      - 'Data/**'
+      - 'ml/**'
+      - '.github/workflows/kaggle-training.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Notebooks/**'
+      - 'Data/**'
+      - 'ml/**'
+      - '.github/workflows/kaggle-training.yml'
   workflow_dispatch:
     inputs:
       notebook:
