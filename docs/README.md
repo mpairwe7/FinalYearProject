@@ -1,29 +1,49 @@
 # Project Documentation Index
 
+## 📚 Documentation Overview
+
+Complete documentation for the URA Chatbot MLOps project.
+
 ## Quick Links
 
 | Document | Description |
 |----------|-------------|
-| [MLOps Workflows](mlops-workflows.md) | CI/CD pipeline documentation (comprehensive) |
-| [MLOps Pipeline](MLOPS_PIPELINE.md) | Pipeline architecture and implementation |
+| **Setup & Getting Started** |
+| [Project Setup](PROJECT_SETUP.md) | Complete installation and setup guide |
+| [Quick Start](../QUICKSTART.md) | 5-minute quick start guide |
+| **CI/CD & MLOps** |
+| [MLOps Workflows](mlops-workflows.md) | Comprehensive CI/CD pipeline documentation |
+| [MLOps Pipeline](MLOPS_PIPELINE.md) | Pipeline architecture and implementation details |
+| **Application** |
+| [API Reference](API_REFERENCE.md) | REST API endpoints and usage |
+| [Gradio App](GRADIO_APP.md) | Gradio web interface documentation |
+| **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models and evaluation criteria |
 
 ## Getting Started
 
 ### For Developers
-1. Read [MLOps Workflows](mlops-workflows.md) to understand the CI/CD pipeline
-2. Review required secrets and variables configuration
-3. Run `gh workflow run ci-ml-pipeline.yml` to trigger a manual build
+1. Read [Project Setup](PROJECT_SETUP.md) for complete installation
+2. Review [MLOps Workflows](mlops-workflows.md) for CI/CD pipeline
+3. Configure GitHub secrets as documented
+4. Run `gh workflow run ci-ml-pipeline.yml` to trigger a build
 
 ### For ML Engineers
-1. Configure Kaggle credentials (see secrets documentation)
+1. Configure Kaggle credentials ([see setup guide](PROJECT_SETUP.md#environment-configuration))
 2. Update training config in `ml/configs/training_config.yaml`
-3. Trigger training with `gh workflow run kaggle-training.yml`
+3. Trigger training: `gh workflow run kaggle-training.yml`
+4. Monitor results in `Results/` folder
 
 ### For Frontend Developers
-1. Configure Vercel secrets
-2. Push to `develop` branch for preview deployments
-3. Merge to `main` for production deployment
+1. Configure Vercel secrets ([see setup guide](PROJECT_SETUP.md))
+2. Run `cd App/frontend && bun run dev` for local development
+3. Push to `develop` for preview deployments
+4. Merge to `main` for production
+
+### For API Users
+1. Review [API Reference](API_REFERENCE.md) for endpoints
+2. Access Swagger docs at `/docs` endpoint
+3. Use provided SDK examples for integration
 
 ## Project Structure Overview
 
