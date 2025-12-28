@@ -32,10 +32,23 @@ except ImportError:
 # =============================================================================
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATASETS_DIR = PROJECT_ROOT / "Data" / "dataset"
-PDF_DIR = PROJECT_ROOT / "Data" / "pdfs"
-TTT_DIR = PROJECT_ROOT / "Data" / "TTT"
-OUTPUT_DIR = PROJECT_ROOT / "artifacts"
+
+# Default directories (can be overridden by CLI args)
+DEFAULT_DATASETS_DIR = PROJECT_ROOT / "datasets"
+DEFAULT_PDF_DIR = PROJECT_ROOT / "pdfs"
+DEFAULT_TTT_DIR = PROJECT_ROOT / "TTT"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "artifacts"
+
+# Also check Data/ folder structure
+ALT_DATASETS_DIR = PROJECT_ROOT / "Data" / "dataset"
+ALT_PDF_DIR = PROJECT_ROOT / "Data" / "pdfs"
+ALT_TTT_DIR = PROJECT_ROOT / "Data" / "TTT"
+
+# Initialize globals (will be set in main())
+DATASETS_DIR = DEFAULT_DATASETS_DIR
+PDF_DIR = DEFAULT_PDF_DIR
+TTT_DIR = DEFAULT_TTT_DIR
+OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 
 RANDOM_SEED = 42
 random.seed(RANDOM_SEED)
@@ -455,9 +468,27 @@ def export_train_val_split(data: list[dict], output_dir: Path, val_ratio: float 
 # =============================================================================
 
 def main():
+    global DATASETS_DIR, PDF_DIR, TTT_DIR, OUTPUT_DIR
+    
     parser = argparse.ArgumentParser(description="Data augmentation for Gemma fine-tuning")
-    parser.add_argument("--output", type=str, default=str(OUTPUT_DIR / "training_data.jsonl"),
-                        help="Output file path")
+    
+    # Directory arguments
+    parser.add_argument("--csv-dir", type=str, default=None,
+                        help="Directory containing CSV FAQ files")
+    parser.add_argument("--pdf-dir", type=str, default=None,
+                        help="Directory containing PDF documents")
+    parser.add_argument("--luganda-dir", type=str, default=None,
+                        help="Directory containing Luganda/TTT data")
+    
+    # Output arguments
+    parser.add_argument("--output", type=str, default=None,
+                        help="Output file path for training data")
+    parser.add_argument("--gemma-output", type=str, default=None,
+                        help="Output file path for Gemma format")
+    parser.add_argument("--instruction-output", type=str, default=None,
+                        help="Output file path for instruction format")
+    
+    # Other arguments
     parser.add_argument("--augment-factor", type=int, default=2,
                         help="Augmentation factor for question variations")
     parser.add_argument("--split", action="store_true",
@@ -466,9 +497,31 @@ def main():
                         help="Also export in HuggingFace datasets format")
     args = parser.parse_args()
     
+    # Resolve directories - check CLI args, then defaults, then alternatives
+    def resolve_dir(cli_arg, default_dir, alt_dir):
+        if cli_arg:
+            path = Path(cli_arg)
+            if path.is_absolute():
+                return path
+            return PROJECT_ROOT / path
+        if default_dir.exists():
+            return default_dir
+        if alt_dir.exists():
+            return alt_dir
+        return default_dir
+    
+    DATASETS_DIR = resolve_dir(args.csv_dir, DEFAULT_DATASETS_DIR, ALT_DATASETS_DIR)
+    PDF_DIR = resolve_dir(args.pdf_dir, DEFAULT_PDF_DIR, ALT_PDF_DIR)
+    TTT_DIR = resolve_dir(args.luganda_dir, DEFAULT_TTT_DIR, ALT_TTT_DIR)
+    OUTPUT_DIR = DEFAULT_OUTPUT_DIR
+    
     print("="*70)
     print("URA CHATBOT DATA AUGMENTATION")
     print("="*70)
+    print(f"\n📁 Directories:")
+    print(f"   CSV FAQs:  {DATASETS_DIR} {'✓' if DATASETS_DIR.exists() else '✗'}")
+    print(f"   PDFs:      {PDF_DIR} {'✓' if PDF_DIR.exists() else '✗'}")
+    print(f"   Luganda:   {TTT_DIR} {'✓' if TTT_DIR.exists() else '✗'}")
     
     # Ensure output directory exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -502,12 +555,31 @@ def main():
     
     # Export
     print("\n💾 Exporting...")
-    output_path = Path(args.output)
+    
+    # Determine output paths
+    output_path = Path(args.output) if args.output else OUTPUT_DIR / "training_data.jsonl"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     
     if args.split:
         export_train_val_split(augmented_data, output_path.parent)
     else:
         export_jsonl(augmented_data, output_path)
+    
+    # Export Gemma format if requested
+    if args.gemma_output:
+        gemma_path = Path(args.gemma_output)
+        gemma_path.parent.mkdir(parents=True, exist_ok=True)
+        gemma_data = [d for d in augmented_data if 'text' in d]
+        export_jsonl(gemma_data, gemma_path)
+        print(f"   Gemma format: {gemma_path} ({len(gemma_data)} samples)")
+    
+    # Export instruction format if requested
+    if args.instruction_output:
+        instruction_path = Path(args.instruction_output)
+        instruction_path.parent.mkdir(parents=True, exist_ok=True)
+        instruction_data = [d for d in augmented_data if 'instruction' in d]
+        export_jsonl(instruction_data, instruction_path)
+        print(f"   Instruction format: {instruction_path} ({len(instruction_data)} samples)")
     
     if args.hf_format:
         hf_dir = output_path.parent / 'hf_dataset'
