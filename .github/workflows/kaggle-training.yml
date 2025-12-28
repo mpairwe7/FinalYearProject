@@ -84,13 +84,7 @@ jobs:
           cp -r Data/lgaudio "$UPLOAD_DIR/lgaudio" 2>/dev/null || true
 
           # Create dataset metadata
-          cat > "$UPLOAD_DIR/dataset-metadata.json" <<EOF
-{
-  "title": "FinalYearProject data",
-  "id": "${KAGGLE_USERNAME}/finalyearproject-dataset",
-  "licenses": [{"name": "CC0-1.0"}]
-}
-EOF
+          echo "{\"title\": \"FinalYearProject data\", \"id\": \"${KAGGLE_USERNAME}/finalyearproject-dataset\", \"licenses\": [{\"name\": \"CC0-1.0\"}]}" > "$UPLOAD_DIR/dataset-metadata.json"
 
           # Try to version (update) the dataset; if it doesn't exist, create it
           set -o pipefail
