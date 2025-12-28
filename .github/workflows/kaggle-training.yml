@@ -87,10 +87,17 @@ jobs:
           echo "{\"title\": \"FinalYearProject data\", \"id\": \"${KAGGLE_USERNAME}/finalyearproject-dataset\", \"licenses\": [{\"name\": \"CC0-1.0\"}]}" > "$UPLOAD_DIR/dataset-metadata.json"
 
           # Try to version (update) the dataset; if it doesn't exist, create it
-          set -o pipefail
-          kaggle datasets version -p "$UPLOAD_DIR" -m "CI update" || kaggle datasets create -p "$UPLOAD_DIR" -m "Initial upload from CI"
-          # Export the slug for later steps
-          echo "KAGGLE_DATASET_SLUG=${KAGGLE_USERNAME}/finalyearproject-dataset" >> $GITHUB_ENV
+          # Use --dir-mode zip to allow uploading folders
+          echo "Uploading dataset to Kaggle (dir-mode=zip)..."
+          if kaggle datasets version -p "$UPLOAD_DIR" -m "CI update" --dir-mode zip; then
+            echo "Dataset versioned"
+            echo "KAGGLE_DATASET_SLUG=${KAGGLE_USERNAME}/finalyearproject-dataset" >> $GITHUB_ENV
+          elif kaggle datasets create -p "$UPLOAD_DIR" -m "Initial upload from CI" --dir-mode zip; then
+            echo "Dataset created"
+            echo "KAGGLE_DATASET_SLUG=${KAGGLE_USERNAME}/finalyearproject-dataset" >> $GITHUB_ENV
+          else
+            echo "Warning: Kaggle dataset upload failed (403 or other). Continuing without attaching dataset." >&2
+          fi
 
       - name: Prepare notebook metadata
         run: |
