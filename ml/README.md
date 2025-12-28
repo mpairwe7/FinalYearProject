@@ -363,3 +363,11 @@ python ml/scripts/data_augmentation.py --validate-only
 - [QLoRA: Efficient Finetuning](https://arxiv.org/abs/2305.14314)
 - [Gemma Technical Report](https://ai.google.dev/gemma)
 - [TRL: Transformer Reinforcement Learning](https://huggingface.co/docs/trl)
+# Full local training
+./ml/scripts/run_training_pipeline.sh --target web_high_accuracy
+
+# Trigger CI pipeline with training
+gh workflow run ci-ml-pipeline.yml -f run_training=true
+
+# Trigger Kaggle GPU training
+gh workflow run kaggle-training.yml -f notebook=ura-training
