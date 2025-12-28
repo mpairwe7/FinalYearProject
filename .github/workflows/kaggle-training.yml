@@ -69,6 +69,35 @@ jobs:
           echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_API_TOKEN }}"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
+      - name: Package and upload dataset to Kaggle (create or version)
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: |
+          # Prepare upload directory
+          UPLOAD_DIR=ml/kaggle/dataset_upload
+          rm -rf "$UPLOAD_DIR"
+          mkdir -p "$UPLOAD_DIR"
+          # Copy data folders
+          cp -r Data/dataset "$UPLOAD_DIR/dataset" 2>/dev/null || true
+          cp -r Data/pdfs "$UPLOAD_DIR/pdfs" 2>/dev/null || true
+          cp -r Data/TTT "$UPLOAD_DIR/TTT" 2>/dev/null || true
+          cp -r Data/lgaudio "$UPLOAD_DIR/lgaudio" 2>/dev/null || true
+
+          # Create dataset metadata
+          cat > "$UPLOAD_DIR/dataset-metadata.json" <<EOF
+{
+  "title": "FinalYearProject data",
+  "id": "${KAGGLE_USERNAME}/finalyearproject-dataset",
+  "licenses": [{"name": "CC0-1.0"}]
+}
+EOF
+
+          # Try to version (update) the dataset; if it doesn't exist, create it
+          set -o pipefail
+          kaggle datasets version -p "$UPLOAD_DIR" -m "CI update" || kaggle datasets create -p "$UPLOAD_DIR" -m "Initial upload from CI"
+          # Export the slug for later steps
+          echo "KAGGLE_DATASET_SLUG=${KAGGLE_USERNAME}/finalyearproject-dataset" >> $GITHUB_ENV
+
       - name: Prepare notebook metadata
         run: |
           # First, prepare training data

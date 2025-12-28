@@ -64,6 +64,10 @@ def prepare_notebook(notebook_name: str, enable_gpu: bool = True, training_data:
     kaggle_username = os.environ.get('KAGGLE_USERNAME', 'your-username')
     import datetime
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    # Allow attaching a Kaggle dataset created via CI by reading the slug from env
+    dataset_slug = os.environ.get('KAGGLE_DATASET_SLUG')
+    dataset_sources = [dataset_slug] if dataset_slug else []
+
     kernel_metadata = {
         "id": f"{kaggle_username}/{notebook_name}-{timestamp}",
         "title": f"{notebook_name.replace('-', ' ').title()} {timestamp}",
@@ -75,7 +79,7 @@ def prepare_notebook(notebook_name: str, enable_gpu: bool = True, training_data:
         "accelerator": "nvidiaTeslaT4" if enable_gpu else "none",  # T4 x2 (was P100)
         "enable_tpu": False,
         "enable_internet": True,
-        "dataset_sources": [],
+        "dataset_sources": dataset_sources,
         "competition_sources": [],
         "kernel_sources": [],
         "model_sources": []
