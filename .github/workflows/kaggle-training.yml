@@ -121,20 +121,14 @@ jobs:
             fi
             SLUG="$KAGGLE_USERNAME/$TITLE"
 
-            python - <<'PY'
-import json, os
-title = os.environ['TITLE']
-slug = os.environ['SLUG']
-metadata_path = 'dataset-metadata.json'
-with open(metadata_path) as f:
-    data = json.load(f)
-data['title'] = title
-data['id'] = slug
-data['licenses'] = data.get('licenses') or [{"name": "CC-BY-4.0"}]
-with open(metadata_path, 'w') as f:
-    json.dump(data, f, indent=2)
-print(f"Updated metadata with title={title}, id={slug}")
-PY
+            cat > dataset-metadata.json <<EOF
+{
+  "title": "$TITLE",
+  "id": "$SLUG",
+  "licenses": [ { "name": "CC-BY-4.0" } ],
+  "description": "URA tax assistant dataset: FAQs (CSV), PDFs, Luganda TTT corpora, audio inventory, and JSONL training files."
+}
+EOF
 
             echo "Attempt $i: creating $SLUG"
             if kaggle datasets create -p .; then
