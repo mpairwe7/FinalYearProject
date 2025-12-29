@@ -6,13 +6,12 @@ name: Kaggle Training Pipeline
 on:
   push:
     branches:
-            TITLE="$TITLE" SLUG="$SLUG" python -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset: FAQs (CSV), PDFs, Luganda TTT corpora, audio inventory, and JSONL training files.'; json.dump(d, open(p,'w'), indent=2); print(f\"Updated metadata with title={d['title']}, id={d['id']}\")"
-  #     - main
-  #   paths:
-  #     - 'Notebooks/**'
-  #     - 'Data/**'
-  #     - 'ml/**'
-  #     - '.github/workflows/kaggle-training.yml'
+      - main
+    paths:
+      - 'Notebooks/**'
+      - 'Data/**'
+      - 'ml/**'
+      - '.github/workflows/kaggle-training.yml'
   workflow_dispatch:
     inputs:
       notebook:
@@ -27,7 +26,12 @@ on:
       gpu:
         description: 'Use GPU accelerator'
         required: false
-            TITLE="$TITLE" SLUG="$SLUG" python -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset: FAQs (CSV), PDFs, Luganda TTT corpora, audio inventory, and JSONL training files.'; json.dump(d, open(p,'w'), indent=2); print(f\"Updated metadata with title={d['title']}, id={d['id']}\")"
+        default: true
+        type: boolean
+
+jobs:
+  # ============================================
+  # Stage 1: Prepare & Trigger Training
   # ============================================
   prepare-kaggle:
     name: Prepare Kaggle Notebook
@@ -106,7 +110,8 @@ on:
             fi
             SLUG="$KAGGLE_USERNAME/$TITLE"
 
-            TITLE="$TITLE" SLUG="$SLUG" python -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset: FAQs (CSV), PDFs, Luganda TTT corpora, audio inventory, and JSONL training files.'; json.dump(d, open(p,'w'), indent=2); print(f\"Updated metadata with title={d['title']}, id={d['id']}\")"
+            export TITLE SLUG
+            python3 -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset'; json.dump(d, open(p,'w'), indent=2); print('Updated metadata:', d['title'], d['id'])"
 
             echo "Attempt $i: creating $SLUG"
             if kaggle datasets create -p .; then
@@ -358,4 +363,3 @@ on:
             
             ### Files Included
             $(ls -1 Model/ 2>/dev/null | sed 's/^/- /')
-
