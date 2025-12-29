@@ -8,11 +8,17 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Optional, List
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
-def prepare_notebook(notebook_name: str, enable_gpu: bool = True, data_sources: list = None, dataset_sources: list = None) -> None:
+def prepare_notebook(
+    notebook_name: str, 
+    enable_gpu: bool = True, 
+    data_sources: Optional[List[str]] = None, 
+    dataset_sources: Optional[List[str]] = None
+) -> None:
     """Prepare Kaggle kernel metadata and files."""
     
     kaggle_dir = PROJECT_ROOT / 'ml' / 'kaggle'
@@ -110,10 +116,6 @@ def main():
     
     enable_gpu = args.gpu.lower() == 'true'
     prepare_notebook(args.notebook, enable_gpu, args.data, args.dataset)
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":

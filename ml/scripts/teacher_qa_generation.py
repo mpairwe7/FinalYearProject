@@ -14,9 +14,10 @@ Usage:
 import argparse
 import json
 import re
+import shutil
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from dataclasses import dataclass, asdict
 
 import torch
@@ -38,7 +39,8 @@ except ImportError:
 # =============================================================================
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-PDF_DIR = PROJECT_ROOT / "Data" / "pdfs"
+DATA_ROOT = PROJECT_ROOT / "Data"
+PDF_DIR = DATA_ROOT / "pdfs"
 OUTPUT_DIR = PROJECT_ROOT / "artifacts"
 
 # Teacher model configuration
@@ -117,8 +119,15 @@ def load_pdf_chunks(
     all_chunks = []
     for pdf_path in pdf_files:
         try:
-            md_text = pymupdf4llm.to_markdown(pdf_path)
-            text = clean_text(md_text)
+            md_result = pymupdf4llm.to_markdown(pdf_path)
+            # Handle both string and list return types
+            if isinstance(md_result, list):
+                text = clean_text("\n\n".join(
+                    chunk.get('text', str(chunk)) if isinstance(chunk, dict) else str(chunk)
+                    for chunk in md_result
+                ))
+            else:
+                text = clean_text(str(md_result))
             
             if len(text) > 100:
                 chunks = chunk_text(text, chunk_size, chunk_overlap)
@@ -237,19 +246,20 @@ OUTPUT FORMAT (JSON array):
 Generate the {num_questions} questions now:"""
 
         try:
+            if self.pipeline is None:
+                print("      ✗ Pipeline not initialized")
+                return []
+            
             # Generate response
             if "t5" in self.model_name.lower():
                 result = self.pipeline(prompt)[0]['generated_text']
             else:
-                # For Llama-style models
-                messages = [{"role": "user", "content": prompt}]
-                result = self.pipeline(messages)[0]['generated_text']
+                # For Llama-style models, use text input
+                result = self.pipeline(prompt)[0]['generated_text']
                 
-                # Extract assistant response
-                if isinstance(result, list):
-                    result = result[-1]['content'] if result else ""
-                elif isinstance(result, str) and "assistant" in result.lower():
-                    result = result.split("assistant")[-1]
+                # Extract the generated part (after the prompt)
+                if isinstance(result, str) and len(result) > len(prompt):
+                    result = result[len(prompt):].strip()
             
             # Parse JSON from response
             questions = self._parse_questions(result, num_questions)
@@ -378,11 +388,24 @@ def _save_checkpoint(qa_pairs: list[GeneratedQA], output_path: Path):
 def export_qa_pairs(
     qa_pairs: list[GeneratedQA],
     output_path: Path,
-    formats: list[str] = ['jsonl', 'gemma', 'instruction']
+    formats: list[str] = ['jsonl', 'gemma', 'instruction'],
+    also_save_to_data: bool = True,
 ):
-    """Export QA pairs in multiple formats."""
+    """Export QA pairs in multiple formats.
+    
+    Args:
+        qa_pairs: List of generated QA pairs
+        output_path: Primary output path (in artifacts/)
+        formats: Export formats to generate
+        also_save_to_data: If True, also save to Data/ folder for Kaggle zip inclusion
+    """
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Also save to Data folder if requested (for Kaggle dataset inclusion)
+    data_output_path = DATA_ROOT / output_path.name if also_save_to_data else None
+    if data_output_path:
+        data_output_path.parent.mkdir(parents=True, exist_ok=True)
     
     # JSONL format (raw)
     if 'jsonl' in formats:
@@ -391,6 +414,12 @@ def export_qa_pairs(
             for qa in qa_pairs:
                 f.write(json.dumps(asdict(qa), ensure_ascii=False) + '\n')
         print(f"✓ Exported JSONL: {jsonl_path}")
+        
+        # Also save to Data folder for Kaggle
+        if data_output_path:
+            data_jsonl = data_output_path.with_suffix('.jsonl')
+            shutil.copy(jsonl_path, data_jsonl)
+            print(f"  → Also saved to: {data_jsonl}")
     
     # Gemma format
     if 'gemma' in formats:
@@ -404,6 +433,12 @@ def export_qa_pairs(
                 }
                 f.write(json.dumps(formatted, ensure_ascii=False) + '\n')
         print(f"✓ Exported Gemma format: {gemma_path}")
+        
+        # Also save to Data folder for Kaggle
+        if data_output_path:
+            data_gemma = data_output_path.with_name(data_output_path.stem + '_gemma.jsonl')
+            shutil.copy(gemma_path, data_gemma)
+            print(f"  → Also saved to: {data_gemma}")
     
     # Instruction format
     if 'instruction' in formats:
@@ -481,6 +516,10 @@ def main():
         default="jsonl,gemma,instruction",
         help="Export formats (comma-separated)"
     )
+    parser.add_argument(
+        "--no-data-copy", action="store_true",
+        help="Don't copy output to Data/ folder (for Kaggle zip inclusion)"
+    )
     
     args = parser.parse_args()
     
@@ -525,7 +564,12 @@ def main():
     
     # Export
     export_formats = [f.strip() for f in args.formats.split(',')]
-    export_qa_pairs(qa_pairs, output_path, formats=export_formats)
+    export_qa_pairs(
+        qa_pairs, 
+        output_path, 
+        formats=export_formats,
+        also_save_to_data=not args.no_data_copy
+    )
     
     print("\n✅ Teacher QA generation complete!")
 

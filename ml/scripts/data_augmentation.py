@@ -17,7 +17,7 @@ import json
 import random
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import pandas as pd
 
@@ -27,28 +27,27 @@ except ImportError:
     pymupdf4llm = None
     print("Warning: pymupdf4llm not installed. PDF processing will be skipped.")
 
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    HAS_LANGCHAIN_SPLITTER = True
+except ImportError:
+    RecursiveCharacterTextSplitter = None  # type: ignore
+    HAS_LANGCHAIN_SPLITTER = False
+    print("Warning: langchain_text_splitters not installed. Using basic chunking.")
+
 # =============================================================================
 # Configuration
 # =============================================================================
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
-# Default directories (can be overridden by CLI args)
-DEFAULT_DATASETS_DIR = PROJECT_ROOT / "datasets"
-DEFAULT_PDF_DIR = PROJECT_ROOT / "pdfs"
-DEFAULT_TTT_DIR = PROJECT_ROOT / "TTT"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "artifacts"
-
-# Also check Data/ folder structure
-ALT_DATASETS_DIR = PROJECT_ROOT / "Data" / "dataset"
-ALT_PDF_DIR = PROJECT_ROOT / "Data" / "pdfs"
-ALT_TTT_DIR = PROJECT_ROOT / "Data" / "TTT"
-
-# Initialize globals (will be set in main())
-DATASETS_DIR = DEFAULT_DATASETS_DIR
-PDF_DIR = DEFAULT_PDF_DIR
-TTT_DIR = DEFAULT_TTT_DIR
-OUTPUT_DIR = DEFAULT_OUTPUT_DIR
+# Standard directory structure: Data/ folder contains all data
+DATA_ROOT = PROJECT_ROOT / "Data"
+DATASETS_DIR = DATA_ROOT / "dataset"
+PDF_DIR = DATA_ROOT / "pdfs"
+TTT_DIR = DATA_ROOT / "TTT"
+LGAUDIO_DIR = DATA_ROOT / "lgaudio"
+OUTPUT_DIR = PROJECT_ROOT / "artifacts"
 
 RANDOM_SEED = 42
 random.seed(RANDOM_SEED)
@@ -116,21 +115,77 @@ def extract_topic_from_text(text: str, max_words: int = 5) -> str:
         first_sentence = sentences[0].strip()
         words = first_sentence.split()[:max_words]
         return ' '.join(words).lower()
-    return text.split()[:max_words]
+    return ' '.join(text.split()[:max_words])
 
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> list[str]:
-    """Split text into overlapping chunks."""
-    words = text.split()
-    chunks = []
-    start = 0
+def smart_chunk_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
+    """
+    Split text into semantically meaningful chunks without fragmentation.
+    Uses LangChain's RecursiveCharacterTextSplitter when available,
+    otherwise falls back to sentence-aware splitting.
+    """
+    if not text or len(text.strip()) < 50:
+        return []
     
-    while start < len(words):
-        end = start + chunk_size
-        chunk = ' '.join(words[start:end])
-        chunks.append(chunk)
-        start = end - overlap
+    if HAS_LANGCHAIN_SPLITTER and RecursiveCharacterTextSplitter is not None:
+        # Use LangChain's smart splitter - splits on paragraphs, sentences, then words
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            length_function=len,
+            separators=["\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ", ""],
+            keep_separator=True,
+        )
+        chunks = splitter.split_text(text)
+        return [c.strip() for c in chunks if len(c.strip()) > 30]
+    
+    # Fallback: sentence-aware splitting
+    # First, split into sentences
+    sentence_pattern = r'(?<=[.!?])\s+'
+    sentences = re.split(sentence_pattern, text)
+    
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+            
+        sentence_len = len(sentence)
         
+        # If adding this sentence exceeds chunk size, finalize current chunk
+        if current_length + sentence_len > chunk_size and current_chunk:
+            chunk_text = ' '.join(current_chunk)
+            if len(chunk_text) > 30:
+                chunks.append(chunk_text)
+            
+            # Keep last sentence for overlap (semantic continuity)
+            if chunk_overlap > 0 and current_chunk:
+                overlap_sentences = []
+                overlap_len = 0
+                for s in reversed(current_chunk):
+                    if overlap_len + len(s) <= chunk_overlap:
+                        overlap_sentences.insert(0, s)
+                        overlap_len += len(s)
+                    else:
+                        break
+                current_chunk = overlap_sentences
+                current_length = overlap_len
+            else:
+                current_chunk = []
+                current_length = 0
+        
+        current_chunk.append(sentence)
+        current_length += sentence_len
+    
+    # Add final chunk
+    if current_chunk:
+        chunk_text = ' '.join(current_chunk)
+        if len(chunk_text) > 30:
+            chunks.append(chunk_text)
+    
     return chunks
 
 
@@ -181,7 +236,7 @@ def load_csv_faqs() -> pd.DataFrame:
 
 
 def load_pdf_content() -> list[dict]:
-    """Load and chunk PDF content."""
+    """Load and chunk PDF content using smart splitting."""
     if pymupdf4llm is None:
         print("Skipping PDF loading (pymupdf4llm not installed)")
         return []
@@ -192,18 +247,27 @@ def load_pdf_content() -> list[dict]:
     pdf_chunks = []
     for path in pdf_files:
         try:
-            md_text = pymupdf4llm.to_markdown(path)
-            text = clean_text(md_text)
+            md_result = pymupdf4llm.to_markdown(path)
+            # Handle both string and list return types
+            if isinstance(md_result, list):
+                # If it's a list of dicts (page chunks), join their text
+                text = clean_text("\n\n".join(
+                    chunk.get('text', str(chunk)) if isinstance(chunk, dict) else str(chunk)
+                    for chunk in md_result
+                ))
+            else:
+                text = clean_text(str(md_result))
             
             if len(text) > 100:
-                chunks = chunk_text(text, chunk_size=400, overlap=50)
+                # Use smart chunking to avoid fragmentation
+                chunks = smart_chunk_text(text, chunk_size=600, chunk_overlap=80)
                 for i, chunk in enumerate(chunks):
                     if len(chunk) > 50:
                         pdf_chunks.append({
                             'text': chunk,
                             'source': path.name,
                             'chunk_id': i,
-                            'category': path.stem.replace('-', ' ').lower()
+                            'category': path.stem.replace('-', ' ').replace('_', ' ').lower()
                         })
         except Exception as e:
             print(f"  Error loading {path.name}: {e}")
@@ -494,11 +558,11 @@ def main():
     
     # Directory arguments
     parser.add_argument("--csv-dir", type=str, default=None,
-                        help="Directory containing CSV FAQ files")
+                        help="Directory containing CSV FAQ files (default: Data/dataset)")
     parser.add_argument("--pdf-dir", type=str, default=None,
-                        help="Directory containing PDF documents")
+                        help="Directory containing PDF documents (default: Data/pdfs)")
     parser.add_argument("--luganda-dir", type=str, default=None,
-                        help="Directory containing Luganda/TTT data")
+                        help="Directory containing Luganda/TTT data (default: Data/TTT)")
     
     # Output arguments
     parser.add_argument("--output", type=str, default=None,
@@ -517,23 +581,23 @@ def main():
                         help="Also export in HuggingFace datasets format")
     args = parser.parse_args()
     
-    # Resolve directories - check CLI args, then defaults, then alternatives
-    def resolve_dir(cli_arg, default_dir, alt_dir):
+    # Resolve directories - use CLI args if provided, otherwise use defaults
+    def resolve_path(cli_arg: Optional[str], default_path: Path) -> Path:
         if cli_arg:
             path = Path(cli_arg)
+            # Handle both absolute and relative paths
             if path.is_absolute():
                 return path
+            # Check if path exists relative to cwd
+            if path.exists():
+                return path.resolve()
+            # Otherwise resolve relative to PROJECT_ROOT
             return PROJECT_ROOT / path
-        if default_dir.exists():
-            return default_dir
-        if alt_dir.exists():
-            return alt_dir
-        return default_dir
+        return default_path
     
-    DATASETS_DIR = resolve_dir(args.csv_dir, DEFAULT_DATASETS_DIR, ALT_DATASETS_DIR)
-    PDF_DIR = resolve_dir(args.pdf_dir, DEFAULT_PDF_DIR, ALT_PDF_DIR)
-    TTT_DIR = resolve_dir(args.luganda_dir, DEFAULT_TTT_DIR, ALT_TTT_DIR)
-    OUTPUT_DIR = DEFAULT_OUTPUT_DIR
+    DATASETS_DIR = resolve_path(args.csv_dir, DATA_ROOT / "dataset")
+    PDF_DIR = resolve_path(args.pdf_dir, DATA_ROOT / "pdfs")
+    TTT_DIR = resolve_path(args.luganda_dir, DATA_ROOT / "TTT")
     
     print("="*70)
     print("URA CHATBOT DATA AUGMENTATION")
