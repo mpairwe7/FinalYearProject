@@ -224,18 +224,18 @@ def format_for_gemma(example: Dict[str, Any]) -> Dict[str, str]:
     
     return {"text": ""}
 
-        # Truncate to max_seq_length tokens if possible
-        max_seq_length = 2048  # Default; can be overridden by config
-        try:
-            from transformers import AutoTokenizer
-            tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
-            tokens = tokenizer.encode(text, add_special_tokens=False)
-            if len(tokens) > max_seq_length:
-                tokens = tokens[:max_seq_length]
-                text = tokenizer.decode(tokens, skip_special_tokens=True)
-        except Exception:
-            pass
-        return {"text": text}
+    # Truncate to max_seq_length tokens if possible
+    max_seq_length = 2048  # Default; can be overridden by config
+    try:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
+        tokens = tokenizer.encode(text, add_special_tokens=False)
+        if len(tokens) > max_seq_length:
+            tokens = tokens[:max_seq_length]
+            text = tokenizer.decode(tokens, skip_special_tokens=True)
+    except Exception:
+        pass
+    return {"text": text}
 
 def format_for_llama(example: Dict[str, Any]) -> Dict[str, str]:
     """Format examples for Llama 3.x instruction tuning."""
@@ -279,18 +279,18 @@ def format_for_llama(example: Dict[str, Any]) -> Dict[str, str]:
     
     return {"text": ""}
 
-        # Truncate to max_seq_length tokens if possible
-        max_seq_length = 2048  # Default; can be overridden by config
-        try:
-            from transformers import AutoTokenizer
-            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
-            tokens = tokenizer.encode(text, add_special_tokens=False)
-            if len(tokens) > max_seq_length:
-                tokens = tokens[:max_seq_length]
-                text = tokenizer.decode(tokens, skip_special_tokens=True)
-        except Exception:
-            pass
-        return {"text": text}
+    # Truncate to max_seq_length tokens if possible
+    max_seq_length = 2048  # Default; can be overridden by config
+    try:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
+        tokens = tokenizer.encode(text, add_special_tokens=False)
+        if len(tokens) > max_seq_length:
+            tokens = tokens[:max_seq_length]
+            text = tokenizer.decode(tokens, skip_special_tokens=True)
+    except Exception:
+        pass
+    return {"text": text}
 
 # =============================================================================
 # Model Setup

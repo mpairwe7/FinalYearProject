@@ -221,8 +221,6 @@ Generate the {num_questions} questions now:"""
         except Exception as e:
             print(f"      ✗ Generation error: {e}")
             return []
-                print(f"   ✗ Fallback also failed: {e2}")
-                return False
     
     def generate_questions(
         self,
