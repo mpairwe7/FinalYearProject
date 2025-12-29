@@ -104,21 +104,68 @@ jobs:
           echo "Dataset structure to be uploaded:"
           find kaggle_dataset -maxdepth 2
           
-          # Initialize or update Kaggle dataset
+          # Initialize or update Kaggle dataset with auto-incrementing title
           cd kaggle_dataset
           kaggle datasets init -p .
-          sed -i "s/INSERT_TITLE_HERE/ura-tax-data/g" dataset-metadata.json
-          sed -i "s/INSERT_SLUG_HERE/$KAGGLE_USERNAME\/ura-tax-data/g" dataset-metadata.json
-          
-          # Try to create, if exists update
-          kaggle datasets create -p . || kaggle datasets version -p . -m "Update from GitHub Actions run ${{ github.run_id }}"
+
+          BASE_TITLE="ura-tax-data-v2"
+          MAX_ATTEMPTS=5
+          DATASET_ID=""
+          CREATED=0
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            if [ "$i" -eq 1 ]; then
+              TITLE="$BASE_TITLE"
+            else
+              TITLE="$BASE_TITLE-$i"
+            fi
+            SLUG="$KAGGLE_USERNAME/$TITLE"
+
+            python - <<'PY'
+import json, os
+title = os.environ['TITLE']
+slug = os.environ['SLUG']
+metadata_path = 'dataset-metadata.json'
+with open(metadata_path) as f:
+    data = json.load(f)
+data['title'] = title
+data['id'] = slug
+data['licenses'] = data.get('licenses') or [{"name": "CC-BY-4.0"}]
+with open(metadata_path, 'w') as f:
+    json.dump(data, f, indent=2)
+print(f"Updated metadata with title={title}, id={slug}")
+PY
+
+            echo "Attempt $i: creating $SLUG"
+            if kaggle datasets create -p .; then
+              DATASET_ID="$SLUG"
+              CREATED=1
+              break
+            else
+              # If already exists, try versioning; otherwise continue attempts
+              if kaggle datasets version -p . -m "Update from GitHub Actions run ${{ github.run_id }}"; then
+                DATASET_ID="$SLUG"
+                CREATED=1
+                break
+              else
+                echo "Retrying with next suffix..."
+              fi
+            fi
+          done
+
+          if [ "$CREATED" -ne 1 ]; then
+            echo "Failed to create or update dataset after $MAX_ATTEMPTS attempts"
+            exit 1
+          fi
+
+          echo "DATASET_ID=$DATASET_ID" >> $GITHUB_ENV
           cd ..
 
           # Then prepare the notebook
           python ml/scripts/prepare_kaggle_notebook.py \
             --notebook ${{ github.event.inputs.notebook || 'ura-training' }} \
             --gpu ${{ github.event.inputs.gpu || 'true' }} \
-            --dataset $KAGGLE_USERNAME/ura-tax-data
+            --dataset $DATASET_ID
 
       - name: Overwrite notebook in ml/kaggle with latest from Notebooks
         run: |
