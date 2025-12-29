@@ -171,6 +171,9 @@ jobs:
             --notebook ${{ github.event.inputs.notebook || 'ura-training' }} \
             --gpu ${{ github.event.inputs.gpu || 'true' }} \
             --dataset $DATASET_ID
+          
+          # Set environment variable for the notebook
+          echo "KAGGLE_DATASET=$DATASET_ID" >> $GITHUB_ENV
 
       - name: Overwrite notebook in ml/kaggle with latest from Notebooks
         run: |
