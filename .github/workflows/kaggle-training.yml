@@ -6,14 +6,7 @@ name: Kaggle Training Pipeline
 on:
   push:
     branches:
-      - main
-    paths:
-      - 'Notebooks/**'
-      - 'Data/**'
-      - 'ml/**'
-      - '.github/workflows/kaggle-training.yml'
-  # pull_request:
-  #   branches:
+            TITLE="$TITLE" SLUG="$SLUG" python -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset: FAQs (CSV), PDFs, Luganda TTT corpora, audio inventory, and JSONL training files.'; json.dump(d, open(p,'w'), indent=2); print(f\"Updated metadata with title={d['title']}, id={d['id']}\")"
   #     - main
   #   paths:
   #     - 'Notebooks/**'
@@ -34,15 +27,7 @@ on:
       gpu:
         description: 'Use GPU accelerator'
         required: false
-        default: true
-        type: boolean
-  schedule:
-    # Run weekly retraining on Sundays at 2 AM UTC
-    - cron: '0 2 * * 0'
-
-jobs:
-  # ============================================
-  # Stage 1: Prepare & Push to Kaggle
+            TITLE="$TITLE" SLUG="$SLUG" python -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset: FAQs (CSV), PDFs, Luganda TTT corpora, audio inventory, and JSONL training files.'; json.dump(d, open(p,'w'), indent=2); print(f\"Updated metadata with title={d['title']}, id={d['id']}\")"
   # ============================================
   prepare-kaggle:
     name: Prepare Kaggle Notebook
@@ -121,14 +106,7 @@ jobs:
             fi
             SLUG="$KAGGLE_USERNAME/$TITLE"
 
-            cat > dataset-metadata.json <<EOF
-{
-  "title": "$TITLE",
-  "id": "$SLUG",
-  "licenses": [ { "name": "CC-BY-4.0" } ],
-  "description": "URA tax assistant dataset: FAQs (CSV), PDFs, Luganda TTT corpora, audio inventory, and JSONL training files."
-}
-EOF
+            TITLE="$TITLE" SLUG="$SLUG" python -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset: FAQs (CSV), PDFs, Luganda TTT corpora, audio inventory, and JSONL training files.'; json.dump(d, open(p,'w'), indent=2); print(f\"Updated metadata with title={d['title']}, id={d['id']}\")"
 
             echo "Attempt $i: creating $SLUG"
             if kaggle datasets create -p .; then
