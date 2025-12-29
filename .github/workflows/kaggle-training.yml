@@ -96,15 +96,15 @@ jobs:
           fi
           
           # Create a temporary directory for the dataset
-          mkdir -p kaggle_dataset
-          cp -r Data kaggle_dataset/
+          mkdir -p kaggle_dataset/Data
+          cp -r Data/* kaggle_dataset/Data/
           
           # Copy all JSONL files inside Data folder so everything is in one zip
-          cp artifacts/*.jsonl kaggle_dataset/Data/ 2>/dev/null || true
+          cp -v artifacts/*.jsonl kaggle_dataset/Data/ 2>/dev/null || echo "No JSONL files to copy"
           
           # Debug: show what's in the dataset directory
           echo "Dataset structure to be uploaded:"
-          find kaggle_dataset -maxdepth 3
+          find kaggle_dataset -type f | head -50
           
           # Initialize or update Kaggle dataset with auto-incrementing title
           cd kaggle_dataset
@@ -126,21 +126,27 @@ jobs:
             export TITLE SLUG
             python3 -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset'; json.dump(d, open(p,'w'), indent=2); print('Updated metadata:', d['title'], d['id'])"
 
-            echo "Attempt $i: creating $SLUG"
-            if kaggle datasets create -p . --dir-mode zip --public; then
+            echo "Attempt $i: trying $SLUG"
+            
+            # First try to version existing dataset
+            echo "  Trying to version existing dataset..."
+            if kaggle datasets version -p . --dir-mode zip -m "Update from GitHub Actions run ${{ github.run_id }}" 2>&1; then
+              echo "  ✓ Dataset versioned successfully"
               DATASET_ID="$SLUG"
               CREATED=1
               break
-            else
-              # If already exists, try versioning; otherwise continue attempts
-              if kaggle datasets version -p . --dir-mode zip -m "Update from GitHub Actions run ${{ github.run_id }}"; then
-                DATASET_ID="$SLUG"
-                CREATED=1
-                break
-              else
-                echo "Retrying with next suffix..."
-              fi
             fi
+            
+            # If versioning failed, try to create new
+            echo "  Trying to create new dataset..."
+            if kaggle datasets create -p . --dir-mode zip --public 2>&1; then
+              echo "  ✓ Dataset created successfully"
+              DATASET_ID="$SLUG"
+              CREATED=1
+              break
+            fi
+            
+            echo "  ✗ Both version and create failed for $SLUG, trying next..."
           done
 
           if [ "$CREATED" -ne 1 ]; then
