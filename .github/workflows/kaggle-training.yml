@@ -114,13 +114,13 @@ jobs:
             python3 -c "import json, os; p='dataset-metadata.json'; d=json.load(open(p)); d['title']=os.environ['TITLE']; d['id']=os.environ['SLUG']; d['licenses']=[{'name':'CC-BY-4.0'}]; d['description']='URA tax assistant dataset'; json.dump(d, open(p,'w'), indent=2); print('Updated metadata:', d['title'], d['id'])"
 
             echo "Attempt $i: creating $SLUG"
-            if kaggle datasets create -p .; then
+            if kaggle datasets create -p . --dir-mode zip; then
               DATASET_ID="$SLUG"
               CREATED=1
               break
             else
               # If already exists, try versioning; otherwise continue attempts
-              if kaggle datasets version -p . -m "Update from GitHub Actions run ${{ github.run_id }}"; then
+              if kaggle datasets version -p . --dir-mode zip -m "Update from GitHub Actions run ${{ github.run_id }}"; then
                 DATASET_ID="$SLUG"
                 CREATED=1
                 break
