@@ -49,12 +49,12 @@ jobs:
 
       - name: Free up disk space (cleanup)
         run: |
-            echo "Freeing up disk space before pip install..."
-            sudo rm -rf /usr/share/dotnet || true
-            sudo rm -rf /opt/ghc || true
-            sudo rm -rf /usr/local/lib/android || true
-            sudo docker image prune -a -f || true
-            df -h
+          echo "Freeing up disk space before pip install..."
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo docker image prune -a -f || true
+          df -h
 
       - name: Install Kaggle CLI
         run: |
