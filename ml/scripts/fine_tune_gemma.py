@@ -34,7 +34,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # Standard directory structure
 DATA_ROOT = PROJECT_ROOT / "Data"
-ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
+ARTIFACTS_DIR = DATA_ROOT / "artifacts"
 OUTPUT_DIR = ARTIFACTS_DIR / "models"
 
 RANDOM_SEED = 42

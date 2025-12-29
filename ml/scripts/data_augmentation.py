@@ -47,7 +47,7 @@ DATASETS_DIR = DATA_ROOT / "dataset"
 PDF_DIR = DATA_ROOT / "pdfs"
 TTT_DIR = DATA_ROOT / "TTT"
 LGAUDIO_DIR = DATA_ROOT / "lgaudio"
-OUTPUT_DIR = PROJECT_ROOT / "artifacts"
+OUTPUT_DIR = DATA_ROOT / "artifacts"
 
 RANDOM_SEED = 42
 random.seed(RANDOM_SEED)

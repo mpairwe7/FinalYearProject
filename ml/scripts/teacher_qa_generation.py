@@ -41,7 +41,7 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_ROOT = PROJECT_ROOT / "Data"
 PDF_DIR = DATA_ROOT / "pdfs"
-OUTPUT_DIR = PROJECT_ROOT / "artifacts"
+OUTPUT_DIR = DATA_ROOT / "artifacts"
 
 # Teacher model configuration
 TEACHER_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
