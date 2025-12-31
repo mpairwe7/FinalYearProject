@@ -173,7 +173,7 @@ class TeacherModel:
             
             models_to_try = [
                 #"meta-llama/Llama-3.2-3B-Instruct",  # Primary (gated)
-                "microsoft/DialoGPT-medium",         # Compatible causal LM fallback
+                "google/flan-t5-small",         # Compatible causal LM fallback
                 "distilgpt2"                         # Another simple causal LM
             ]
             

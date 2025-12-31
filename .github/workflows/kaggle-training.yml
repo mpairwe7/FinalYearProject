@@ -85,7 +85,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           # First, prepare training data
-          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl
+          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl datasets
           mkdir -p artifacts
           python ml/scripts/data_augmentation.py \
             --csv-dir Data/dataset \
