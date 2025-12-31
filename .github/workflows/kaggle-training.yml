@@ -106,11 +106,11 @@ jobs:
           
           # Create a temporary directory for the dataset
           mkdir -p kaggle_dataset/Data
-          cp -r Data/* kaggle_dataset/Data/Dataset/
+          cp -r Data/* kaggle_dataset/Data/
           
           # Copy all JSONL files to artifacts/data subfolder inside Data folder for the zip
-          mkdir -p kaggle_dataset/Data/Dataset/artifacts/
-          cp -v artifacts/*.jsonl kaggle_dataset/Data/Dataset/artifacts/ 2>/dev/null || echo "No JSONL files to copy"
+          mkdir -p kaggle_dataset/Data/artifacts/data
+          cp -v artifacts/*.jsonl kaggle_dataset/Data/artifacts/data/ 2>/dev/null || echo "No JSONL files to copy"
           
           # Debug: show what's in the dataset directory
           echo "Dataset structure to be uploaded:"
