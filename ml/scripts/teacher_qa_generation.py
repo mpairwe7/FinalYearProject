@@ -160,67 +160,134 @@ class TeacherModel:
         self.tokenizer = None
         self.pipeline = None
         
-    def generate_questions(
-        self,
-        chunk_text: str,
-        num_questions: int = 5,
-        context: str = "Uganda Revenue Authority (URA) tax documentation"
-    ) -> list[dict]:
-        """Generate questions from a text chunk, truncating to model max length if needed."""
-
-        # Truncate chunk_text to fit model max length
-        max_input_tokens = 512  # Default; override if model/tokenizer has a different limit
-        if self.tokenizer is not None:
-            # Reserve some tokens for prompt and instructions
-            reserved_tokens = 128
-            max_input_tokens = getattr(self.tokenizer, 'model_max_length', 512)
-            max_chunk_tokens = max(1, max_input_tokens - reserved_tokens)
-            tokens = self.tokenizer.encode(chunk_text, add_special_tokens=False)
-            if len(tokens) > max_chunk_tokens:
-                tokens = tokens[:max_chunk_tokens]
-                chunk_text = self.tokenizer.decode(tokens, skip_special_tokens=True)
-
-        prompt = f"""You are an expert at creating educational questions from text content.
-
-CONTEXT: This text is from {context}.
-
-TEXT CHUNK:
-{chunk_text}
-
-TASK: Generate exactly {num_questions} high-quality questions that can be answered using ONLY the information in the text chunk above.
-
-REQUIREMENTS:
-1. Questions should be diverse (factual, procedural, definitional, comparative)
-2. Each question must be answerable from the text
-3. Include the answer extracted/paraphrased from the text
-4. Questions should be relevant to tax/URA context
-5. Vary question complexity (simple to moderately complex)
-
-OUTPUT FORMAT (JSON array):
-[
-  {{"question": "...", "answer": "...", "type": "factual|procedural|definitional|comparative"}},
-  ...
-]
-
-Generate the {num_questions} questions now:"""
-
+    def load(self) -> bool:
+        """Load the teacher model and tokenizer."""
         try:
-            if self.pipeline is None:
-                # ...existing code...
-                pass
-            # Generate response
-            if "t5" in self.model_name.lower():
-                # ...existing code...
-                pass
-            else:
-                # ...existing code...
-                pass
-            # Parse JSON from response
-            questions = self._parse_questions(result, num_questions)
-            return questions
+            print(f"Loading teacher model: {self.model_name}")
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device_map="auto" if self.device == "cuda" else None,
+                low_cpu_mem_usage=True,
+            )
+            # Note: If device_map="auto", model is already on GPU, don't call .to()
+            if self.device == "cuda" and not hasattr(self.model, 'hf_device_map'):
+                self.model.to(self.device)
+            
+            # Create pipeline for text generation
+            # If device_map="auto" was used, let pipeline auto-detect device
+            pipeline_device = -1 if self.device == "cuda" and hasattr(self.model, 'hf_device_map') else (0 if self.device == "cuda" else -1)
+            self.pipeline = pipeline(
+                "text-generation",
+                model=self.model,
+                tokenizer=self.tokenizer,
+                device=pipeline_device,
+                max_new_tokens=512,
+                temperature=0.7,
+                do_sample=True,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+            print("✅ Teacher model loaded successfully")
+            return True
         except Exception as e:
-            print(f"      ✗ Generation error: {e}")
-            return []
+            print(f"❌ Failed to load teacher model: {e}")
+            # Try fallback model
+            try:
+                print(f"Trying fallback model: {FALLBACK_MODEL}")
+                self.model_name = FALLBACK_MODEL
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
+                if self.device == "cuda":
+                    self.model.to(self.device)
+                self.pipeline = pipeline(
+                    "text2text-generation",
+                    model=self.model,
+                    tokenizer=self.tokenizer,
+                    device=0 if self.device == "cuda" else -1,
+                    max_new_tokens=128,
+                )
+                print("✅ Fallback model loaded successfully")
+                return True
+            except Exception as e2:
+                print(f"❌ Fallback model also failed: {e2}")
+                return False
+        
+    def _parse_questions(self, response: str, expected_count: int) -> list[dict]:
+        """Parse generated questions from model response."""
+        questions = []
+        
+        # Try to extract JSON array
+        try:
+            # Find JSON array in response
+            json_match = re.search(r'\[[\s\S]*\]', response)
+            if json_match:
+                json_str = json_match.group()
+                parsed = json.loads(json_str)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        if isinstance(item, dict) and 'question' in item:
+                            questions.append({
+                                'question': item.get('question', ''),
+                                'answer': item.get('answer', ''),
+                                'type': item.get('type', 'factual'),
+                            })
+        except json.JSONDecodeError:
+            pass
+        
+        # Fallback: extract question patterns
+        if not questions:
+            # Look for numbered questions
+            q_patterns = re.findall(
+                r'(?:\d+\.\s*)?["\']?([^"\'?\n]+\?)["\']?\s*(?:Answer:|A:)?\s*([^?\n]+)',
+                response,
+                re.IGNORECASE
+            )
+            for q, a in q_patterns[:expected_count]:
+                questions.append({
+                    'question': q.strip(),
+                    'answer': a.strip(),
+                    'type': 'factual',
+                })
+        
+        return questions[:expected_count]
+        """Parse generated questions from model response."""
+        questions = []
+        
+        # Try to extract JSON array
+        try:
+            # Find JSON array in response
+            json_match = re.search(r'\[[\s\S]*\]', response)
+            if json_match:
+                json_str = json_match.group()
+                parsed = json.loads(json_str)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        if isinstance(item, dict) and 'question' in item:
+                            questions.append({
+                                'question': item.get('question', ''),
+                                'answer': item.get('answer', ''),
+                                'type': item.get('type', 'factual'),
+                            })
+        except json.JSONDecodeError:
+            pass
+        
+        # Fallback: extract question patterns
+        if not questions:
+            # Look for numbered questions
+            q_patterns = re.findall(
+                r'(?:\d+\.\s*)?["\']?([^"\'?\n]+\?)["\']?\s*(?:Answer:|A:)?\s*([^?\n]+)',
+                response,
+                re.IGNORECASE
+            )
+            for q, a in q_patterns[:expected_count]:
+                questions.append({
+                    'question': q.strip(),
+                    'answer': a.strip(),
+                    'type': 'factual',
+                })
+        
+        return questions[:expected_count]
     
     def generate_questions(
         self,
@@ -277,45 +344,6 @@ Generate the {num_questions} questions now:"""
         except Exception as e:
             print(f"      ✗ Generation error: {e}")
             return []
-    
-    def _parse_questions(self, response: str, expected_count: int) -> list[dict]:
-        """Parse generated questions from model response."""
-        questions = []
-        
-        # Try to extract JSON array
-        try:
-            # Find JSON array in response
-            json_match = re.search(r'\[[\s\S]*\]', response)
-            if json_match:
-                json_str = json_match.group()
-                parsed = json.loads(json_str)
-                if isinstance(parsed, list):
-                    for item in parsed:
-                        if isinstance(item, dict) and 'question' in item:
-                            questions.append({
-                                'question': item.get('question', ''),
-                                'answer': item.get('answer', ''),
-                                'type': item.get('type', 'factual'),
-                            })
-        except json.JSONDecodeError:
-            pass
-        
-        # Fallback: extract question patterns
-        if not questions:
-            # Look for numbered questions
-            q_patterns = re.findall(
-                r'(?:\d+\.\s*)?["\']?([^"\'?\n]+\?)["\']?\s*(?:Answer:|A:)?\s*([^?\n]+)',
-                response,
-                re.IGNORECASE
-            )
-            for q, a in q_patterns[:expected_count]:
-                questions.append({
-                    'question': q.strip(),
-                    'answer': a.strip(),
-                    'type': 'factual',
-                })
-        
-        return questions[:expected_count]
 
 
 # =============================================================================
