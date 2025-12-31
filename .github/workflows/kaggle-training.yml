@@ -100,7 +100,7 @@ jobs:
             pip install torch transformers accelerate
             python ml/scripts/teacher_qa_generation.py \
               --output artifacts/teacher_qa \
-              --chunks 50 \
+              --chunks 669 \
               --questions 3 \
               --formats jsonl,gemma || echo "Teacher QA generation skipped (model not available)"
           fi
@@ -115,15 +115,12 @@ jobs:
           import pandas as pd
           ds = load_dataset('kambale/luganda-english-parallel-corpus')
           df = pd.DataFrame({'english': ds['train']['english'], 'luganda': ds['train']['luganda']})
-          df.to_csv('kaggle_dataset/Data/dataset/luganda_parallel.csv', index=False)
+          df.to_csv('kaggle_dataset/Data/dataset/TTT/luganda_parallel.csv', index=False)
           print('Added Luganda-English parallel corpus to dataset path')
           print(f'Dataset shape: {df.shape}')
           print(f'First few rows:\\n{df.head()}')
-          "
-          
-          # Create a temporary directory for the dataset
-          mkdir -p kaggle_dataset/Data/dataset
-          cp -r Data/* kaggle_dataset/Data/dataset/
+          "   
+         
           
           # Copy artifacts folder inside dataset folder so everything is in one zip
           cp -r artifacts/ kaggle_dataset/Data/dataset/
