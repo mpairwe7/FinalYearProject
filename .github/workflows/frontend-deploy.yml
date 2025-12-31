@@ -78,7 +78,7 @@ jobs:
           name: frontend-build
           path: frontend/.next/
 
-  # ============================================
+    # ============================================
   # Stage 3: Deploy to Vercel (Preview)
   # ============================================
   deploy-preview:
@@ -86,9 +86,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-frontend
     if: github.event_name == 'pull_request'
-    environment:
-      name: preview
-      url: ${{ steps.deploy.outputs.preview-url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -121,7 +118,6 @@ jobs:
               repo: context.repo.repo,
               body: '🚀 Preview deployed to: ${{ steps.deploy.outputs.preview-url }}'
             })
-
   # ============================================
   # Stage 4: Deploy to Vercel (Production)
   # ============================================

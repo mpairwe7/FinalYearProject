@@ -82,6 +82,7 @@ jobs:
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           # First, prepare training data
           pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl
@@ -103,6 +104,20 @@ jobs:
               --questions 3 \
               --formats jsonl,gemma || echo "Teacher QA generation skipped (model not available)"
           fi
+           # Create a temporary directory for the dataset
+          mkdir -p kaggle_dataset/Data/dataset
+          cp -r Data/* kaggle_dataset/Data/dataset/
+          
+          # Authenticate with Hugging Face and add Luganda-English parallel corpus to dataset
+          huggingface-cli login --token $HF_TOKEN
+          python -c "
+          from datasets import load_dataset
+          import pandas as pd
+          ds = load_dataset('kambale/luganda-english-parallel-corpus')
+          df = pd.DataFrame({'luganda': ds['train']['lg'], 'english': ds['train']['en']})
+          df.to_csv('kaggle_dataset/Data/dataset/luganda_parallel.csv', index=False)
+          print('Added Luganda-English parallel corpus to dataset path')
+          "
           
           # Create a temporary directory for the dataset
           mkdir -p kaggle_dataset/Data/dataset

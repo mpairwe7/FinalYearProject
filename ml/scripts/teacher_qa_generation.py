@@ -45,7 +45,7 @@ OUTPUT_DIR = DATA_ROOT / "artifacts"
 
 # Teacher model configuration
 TEACHER_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
-FALLBACK_MODEL = "google/flan-t5-large"  # Fallback if Llama unavailable
+FALLBACK_MODEL = "microsoft/DialoGPT-medium"  # Compatible causal LM fallback
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MAX_NEW_TOKENS = 512
@@ -163,94 +163,59 @@ class TeacherModel:
     def load(self) -> bool:
         """Load the teacher model and tokenizer."""
         try:
-            print(f"Loading teacher model: {self.model_name}")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map="auto" if self.device == "cuda" else None,
-                low_cpu_mem_usage=True,
-            )
-            # Note: If device_map="auto", model is already on GPU, don't call .to()
-            if self.device == "cuda" and not hasattr(self.model, 'hf_device_map'):
-                self.model.to(self.device)
+            from huggingface_hub import login
+            import os
             
-            # Create pipeline for text generation
-            # If device_map="auto" was used, let pipeline auto-detect device
-            pipeline_device = -1 if self.device == "cuda" and hasattr(self.model, 'hf_device_map') else (0 if self.device == "cuda" else -1)
-            self.pipeline = pipeline(
-                "text-generation",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                device=pipeline_device,
-                max_new_tokens=512,
-                temperature=0.7,
-                do_sample=True,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
-            print("✅ Teacher model loaded successfully")
-            return True
+            # Authenticate with Hugging Face if token is available
+            hf_token = os.getenv("HF_TOKEN")
+            if hf_token:
+                login(hf_token)
+            
+            models_to_try = [
+                "meta-llama/Llama-3.2-3B-Instruct",  # Primary (gated)
+                "microsoft/DialoGPT-medium",         # Compatible causal LM fallback
+                "distilgpt2"                         # Another simple causal LM
+            ]
+            
+            for model_name in models_to_try:
+                try:
+                    print(f"Trying to load model: {model_name}")
+                    self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                        device_map="auto" if self.device == "cuda" else None,
+                        low_cpu_mem_usage=True,
+                    )
+                    # Note: If device_map="auto", model is already on GPU, don't call .to()
+                    if self.device == "cuda" and not hasattr(self.model, 'hf_device_map'):
+                        self.model.to(self.device)
+                    
+                    # Create pipeline for text generation
+                    # If device_map="auto" was used, let pipeline auto-detect device
+                    pipeline_device = -1 if self.device == "cuda" and hasattr(self.model, 'hf_device_map') else (0 if self.device == "cuda" else -1)
+                    self.pipeline = pipeline(
+                        "text-generation",
+                        model=self.model,
+                        tokenizer=self.tokenizer,
+                        device=pipeline_device,
+                        max_new_tokens=512,
+                        temperature=0.7,
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+                    print("✅ Teacher model loaded successfully")
+                    return True
+                except Exception as e:
+                    print(f"❌ Failed to load {model_name}: {e}")
+                    continue
+            
+            raise RuntimeError("All teacher models failed to load.")
         except Exception as e:
             print(f"❌ Failed to load teacher model: {e}")
-            # Try fallback model
-            try:
-                print(f"Trying fallback model: {FALLBACK_MODEL}")
-                self.model_name = FALLBACK_MODEL
-                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                self.model = AutoModelForCausalLM.from_pretrained(self.model_name)
-                if self.device == "cuda":
-                    self.model.to(self.device)
-                self.pipeline = pipeline(
-                    "text2text-generation",
-                    model=self.model,
-                    tokenizer=self.tokenizer,
-                    device=0 if self.device == "cuda" else -1,
-                    max_new_tokens=128,
-                )
-                print("✅ Fallback model loaded successfully")
-                return True
-            except Exception as e2:
-                print(f"❌ Fallback model also failed: {e2}")
-                return False
+            return False
         
     def _parse_questions(self, response: str, expected_count: int) -> list[dict]:
-        """Parse generated questions from model response."""
-        questions = []
-        
-        # Try to extract JSON array
-        try:
-            # Find JSON array in response
-            json_match = re.search(r'\[[\s\S]*\]', response)
-            if json_match:
-                json_str = json_match.group()
-                parsed = json.loads(json_str)
-                if isinstance(parsed, list):
-                    for item in parsed:
-                        if isinstance(item, dict) and 'question' in item:
-                            questions.append({
-                                'question': item.get('question', ''),
-                                'answer': item.get('answer', ''),
-                                'type': item.get('type', 'factual'),
-                            })
-        except json.JSONDecodeError:
-            pass
-        
-        # Fallback: extract question patterns
-        if not questions:
-            # Look for numbered questions
-            q_patterns = re.findall(
-                r'(?:\d+\.\s*)?["\']?([^"\'?\n]+\?)["\']?\s*(?:Answer:|A:)?\s*([^?\n]+)',
-                response,
-                re.IGNORECASE
-            )
-            for q, a in q_patterns[:expected_count]:
-                questions.append({
-                    'question': q.strip(),
-                    'answer': a.strip(),
-                    'type': 'factual',
-                })
-        
-        return questions[:expected_count]
         """Parse generated questions from model response."""
         questions = []
         
