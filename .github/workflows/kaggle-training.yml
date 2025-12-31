@@ -114,9 +114,11 @@ jobs:
           from datasets import load_dataset
           import pandas as pd
           ds = load_dataset('kambale/luganda-english-parallel-corpus')
-          df = pd.DataFrame({'luganda': ds['train']['lg'], 'english': ds['train']['en']})
+          df = pd.DataFrame({'english': ds['train']['english'], 'luganda': ds['train']['luganda']})
           df.to_csv('kaggle_dataset/Data/dataset/luganda_parallel.csv', index=False)
           print('Added Luganda-English parallel corpus to dataset path')
+          print(f'Dataset shape: {df.shape}')
+          print(f'First few rows:\\n{df.head()}')
           "
           
           # Create a temporary directory for the dataset

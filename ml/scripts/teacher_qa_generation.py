@@ -44,8 +44,8 @@ PDF_DIR = DATA_ROOT / "pdfs"
 OUTPUT_DIR = DATA_ROOT / "artifacts"
 
 # Teacher model configuration
-TEACHER_MODEL = "google/flan-t5-small"
-FALLBACK_MODEL = "distilgpt2"  # Compatible causal LM fallback
+TEACHER_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+FALLBACK_MODEL = "microsoft/Phi-3-mini-4k-instruct"  # Compatible causal LM fallback
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MAX_NEW_TOKENS = 512
@@ -156,7 +156,7 @@ class TeacherModel:
         self.model_name = model_name
         self.device = device
         self.model = None
-        self.tokenizer = None
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.pipeline = None
         
     def load(self) -> bool:
@@ -172,8 +172,8 @@ class TeacherModel:
             
             models_to_try = [
                 #"meta-llama/Llama-3.2-3B-Instruct",  # Primary (gated)
-                "google/flan-t5-small",              # Public instruction-tuned
-                "distilgpt2",                        # Last resort causal LM
+                "Qwen/Qwen2.5-1.5B-Instruct",              # Public instruction-tuned
+                "microsoft/Phi-3-mini-4k-instruct",                        # Last resort causal LM
             ]
             
             for model_name in models_to_try:
@@ -300,6 +300,10 @@ class TeacherModel:
         context: str = "Uganda Revenue Authority (URA) tax documentation"
     ) -> list[dict]:
         """Generate questions from a text chunk."""
+        
+        if self.pipeline is None:
+            print("      ✗ Pipeline not loaded, skipping generation")
+            return []
         
         # Truncate chunk if too long to avoid tokenization errors
         max_chunk_length = 1000  # Adjust based on model limits

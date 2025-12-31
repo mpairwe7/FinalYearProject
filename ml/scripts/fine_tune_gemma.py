@@ -436,7 +436,7 @@ def train(
         logging_steps=10,
         save_steps=100,
         eval_steps=100,
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         save_strategy="steps",
         save_total_limit=3,
         load_best_model_at_end=True,

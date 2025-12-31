@@ -1,389 +1,389 @@
-# MLOps CI/CD Pipeline for URA Chatbot
-# Based on DataCamp CI/CD for ML best practices
-# Triggers: Push to main/develop, PR, manual dispatch
+# # MLOps CI/CD Pipeline for URA Chatbot
+# # Based on DataCamp CI/CD for ML best practices
+# # Triggers: Push to main/develop, PR, manual dispatch
 
-name: ML Pipeline CI/CD
+# name: ML Pipeline CI/CD
 
-on:
-  push:
-    branches: [main, develop, feat/*]
-    paths:
-      - 'ml/**'
-      - 'App/backend/**'
-      - 'App/frontend/**'
-      - 'App/**'
-      - 'Data/**'
-      - 'Model/**'
-      - 'requirements.txt'
-      - '.github/workflows/ci-ml-pipeline.yml'
-  pull_request:
-    branches: [main, develop]
-  workflow_dispatch:
-    inputs:
-      run_training:
-        description: 'Run full model training'
-        required: false
-        default: false
-        type: boolean
-      deploy_model:
-        description: 'Deploy model to Hugging Face'
-        required: false
-        default: false
-        type: boolean
+# on:
+#   push:
+#     branches: [main, develop, feat/*]
+#     paths:
+#       - 'ml/**'
+#       - 'App/backend/**'
+#       - 'App/frontend/**'
+#       - 'App/**'
+#       - 'Data/**'
+#       - 'Model/**'
+#       - 'requirements.txt'
+#       - '.github/workflows/ci-ml-pipeline.yml'
+#   pull_request:
+#     branches: [main, develop]
+#   workflow_dispatch:
+#     inputs:
+#       run_training:
+#         description: 'Run full model training'
+#         required: false
+#         default: false
+#         type: boolean
+#       deploy_model:
+#         description: 'Deploy model to Hugging Face'
+#         required: false
+#         default: false
+#         type: boolean
 
-env:
-  PYTHON_VERSION: '3.11'
-  HF_REPO: ${{ vars.HF_REPO || 'mpairweLandwind/ura-chatbot' }}
-  DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'landwind/ura-chatbot-api' }}
+# env:
+#   PYTHON_VERSION: '3.11'
+#   HF_REPO: ${{ vars.HF_REPO || 'mpairweLandwind/ura-chatbot' }}
+#   DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'landwind/ura-chatbot-api' }}
 
-jobs:
-  # ============================================
-  # Stage 1: Code Quality & Linting
-  # ============================================
-  lint-and-test:
-    name: Lint & Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+# jobs:
+#   # ============================================
+#   # Stage 1: Code Quality & Linting
+#   # ============================================
+#   lint-and-test:
+#     name: Lint & Unit Tests
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: ${{ env.PYTHON_VERSION }}
+#           cache: 'pip'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff pytest pytest-cov black isort mypy
-          pip install -r requirements.txt
+#       - name: Install dependencies
+#         run: |
+#           python -m pip install --upgrade pip
+#           pip install ruff pytest pytest-cov black isort mypy
+#           pip install -r requirements.txt
 
-      - name: Run Ruff linter
-        run: ruff check ml/ App/backend/ --output-format=github
+#       - name: Run Ruff linter
+#         run: ruff check ml/ App/backend/ --output-format=github
 
-      - name: Check formatting with Black
-        run: black --check ml/ App/backend/
+#       - name: Check formatting with Black
+#         run: black --check ml/ App/backend/
 
-      - name: Check import sorting
-        run: isort --check-only ml/ App/backend/
+#       - name: Check import sorting
+#         run: isort --check-only ml/ App/backend/
 
-      - name: Type checking with MyPy
-        run: mypy ml/ App/backend/ --ignore-missing-imports
-        continue-on-error: true
+#       - name: Type checking with MyPy
+#         run: mypy ml/ App/backend/ --ignore-missing-imports
+#         continue-on-error: true
 
-      - name: Run unit tests
-        run: |
-          pytest tests/ -v --cov=ml --cov=App/backend --cov-report=xml --cov-report=term-missing
-        continue-on-error: true
+#       - name: Run unit tests
+#         run: |
+#           pytest tests/ -v --cov=ml --cov=App/backend --cov-report=xml --cov-report=term-missing
+#         continue-on-error: true
 
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          fail_ci_if_error: false
+#       - name: Upload coverage report
+#         uses: codecov/codecov-action@v4
+#         with:
+#           file: ./coverage.xml
+#           fail_ci_if_error: false
 
-  # ============================================
-  # Stage 2: Data Validation
-  # ============================================
-  data-validation:
-    name: Validate Data Quality
-    runs-on: ubuntu-latest
-    needs: lint-and-test
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   # ============================================
+#   # Stage 2: Data Validation
+#   # ============================================
+#   data-validation:
+#     name: Validate Data Quality
+#     runs-on: ubuntu-latest
+#     needs: lint-and-test
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: ${{ env.PYTHON_VERSION }}
+#           cache: 'pip'
 
-      - name: Install validation dependencies
-        run: |
-          pip install pandas great-expectations pydantic
+#       - name: Install validation dependencies
+#         run: |
+#           pip install pandas great-expectations pydantic
 
-      - name: Run data validation
-        run: python ml/pipelines/validate_data.py
+#       - name: Run data validation
+#         run: python ml/pipelines/validate_data.py
 
-      - name: Upload validation report
-        uses: actions/upload-artifact@v4
-        with:
-          name: data-validation-report
-          path: Results/reports/data_validation_report.json
+#       - name: Upload validation report
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: data-validation-report
+#           path: Results/reports/data_validation_report.json
 
-  # ============================================
-  # Stage 3: Data Augmentation & Preparation
-  # ============================================
-  prepare-training-data:
-    name: Prepare Training Data
-    runs-on: ubuntu-latest
-    needs: data-validation
-    if: github.event.inputs.run_training == 'true' || github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   # ============================================
+#   # Stage 3: Data Augmentation & Preparation
+#   # ============================================
+#   prepare-training-data:
+#     name: Prepare Training Data
+#     runs-on: ubuntu-latest
+#     needs: data-validation
+#     if: github.event.inputs.run_training == 'true' || github.ref == 'refs/heads/main'
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: ${{ env.PYTHON_VERSION }}
+#           cache: 'pip'
 
-      - name: Install dependencies
-        run: |
-          pip install pandas PyPDF2 langchain-text-splitters pyyaml
+#       - name: Install dependencies
+#         run: |
+#           pip install pandas PyPDF2 langchain-text-splitters pyyaml
 
-      - name: Run data augmentation
-        run: |
-          mkdir -p artifacts Data/processed
-          python ml/scripts/data_augmentation.py \
-            --csv-dir Data/dataset \
-            --pdf-dir Data/pdfs \
-            --luganda-dir Data/TTT \
-            --output artifacts/training_data.jsonl \
-            --gemma-output artifacts/gemma_format.jsonl \
-            --instruction-output artifacts/instruction_format.jsonl
+#       - name: Run data augmentation
+#         run: |
+#           mkdir -p artifacts Data/processed
+#           python ml/scripts/data_augmentation.py \
+#             --csv-dir Data/dataset \
+#             --pdf-dir Data/pdfs \
+#             --luganda-dir Data/TTT \
+#             --output artifacts/training_data.jsonl \
+#             --gemma-output artifacts/gemma_format.jsonl \
+#             --instruction-output artifacts/instruction_format.jsonl
 
-      - name: Upload prepared data
-        uses: actions/upload-artifact@v4
-        with:
-          name: training-data
-          path: |
-            artifacts/training_data.jsonl
-            artifacts/gemma_format.jsonl
-            artifacts/instruction_format.jsonl
+#       - name: Upload prepared data
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: training-data
+#           path: |
+#             artifacts/training_data.jsonl
+#             artifacts/gemma_format.jsonl
+#             artifacts/instruction_format.jsonl
 
-      - name: Log data stats
-        run: |
-          echo "## Training Data Statistics" >> $GITHUB_STEP_SUMMARY
-          echo "- Training samples: $(wc -l < artifacts/training_data.jsonl)" >> $GITHUB_STEP_SUMMARY
-          echo "- Gemma format: $(wc -l < artifacts/gemma_format.jsonl)" >> $GITHUB_STEP_SUMMARY
+#       - name: Log data stats
+#         run: |
+#           echo "## Training Data Statistics" >> $GITHUB_STEP_SUMMARY
+#           echo "- Training samples: $(wc -l < artifacts/training_data.jsonl)" >> $GITHUB_STEP_SUMMARY
+#           echo "- Gemma format: $(wc -l < artifacts/gemma_format.jsonl)" >> $GITHUB_STEP_SUMMARY
 
-  # ============================================
-  # Stage 4: Model Training (Kaggle or Local)
-  # ============================================
-  train-model:
-    name: Train Model
-    runs-on: ubuntu-latest
-    needs: prepare-training-data
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   # ============================================
+#   # Stage 4: Model Training (Kaggle or Local)
+#   # ============================================
+#   train-model:
+#     name: Train Model
+#     runs-on: ubuntu-latest
+#     needs: prepare-training-data
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Download prepared data
-        uses: actions/download-artifact@v4
-        with:
-          name: training-data
-          path: artifacts/
+#       - name: Download prepared data
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: training-data
+#           path: artifacts/
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: ${{ env.PYTHON_VERSION }}
+#           cache: 'pip'
 
-      - name: Install training dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install kaggle mlflow dvc transformers datasets peft accelerate bitsandbytes trl
+#       - name: Install training dependencies
+#         run: |
+#           pip install -r requirements.txt
+#           pip install kaggle mlflow dvc transformers datasets peft accelerate bitsandbytes trl
 
-      - name: Configure Kaggle API
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-        run: |
-          mkdir -p ~/.kaggle
-          echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_API_TOKEN }}"}' > ~/.kaggle/kaggle.json
-          chmod 600 ~/.kaggle/kaggle.json
+#       - name: Configure Kaggle API
+#         env:
+#           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+#           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+#         run: |
+#           mkdir -p ~/.kaggle
+#           echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_API_TOKEN }}"}' > ~/.kaggle/kaggle.json
+#           chmod 600 ~/.kaggle/kaggle.json
 
-      - name: Run fine-tuning (dry run on CI)
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          # Dry run to validate data format (no GPU on GitHub Actions)
-          python ml/scripts/fine_tune_gemma.py \
-            --data artifacts/training_data.jsonl \
-            --target web_high_accuracy \
-            --output artifacts/ura-gemma-finetuned \
-            --dry-run
+#       - name: Run fine-tuning (dry run on CI)
+#         env:
+#           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+#           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+#         run: |
+#           # Dry run to validate data format (no GPU on GitHub Actions)
+#           python ml/scripts/fine_tune_gemma.py \
+#             --data artifacts/training_data.jsonl \
+#             --target web_high_accuracy \
+#             --output artifacts/ura-gemma-finetuned \
+#             --dry-run
           
-          # For actual training, use Kaggle workflow or self-hosted runner
-          # python ml/pipelines/train.py \
-          #   --config ml/configs/training_config.yaml \
-          #   --output-dir Model
+#           # For actual training, use Kaggle workflow or self-hosted runner
+#           # python ml/pipelines/train.py \
+#           #   --config ml/configs/training_config.yaml \
+#           #   --output-dir Model
 
-      - name: Upload trained model artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: trained-model
-          path: |
-            Model/
-            Results/metrics/
-            artifacts/
+#       - name: Upload trained model artifacts
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: trained-model
+#           path: |
+#             Model/
+#             Results/metrics/
+#             artifacts/
 
-      - name: Log metrics to summary
-        run: |
-          echo "## Training Pipeline" >> $GITHUB_STEP_SUMMARY
-          echo "✓ Data validation passed" >> $GITHUB_STEP_SUMMARY
-          echo "✓ Training data prepared" >> $GITHUB_STEP_SUMMARY
-          echo "✓ Fine-tuning config validated" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "For GPU training, use the kaggle-training workflow." >> $GITHUB_STEP_SUMMARY
+#       - name: Log metrics to summary
+#         run: |
+#           echo "## Training Pipeline" >> $GITHUB_STEP_SUMMARY
+#           echo "✓ Data validation passed" >> $GITHUB_STEP_SUMMARY
+#           echo "✓ Training data prepared" >> $GITHUB_STEP_SUMMARY
+#           echo "✓ Fine-tuning config validated" >> $GITHUB_STEP_SUMMARY
+#           echo "" >> $GITHUB_STEP_SUMMARY
+#           echo "For GPU training, use the kaggle-training workflow." >> $GITHUB_STEP_SUMMARY
 
-  # ============================================
-  # Stage 5: Model Evaluation
-  # ============================================
-  evaluate-model:
-    name: Evaluate Model
-    runs-on: ubuntu-latest
-    needs: train-model
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   # ============================================
+#   # Stage 5: Model Evaluation
+#   # ============================================
+#   evaluate-model:
+#     name: Evaluate Model
+#     runs-on: ubuntu-latest
+#     needs: train-model
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Download trained model
-        uses: actions/download-artifact@v4
-        with:
-          name: trained-model
-          path: ./
+#       - name: Download trained model
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: trained-model
+#           path: ./
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: ${{ env.PYTHON_VERSION }}
+#           cache: 'pip'
 
-      - name: Install evaluation dependencies
-        run: pip install -r requirements.txt
+#       - name: Install evaluation dependencies
+#         run: pip install -r requirements.txt
 
-      - name: Run model evaluation
-        run: |
-          mkdir -p Results/metrics Results/reports
-          python ml/pipelines/evaluate.py \
-            --model-path Model \
-            --output-dir Results
-        continue-on-error: true
+#       - name: Run model evaluation
+#         run: |
+#           mkdir -p Results/metrics Results/reports
+#           python ml/pipelines/evaluate.py \
+#             --model-path Model \
+#             --output-dir Results
+#         continue-on-error: true
 
-      - name: Upload evaluation results
-        uses: actions/upload-artifact@v4
-        with:
-          name: evaluation-results
-          path: Results/
+#       - name: Upload evaluation results
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: evaluation-results
+#           path: Results/
 
-      - name: Check model quality gates
-        run: python ml/pipelines/quality_gates.py
-        continue-on-error: true
+#       - name: Check model quality gates
+#         run: python ml/pipelines/quality_gates.py
+#         continue-on-error: true
 
-  # ============================================
-  # Stage 6: Push to Hugging Face Hub
-  # ============================================
-  push-to-huggingface:
-    name: Deploy to Hugging Face
-    runs-on: ubuntu-latest
-    needs: evaluate-model
-    if: github.event.inputs.deploy_model == 'true' || github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   # ============================================
+#   # Stage 6: Push to Hugging Face Hub
+#   # ============================================
+#   push-to-huggingface:
+#     name: Deploy to Hugging Face
+#     runs-on: ubuntu-latest
+#     needs: evaluate-model
+#     if: github.event.inputs.deploy_model == 'true' || github.ref == 'refs/heads/main'
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Download model artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: trained-model
-          path: ./
+#       - name: Download model artifacts
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: trained-model
+#           path: ./
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install Hugging Face CLI
-        run: pip install huggingface_hub
+#       - name: Install Hugging Face CLI
+#         run: pip install huggingface_hub
 
-      - name: Push model to Hugging Face Hub
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          python ml/pipelines/push_to_hub.py \
-            --model-path Model \
-            --repo-id ${{ env.HF_REPO }} \
-            --commit-message "CI/CD: Update model from commit ${{ github.sha }}"
+#       - name: Push model to Hugging Face Hub
+#         env:
+#           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+#         run: |
+#           python ml/pipelines/push_to_hub.py \
+#             --model-path Model \
+#             --repo-id ${{ env.HF_REPO }} \
+#             --commit-message "CI/CD: Update model from commit ${{ github.sha }}"
 
-  # ============================================
-  # Stage 7: Build & Push Docker Image
-  # ============================================
-  build-docker:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    needs: [lint-and-test]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   # ============================================
+#   # Stage 7: Build & Push Docker Image
+#   # ============================================
+#   build-docker:
+#     name: Build Docker Image
+#     runs-on: ubuntu-latest
+#     needs: [lint-and-test]
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+#       - name: Set up Docker Buildx
+#         uses: docker/setup-buildx-action@v3
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+#       - name: Login to DockerHub
+#         uses: docker/login-action@v3
+#         with:
+#           username: ${{ secrets.DOCKERHUB_USERNAME }}
+#           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.DOCKER_IMAGE }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix=
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+#       - name: Extract metadata
+#         id: meta
+#         uses: docker/metadata-action@v5
+#         with:
+#           images: ${{ env.DOCKER_IMAGE }}
+#           tags: |
+#             type=ref,event=branch
+#             type=ref,event=pr
+#             type=sha,prefix=
+#             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+#       - name: Build and push
+#         uses: docker/build-push-action@v5
+#         with:
+#           context: .
+#           file: ./Dockerfile
+#           push: ${{ github.event_name != 'pull_request' }}
+#           tags: ${{ steps.meta.outputs.tags }}
+#           labels: ${{ steps.meta.outputs.labels }}
+#           cache-from: type=gha
+#           cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-        continue-on-error: true
+#       - name: Run Trivy vulnerability scanner
+#         uses: aquasecurity/trivy-action@master
+#         with:
+#           image-ref: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+#           format: 'sarif'
+#           output: 'trivy-results.sarif'
+#         continue-on-error: true
 
-  # ============================================
-  # Stage 8: Deploy Backend
-  # ============================================
-  deploy-backend:
-    name: Deploy Backend API
-    runs-on: ubuntu-latest
-    needs: [build-docker, push-to-huggingface]
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+#   # ============================================
+#   # Stage 8: Deploy Backend
+#   # ============================================
+#   deploy-backend:
+#     name: Deploy Backend API
+#     runs-on: ubuntu-latest
+#     needs: [build-docker, push-to-huggingface]
+#     if: github.ref == 'refs/heads/main'
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Deploy to production
-        env:
-          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
-          API_HOST: ${{ secrets.API_HOST }}
-        run: |
-          echo "Deploying ${{ env.DOCKER_IMAGE }}:latest to production"
-          # Add your deployment commands here (e.g., SSH, kubectl, etc.)
-          # ssh -i $DEPLOY_KEY user@$API_HOST "docker pull ${{ env.DOCKER_IMAGE }}:latest && docker-compose up -d"
+#       - name: Deploy to production
+#         env:
+#           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+#           API_HOST: ${{ secrets.API_HOST }}
+#         run: |
+#           echo "Deploying ${{ env.DOCKER_IMAGE }}:latest to production"
+#           # Add your deployment commands here (e.g., SSH, kubectl, etc.)
+#           # ssh -i $DEPLOY_KEY user@$API_HOST "docker pull ${{ env.DOCKER_IMAGE }}:latest && docker-compose up -d"
 
-      - name: Health check
-        run: |
-          echo "Running health check..."
-          # curl -f ${{ vars.API_URL }}/health || exit 1
+#       - name: Health check
+#         run: |
+#           echo "Running health check..."
+#           # curl -f ${{ vars.API_URL }}/health || exit 1
