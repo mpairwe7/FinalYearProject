@@ -189,6 +189,8 @@ class TeacherModel:
                             torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
                             device_map="auto" if self.device == "cuda" else None,
                         )
+                        # T5 models need padding token
+                        self.tokenizer.pad_token = self.tokenizer.eos_token
                     else:
                         self.model = AutoModelForCausalLM.from_pretrained(
                             model_name,
@@ -234,6 +236,62 @@ class TeacherModel:
         except Exception as e:
             print(f"❌ Failed to load teacher model: {e}")
             return False
+    
+    def _parse_questions(self, generated_text: str, expected_count: int) -> list[dict]:
+        """Parse generated text to extract questions and answers."""
+        import json
+        import re
+        
+        # Clean the generated text
+        text = generated_text.strip()
+        
+        # Try to extract JSON array
+        json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+        if json_match:
+            try:
+                questions = json.loads(json_match.group(0))
+                if isinstance(questions, list):
+                    # Validate and clean each question
+                    valid_questions = []
+                    for q in questions:
+                        if isinstance(q, dict) and 'question' in q and 'answer' in q:
+                            valid_q = {
+                                'question': str(q['question']).strip(),
+                                'answer': str(q['answer']).strip(),
+                                'type': str(q.get('type', 'factual')).lower()
+                            }
+                            # Basic validation
+                            if valid_q['question'] and valid_q['answer']:
+                                valid_questions.append(valid_q)
+                    
+                    # Limit to expected count
+                    return valid_questions[:expected_count]
+            except json.JSONDecodeError:
+                pass
+        
+        # Fallback: Parse line by line
+        questions = []
+        lines = text.split('\n')
+        current_q = {}
+        
+        for line in lines:
+            line = line.strip().lower()
+            if 'question:' in line:
+                if current_q and 'question' in current_q and 'answer' in current_q:
+                    questions.append(current_q)
+                    current_q = {}
+                question = line.split('question:', 1)[1].strip()
+                current_q['question'] = question.capitalize()
+                current_q['type'] = 'factual'
+            elif 'answer:' in line and current_q:
+                answer = line.split('answer:', 1)[1].strip()
+                current_q['answer'] = answer.capitalize()
+        
+        # Add last question if complete
+        if current_q and 'question' in current_q and 'answer' in current_q:
+            questions.append(current_q)
+        
+        return questions[:expected_count]
         
     def generate_questions(
         self,
@@ -249,14 +307,25 @@ class TeacherModel:
             chunk_text = chunk_text[:max_chunk_length] + "..."
         
         if "t5" in self.model_name.lower():
-            # T5-style prompt
+            # T5-style prompt (text2text)
             prompt = f"""Generate {num_questions} questions and answers from this text about {context}. Output as JSON array: [{{"question": "...", "answer": "...", "type": "factual"}}]
 
 Text: {chunk_text}
 
 JSON:"""
+            
+            try:
+                result = self.pipeline(
+                    prompt,
+                    max_length=512,
+                    temperature=0.7,
+                    do_sample=True,
+                )[0]['generated_text']
+            except Exception as e:
+                print(f"      ✗ T5 generation error: {e}")
+                return []
         else:
-            # Causal LM prompt (simplified for distilgpt2)
+            # Causal LM prompt
             prompt = f"""Context: {context}
 
 Text: {chunk_text}
@@ -268,28 +337,30 @@ Generate {num_questions} questions and answers in JSON format:
 ]
 
 Output:"""
-
-        try:
-            if self.pipeline is None:
-                print("      ✗ Pipeline not initialized")
-                return []
             
-            # Generate response
-            if "t5" in self.model_name.lower():
-                result = self.pipeline(prompt)[0]['generated_text']
-            else:
-                result = self.pipeline(prompt)[0]['generated_text']
+            try:
+                result = self.pipeline(
+                    prompt,
+                    max_new_tokens=512,
+                    temperature=0.7,
+                    do_sample=True,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )[0]['generated_text']
                 # Extract generated part
                 if isinstance(result, str) and len(result) > len(prompt):
                     result = result[len(prompt):].strip()
-            
-            # Parse JSON
+            except Exception as e:
+                print(f"      ✗ Generation error: {e}")
+                return []
+        
+        # Parse questions using the new method
+        try:
             questions = self._parse_questions(result, num_questions)
             return questions
-            
         except Exception as e:
-            print(f"      ✗ Generation error: {e}")
+            print(f"      ✗ Parsing error: {e}")
             return []
+
 
 # =============================================================================
 # QA Generation Pipeline
@@ -320,26 +391,31 @@ def generate_qa_dataset(
         
         print(f"\n[{i+1}/{len(chunks)}] Processing {chunk['source']} (chunk {chunk['chunk_id']+1}/{chunk['total_chunks']})")
         
-        # Generate questions
-        questions = teacher.generate_questions(
-            chunk['text'],
-            num_questions=questions_per_chunk
-        )
-        
-        # Create QA pairs
-        for q in questions:
-            qa = GeneratedQA(
-                question=q['question'],
-                answer=q['answer'],
-                chunk_text=chunk['text'],
-                source_pdf=chunk['source'],
-                chunk_id=chunk['chunk_id'],
-                question_type=q.get('type', 'factual'),
+        try:
+            # Generate questions
+            questions = teacher.generate_questions(
+                chunk['text'],
+                num_questions=questions_per_chunk
             )
-            all_qa_pairs.append(qa)
-        
-        chunk_time = time.time() - chunk_start
-        print(f"   ✓ Generated {len(questions)} questions ({chunk_time:.1f}s)")
+            
+            # Create QA pairs
+            for q in questions:
+                qa = GeneratedQA(
+                    question=q['question'],
+                    answer=q['answer'],
+                    chunk_text=chunk['text'],
+                    source_pdf=chunk['source'],
+                    chunk_id=chunk['chunk_id'],
+                    question_type=q.get('type', 'factual'),
+                )
+                all_qa_pairs.append(qa)
+            
+            chunk_time = time.time() - chunk_start
+            print(f"   ✓ Generated {len(questions)} questions ({chunk_time:.1f}s)")
+            
+        except Exception as e:
+            chunk_time = time.time() - chunk_start
+            print(f"   ✗ Error processing chunk: {e} ({chunk_time:.1f}s)")
         
         # Periodic save
         if output_path and (i + 1) % save_interval == 0:
