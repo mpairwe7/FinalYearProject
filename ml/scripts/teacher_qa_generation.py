@@ -172,7 +172,7 @@ class TeacherModel:
                 login(hf_token)
             
             models_to_try = [
-                "meta-llama/Llama-3.2-3B-Instruct",  # Primary (gated)
+                #"meta-llama/Llama-3.2-3B-Instruct",  # Primary (gated)
                 "microsoft/DialoGPT-medium",         # Compatible causal LM fallback
                 "distilgpt2"                         # Another simple causal LM
             ]
