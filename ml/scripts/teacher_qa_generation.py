@@ -44,8 +44,8 @@ PDF_DIR = DATA_ROOT / "pdfs"
 OUTPUT_DIR = DATA_ROOT / "artifacts"
 
 # Teacher model configuration
-TEACHER_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
-FALLBACK_MODEL = "microsoft/DialoGPT-medium"  # Compatible causal LM fallback
+TEACHER_MODEL = "google/flan-t5-small"
+FALLBACK_MODEL = "distilgpt2"  # Compatible causal LM fallback
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MAX_NEW_TOKENS = 512
@@ -149,7 +149,6 @@ def load_pdf_chunks(
 # =============================================================================
 # Teacher Model
 # =============================================================================
-
 class TeacherModel:
     """Teacher model for generating synthetic QA pairs."""
     
@@ -173,37 +172,58 @@ class TeacherModel:
             
             models_to_try = [
                 #"meta-llama/Llama-3.2-3B-Instruct",  # Primary (gated)
-                "google/flan-t5-small",         # Compatible causal LM fallback
-                "distilgpt2"                         # Another simple causal LM
+                "google/flan-t5-small",              # Public instruction-tuned
+                "distilgpt2",                        # Last resort causal LM
             ]
             
             for model_name in models_to_try:
                 try:
                     print(f"Trying to load model: {model_name}")
                     self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-                    self.model = AutoModelForCausalLM.from_pretrained(
-                        model_name,
-                        torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                        device_map="auto" if self.device == "cuda" else None,
-                        low_cpu_mem_usage=True,
-                    )
+                    
+                    # Use correct model class based on type
+                    if "t5" in model_name.lower():
+                        from transformers import T5ForConditionalGeneration
+                        self.model = T5ForConditionalGeneration.from_pretrained(
+                            model_name,
+                            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                            device_map="auto" if self.device == "cuda" else None,
+                        )
+                    else:
+                        self.model = AutoModelForCausalLM.from_pretrained(
+                            model_name,
+                            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                            device_map="auto" if self.device == "cuda" else None,
+                            low_cpu_mem_usage=True,
+                        )
+                    
                     # Note: If device_map="auto", model is already on GPU, don't call .to()
                     if self.device == "cuda" and not hasattr(self.model, 'hf_device_map'):
                         self.model.to(self.device)
                     
-                    # Create pipeline for text generation
-                    # If device_map="auto" was used, let pipeline auto-detect device
-                    pipeline_device = -1 if self.device == "cuda" and hasattr(self.model, 'hf_device_map') else (0 if self.device == "cuda" else -1)
-                    self.pipeline = pipeline(
-                        "text-generation",
-                        model=self.model,
-                        tokenizer=self.tokenizer,
-                        device=pipeline_device,
-                        max_new_tokens=512,
-                        temperature=0.7,
-                        do_sample=True,
-                        pad_token_id=self.tokenizer.eos_token_id,
-                    )
+                    # Create pipeline based on model type
+                    if "t5" in model_name.lower():
+                        from transformers import pipeline as t5_pipeline
+                        self.pipeline = t5_pipeline(
+                            "text2text-generation",
+                            model=self.model,
+                            tokenizer=self.tokenizer,
+                            device=0 if self.device == "cuda" else -1,
+                            max_length=512,  # Limit output length
+                            temperature=0.7,
+                            do_sample=True,
+                        )
+                    else:
+                        self.pipeline = pipeline(
+                            "text-generation",
+                            model=self.model,
+                            tokenizer=self.tokenizer,
+                            device=0 if self.device == "cuda" else -1,
+                            max_new_tokens=512,
+                            temperature=0.7,
+                            do_sample=True,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                        )
                     print("✅ Teacher model loaded successfully")
                     return True
                 except Exception as e:
@@ -215,45 +235,6 @@ class TeacherModel:
             print(f"❌ Failed to load teacher model: {e}")
             return False
         
-    def _parse_questions(self, response: str, expected_count: int) -> list[dict]:
-        """Parse generated questions from model response."""
-        questions = []
-        
-        # Try to extract JSON array
-        try:
-            # Find JSON array in response
-            json_match = re.search(r'\[[\s\S]*\]', response)
-            if json_match:
-                json_str = json_match.group()
-                parsed = json.loads(json_str)
-                if isinstance(parsed, list):
-                    for item in parsed:
-                        if isinstance(item, dict) and 'question' in item:
-                            questions.append({
-                                'question': item.get('question', ''),
-                                'answer': item.get('answer', ''),
-                                'type': item.get('type', 'factual'),
-                            })
-        except json.JSONDecodeError:
-            pass
-        
-        # Fallback: extract question patterns
-        if not questions:
-            # Look for numbered questions
-            q_patterns = re.findall(
-                r'(?:\d+\.\s*)?["\']?([^"\'?\n]+\?)["\']?\s*(?:Answer:|A:)?\s*([^?\n]+)',
-                response,
-                re.IGNORECASE
-            )
-            for q, a in q_patterns[:expected_count]:
-                questions.append({
-                    'question': q.strip(),
-                    'answer': a.strip(),
-                    'type': 'factual',
-                })
-        
-        return questions[:expected_count]
-    
     def generate_questions(
         self,
         chunk_text: str,
@@ -262,29 +243,31 @@ class TeacherModel:
     ) -> list[dict]:
         """Generate questions from a text chunk."""
         
-        prompt = f"""You are an expert at creating educational questions from text content.
+        # Truncate chunk if too long to avoid tokenization errors
+        max_chunk_length = 1000  # Adjust based on model limits
+        if len(chunk_text) > max_chunk_length:
+            chunk_text = chunk_text[:max_chunk_length] + "..."
+        
+        if "t5" in self.model_name.lower():
+            # T5-style prompt
+            prompt = f"""Generate {num_questions} questions and answers from this text about {context}. Output as JSON array: [{{"question": "...", "answer": "...", "type": "factual"}}]
 
-CONTEXT: This text is from {context}.
+Text: {chunk_text}
 
-TEXT CHUNK:
-{chunk_text}
+JSON:"""
+        else:
+            # Causal LM prompt (simplified for distilgpt2)
+            prompt = f"""Context: {context}
 
-TASK: Generate exactly {num_questions} high-quality questions that can be answered using ONLY the information in the text chunk above.
+Text: {chunk_text}
 
-REQUIREMENTS:
-1. Questions should be diverse (factual, procedural, definitional, comparative)
-2. Each question must be answerable from the text
-3. Include the answer extracted/paraphrased from the text
-4. Questions should be relevant to tax/URA context
-5. Vary question complexity (simple to moderately complex)
-
-OUTPUT FORMAT (JSON array):
+Generate {num_questions} questions and answers in JSON format:
 [
-  {{"question": "...", "answer": "...", "type": "factual|procedural|definitional|comparative"}},
+  {{"question": "...", "answer": "...", "type": "factual"}},
   ...
 ]
 
-Generate the {num_questions} questions now:"""
+Output:"""
 
         try:
             if self.pipeline is None:
@@ -295,21 +278,18 @@ Generate the {num_questions} questions now:"""
             if "t5" in self.model_name.lower():
                 result = self.pipeline(prompt)[0]['generated_text']
             else:
-                # For Llama-style models, use text input
                 result = self.pipeline(prompt)[0]['generated_text']
-                
-                # Extract the generated part (after the prompt)
+                # Extract generated part
                 if isinstance(result, str) and len(result) > len(prompt):
                     result = result[len(prompt):].strip()
             
-            # Parse JSON from response
+            # Parse JSON
             questions = self._parse_questions(result, num_questions)
             return questions
             
         except Exception as e:
             print(f"      ✗ Generation error: {e}")
             return []
-
 
 # =============================================================================
 # QA Generation Pipeline
