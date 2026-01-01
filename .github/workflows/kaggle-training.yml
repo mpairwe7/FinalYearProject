@@ -100,7 +100,7 @@ jobs:
             pip install torch transformers accelerate 
             python ml/scripts/teacher_qa_generation.py \
               --output artifacts/teacher_qa \
-              --chunks 669 \
+              --chunks 200 \
               --questions 3 \
               --formats jsonl,gemma || echo "Teacher QA generation skipped (model not available)"
           fi
