@@ -63,12 +63,6 @@ jobs:
           echo "{\"username\":\"${{ secrets.KAGGLE_USERNAME }}\",\"key\":\"${{ secrets.KAGGLE_API_TOKEN }}\"}" > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
         
-      - name: Upload Kaggle Secret (HF_TOKEN)
-        run: |
-          kaggle secrets set \
-          -n HF_TOKEN \
-          -v "${{ secrets.HF_TOKEN }}"
-
       - name: Prepare Kaggle kernel
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
