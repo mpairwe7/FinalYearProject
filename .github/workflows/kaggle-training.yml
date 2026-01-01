@@ -60,13 +60,20 @@ jobs:
         run: |
           pip install kaggle
           mkdir -p ~/.kaggle
-          echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_API_TOKEN }}"}' > ~/.kaggle/kaggle.json
+          echo "{\"username\":\"${{ secrets.KAGGLE_USERNAME }}\",\"key\":\"${{ secrets.KAGGLE_API_TOKEN }}\"}" > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
+        
+      - name: Upload Kaggle Secret (HF_TOKEN)
+        run: |
+          kaggle secrets set \
+          -n HF_TOKEN \
+          -v "${{ secrets.HF_TOKEN }}"
 
       - name: Prepare Kaggle kernel
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           # Check if secrets are set
           if [ -z "$KAGGLE_USERNAME" ]; then
@@ -76,13 +83,10 @@ jobs:
           if [ -z "$KAGGLE_API_TOKEN" ]; then
             echo "Error: KAGGLE_API_TOKEN secret is not set"
             exit 1
-          fi
+          fi      
 
-      - name: Prepare notebook metadata
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      - name: Prepare training data, artifacts and Kaggle dataset
+        
         run: |
           # First, prepare training data
           pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl datasets pymupdf-layout
@@ -100,7 +104,7 @@ jobs:
             pip install torch transformers accelerate 
             python ml/scripts/teacher_qa_generation.py \
               --output artifacts/teacher_qa \
-              --chunks 200 \
+              --chunks 100 \
               --questions 3 \
               --formats jsonl,gemma || echo "Teacher QA generation skipped (model not available)"
           fi
