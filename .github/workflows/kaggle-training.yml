@@ -80,10 +80,14 @@ jobs:
           fi      
 
       - name: Prepare training data, artifacts and Kaggle dataset
-        
+        env:
+          TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
         run: |
-          # First, prepare training data
-          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl datasets pymupdf-layout opencv-python
+          # Install Tesseract OCR for PDF text extraction
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng libtesseract-dev
+          
+          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl datasets pymupdf-layout opencv-python pytesseract
           mkdir -p artifacts
           python ml/scripts/data_augmentation.py \
             --csv-dir Data/dataset \
