@@ -22,10 +22,13 @@ from dataclasses import dataclass, asdict
 
 import torch
 
+# Import pymupdf.layout and pymupdf4llm
 try:
+    import pymupdf.layout
     import pymupdf4llm
 except ImportError:
     pymupdf4llm = None
+    pymupdf.layout = None
     print("Warning: pymupdf4llm not installed. Run: pip install pymupdf4llm")
 
 try:
@@ -105,9 +108,9 @@ def load_pdf_chunks(
     chunk_overlap: int = 50,
     max_pdfs: Optional[int] = None
 ) -> list[dict]:
-    """Load and chunk all PDFs."""
-    if pymupdf4llm is None:
-        print("❌ pymupdf4llm not installed")
+    """Load and chunk all PDFs using pymupdf4llm with layout support."""
+    if pymupdf4llm is None or pymupdf.layout is None:
+        print("❌ pymupdf4llm not installed or missing pymupdf.layout")
         return []
     
     pdf_files = sorted(pdf_dir.glob("*.pdf"))
@@ -119,15 +122,18 @@ def load_pdf_chunks(
     all_chunks = []
     for pdf_path in pdf_files:
         try:
-            md_result = pymupdf4llm.to_markdown(pdf_path)
-            # Handle both string and list return types
-            if isinstance(md_result, list):
-                text = clean_text("\n\n".join(
-                    chunk.get('text', str(chunk)) if isinstance(chunk, dict) else str(chunk)
-                    for chunk in md_result
-                ))
-            else:
-                text = clean_text(str(md_result))
+            # Use pymupdf4llm with layout support for better text extraction
+            print(f"  Processing {pdf_path.name}...")
+            
+            # Extract markdown with layout preservation
+            md_text = pymupdf4llm.to_markdown(
+                str(pdf_path),
+                pages=None,  # All pages
+                show_progress=False
+            )
+            
+            # Clean the extracted text
+            text = clean_text(str(md_text))
             
             if len(text) > 100:
                 chunks = chunk_text(text, chunk_size, chunk_overlap)
@@ -139,11 +145,60 @@ def load_pdf_chunks(
                         'total_chunks': len(chunks)
                     })
                 print(f"  ✓ {pdf_path.name}: {len(chunks)} chunks")
+            else:
+                print(f"  ⚠ {pdf_path.name}: Text too short ({len(text)} chars)")
+                
         except Exception as e:
             print(f"  ✗ {pdf_path.name}: {e}")
+            import traceback
+            traceback.print_exc()
     
     print(f"\n📊 Total chunks: {len(all_chunks)}")
     return all_chunks
+
+
+def extract_text_with_layout(pdf_path: Path) -> str:
+    """Extract text from PDF with layout preservation using pymupdf.layout."""
+    try:
+        import pymupdf as fitz
+        from typing import cast, Dict, Any
+        
+        doc = fitz.open(pdf_path)
+        text_parts = []
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            
+            # Use pymupdf.layout for better text extraction
+            text_dict = cast(Dict[str, Any], page.get_text("dict"))
+            blocks = text_dict["blocks"]
+            
+            for block in blocks:
+                if "lines" in block:
+                    for line in block["lines"]:
+                        line_text = ""
+                        for span in line["spans"]:
+                            # Preserve font and layout information
+                            font_size = span["size"]
+                            font_name = span["font"]
+                            span_text = span["text"]
+                            
+                            # Add text with layout hints
+                            if font_size > 12:
+                                line_text += f"# {span_text} "
+                            elif font_size > 10:
+                                line_text += f"## {span_text} "
+                            else:
+                                line_text += span_text
+                        
+                        text_parts.append(line_text.strip())
+        
+        doc.close()
+        return "\n".join(text_parts)
+        
+    except Exception as e:
+        print(f"Error extracting text with layout from {pdf_path.name}: {e}")
+        return ""
 
 
 # =============================================================================
@@ -171,9 +226,8 @@ class TeacherModel:
                 login(hf_token)
             
             models_to_try = [
-                #"meta-llama/Llama-3.2-3B-Instruct",  # Primary (gated)
                 "Qwen/Qwen2.5-1.5B-Instruct",              # Public instruction-tuned
-                "microsoft/Phi-3-mini-4k-instruct",                        # Last resort causal LM
+                "microsoft/Phi-3-mini-4k-instruct",        # Small but capable
             ]
             
             for model_name in models_to_try:
@@ -181,60 +235,48 @@ class TeacherModel:
                     print(f"Trying to load model: {model_name}")
                     self.tokenizer = AutoTokenizer.from_pretrained(model_name)
                     
-                    # Use correct model class based on type
-                    if "t5" in model_name.lower():
-                        from transformers import T5ForConditionalGeneration
-                        self.model = T5ForConditionalGeneration.from_pretrained(
-                            model_name,
-                            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                            device_map="auto" if self.device == "cuda" else None,
-                        )
-                        # T5 models need padding token
+                    # Set padding token if not exists
+                    if self.tokenizer.pad_token is None:
                         self.tokenizer.pad_token = self.tokenizer.eos_token
-                    else:
-                        self.model = AutoModelForCausalLM.from_pretrained(
-                            model_name,
-                            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                            device_map="auto" if self.device == "cuda" else None,
-                            low_cpu_mem_usage=True,
-                        )
                     
-                    # Note: If device_map="auto", model is already on GPU, don't call .to()
-                    if self.device == "cuda" and not hasattr(self.model, 'hf_device_map'):
-                        self.model.to(self.device)
+                    # Load model
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                        device_map="auto" if self.device == "cuda" else None,
+                        low_cpu_mem_usage=True,
+                        trust_remote_code=True,
+                    )
                     
-                    # Create pipeline based on model type
-                    if "t5" in model_name.lower():
-                        from transformers import pipeline as t5_pipeline
-                        self.pipeline = t5_pipeline(
-                            "text2text-generation",
-                            model=self.model,
-                            tokenizer=self.tokenizer,
-                            device=0 if self.device == "cuda" else -1,
-                            max_length=512,  # Limit output length
-                            temperature=0.7,
-                            do_sample=True,
-                        )
-                    else:
-                        self.pipeline = pipeline(
-                            "text-generation",
-                            model=self.model,
-                            tokenizer=self.tokenizer,
-                            device=0 if self.device == "cuda" else -1,
-                            max_new_tokens=512,
-                            temperature=0.7,
-                            do_sample=True,
-                            pad_token_id=self.tokenizer.eos_token_id,
-                        )
-                    print("✅ Teacher model loaded successfully")
+                    # Create pipeline
+                    self.pipeline = pipeline(
+                        "text-generation",
+                        model=self.model,
+                        tokenizer=self.tokenizer,
+                        device=0 if self.device == "cuda" else -1,
+                        max_new_tokens=MAX_NEW_TOKENS,
+                        temperature=TEMPERATURE,
+                        top_p=TOP_P,
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+                    
+                    print(f"✅ Teacher model loaded successfully: {model_name}")
+                    self.model_name = model_name
                     return True
+                    
                 except Exception as e:
                     print(f"❌ Failed to load {model_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
             
             raise RuntimeError("All teacher models failed to load.")
+            
         except Exception as e:
             print(f"❌ Failed to load teacher model: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _parse_questions(self, generated_text: str, expected_count: int) -> list[dict]:
@@ -245,8 +287,8 @@ class TeacherModel:
         # Clean the generated text
         text = generated_text.strip()
         
-        # Try to extract JSON array
-        json_match = re.search(r'\[\s*\{.*\}\s*\]', text, re.DOTALL)
+        # Try to extract JSON array (most common pattern)
+        json_match = re.search(r'\[\s*\{.*?\}\s*\]', text, re.DOTALL)
         if json_match:
             try:
                 questions = json.loads(json_match.group(0))
@@ -266,8 +308,44 @@ class TeacherModel:
                     
                     # Limit to expected count
                     return valid_questions[:expected_count]
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                print(f"JSON parse error: {e}")
                 pass
+        
+        # Alternative JSON patterns
+        patterns = [
+            r'\{.*?"question".*?"answer".*?\}',  # Single object
+            r'"questions".*?\:.*?\[.*?\]',  # Questions array in object
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.DOTALL)
+            if matches:
+                try:
+                    questions = []
+                    for match in matches:
+                        data = json.loads(match)
+                        if isinstance(data, dict):
+                            if 'questions' in data and isinstance(data['questions'], list):
+                                questions.extend(data['questions'])
+                            elif 'question' in data and 'answer' in data:
+                                questions.append(data)
+                    
+                    if questions:
+                        valid_questions = []
+                        for q in questions:
+                            if isinstance(q, dict) and 'question' in q and 'answer' in q:
+                                valid_q = {
+                                    'question': str(q['question']).strip(),
+                                    'answer': str(q['answer']).strip(),
+                                    'type': str(q.get('type', 'factual')).lower()
+                                }
+                                if valid_q['question'] and valid_q['answer']:
+                                    valid_questions.append(valid_q)
+                        
+                        return valid_questions[:expected_count]
+                except json.JSONDecodeError:
+                    continue
         
         # Fallback: Parse line by line
         questions = []
@@ -275,21 +353,46 @@ class TeacherModel:
         current_q = {}
         
         for line in lines:
-            line = line.strip().lower()
-            if 'question:' in line:
+            line = line.strip()
+            
+            # Check for question markers (case insensitive)
+            if re.search(r'question\s*\d*[:.]', line, re.IGNORECASE):
                 if current_q and 'question' in current_q and 'answer' in current_q:
                     questions.append(current_q)
                     current_q = {}
-                question = line.split('question:', 1)[1].strip()
-                current_q['question'] = question.capitalize()
-                current_q['type'] = 'factual'
-            elif 'answer:' in line and current_q:
-                answer = line.split('answer:', 1)[1].strip()
-                current_q['answer'] = answer.capitalize()
+                
+                # Extract question
+                match = re.search(r'question\s*\d*[:.]\s*(.+)', line, re.IGNORECASE)
+                if match:
+                    question = match.group(1).strip()
+                    current_q = {'question': question, 'type': 'factual'}
+            
+            elif re.search(r'answer\s*\d*[:.]', line, re.IGNORECASE) and current_q:
+                # Extract answer
+                match = re.search(r'answer\s*\d*[:.]\s*(.+)', line, re.IGNORECASE)
+                if match:
+                    answer = match.group(1).strip()
+                    current_q['answer'] = answer
         
         # Add last question if complete
         if current_q and 'question' in current_q and 'answer' in current_q:
             questions.append(current_q)
+        
+        # If we still don't have questions, try simple Q/A pattern
+        if not questions:
+            q_pattern = r'Q[:\s]+(.+?)(?=A[:\s]|$)'
+            a_pattern = r'A[:\s]+(.+)'
+            
+            q_matches = re.findall(q_pattern, text, re.DOTALL | re.IGNORECASE)
+            a_matches = re.findall(a_pattern, text, re.DOTALL | re.IGNORECASE)
+            
+            for q, a in zip(q_matches, a_matches):
+                if q.strip() and a.strip():
+                    questions.append({
+                        'question': q.strip(),
+                        'answer': a.strip(),
+                        'type': 'factual'
+                    })
         
         return questions[:expected_count]
         
@@ -306,63 +409,77 @@ class TeacherModel:
             return []
         
         # Truncate chunk if too long to avoid tokenization errors
-        max_chunk_length = 1000  # Adjust based on model limits
+        max_chunk_length = 2000  # Increased for better context
         if len(chunk_text) > max_chunk_length:
             chunk_text = chunk_text[:max_chunk_length] + "..."
         
-        if "t5" in self.model_name.lower():
-            # T5-style prompt (text2text)
-            prompt = f"""Generate {num_questions} questions and answers from this text about {context}. Output as JSON array: [{{"question": "...", "answer": "...", "type": "factual"}}]
+        # Enhanced prompt for better JSON generation
+        prompt = f"""You are a helpful assistant that generates educational questions and answers from text passages.
 
-Text: {chunk_text}
+CONTEXT: {context}
+TEXT PASSAGE:
+{chunk_text}
 
-JSON:"""
-            
-            try:
-                result = self.pipeline(
-                    prompt,
-                    max_length=512,
-                    temperature=0.7,
-                    do_sample=True,
-                )[0]['generated_text']
-            except Exception as e:
-                print(f"      ✗ T5 generation error: {e}")
-                return []
-        else:
-            # Causal LM prompt
-            prompt = f"""Context: {context}
+INSTRUCTIONS:
+Generate exactly {num_questions} questions and answers based on the text passage above.
 
-Text: {chunk_text}
+REQUIREMENTS:
+1. Questions should be factual and answerable directly from the text
+2. Answers should be concise and accurate
+3. Include different types of questions (factual, conceptual, application)
+4. Format output as a JSON array of objects
 
-Generate {num_questions} questions and answers in JSON format:
+OUTPUT FORMAT (JSON):
 [
-  {{"question": "...", "answer": "...", "type": "factual"}},
-  ...
+  {{
+    "question": "What is the main topic?",
+    "answer": "The main topic is...",
+    "type": "factual"
+  }},
+  {{
+    "question": "How does the process work?",
+    "answer": "The process works by...",
+    "type": "conceptual"
+  }}
 ]
 
-Output:"""
-            
-            try:
-                result = self.pipeline(
-                    prompt,
-                    max_new_tokens=512,
-                    temperature=0.7,
-                    do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id,
-                )[0]['generated_text']
-                # Extract generated part
-                if isinstance(result, str) and len(result) > len(prompt):
-                    result = result[len(prompt):].strip()
-            except Exception as e:
-                print(f"      ✗ Generation error: {e}")
-                return []
+JSON OUTPUT:"""
         
-        # Parse questions using the new method
         try:
+            # Generate with the pipeline
+            result = self.pipeline(
+                prompt,
+                max_new_tokens=MAX_NEW_TOKENS,
+                temperature=TEMPERATURE,
+                top_p=TOP_P,
+                do_sample=True,
+                pad_token_id=self.tokenizer.eos_token_id,
+                num_return_sequences=1,
+            )[0]['generated_text']
+            
+            # Extract generated part (remove prompt if present)
+            if result.startswith(prompt):
+                result = result[len(prompt):].strip()
+            
+            print(f"      Generated text length: {len(result)} chars")
+            
+            # Parse questions
             questions = self._parse_questions(result, num_questions)
+            
+            if questions:
+                print(f"      Successfully parsed {len(questions)} questions")
+            else:
+                print(f"      Could not parse questions from generated text")
+                # Debug: save problematic generation
+                with open("debug_generation.txt", "a", encoding="utf-8") as f:
+                    f.write(f"\n{'='*50}\nPROMPT:\n{prompt}\n\nRESULT:\n{result}\n")
+            
             return questions
+            
         except Exception as e:
-            print(f"      ✗ Parsing error: {e}")
+            print(f"      ✗ Generation error: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
 
@@ -394,6 +511,7 @@ def generate_qa_dataset(
         chunk_start = time.time()
         
         print(f"\n[{i+1}/{len(chunks)}] Processing {chunk['source']} (chunk {chunk['chunk_id']+1}/{chunk['total_chunks']})")
+        print(f"   Chunk text preview: {chunk['text'][:100]}...")
         
         try:
             # Generate questions
@@ -420,6 +538,8 @@ def generate_qa_dataset(
         except Exception as e:
             chunk_time = time.time() - chunk_start
             print(f"   ✗ Error processing chunk: {e} ({chunk_time:.1f}s)")
+            import traceback
+            traceback.print_exc()
         
         # Periodic save
         if output_path and (i + 1) % save_interval == 0:
@@ -541,7 +661,7 @@ def export_qa_pairs(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate QA pairs from PDFs using teacher model (Llama-3.2-3B)"
+        description="Generate QA pairs from PDFs using teacher model"
     )
     parser.add_argument(
         "--output", type=str,
@@ -582,6 +702,10 @@ def main():
         "--no-data-copy", action="store_true",
         help="Don't copy output to Data/ folder (for Kaggle zip inclusion)"
     )
+    parser.add_argument(
+        "--use-layout", action="store_true",
+        help="Use pymupdf.layout for enhanced text extraction (experimental)"
+    )
     
     args = parser.parse_args()
     
@@ -591,6 +715,7 @@ def main():
     print(f"\nTeacher Model: {args.model}")
     print(f"Questions per chunk: {args.questions}")
     print(f"Device: {DEVICE}")
+    print(f"Using pymupdf.layout: {args.use_layout}")
     
     # Load PDF chunks
     chunks = load_pdf_chunks(

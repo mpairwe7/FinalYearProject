@@ -85,7 +85,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           # First, prepare training data
-          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl datasets
+          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl datasets pymupdf-layout
           mkdir -p artifacts
           python ml/scripts/data_augmentation.py \
             --csv-dir Data/dataset \
@@ -97,7 +97,7 @@ jobs:
           # Generate teacher QA if PDFs exist (optional - may take time)
           if [ -d "Data/pdfs" ] && [ "$(ls -A Data/pdfs/*.pdf 2>/dev/null)" ]; then
             echo "Generating teacher QA from PDFs..."
-            pip install torch transformers accelerate
+            pip install torch transformers accelerate 
             python ml/scripts/teacher_qa_generation.py \
               --output artifacts/teacher_qa \
               --chunks 669 \
