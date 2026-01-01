@@ -83,7 +83,7 @@ jobs:
         
         run: |
           # First, prepare training data
-          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl datasets pymupdf-layout
+          pip install pandas PyPDF2 langchain-text-splitters pymupdf4llm openpyxl datasets pymupdf-layout opencv-python
           mkdir -p artifacts
           python ml/scripts/data_augmentation.py \
             --csv-dir Data/dataset \
