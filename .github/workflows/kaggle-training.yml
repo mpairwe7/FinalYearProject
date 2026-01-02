@@ -82,6 +82,7 @@ jobs:
       - name: Prepare training data, artifacts and Kaggle dataset
         env:
           TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           # Install Tesseract OCR for PDF text extraction
           sudo apt-get update
