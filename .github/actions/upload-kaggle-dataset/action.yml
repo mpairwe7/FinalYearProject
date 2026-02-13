@@ -1,0 +1,102 @@
+name: Upload Kaggle Dataset
+description: Upload a directory as a Kaggle dataset with version-or-create retry logic
+
+inputs:
+  dataset-dir:
+    description: Path to the directory to upload
+    required: true
+  base-title:
+    description: Base title for the dataset slug
+    required: true
+  kaggle-username:
+    description: Kaggle username for the dataset owner
+    required: true
+  run-id:
+    description: GitHub run ID for version message
+    required: false
+    default: ''
+  max-attempts:
+    description: Max number of slug variants to try
+    required: false
+    default: '3'
+  license:
+    description: Dataset license
+    required: false
+    default: CC-BY-4.0
+  description:
+    description: Dataset description
+    required: false
+    default: 'Uploaded via GitHub Actions'
+
+outputs:
+  dataset-id:
+    description: The Kaggle dataset ID (username/slug)
+    value: ${{ steps.upload.outputs.dataset-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Upload dataset to Kaggle
+      id: upload
+      shell: bash
+      env:
+        DATASET_DIR: ${{ inputs.dataset-dir }}
+        BASE_TITLE: ${{ inputs.base-title }}
+        KAGGLE_USERNAME: ${{ inputs.kaggle-username }}
+        RUN_ID: ${{ inputs.run-id }}
+        MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        DS_LICENSE: ${{ inputs.license }}
+        DS_DESCRIPTION: ${{ inputs.description }}
+      run: |
+        cd "$DATASET_DIR"
+        kaggle datasets init -p .
+
+        DATASET_ID=""
+        CREATED=0
+
+        for i in $(seq 1 "$MAX_ATTEMPTS"); do
+          if [ "$i" -eq 1 ]; then
+            TITLE="$BASE_TITLE"
+          else
+            TITLE="$BASE_TITLE-$i"
+          fi
+          SLUG="$KAGGLE_USERNAME/$TITLE"
+
+          # Update metadata via Python (avoids shell interpolation of secrets)
+          python3 -c "
+        import json, os
+        meta = json.load(open('dataset-metadata.json'))
+        meta['title'] = os.environ.get('TITLE', '$TITLE')
+        meta['id'] = os.environ.get('SLUG', '$SLUG')
+        meta['licenses'] = [{'name': os.environ.get('DS_LICENSE', 'CC-BY-4.0')}]
+        meta['description'] = os.environ.get('DS_DESCRIPTION', 'Uploaded via GitHub Actions')
+        json.dump(meta, open('dataset-metadata.json', 'w'), indent=2)
+        " TITLE="$TITLE" SLUG="$SLUG"
+
+          echo "Attempt $i: trying $SLUG"
+
+          # Try to version existing dataset first
+          if kaggle datasets version -p . --dir-mode zip -m "Update from run ${RUN_ID}" 2>&1; then
+            echo "::notice::Dataset versioned: $SLUG"
+            DATASET_ID="$SLUG"
+            CREATED=1
+            break
+          fi
+
+          # Fall back to creating new dataset
+          if kaggle datasets create -p . --dir-mode zip --public 2>&1; then
+            echo "::notice::Dataset created: $SLUG"
+            DATASET_ID="$SLUG"
+            CREATED=1
+            break
+          fi
+
+          echo "::warning::Both version and create failed for $SLUG, trying next variant..."
+        done
+
+        if [ "$CREATED" -ne 1 ]; then
+          echo "::error::Failed to upload dataset after $MAX_ATTEMPTS attempts"
+          exit 1
+        fi
+
+        echo "dataset-id=$DATASET_ID" >> "$GITHUB_OUTPUT"

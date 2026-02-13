@@ -1,0 +1,55 @@
+name: Commit and Push
+description: Stage files, commit if changed, pull with rebase, and push with retry
+
+inputs:
+  paths:
+    description: Space-separated paths to git add
+    required: true
+  commit-message:
+    description: Commit message
+    required: true
+  max-retries:
+    description: Max push retries (handles concurrent pushes)
+    required: false
+    default: '3'
+
+runs:
+  using: composite
+  steps:
+    - name: Commit and push changes
+      shell: bash
+      env:
+        PATHS: ${{ inputs.paths }}
+        COMMIT_MSG: ${{ inputs.commit-message }}
+        MAX_RETRIES: ${{ inputs.max-retries }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        # Stage specified paths
+        for p in $PATHS; do
+          git add "$p"
+        done
+
+        # Check if there are staged changes
+        if git diff --staged --quiet; then
+          echo "::notice::No changes to commit"
+          exit 0
+        fi
+
+        git commit -m "$COMMIT_MSG"
+
+        # Push with retry + rebase to handle concurrent pushes
+        for attempt in $(seq 1 "$MAX_RETRIES"); do
+          echo "Push attempt $attempt/$MAX_RETRIES"
+          if git push; then
+            echo "::notice::Changes pushed successfully"
+            exit 0
+          fi
+          echo "::warning::Push failed, pulling with rebase and retrying..."
+          git pull --rebase origin "$(git branch --show-current)"
+          sleep 2
+        done
+
+        echo "::error::Failed to push after $MAX_RETRIES attempts"
+        exit 1
