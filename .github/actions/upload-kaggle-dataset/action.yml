@@ -63,15 +63,16 @@ runs:
           SLUG="$KAGGLE_USERNAME/$TITLE"
 
           # Update metadata via Python (avoids shell interpolation of secrets)
-          python3 -c "
+          export TITLE SLUG
+          python3 << 'PYEOF'
         import json, os
         meta = json.load(open('dataset-metadata.json'))
-        meta['title'] = os.environ.get('TITLE', '$TITLE')
-        meta['id'] = os.environ.get('SLUG', '$SLUG')
+        meta['title'] = os.environ['TITLE']
+        meta['id'] = os.environ['SLUG']
         meta['licenses'] = [{'name': os.environ.get('DS_LICENSE', 'CC-BY-4.0')}]
         meta['description'] = os.environ.get('DS_DESCRIPTION', 'Uploaded via GitHub Actions')
         json.dump(meta, open('dataset-metadata.json', 'w'), indent=2)
-        " TITLE="$TITLE" SLUG="$SLUG"
+        PYEOF
 
           echo "Attempt $i: trying $SLUG"
 

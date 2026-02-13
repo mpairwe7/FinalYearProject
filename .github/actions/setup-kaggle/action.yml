@@ -18,10 +18,12 @@ runs:
   steps:
     - name: Install Kaggle CLI
       shell: bash
+      env:
+        EXTRA_PACKAGES: ${{ inputs.extra-packages }}
       run: |
         pip install --quiet kaggle
-        if [ -n "${{ inputs.extra-packages }}" ]; then
-          pip install --quiet ${{ inputs.extra-packages }}
+        if [ -n "$EXTRA_PACKAGES" ]; then
+          pip install --quiet $EXTRA_PACKAGES
         fi
 
     - name: Configure Kaggle credentials
