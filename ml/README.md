@@ -16,6 +16,7 @@ ml/
 │   ├── fine_tune_gemma.py         # LoRA fine-tuning for Gemma/Llama
 │   ├── run_training_pipeline.sh   # Full pipeline orchestrator
 │   ├── prepare_kaggle_notebook.py # Prepare notebook for Kaggle training
+│   ├── export_tpu_ready_data.py   # Build fixed-length packed shards for TPU
 │   ├── monitor_kaggle.py          # Monitor Kaggle training jobs
 │   └── process_kaggle_output.py   # Process artifacts from Kaggle
 └── configs/               # Training configurations
@@ -245,20 +246,39 @@ train-model:
         python ml/pipelines/train.py --config ml/configs/training_config.yaml
 ```
 
-#### 2. kaggle-training.yml (Remote GPU Training)
+#### 2. kaggle-training.yml (Remote GPU/TPU Training)
 ```yaml
 jobs:
+  resolve-accelerator:
+    steps:
+      - name: Resolve accelerator
+        run: echo "gpu|tpu"
+
+  run-data-ingestion:
+    steps:
+      - name: Run data ingestion + optional EDA
+        run: python Notebooks/DataIngestion_Augmentation.ipynb
+
+  export-tpu-ready:
+    if: ${{ inputs.accelerator == 'tpu' }}
+    steps:
+      - name: Export fixed-length packed shards
+        run: python ml/scripts/export_tpu_ready_data.py
+
   prepare:
-    - name: Prepare notebook
-      run: python ml/scripts/prepare_kaggle_notebook.py
-  
+    steps:
+      - name: Prepare notebook
+        run: python ml/scripts/prepare_kaggle_notebook.py
+
   monitor:
-    - name: Monitor training
-      run: python ml/scripts/monitor_kaggle.py
-  
+    steps:
+      - name: Monitor training
+        run: python ml/scripts/monitor_kaggle.py
+
   process:
-    - name: Process output
-      run: python ml/scripts/process_kaggle_output.py
+    steps:
+      - name: Process output
+        run: python ml/scripts/process_kaggle_output.py
 ```
 
 ### Manual Workflow Trigger
@@ -267,10 +287,16 @@ jobs:
 # Trigger Kaggle training
 gh workflow run kaggle-training.yml
 
-# With custom parameters
+# With explicit TPU parameters
 gh workflow run kaggle-training.yml \
-    -f target=mobile_offline \
-    -f epochs=5
+    -f notebook=ura-training \
+    -f accelerator=tpu \
+    -f run_data_eda=false
+
+# With explicit GPU parameters
+gh workflow run kaggle-training.yml \
+    -f notebook=ura-training \
+    -f accelerator=gpu
 ```
 
 ## 📈 Evaluation
@@ -369,5 +395,5 @@ python ml/scripts/data_augmentation.py --validate-only
 # Trigger CI pipeline with training
 gh workflow run ci-ml-pipeline.yml -f run_training=true
 
-# Trigger Kaggle GPU training
+# Trigger Kaggle training (manual dispatch default accelerator is TPU)
 gh workflow run kaggle-training.yml -f notebook=ura-training

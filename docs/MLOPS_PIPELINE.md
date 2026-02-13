@@ -66,15 +66,27 @@ This document describes the automated MLOps CI/CD pipeline for the URA Chatbot p
 ### 3. Kaggle Training Pipeline (`.github/workflows/kaggle-training.yml`)
 
 **Triggers:**
-- Manual dispatch with notebook selection
-- Weekly schedule (Sunday 2 AM UTC)
+- Push (data/notebook/ml/workflow changes)
+- Manual dispatch with notebook and accelerator selection
 
 **Stages:**
-- Prepare Kaggle notebook metadata
+- Resolve accelerator (`gpu|tpu`)
+- Check data changes and upload data dataset
+- Run `DataIngestion_Augmentation`
+- Prepare training dataset and notebook metadata
+- Export TPU-ready packed data (TPU only)
 - Push notebook to Kaggle
-- Monitor execution status
+- Monitor execution status (accelerator-aware timeout)
 - Download training outputs
 - Process and deploy model
+
+**Key Manual Inputs (`workflow_dispatch`):**
+- `notebook` (`ura-training`, `DataIngestion_Augmentation`, `embedding-fine-tune`, `full-pipeline`)
+- `accelerator` (`gpu|tpu`, default `tpu`)
+- `run_data_eda` (`true|false`, default `false`)
+- `run_data_pipeline_first` (`true|false`)
+- `skip_data_upload` (`true|false`)
+- `gpu` (deprecated compatibility input)
 
 ## Folder Structure
 
@@ -118,6 +130,7 @@ FinalYearProject/
 │   ├── scripts/
 │   │   ├── __init__.py
 │   │   ├── prepare_kaggle_notebook.py
+│   │   ├── export_tpu_ready_data.py
 │   │   ├── monitor_kaggle.py
 │   │   └── process_kaggle_output.py
 │   └── huggingface/                # HF Space files
@@ -214,10 +227,10 @@ FinalYearProject/
 2. **Run with Docker:**
    ```bash
    # Development mode (hot-reload)
-   docker-compose --profile dev up api-dev
+   docker compose --profile dev up api-dev
    
    # Production mode
-   docker-compose up api
+   docker compose up api
    ```
 
 3. **Run ML pipeline locally:**
@@ -288,7 +301,22 @@ gh workflow run ci-ml-pipeline.yml -f run_training=true -f deploy_model=true
 
 **Kaggle Training:**
 ```bash
-gh workflow run kaggle-training.yml -f notebook=ura-training -f gpu=true
+gh workflow run kaggle-training.yml -f notebook=ura-training
+```
+
+**Kaggle TPU Training (recommended):**
+```bash
+gh workflow run kaggle-training.yml \
+  -f notebook=ura-training \
+  -f accelerator=tpu \
+  -f run_data_eda=false
+```
+
+**Kaggle GPU Training:**
+```bash
+gh workflow run kaggle-training.yml \
+  -f notebook=ura-training \
+  -f accelerator=gpu
 ```
 
 ### Automatic Triggers
@@ -298,7 +326,7 @@ gh workflow run kaggle-training.yml -f notebook=ura-training -f gpu=true
 | Push to `main` | All | Full CI/CD + Deploy |
 | Push to `develop` | ML Pipeline | Test + Validate |
 | PR to `main` | All | Test + Preview Deploy |
-| Weekly (Sun 2AM) | Kaggle | Retrain model |
+| Push to data/notebook/ml/workflow files | Kaggle | Run remote data/training pipeline |
 
 ## Monitoring & Debugging
 
@@ -331,7 +359,7 @@ vercel logs
 ### Common Issues
 
 1. **Kaggle kernel fails:**
-   - Check GPU/Internet is enabled in metadata
+   - Check accelerator/internet is enabled in metadata
    - Verify datasets are accessible
    - Check kernel logs: `kaggle kernels output <kernel-id>`
 

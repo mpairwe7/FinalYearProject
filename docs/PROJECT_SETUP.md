@@ -97,14 +97,16 @@ VERCEL_PROJECT_ID=your_project_id
 
 ```bash
 # Production mode
-docker-compose up -d api
+docker compose up -d api
 
 # Development mode (with hot reload)
-docker-compose --profile dev up api-dev
+docker compose --profile dev up api-dev
 
 # View logs
-docker-compose logs -f api
+docker compose logs -f api
 ```
+
+> Note: The `trainer` container runs as a non-root user (UID 1000). Ensure `./artifacts` is writable on the host before running training profile.
 
 ### Option 2: Manual Start
 
@@ -169,6 +171,7 @@ FinalYearProject/
 │   │   └── push_to_hub.py
 │   ├── scripts/
 │   │   ├── prepare_kaggle_notebook.py
+│   │   ├── export_tpu_ready_data.py
 │   │   ├── monitor_kaggle.py
 │   │   └── process_kaggle_output.py
 │   └── huggingface/
@@ -280,7 +283,18 @@ gh workflow list
 gh workflow run ci-ml-pipeline.yml -f run_training=true -f deploy_model=true
 
 # Run Kaggle training
-gh workflow run kaggle-training.yml -f notebook=ura-training -f gpu=true
+gh workflow run kaggle-training.yml -f notebook=ura-training
+
+# Run explicit TPU mode and skip EDA in data-ingestion stage
+gh workflow run kaggle-training.yml \
+  -f notebook=ura-training \
+  -f accelerator=tpu \
+  -f run_data_eda=false
+
+# Run explicit GPU mode
+gh workflow run kaggle-training.yml \
+  -f notebook=ura-training \
+  -f accelerator=gpu
 
 # View run status
 gh run list --workflow=ci-ml-pipeline.yml
@@ -307,9 +321,9 @@ kill -9 <PID>
 ### Docker Issues
 ```bash
 # Reset Docker
-docker-compose down -v
+docker compose down -v
 docker system prune -f
-docker-compose up --build
+docker compose up --build
 ```
 
 ### Python Import Errors

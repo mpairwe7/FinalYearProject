@@ -1,13 +1,18 @@
+# syntax=docker/dockerfile:1.7
+
 # =============================================================================
 # URA Chatbot ML Training - Dockerfile
 # For local and CI/CD model training
 # =============================================================================
 
-FROM python:3.11-slim
+ARG PYTHON_IMAGE=python:3.11.11-slim-bookworm
+FROM ${PYTHON_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 WORKDIR /app
 
@@ -20,16 +25,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 COPY requirements.txt ./requirements.txt
-RUN pip install --upgrade pip && \
+ARG MLFLOW_VERSION=2.16.2
+ARG DVC_VERSION=3.51.2
+ARG KAGGLE_VERSION=1.6.17
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
     pip install -r requirements.txt && \
-    pip install mlflow dvc kaggle
+    pip install \
+      "mlflow==${MLFLOW_VERSION}" \
+      "dvc==${DVC_VERSION}" \
+      "kaggle==${KAGGLE_VERSION}"
 
 # Copy ML pipeline code
-COPY ml ./ml
-COPY Data/dataset ./datasets
+RUN groupadd --gid 1000 trainer && \
+    useradd --uid 1000 --gid trainer --create-home --shell /usr/sbin/nologin trainer
+COPY --chown=trainer:trainer ml ./ml
+COPY --chown=trainer:trainer Data/dataset ./datasets
 
 # Create output directories
-RUN mkdir -p /app/artifacts/models /app/artifacts/metrics
+RUN mkdir -p /app/artifacts/models /app/artifacts/metrics && \
+    chown -R trainer:trainer /app
 
 # Default command
+USER trainer
 CMD ["python", "ml/pipelines/train.py", "--config", "ml/configs/training_config.yaml"]

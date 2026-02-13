@@ -37,10 +37,23 @@ on:
           - DataIngestion_Augmentation
           - embedding-fine-tune
           - full-pipeline
+      accelerator:
+        description: 'Training accelerator'
+        required: false
+        default: tpu
+        type: choice
+        options:
+          - gpu
+          - tpu
       gpu:
-        description: 'Use GPU accelerator'
+        description: '[Deprecated] true = GPU, false = TPU'
         required: false
         default: true
+        type: boolean
+      run_data_eda:
+        description: 'Run EDA visualizations in DataIngestion notebook'
+        required: false
+        default: false
         type: boolean
       run_data_pipeline_first:
         description: 'Run DataIngestion_Augmentation before training'
@@ -69,6 +82,42 @@ env:
   PYTHON_VERSION: '3.11'
 
 jobs:
+  # ============================================
+  # Stage 0: Resolve Accelerator
+  # ============================================
+  resolve-accelerator:
+    name: Resolve Accelerator
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      accelerator: ${{ steps.resolve.outputs.accelerator }}
+    steps:
+      - name: Resolve accelerator mode
+        id: resolve
+        run: |
+          ACCELERATOR="gpu"
+
+          # workflow_dispatch supports explicit accelerator selection.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ github.event.inputs.accelerator }}" ]; then
+              ACCELERATOR="${{ github.event.inputs.accelerator }}"
+            elif [ "${{ github.event.inputs.gpu }}" = "false" ]; then
+              ACCELERATOR="tpu"
+            fi
+          fi
+
+          if [ "$ACCELERATOR" != "gpu" ] && [ "$ACCELERATOR" != "tpu" ]; then
+            ACCELERATOR="gpu"
+          fi
+
+          echo "accelerator=$ACCELERATOR" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Accelerator Resolution"
+            echo ""
+            echo "- Selected accelerator: \`$ACCELERATOR\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ============================================
   # Stage 0a: Check for Data Changes
   # ============================================
@@ -218,9 +267,61 @@ jobs:
         env:
           DATASET_ID: ${{ needs.upload-data-to-kaggle.outputs.dataset-id }}
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          RUN_DATA_EDA: ${{ github.event.inputs.run_data_eda || 'false' }}
         run: |
           mkdir -p ml/kaggle
           cp Notebooks/DataIngestion_Augmentation.ipynb ml/kaggle/
+
+          # CI optimization: run exactly one entrypoint and optionally skip EDA.
+          python3 << PYEOF
+          import json, os
+
+          notebook_path = "ml/kaggle/DataIngestion_Augmentation.ipynb"
+          with open(notebook_path, "r", encoding="utf-8") as f:
+              nb = json.load(f)
+
+          run_plain = "\n".join([
+              "# Run the enhanced pipeline",
+              "if __name__ == \"__main__\":",
+              "    enhanced_main_pipeline()",
+              "",
+          ])
+          run_with_eda = "\n".join([
+              "# Run the enhanced pipeline with EDA",
+              "if __name__ == \"__main__\":",
+              "    enhanced_main_pipeline_with_eda()",
+              "",
+          ])
+          disabled_marker = "# Auto-run disabled by kaggle-training workflow\\n"
+
+          run_eda = os.environ.get("RUN_DATA_EDA", "false").lower() == "true"
+          updated_cells = 0
+
+          for cell in nb.get("cells", []):
+              if cell.get("cell_type") != "code":
+                  continue
+
+              src = "".join(cell.get("source", []))
+              new_src = src
+
+              # Avoid running both entrypoints in the same notebook execution.
+              new_src = new_src.replace(run_plain, disabled_marker)
+              if run_eda:
+                  # Keep EDA entrypoint as-is.
+                  pass
+              else:
+                  new_src = new_src.replace(run_with_eda, run_plain)
+
+              if new_src != src:
+                  updated_cells += 1
+                  cell["source"] = new_src.splitlines(keepends=True)
+
+          with open(notebook_path, "w", encoding="utf-8") as f:
+              json.dump(nb, f, ensure_ascii=False, indent=1)
+
+          mode = "with_eda" if run_eda else "without_eda"
+          print(f"Notebook entrypoint prepared ({mode}), updated cells: {updated_cells}")
+          PYEOF
 
           python3 << PYEOF
           import json, os
@@ -232,6 +333,7 @@ jobs:
               "kernel_type": "notebook",
               "is_private": True,
               "enable_gpu": True,
+              "enable_tpu": False,
               "enable_internet": True,
               "dataset_sources": [os.environ["DATASET_ID"]],
               "competition_sources": [],
@@ -315,6 +417,7 @@ jobs:
             echo "|------|--------|"
             echo "| Kernel | \`${{ steps.push-data.outputs.kernel-id }}\` |"
             echo "| Data ready | ${{ steps.download-data.outputs.data-ready || 'unknown' }} |"
+            echo "| EDA mode | ${{ github.event.inputs.run_data_eda || 'false' }} |"
             echo "| Processed files | $(find Data/processed -type f 2>/dev/null | wc -l) |"
             echo "| EDA files | $(find Data/eda_visualizations -type f 2>/dev/null | wc -l) |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -326,11 +429,14 @@ jobs:
     name: Prepare Kaggle Notebook
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [run-data-ingestion, upload-data-to-kaggle, check-data-changes]
+    needs: [resolve-accelerator, run-data-ingestion, upload-data-to-kaggle, check-data-changes]
     if: always() && (github.event.inputs.notebook != 'DataIngestion_Augmentation')
     outputs:
       kernel-id: ${{ steps.push.outputs.kernel-id }}
       training-notebook: ${{ steps.resolve.outputs.training-notebook }}
+      accelerator: ${{ needs.resolve-accelerator.outputs.accelerator }}
+    env:
+      TRAINING_ACCELERATOR: ${{ needs.resolve-accelerator.outputs.accelerator }}
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -409,6 +515,34 @@ jobs:
             cp artifacts/*.jsonl kaggle_dataset/Data/processed/ 2>/dev/null || true
           fi
 
+      - name: Export TPU-ready packed dataset
+        if: ${{ env.TRAINING_ACCELERATOR == 'tpu' }}
+        run: |
+          python -m pip install --quiet --disable-pip-version-check "transformers>=4.45" tokenizers
+
+          mkdir -p artifacts/tpu_ready
+          python ml/scripts/export_tpu_ready_data.py \
+            --input-jsonl artifacts/data_pipeline/enhanced_training_data.jsonl \
+            --input-jsonl artifacts/enhanced_training_data.jsonl \
+            --input-jsonl Data/processed/enhanced_training_data.jsonl \
+            --output-dir artifacts/tpu_ready \
+            --tokenizer google/flan-t5-small \
+            --seq-len 512 \
+            --val-ratio 0.1 \
+            --seed 42 \
+            --shard-size 2000
+
+          mkdir -p kaggle_dataset/Data/processed/tpu_ready
+          cp -v artifacts/tpu_ready/* kaggle_dataset/Data/processed/tpu_ready/
+
+      - name: Upload TPU-ready data artifact
+        if: ${{ env.TRAINING_ACCELERATOR == 'tpu' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tpu-ready-data
+          path: artifacts/tpu_ready/
+          retention-days: 14
+
       - name: Upload training dataset
         id: upload-training-ds
         uses: ./.github/actions/upload-kaggle-dataset
@@ -425,26 +559,16 @@ jobs:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           DATASET_ID: ${{ steps.upload-training-ds.outputs.dataset-id }}
           TRAINING_NOTEBOOK: ${{ steps.resolve.outputs.training-notebook }}
+          TRAINING_ACCELERATOR: ${{ env.TRAINING_ACCELERATOR }}
         run: |
           # Prepare the notebook using the helper script
           python ml/scripts/prepare_kaggle_notebook.py \
             --notebook "$TRAINING_NOTEBOOK" \
-            --gpu ${{ github.event.inputs.gpu || 'true' }} \
+            --accelerator "$TRAINING_ACCELERATOR" \
             --dataset "$DATASET_ID"
 
           # Overwrite with latest notebook from Notebooks/
           cp "Notebooks/${TRAINING_NOTEBOOK}.ipynb" ml/kaggle/
-
-          # Ensure GPU is enabled in kernel metadata
-          python3 << PYEOF
-          import json
-          with open("ml/kaggle/kernel-metadata.json", "r") as f:
-              data = json.load(f)
-          data["enable_gpu"] = True
-          data["accelerator"] = "nvidiaTeslaT4"
-          with open("ml/kaggle/kernel-metadata.json", "w") as f:
-              json.dump(data, f, indent=2)
-          PYEOF
 
           cd ml/kaggle
           kaggle kernels push
@@ -460,7 +584,8 @@ jobs:
             echo "| Notebook | \`${{ steps.resolve.outputs.training-notebook }}\` |"
             echo "| Kernel ID | \`${{ steps.push.outputs.kernel-id }}\` |"
             echo "| Dataset | \`${{ steps.upload-training-ds.outputs.dataset-id }}\` |"
-            echo "| GPU | ${{ github.event.inputs.gpu || 'true' }} |"
+            echo "| Accelerator | ${{ env.TRAINING_ACCELERATOR }} |"
+            echo "| TPU-ready files | $(find artifacts/tpu_ready -type f 2>/dev/null | wc -l) |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
@@ -491,10 +616,18 @@ jobs:
 
       - name: Wait for training completion
         run: |
+          TIMEOUT=7200
+          POLL_INTERVAL=60
+          if [ "${{ needs.prepare-kaggle.outputs.accelerator }}" = "tpu" ]; then
+            # TPU runs may spend extra time in compile/warmup.
+            TIMEOUT=9000
+            POLL_INTERVAL=90
+          fi
+
           python ml/scripts/monitor_kaggle.py \
             --kernel-id "${{ needs.prepare-kaggle.outputs.kernel-id }}" \
-            --timeout 7200 \
-            --poll-interval 60
+            --timeout "$TIMEOUT" \
+            --poll-interval "$POLL_INTERVAL"
 
       - name: Download outputs
         run: |
@@ -518,6 +651,7 @@ jobs:
             echo "| Item | Value |"
             echo "|------|-------|"
             echo "| Kernel | \`${{ needs.prepare-kaggle.outputs.kernel-id }}\` |"
+            echo "| Accelerator | ${{ needs.prepare-kaggle.outputs.accelerator }} |"
             echo "| Output files | $(find artifacts/kaggle -type f 2>/dev/null | wc -l) |"
             echo "| Output size | $(du -sh artifacts/kaggle 2>/dev/null | cut -f1 || echo 'N/A') |"
           } >> "$GITHUB_STEP_SUMMARY"

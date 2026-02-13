@@ -49,7 +49,7 @@ FinalYearProject/
 2) **Merge to main**: CI re-runs; when green, two deploy jobs can follow:
 	- **Vercel deploy**: `vercel deploy --prod` using org/project IDs and token; publishes the Next.js UI.
 	- **API image push**: Build FastAPI image and push to DockerHub with tags `latest` and commit SHA; downstream infra pulls from DockerHub.
-3) **Training (manual or scheduled)**: Trigger `kaggle-training.yml` to run Kaggle notebook training; notebooks are synced, job is started via Kaggle API, results are downloaded, then metrics/checkpoints are published (GitHub Release or object store). CI can gate on training success before promoting artifacts.
+3) **Training (manual or push-triggered)**: Trigger `kaggle-training.yml` (or push notebook/data/ml changes) to run Kaggle notebook training; notebooks are synced, job is started via Kaggle API, results are downloaded, then metrics/checkpoints are published (GitHub Release or object store). CI can gate on training success before promoting artifacts.
 4) **Release consumption**: Frontend points to deployed API; API loads the latest validated model from the artifact store or release tag; Docker images from DockerHub are used by runtime (e.g., compose/k8s).
 
 ## URA Chatbot specifics
@@ -69,7 +69,7 @@ Three consolidated workflows under `.github/workflows/`:
 |-------|-------------|
 | Lint & Test | Ruff, Black, isort, MyPy, Pytest |
 | Data Validation | Schema validation, quality checks |
-| Train Model | Local or Kaggle GPU training |
+| Train Model | Local or Kaggle GPU/TPU training |
 | Evaluate | Model performance metrics |
 | Quality Gates | Pass/fail thresholds |
 | Push to HF | Deploy model to Hugging Face Hub |
@@ -86,15 +86,23 @@ Three consolidated workflows under `.github/workflows/`:
 | Deploy Preview | PR preview deployments |
 | Deploy Production | Production Vercel deployment |
 
-### 3. `kaggle-training.yml` - Remote GPU Training
-**Triggers**: Manual dispatch, weekly schedule (Sundays 2 AM UTC)
+### 3. `kaggle-training.yml` - Remote Kaggle Training
+**Triggers**: Push (notebook/data changes), manual dispatch
 
 | Stage | Description |
 |-------|-------------|
-| Prepare | Push notebook to Kaggle |
+| Resolve | Resolve accelerator (`gpu|tpu`) |
+| Data | Detect/upload/run `DataIngestion_Augmentation` |
+| Export | Build TPU-ready packed dataset when accelerator is `tpu` |
+| Prepare | Push notebook to Kaggle with accelerator-aware metadata |
 | Monitor | Poll for completion |
 | Process | Download and validate outputs |
 | Deploy | Push to Hugging Face |
+
+Manual dispatch highlights:
+- `accelerator`: `gpu|tpu` (default `tpu`)
+- `run_data_eda`: `false` by default for faster data-ingestion runs
+- `gpu`: deprecated compatibility input (`true` -> GPU, `false` -> TPU)
 
 ## Required Secrets
 
@@ -142,14 +150,31 @@ See [ml/README.md](ml/README.md) for detailed documentation.
 - Keep Kaggle notebook entrypoint versioned; ensure data paths/configs are reproducible.
 - API: build and run locally with `docker compose up --build` (expects `app.main:app`).
 
+## Container Baseline
+- API image (`Dockerfile`) uses multi-stage build, non-root runtime user, exec-style entrypoint, and Python-based healthcheck (no runtime `curl` dependency).
+- Training image (`Dockerfile.ml`) runs as non-root and pins core ML tooling versions (`mlflow`, `dvc`, `kaggle`) via build args.
+- Both Dockerfiles use BuildKit cache mounts for pip dependency layers (`# syntax=docker/dockerfile:1.7` + `--mount=type=cache`).
+- Compose runtime hardening is enabled for production-like services (`read_only` rootfs for API, `cap_drop: [ALL]`, `no-new-privileges:true`, `tmpfs` mounts, `init: true`).
+
 ## Quick Commands
 
 ```bash
 # Trigger full training pipeline
 gh workflow run ci-ml-pipeline.yml -f run_training=true -f deploy_model=true
 
-# Trigger Kaggle GPU training
-gh workflow run kaggle-training.yml -f notebook=ura-training -f gpu=true
+# Trigger Kaggle training (default accelerator is TPU)
+gh workflow run kaggle-training.yml -f notebook=ura-training
+
+# Trigger explicit TPU training without EDA in data-ingestion stage
+gh workflow run kaggle-training.yml \
+  -f notebook=ura-training \
+  -f accelerator=tpu \
+  -f run_data_eda=false
+
+# Trigger explicit GPU training
+gh workflow run kaggle-training.yml \
+  -f notebook=ura-training \
+  -f accelerator=gpu
 
 # Deploy frontend only
 gh workflow run frontend-deploy.yml

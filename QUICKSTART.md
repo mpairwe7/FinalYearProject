@@ -81,10 +81,10 @@ python ml/pipelines/quality_gates.py
 
 ```bash
 # Development
-docker-compose --profile dev up
+docker compose --profile dev up
 
 # Production
-docker-compose up api
+docker compose up api
 ```
 
 ## 📚 Documentation
@@ -98,7 +98,7 @@ docker-compose up api
 |----------|---------|--------------|
 | ML Pipeline | Push to main | Train → Evaluate → Deploy |
 | Frontend | Push to main | Build → Deploy to Vercel |
-| Kaggle Training | Manual/Weekly | Remote GPU training |
+| Kaggle Training | Push/Manual | Remote GPU/TPU data + training pipeline |
 
 ---
 

@@ -16,7 +16,7 @@ This project implements a comprehensive MLOps CI/CD pipeline following DataCamp 
 │       │              │              │              │              │        │
 │       ▼              ▼              ▼              ▼              ▼        │
 │   GitHub         Ruff/Black     Kaggle/       Quality       Hugging Face  │
-│   Actions        MyPy/Pytest    Local GPU      Gates         DockerHub    │
+│   Actions        MyPy/Pytest    Local GPU/TPU  Gates         DockerHub    │
 │                                                              Vercel       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -71,7 +71,7 @@ Output:
 ```yaml
 Execution:
 - Local: GitHub Actions runner
-- Remote: Kaggle notebooks (GPU)
+- Remote: Kaggle notebooks (GPU/TPU)
 
 Configuration:
 - ml/configs/training_config.yaml
@@ -112,6 +112,8 @@ Method: huggingface_hub Python SDK
 ```yaml
 Features:
 - Multi-stage builds
+- Non-root runtime users
+- Read-only filesystem + dropped Linux capabilities (compose runtime hardening)
 - GitHub Actions cache (gha)
 - Trivy security scanning
 - Automatic tagging (branch, sha, latest)
@@ -147,19 +149,35 @@ Features:
 
 ### 3. Kaggle Training (`kaggle-training.yml`)
 
-**Remote GPU training** on Kaggle notebooks.
+**Remote Kaggle training** with accelerator-aware execution (GPU or TPU).
 
 #### Triggers
-- **Manual Dispatch**: Select notebook and GPU options
-- **Scheduled**: Weekly (Sundays 2 AM UTC)
+- **Push**: `Notebooks/**`, `Data/**`, `ml/**`, workflow changes
+- **Manual Dispatch**: Select notebook + accelerator options
 
 #### Pipeline Stages
 
 | Stage | Job Name | Description |
 |-------|----------|-------------|
-| 1 | `prepare-kaggle` | Prepare and push notebook |
-| 2 | `monitor-training` | Monitor execution status |
-| 3 | `process-model` | Download and process outputs |
+| 1 | `resolve-accelerator` | Resolve `gpu|tpu` mode (manual default: `tpu`) |
+| 2 | `check-data-changes` | Detect if data pipeline should run |
+| 3 | `upload-data-to-kaggle` | Upload `Data/` package to Kaggle dataset |
+| 4 | `run-data-ingestion` | Run `DataIngestion_Augmentation` notebook |
+| 5 | `prepare-kaggle` | Build training dataset + notebook metadata |
+| 6 | `monitor-training` | Monitor kernel completion (accelerator-aware timeout) |
+| 7 | `process-model` | Download and process outputs |
+| 8 | `fine-tune-model` | Optional post-training fine-tune stage |
+
+#### Manual Dispatch Inputs
+
+| Input | Type | Default | Notes |
+|-------|------|---------|-------|
+| `notebook` | choice | `ura-training` | Target notebook |
+| `accelerator` | choice | `tpu` | `gpu` or `tpu` |
+| `gpu` | boolean | `true` | Deprecated compatibility flag |
+| `run_data_eda` | boolean | `false` | Controls EDA execution in data-ingestion notebook |
+| `run_data_pipeline_first` | boolean | `false` | Forces data-ingestion stage |
+| `skip_data_upload` | boolean | `false` | Skip dataset upload stage |
 
 #### Notebook Options
 | Notebook | Description |
@@ -169,7 +187,9 @@ Features:
 | `full-pipeline` | Complete end-to-end training |
 
 #### Features
-- **GPU Support**: Optional T4/P100 acceleration
+- **Accelerator Switch**: Clean `gpu|tpu` selection at dispatch
+- **TPU-Ready Export**: Fixed-length packed data blocks at `Data/processed/tpu_ready`
+- **DataIngestion EDA Toggle**: Faster CI path by skipping heavy EDA unless requested
 - **Output Monitoring**: Polls until completion
 - **Automatic Upload**: Pushes to Hugging Face
 
@@ -226,7 +246,7 @@ FinalYearProject/
 │   └── workflows/
 │       ├── ci-ml-pipeline.yml    # Main ML CI/CD
 │       ├── frontend-deploy.yml    # Frontend deployment
-│       └── kaggle-training.yml    # Kaggle GPU training
+│       └── kaggle-training.yml    # Kaggle GPU/TPU training
 ├── ml/
 │   ├── configs/
 │   │   └── training_config.yaml   # Training hyperparameters
@@ -239,6 +259,7 @@ FinalYearProject/
 │   ├── scripts/
 │   │   ├── prepare_kaggle_notebook.py
 │   │   ├── monitor_kaggle.py
+│   │   ├── export_tpu_ready_data.py
 │   │   └── process_kaggle_output.py
 │   └── huggingface/
 │       ├── README.md
@@ -283,17 +304,23 @@ graph TD
 
 ```mermaid
 graph LR
-    A[Trigger] --> B[Prepare Notebook]
-    B --> C[Push to Kaggle]
-    C --> D[Monitor Execution]
-    D --> E{Complete?}
-    E -->|No| D
-    E -->|Yes| F[Download Outputs]
-    F --> G[Process Model]
-    G --> H[Push to HF]
+    A[Trigger] --> B[Resolve Accelerator]
+    B --> C[Check Data Changes]
+    C --> D[Run DataIngestion]
+    D --> E[Prepare Training Dataset]
+    E --> F{TPU?}
+    F -->|Yes| G[Export TPU-ready Packed Data]
+    F -->|No| H[Push Training Notebook]
+    G --> H
+    H --> I[Monitor Execution]
+    I --> J{Complete?}
+    J -->|No| I
+    J -->|Yes| K[Download Outputs]
+    K --> L[Process Model]
+    L --> M[Push to HF]
     
     style A fill:#e1f5fe
-    style H fill:#c8e6c9
+    style M fill:#c8e6c9
 ```
 
 ---
@@ -310,8 +337,22 @@ gh workflow run ci-ml-pipeline.yml \
 ### Run Kaggle Training
 ```bash
 gh workflow run kaggle-training.yml \
+  -f notebook=ura-training
+```
+
+### Run Kaggle Training on TPU (recommended)
+```bash
+gh workflow run kaggle-training.yml \
   -f notebook=ura-training \
-  -f gpu=true
+  -f accelerator=tpu \
+  -f run_data_eda=false
+```
+
+### Run Kaggle Training on GPU
+```bash
+gh workflow run kaggle-training.yml \
+  -f notebook=ura-training \
+  -f accelerator=gpu
 ```
 
 ### Deploy Frontend Only
@@ -332,7 +373,9 @@ Each workflow run produces artifacts downloadable from GitHub Actions:
 | `trained-model` | ci-ml-pipeline | Model files, metrics |
 | `evaluation-results` | ci-ml-pipeline | Evaluation reports |
 | `frontend-build` | frontend-deploy | Next.js build output |
+| `data-pipeline-outputs` | kaggle-training | Processed data + EDA outputs from data-ingestion |
 | `kaggle-training-outputs` | kaggle-training | Kaggle notebook outputs |
+| `tpu-ready-data` | kaggle-training | Packed fixed-length training shards |
 
 ### GitHub Step Summary
 Each job posts summaries to the GitHub Actions summary tab:
@@ -376,7 +419,7 @@ gh run rerun <run-id> --failed
 3. **Caching**: GitHub Actions cache for pip, npm, Docker layers
 4. **Security**: Trivy scanning, secret management
 5. **Preview Deployments**: PR previews for frontend changes
-6. **Scheduled Retraining**: Weekly model refresh capability
+6. **On-Change Retraining**: Push/manual-triggered Kaggle data+training runs
 7. **Multi-environment**: Separate preview/production deployments
 8. **Artifact Management**: Preserved build outputs for debugging
 

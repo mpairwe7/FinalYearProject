@@ -67,7 +67,7 @@
 | Workflow | Trigger | Data Operations |
 |----------|---------|-----------------|
 | `ci-ml-pipeline.yml` | Push/PR | validate_data.py, quality_gates.py |
-| `kaggle-training.yml` | Schedule/Manual | Full dataset processing on GPU |
+| `kaggle-training.yml` | Push/Manual | Full dataset processing + training on GPU/TPU |
 | `frontend-deploy.yml` | Push to main | API URL configuration |
 
 ### Data Quality Metrics Tracked

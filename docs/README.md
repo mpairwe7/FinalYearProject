@@ -31,8 +31,9 @@ Complete documentation for the URA Chatbot MLOps project.
 ### For ML Engineers
 1. Configure Kaggle credentials ([see setup guide](PROJECT_SETUP.md#environment-configuration))
 2. Update training config in `ml/configs/training_config.yaml`
-3. Trigger training: `gh workflow run kaggle-training.yml`
-4. Monitor results in `Results/` folder
+3. Trigger training (TPU default): `gh workflow run kaggle-training.yml -f notebook=ura-training`
+4. Optional explicit mode: `-f accelerator=tpu|gpu` and `-f run_data_eda=false`
+5. Monitor results in `Results/` folder
 
 ### For Frontend Developers
 1. Configure Vercel secrets ([see setup guide](PROJECT_SETUP.md))
