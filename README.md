@@ -34,7 +34,8 @@ FinalYearProject/
 ├── Results/               # Metrics and reports
 ├── Notebooks/             # Jupyter notebooks
 │   ├── ura-training.ipynb                 # Classification + RAG pipeline
-│   └── DataIngestion_Augmentation.ipynb   # Data ingestion & augmentation pipeline
+│   ├── DataIngestion_Augmentation.ipynb   # Data ingestion & augmentation pipeline
+│   └── fine_tune_gemma.ipynb              # Gemma/LLM fine-tuning pipeline
 └── docs/                  # Documentation
 ```
 
@@ -98,6 +99,29 @@ CSV/PDF/HF ──▶ Provenance ──▶ Semantic Dedup ──▶ PII Redaction
 | **Checkpoints** | JSONL/Parquet with lineage | Legacy pickle read-only fallback; pipeline-stage metadata |
 | **Splitting** | Stratified by source group | Leakage prevention; `splits/` subdirectory output |
 | **Governance** | HF Dataset Card generator | License, language tags (en/lg), bias notes, reproducibility |
+
+## Fine-Tuning Pipeline (Gemma/LLM)
+
+The notebook (`Notebooks/fine_tune_gemma.ipynb`) implements a production-grade fine-tuning pipeline:
+
+```
+Teacher QA ──▶ Fail-Fast ──▶ RAG-Aware Format ──▶ SFT (rsLoRA) ──▶ ORPO Stage-2 ──▶ Eval Gates ──▶ Export
+              (SHA-256,      (RAFT-style         (Unsloth +        (preference       (domain QA,     (atomic save,
+               no fallback)   context+cite)       4-bit QLoRA)      optimization)      groundedness)   hash verify)
+```
+
+| Component | Implementation | Details |
+|-----------|---------------|---------|
+| **Dependencies** | Pinned versions (23 packages) | No `--upgrade`, no git+HEAD; reproducible installs |
+| **Reproducibility** | Full PyTorch determinism | `torch.manual_seed`, `cudnn.deterministic`, `PYTHONHASHSEED`, `worker_init_fn` |
+| **Data Loading** | Fail-fast with SHA-256 integrity | No synthetic fallback; minimum sample validation |
+| **Training Format** | RAFT-style RAG-aware | Context prefix + citation supervision when available |
+| **PEFT** | rsLoRA + optional DoRA | BitsAndBytes 4-bit (nf4), configurable target modules |
+| **TRL Pipeline** | Raw text path (SFTTrainer) | `dataset_text_field="text"`, `processing_class=tokenizer` |
+| **Alignment** | ORPO Stage-2 (optional) | Preference pairs from domain QA; `beta=0.1` |
+| **Evaluation** | Domain QA + groundedness + safety | Regression gates (max loss, min accuracy, max hallucination) |
+| **Export** | Atomic save → zip → verify → cleanup | `save_model()` before archive, SHA-256 integrity check |
+| **Governance** | HF Model Card generator | License, language tags, eval results, bias/limitations notes |
 
 ## GitHub Actions Workflows
 

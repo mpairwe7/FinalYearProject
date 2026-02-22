@@ -39,3 +39,8 @@ pydub==0.25.1
 datasketch==1.6.5
 pyarrow==18.1.0
 pandera==0.21.1
+
+# Fine-tuning evaluation
+rouge-score==0.1.2
+nltk==3.9.1
+sacrebleu==2.5.1
