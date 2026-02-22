@@ -18,7 +18,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | [API Reference](API_REFERENCE.md) | REST API endpoints and usage |
 | [Gradio App](GRADIO_APP.md) | Gradio web interface documentation |
 | **Data & Evaluation** |
-| [Data Schema & Evaluation](data-schema-and-eval.md) | Database models and evaluation criteria |
+| [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
 
 ## Getting Started
 
@@ -34,6 +34,10 @@ Complete documentation for the URA Chatbot MLOps project.
 3. Trigger training (TPU default): `gh workflow run kaggle-training.yml -f notebook=ura-training`
 4. Optional explicit mode: `-f accelerator=tpu|gpu` and `-f run_data_eda=false`
 5. Monitor results in `Results/` folder
+6. Review RAG pipeline configuration in `Notebooks/ura-training.ipynb` (Sections 8–11)
+   - Embedding model: change `EMBED_TARGET` in cell 3 (`fast_cpu` / `multilingual` / `multilingual_light`)
+   - Index version: bump `INDEX_VERSION` when re-indexing with schema changes
+   - Evaluation thresholds: adjust `MRR_THRESHOLD`, `HITATK_THRESHOLD`, `GROUNDING_THRESHOLD` in eval cells
 
 ### For Frontend Developers
 1. Configure Vercel secrets ([see setup guide](PROJECT_SETUP.md))

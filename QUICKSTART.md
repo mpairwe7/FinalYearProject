@@ -40,13 +40,43 @@ python App/classifier.py
 ```
 FinalYearProject/
 ├── App/           # Web classifier (Gradio)
-├── Data/          # Training CSV files  
+├── Data/          # Training CSV files + PDFs
 ├── Model/         # Trained model files
 ├── Results/       # Metrics & plots
+├── Notebooks/     # Jupyter notebooks (classification + RAG pipeline)
 ├── ml/            # ML pipelines
 ├── backend/       # FastAPI backend
 └── frontend/      # Next.js frontend
 ```
+
+## 📓 Notebook Sections (ura-training.ipynb)
+
+| Section | What It Does |
+|---------|-------------|
+| §1–6 | Setup, data loading, preprocessing, EDA |
+| §7 | Supervised classification pipeline (SGD + embeddings) |
+| §8 | **RAG pipeline**: semantic chunking, Qdrant indexing, hybrid retrieval (dense + BM25 + reranking) |
+| §9 | **Answer generation**: cached models, structured output with citations, safety guardrails |
+| §10 | **RAG evaluation**: Hit@K, MRR, NDCG, groundedness, regression gates |
+| §11 | **End-to-end benchmarks**: per-stage latency profiling |
+| §12–13 | T5 tag generation, TTS (optional) |
+
+## 📓 Notebook Sections (DataIngestion_Augmentation.ipynb)
+
+| Section | What It Does |
+|---------|-------------|
+| §1–4 | Setup, imports, configuration (provenance, PII, dedup settings) |
+| §5–6 | Text processing with PII redaction (Uganda-specific patterns) |
+| §7–8 | Data loading (CSV/PDF/HF), page-level PDF extraction with section detection |
+| §9 | Pandera schema validation (hash, category, data_type, word counts) |
+| §10 | JSONL/Parquet checkpointing with lineage metadata |
+| §11 | Teacher model QA generation (Llama/Gemma with RAFT) |
+| §12 | **Data augmentation**: phased dedup (exact hash + MinHash LSH), PII redaction |
+| §13 | **Provenance verification**: SHA-256 checksums, trusted source policy |
+| §14 | **QA quality gates**: groundedness, relevance, artifact detection |
+| §15 | **Governance**: HF dataset card generation (license, language tags, bias) |
+| §16 | **Pipeline**: stratified splitting (grouped by source), end-to-end orchestration |
+| §17–23 | EDA visualizations, quality assessment, report export |
 
 ## 🔧 GitHub Actions Setup
 

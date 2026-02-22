@@ -4,11 +4,11 @@
 - **documents**: One row per PDF or source document.
   - id (uuid), title, source_path, source_type (pdf), language, uploaded_by, uploaded_at, checksum, status (ingested/pending/failed).
 - **document_chunks**: Chunked text spans for retrieval.
-  - id (uuid), document_id (fk documents), chunk_index, text, tokens, section_heading, page_start, page_end, created_at.
+  - id (uuid), document_id (fk documents), chunk_index, text, tokens, section_heading, page_start, page_end, doc_type (qa_pair/pdf_page), section (vat/tin/customs/...), created_at.
 - **embeddings**: Vector representations tied to chunks.
   - id (uuid), chunk_id (fk document_chunks), vector (array/Vector type), model_name, dim, created_at.
-- **faiss_index_metadata** (optional if using external vector store):
-  - id (uuid), index_uri, index_type (faiss/hnsw), model_name, dim, metric (cosine/dot), last_built_at, doc_count.
+- **qdrant_collections**: Qdrant vector store metadata (replaces FAISS).
+  - id (uuid), collection_name, index_version, model_name, dim, metric (cosine), points_count, created_at, status (active/archived).
 - **conversations**: Conversation sessions with end users.
   - id (uuid), user_id (optional), created_at, channel (web/ivr), locale.
 - **messages**: Ordered turns within a conversation.
@@ -18,26 +18,94 @@
 - **eval_samples**: Individual Q/A pairs with references.
   - id (uuid), eval_run_id (fk eval_runs), question, reference_answer, source_ids (array), metadata (json: policy tags, difficulty).
 - **eval_results**: Metrics per sample and aggregate.
-  - id (uuid), eval_sample_id (fk eval_samples), answer, score_context_precision, score_context_recall, answer_quality, factuality, hallucination_flag, latencies_ms (json), created_at.
+  - id (uuid), eval_sample_id (fk eval_samples), answer, score_context_precision, score_context_recall, answer_quality, factuality, hallucination_flag, grounding_score, latencies_ms (json), created_at.
 
 ## PDF Ingestion Flow
-1) Upload PDF -> store metadata row in `documents` (status=pending).
+1) Upload PDF → store metadata row in `documents` (status=pending).
 2) Extract text + metadata:
-   - Use pdfminer/pymupdf to parse pages.
-   - Normalize whitespace, keep page numbers and section headings if available.
-3) Chunk text:
-   - Sliding window with overlap (e.g., 500 tokens window, 50 overlap) -> insert rows in `document_chunks`.
+   - Use pymupdf4llm to parse pages with `page_chunks=True` for per-page extraction.
+   - Normalize whitespace, preserve page numbers and section headings.
+   - Detect sections automatically (VAT, TIN, customs, excise, penalties, etc.) via heuristic patterns.
+3) Chunk text (semantic chunking):
+   - **QA pairs**: `RecursiveCharacterTextSplitter(chunk_size=600, overlap=80)` with QA-aware separators.
+   - **PDF pages**: `RecursiveCharacterTextSplitter(chunk_size=1000, overlap=150)` with heading-aware separators (`\n## `, `\n### `, `\n\n`).
+   - Each chunk includes hierarchical metadata: source, page, section, doc_type, chunk_index, total_chunks.
 4) Embed chunks:
-   - Call embedding model (e.g., OpenAI text-embedding-3-large or local model) -> write rows in `embeddings` (and update vector index).
-5) Update status:
+   - Configurable embedding model via `EMBED_CONFIGS`:
+     - `fast_cpu`: `all-MiniLM-L6-v2` (384-dim, English-optimized)
+     - `multilingual`: `multilingual-e5-large` (1024-dim, 100+ languages incl. Luganda)
+     - `multilingual_light`: `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, balanced)
+   - Embeddings are L2-normalized (`normalize_embeddings=True`).
+5) Index into Qdrant (non-destructive):
+   - Versioned collection names: `ura_knowledge_base_{INDEX_VERSION}`.
+   - Existing collections are reused if dimension matches; archived on mismatch.
+   - No delete-and-recreate; incremental upsert for new/changed documents.
+6) Update status:
    - Mark `documents.status = ingested` only after all chunks + embeddings succeed; otherwise flag failed and log why.
 
+## Retrieval Pipeline
+- **Hybrid retrieval**: Dense embeddings (Qdrant) + sparse BM25 (`rank_bm25`) fused via Reciprocal Rank Fusion (weights: 0.6 dense / 0.4 sparse).
+- **Cross-encoder reranking**: `cross-encoder/ms-marco-MiniLM-L-6-v2` reranks top candidates for final relevance ordering.
+- **Metadata filtering**: Qdrant pre-retrieval filtering by source, section, or doc_type.
+
+## Safety Guardrails
+- **Input validation**: Regex-based detection of prompt injection patterns (15+ rules), harmful intent queries, and query length limits.
+- **Output validation**: Grounding check measures overlap between answer content and retrieved context (threshold: ≥0.5 grounding score).
+- **Content moderation**: Flag violence, illegal activity, and other policy-violating content in generated answers.
+- Aligned with OWASP LLM Top 10 guidelines.
+
 ## Evaluation Criteria
-- **Retrieval**: context_precision, context_recall, MRR@k, Recall@k using reference chunk ids.
-- **Answer Quality**: LLM-judge or rubric scoring for faithfulness, helpfulness, completeness (0-5 scale per dimension).
-- **Factuality**: hallucination_flag (boolean) + fact_score (0-1) derived from groundedness checks.
-- **Latency**: total latency, retrieval latency, generation latency (ms) stored per message and aggregated per eval_run.
-- **Safety/Policy**: tag unsafe outputs and count violations per eval_run.
+- **Retrieval**: Hit@K (K=1,3,5,10), MRR (Mean Reciprocal Rank), NDCG@5 using reference answer content overlap.
+- **Answer Quality**: Groundedness score (0-1) based on answer-context term overlap; faithfulness via self-consistency.
+- **Factuality**: hallucination_flag (boolean) + grounding_score (0-1) derived from groundedness checks.
+- **Latency**: Per-stage profiling (input validation, retrieval, generation, output validation) with P50/P95/P99 percentiles.
+- **Safety/Policy**: Tag unsafe outputs and count violations per eval_run.
+
+## Regression Gates
+| Metric | Threshold | Action on Failure |
+|--------|-----------|-------------------|
+| MRR | ≥ 0.5 | Block deployment |
+| Hit@5 | ≥ 0.6 | Block deployment |
+| Avg Grounding Score | ≥ 0.4 | Block deployment |
+| Index populated | > 0 points | Block deployment |
+| Safety checks | All pass | Block deployment |
+
+## Data Ingestion Pipeline (`DataIngestion_Augmentation.ipynb`)
+
+### Provenance & Integrity
+- **Trusted sources**: Configurable allowlist (`trusted_sources` in config); untrusted datasets are quarantined.
+- **SHA-256 checksums**: File-level hashes computed via `DataProvenanceVerifier`, stored in signed manifest.
+- **Dataset versioning**: Pinned HF dataset slugs with `dataset_version` config; no mutable slug loading.
+
+### Deduplication (Phased)
+1. **Pre-augmentation**: Exact hash dedup during `_process_faq_data` and `_process_teacher_qa` using `seen_hashes` set.
+2. **Post-augmentation**: MinHash LSH (`datasketch`) with configurable threshold (`minhash_threshold=0.8`, `minhash_num_perm=128`) for semantic near-duplicate removal.
+3. **Phased scope**: Pre-augmentation hashes and post-augmentation hashes are tracked separately to preserve valid augmented variants while removing true duplicates.
+
+### PII Redaction
+- Uganda-specific regex patterns: email, phone (+256...), TIN (10-digit), National ID (CM/CF prefix).
+- Applied to question and answer fields before export.
+- Configurable via `config.redact_pii` flag.
+
+### QA Quality Gates
+- **`QAQualityGate`**: Evaluates each QA pair on groundedness (word overlap ratio ≥ 0.3), QA relevance (question-answer similarity ≥ 0.2), minimum answer length (≥ 5 words), and generation artifact detection.
+- **Reject-sampling**: QA pairs failing quality gates are filtered out; pass rate is logged as a pipeline metric.
+- **Batch filtering**: `filter_qa_batch()` returns filtered data + statistics (total, passed, failed, pass_rate).
+
+### Data Splitting
+- **Stratified by source**: Groups items by `base_source` (stripping augmentation suffixes like `_paraphrased`, `_backtranslated`).
+- **Leakage prevention**: All variants of the same source item go to the same split (train/val/test).
+- **Ratios**: 80/10/10 default, output to `splits/` subdirectory in Parquet + JSONL formats.
+
+### Checkpointing
+- **JSONL/Parquet**: Replaces pickle blobs for portability and auditability.
+- **Lineage metadata**: Each checkpoint records pipeline stage, timestamp, record count, and config hash.
+- **Legacy fallback**: Reads old pickle checkpoints (read-only) for backward compatibility.
+
+### Governance
+- **HF Dataset Card**: Auto-generated with YAML front matter (license: Apache-2.0, languages: en/lg).
+- **Bias documentation**: Known biases (English-dominant, Uganda-specific tax domain) documented in card.
+- **Reproducibility**: Global seed enforcement, pinned dependencies, deterministic generation config.
 
 ## Suggested Evaluation Datasets
 - **Golden Q/A** curated from URA PDFs with source chunk ids.

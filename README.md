@@ -33,6 +33,8 @@ FinalYearProject/
 ├── Model/                 # Trained model artifacts
 ├── Results/               # Metrics and reports
 ├── Notebooks/             # Jupyter notebooks
+│   ├── ura-training.ipynb                 # Classification + RAG pipeline
+│   └── DataIngestion_Augmentation.ipynb   # Data ingestion & augmentation pipeline
 └── docs/                  # Documentation
 ```
 
@@ -52,9 +54,50 @@ FinalYearProject/
 3) **Training (manual or push-triggered)**: Trigger `kaggle-training.yml` (or push notebook/data/ml changes) to run Kaggle notebook training; notebooks are synced, job is started via Kaggle API, results are downloaded, then metrics/checkpoints are published (GitHub Release or object store). CI can gate on training success before promoting artifacts.
 4) **Release consumption**: Frontend points to deployed API; API loads the latest validated model from the artifact store or release tag; Docker images from DockerHub are used by runtime (e.g., compose/k8s).
 
-## URA Chatbot specifics
-- PDF ingestion -> chunking -> embeddings -> database -> retrieval-augmented chatbot UI.
+## URA Chatbot — RAG Pipeline
+
+The notebook (`Notebooks/ura-training.ipynb`) implements a production-grade Retrieval-Augmented Generation pipeline:
+
+```
+PDF/CSV ──▶ Semantic Chunking ──▶ Qdrant Vector Store ──▶ Hybrid Retrieval ──▶ Reranking ──▶ Generation
+               (page-level,          (versioned,           (dense + BM25       (cross-encoder)   (cached T5/Gemma,
+                section tags)          non-destructive)      RRF fusion)                           structured JSON)
+```
+
+| Component | Implementation | Details |
+|-----------|---------------|---------|
+| **Chunking** | `RecursiveCharacterTextSplitter` | QA: 600 tokens, PDF: 1000 tokens; section/page metadata |
+| **Embeddings** | Configurable (`all-MiniLM-L6-v2` / `multilingual-e5-large`) | Auto-detected dimensions (384/1024) |
+| **Vector Store** | Qdrant (local persistent) | Versioned collections, non-destructive indexing |
+| **Retrieval** | Hybrid dense + BM25 sparse | Reciprocal Rank Fusion (0.6/0.4 weights) |
+| **Reranking** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranking on top candidates |
+| **Generation** | Flan-T5 / Gemma-2 / TinyLlama | Singleton cache, structured output with citations |
+| **Safety** | OWASP-aligned guardrails | Injection detection, grounding validation, content moderation |
+| **Evaluation** | Hit@K, MRR, NDCG, groundedness | Regression gates block deployment below thresholds |
+
 - Data model, ingestion flow, and evaluation rubric are documented in [docs/data-schema-and-eval.md](docs/data-schema-and-eval.md).
+
+## Data Ingestion & Augmentation Pipeline
+
+The notebook (`Notebooks/DataIngestion_Augmentation.ipynb`) implements a production-grade data pipeline:
+
+```
+CSV/PDF/HF ──▶ Provenance ──▶ Semantic Dedup ──▶ PII Redaction ──▶ QA Generation ──▶ Quality Gates ──▶ Stratified Split
+               (SHA-256,       (exact hash +      (email/phone/     (teacher LLM       (groundedness,    (grouped by
+                trust policy)   MinHash LSH)       TIN/NID regex)    with RAFT)          citation check)   source variant)
+```
+
+| Component | Implementation | Details |
+|-----------|---------------|---------|
+| **Ingestion** | `pymupdf4llm` + page-level extraction | Section detection (VAT/TIN/customs), fallback for legacy PDFs |
+| **Provenance** | `DataProvenanceVerifier` | SHA-256 checksums, trusted source policy, signed manifests |
+| **Dedup** | Phased exact-hash + MinHash LSH | Pre/post-augmentation scopes; `datasketch` for semantic near-duplicates |
+| **PII Redaction** | Regex-based (Uganda-specific) | Email, phone (+256), TIN, National ID patterns |
+| **QA Generation** | Teacher model (Llama/Gemma) | Reject-sampling with `QAQualityGate` (groundedness, artifact detection) |
+| **Validation** | Pandera schema | Word count, hash, category, data_type, source columns |
+| **Checkpoints** | JSONL/Parquet with lineage | Legacy pickle read-only fallback; pipeline-stage metadata |
+| **Splitting** | Stratified by source group | Leakage prevention; `splits/` subdirectory output |
+| **Governance** | HF Dataset Card generator | License, language tags (en/lg), bias notes, reproducibility |
 
 ## GitHub Actions Workflows
 
