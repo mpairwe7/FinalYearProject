@@ -40,10 +40,9 @@ Complete documentation for the URA Chatbot MLOps project.
    - Evaluation thresholds: adjust `MRR_THRESHOLD`, `HITATK_THRESHOLD`, `GROUNDING_THRESHOLD` in eval cells
 
 ### For Frontend Developers
-1. Configure Vercel secrets ([see setup guide](PROJECT_SETUP.md))
-2. Run `cd App/frontend && bun run dev` for local development
-3. Push to `develop` for preview deployments
-4. Merge to `main` for production
+1. Run `cd App/frontend && bun run dev` for local development
+2. Push to `develop` for CI checks
+3. Merge to `main` for production Docker build and deployment
 
 ### For API Users
 1. Review [API Reference](API_REFERENCE.md) for endpoints
@@ -116,5 +115,5 @@ Main Branch → Docker Build → HF Push → Production Deploy
 For issues related to:
 - **CI/CD Pipeline**: Check GitHub Actions logs
 - **Model Training**: Review Kaggle notebook outputs
-- **Frontend**: Check Vercel deployment logs
+- **Frontend**: Check Docker container logs or GitHub Actions build logs
 - **Backend API**: Review Docker container logs

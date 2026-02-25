@@ -94,9 +94,9 @@ docker build -t ura-chatbot .
 docker run -p 7860:7860 ura-chatbot
 ```
 
-### Vercel (Frontend)
+### Docker (Frontend)
 
-The frontend is configured for Vercel deployment via `vercel.json`.
+The frontend is containerised and deployed via Docker Hub (see `App/frontend/Dockerfile`).
 
 ## Environment Variables
 

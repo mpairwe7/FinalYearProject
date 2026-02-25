@@ -30,6 +30,11 @@ export const useChatStore = create<ChatStore>((set) => ({
   speechState: 'idle',
   setMessage: (value) => set({ message: value }),
   setSpeechState: (state) => set({ speechState: state }),
-  addTurns: (turns) => set((s) => ({ chat: [...s.chat, ...turns] })),
+  addTurns: (turns) =>
+    set((s) => {
+      const updated = [...s.chat, ...turns];
+      // Cap history at 200 turns to prevent memory exhaustion (H5 audit fix)
+      return { chat: updated.length > 200 ? updated.slice(-200) : updated };
+    }),
   reset: () => set({ message: '', chat: [initialGreeting], speechState: 'idle' }),
 }));

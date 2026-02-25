@@ -101,6 +101,36 @@ services:
     networks:
       - ura-network
 
+  # ---------------------------------------------------------------------------
+  # Frontend Service
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./App/frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: ${DOCKER_IMAGE_FRONTEND:-landwind/ura-chatbot-frontend}:${IMAGE_TAG:-latest}
+    container_name: ura-chatbot-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - ura-network
+
 # -----------------------------------------------------------------------------
 # Networks
 # -----------------------------------------------------------------------------

@@ -1,0 +1,243 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-02-25T00:00:00Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "cyclonedx-bom",
+          "version": "4.0.0",
+          "publisher": "CycloneDX"
+        }
+      ]
+    },
+    "authors": [
+      {
+        "name": "Mpairwe Landwind",
+        "email": "mpairwe.landwind@students.mak.ac.ug"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "ura-chatbot",
+      "name": "ura-chatbot",
+      "version": "1.0.0",
+      "description": "MLOps Pipeline for URA Chat Bot – AI-powered customer-service chatbot for Uganda Revenue Authority",
+      "licenses": [
+        { "license": { "id": "Apache-2.0" } }
+      ],
+      "purl": "pkg:github/mpairweLandwind/ura-chatbot@1.0.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/fastapi@0.111.0",
+      "name": "fastapi",
+      "version": "0.111.0",
+      "purl": "pkg:pypi/fastapi@0.111.0",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/uvicorn@0.30.1",
+      "name": "uvicorn",
+      "version": "0.30.1",
+      "purl": "pkg:pypi/uvicorn@0.30.1",
+      "licenses": [{"license": {"id": "BSD-3-Clause"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/pydantic@2.7.4",
+      "name": "pydantic",
+      "version": "2.7.4",
+      "purl": "pkg:pypi/pydantic@2.7.4",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/transformers@4.44.0",
+      "name": "transformers",
+      "version": "4.44.0",
+      "purl": "pkg:pypi/transformers@4.44.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/torch@2.3.1",
+      "name": "torch",
+      "version": "2.3.1",
+      "purl": "pkg:pypi/torch@2.3.1",
+      "licenses": [{"license": {"id": "BSD-3-Clause"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/datasets@2.20.0",
+      "name": "datasets",
+      "version": "2.20.0",
+      "purl": "pkg:pypi/datasets@2.20.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/peft@0.11.1",
+      "name": "peft",
+      "version": "0.11.1",
+      "purl": "pkg:pypi/peft@0.11.1",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/bitsandbytes@0.43.1",
+      "name": "bitsandbytes",
+      "version": "0.43.1",
+      "purl": "pkg:pypi/bitsandbytes@0.43.1",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/accelerate@0.31.0",
+      "name": "accelerate",
+      "version": "0.31.0",
+      "purl": "pkg:pypi/accelerate@0.31.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/sentencepiece@0.2.0",
+      "name": "sentencepiece",
+      "version": "0.2.0",
+      "purl": "pkg:pypi/sentencepiece@0.2.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/safetensors@0.4.3",
+      "name": "safetensors",
+      "version": "0.4.3",
+      "purl": "pkg:pypi/safetensors@0.4.3",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "framework",
+      "bom-ref": "pkg:npm/next@14.2.4",
+      "name": "next",
+      "version": "14.2.4",
+      "purl": "pkg:npm/next@14.2.4",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/react@18.3.1",
+      "name": "react",
+      "version": "18.3.1",
+      "purl": "pkg:npm/react@18.3.1",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/react-dom@18.3.1",
+      "name": "react-dom",
+      "version": "18.3.1",
+      "purl": "pkg:npm/react-dom@18.3.1",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/zustand@4.5.2",
+      "name": "zustand",
+      "version": "4.5.2",
+      "purl": "pkg:npm/zustand@4.5.2",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/ruff@0.4.8",
+      "name": "ruff",
+      "version": "0.4.8",
+      "purl": "pkg:pypi/ruff@0.4.8",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/black@24.4.2",
+      "name": "black",
+      "version": "24.4.2",
+      "purl": "pkg:pypi/black@24.4.2",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/mypy@1.10.0",
+      "name": "mypy",
+      "version": "1.10.0",
+      "purl": "pkg:pypi/mypy@1.10.0",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/pytest@8.2.2",
+      "name": "pytest",
+      "version": "8.2.2",
+      "purl": "pkg:pypi/pytest@8.2.2",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "gemma-2-9b",
+      "name": "gemma-2-9b",
+      "version": "2.0",
+      "purl": "pkg:huggingface/google/gemma-2-9b@2.0",
+      "description": "Google DeepMind Gemma 2 9B parameter base model, fine-tuned with LoRA for URA tax domain",
+      "licenses": [{"license": {"name": "Gemma Terms of Use"}}],
+      "supplier": {
+        "name": "Google DeepMind"
+      }
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "ura-chatbot",
+      "dependsOn": [
+        "pkg:pypi/fastapi@0.111.0",
+        "pkg:pypi/uvicorn@0.30.1",
+        "pkg:pypi/pydantic@2.7.4",
+        "pkg:pypi/transformers@4.44.0",
+        "pkg:pypi/torch@2.3.1",
+        "pkg:pypi/datasets@2.20.0",
+        "pkg:pypi/peft@0.11.1",
+        "pkg:pypi/accelerate@0.31.0",
+        "pkg:pypi/sentencepiece@0.2.0",
+        "pkg:pypi/safetensors@0.4.3",
+        "pkg:npm/next@14.2.4",
+        "pkg:npm/react@18.3.1",
+        "pkg:npm/react-dom@18.3.1",
+        "pkg:npm/zustand@4.5.2",
+        "gemma-2-9b"
+      ]
+    }
+  ]
+}

@@ -14,9 +14,9 @@ Currently, the API is open. Future versions will implement:
 
 ## Endpoints
 
-### Health Check
+### Liveness Probe
 
-Check if the API is running and healthy.
+Check if the API process is running. Does **not** depend on model availability.
 
 ```http
 GET /health
@@ -25,9 +25,28 @@ GET /health
 **Response**
 ```json
 {
-  "status": "healthy",
+  "status": "alive",
+  "version": "1.0.0"
+}
+```
+
+---
+
+### Readiness Probe
+
+Confirms the model is loaded and the service can handle requests. Returns **503** if the model is unavailable.
+
+```http
+GET /ready
+```
+
+**Response**
+```json
+{
+  "status": "ready",
   "version": "1.0.0",
-  "model_loaded": true
+  "model_loaded": true,
+  "tags_loaded": 41
 }
 ```
 
@@ -87,7 +106,7 @@ curl -X POST http://localhost:8000/classify \
 Send a message and receive an AI-generated response.
 
 ```http
-POST /chat
+POST /v1/chat
 ```
 
 **Request Body**
@@ -95,35 +114,29 @@ POST /chat
 {
   "message": "What is the VAT rate in Uganda?",
   "conversation_id": "conv_123",
-  "language": "en"
+  "top_k": 4
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `message` | string | Yes | User's question |
+| `message` | string | Yes | User's question (max 2000 chars) |
 | `conversation_id` | string | No | For conversation continuity |
-| `language` | string | No | Response language (en, lg) |
+| `top_k` | integer | No | Number of passages to retrieve (1–10, default 4) |
 
 **Response**
 ```json
 {
-  "response": "The standard VAT rate in Uganda is 18%. Some goods and services are zero-rated or exempt.",
-  "tag": "vat_rates",
-  "confidence": 0.89,
-  "sources": [
-    {
-      "document": "ura_vat_faqs.csv",
-      "relevance": 0.95
-    }
-  ],
+  "reply": "The standard VAT rate in Uganda is 18%. Some goods and services are zero-rated or exempt.",
+  "sources": ["ura_vat_faqs.csv"],
+  "model": "ura-gemma-2-9b",
   "conversation_id": "conv_123"
 }
 ```
 
 **cURL Example**
 ```bash
-curl -X POST http://localhost:8000/chat \
+curl -X POST http://localhost:8000/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What is VAT rate in Uganda?"}'
 ```
@@ -258,18 +271,7 @@ All errors follow this format:
 | `VALIDATION_ERROR` | 400 | Invalid request parameters |
 | `NOT_FOUND` | 404 | Resource not found |
 | `MODEL_ERROR` | 500 | Model inference failed |
-| `RATE_LIMIT` | 429 | Too many requests |
 | `INTERNAL_ERROR` | 500 | Server error |
-
----
-
-## Rate Limiting
-
-| Endpoint | Limit |
-|----------|-------|
-| `/classify` | 100 req/min |
-| `/chat` | 60 req/min |
-| `/classify/batch` | 10 req/min |
 
 ---
 
@@ -292,19 +294,18 @@ class ClassificationResponse(BaseModel):
 ### ChatRequest
 ```python
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=2000)
     conversation_id: Optional[str] = None
-    language: str = "en"
+    top_k: int = Field(4, ge=1, le=10)
 ```
 
 ### ChatResponse
 ```python
 class ChatResponse(BaseModel):
-    response: str
-    tag: str
-    confidence: float
-    sources: List[Source]
-    conversation_id: str
+    reply: str
+    sources: List[str] = Field(default_factory=list)
+    model: str = "ura-gemma-2-9b"
+    conversation_id: Optional[str] = None
 ```
 
 ---
@@ -326,7 +327,7 @@ def classify(text: str) -> dict:
 
 def chat(message: str) -> dict:
     response = requests.post(
-        f"{API_URL}/chat",
+        f"{API_URL}/v1/chat",
         json={"message": message}
     )
     return response.json()
@@ -350,7 +351,7 @@ async function classify(text) {
 }
 
 async function chat(message) {
-  const response = await fetch(`${API_URL}/chat`, {
+  const response = await fetch(`${API_URL}/v1/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message })
@@ -385,9 +386,11 @@ docker run -p 8000:8000 landwind/ura-chatbot-api:latest
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | Server port | 8000 |
-| `WORKERS` | Uvicorn workers | 4 |
+| `WORKERS` | Uvicorn workers | 2 |
 | `LOG_LEVEL` | Logging level | info |
 | `HF_MODEL_REPO` | Model repository | mpairweLandwind/ura-chatbot |
+| `CORS_ORIGINS` | Comma-separated allowed origins | http://localhost:3000 |
+| `DATA_DIR` | Path to FAQ CSV directory | Data/dataset |
 
 ---
 

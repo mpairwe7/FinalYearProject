@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useChatStore, ChatTurn, SpeechState } from '../store/useChatStore';
 
 // Minimal speech recognition types for browsers that expose them; keeps TS happy in Next.
@@ -38,11 +38,13 @@ interface SpeechRecognitionResultList {
   length: number;
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
 const starterPrompts = [
   'What services does URA provide?',
-  'How do I submit a document online?',
-  'Summarize the latest policy update from the PDF set.',
-  'What are the contact options for support?'
+  'How do I register for a TIN?',
+  'What is the current VAT rate in Uganda?',
+  'How do I file my annual tax returns?'
 ];
 
 const MicIcon = () => (
@@ -98,9 +100,24 @@ const BotIcon = () => (
   </svg>
 );
 
+const LoadingDots = () => (
+  <span className="loading-dots" aria-label="Loading response">
+    <span className="dot" />
+    <span className="dot" />
+    <span className="dot" />
+  </span>
+);
+
 export default function Page() {
   const { message, setMessage, chat, speechState, setSpeechState, addTurns } = useChatStore();
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to latest message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chat]);
 
   useEffect(() => {
     const SpeechRecognitionImpl =
@@ -129,17 +146,53 @@ export default function Page() {
     return () => recog.abort();
   }, []);
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     const text = message.trim();
-    if (!text) return;
+    if (!text || isLoading) return;
+
     const userTurn: ChatTurn = { role: 'user', content: text, timestamp: Date.now() };
-    const pendingReply: ChatTurn = {
-      role: 'assistant',
-      content: 'Thinking... (stubbed response)',
-      timestamp: Date.now(),
-    };
-    addTurns([userTurn, pendingReply]);
+    addTurns([userTurn]);
     setMessage('');
+    setIsLoading(true);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    try {
+      const response = await fetch(`${API_URL}/v1/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, top_k: 4 }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      const sources = data.sources?.length
+        ? `\n\nSources: ${data.sources.join(', ')}`
+        : '';
+
+      const assistantTurn: ChatTurn = {
+        role: 'assistant',
+        content: data.reply + sources,
+        timestamp: Date.now(),
+      };
+      addTurns([assistantTurn]);
+    } catch (err) {
+      const errorTurn: ChatTurn = {
+        role: 'assistant',
+        content: 'Sorry, I could not reach the URA knowledge base right now. Please try again shortly.',
+        timestamp: Date.now(),
+      };
+      addTurns([errorTurn]);
+    } finally {
+      clearTimeout(timeout);
+      setIsLoading(false);
+    }
   };
 
   const handleStartListening = () => {
@@ -188,7 +241,7 @@ export default function Page() {
           <div className="section-title">
             <div>
               <h2 style={{ margin: 0 }}>Conversation</h2>
-              <div className="small">Context-aware responses (stubbed)</div>
+              <div className="small">Context-aware responses powered by URA knowledge base</div>
             </div>
             <div className="status">
               <MicIcon /> {speechStatusLabel}
@@ -205,10 +258,22 @@ export default function Page() {
                   <div className="small" style={{ marginBottom: '0.25rem', textTransform: 'capitalize' }}>
                     {turn.role}
                   </div>
-                  <div>{turn.content}</div>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{turn.content}</div>
                 </div>
               </article>
             ))}
+            {isLoading && (
+              <article className="message-row">
+                <div className="avatar assistant" aria-hidden="true">
+                  <BotIcon />
+                </div>
+                <div className="bubble assistant">
+                  <div className="small" style={{ marginBottom: '0.25rem' }}>Assistant</div>
+                  <LoadingDots />
+                </div>
+              </article>
+            )}
+            <div ref={messagesEndRef} />
           </div>
 
           <div className="input-row">
@@ -223,16 +288,22 @@ export default function Page() {
                   sendMessage();
                 }
               }}
+              disabled={isLoading}
             />
             <button
               className="button secondary"
               onClick={handleStartListening}
-              disabled={speechState === 'unavailable'}
+              disabled={speechState === 'unavailable' || isLoading}
               aria-label="Voice input"
             >
               <MicIcon /> {speechState === 'listening' ? 'Stop' : 'Speak'}
             </button>
-            <button className="button" onClick={sendMessage} aria-label="Send message">
+            <button
+              className="button"
+              onClick={sendMessage}
+              disabled={isLoading || !message.trim()}
+              aria-label="Send message"
+            >
               <SendIcon /> Send
             </button>
           </div>

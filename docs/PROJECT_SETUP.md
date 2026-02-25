@@ -85,10 +85,8 @@ KAGGLE_API_TOKEN=your_api_key
 DOCKERHUB_USERNAME=your_username
 DOCKERHUB_TOKEN=your_token
 
-# Vercel (for frontend deployment)
-VERCEL_TOKEN=your_token
-VERCEL_ORG_ID=your_org_id
-VERCEL_PROJECT_ID=your_project_id
+# Frontend Docker Image
+DOCKER_IMAGE_FRONTEND=landwind/ura-chatbot-frontend
 ```
 
 ## Running the Application

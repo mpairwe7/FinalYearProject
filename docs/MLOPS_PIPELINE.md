@@ -18,7 +18,7 @@ This document describes the automated MLOps CI/CD pipeline for the URA Chatbot p
 │                                                        │                    │
 │                                                        ▼                    │
 │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐              │
-│  │  Vercel  │◀───│  Docker  │◀───│  HF Hub  │◀───│  Quality │              │
+│  │  Docker  │◀───│  Docker  │◀───│  HF Hub  │◀───│  Quality │              │
 │  │  Deploy  │    │  Build   │    │  Push    │    │  Gates   │              │
 │  └──────────┘    └──────────┘    └──────────┘    └──────────┘              │
 │                                                                              │
@@ -60,8 +60,8 @@ This document describes the automated MLOps CI/CD pipeline for the URA Chatbot p
 **Stages:**
 - Lint & Type Check (ESLint, TypeScript)
 - Build Frontend
-- Deploy Preview (PR) → Vercel Preview URL
-- Deploy Production (main) → Vercel Production
+- Build Docker Image → Push to Docker Hub
+- Deploy Production (main) → Docker deployment
 
 ### 3. Kaggle Training Pipeline (`.github/workflows/kaggle-training.yml`)
 
@@ -95,7 +95,7 @@ FinalYearProject/
 ├── .github/
 │   └── workflows/
 │       ├── ci-ml-pipeline.yml      # Main ML CI/CD
-│       ├── frontend-deploy.yml     # Vercel deployment
+│       ├── frontend-deploy.yml     # Frontend Docker deployment
 │       └── kaggle-training.yml     # Kaggle training
 ├── App/                            # Web Application
 │   ├── classifier.py               # Gradio classifier app
@@ -145,7 +145,7 @@ FinalYearProject/
 │   ├── src/
 │   │   └── app/
 │   ├── package.json
-│   └── vercel.json                 # Vercel config
+│   └── Dockerfile                  # Frontend container image
 ├── tests/
 │   ├── __init__.py
 │   ├── test_ml_pipeline.py
@@ -172,9 +172,7 @@ FinalYearProject/
    HF_TOKEN             # Hugging Face write token
    DOCKERHUB_USERNAME   # Docker Hub username
    DOCKERHUB_TOKEN      # Docker Hub access token
-   VERCEL_TOKEN         # Vercel deployment token
-   VERCEL_ORG_ID        # Vercel organization ID
-   VERCEL_PROJECT_ID    # Vercel project ID
+   DOCKER_IMAGE_FRONTEND  # Frontend Docker image name
    ```
 
 2. **GitHub Repository Variables**
@@ -206,13 +204,6 @@ FinalYearProject/
 1. Go to [hub.docker.com/settings/security](https://hub.docker.com/settings/security)
 2. Create new access token
 3. Copy the token
-
-#### Vercel Credentials
-1. Go to [vercel.com/account/tokens](https://vercel.com/account/tokens)
-2. Create new token
-3. For `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`:
-   - Run `vercel link` in frontend directory
-   - Check `.vercel/project.json` for IDs
 
 ### Local Development
 
@@ -349,9 +340,9 @@ gh run download <run-id> -n evaluation-results
 docker ps
 curl http://localhost:8000/health
 
-# Vercel
-vercel ls
-vercel logs
+# Frontend container
+docker ps --filter "name=frontend"
+docker logs ura-chatbot-frontend
 ```
 
 ## Troubleshooting
@@ -373,10 +364,10 @@ vercel logs
    - Verify requirements.txt is valid
    - Check disk space
 
-4. **Vercel deployment fails:**
-   - Verify environment variables are set
-   - Check build logs in Vercel dashboard
-   - Ensure `vercel.json` is valid
+4. **Frontend Docker build fails:**
+   - Check `App/frontend/Dockerfile` syntax
+   - Verify `NEXT_PUBLIC_API_URL` variable is set
+   - Check GitHub Actions build logs
 
 ### Getting Help
 
@@ -390,5 +381,4 @@ vercel logs
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Hugging Face Hub Documentation](https://huggingface.co/docs/hub)
 - [Kaggle API Documentation](https://www.kaggle.com/docs/api)
-- [Vercel Documentation](https://vercel.com/docs)
 - [Docker Documentation](https://docs.docker.com/)

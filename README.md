@@ -1,6 +1,6 @@
 # FinalYearProject
 
-This repository describes a CI/CD pipeline for developing and training a customer-service conversation AI. The pipeline uses GitHub Actions for automation, Kaggle for model training, and Vercel for hosting the frontend UI. Backend uses Python/FastAPI with `uv` for dependency management; frontend (Next.js) uses Bun.
+This repository describes a CI/CD pipeline for developing and training a customer-service conversation AI. The pipeline uses GitHub Actions for automation, Kaggle for model training, and Docker for containerised deployment. Backend uses Python/FastAPI with `uv` for dependency management; frontend (Next.js) uses Bun.
 
 ## 📚 Documentation
 
@@ -14,8 +14,9 @@ This repository describes a CI/CD pipeline for developing and training a custome
 - **Code**: Source, data configs, and frontend live in this repo on GitHub.
 - **CI (GitHub Actions)**: Lint/test backend and UI, validate dataset configs, and build artifacts.
 - **Model Training (Kaggle)**: GitHub Actions launches Kaggle notebook jobs via API for training; artifacts (checkpoints/metrics) are pushed back to GitHub Releases or an object store.
-- **CD (Vercel)**: Successful main-branch builds trigger Vercel deployments for the frontend.
-- **API Container**: FastAPI backend packaged via Docker; images pushed to DockerHub for deployment.
+- **CD (Docker)**: Successful main-branch builds trigger Docker image builds for both frontend and backend, pushed to Docker Hub.
+- **API Container**: FastAPI backend packaged via Docker; images pushed to Docker Hub for deployment.
+- **Frontend Container**: Next.js frontend packaged via Docker; images pushed to Docker Hub for deployment.
 
 ## Project Structure
 
@@ -50,8 +51,8 @@ FinalYearProject/
 
 1) **Commit/PR**: Push changes to feature branches; CI runs lint/tests on backend (uv/pytest/mypy/ruff) and frontend (bun lint/test/build).
 2) **Merge to main**: CI re-runs; when green, two deploy jobs can follow:
-	- **Vercel deploy**: `vercel deploy --prod` using org/project IDs and token; publishes the Next.js UI.
-	- **API image push**: Build FastAPI image and push to DockerHub with tags `latest` and commit SHA; downstream infra pulls from DockerHub.
+	- **Frontend image push**: Build Next.js Docker image and push to Docker Hub with tags `latest` and commit SHA.
+	- **API image push**: Build FastAPI Docker image and push to Docker Hub with tags `latest` and commit SHA; downstream infra pulls from Docker Hub.
 3) **Training (manual or push-triggered)**: Trigger `kaggle-training.yml` (or push notebook/data/ml changes) to run Kaggle notebook training; notebooks are synced, job is started via Kaggle API, results are downloaded, then metrics/checkpoints are published (GitHub Release or object store). CI can gate on training success before promoting artifacts.
 4) **Release consumption**: Frontend points to deployed API; API loads the latest validated model from the artifact store or release tag; Docker images from DockerHub are used by runtime (e.g., compose/k8s).
 
@@ -151,7 +152,8 @@ Three consolidated workflows under `.github/workflows/`:
 | Lint | ESLint + TypeScript checking |
 | Build | Next.js production build |
 | Deploy Preview | PR preview deployments |
-| Deploy Production | Production Vercel deployment |
+| Build Docker | Build & push frontend Docker image |
+| Deploy Production | Production Docker deployment |
 
 ### 3. `kaggle-training.yml` - Remote Kaggle Training
 **Triggers**: Push (notebook/data changes), manual dispatch
@@ -177,8 +179,7 @@ Manual dispatch highlights:
 |--------|---------|
 | `HF_TOKEN` | Hugging Face API token |
 | `KAGGLE_USERNAME`, `KAGGLE_API_TOKEN` | Kaggle API access |
-| `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | Vercel deployment |
-| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | DockerHub push |
+| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Docker Hub push (backend + frontend) |
 | `MLFLOW_TRACKING_URI` | MLflow experiment tracking (optional) |
 | `DEPLOY_KEY`, `API_HOST` | Production server deployment |
 
@@ -253,5 +254,4 @@ gh run list --workflow=ci-ml-pipeline.yml
 ## Next Steps
 - Set repository secrets in GitHub settings before running workflows
 - Configure Hugging Face repository at `mpairweLandwind/ura-chatbot`
-- Set up Vercel project and link to repository
 - Review [docs/mlops-workflows.md](docs/mlops-workflows.md) for detailed configuration

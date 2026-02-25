@@ -27,10 +27,10 @@ def check_quality_gates(metrics: dict, gates: dict) -> dict:
     }
     
     checks = [
-        ('accuracy', 'test_accuracy', gates.get('min_accuracy', 0.7)),
-        ('f1_score', 'test_f1_macro', gates.get('min_f1_score', 0.65)),
-        ('precision', 'test_precision', gates.get('min_precision', 0.65)),
-        ('recall', 'test_recall', gates.get('min_recall', 0.60)),
+        ('accuracy', 'test_accuracy', gates.get('min_accuracy', 0.85)),
+        ('f1_score', 'test_f1_macro', gates.get('min_f1_score', 0.75)),
+        ('precision', 'test_precision', gates.get('min_precision', 0.75)),
+        ('recall', 'test_recall', gates.get('min_recall', 0.70)),
     ]
     
     for name, metric_key, threshold in checks:

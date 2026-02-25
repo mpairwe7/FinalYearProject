@@ -71,9 +71,6 @@ node_modules/
 frontend/.next/
 frontend/out/
 
-# Vercel
-.vercel
-
 # Docker
 *.log
 

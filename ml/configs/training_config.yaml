@@ -85,10 +85,10 @@ training:
 # Quality Gates
 # ===========================================
 quality_gates:
-  min_accuracy: 0.75
-  min_f1_score: 0.70
-  min_precision: 0.70
-  min_recall: 0.65
+  min_accuracy: 0.85
+  min_f1_score: 0.75
+  min_precision: 0.75
+  min_recall: 0.70
   max_latency_ms: 100
   
 # ===========================================

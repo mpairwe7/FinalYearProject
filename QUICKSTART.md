@@ -12,7 +12,7 @@ cd FinalYearProject
 pip install -r requirements.txt
 
 # Frontend
-cd frontend && bun install && cd ..
+cd App/frontend && bun install && cd ../..
 ```
 
 ### 2. Set Up Environment
@@ -26,10 +26,10 @@ cp .env.example .env
 
 ```bash
 # Backend API
-uvicorn backend.app.main:app --reload
+cd App/backend && uvicorn app.main:app --reload
 
 # Frontend (new terminal)
-cd frontend && bun run dev
+cd App/frontend && bun run dev
 
 # Classifier App (Gradio)
 python App/classifier.py
@@ -45,8 +45,8 @@ FinalYearProject/
 ├── Results/       # Metrics & plots
 ├── Notebooks/     # Jupyter notebooks (classification + RAG pipeline)
 ├── ml/            # ML pipelines
-├── backend/       # FastAPI backend
-└── frontend/      # Next.js frontend
+├── App/backend/   # FastAPI backend
+└── App/frontend/  # Next.js frontend
 ```
 
 ## 📓 Notebook Sections (ura-training.ipynb)
@@ -106,7 +106,6 @@ Add these secrets in GitHub → Settings → Secrets:
 | `KAGGLE_API_TOKEN` | [kaggle.com/account](https://www.kaggle.com/account) |
 | `DOCKERHUB_USERNAME` | Your Docker Hub username |
 | `DOCKERHUB_TOKEN` | [hub.docker.com/settings/security](https://hub.docker.com/settings/security) |
-| `VERCEL_TOKEN` | [vercel.com/account/tokens](https://vercel.com/account/tokens) |
 
 ## 📊 Run ML Pipeline
 
@@ -144,7 +143,7 @@ docker compose up api
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
 | ML Pipeline | Push to main | Train → Evaluate → Deploy |
-| Frontend | Push to main | Build → Deploy to Vercel |
+| Frontend | Push to main | Build → Docker image → Docker Hub |
 | Kaggle Training | Push/Manual | Remote GPU/TPU data + training pipeline |
 
 ---

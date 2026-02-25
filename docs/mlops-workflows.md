@@ -17,7 +17,6 @@ This project implements a comprehensive MLOps CI/CD pipeline following DataCamp 
 │       ▼              ▼              ▼              ▼              ▼        │
 │   GitHub         Ruff/Black     Kaggle/       Quality       Hugging Face  │
 │   Actions        MyPy/Pytest    Local GPU/TPU  Gates         DockerHub    │
-│                                                              Vercel       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -123,7 +122,7 @@ Features:
 
 ### 2. Frontend CI/CD (`frontend-deploy.yml`)
 
-**Handles Next.js frontend** deployment to Vercel.
+**Handles Next.js frontend** lint, build, and Docker deployment.
 
 #### Triggers
 - **Push**: `main`, `develop` branches (frontend changes)
@@ -136,13 +135,12 @@ Features:
 |-------|----------|-------------|-------------|
 | 1 | `lint-frontend` | ESLint + TypeScript checks | - |
 | 2 | `build-frontend` | Next.js production build | - |
-| 3 | `deploy-preview` | Deploy PR preview | preview |
+| 3 | `build-docker` | Build & push Docker image to Docker Hub | - |
 | 4 | `deploy-production` | Deploy to production | production |
 
 #### Features
 - **Bun**: Fast JavaScript runtime and package manager
-- **Preview Deployments**: Automatic PR preview URLs
-- **PR Comments**: Bot comments with preview link
+- **Docker**: Frontend containerised and pushed to Docker Hub
 - **Production Gates**: Only `main` branch deploys to production
 
 ---
@@ -218,9 +216,8 @@ Configure these in GitHub repository settings:
 ### Frontend
 | Secret | Description | Required For |
 |--------|-------------|--------------|
-| `VERCEL_TOKEN` | Vercel API token | Deployments |
-| `VERCEL_ORG_ID` | Vercel organization ID | Deployments |
-| `VERCEL_PROJECT_ID` | Vercel project ID | Deployments |
+| `DOCKERHUB_USERNAME` | Docker Hub username | Frontend image push |
+| `DOCKERHUB_TOKEN` | Docker Hub access token | Frontend image push |
 
 ---
 
@@ -395,7 +392,7 @@ Each job posts summaries to the GitHub Actions summary tab:
 | HF push fails | Check `HF_TOKEN` secret is valid |
 | Kaggle timeout | Increase `--timeout` in monitor script |
 | Docker build fails | Check Dockerfile syntax, base image availability |
-| Vercel deploy fails | Verify `VERCEL_*` secrets are configured |
+| Frontend Docker build fails | Check `App/frontend/Dockerfile` and build logs |
 | Tests fail | Run `pytest tests/ -v` locally first |
 
 ### Debugging Commands
@@ -418,9 +415,9 @@ gh run rerun <run-id> --failed
 2. **Quality Gates**: Automated model quality checks before deployment
 3. **Caching**: GitHub Actions cache for pip, npm, Docker layers
 4. **Security**: Trivy scanning, secret management
-5. **Preview Deployments**: PR previews for frontend changes
+5. **Docker Deployment**: Frontend and backend both containerised via Docker Hub
 6. **On-Change Retraining**: Push/manual-triggered Kaggle data+training runs
-7. **Multi-environment**: Separate preview/production deployments
+7. **Multi-environment**: Separate development/production configurations
 8. **Artifact Management**: Preserved build outputs for debugging
 
 ---
@@ -430,5 +427,5 @@ gh run rerun <run-id> --failed
 - [DataCamp: CI/CD for Machine Learning](https://www.datacamp.com/tutorial/ci-cd-for-machine-learning)
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Hugging Face Hub Documentation](https://huggingface.co/docs/hub)
-- [Vercel Documentation](https://vercel.com/docs)
+- [Docker Documentation](https://docs.docker.com/)
 - [Kaggle API Documentation](https://github.com/Kaggle/kaggle-api)
