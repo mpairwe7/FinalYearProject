@@ -87,6 +87,21 @@ DOCKERHUB_TOKEN=your_token
 
 # Frontend Docker Image
 DOCKER_IMAGE_FRONTEND=landwind/ura-chatbot-frontend
+
+# Qdrant Vector Store (hybrid retrieval)
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=              # Optional, for Qdrant Cloud
+QDRANT_COLLECTION=ura_knowledge_base_v1
+
+# Guardrails & Privacy
+STORE_RAW_PROMPTS=false      # Set true only for debugging
+ABSTENTION_THRESHOLD=0.3     # Min retrieval score before refusing
+CONVERSATION_TTL_DAYS=7      # Auto-purge conversation data
+FEEDBACK_TTL_DAYS=90         # Auto-purge feedback data
+
+# Observability (opt-in)
+OTEL_ENABLED=false
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
 
 ## Running the Application
@@ -143,11 +158,17 @@ FinalYearProject/
 │   ├── classifier.py       # Simple classifier demo
 │   ├── backend/            # FastAPI REST API
 │   │   ├── app/
-│   │   │   ├── main.py     # API routes
-│   │   │   ├── models.py   # Pydantic schemas
-│   │   │   └── service.py  # ML service
+│   │   │   ├── main.py     # API routes + security headers
+│   │   │   ├── models.py   # Pydantic v2 schemas (citations, escalation)
+│   │   │   ├── service.py  # RAG pipeline orchestrator
+│   │   │   ├── retriever.py # Hybrid retrieval (dense+sparse+RRF+rerank)
+│   │   │   ├── indexer.py  # PDF/CSV ingestion → Qdrant
+│   │   │   ├── guardrails.py # OWASP LLM Top 10 (input/output guards)
+│   │   │   ├── tracing.py  # OpenTelemetry GenAI tracing
+│   │   │   ├── database.py # SQLite + WAL + data retention TTLs
+│   │   │   └── analytics.py # Usage analytics
 │   │   └── requirements.txt
-│   └── frontend/           # Next.js UI
+│   └── frontend/           # Next.js UI (citations, faithfulness, escalation)
 │       ├── src/app/
 │       ├── package.json
 │       └── next.config.mjs
@@ -158,12 +179,18 @@ FinalYearProject/
 │   ├── TTT/                # Translation corpus
 │   └── lgaudio/            # Audio files
 │
+├── governance/              # Compliance & Risk
+│   ├── compliance_check.py # CI gate (NIST/ISO/OWASP/EU AI Act)
+│   └── ai_risk_manifest.yaml
+│
 ├── ml/                      # ML Pipeline Code
 │   ├── configs/
-│   │   └── training_config.yaml
+│   │   └── training_config.yaml  # Includes rag_quality_gates
 │   ├── pipelines/
 │   │   ├── train.py
 │   │   ├── evaluate.py
+│   │   ├── evaluate_rag.py       # RAG evaluation (8 metrics)
+│   │   ├── export_feedback.py    # Feedback → JSONL for tuning
 │   │   ├── validate_data.py
 │   │   ├── quality_gates.py
 │   │   └── push_to_hub.py
@@ -258,6 +285,35 @@ python ml/pipelines/validate_data.py
 ### Check Quality Gates
 ```bash
 python ml/pipelines/quality_gates.py
+```
+
+### Evaluate RAG Pipeline
+```bash
+# English eval set
+python -m ml.pipelines.evaluate_rag --eval-set Data/eval/rag_eval.jsonl
+
+# Luganda eval set
+python -m ml.pipelines.evaluate_rag --eval-set Data/eval/rag_eval_lg.jsonl
+```
+
+### Run Governance Check
+```bash
+python governance/compliance_check.py
+```
+
+### Index Documents into Qdrant
+```bash
+# Incremental upsert
+python -m App.backend.app.indexer
+
+# Recreate collection from scratch
+python -m App.backend.app.indexer --recreate
+```
+
+### Export Production Feedback
+```bash
+python -m ml.pipelines.export_feedback
+# Outputs: retriever_negatives.jsonl, regression_candidates.jsonl
 ```
 
 ### Push to Hugging Face

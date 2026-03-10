@@ -8,9 +8,13 @@ The URA Chatbot provides a FastAPI-based REST API for tax-related question class
 
 ## Authentication
 
-Currently, the API is open. Future versions will implement:
-- API Key authentication
-- OAuth 2.0 / JWT tokens
+The API is open for chat and classification endpoints. The indexing endpoint requires bearer token authentication when `INDEX_API_KEY` is configured:
+
+```http
+Authorization: Bearer <INDEX_API_KEY>
+```
+
+Session tracking uses the `X-Session-ID` header (optional, client-provided).
 
 ## Endpoints
 
@@ -187,11 +191,16 @@ curl -X POST http://localhost:8000/v1/chat \
 
 ### Trigger Re-Indexing
 
-Rebuild the Qdrant vector index from all PDFs and FAQ CSVs.
+Rebuild the Qdrant vector index from all PDFs and FAQ CSVs. Requires `Authorization: Bearer <INDEX_API_KEY>` when configured (OWASP LLM10 — unbounded consumption protection).
 
 ```http
 POST /v1/index
 ```
+
+**Headers**
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Authorization` | When `INDEX_API_KEY` is set | `Bearer <INDEX_API_KEY>` |
 
 **Response**
 ```json
@@ -203,6 +212,179 @@ POST /v1/index
   "csv_documents": 450,
   "retrieval_mode": "hybrid"
 }
+```
+
+**cURL Example**
+```bash
+curl -X POST http://localhost:8000/v1/index \
+  -H "Authorization: Bearer my-secret-key"
+```
+
+---
+
+### Submit Feedback
+
+Submit thumbs-up/down feedback on a chatbot response.
+
+```http
+POST /v1/feedback
+```
+
+**Request Body**
+```json
+{
+  "message_id": "msg_abc123",
+  "rating": "up",
+  "comment": "Very helpful answer",
+  "session_id": "session_xyz",
+  "user_query": "What is the VAT rate?",
+  "bot_reply": "The standard VAT rate in Uganda is 18%."
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `message_id` | string | Yes | ID of the bot message being rated |
+| `rating` | string | Yes | `up` or `down` |
+| `comment` | string | No | Optional text feedback (max 1000 chars) |
+| `session_id` | string | No | Client session identifier |
+| `user_query` | string | No | Original question (PII-redacted before storage) |
+| `bot_reply` | string | No | Bot response that was rated (PII-redacted before storage) |
+
+**Response**
+```json
+{
+  "id": "fb_12345",
+  "message_id": "msg_abc123",
+  "rating": "up",
+  "created_at": 1710072000.0
+}
+```
+
+---
+
+### Update Feedback Comment
+
+Add a follow-up comment to existing feedback (avoids duplicate entries).
+
+```http
+PATCH /v1/feedback/{message_id}/comment
+```
+
+**Request Body**
+```json
+{
+  "comment": "Actually, I had a follow-up question about exemptions."
+}
+```
+
+**Response**
+```json
+{
+  "status": "ok",
+  "message_id": "msg_abc123"
+}
+```
+
+---
+
+### Feedback Summary
+
+Aggregated feedback statistics for the specified period.
+
+```http
+GET /v1/feedback/summary?days=30
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `days` | integer | No | Period in days (1–365, default 30) |
+
+**Response**
+```json
+{
+  "period_days": 30,
+  "total": 150,
+  "thumbs_up": 120,
+  "thumbs_down": 30,
+  "satisfaction_pct": 80.0,
+  "recent": []
+}
+```
+
+---
+
+### Track Analytics Event
+
+Track a client-side analytics event (e.g., page views, button clicks).
+
+```http
+POST /v1/analytics/event
+```
+
+**Request Body**
+```json
+{
+  "event_type": "page_view",
+  "event_data": {"page": "/chat"},
+  "session_id": "session_xyz"
+}
+```
+
+**Response**
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+### Analytics Dashboard
+
+Comprehensive analytics dashboard data including uptime, request counters, session stats, conversation stats, and feedback summary.
+
+```http
+GET /v1/analytics/dashboard?days=30
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `days` | integer | No | Period in days (1–365, default 30) |
+
+**Response**
+```json
+{
+  "uptime_seconds": 86400.5,
+  "requests": {
+    "counters": {},
+    "latency": {}
+  },
+  "chat": {
+    "event_counts": {}
+  },
+  "sessions": {},
+  "conversations": {},
+  "feedback": {}
+}
+```
+
+---
+
+### Prometheus Metrics
+
+Prometheus-compatible metrics endpoint for scraping by monitoring systems.
+
+```http
+GET /metrics
+```
+
+**Response** (`text/plain; version=0.0.4`)
+```
+# HELP requests_total Total HTTP requests
+# TYPE requests_total counter
+requests_total{method="POST",path="/v1/chat"} 1234
+...
 ```
 
 ---
@@ -389,6 +571,66 @@ class ChatResponse(BaseModel):
     escalation_reason: str = ""
 ```
 
+### FeedbackRequest
+```python
+class FeedbackRequest(BaseModel):
+    message_id: str = Field(..., min_length=1, max_length=128)
+    rating: str = Field(..., pattern=r"^(up|down)$")
+    comment: str = Field("", max_length=1000)
+    session_id: str | None = Field(None, max_length=128)
+    user_query: str = Field("", max_length=2000)
+    bot_reply: str = Field("", max_length=5000)
+```
+
+### FeedbackResponse
+```python
+class FeedbackResponse(BaseModel):
+    id: str
+    message_id: str
+    rating: str
+    created_at: float
+```
+
+### FeedbackSummary
+```python
+class FeedbackSummary(BaseModel):
+    period_days: int
+    total: int
+    thumbs_up: int
+    thumbs_down: int
+    satisfaction_pct: float
+    recent: list[dict]
+```
+
+### AnalyticsEvent
+```python
+class AnalyticsEvent(BaseModel):
+    event_type: str = Field(..., min_length=1, max_length=100)
+    event_data: dict = Field(default_factory=dict)
+    session_id: str | None = Field(None, max_length=128)
+```
+
+### AnalyticsDashboard
+```python
+class AnalyticsDashboard(BaseModel):
+    uptime_seconds: float
+    requests: dict
+    chat: dict
+    sessions: dict
+    conversations: dict
+    feedback: dict
+```
+
+### HealthResponse
+```python
+class HealthResponse(BaseModel):
+    status: str        # "ready" or "degraded"
+    version: str
+    model_loaded: bool
+    tags_loaded: int = 0
+    retrieval_mode: str = "keyword"  # hybrid | keyword
+```
+
 ---
 
 ## SDK Examples
@@ -492,6 +734,7 @@ docker run -p 8000:8000 landwind/ura-chatbot-api:latest
 | `RERANKER_MODEL` | Cross-encoder reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `RERANK_ENABLED` | Enable cross-encoder reranking | `true` |
 | **OWASP Guardrails** | | |
+| `INDEX_API_KEY` | Bearer token for `/v1/index` (empty = auth disabled) | `` |
 | `MAX_INPUT_LENGTH` | Maximum input characters | `2000` |
 | `GROUNDING_THRESHOLD` | Faithfulness threshold for disclaimer | `0.3` |
 | `ABSTENTION_THRESHOLD` | Score below which to refuse answering | `0.15` |

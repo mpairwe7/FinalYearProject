@@ -258,9 +258,18 @@ FinalYearProject/
    # Evaluate
    python ml/pipelines/evaluate.py --model-path Model --output-dir Results
    
-   # Check quality gates
+   # Check classifier quality gates
    python ml/pipelines/quality_gates.py
-   
+
+   # Run RAG evaluation (English + Luganda)
+   python ml/pipelines/evaluate_rag.py
+
+   # Export negative feedback for retriever tuning
+   python ml/pipelines/export_feedback.py
+
+   # Run governance compliance check
+   python governance/compliance_check.py
+
    # Run App
    python App/classifier.py
    ```
@@ -296,7 +305,7 @@ The RAG pipeline is evaluated by `ml/pipelines/evaluate_rag.py` against `Data/ev
 | Context Recall | >= 0.5 | Fraction of ground-truth covered by retrieved contexts |
 | Groundedness | >= 0.4 | Phrase-level (trigram) grounding in contexts |
 | Citation Accuracy | >= 0.4 | Whether cited contexts contain ground-truth information |
-| Safety Probe Pass Rate | >= 0.8 | Adversarial prompts blocked by InputGuard |
+| Safety Probe Pass Rate | >= 1.0 | Adversarial prompts blocked by InputGuard |
 | Abstention Precision | >= 0.5 | Correct refusal rate on unanswerable questions |
 
 Configure in `ml/configs/training_config.yaml`:
@@ -316,7 +325,7 @@ rag_quality_gates:
   min_context_recall: 0.5
   min_groundedness: 0.4
   min_citation_accuracy: 0.4
-  min_safety_probe_pass_rate: 0.8
+  min_safety_probe_pass_rate: 1.0
   min_abstention_precision: 0.5
 ```
 
@@ -389,6 +398,7 @@ gh run view <run-id> --log
 ```bash
 gh run download <run-id> -n trained-model
 gh run download <run-id> -n evaluation-results
+gh run download <run-id> -n rag-evaluation-results   # RAG metrics + quality gates
 ```
 
 ### Check Deployment Status
@@ -425,6 +435,15 @@ docker logs ura-chatbot-frontend
    - Check `App/frontend/Dockerfile` syntax
    - Verify `NEXT_PUBLIC_API_URL` variable is set
    - Check GitHub Actions build logs
+
+5. **RAG evaluation fails:**
+   - Check that `Data/eval/rag_eval.jsonl` and `Data/eval/rag_eval_lg.jsonl` exist
+   - Verify Qdrant is running (`docker compose up qdrant`)
+   - Check `Results/rag_quality_gates.json` for which metrics failed
+
+6. **Governance compliance check fails:**
+   - Run `python governance/compliance_check.py` locally to see which files/keywords are missing
+   - Check `governance/ai_risk_manifest.yaml` for required OWASP LLM entries (LLM01–LLM10)
 
 ### Getting Help
 

@@ -5,19 +5,24 @@
 This project implements a comprehensive MLOps CI/CD pipeline following DataCamp best practices for ML systems. The pipeline automates model training, evaluation, deployment, and monitoring across multiple platforms.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           MLOps Pipeline Architecture                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐  │
-│  │  Code   │───▶│  Test   │───▶│  Train  │───▶│  Eval   │───▶│ Deploy  │  │
-│  │  Push   │    │  Lint   │    │  Model  │    │ Quality │    │  Prod   │  │
-│  └─────────┘    └─────────┘    └─────────┘    └─────────┘    └─────────┘  │
-│       │              │              │              │              │        │
-│       ▼              ▼              ▼              ▼              ▼        │
-│   GitHub         Ruff/Black     Kaggle/       Quality       Hugging Face  │
-│   Actions        MyPy/Pytest    Local GPU/TPU  Gates         DockerHub    │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│                           MLOps Pipeline Architecture                                 │
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐            │
+│  │  Code   │───▶│  Test   │───▶│  Train  │───▶│  Eval   │───▶│ RAG     │            │
+│  │  Push   │    │  Lint   │    │  Model  │    │ Quality │    │  Eval   │            │
+│  └─────────┘    └────┬────┘    └─────────┘    └─────────┘    └────┬────┘            │
+│       │              │              │              │               │                 │
+│       │         ┌────▼────┐         │              │          ┌────▼────┐            │
+│       │         │Governance│         │              │          │ Deploy  │            │
+│       │         │  Check   │         │              │          │  Prod   │            │
+│       │         └─────────┘         │              │          └─────────┘            │
+│       ▼              ▼              ▼              ▼              ▼                   │
+│   GitHub         Compliance     Kaggle/       Quality       Hugging Face             │
+│   Actions        + OWASP       Local GPU/TPU  Gates         DockerHub                │
+│                  + NIST RMF                   + RAG Gates   + Feedback Loop           │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Workflows
@@ -35,13 +40,15 @@ This project implements a comprehensive MLOps CI/CD pipeline following DataCamp 
 
 | Stage | Job Name | Description | Dependencies |
 |-------|----------|-------------|--------------|
-| 1 | `lint-and-test` | Code quality checks | None |
+| 1a | `lint-and-test` | Code quality checks | None |
+| 1b | `governance-check` | NIST/ISO/OWASP/EU AI Act compliance | None (parallel with 1a) |
 | 2 | `data-validation` | Validate dataset integrity | lint-and-test |
 | 3 | `train-model` | Train ML model | data-validation |
 | 4 | `evaluate-model` | Model performance evaluation | train-model |
-| 5 | `push-to-huggingface` | Deploy model to HF Hub | evaluate-model |
-| 6 | `build-docker` | Build and push Docker image | lint-and-test |
-| 7 | `deploy-backend` | Deploy API to production | build-docker, push-to-huggingface |
+| 5 | `evaluate-rag` | RAG pipeline quality gates (8 metrics) | evaluate-model |
+| 6 | `push-to-huggingface` | Deploy model to HF Hub | evaluate-model, evaluate-rag |
+| 7 | `build-docker` | Build and push Docker image | lint-and-test |
+| 8 | `deploy-backend` | Deploy API to production | build-docker, push-to-huggingface |
 
 #### Stage Details
 
@@ -80,6 +87,21 @@ Output:
 - Results/metrics/training_metrics.json
 ```
 
+##### Stage 1b: Governance Check (parallel with Lint & Test)
+```yaml
+Checks:
+- 10 required files exist (guardrails, tracing, database, risk manifest, etc.)
+- 29 content keywords verified (OWASP, NIST AI RMF, ISO 42001, EU AI Act)
+
+Script: governance/compliance_check.py
+
+Frameworks:
+- NIST AI RMF (govern/map/measure/manage)
+- ISO/IEC 42001 (9 clauses)
+- OWASP LLM Top 10 (6 categories)
+- EU AI Act (transparency, human oversight, risk management)
+```
+
 ##### Stage 4: Model Evaluation
 ```yaml
 Metrics Computed:
@@ -91,23 +113,52 @@ Output:
 - Results/evaluation/
 ```
 
-##### Stage 5: Quality Gates
+##### Stage 5: RAG Evaluation
 ```yaml
-Checks:
-- Minimum accuracy threshold
-- Maximum latency requirements
-- Model size constraints
+Metrics (8 total):
+- Faithfulness (sentence-level token overlap >= 50%)
+- Answer Relevancy (cosine similarity)
+- Context Precision (GT word overlap > 20%)
+- Context Recall (GT sentence coverage >= 40%)
+- Groundedness (trigram overlap)
+- Citation Accuracy (GT word overlap > 15%)
+- Safety Probe Pass Rate (5 adversarial prompts)
+- Abstention Precision (correct refusal rate)
 
-Script: ml/pipelines/quality_gates.py
+Eval Sets:
+- Data/eval/rag_eval.jsonl (21 English samples)
+- Data/eval/rag_eval_lg.jsonl (12 Luganda samples)
+
+Script: ml/pipelines/evaluate_rag.py
 ```
 
-##### Stage 6: Hugging Face Deployment
+##### Stage 6: Quality Gates
+```yaml
+Classifier Gates:
+- Minimum accuracy >= 0.85
+- F1-score >= 0.75
+- Latency P95 < 100ms
+
+RAG Gates (block HF push):
+- Faithfulness >= 0.6
+- Answer Relevancy >= 0.7
+- Context Precision >= 0.5
+- Context Recall >= 0.5
+- Groundedness >= 0.4
+- Citation Accuracy >= 0.4
+- Safety Probe Pass Rate >= 1.0
+- Abstention Precision >= 0.5
+
+Script: ml/pipelines/quality_gates.py, ml/pipelines/evaluate_rag.py
+```
+
+##### Stage 7: Hugging Face Deployment
 ```yaml
 Target: mpairweLandwind/ura-chatbot
 Method: huggingface_hub Python SDK
 ```
 
-##### Stage 7: Docker Build
+##### Stage 8: Docker Build
 ```yaml
 Features:
 - Multi-stage builds
@@ -246,10 +297,12 @@ FinalYearProject/
 │       └── kaggle-training.yml    # Kaggle GPU/TPU training
 ├── ml/
 │   ├── configs/
-│   │   └── training_config.yaml   # Training hyperparameters
+│   │   └── training_config.yaml   # Training hyperparameters + RAG quality gates
 │   ├── pipelines/
 │   │   ├── train.py              # Training script
-│   │   ├── evaluate.py           # Evaluation script
+│   │   ├── evaluate.py           # Classifier evaluation
+│   │   ├── evaluate_rag.py       # RAG pipeline evaluation (8 metrics)
+│   │   ├── export_feedback.py    # Production feedback → JSONL for tuning
 │   │   ├── validate_data.py      # Data validation
 │   │   ├── quality_gates.py      # Quality checks
 │   │   └── push_to_hub.py        # HF deployment
@@ -261,13 +314,19 @@ FinalYearProject/
 │   └── huggingface/
 │       ├── README.md
 │       └── app.py
+├── governance/                    # Compliance & risk management
+│   ├── compliance_check.py       # CI gate (10 files + 29 keywords)
+│   └── ai_risk_manifest.yaml     # NIST/ISO/OWASP/EU AI Act risk register
 ├── Model/                         # Trained model artifacts
 ├── Results/
 │   ├── metrics/                   # Training metrics
 │   ├── reports/                   # Validation reports
 │   └── plots/                     # Visualization outputs
 └── Data/
-    └── dataset/                   # Training CSV files
+    ├── dataset/                   # Training CSV files
+    └── eval/                      # RAG evaluation datasets
+        ├── rag_eval.jsonl         # English (21 samples)
+        └── rag_eval_lg.jsonl      # Luganda (12 samples)
 ```
 
 ---
@@ -279,21 +338,30 @@ FinalYearProject/
 ```mermaid
 graph TD
     A[Push/PR] --> B[Lint & Test]
+    A --> B2[Governance Check]
     B --> C{Tests Pass?}
+    B2 --> C2{Compliance Pass?}
     C -->|Yes| D[Data Validation]
     C -->|No| X[Fail]
+    C2 -->|No| X
     D --> E{Valid Data?}
     E -->|Yes| F[Train Model]
     E -->|No| X
     F --> G[Evaluate Model]
-    G --> H{Quality Gates?}
+    G --> G2[RAG Evaluation]
+    G2 --> H{Quality Gates?}
     H -->|Pass| I[Push to HF Hub]
     H -->|Fail| X
     I --> J[Build Docker]
     J --> K[Deploy Production]
-    
+    K --> L[Feedback Loop]
+    L -->|Negative feedback| M[Retriever Tuning]
+
     style A fill:#e1f5fe
+    style B2 fill:#fff3e0
+    style G2 fill:#fff3e0
     style K fill:#c8e6c9
+    style L fill:#e8f5e9
     style X fill:#ffcdd2
 ```
 
@@ -368,7 +436,9 @@ Each workflow run produces artifacts downloadable from GitHub Actions:
 |----------|----------|----------|
 | `data-validation-report` | ci-ml-pipeline | JSON validation results |
 | `trained-model` | ci-ml-pipeline | Model files, metrics |
-| `evaluation-results` | ci-ml-pipeline | Evaluation reports |
+| `evaluation-results` | ci-ml-pipeline | Classifier evaluation reports |
+| `rag-evaluation-results` | ci-ml-pipeline | RAG metrics (8 scores), eval set results |
+| `governance-report` | ci-ml-pipeline | Compliance check output (files + keywords) |
 | `frontend-build` | frontend-deploy | Next.js build output |
 | `data-pipeline-outputs` | kaggle-training | Processed data + EDA outputs from data-ingestion |
 | `kaggle-training-outputs` | kaggle-training | Kaggle notebook outputs |
@@ -411,14 +481,18 @@ gh run rerun <run-id> --failed
 
 ## Best Practices Implemented
 
-1. **Staged Pipeline**: Fail fast with early linting/testing
-2. **Quality Gates**: Automated model quality checks before deployment
-3. **Caching**: GitHub Actions cache for pip, npm, Docker layers
-4. **Security**: Trivy scanning, secret management
-5. **Docker Deployment**: Frontend and backend both containerised via Docker Hub
-6. **On-Change Retraining**: Push/manual-triggered Kaggle data+training runs
-7. **Multi-environment**: Separate development/production configurations
-8. **Artifact Management**: Preserved build outputs for debugging
+1. **Staged Pipeline**: Fail fast with early linting/testing + parallel governance checks
+2. **Quality Gates**: Classifier gates + 8 RAG metrics gates before deployment
+3. **Governance-as-Code**: Automated NIST AI RMF, ISO 42001, OWASP LLM, EU AI Act compliance checks
+4. **SHA-Pinned Actions**: All 33 GitHub Actions pinned to full SHA hashes (supply chain security)
+5. **Caching**: GitHub Actions cache for pip, npm, Docker layers
+6. **Security**: Trivy scanning, secret management, OWASP LLM Top 10 guardrails
+7. **Docker Deployment**: Frontend and backend both containerised via Docker Hub
+8. **On-Change Retraining**: Push/manual-triggered Kaggle data+training runs
+9. **Multi-environment**: Separate development/production configurations
+10. **Artifact Management**: Preserved build outputs for debugging
+11. **Feedback Loop**: Production thumbs-down → retriever negatives → tuning pipeline
+12. **Privacy-by-Design**: PII redaction before storage, configurable data retention TTLs
 
 ---
 

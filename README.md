@@ -23,7 +23,6 @@ This repository describes a CI/CD pipeline for developing and training a custome
 ```
 FinalYearProject/
 ├── .github/workflows/     # CI/CD pipeline (3 workflows)
-├── .github/workflows/     # CI/CD pipeline (3 workflows)
 ├── App/                   # Application code
 │   ├── app.py            # Gradio HF Spaces app
 │   ├── backend/          # FastAPI backend
@@ -38,6 +37,13 @@ FinalYearProject/
 │   │       ├── analytics.py   # Prometheus-compatible metrics middleware
 │   │       └── database.py    # SQLite WAL analytics/feedback/session store
 │   └── frontend/         # Next.js 15 + React 19 + Zustand 5 frontend
+├── MobileApp/             # Flutter mobile application
+│   └── ura_chatbot/       # Flutter 3.41 + Riverpod + Material 3
+│       ├── lib/
+│       │   ├── core/      # Config, networking (Dio), theme, storage
+│       │   └── features/  # Chat, FAQ, Settings screens + providers
+│       ├── android/       # Android native (speech, network config)
+│       └── ios/           # iOS native (speech, microphone permissions)
 ├── Data/                  # Training & evaluation data
 │   ├── dataset/          # 41 CSV FAQ files
 │   ├── pdfs/             # PDF documents
@@ -68,23 +74,21 @@ FinalYearProject/
 ## End-to-End CI/CD Flow
 
 ```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  Commit  │───▶│  Lint &  │───▶│  Train   │───▶│ Evaluate │───▶│  Deploy  │
-│   Push   │    │   Test   │    │  Model   │    │  Quality │    │   Prod   │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
-                      │                          ┌──────────┐
-                      └─────────────────────────▶│Governance│ (parallel)
-                                                 │Compliance│
-                                                 └──────────┘
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│  Commit  │───▶│  Lint &  │───▶│  Train   │───▶│ Evaluate │───▶│ RAG Eval │───▶│  Deploy  │
+│   Push   │    │   Test   │    │  Model   │    │ Classify │    │  Gates   │    │   Prod   │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+       │        ┌────────────┐                                                  ┌──────────┐
+       └───────▶│ Governance │ (parallel)                                       │ Feedback │
+                │ Compliance │                                                  │   Loop   │
+                └────────────┘                                                  └──────────┘
 ```
 
-1) **Commit/PR**: Push changes to feature branches; CI runs lint/tests on backend (uv/pytest/mypy/ruff) and frontend (bun lint/test/build). Governance compliance check runs in parallel.
-2) **Merge to main**: CI re-runs; when green, two deploy jobs can follow:
-	- **Frontend image push**: Build Next.js Docker image and push to Docker Hub with tags `latest` and commit SHA.
-	- **API image push**: Build FastAPI Docker image and push to Docker Hub with tags `latest` and commit SHA; downstream infra pulls from Docker Hub.
-3) **Training (manual or push-triggered)**: Trigger `kaggle-training.yml` (or push notebook/data/ml changes) to run Kaggle notebook training; notebooks are synced, job is started via Kaggle API, results are downloaded, then metrics/checkpoints are published (GitHub Release or object store). CI can gate on training success before promoting artifacts.
-4) **Quality gates**: Deployment requires **both** classifier evaluation AND RAG evaluation (faithfulness, groundedness, citation accuracy, safety probes, Luganda eval) to pass.
-5) **Release consumption**: Frontend points to deployed API; API loads the latest validated model from the artifact store or release tag; Docker images from DockerHub are used by runtime (e.g., compose/k8s).
+1) **Commit/PR**: CI runs lint/tests + governance compliance check (parallel). Governance verifies NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10, and EU AI Act artifacts.
+2) **Merge to main**: Full pipeline runs: data validation → train → classifier eval → **RAG evaluation** (faithfulness, groundedness, citation accuracy, safety probes, abstention precision) → quality gates → HF push → Docker build (with Trivy scan) → deploy.
+3) **Training (manual or push-triggered)**: `kaggle-training.yml` for GPU/TPU training on Kaggle.
+4) **Quality gates**: Deployment requires **both** classifier evaluation AND RAG evaluation (8 metrics) to pass. HF push is gated on `evaluate-rag` job success.
+5) **Feedback loop**: User thumbs-down feedback → `ml/pipelines/export_feedback.py` → retriever negative judgments + regression test candidates → retriever/reranker tuning.
 
 ## URA Chatbot — RAG Pipeline
 

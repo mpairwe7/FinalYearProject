@@ -19,6 +19,9 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Gradio App](GRADIO_APP.md) | Gradio web interface documentation |
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
+| **Governance & Compliance** |
+| [AI Risk Manifest](../governance/ai_risk_manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM, EU AI Act risk register |
+| [Compliance Gate](../governance/compliance_check.py) | CI gate script (10 files + 29 keywords) |
 
 ## Getting Started
 
@@ -63,9 +66,12 @@ FinalYearProject/
 │   ├── pdfs/             # PDF documents
 │   ├── TTT/              # Translation corpus
 │   └── lgaudio/          # Audio files
+├── governance/            # Compliance & risk management
+│   ├── compliance_check.py
+│   └── ai_risk_manifest.yaml
 ├── ml/                    # ML pipeline implementation
-│   ├── configs/          # Training configuration
-│   ├── pipelines/        # Training, evaluation scripts
+│   ├── configs/          # Training configuration + RAG quality gates
+│   ├── pipelines/        # Training, evaluation, RAG eval, feedback export
 │   ├── scripts/          # Kaggle integration
 │   └── huggingface/      # HF Spaces files
 ├── Model/                 # Trained model artifacts
@@ -86,12 +92,12 @@ Code → Push → Lint → Test → Review → Merge
 
 ### 2. ML Training Workflow
 ```
-Data Validation → Training → Evaluation → Quality Gates → Deployment
+Data Validation → Training → Classifier Eval → RAG Eval (8 metrics) → Quality Gates → Deployment
 ```
 
 ### 3. Release Workflow
 ```
-Main Branch → Docker Build → HF Push → Production Deploy
+Main Branch → Governance Check → Docker Build → HF Push → Production Deploy → Feedback Loop
 ```
 
 ## Environment Setup

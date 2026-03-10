@@ -43,32 +43,131 @@
 6) Update status:
    - Mark `documents.status = ingested` only after all chunks + embeddings succeed; otherwise flag failed and log why.
 
-## Retrieval Pipeline
-- **Hybrid retrieval**: Dense embeddings (Qdrant) + sparse BM25 (`rank_bm25`) fused via Reciprocal Rank Fusion (weights: 0.6 dense / 0.4 sparse).
-- **Cross-encoder reranking**: `cross-encoder/ms-marco-MiniLM-L-6-v2` reranks top candidates for final relevance ordering.
-- **Metadata filtering**: Qdrant pre-retrieval filtering by source, section, or doc_type.
+## Retrieval Pipeline (Production Architecture)
 
-## Safety Guardrails
-- **Input validation**: Regex-based detection of prompt injection patterns (15+ rules), harmful intent queries, and query length limits.
-- **Output validation**: Grounding check measures overlap between answer content and retrieved context (threshold: ≥0.5 grounding score).
-- **Content moderation**: Flag violence, illegal activity, and other policy-violating content in generated answers.
-- Aligned with OWASP LLM Top 10 guidelines.
+```
+User Query
+  → InputGuard (OWASP LLM01: 11 prompt injection patterns + length validation)
+  → HybridRetriever.search()
+      ├─ Dense: sentence-transformers/all-MiniLM-L6-v2 (384-dim HNSW)
+      ├─ Sparse: BM25-weighted token vectors (inverted index)
+      ├─ Fusion: Reciprocal Rank Fusion (RRF) via Qdrant query API
+      └─ Reranking: cross-encoder/ms-marco-MiniLM-L-6-v2
+  → Fallback: keyword overlap search (when Qdrant unavailable)
+  → Calibrated Abstention (refuse if best_score < ABSTENTION_THRESHOLD)
+  → Citation Assembly: [1]...[n] with source, page, section, passage
+  → OutputGuard
+      ├─ redact_pii() — 7 Uganda-specific PII patterns (LLM02)
+      ├─ sanitize() — HTML/script/external link stripping (LLM05)
+      └─ check_grounding() — faithfulness scoring + disclaimer (LLM09)
+  → Escalation Check (flag for human review if needed)
+  → ChatResponse with citations + faithfulness_score + escalation info
+```
+
+### Retrieval Components
+
+| Component | Implementation | Details |
+|-----------|---------------|---------|
+| **Dense encoder** | `sentence-transformers/all-MiniLM-L6-v2` | 384-dim, cosine similarity, HNSW index |
+| **Sparse encoder** | `BM25SparseEncoder` (custom) | Okapi BM25 weights, JSON-serializable vocabulary |
+| **Fusion** | Qdrant RRF | Prefetch dense + sparse → Reciprocal Rank Fusion |
+| **Reranker** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Optional (toggle via `RERANK_ENABLED`) |
+| **Metadata filtering** | Qdrant payload filters | Filter by `doc_type`, `tag`, `section`, etc. |
+| **Graceful degradation** | Keyword fallback | Automatic when Qdrant connection fails |
+
+### Payload Filter Examples
+```python
+retriever.search("VAT rate", filters={"doc_type": "pdf"})
+retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registration"]})
+```
+
+## Safety Guardrails (OWASP LLM Top 10)
+
+| OWASP ID | Control | Implementation |
+|----------|---------|----------------|
+| **LLM01** | Prompt Injection | `InputGuard.check()` — 11 regex patterns + max input length |
+| **LLM02** | Sensitive Info Disclosure | `OutputGuard.redact_pii()` — email, phone, TIN, NID, CC, passport |
+| **LLM05** | Improper Output Handling | `OutputGuard.sanitize()` — script tags, HTML, external image links |
+| **LLM09** | Misinformation | `OutputGuard.check_grounding()` — runtime faithfulness scoring |
+| — | Calibrated Abstention | `should_abstain()` — refuse when retrieval confidence too low |
+| — | Human Escalation | `should_escalate()` — flag low faithfulness, no results, consecutive low confidence |
+| — | Privacy | `redact_for_storage()` — PII stripped before database writes |
+
+### PII Patterns (Uganda-specific)
+| Pattern | Example | Redaction |
+|---------|---------|-----------|
+| Email | `user@ura.go.ug` | `[REDACTED_EMAIL]` |
+| UG Phone | `+256701234567` | `[REDACTED_UG_PHONE]` |
+| UG TIN | `1234567890` | `[REDACTED_UG_TIN]` |
+| UG National ID | `CM95ABCDE12345A` | `[REDACTED_UG_NID]` |
+| Credit Card | `4111 1111 1111 1111` | `[REDACTED_CREDIT_CARD]` |
+| UG Passport | `AB1234567` | `[REDACTED_UG_PASSPORT]` |
 
 ## Evaluation Criteria
-- **Retrieval**: Hit@K (K=1,3,5,10), MRR (Mean Reciprocal Rank), NDCG@5 using reference answer content overlap.
-- **Answer Quality**: Groundedness score (0-1) based on answer-context term overlap; faithfulness via self-consistency.
-- **Factuality**: hallucination_flag (boolean) + grounding_score (0-1) derived from groundedness checks.
-- **Latency**: Per-stage profiling (input validation, retrieval, generation, output validation) with P50/P95/P99 percentiles.
-- **Safety/Policy**: Tag unsafe outputs and count violations per eval_run.
+
+### Classifier Metrics
+- **Accuracy, Precision, Recall, F1**: Standard classification metrics
+- **Latency**: P50/P95/P99 inference time
+
+### RAG Metrics (`ml/pipelines/evaluate_rag.py`)
+
+| Metric | Method | Description |
+|--------|--------|-------------|
+| **Faithfulness** | Sentence-level token overlap >= 50% | Fraction of answer sentences grounded in context |
+| **Answer Relevancy** | Cosine similarity (sentence-transformers) | Question-answer embedding similarity |
+| **Context Precision** | Ground-truth word overlap > 20% | Fraction of retrieved contexts containing GT info |
+| **Context Recall** | GT sentence coverage >= 40% | Fraction of GT content covered by contexts |
+| **Groundedness** | Trigram (n=3) overlap | Phrase-level grounding in contexts |
+| **Citation Accuracy** | GT word overlap > 15% | Whether cited contexts contain GT information |
+| **Safety Probe Pass Rate** | 5 adversarial prompts through InputGuard | Refusal rate on injection attempts |
+| **Abstention Precision** | Faithfulness < threshold on unanswerable | Correct refusal rate |
+
+### Evaluation Datasets
+- `Data/eval/rag_eval.jsonl` — English eval set (21 samples), JSONL format:
+  ```json
+  {"question": "...", "ground_truth": "...", "contexts": ["..."], "answer": "..."}
+  ```
+  Covers: TIN, VAT, penalties, EFRIS, withholding tax, customs, income tax, corporate tax, exemptions, excise duty, PAYE, online payments, rental tax, digital stamps, objections, refunds, stamp duty, amendments, online businesses.
+
+- `Data/eval/rag_eval_lg.jsonl` — Luganda eval set (12 samples), same format:
+  Covers: TIN, VAT, penalties, e-services, EFRIS, mobile payments, withholding tax, tax clearance, VAT exemptions, late filing, corporate tax, objections. Evaluated as a blocking CI step.
 
 ## Regression Gates
-| Metric | Threshold | Action on Failure |
-|--------|-----------|-------------------|
-| MRR | ≥ 0.5 | Block deployment |
-| Hit@5 | ≥ 0.6 | Block deployment |
-| Avg Grounding Score | ≥ 0.4 | Block deployment |
-| Index populated | > 0 points | Block deployment |
-| Safety checks | All pass | Block deployment |
+
+### Classifier Gates
+| Metric | Threshold | Action |
+|--------|-----------|--------|
+| Accuracy | >= 0.85 | Block deployment |
+| F1-Score | >= 0.75 | Block deployment |
+| Latency (P95) | < 100ms | Block deployment |
+
+### RAG Gates (CI job: `evaluate-rag`)
+| Metric | Threshold | Action |
+|--------|-----------|--------|
+| Faithfulness | >= 0.6 | Block HF push |
+| Answer Relevancy | >= 0.7 | Block HF push |
+| Context Precision | >= 0.5 | Block HF push |
+| Context Recall | >= 0.5 | Block HF push |
+| Groundedness | >= 0.4 | Block HF push |
+| Citation Accuracy | >= 0.4 | Block HF push |
+| Safety Probe Pass Rate | >= 1.0 | Block HF push |
+| Abstention Precision | >= 0.5 | Block HF push |
+
+### Governance Gate (CI job: `governance-check`)
+| Check | Action |
+|-------|--------|
+| 10 required files exist | Block merge |
+| 29 content keywords present | Block merge |
+
+## Feedback Loop
+
+```
+User feedback (thumbs up/down) → database.save_feedback()
+  → ml/pipelines/export_feedback.py
+    → retriever_negatives.jsonl (thumbs-down → negative relevance judgments)
+    → regression_candidates.jsonl (all negative feedback → regression test expansion)
+  → Retriever/reranker tuning
+```
 
 ## Data Ingestion Pipeline (`DataIngestion_Augmentation.ipynb`)
 
