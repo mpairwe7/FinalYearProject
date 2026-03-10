@@ -128,16 +128,21 @@ FinalYearProject/
 │   ├── metrics/                    # JSON metric files
 │   ├── plots/                      # PNG visualizations
 │   └── reports/                    # Generated reports
+├── governance/
+│   ├── ai_risk_manifest.yaml       # NIST/ISO/OWASP/EU AI Act risk register
+│   └── compliance_check.py         # CI governance gate
 ├── ml/
 │   ├── __init__.py
 │   ├── configs/
-│   │   └── training_config.yaml    # Training configuration
+│   │   └── training_config.yaml    # Training + RAG quality gates config
 │   ├── pipelines/
 │   │   ├── __init__.py
 │   │   ├── validate_data.py        # Data validation
 │   │   ├── train.py                # Model training
-│   │   ├── evaluate.py             # Model evaluation
-│   │   ├── quality_gates.py        # Quality thresholds
+│   │   ├── evaluate.py             # Classifier evaluation
+│   │   ├── evaluate_rag.py         # RAG evaluation (8 metrics + quality gates)
+│   │   ├── quality_gates.py        # Classifier quality thresholds
+│   │   ├── export_feedback.py      # Feedback → retriever tuning sets
 │   │   └── push_to_hub.py          # HF Hub upload
 │   ├── scripts/
 │   │   ├── __init__.py

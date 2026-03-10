@@ -23,20 +23,45 @@ This repository describes a CI/CD pipeline for developing and training a custome
 ```
 FinalYearProject/
 ├── .github/workflows/     # CI/CD pipeline (3 workflows)
+├── .github/workflows/     # CI/CD pipeline (3 workflows)
 ├── App/                   # Application code
 │   ├── app.py            # Gradio HF Spaces app
 │   ├── backend/          # FastAPI backend
-│   └── frontend/         # Next.js frontend
-├── Data/                  # Training data
-│   ├── dataset/          # 41 CSV files
-│   └── pdfs/             # PDF documents
+│   │   └── app/
+│   │       ├── main.py        # FastAPI app + endpoints
+│   │       ├── models.py      # Pydantic v2 request/response models
+│   │       ├── service.py     # ChatModel (RAG + classification)
+│   │       ├── guardrails.py  # OWASP LLM Top 10 input/output guards
+│   │       ├── retriever.py   # Qdrant hybrid retriever (dense+BM25+RRF)
+│   │       ├── indexer.py     # Document indexing pipeline (PDF+CSV→Qdrant)
+│   │       ├── tracing.py     # OpenTelemetry GenAI tracing
+│   │       ├── analytics.py   # Prometheus-compatible metrics middleware
+│   │       └── database.py    # SQLite WAL analytics/feedback/session store
+│   └── frontend/         # Next.js 15 + React 19 + Zustand 5 frontend
+├── Data/                  # Training & evaluation data
+│   ├── dataset/          # 41 CSV FAQ files
+│   ├── pdfs/             # PDF documents
+│   └── eval/             # RAG evaluation sets
+│       ├── rag_eval.jsonl      # English eval (21 samples)
+│       └── rag_eval_lg.jsonl   # Luganda eval (12 samples)
+├── governance/            # AI governance framework
+│   ├── ai_risk_manifest.yaml   # NIST AI RMF + ISO 42001 + OWASP + EU AI Act
+│   └── compliance_check.py     # CI gate for governance artifacts
 ├── ml/                    # ML pipeline scripts
+│   ├── configs/
+│   │   └── training_config.yaml  # Training + quality gates config
+│   └── pipelines/
+│       ├── evaluate_rag.py       # RAG evaluation (8 metrics)
+│       ├── export_feedback.py    # Feedback → retriever tuning sets
+│       └── quality_gates.py      # Classifier quality gates
 ├── Model/                 # Trained model artifacts
 ├── Results/               # Metrics and reports
 ├── Notebooks/             # Jupyter notebooks
 │   ├── ura-training.ipynb                 # Classification + RAG pipeline
 │   ├── DataIngestion_Augmentation.ipynb   # Data ingestion & augmentation pipeline
 │   └── fine_tune_gemma.ipynb              # Gemma/LLM fine-tuning pipeline
+├── tests/                 # Test suite
+├── docker-compose.yml     # Service orchestration (API + Qdrant)
 └── docs/                  # Documentation
 ```
 
@@ -47,14 +72,19 @@ FinalYearProject/
 │  Commit  │───▶│  Lint &  │───▶│  Train   │───▶│ Evaluate │───▶│  Deploy  │
 │   Push   │    │   Test   │    │  Model   │    │  Quality │    │   Prod   │
 └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+                      │                          ┌──────────┐
+                      └─────────────────────────▶│Governance│ (parallel)
+                                                 │Compliance│
+                                                 └──────────┘
 ```
 
-1) **Commit/PR**: Push changes to feature branches; CI runs lint/tests on backend (uv/pytest/mypy/ruff) and frontend (bun lint/test/build).
+1) **Commit/PR**: Push changes to feature branches; CI runs lint/tests on backend (uv/pytest/mypy/ruff) and frontend (bun lint/test/build). Governance compliance check runs in parallel.
 2) **Merge to main**: CI re-runs; when green, two deploy jobs can follow:
 	- **Frontend image push**: Build Next.js Docker image and push to Docker Hub with tags `latest` and commit SHA.
 	- **API image push**: Build FastAPI Docker image and push to Docker Hub with tags `latest` and commit SHA; downstream infra pulls from Docker Hub.
 3) **Training (manual or push-triggered)**: Trigger `kaggle-training.yml` (or push notebook/data/ml changes) to run Kaggle notebook training; notebooks are synced, job is started via Kaggle API, results are downloaded, then metrics/checkpoints are published (GitHub Release or object store). CI can gate on training success before promoting artifacts.
-4) **Release consumption**: Frontend points to deployed API; API loads the latest validated model from the artifact store or release tag; Docker images from DockerHub are used by runtime (e.g., compose/k8s).
+4) **Quality gates**: Deployment requires **both** classifier evaluation AND RAG evaluation (faithfulness, groundedness, citation accuracy, safety probes, Luganda eval) to pass.
+5) **Release consumption**: Frontend points to deployed API; API loads the latest validated model from the artifact store or release tag; Docker images from DockerHub are used by runtime (e.g., compose/k8s).
 
 ## URA Chatbot — RAG Pipeline
 
@@ -136,12 +166,14 @@ Three consolidated workflows under `.github/workflows/`:
 | Stage | Description |
 |-------|-------------|
 | Lint & Test | Ruff, Black, isort, MyPy, Pytest |
+| Governance Check | NIST/ISO/OWASP/EU AI Act compliance (parallel) |
 | Data Validation | Schema validation, quality checks |
 | Train Model | Local or Kaggle GPU/TPU training |
-| Evaluate | Model performance metrics |
-| Quality Gates | Pass/fail thresholds |
-| Push to HF | Deploy model to Hugging Face Hub |
-| Build Docker | Multi-stage build, push to DockerHub |
+| Evaluate Model | Classifier performance metrics |
+| **RAG Evaluation** | Faithfulness, groundedness, citation accuracy, safety probes, Luganda eval |
+| Quality Gates | Pass/fail thresholds (classifier + RAG) |
+| Push to HF | Deploy model to Hugging Face Hub (requires both gates) |
+| Build Docker | Multi-stage build, Trivy scan, push to DockerHub |
 | Deploy Backend | Production API deployment |
 
 ### 2. `frontend-deploy.yml` - Frontend CI/CD
@@ -182,6 +214,33 @@ Manual dispatch highlights:
 | `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | Docker Hub push (backend + frontend) |
 | `MLFLOW_TRACKING_URI` | MLflow experiment tracking (optional) |
 | `DEPLOY_KEY`, `API_HOST` | Production server deployment |
+| `INDEX_API_KEY` | Bearer token for `/v1/index` re-indexing endpoint (OWASP LLM10) |
+
+## RAG Quality Gates
+
+Deployment is blocked unless both classifier **and** RAG evaluation pass. RAG metrics are evaluated by `ml/pipelines/evaluate_rag.py` and configured in `ml/configs/training_config.yaml`:
+
+| Metric | Minimum Threshold | Description |
+|--------|-------------------|-------------|
+| Faithfulness | 0.6 | Answer grounded in retrieved passages |
+| Answer Relevancy | 0.7 | Response addresses the question |
+| Context Precision | 0.5 | Retrieved passages are relevant |
+| Context Recall | 0.5 | All needed information was retrieved |
+| Groundedness | 0.4 | Claims supported by source material |
+| Citation Accuracy | 0.4 | Citations point to correct passages |
+| Safety Probe Pass Rate | 1.0 | All adversarial probes blocked |
+| Abstention Precision | 0.5 | Refusals are calibrated correctly |
+
+## Governance & Compliance
+
+The project implements a comprehensive AI governance framework verified in CI:
+
+- **NIST AI RMF** — risk identification, measurement, and management
+- **ISO/IEC 42001:2023** — AI management system controls
+- **OWASP LLM Top 10 (2025)** — all 10 entries (LLM01–LLM10) addressed
+- **EU AI Act** — transparency and human oversight provisions
+
+Run locally: `python governance/compliance_check.py`
 
 ## ML Training Pipeline
 
@@ -216,7 +275,7 @@ See [ml/README.md](ml/README.md) for detailed documentation.
 - Install Python deps with `uv pip install -r requirements.txt` (or `uv sync` if using a lockfile) and run lint/tests via `uv run ruff/pytest/mypy` to mirror CI.
 - Frontend (App/frontend/): install with `bun install`; run `bun run dev` for local preview or `bun run lint/test/build` matching CI.
 - Keep Kaggle notebook entrypoint versioned; ensure data paths/configs are reproducible.
-- API: build and run locally with `docker compose up --build` (expects `app.main:app`).
+- API: build and run locally with `docker compose up --build` (expects `app.main:app`). Qdrant runs as a first-class service via docker-compose with healthcheck.
 
 ## Container Baseline
 - API image (`Dockerfile`) uses multi-stage build, non-root runtime user, exec-style entrypoint, and Python-based healthcheck (no runtime `curl` dependency).
