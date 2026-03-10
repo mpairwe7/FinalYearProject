@@ -43,7 +43,9 @@ models:
   # Generation models
   generation:
     web_high_accuracy: "google/gemma-2-2b-it"
+    web_inference: "Qwen/Qwen2.5-3B-Instruct"   # API backend (llm.py)
     web_alt: "meta-llama/Llama-3.2-3B-Instruct"
+    mobile_gemma_2b: "google/gemma-2-2b-it"      # On-device mobile (GGUF INT4)
     mobile_offline: "meta-llama/Llama-3.2-1B-Instruct"
     background_t5: "google/flan-t5-small"
     
@@ -118,10 +120,11 @@ deployment:
     
   # Export formats
   export_formats:
-    - joblib    # sklearn
-    - onnx      # cross-platform
-    - pytorch   # web deployment
-    - tflite    # mobile deployment
+    - joblib      # sklearn (backend classifier)
+    - onnx        # cross-platform (ONNX Runtime)
+    - pytorch     # web deployment (PyTorch)
+    - torchscript # mobile deployment (LibTorch)
+    - gguf        # on-device LLM (llama.cpp / MediaPipe)
 
 # ===========================================
 # MLflow Tracking (Optional)

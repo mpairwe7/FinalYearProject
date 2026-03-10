@@ -34,11 +34,13 @@ All contributors must adhere to the [ACM Code of Ethics](https://www.acm.org/cod
 ### Coding Standards
 
 #### Python (Backend / ML)
+- Package manager: **uv** (replaces pip)
 - Formatter: **Black** (line length 88)
 - Linter: **Ruff**
 - Type checker: **MyPy** (strict mode)
 - Docstrings: Google style
 - Test framework: **pytest**
+- LLM: **Qwen2.5-3B-Instruct** via HuggingFace transformers (local inference)
 
 #### TypeScript (Frontend)
 - Formatter: **Prettier**

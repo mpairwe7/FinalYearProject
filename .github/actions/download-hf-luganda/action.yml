@@ -14,7 +14,7 @@ runs:
   steps:
     - name: Install HuggingFace dependencies
       shell: bash
-      run: pip install --quiet huggingface_hub[cli] datasets pandas
+      run: uv pip install --system --quiet huggingface_hub[cli] datasets pandas
 
     - name: Download Luganda-English parallel corpus
       shell: bash

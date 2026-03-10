@@ -8,10 +8,12 @@
 git clone https://github.com/mpairweLandwind/FinalYearProject.git
 cd FinalYearProject
 
-# Backend
-pip install -r requirements.txt
+# Backend (uv package manager)
+uv venv && source .venv/bin/activate
+uv pip install -r requirements.txt
+uv pip install -r App/backend/requirements.txt
 
-# Frontend
+# Frontend (Bun)
 cd App/frontend && bun install && cd ../..
 ```
 
@@ -19,7 +21,13 @@ cd App/frontend && bun install && cd ../..
 
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env with your settings
+
+# Key LLM settings (optional — defaults work out of the box):
+# LLM_MODEL=Qwen/Qwen2.5-3B-Instruct  # ~6 GB, auto-downloads on first run
+# LLM_DEVICE=auto                       # auto|cpu|cuda
+# LLM_ENABLED=true                      # false = FAQ lookup fallback
+# QDRANT_URL=http://localhost:6333       # Required for hybrid retrieval
 ```
 
 ### 3. Run Locally

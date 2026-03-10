@@ -8,11 +8,13 @@
 ARG PYTHON_IMAGE=python:3.11.11-slim-bookworm
 FROM ${PYTHON_IMAGE}
 
+# Install uv for fast dependency resolution
+COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_ROOT_USER_ACTION=ignore
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
 WORKDIR /app
 
@@ -28,10 +30,9 @@ COPY requirements.txt ./requirements.txt
 ARG MLFLOW_VERSION=2.16.2
 ARG DVC_VERSION=3.51.2
 ARG KAGGLE_VERSION=1.6.17
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip && \
-    pip install -r requirements.txt && \
-    pip install \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements.txt && \
+    uv pip install --system \
       "mlflow==${MLFLOW_VERSION}" \
       "dvc==${DVC_VERSION}" \
       "kaggle==${KAGGLE_VERSION}"

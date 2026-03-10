@@ -77,6 +77,18 @@ def compute_faithfulness(answer: str, contexts: list[str]) -> float:
     return grounded / len(sentences)
 
 
+_st_model_cache: dict = {}
+
+
+def _get_st_model(model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    """Return a cached SentenceTransformer instance (load once, reuse)."""
+    if model_name not in _st_model_cache:
+        from sentence_transformers import SentenceTransformer
+
+        _st_model_cache[model_name] = SentenceTransformer(model_name)
+    return _st_model_cache[model_name]
+
+
 def compute_answer_relevancy(
     question: str,
     answer: str,
@@ -84,9 +96,7 @@ def compute_answer_relevancy(
 ) -> float:
     """Cosine similarity between question and answer embeddings."""
     try:
-        from sentence_transformers import SentenceTransformer
-
-        model = SentenceTransformer(model_name)
+        model = _get_st_model(model_name)
         emb = model.encode([question, answer])
         cos = float(
             np.dot(emb[0], emb[1])

@@ -3,16 +3,28 @@ fastapi==0.111.0
 uvicorn[standard]==0.30.1
 pydantic==2.7.4
 
+# Rate limiting (Phase 1 – production hardening)
+slowapi>=0.1.9
+
 # Data loading
-pandas>=1.5,<2.0
+pandas>=2.0
 
 # Hybrid retrieval (dense + sparse + reranking)
 sentence-transformers==3.4.1
 qdrant-client==1.13.3
+numpy>=1.26.0
 
 # PDF ingestion
 pymupdf4llm==0.0.17
 pymupdf==1.25.3
+
+# LLM generation (Phase 2 – Qwen2.5-3B-Instruct local inference)
+transformers>=4.46.0
+torch>=2.4.0
+accelerate>=1.2.0
+
+# SSE streaming (Phase 3)
+sse-starlette>=2.0.0
 
 # OpenTelemetry GenAI observability (opt-in)
 opentelemetry-api>=1.27.0

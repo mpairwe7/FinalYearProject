@@ -21,9 +21,9 @@ runs:
       env:
         EXTRA_PACKAGES: ${{ inputs.extra-packages }}
       run: |
-        pip install --quiet kaggle
+        uv pip install --system --quiet kaggle
         if [ -n "$EXTRA_PACKAGES" ]; then
-          pip install --quiet $EXTRA_PACKAGES
+          uv pip install --system --quiet $EXTRA_PACKAGES
         fi
 
     - name: Configure Kaggle credentials

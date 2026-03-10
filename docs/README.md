@@ -15,10 +15,13 @@ Complete documentation for the URA Chatbot MLOps project.
 | [MLOps Workflows](mlops-workflows.md) | Comprehensive CI/CD pipeline documentation |
 | [MLOps Pipeline](MLOPS_PIPELINE.md) | Pipeline architecture and implementation details |
 | **Application** |
-| [API Reference](API_REFERENCE.md) | REST API endpoints and usage |
+| [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) and usage |
+| [RAG Architecture](RAG_ARCHITECTURE.md) | 6-phase advanced RAG pipeline design (2026) |
 | [Gradio App](GRADIO_APP.md) | Gradio web interface documentation |
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
+| **Security** |
+| [Security Policy](../SECURITY.md) | Vulnerability reporting, OWASP LLM Top 10 controls |
 | **Governance & Compliance** |
 | [AI Risk Manifest](../governance/ai_risk_manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM, EU AI Act risk register |
 | [Compliance Gate](../governance/compliance_check.py) | CI gate script (10 files + 29 keywords) |
@@ -103,8 +106,8 @@ Main Branch → Governance Check → Docker Build → HF Push → Production Dep
 ## Environment Setup
 
 ### Required Tools
-- Python 3.11+
-- Node.js 20+ / Bun
+- Python 3.11+ with [uv](https://docs.astral.sh/uv/) package manager
+- Node.js 20+ with [Bun](https://bun.sh/) package manager
 - Docker
 - GitHub CLI (`gh`)
 

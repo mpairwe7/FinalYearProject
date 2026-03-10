@@ -11,8 +11,9 @@ URA Chatbot is an AI-powered customer service assistant for Uganda Revenue Autho
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Python | 3.11+ | Backend, ML pipelines |
-| Node.js | 20+ | Frontend build |
-| Bun | Latest | Fast JS runtime |
+| uv | 0.7+ | Python package manager (replaces pip) |
+| Node.js | 20+ | Frontend runtime |
+| Bun | 1.1+ | Frontend package manager & JS runtime |
 | Docker | 24+ | Containerization |
 | Git | 2.40+ | Version control |
 | GitHub CLI | 2.40+ | Workflow management |
@@ -21,9 +22,12 @@ URA Chatbot is an AI-powered customer service assistant for Uganda Revenue Autho
 
 ```bash
 # Ubuntu/Debian
-sudo apt update && sudo apt install -y python3.11 python3-pip nodejs npm docker.io git
+sudo apt update && sudo apt install -y python3.11 nodejs docker.io git
 
-# Install Bun
+# Install uv (Python package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install Bun (frontend package manager)
 curl -fsSL https://bun.sh/install | bash
 
 # Install GitHub CLI
@@ -44,14 +48,14 @@ cd FinalYearProject
 ### 2. Python Environment
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: .\venv\Scripts\activate  # Windows
+# Create virtual environment and install dependencies
+uv venv
+source .venv/bin/activate  # Linux/Mac
+# or: .\.venv\Scripts\activate  # Windows
 
 # Install dependencies
-pip install -r requirements.txt
-pip install -r App/backend/requirements.txt
+uv pip install -r requirements.txt
+uv pip install -r App/backend/requirements.txt
 ```
 
 ### 3. Frontend Setup
@@ -93,9 +97,32 @@ QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=              # Optional, for Qdrant Cloud
 QDRANT_COLLECTION=ura_knowledge_base_v1
 
+# LLM Generation (Qwen2.5-3B-Instruct, ~6 GB auto-download)
+LLM_MODEL=Qwen/Qwen2.5-3B-Instruct
+LLM_ENABLED=true
+LLM_DEVICE=auto              # auto|cpu|cuda
+LLM_TORCH_DTYPE=auto         # float16|bfloat16|float32|auto
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=512
+
+# Semantic Cache
+CACHE_ENABLED=true
+CACHE_THRESHOLD=0.92         # Cosine similarity threshold
+CACHE_TTL_SECONDS=3600       # 1 hour
+CACHE_MAX_SIZE=1000
+
+# Corrective RAG
+CORRECTIVE_RAG_ENABLED=true
+CORRECTIVE_RAG_THRESHOLD=0.3
+
+# Rate Limiting
+RATE_LIMIT=30/minute
+
 # Guardrails & Privacy
 STORE_RAW_PROMPTS=false      # Set true only for debugging
-ABSTENTION_THRESHOLD=0.3     # Min retrieval score before refusing
+ABSTENTION_THRESHOLD=0.15    # Min score before abstaining
+ESCALATION_THRESHOLD=0.25    # Faithfulness below which to flag for human review
+GROUNDING_THRESHOLD=0.3      # Score below which to append disclaimer
 CONVERSATION_TTL_DAYS=7      # Auto-purge conversation data
 FEEDBACK_TTL_DAYS=90         # Auto-purge feedback data
 
@@ -156,19 +183,23 @@ FinalYearProject/
 ├── App/                     # Application Code
 │   ├── app.py              # Full Gradio app (HF Spaces)
 │   ├── classifier.py       # Simple classifier demo
-│   ├── backend/            # FastAPI REST API
+│   ├── backend/            # FastAPI REST API (v1.2.0)
 │   │   ├── app/
-│   │   │   ├── main.py     # API routes + security headers
+│   │   │   ├── main.py     # API routes + SSE streaming + rate limiting
 │   │   │   ├── models.py   # Pydantic v2 schemas (citations, escalation)
-│   │   │   ├── service.py  # RAG pipeline orchestrator
-│   │   │   ├── retriever.py # Hybrid retrieval (dense+sparse+RRF+rerank)
+│   │   │   ├── service.py  # 6-phase RAG pipeline orchestrator
+│   │   │   ├── llm.py      # Qwen2.5-3B-Instruct local generation
+│   │   │   ├── query.py    # Query rewriting (abbreviations, spelling, coreference)
+│   │   │   ├── cache.py    # Semantic response cache (cosine similarity)
+│   │   │   ├── corrective_rag.py # Corrective re-retrieval + clarification
+│   │   │   ├── retriever.py # Hybrid retrieval (dense+sparse+RRF+rerank+circuit breaker)
 │   │   │   ├── indexer.py  # PDF/CSV ingestion → Qdrant
 │   │   │   ├── guardrails.py # OWASP LLM Top 10 (input/output guards)
-│   │   │   ├── tracing.py  # OpenTelemetry GenAI tracing
-│   │   │   ├── database.py # SQLite + WAL + data retention TTLs
-│   │   │   └── analytics.py # Usage analytics
+│   │   │   ├── tracing.py  # OpenTelemetry GenAI per-stage tracing
+│   │   │   ├── database.py # SQLite + WAL + conversation history + data retention TTLs
+│   │   │   └── analytics.py # Usage analytics + Prometheus metrics
 │   │   └── requirements.txt
-│   └── frontend/           # Next.js UI (citations, faithfulness, escalation)
+│   └── frontend/           # Next.js 15 UI (SSE streaming, citations, escalation)
 │       ├── src/app/
 │       ├── package.json
 │       └── next.config.mjs
@@ -241,11 +272,20 @@ curl -X POST http://localhost:8000/classify \
   -d '{"text": "How do I register for TIN?"}'
 ```
 
-### Chat
+### Chat (Sync)
 ```bash
-curl -X POST http://localhost:8000/chat \
+curl -X POST http://localhost:8000/v1/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "What is VAT rate in Uganda?"}'
+  -H "X-Session-ID: my-session" \
+  -d '{"message": "What is VAT rate in Uganda?", "locale": "en"}'
+```
+
+### Chat (SSE Streaming)
+```bash
+curl -N -X POST http://localhost:8000/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "X-Session-ID: my-session" \
+  -d '{"message": "What is VAT rate in Uganda?", "locale": "en"}'
 ```
 
 ## Running Tests
@@ -383,10 +423,10 @@ docker compose up --build
 ### Python Import Errors
 ```bash
 # Ensure virtual environment is active
-source venv/bin/activate
+source .venv/bin/activate
 
 # Reinstall dependencies
-pip install -r requirements.txt --force-reinstall
+uv pip install -r requirements.txt --reinstall
 ```
 
 ### Bun/Node Issues

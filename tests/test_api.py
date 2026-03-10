@@ -115,7 +115,7 @@ class TestChatResponse:
 
         assert response.reply == "Test response"
         assert response.sources == []
-        assert response.model == "ura-gemma-2-9b"
+        assert response.model == "ura-qwen2.5-3b-instruct"
 
 
 class TestChatModel:
@@ -127,7 +127,7 @@ class TestChatModel:
 
         model = ChatModel()
 
-        assert model.name == "ura-gemma-2-9b"
+        assert model.name == "ura-qwen2.5-3b-instruct"
     
     def test_generate_returns_dict(self):
         """Test generate returns proper dict."""
@@ -162,7 +162,7 @@ class TestChatModel:
         assert isinstance(result["reply"], str)
         assert len(result["reply"]) > 0
         assert isinstance(result["sources"], list)
-        assert result["model"] == "ura-gemma-2-9b"
+        assert result["model"] == "ura-qwen2.5-3b-instruct"
         assert result["retrieval_mode"] in ("hybrid", "keyword", "abstained", "blocked")
         assert isinstance(result["escalation_required"], bool)
 

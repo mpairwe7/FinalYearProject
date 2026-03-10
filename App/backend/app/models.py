@@ -32,7 +32,7 @@ class ChatResponse(BaseModel):
     citations: list[Citation] = Field(default_factory=list, description="Passage-level citations")
     faithfulness_score: float | None = Field(None, description="Grounding score 0-1")
     retrieval_mode: str = Field("keyword", description="hybrid | keyword | blocked | abstained")
-    model: str = "ura-gemma-2-9b"
+    model: str = "ura-qwen2.5-3b-instruct"
     conversation_id: str | None = None
     locale: str = Field("en", description="Locale used for this response")
     escalation_required: bool = Field(False, description="Whether human review is needed")

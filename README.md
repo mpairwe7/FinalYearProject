@@ -27,15 +27,19 @@ FinalYearProject/
 │   ├── app.py            # Gradio HF Spaces app
 │   ├── backend/          # FastAPI backend
 │   │   └── app/
-│   │       ├── main.py        # FastAPI app + endpoints
+│   │       ├── main.py        # FastAPI app + endpoints (sync + SSE streaming)
 │   │       ├── models.py      # Pydantic v2 request/response models
-│   │       ├── service.py     # ChatModel (RAG + classification)
+│   │       ├── service.py     # ChatModel (6-phase RAG + classification)
+│   │       ├── llm.py         # Qwen2.5-3B-Instruct local LLM generation
+│   │       ├── query.py       # Query rewriting (abbreviations, spelling, coreference)
+│   │       ├── cache.py       # Semantic cache (cosine similarity)
+│   │       ├── corrective_rag.py # Corrective re-retrieval + clarification
 │   │       ├── guardrails.py  # OWASP LLM Top 10 input/output guards
-│   │       ├── retriever.py   # Qdrant hybrid retriever (dense+BM25+RRF)
+│   │       ├── retriever.py   # Qdrant hybrid retriever (dense+BM25+RRF+circuit breaker)
 │   │       ├── indexer.py     # Document indexing pipeline (PDF+CSV→Qdrant)
-│   │       ├── tracing.py     # OpenTelemetry GenAI tracing
+│   │       ├── tracing.py     # OpenTelemetry GenAI tracing (per-stage spans)
 │   │       ├── analytics.py   # Prometheus-compatible metrics middleware
-│   │       └── database.py    # SQLite WAL analytics/feedback/session store
+│   │       └── database.py    # SQLite WAL analytics/feedback/session/conversation store
 │   └── frontend/         # Next.js 15 + React 19 + Zustand 5 frontend
 ├── MobileApp/             # Flutter mobile application
 │   └── ura_chatbot/       # Flutter 3.41 + Riverpod + Material 3
@@ -90,14 +94,21 @@ FinalYearProject/
 4) **Quality gates**: Deployment requires **both** classifier evaluation AND RAG evaluation (8 metrics) to pass. HF push is gated on `evaluate-rag` job success.
 5) **Feedback loop**: User thumbs-down feedback → `ml/pipelines/export_feedback.py` → retriever negative judgments + regression test candidates → retriever/reranker tuning.
 
-## URA Chatbot — RAG Pipeline
+## URA Chatbot — Advanced RAG Pipeline (2026)
 
-The notebook (`Notebooks/ura-training.ipynb`) implements a production-grade Retrieval-Augmented Generation pipeline:
+The API backend (`App/backend/app/`) implements a production-grade 6-phase Retrieval-Augmented Generation pipeline with local LLM inference:
 
 ```
-PDF/CSV ──▶ Semantic Chunking ──▶ Qdrant Vector Store ──▶ Hybrid Retrieval ──▶ Reranking ──▶ Generation
-               (page-level,          (versioned,           (dense + BM25       (cross-encoder)   (cached T5/Gemma,
-                section tags)          non-destructive)      RRF fusion)                           structured JSON)
+User Query
+  → Query Rewriting (spell-correct, abbreviation expand, coreference resolve)
+  → InputGuard (OWASP LLM01 prompt injection detection)
+  → Semantic Cache (cosine similarity ≥ 0.92 → instant reply)
+  → Hybrid Retrieval (dense + BM25 RRF → cross-encoder rerank)
+  → Corrective RAG (re-retrieve if avg score < threshold)
+  → Clarification / Abstention check
+  → LLM Synthesis (Qwen2.5-3B-Instruct, local inference)
+  → OutputGuard (PII redaction, XSS sanitization, grounding check)
+  → Escalation evaluation → SSE stream or sync response
 ```
 
 | Component | Implementation | Details |
@@ -105,11 +116,17 @@ PDF/CSV ──▶ Semantic Chunking ──▶ Qdrant Vector Store ──▶ Hybr
 | **Chunking** | `RecursiveCharacterTextSplitter` | QA: 600 tokens, PDF: 1000 tokens; section/page metadata |
 | **Embeddings** | Configurable (`all-MiniLM-L6-v2` / `multilingual-e5-large`) | Auto-detected dimensions (384/1024) |
 | **Vector Store** | Qdrant (local persistent) | Versioned collections, non-destructive indexing |
-| **Retrieval** | Hybrid dense + BM25 sparse | Reciprocal Rank Fusion (0.6/0.4 weights) |
-| **Reranking** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder reranking on top candidates |
-| **Generation** | Flan-T5 / Gemma-2 / TinyLlama | Singleton cache, structured output with citations |
-| **Safety** | OWASP-aligned guardrails | Injection detection, grounding validation, content moderation |
-| **Evaluation** | Hit@K, MRR, NDCG, groundedness | Regression gates block deployment below thresholds |
+| **Retrieval** | Hybrid dense + BM25 sparse | RRF fusion + circuit breaker with exponential backoff |
+| **Reranking** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Thread-safe cross-encoder reranking |
+| **Query Rewriting** | `query.py` | Abbreviation expansion (15+ URA terms), spell correction, coreference resolution |
+| **Semantic Cache** | `cache.py` | Cosine similarity matching, configurable TTL/threshold/max-size |
+| **Corrective RAG** | `corrective_rag.py` | Re-retrieve with expanded query when initial quality is low |
+| **Generation** | `Qwen/Qwen2.5-3B-Instruct` (local) | HuggingFace transformers, sync + SSE streaming via `TextIteratorStreamer` |
+| **Multi-turn Memory** | `database.py` | 5-turn sliding window from SQLite conversation history |
+| **Safety** | OWASP LLM Top 10 guardrails | Injection detection, PII redaction, XSS sanitization, grounding verification |
+| **Escalation** | `guardrails.py` | Auto-flag for human review on low faithfulness or no results |
+| **Observability** | OpenTelemetry + Prometheus | Per-stage latency spans, token usage metrics |
+| **Evaluation** | Hit@K, MRR, NDCG, faithfulness | 8-metric quality gates block deployment below thresholds |
 
 - Data model, ingestion flow, and evaluation rubric are documented in [docs/data-schema-and-eval.md](docs/data-schema-and-eval.md).
 
@@ -248,7 +265,7 @@ Run locally: `python governance/compliance_check.py`
 
 ## ML Training Pipeline
 
-The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemma/Llama models.
+The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemma/Llama models for both web API inference (Qwen2.5-3B) and on-device mobile inference (Gemma-2-2B).
 
 ### Scripts
 
@@ -256,8 +273,20 @@ The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemm
 |--------|-------------|
 | `ml/scripts/data_augmentation.py` | Combine CSV FAQs, PDFs, Luganda data into training format |
 | `ml/scripts/teacher_qa_generation.py` | Generate synthetic QA using Llama-3.2-3B teacher |
-| `ml/scripts/fine_tune_gemma.py` | LoRA/QLoRA fine-tuning for Gemma-2-2B |
+| `ml/scripts/fine_tune_gemma.py` | LoRA/QLoRA fine-tuning for Gemma-2-2B / Llama / T5 |
+| `ml/scripts/export_mobile.py` | Export fine-tuned Gemma-2B to GGUF INT4 for mobile inference |
 | `ml/scripts/run_training_pipeline.sh` | Full pipeline orchestrator |
+
+### Deployment Targets
+
+| Target | Model | Use Case | Export Format |
+|--------|-------|----------|---------------|
+| `web_high_accuracy` | Gemma-2-2B | Fine-tuning base | HF safetensors |
+| `mobile_gemma_2b` | Gemma-2-2B | On-device mobile inference | GGUF Q4_K_M (~1.5 GB) |
+| `mobile_offline` | Llama-3.2-1B | Lightweight mobile | GGUF Q4_K_M (~0.8 GB) |
+| `background_t5` | Flan-T5-Small | Background tasks | HF safetensors |
+
+**Web API inference** uses Qwen2.5-3B-Instruct (see `App/backend/app/llm.py`).
 
 ### Quick Start
 
@@ -265,12 +294,18 @@ The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemm
 # Full pipeline (data prep → teacher QA → fine-tuning)
 ./ml/scripts/run_training_pipeline.sh --target web_high_accuracy
 
+# Fine-tune Gemma-2B for mobile
+./ml/scripts/run_training_pipeline.sh --target mobile_gemma_2b
+
 # Dry run (validate data only)
 ./ml/scripts/run_training_pipeline.sh --dry-run
 
 # Individual steps
 python ml/scripts/data_augmentation.py --output artifacts/training_data.jsonl
-python ml/scripts/fine_tune_gemma.py --data artifacts/training_data.jsonl --epochs 3
+python ml/scripts/fine_tune_gemma.py --data artifacts/training_data.jsonl --target mobile_gemma_2b
+
+# Export to GGUF for mobile (after fine-tuning)
+python ml/scripts/export_mobile.py --adapter artifacts/models/ura-gemma-2-2b-it-*/final --quant Q4_K_M
 ```
 
 See [ml/README.md](ml/README.md) for detailed documentation.
@@ -280,11 +315,12 @@ See [ml/README.md](ml/README.md) for detailed documentation.
 - Frontend (App/frontend/): install with `bun install`; run `bun run dev` for local preview or `bun run lint/test/build` matching CI.
 - Keep Kaggle notebook entrypoint versioned; ensure data paths/configs are reproducible.
 - API: build and run locally with `docker compose up --build` (expects `app.main:app`). Qdrant runs as a first-class service via docker-compose with healthcheck.
+- LLM: Qwen2.5-3B-Instruct downloads automatically on first request (~6 GB). Set `LLM_DEVICE=cpu` for CPU-only inference or `LLM_DEVICE=auto` for GPU auto-detection. Disable with `LLM_ENABLED=false` to fall back to FAQ lookup.
 
 ## Container Baseline
 - API image (`Dockerfile`) uses multi-stage build, non-root runtime user, exec-style entrypoint, and Python-based healthcheck (no runtime `curl` dependency).
 - Training image (`Dockerfile.ml`) runs as non-root and pins core ML tooling versions (`mlflow`, `dvc`, `kaggle`) via build args.
-- Both Dockerfiles use BuildKit cache mounts for pip dependency layers (`# syntax=docker/dockerfile:1.7` + `--mount=type=cache`).
+- Both Dockerfiles use BuildKit cache mounts for uv dependency layers (`# syntax=docker/dockerfile:1.7` + `--mount=type=cache,target=/root/.cache/uv`).
 - Compose runtime hardening is enabled for production-like services (`read_only` rootfs for API, `cap_drop: [ALL]`, `no-new-privileges:true`, `tmpfs` mounts, `init: true`).
 
 ## Quick Commands

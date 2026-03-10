@@ -29,6 +29,7 @@ interface ChatStore {
   setMessage: (value: string) => void;
   setSpeechState: (state: SpeechState) => void;
   addTurns: (turns: ChatTurn[]) => void;
+  updateLastTurn: (updater: (turn: ChatTurn) => ChatTurn) => void;
   reset: () => void;
 }
 
@@ -77,6 +78,13 @@ export const useChatStore = create<ChatStore>((set) => ({
       const updated = [...s.chat, ...turns];
       // Cap history at 200 turns to prevent memory exhaustion (H5 audit fix)
       return { chat: updated.length > 200 ? updated.slice(-200) : updated };
+    }),
+  updateLastTurn: (updater) =>
+    set((s) => {
+      if (s.chat.length === 0) return s;
+      const updated = [...s.chat];
+      updated[updated.length - 1] = updater(updated[updated.length - 1]);
+      return { chat: updated };
     }),
   reset: () => set({ message: '', chat: [initialGreeting], speechState: 'idle' }),
 }));

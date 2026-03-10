@@ -152,7 +152,7 @@ POST /v1/chat
   ],
   "faithfulness_score": 0.92,
   "retrieval_mode": "hybrid",
-  "model": "ura-gemma-2-9b",
+  "model": "ura-qwen2.5-3b-instruct",
   "conversation_id": "conv_123",
   "locale": "en",
   "escalation_required": false,
@@ -186,6 +186,66 @@ curl -X POST http://localhost:8000/v1/chat \
   -H "X-Session-ID: my-session-123" \
   -d '{"message": "What is VAT rate in Uganda?", "locale": "en"}'
 ```
+
+---
+
+### Chat (SSE Streaming)
+
+Stream tokens progressively via Server-Sent Events. Same guardrails, retrieval, and LLM pipeline as `/v1/chat` but tokens arrive incrementally.
+
+```http
+POST /v1/chat/stream
+```
+
+**Request Body** — identical to `/v1/chat`.
+
+**SSE Event Types**
+
+| Event | Data | Description |
+|-------|------|-------------|
+| `metadata` | JSON | Sources, citations, retrieval mode, locale (sent first) |
+| `token` | string | Generated text chunk (sanitized, XSS-safe) |
+| `grounding` | JSON | `faithfulness_score`, `escalation_required`, `escalation_reason` |
+| `done` | empty | Stream complete |
+| `error` | string | Error message |
+
+**cURL Example**
+```bash
+curl -N -X POST http://localhost:8000/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "X-Session-ID: my-session-123" \
+  -d '{"message": "What is VAT rate in Uganda?", "locale": "en"}'
+```
+
+**JavaScript Example**
+```javascript
+const response = await fetch("/v1/chat/stream", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ message: "What is VAT?", locale: "en" }),
+});
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+let currentEventType = "";
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  const text = decoder.decode(value, { stream: true });
+  for (const line of text.split("\n")) {
+    if (line.startsWith("event: ")) currentEventType = line.slice(7);
+    else if (line.startsWith("data: ")) {
+      const data = line.slice(6);
+      if (currentEventType === "token") console.log(data);
+      else if (currentEventType === "metadata") console.log(JSON.parse(data));
+      else if (currentEventType === "grounding") console.log(JSON.parse(data));
+    }
+  }
+}
+reader.releaseLock();
+```
+
+**Rate Limiting**: Same limit as `/v1/chat` (default: 30/minute per IP, configurable via `RATE_LIMIT` env var).
 
 ---
 
@@ -564,7 +624,7 @@ class ChatResponse(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     faithfulness_score: float | None = None
     retrieval_mode: str = "keyword"  # hybrid | keyword | blocked | abstained
-    model: str = "ura-gemma-2-9b"
+    model: str = "ura-qwen2.5-3b-instruct"
     conversation_id: str | None = None
     locale: str = "en"
     escalation_required: bool = False
@@ -733,6 +793,23 @@ docker run -p 8000:8000 landwind/ura-chatbot-api:latest
 | `DENSE_MODEL` | Embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
 | `RERANKER_MODEL` | Cross-encoder reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
 | `RERANK_ENABLED` | Enable cross-encoder reranking | `true` |
+| **LLM Generation (Qwen2.5-3B-Instruct)** | | |
+| `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen2.5-3B-Instruct` |
+| `LLM_ENABLED` | Enable LLM generation (`false` = FAQ lookup fallback) | `true` |
+| `LLM_DEVICE` | Device for inference (`auto`, `cpu`, `cuda`) | `auto` |
+| `LLM_TORCH_DTYPE` | Tensor dtype (`float16`, `bfloat16`, `float32`, `auto`) | `auto` |
+| `LLM_TEMPERATURE` | Generation temperature | `0.2` |
+| `LLM_MAX_TOKENS` | Max new tokens per response | `512` |
+| **Semantic Cache** | | |
+| `CACHE_ENABLED` | Enable semantic response cache | `true` |
+| `CACHE_THRESHOLD` | Cosine similarity threshold for cache hit | `0.92` |
+| `CACHE_TTL_SECONDS` | Cache entry expiry | `3600` |
+| `CACHE_MAX_SIZE` | Max cached entries | `1000` |
+| **Corrective RAG** | | |
+| `CORRECTIVE_RAG_ENABLED` | Enable corrective re-retrieval | `true` |
+| `CORRECTIVE_RAG_THRESHOLD` | Min avg reranker score before re-retrieve | `0.3` |
+| **Rate Limiting** | | |
+| `RATE_LIMIT` | Rate limit for chat endpoints | `30/minute` |
 | **OWASP Guardrails** | | |
 | `INDEX_API_KEY` | Bearer token for `/v1/index` (empty = auth disabled) | `` |
 | `MAX_INPUT_LENGTH` | Maximum input characters | `2000` |
@@ -767,7 +844,20 @@ All responses include hardened security headers (OWASP, NIST SSDF):
 
 ## Changelog
 
-### v1.1.0 (2026-03-10)
+### v1.2.0 (2026-03-10) — Advanced RAG (6-Phase)
+- **LLM Generation**: Qwen2.5-3B-Instruct local inference replacing FAQ lookup (sync + SSE streaming)
+- **SSE Streaming**: `POST /v1/chat/stream` with `metadata`, `token`, `grounding`, `done`, `error` event types
+- **Query Rewriting**: Abbreviation expansion (15+ URA terms), spell correction, coreference resolution from history
+- **Semantic Cache**: Cosine similarity matching with configurable threshold/TTL/max-size
+- **Corrective RAG**: Automatic re-retrieval with expanded query when initial quality is low
+- **Clarification Detection**: Ask for more details on genuinely ambiguous single-word queries
+- **Multi-turn Memory**: 5-turn sliding window from SQLite conversation history
+- **Circuit Breaker**: Thread-safe Qdrant circuit breaker with exponential backoff (10s→300s)
+- **Rate Limiting**: `slowapi` with configurable per-IP limits on chat endpoints
+- **OutputGuard on SSE**: PII redaction and XSS sanitization applied to streaming tokens
+- **Per-stage Tracing**: OpenTelemetry spans with automatic timing for each RAG stage
+
+### v1.1.0 (2026-03-08)
 - Hybrid retrieval: Qdrant dense + BM25 sparse + RRF fusion + cross-encoder reranking
 - Passage-level citations with source, page, section, excerpt
 - Runtime faithfulness scoring (grounding verification)

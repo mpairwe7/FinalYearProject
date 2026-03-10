@@ -132,7 +132,7 @@ const LOCALE_OPTIONS = [
 ] as const;
 
 export default function Page() {
-  const { message, setMessage, chat, speechState, setSpeechState, addTurns } = useChatStore();
+  const { message, setMessage, chat, speechState, setSpeechState, addTurns, updateLastTurn } = useChatStore();
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [locale, setLocale] = useState<string>('en');
@@ -192,10 +192,11 @@ export default function Page() {
     const sendTime = Date.now();
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    const timeout = setTimeout(() => controller.abort(), 60000);
 
     try {
-      const response = await fetch(`${API_URL}/v1/chat`, {
+      // Try SSE streaming first
+      const response = await fetch(`${API_URL}/v1/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -206,29 +207,142 @@ export default function Page() {
       });
 
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+        // Fallback to synchronous endpoint
+        const syncResponse = await fetch(`${API_URL}/v1/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-ID': getAnalyticsSessionId(),
+          },
+          body: JSON.stringify({ message: text, top_k: 4, locale }),
+          signal: controller.signal,
+        });
+        if (!syncResponse.ok) throw new Error(`API error: ${syncResponse.status}`);
+        const data = await syncResponse.json();
+        const responseTimeMs = Date.now() - sendTime;
+        const assistantTurn = createTurn('assistant', data.reply, {
+          citations: data.citations ?? [],
+          faithfulnessScore: data.faithfulness_score ?? null,
+          retrievalMode: data.retrieval_mode ?? 'keyword',
+          escalationRequired: data.escalation_required ?? false,
+          escalationReason: data.escalation_reason ?? '',
+        });
+        addTurns([assistantTurn]);
+        trackChatReceived(responseTimeMs, (data.sources?.length ?? 0) > 0);
+        return;
       }
 
-      const data = await response.json();
+      // Create placeholder assistant turn for progressive streaming
+      const streamTurn = createTurn('assistant', '', {});
+      addTurns([streamTurn]);
+
+      // Parse SSE stream with proper event type tracking
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamedContent = '';
+      let metadata: Record<string, any> = {};
+      let currentEventType = 'token'; // default SSE event type
+      let pendingUpdate: number | null = null;
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEventType = line.slice(7).trim();
+              continue;
+            }
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+
+              // Dispatch based on tracked event type
+              if (currentEventType === 'error') {
+                // Server-side error — show to user
+                updateLastTurn((turn) => ({
+                  ...turn,
+                  content: 'Sorry, an error occurred while generating the response. Please try again.',
+                }));
+                currentEventType = 'token';
+                continue;
+              }
+
+              if (currentEventType === 'done') {
+                currentEventType = 'token';
+                continue;
+              }
+
+              if (currentEventType === 'metadata' || currentEventType === 'grounding') {
+                try {
+                  const parsed = JSON.parse(data);
+                  metadata = { ...metadata, ...parsed };
+                  updateLastTurn((turn) => ({
+                    ...turn,
+                    citations: parsed.citations ?? turn.citations,
+                    faithfulnessScore: parsed.faithfulness_score ?? turn.faithfulnessScore,
+                    retrievalMode: parsed.retrieval_mode ?? turn.retrievalMode,
+                    escalationRequired: parsed.escalation_required ?? turn.escalationRequired,
+                    escalationReason: parsed.escalation_reason ?? turn.escalationReason,
+                  }));
+                } catch {
+                  // malformed metadata — ignore
+                }
+                currentEventType = 'token';
+                continue;
+              }
+
+              // Default: token event — append text
+              if (data) {
+                streamedContent += data;
+                // Batch DOM updates via requestAnimationFrame to reduce re-renders
+                if (pendingUpdate === null) {
+                  const capturedContent = streamedContent;
+                  pendingUpdate = requestAnimationFrame(() => {
+                    updateLastTurn((turn) => ({
+                      ...turn,
+                      content: capturedContent,
+                    }));
+                    pendingUpdate = null;
+                  });
+                }
+              }
+              currentEventType = 'token';
+            }
+          }
+        }
+        // Flush TextDecoder and final content update
+        decoder.decode();
+        if (pendingUpdate !== null) cancelAnimationFrame(pendingUpdate);
+        updateLastTurn((turn) => ({ ...turn, content: streamedContent }));
+      } finally {
+        reader.releaseLock();
+      }
+
       const responseTimeMs = Date.now() - sendTime;
-
-      const assistantTurn = createTurn('assistant', data.reply, {
-        citations: data.citations ?? [],
-        faithfulnessScore: data.faithfulness_score ?? null,
-        retrievalMode: data.retrieval_mode ?? 'keyword',
-        escalationRequired: data.escalation_required ?? false,
-        escalationReason: data.escalation_reason ?? '',
-      });
-      addTurns([assistantTurn]);
-
-      // Track response analytics
-      trackChatReceived(responseTimeMs, (data.sources?.length ?? 0) > 0);
+      trackChatReceived(responseTimeMs, (metadata.sources?.length ?? 0) > 0);
     } catch (err) {
-      const errorTurn = createTurn(
-        'assistant',
-        'Sorry, I could not reach the URA knowledge base right now. Please try again shortly.',
-      );
-      addTurns([errorTurn]);
+      // FIX: use getState() to avoid stale closure
+      const currentChat = useChatStore.getState().chat;
+      const existingLast = currentChat[currentChat.length - 1];
+      if (existingLast?.role === 'assistant' && existingLast?.content === '') {
+        updateLastTurn((turn) => ({
+          ...turn,
+          content: 'Sorry, I could not reach the URA knowledge base right now. Please try again shortly.',
+        }));
+      } else {
+        const errorTurn = createTurn(
+          'assistant',
+          'Sorry, I could not reach the URA knowledge base right now. Please try again shortly.',
+        );
+        addTurns([errorTurn]);
+      }
       trackErrorOccurred('chat_fetch_failed');
     } finally {
       clearTimeout(timeout);
@@ -277,8 +391,9 @@ export default function Page() {
             {LOCALE_OPTIONS.map(opt => (
               <button
                 key={opt.value}
+                role="radio"
                 onClick={() => setLocale(opt.value)}
-                aria-pressed={locale === opt.value}
+                aria-checked={locale === opt.value}
                 style={{
                   padding: '0.25rem 0.75rem',
                   borderRadius: '1rem',
@@ -370,17 +485,23 @@ export default function Page() {
                 </div>
               </article>
             ))}
-            {isLoading && (
-              <article className="message-row">
-                <div className="avatar assistant" aria-hidden="true">
-                  <BotIcon />
-                </div>
-                <div className="bubble assistant">
-                  <div className="small" style={{ marginBottom: '0.25rem' }}>Assistant</div>
-                  <LoadingDots />
-                </div>
-              </article>
-            )}
+            {isLoading && (() => {
+              // Suppress loading dots when streaming content is arriving
+              const lastTurn = chat[chat.length - 1];
+              const isStreaming = lastTurn?.role === 'assistant' && lastTurn.content !== '';
+              if (isStreaming) return null;
+              return (
+                <article className="message-row">
+                  <div className="avatar assistant" aria-hidden="true">
+                    <BotIcon />
+                  </div>
+                  <div className="bubble assistant">
+                    <div className="small" style={{ marginBottom: '0.25rem' }}>Assistant</div>
+                    <LoadingDots />
+                  </div>
+                </article>
+              );
+            })()}
             <div ref={messagesEndRef} />
           </div>
 

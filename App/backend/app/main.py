@@ -16,6 +16,10 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sse_starlette.sse import EventSourceResponse
 
 from .models import (
     ChatRequest,
@@ -76,12 +80,20 @@ async def lifespan(app: FastAPI):
     logger.info("ChatModel shut down.")
 
 
+# ---------------------------------------------------------------------------
+# Rate limiter (Phase 1 – production hardening, 30 req/min/IP on chat)
+# ---------------------------------------------------------------------------
+_RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
+
 app = FastAPI(
     title="URA Chatbot API",
-    version="1.1.0",
+    version="1.2.0",
     description="AI-powered customer-service chatbot for the Uganda Revenue Authority",
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +181,7 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
 # Chat endpoint (with conversation logging)
 # ---------------------------------------------------------------------------
 @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
 def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_model)) -> ChatResponse:
     session_id = request.headers.get("X-Session-ID", "")
     t0 = time.perf_counter()
@@ -178,6 +191,7 @@ def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_mod
         conversation_id=body.conversation_id,
         top_k=body.top_k,
         locale=body.locale,
+        session_id=session_id or None,
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -228,6 +242,144 @@ def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_mod
             logger.debug("Escalation event tracking failed", exc_info=True)
 
     return ChatResponse(**result)
+
+
+# ---------------------------------------------------------------------------
+# SSE streaming chat endpoint (Phase 3)
+# ---------------------------------------------------------------------------
+@app.post("/v1/chat/stream", tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = Depends(get_model)):
+    """Server-Sent Events streaming chat — tokens arrive progressively."""
+    from . import llm as llm_module
+
+    session_id = request.headers.get("X-Session-ID", "")
+
+    async def event_generator():
+        import asyncio
+        from .guardrails import OutputGuard
+        from .retriever import HybridRetriever
+
+        _output_guard = OutputGuard()
+        t0 = time.perf_counter()
+        full_reply = ""  # FIX BUG: initialise before branches
+        result: dict = {}  # Sentinel: safe default for finally block
+
+        try:
+            # FIX LOGIC: run blocking retrieval in thread pool
+            result = await asyncio.to_thread(
+                model.generate_retrieval_only,
+                message=body.message,
+                conversation_id=body.conversation_id,
+                top_k=body.top_k,
+                locale=body.locale,
+                session_id=session_id or None,
+            )
+
+            # If blocked/abstained/clarification, send single event
+            if result.get("retrieval_mode") in ("blocked", "abstained", "clarification"):
+                yield {"event": "metadata", "data": json.dumps({
+                    "sources": result.get("sources", []),
+                    "citations": result.get("citations", []),
+                    "faithfulness_score": result.get("faithfulness_score"),
+                    "retrieval_mode": result.get("retrieval_mode"),
+                    "model": result.get("model"),
+                    "conversation_id": result.get("conversation_id"),
+                    "locale": result.get("locale"),
+                    "escalation_required": result.get("escalation_required", False),
+                    "escalation_reason": result.get("escalation_reason", ""),
+                })}
+                yield {"event": "token", "data": result.get("reply", "")}
+                yield {"event": "done", "data": ""}
+                return
+
+            # Send metadata first
+            yield {"event": "metadata", "data": json.dumps({
+                "sources": result.get("sources", []),
+                "citations": result.get("citations", []),
+                "retrieval_mode": result.get("retrieval_mode"),
+                "model": result.get("model"),
+                "conversation_id": result.get("conversation_id"),
+                "locale": result.get("locale"),
+            })}
+
+            # Stream LLM tokens
+            hits = result.get("_hits", [])
+            conversation_history = result.get("_history", [])
+            rewritten_query = result.get("_rewritten", body.message)
+            if llm_module.is_available() and hits:
+                # Run blocking LLM stream in thread pool
+                def _stream_tokens():
+                    return list(llm_module.generate_stream(
+                        query=rewritten_query,  # use rewritten, not original
+                        passages=hits,
+                        conversation_history=conversation_history or None,
+                        locale=body.locale,
+                    ))
+
+                tokens = await asyncio.to_thread(_stream_tokens)
+                for token in tokens:
+                    # Sanitize each token chunk (OWASP LLM05)
+                    sanitized = _output_guard.sanitize(token)
+                    full_reply += sanitized
+                    yield {"event": "token", "data": sanitized}
+
+                # Apply PII redaction to full accumulated reply
+                full_reply = _output_guard.redact_pii(full_reply)
+
+                # Compute faithfulness + grounding on full reply
+                contexts = [h.get("text") or h.get("answer", "") for h in hits]
+                faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
+                escalate, esc_reason = _output_guard.should_escalate(faith, hits)
+                yield {"event": "grounding", "data": json.dumps({
+                    "faithfulness_score": faith,
+                    "escalation_required": escalate,
+                    "escalation_reason": esc_reason,
+                })}
+
+                # Cache the completed streaming response
+                try:
+                    model._cache.put(rewritten_query, {
+                        "reply": full_reply,
+                        "sources": result.get("sources", []),
+                        "citations": result.get("citations", []),
+                        "faithfulness_score": faith,
+                        "retrieval_mode": result.get("retrieval_mode"),
+                        "model": result.get("model"),
+                        "conversation_id": result.get("conversation_id"),
+                        "locale": result.get("locale"),
+                        "escalation_required": escalate,
+                        "escalation_reason": esc_reason,
+                    })
+                except Exception:
+                    logger.debug("Stream cache store failed", exc_info=True)
+            else:
+                # Fallback: send best-hit answer as single token
+                full_reply = result.get("reply", "")
+                yield {"event": "token", "data": full_reply}
+
+            yield {"event": "done", "data": ""}
+
+        except Exception:
+            logger.exception("SSE stream error")
+            yield {"event": "error", "data": "Internal server error"}
+            yield {"event": "done", "data": ""}
+        finally:
+            # FIX LOGIC: log conversation in finally block (runs even on disconnect)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            try:
+                from .service import ChatModel as _CM
+                db.log_conversation(
+                    session_id=session_id or None,
+                    user_message=_CM.redact_for_storage(body.message),
+                    bot_reply=_CM.redact_for_storage(full_reply),
+                    sources=json.dumps(result.get("sources", []) if result else []),
+                    response_time_ms=round(elapsed_ms, 2),
+                )
+            except Exception:
+                logger.warning("Stream conversation logging failed", exc_info=True)
+
+    return EventSourceResponse(event_generator())
 
 
 # ---------------------------------------------------------------------------

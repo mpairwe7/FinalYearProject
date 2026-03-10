@@ -20,11 +20,89 @@ import logging
 import math
 import os
 import re
+import threading
+import time
 from collections import Counter
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker (Phase 1 – production resilience)
+# ---------------------------------------------------------------------------
+class CircuitState(Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class CircuitBreaker:
+    """Thread-safe circuit breaker with exponential back-off for Qdrant.
+
+    - CLOSED: requests flow normally; consecutive failures tracked.
+    - OPEN: requests rejected immediately; waits *reset_timeout* (doubles each trip).
+    - HALF_OPEN: one test request allowed; success → CLOSED, failure → OPEN.
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 3,
+        reset_timeout: float = 10.0,
+        max_timeout: float = 300.0,
+    ) -> None:
+        self.failure_threshold = failure_threshold
+        self._base_timeout = reset_timeout
+        self._max_timeout = max_timeout
+        self._failures = 0
+        self._state = CircuitState.CLOSED
+        self._opened_at: float = 0.0
+        self._current_timeout = reset_timeout
+        self._lock = threading.Lock()
+
+    @property
+    def state(self) -> CircuitState:
+        with self._lock:
+            if self._state == CircuitState.OPEN:
+                if time.monotonic() - self._opened_at >= self._current_timeout:
+                    self._state = CircuitState.HALF_OPEN
+                    logger.info("Circuit breaker → HALF_OPEN (testing)")
+            return self._state
+
+    def allow_request(self) -> bool:
+        """Return True if the request should proceed."""
+        s = self.state
+        return s in (CircuitState.CLOSED, CircuitState.HALF_OPEN)
+
+    def record_success(self) -> None:
+        """Call after a successful operation."""
+        with self._lock:
+            if self._state in (CircuitState.HALF_OPEN, CircuitState.OPEN):
+                logger.info("Circuit breaker → CLOSED (recovered)")
+            self._failures = 0
+            self._state = CircuitState.CLOSED
+            self._current_timeout = self._base_timeout
+
+    def record_failure(self) -> None:
+        """Call after a failed operation."""
+        with self._lock:
+            self._failures += 1
+            was_half_open = self._state == CircuitState.HALF_OPEN
+            if self._failures >= self.failure_threshold or was_half_open:
+                self._state = CircuitState.OPEN
+                self._opened_at = time.monotonic()
+                # Double backoff only from HALF_OPEN→OPEN (not first trip)
+                if was_half_open:
+                    self._current_timeout = min(
+                        self._current_timeout * 2, self._max_timeout
+                    )
+                logger.warning(
+                    "Circuit breaker → OPEN (failures=%d, backoff=%.0fs)",
+                    self._failures,
+                    self._current_timeout,
+                )
 
 # ---------------------------------------------------------------------------
 # Configuration via environment
@@ -147,6 +225,11 @@ class HybridRetriever:
         self._reranker: Any = None
         self._sparse_encoder = BM25SparseEncoder()
         self._ready = False
+        self._circuit = CircuitBreaker(
+            failure_threshold=3,
+            reset_timeout=10.0,
+            max_timeout=300.0,
+        )
 
     def initialize(self) -> bool:
         """Connect to Qdrant and load models.  Returns ``True`` if ready."""
@@ -212,6 +295,11 @@ class HybridRetriever:
         if not self._ready or self._client is None or self._dense_model is None:
             return []
 
+        # Circuit breaker gate — reject immediately when OPEN
+        if not self._circuit.allow_request():
+            logger.warning("Circuit breaker OPEN — skipping Qdrant search")
+            return []
+
         try:
             from qdrant_client import models
 
@@ -255,6 +343,7 @@ class HybridRetriever:
             )
 
             if not results.points:
+                self._circuit.record_success()
                 return []
 
             candidates: list[dict[str, Any]] = []
@@ -286,11 +375,16 @@ class HybridRetriever:
                     candidates[i]["score_rerank"] = float(s)
                 candidates.sort(key=lambda x: x.get("score_rerank", 0.0), reverse=True)
 
+            self._circuit.record_success()
+            self._ready = True  # ensure readiness restored on success
             return candidates[:top_k]
 
         except Exception:
-            logger.exception("Hybrid search failed; disabling retriever until reconnect")
-            self._ready = False
+            self._circuit.record_failure()
+            logger.exception("Hybrid search failed; circuit breaker tracking failure")
+            # Do NOT permanently disable _ready — the circuit breaker
+            # controls availability via allow_request(). Setting _ready=False
+            # here would prevent auto-recovery when Qdrant comes back.
             return []
 
     # -- Grounding helpers ---------------------------------------------------

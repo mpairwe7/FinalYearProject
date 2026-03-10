@@ -52,8 +52,9 @@ This project implements a comprehensive MLOps CI/CD pipeline following DataCamp 
 
 #### Stage Details
 
-##### Stage 1: Lint & Test
+##### Stage 1a: Lint & Test
 ```yaml
+Package Manager: uv (astral-sh/setup-uv)
 Tools Used:
 - Ruff: Fast Python linter
 - Black: Code formatter
@@ -484,8 +485,9 @@ gh run rerun <run-id> --failed
 1. **Staged Pipeline**: Fail fast with early linting/testing + parallel governance checks
 2. **Quality Gates**: Classifier gates + 8 RAG metrics gates before deployment
 3. **Governance-as-Code**: Automated NIST AI RMF, ISO 42001, OWASP LLM, EU AI Act compliance checks
-4. **SHA-Pinned Actions**: All 33 GitHub Actions pinned to full SHA hashes (supply chain security)
-5. **Caching**: GitHub Actions cache for pip, npm, Docker layers
+4. **SHA-Pinned Actions**: All GitHub Actions pinned to full SHA hashes (supply chain security)
+5. **Fast Package Management**: uv for Python (10-100x faster than pip), Bun for frontend
+6. **Caching**: GitHub Actions cache for uv, Bun, Docker layers
 6. **Security**: Trivy scanning, secret management, OWASP LLM Top 10 guardrails
 7. **Docker Deployment**: Frontend and backend both containerised via Docker Hub
 8. **On-Change Retraining**: Push/manual-triggered Kaggle data+training runs

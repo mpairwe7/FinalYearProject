@@ -351,6 +351,26 @@ def log_conversation(
     return conv_id
 
 
+def get_recent_turns(
+    session_id: str,
+    limit: int = 5,
+) -> list[dict[str, str]]:
+    """Retrieve the most recent conversation turns for a session (multi-turn memory).
+
+    Returns a list of dicts with ``user_message`` and ``bot_reply`` keys,
+    ordered oldest-first (chronological) for prompt injection.
+    """
+    conn = _get_connection()
+    rows = conn.execute(
+        """SELECT user_message, bot_reply FROM conversations
+           WHERE session_id = ?
+           ORDER BY created_at DESC LIMIT ?""",
+        (session_id, limit),
+    ).fetchall()
+    # Reverse to chronological order
+    return [{"user_message": r["user_message"], "bot_reply": r["bot_reply"]} for r in reversed(rows)]
+
+
 def get_conversation_stats(days: int = 30) -> dict[str, Any]:
     """Conversation analytics for the last N days."""
     conn = _get_connection()

@@ -21,7 +21,9 @@ Requirements:
 """
 
 import argparse
+import datetime
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -60,6 +62,15 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "lora_alpha": 32,
         "epochs": 3,
         "learning_rate": 2e-4,
+    },
+    "mobile_gemma_2b": {
+        "model_id": "google/gemma-2-2b-it",
+        "max_seq_length": 1024,
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "epochs": 5,
+        "learning_rate": 1e-4,
+        "description": "Gemma-2-2B optimised for on-device mobile inference (GGUF INT4)",
     },
     "mobile_offline": {
         "model_id": "meta-llama/Llama-3.2-1B-Instruct",
@@ -133,10 +144,13 @@ def check_dependencies() -> bool:
             print(f"   CUDA Version: {cuda_version}")
         else:
             print("⚠️  No GPU detected - training will be slow")
-            # Check if we should still proceed
-            response = input("Continue with CPU training? (y/n): ")
-            if response.lower() != 'y':
-                return False
+            # Auto-continue in CI/non-interactive environments
+            if os.environ.get("CI") or not os.isatty(0):
+                print("   Non-interactive environment detected — continuing with CPU")
+            else:
+                response = input("Continue with CPU training? (y/n): ")
+                if response.lower() != 'y':
+                    return False
     except Exception as e:
         print(f"⚠️  GPU check failed: {e}")
     
@@ -493,25 +507,12 @@ def setup_model_and_tokenizer(
             model_kwargs["torch_dtype"] = compute_dtype
         
         model = model_class.from_pretrained(model_id, **model_kwargs)
-        
+
         if use_4bit or use_8bit:
             model = prepare_model_for_kbit_training(model)
-        
+
         model.gradient_checkpointing_enable()
-        
-        total_params = model.num_parameters()
-        print(f"   ✓ Model loaded: {total_params:,} parameters")
-        
-        # Move to GPU if not already there
-        if torch.cuda.is_available() and model.device.type == "cpu":
-            print("   Moving model to GPU...")
-             model = model_class.from_pretrained(model_id, **model_kwargs)
-        
-        if use_4bit or use_8bit:
-            model = prepare_model_for_kbit_training(model)
-        
-        model.gradient_checkpointing_enable()
-        
+
         total_params = model.num_parameters()
         print(f"   ✓ Model loaded: {total_params:,} parameters")
         
@@ -762,7 +763,14 @@ def train(
         "is_t5": is_t5,
         "train_samples": len(split["train"]),
         "eval_samples": len(split["test"]),
-        "lora_config": {k: v for k, v in DEFAULT_LORA_CONFIG.items()},
+        "lora_config": {
+            "r": args.lora_r,
+            "lora_alpha": args.lora_alpha,
+            "lora_dropout": args.lora_dropout,
+            "target_modules": DEFAULT_LORA_CONFIG["target_modules"],
+            "bias": DEFAULT_LORA_CONFIG["bias"],
+            "task_type": DEFAULT_LORA_CONFIG["task_type"],
+        },
         "dataset_sources": list(set(dataset["source"])) if "source" in dataset.column_names else []
     }
     with open(config_path, "w") as f:
@@ -837,9 +845,12 @@ Examples:
     
     # LoRA arguments
     lora_group = parser.add_argument_group("LoRA")
-    lora_group.add_argument("--lora-r", type=int, default=16, help="LoRA rank")
-    lora_group.add_argument("--lora-alpha", type=int, default=32, help="LoRA alpha")
-    lora_group.add_argument("--lora-dropout", type=float, default=0.05)
+    lora_group.add_argument("--lora-r", type=int, default=None,
+                             help="LoRA rank (default: from preset or 16)")
+    lora_group.add_argument("--lora-alpha", type=int, default=None,
+                             help="LoRA alpha (default: from preset or 32)")
+    lora_group.add_argument("--lora-dropout", type=float, default=None,
+                             help="LoRA dropout (default: 0.05)")
     
     # Quantization arguments
     quant_group = parser.add_argument_group("Quantization")
@@ -868,7 +879,6 @@ Examples:
     
     # Force CPU if requested
     if args.force_cpu:
-        import os
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         print("\n⚠️  CPU training forced (--force-cpu)")
     
@@ -893,13 +903,19 @@ Examples:
         print(f"   Epochs:     {args.epochs}")
         print(f"   LR:         {args.learning_rate}")
     
-    # Set defaults for unspecified args
+    # Set defaults for unspecified args (after preset overrides)
     if args.max_seq_length is None:
         args.max_seq_length = 2048 if "gemma" in args.model else 1024
     if args.epochs is None:
         args.epochs = 3
     if args.learning_rate is None:
         args.learning_rate = 2e-4
+    if args.lora_r is None:
+        args.lora_r = DEFAULT_LORA_CONFIG["r"]
+    if args.lora_alpha is None:
+        args.lora_alpha = DEFAULT_LORA_CONFIG["lora_alpha"]
+    if args.lora_dropout is None:
+        args.lora_dropout = DEFAULT_LORA_CONFIG["lora_dropout"]
     
     # Find training data if not specified
     if args.data is None:
@@ -1019,7 +1035,6 @@ Examples:
     
     # Train
     try:
-        import datetime
         print(f"\n📅 Starting training at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         train(

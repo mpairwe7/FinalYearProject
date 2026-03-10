@@ -44,11 +44,13 @@ The URA Chat Bot project takes security seriously. If you discover a security vu
 - SLSA v1.2 build provenance attestation
 
 ### AI/ML-Specific Security (OWASP LLM Top 10 2025)
-- **LLM01 – Prompt Injection**: Input length/pattern validation; system-prompt isolation planned for full RAG phase
-- **LLM02 – Sensitive Information Disclosure**: PII redaction in training data, no PII logging
-- **LLM04 – Data and Model Poisoning**: Data provenance tracking, CODEOWNERS review gates, quality gates
-- **LLM05 – Improper Output Handling**: Output encoding before rendering, CSP headers
-- **LLM09 – Misinformation**: Confidence scores + source citations in every response
+- **LLM01 – Prompt Injection**: `InputGuard` with 11 regex patterns; system-prompt isolation via Qwen chat template; passage delimiters (`<passage>` tags) to reduce indirect injection surface
+- **LLM02 – Sensitive Information Disclosure**: `OutputGuard.redact_pii()` on all responses and before database storage; Uganda-specific PII patterns (TIN, NID, phone, passport); `STORE_RAW_PROMPTS=false` default; conversation history sanitized before feeding to LLM
+- **LLM03 – Supply Chain Vulnerabilities**: Pinned dependency versions; Trivy container scanning; SBOM generation; SHA-256 data integrity checks
+- **LLM04 – Data and Model Poisoning**: Data provenance tracking; CODEOWNERS review gates; quality gates; local inference (no external API calls)
+- **LLM05 – Improper Output Handling**: `OutputGuard.sanitize()` strips `<script>`, HTML tags, suspicious markdown image links; applied per-token in SSE streaming path; CSP headers
+- **LLM09 – Misinformation**: Runtime faithfulness scoring via `compute_faithfulness()`; grounding disclaimer appended when score < threshold; calibrated abstention when confidence too low; human escalation flagging
+- **LLM10 – Unbounded Consumption**: Rate limiting via `slowapi` (configurable per-IP); bearer token auth on `/v1/index` endpoint; `MAX_INPUT_LENGTH` enforced; semantic cache reduces redundant LLM calls
 
 ### Infrastructure
 - Non-root container execution

@@ -2,3 +2,8 @@
 node_modules
 out
 .next/cache
+
+# Prevent accidental commits from non-Bun package managers
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
