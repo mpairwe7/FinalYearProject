@@ -22,6 +22,7 @@ services:
       - WORKERS=${WORKERS:-2}
       - HF_MODEL_REPO=${HF_MODEL_REPO:-mpairweLandwind/ura-chatbot}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ANALYTICS_DB_DIR=/app/data_store
     env_file:
       - .env
     init: true
@@ -36,6 +37,7 @@ services:
     volumes:
       - ./artifacts/models:/app/models:ro
       - api_logs:/app/logs
+      - analytics_data:/app/data_store
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
       interval: 30s
@@ -143,3 +145,4 @@ networks:
 # -----------------------------------------------------------------------------
 volumes:
   api_logs:
+  analytics_data:

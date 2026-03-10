@@ -89,6 +89,56 @@ class FAQResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+class FeedbackRequest(BaseModel):
+    message_id: str = Field(..., min_length=1, max_length=128, description="ID of the bot message")
+    rating: str = Field(..., pattern=r"^(up|down)$", description="Thumbs up or down")
+    comment: str = Field("", max_length=1000, description="Optional text feedback")
+    session_id: str | None = Field(None, max_length=128)
+    user_query: str = Field("", max_length=2000, description="Original user question")
+    bot_reply: str = Field("", max_length=5000, description="Bot response that was rated")
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    message_id: str
+    rating: str
+    created_at: float
+
+
+class FeedbackCommentRequest(BaseModel):
+    comment: str = Field(..., min_length=1, max_length=1000, description="Follow-up comment text")
+
+
+class FeedbackSummary(BaseModel):
+    period_days: int
+    total: int
+    thumbs_up: int
+    thumbs_down: int
+    satisfaction_pct: float
+    recent: list[dict]
+
+
+# ---------------------------------------------------------------------------
+# Analytics
+# ---------------------------------------------------------------------------
+class AnalyticsEvent(BaseModel):
+    event_type: str = Field(..., min_length=1, max_length=100)
+    event_data: dict = Field(default_factory=dict)
+    session_id: str | None = Field(None, max_length=128)
+
+
+class AnalyticsDashboard(BaseModel):
+    uptime_seconds: float
+    requests: dict
+    chat: dict
+    sessions: dict
+    conversations: dict
+    feedback: dict
+
+
+# ---------------------------------------------------------------------------
 # System
 # ---------------------------------------------------------------------------
 class HealthResponse(BaseModel):

@@ -1,7 +1,17 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useChatStore, ChatTurn, SpeechState } from '../store/useChatStore';
+import { useChatStore, ChatTurn, SpeechState, createTurn } from '../store/useChatStore';
+import {
+  initAnalytics,
+  getAnalyticsSessionId,
+  trackChatSent,
+  trackChatReceived,
+  trackVoiceUsed,
+  trackStarterPromptUsed,
+  trackErrorOccurred,
+} from '../store/useAnalyticsStore';
+import FeedbackButtons from '../components/FeedbackButtons';
 
 // Minimal speech recognition types for browsers that expose them; keeps TS happy in Next.
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
@@ -108,11 +118,26 @@ const LoadingDots = () => (
   </span>
 );
 
+// Track the user query that precedes each assistant response for feedback context
+function findPrecedingUserQuery(chat: ChatTurn[], assistantIndex: number): string {
+  for (let i = assistantIndex - 1; i >= 0; i--) {
+    if (chat[i].role === 'user') return chat[i].content;
+  }
+  return '';
+}
+
 export default function Page() {
   const { message, setMessage, chat, speechState, setSpeechState, addTurns } = useChatStore();
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Track last user query separately so feedback context survives chat history truncation
+  const lastUserQueryRef = useRef<string>('');
+
+  // Initialise analytics on mount
+  useEffect(() => {
+    initAnalytics();
+  }, []);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -150,10 +175,15 @@ export default function Page() {
     const text = message.trim();
     if (!text || isLoading) return;
 
-    const userTurn: ChatTurn = { role: 'user', content: text, timestamp: Date.now() };
+    const userTurn = createTurn('user', text);
     addTurns([userTurn]);
     setMessage('');
     setIsLoading(true);
+    lastUserQueryRef.current = text;
+
+    // Track analytics
+    trackChatSent(text.length);
+    const sendTime = Date.now();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
@@ -161,7 +191,10 @@ export default function Page() {
     try {
       const response = await fetch(`${API_URL}/v1/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-ID': getAnalyticsSessionId(),
+        },
         body: JSON.stringify({ message: text, top_k: 4 }),
         signal: controller.signal,
       });
@@ -171,24 +204,24 @@ export default function Page() {
       }
 
       const data = await response.json();
+      const responseTimeMs = Date.now() - sendTime;
 
       const sources = data.sources?.length
         ? `\n\nSources: ${data.sources.join(', ')}`
         : '';
 
-      const assistantTurn: ChatTurn = {
-        role: 'assistant',
-        content: data.reply + sources,
-        timestamp: Date.now(),
-      };
+      const assistantTurn = createTurn('assistant', data.reply + sources);
       addTurns([assistantTurn]);
+
+      // Track response analytics
+      trackChatReceived(responseTimeMs, (data.sources?.length ?? 0) > 0);
     } catch (err) {
-      const errorTurn: ChatTurn = {
-        role: 'assistant',
-        content: 'Sorry, I could not reach the URA knowledge base right now. Please try again shortly.',
-        timestamp: Date.now(),
-      };
+      const errorTurn = createTurn(
+        'assistant',
+        'Sorry, I could not reach the URA knowledge base right now. Please try again shortly.',
+      );
       addTurns([errorTurn]);
+      trackErrorOccurred('chat_fetch_failed');
     } finally {
       clearTimeout(timeout);
       setIsLoading(false);
@@ -201,7 +234,13 @@ export default function Page() {
       recognitionRef.current.stop();
       return;
     }
+    trackVoiceUsed();
     recognitionRef.current.start();
+  };
+
+  const handleStarterPrompt = (prompt: string) => {
+    setMessage(prompt);
+    trackStarterPromptUsed(prompt);
   };
 
   const speechStatusLabel = useMemo(() => {
@@ -249,8 +288,8 @@ export default function Page() {
           </div>
 
           <div className="message-list" aria-live="polite">
-            {chat.map((turn: ChatTurn) => (
-              <article key={turn.timestamp + turn.role} className="message-row">
+            {chat.map((turn: ChatTurn, index: number) => (
+              <article key={turn.id} className="message-row">
                 <div className={`avatar ${turn.role === 'user' ? 'user' : 'assistant'}`} aria-hidden="true">
                   {turn.role === 'user' ? <UserIcon /> : <BotIcon />}
                 </div>
@@ -259,6 +298,13 @@ export default function Page() {
                     {turn.role}
                   </div>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{turn.content}</div>
+                  {turn.role === 'assistant' && turn.id !== 'greeting-0' && (
+                    <FeedbackButtons
+                      messageId={turn.id}
+                      userQuery={findPrecedingUserQuery(chat, index) || lastUserQueryRef.current}
+                      botReply={turn.content}
+                    />
+                  )}
                 </div>
               </article>
             ))}
@@ -324,7 +370,7 @@ export default function Page() {
           </div>
           <div className="chip-grid">
             {starterPrompts.map((p) => (
-              <button key={p} className="chip" onClick={() => setMessage(p)}>
+              <button key={p} className="chip" onClick={() => handleStarterPrompt(p)}>
                 <SparklesIcon /> {p}
               </button>
             ))}

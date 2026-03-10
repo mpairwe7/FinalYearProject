@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 export interface ChatTurn {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
@@ -18,11 +19,23 @@ interface ChatStore {
   reset: () => void;
 }
 
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 const initialGreeting: ChatTurn = {
+  id: 'greeting-0',
   role: 'assistant',
   content: 'Hi! I can answer your questions about URA. Type or speak your question to begin.',
   timestamp: Date.now(),
 };
+
+export function createTurn(role: 'user' | 'assistant', content: string): ChatTurn {
+  return { id: generateId(), role, content, timestamp: Date.now() };
+}
 
 export const useChatStore = create<ChatStore>((set) => ({
   message: '',
