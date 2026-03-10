@@ -36,6 +36,25 @@ The URA Chat Bot project takes security seriously. If you discover a security vu
 - DATA_DIR path-traversal guard on backend
 - No secrets in source code (`.env.example` template only)
 
+### Secret Scanning (Defence-in-Depth)
+
+Four independent secret scanners run at both pre-commit (local) and CI (remote) stages:
+
+| Scanner | Method | Coverage | Config File |
+|---------|--------|----------|-------------|
+| TruffleHog v3 | Verified credentials (contacts provider API) | 800+ detector types | `.trufflehog-exclude-paths.txt` |
+| GitGuardian ggshield | ML-based pattern detection | 400+ secret types | `.gitguardian.yaml` |
+| Gitleaks v8 | Regex + entropy + custom rules | 150+ rules + URA custom | `.gitleaks.toml` |
+| detect-secrets (Yelp) | Entropy + baseline comparison | Generic high-entropy | `.secrets.baseline` |
+
+- **Pre-commit hooks**: All 4 scanners run locally before every commit (setup: `bash scripts/setup-secret-scanning.sh`)
+- **CI pipeline**: `.github/workflows/secret-scanning.yml` runs all scanners on push, PR, and weekly full-history scan
+- **Summary gate**: All scanners must pass; ggshield gracefully skips on forks without API key
+- **Custom rules** (`.gitleaks.toml`): Uganda PII (TIN, NIN, mobile), ML API keys (HuggingFace, Kaggle, OpenAI, Google AI, W&B), mobile secrets (Firebase, Android keystore)
+- **detect-secrets baseline**: `.secrets.baseline` tracks known false-positives; audited in CI
+- **Branch protection**: `no-commit-to-branch` hook blocks direct commits to `main`/`master`
+- **File hygiene**: `detect-private-key` blocks `.pem`/`.key` files; `check-added-large-files` blocks files >500 KB
+
 ### Supply Chain Security
 - SHA-pinned GitHub Actions (no mutable tags)
 - Dependabot enabled for automated dependency updates
@@ -52,6 +71,15 @@ The URA Chat Bot project takes security seriously. If you discover a security vu
 - **LLM09 – Misinformation**: Runtime faithfulness scoring via `compute_faithfulness()`; grounding disclaimer appended when score < threshold; calibrated abstention when confidence too low; human escalation flagging
 - **LLM10 – Unbounded Consumption**: Rate limiting via `slowapi` (configurable per-IP); bearer token auth on `/v1/index` endpoint; `MAX_INPUT_LENGTH` enforced; semantic cache reduces redundant LLM calls
 
+### Mobile App Security (Flutter / On-Device Inference)
+- **On-device inference**: Gemma-2B GGUF model runs locally via MediaPipe — no data leaves the device
+- **Platform channels**: Kotlin/Swift native bridge with input validation on both sides
+- **No embedded secrets**: API URL injected via `--dart-define` at build time, never hardcoded
+- **Android**: minSdk 31 (Android 12+), `android:usesCleartextTraffic="false"`, ProGuard/R8 code shrinking
+- **iOS**: Minimum iOS 16, App Transport Security (ATS) enforced
+- **Model integrity**: SHA-256 checksum in `manifest.json` validates GGUF model before loading
+- **Offline-first**: Network errors trigger automatic fallback to on-device model — no unencrypted retry
+
 ### Infrastructure
 - Non-root container execution
 - Read-only filesystem where applicable
@@ -65,9 +93,10 @@ See `.env.example` for all configurable security parameters. Never commit `.env`
 ## Dependency Management
 
 This project uses:
-- **Dependabot** for automated Python and JavaScript (Bun/npm) dependency updates
+- **Dependabot** for automated Python, JavaScript (Bun/npm), and Flutter (pub) dependency updates
 - **Trivy** for container vulnerability scanning
 - **Semgrep** for static analysis (SAST)
+- **Pre-commit autoupdate** for keeping secret scanning hooks current (`pre-commit autoupdate`)
 
 ## Compliance
 

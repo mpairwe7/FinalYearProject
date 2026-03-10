@@ -21,7 +21,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
 | **Security** |
-| [Security Policy](../SECURITY.md) | Vulnerability reporting, OWASP LLM Top 10 controls |
+| [Security Policy](../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
 | **Governance & Compliance** |
 | [AI Risk Manifest](../governance/ai_risk_manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM, EU AI Act risk register |
 | [Compliance Gate](../governance/compliance_check.py) | CI gate script (10 files + 29 keywords) |
@@ -90,7 +90,7 @@ FinalYearProject/
 
 ### 1. Development Workflow
 ```
-Code → Push → Lint → Test → Review → Merge
+Code → Pre-commit (4 secret scanners) → Push → CI Lint + Test + Secret Scan → Review → Merge
 ```
 
 ### 2. ML Training Workflow
@@ -118,6 +118,11 @@ Main Branch → Governance Check → Docker Build → HF Push → Production Dep
 | `ml/configs/training_config.yaml` | Training hyperparameters |
 | `docker-compose.yml` | Local development setup |
 | `Dockerfile` | Production container image |
+| `.pre-commit-config.yaml` | Pre-commit hook definitions (4 secret scanners) |
+| `.gitleaks.toml` | Gitleaks custom rules (Uganda PII, ML API keys) |
+| `.gitguardian.yaml` | ggshield path exclusions |
+| `.trufflehog-exclude-paths.txt` | TruffleHog path exclusions |
+| `.secrets.baseline` | detect-secrets known false-positive baseline |
 
 ## Support
 

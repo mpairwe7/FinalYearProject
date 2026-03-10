@@ -21,9 +21,14 @@ All contributors must adhere to the [ACM Code of Ethics](https://www.acm.org/cod
    ```bash
    git checkout -b feature/your-feature-name
    ```
-3. **Make changes** following our coding standards (below).
-4. **Test** your changes locally.
-5. **Commit** with conventional commit messages:
+3. **Install pre-commit hooks** (one-time setup):
+   ```bash
+   bash scripts/setup-secret-scanning.sh
+   ```
+   This installs 4-layer secret scanning (TruffleHog, ggshield, Gitleaks, detect-secrets) plus hygiene hooks. Commits with secrets will be **automatically blocked**.
+4. **Make changes** following our coding standards (below).
+5. **Test** your changes locally.
+6. **Commit** with conventional commit messages:
    ```
    feat: add VAT rate lookup endpoint
    fix: correct PII redaction regex for Uganda NINs
@@ -49,9 +54,10 @@ All contributors must adhere to the [ACM Code of Ethics](https://www.acm.org/cod
 
 #### General
 - No secrets or credentials in code (use `.env` files, reference `.env.example`)
+- Pre-commit hooks **must** be installed — they block secrets, large files, and direct pushes to `main`
 - All new endpoints must include Pydantic request/response models
 - All new features must include tests
-- All changes must pass CI checks before merge
+- All changes must pass CI checks (lint, test, secret scanning) before merge
 
 ### Data Contributions
 
@@ -70,8 +76,9 @@ If contributing training data:
 ## Review Process
 
 1. All PRs require at least one approving review from a CODEOWNER.
-2. CI must pass (linting, type checking, tests, security scans).
-3. Documentation must be updated if the PR changes public APIs or user-facing behaviour.
+2. CI must pass (linting, type checking, tests, **secret scanning**, security scans).
+3. The `secret-scan-gate` job must pass — all 4 secret scanners run automatically on every PR.
+4. Documentation must be updated if the PR changes public APIs or user-facing behaviour.
 
 ## License
 

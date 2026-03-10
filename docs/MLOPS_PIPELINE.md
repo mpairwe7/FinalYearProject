@@ -100,6 +100,31 @@ This document describes the automated MLOps CI/CD pipeline for the URA Chatbot p
 - `skip_data_upload` (`true|false`)
 - `gpu` (deprecated compatibility input)
 
+### 4. Secret Scanning Pipeline (`.github/workflows/secret-scanning.yml`)
+
+**Triggers:**
+- Push to `main` or `develop`
+- Pull requests to `main` or `develop`
+- Weekly full-history scan (Sunday 02:00 UTC)
+- Manual dispatch with full-history option
+
+**Scanners (4 layers, parallel execution):**
+
+| Scanner | Detection Method | False Positive Rate | Coverage |
+|---------|-----------------|---------------------|----------|
+| TruffleHog v3 | Verified credentials (contacts provider API) | Near zero | 800+ detector types |
+| Gitleaks v8 | Regex + entropy + custom rules | Low | 150+ rules + URA custom |
+| ggshield | GitGuardian ML models | Very low | 400+ secret types |
+| detect-secrets | Entropy + baseline comparison | Medium (managed by baseline) | Generic high-entropy |
+
+**Custom Rules (`.gitleaks.toml`):**
+- Uganda TIN/NIN/mobile number detection
+- ML platform keys: HuggingFace, Kaggle, OpenAI, Google AI, W&B
+- Mobile secrets: Firebase, Android keystore passwords
+- High-entropy generic patterns (entropy > 4.5)
+
+**Summary Gate:** All scanners must pass. ggshield gracefully skips on forks without API key.
+
 ## Folder Structure
 
 ```
@@ -108,7 +133,8 @@ FinalYearProject/
 │   └── workflows/
 │       ├── ci-ml-pipeline.yml      # Main ML CI/CD
 │       ├── frontend-deploy.yml     # Frontend Docker deployment
-│       └── kaggle-training.yml     # Kaggle training
+│       ├── kaggle-training.yml     # Kaggle training
+│       └── secret-scanning.yml     # 4-layer secret scanning
 ├── App/                            # Web Application
 │   ├── classifier.py               # Gradio classifier app
 │   ├── README.md                   # App metadata (HF Space)
@@ -190,12 +216,13 @@ FinalYearProject/
    Navigate to Settings → Secrets and variables → Actions:
 
    ```
-   KAGGLE_USERNAME      # Kaggle account username
-   KAGGLE_API_TOKEN     # Kaggle API key
-   HF_TOKEN             # Hugging Face write token
-   DOCKERHUB_USERNAME   # Docker Hub username
-   DOCKERHUB_TOKEN      # Docker Hub access token
+   KAGGLE_USERNAME        # Kaggle account username
+   KAGGLE_API_TOKEN       # Kaggle API key
+   HF_TOKEN               # Hugging Face write token
+   DOCKERHUB_USERNAME     # Docker Hub username
+   DOCKERHUB_TOKEN        # Docker Hub access token
    DOCKER_IMAGE_FRONTEND  # Frontend Docker image name
+   GITGUARDIAN_API_KEY    # GitGuardian API key (free for OSS)
    ```
 
 2. **GitHub Repository Variables**
@@ -381,9 +408,10 @@ gh workflow run kaggle-training.yml \
 | Event | Workflow | Action |
 |-------|----------|--------|
 | Push to `main` | All | Full CI/CD + Deploy |
-| Push to `develop` | ML Pipeline | Test + Validate |
+| Push to `develop` | ML Pipeline + Secret Scan | Test + Validate |
 | PR to `main` | All | Test + Preview Deploy |
 | Push to data/notebook/ml/workflow files | Kaggle | Run remote data/training pipeline |
+| Weekly (Sunday 02:00 UTC) | Secret Scanning | Full git history secret scan |
 
 ## Monitoring & Debugging
 

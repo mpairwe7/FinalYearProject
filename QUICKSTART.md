@@ -17,7 +17,14 @@ uv pip install -r App/backend/requirements.txt
 cd App/frontend && bun install && cd ../..
 ```
 
-### 2. Set Up Environment
+### 2. Install Secret Scanning Hooks
+
+```bash
+# One-command setup (TruffleHog + ggshield + Gitleaks + detect-secrets)
+bash scripts/setup-secret-scanning.sh
+```
+
+### 3. Set Up Environment
 
 ```bash
 cp .env.example .env
@@ -30,7 +37,7 @@ cp .env.example .env
 # QDRANT_URL=http://localhost:6333       # Required for hybrid retrieval
 ```
 
-### 3. Run Locally
+### 4. Run Locally
 
 ```bash
 # Backend API
@@ -114,6 +121,7 @@ Add these secrets in GitHub → Settings → Secrets:
 | `KAGGLE_API_TOKEN` | [kaggle.com/account](https://www.kaggle.com/account) |
 | `DOCKERHUB_USERNAME` | Your Docker Hub username |
 | `DOCKERHUB_TOKEN` | [hub.docker.com/settings/security](https://hub.docker.com/settings/security) |
+| `GITGUARDIAN_API_KEY` | [dashboard.gitguardian.com](https://dashboard.gitguardian.com/api/personal-access-tokens) |
 
 ## 📊 Run ML Pipeline
 
@@ -153,6 +161,7 @@ docker compose up api
 | ML Pipeline | Push to main | Train → Evaluate → Deploy |
 | Frontend | Push to main | Build → Docker image → Docker Hub |
 | Kaggle Training | Push/Manual | Remote GPU/TPU data + training pipeline |
+| Secret Scanning | Push/PR/Weekly | 4-layer secret detection (TruffleHog, Gitleaks, ggshield, detect-secrets) |
 
 ---
 

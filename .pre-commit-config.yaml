@@ -1,0 +1,87 @@
+# =============================================================================
+# Pre-commit hooks – Secret Scanning & Code Quality (2026 Industry Standard)
+#
+# Setup:
+#   pip install pre-commit && pre-commit install --hook-type pre-commit --hook-type pre-push
+#
+# Update hook versions:
+#   pre-commit autoupdate
+#
+# Manual full scan:
+#   pre-commit run --all-files
+# =============================================================================
+default_stages: [pre-commit]
+
+repos:
+  # ── TruffleHog v3 – verified secret detection ────────────────────────────
+  # Scans staged diffs for 800+ credential types. Only reports secrets that
+  # are confirmed active (verified against the provider's API), so nearly
+  # zero false positives.
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.88.0
+    hooks:
+      - id: trufflehog
+        name: TruffleHog – verified secret scan
+        stages: [pre-commit, pre-push]
+        args:
+          - --only-verified
+          - --fail
+
+  # ── GitGuardian ggshield – real-time secret detection ─────────────────────
+  # Requires GITGUARDIAN_API_KEY env var (free for open-source).
+  # Config: .gitguardian.yaml
+  - repo: https://github.com/gitguardian/ggshield
+    rev: v1.35.0
+    hooks:
+      - id: ggshield
+        name: ggshield – GitGuardian secret scan
+        stages: [pre-commit]
+
+  # ── Gitleaks – fast regex-based secret scanner ────────────────────────────
+  # Config: .gitleaks.toml (includes Uganda-specific PII + ML API key rules)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.0
+    hooks:
+      - id: gitleaks
+        name: Gitleaks – detect hardcoded secrets
+        stages: [pre-commit]
+
+  # ── detect-secrets (Yelp) – baseline-aware entropy scanner ────────────────
+  # Maintains a baseline (.secrets.baseline) of known false-positives.
+  # New high-entropy strings trigger a failure requiring explicit audit.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: detect-secrets – baseline scan
+        args: ['--baseline', '.secrets.baseline']
+        exclude: >
+          (?x)^(
+            .*\.lock$|
+            package-lock\.json$|
+            bun\.lockb$|
+            .*\.ipynb$|
+            Data/.*|
+            Results/.*|
+            test_env/.*
+          )$
+        stages: [pre-commit]
+
+  # ── Basic hygiene checks ──────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        name: Block large files (>500 KB)
+        args: ['--maxkb=500']
+      - id: detect-private-key
+        name: Detect private keys (.pem, .key, RSA/EC headers)
+      - id: check-merge-conflict
+        name: Check for merge conflict markers
+      - id: no-commit-to-branch
+        name: Block direct commits to main/master
+        args: ['--branch', 'main', '--branch', 'master']
+      - id: check-case-conflict
+        name: Check for case-insensitive filename conflicts
+      - id: check-symlinks
+        name: Check for broken symlinks

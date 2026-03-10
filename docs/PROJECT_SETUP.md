@@ -66,7 +66,24 @@ bun install
 cd ../..
 ```
 
-### 4. Environment Configuration
+### 4. Secret Scanning & Pre-commit Hooks
+
+```bash
+# One-command setup: installs TruffleHog, ggshield, Gitleaks, detect-secrets
+bash scripts/setup-secret-scanning.sh
+
+# Or manually:
+pip install pre-commit detect-secrets ggshield
+pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+This installs 4-layer defence-in-depth secret scanning (see [SECURITY.md](../SECURITY.md#secret-scanning-defence-in-depth)):
+1. **TruffleHog v3** — verified credential detection (800+ detectors)
+2. **ggshield** — GitGuardian ML-based detection (requires `GITGUARDIAN_API_KEY`)
+3. **Gitleaks v8** — regex + entropy with custom URA rules (`.gitleaks.toml`)
+4. **detect-secrets** — baseline-aware entropy scanner (`.secrets.baseline`)
+
+### 5. Environment Configuration
 
 ```bash
 # Copy example environment file
@@ -178,7 +195,8 @@ FinalYearProject/
 │   └── workflows/           # CI/CD pipelines
 │       ├── ci-ml-pipeline.yml
 │       ├── frontend-deploy.yml
-│       └── kaggle-training.yml
+│       ├── kaggle-training.yml
+│       └── secret-scanning.yml  # 4-layer secret scanning
 │
 ├── App/                     # Application Code
 │   ├── app.py              # Full Gradio app (HF Spaces)

@@ -1,0 +1,122 @@
+# =============================================================================
+# Gitleaks v8 Configuration – URA Chatbot (2026)
+# Docs: https://github.com/gitleaks/gitleaks
+#
+# Extends default 150+ rules with project-specific detectors for:
+#   - Uganda PII (TIN, NIN, mobile numbers)
+#   - ML/AI platform API keys (HuggingFace, Kaggle, OpenAI, Google AI)
+#   - Mobile app secrets (Firebase, Android keystore)
+#   - High-entropy generic patterns
+# =============================================================================
+title = "URA Chatbot Gitleaks Config"
+
+[extend]
+useDefault = true
+
+# ── Uganda-specific PII detectors ───────────────────────────────────────────
+
+[[rules]]
+id = "uganda-tin"
+description = "Uganda Taxpayer Identification Number"
+regex = '''(?i)\b(tin|taxpayer)[\s:=_-]*\d{10}\b'''
+tags = ["pii", "uganda"]
+keywords = ["tin", "taxpayer"]
+
+[[rules]]
+id = "uganda-nin"
+description = "Uganda National ID Number (CM + 13 digits + letter)"
+regex = '''(?i)\b(nin|national[_\s-]?id)[\s:=_-]*[A-Z]{2}\d{13}[A-Z]\b'''
+tags = ["pii", "uganda"]
+keywords = ["nin", "national"]
+
+[[rules]]
+id = "uganda-mobile"
+description = "Uganda Mobile Number (potential PII in code)"
+regex = '''(?i)(phone|mobile|tel)[\s:=]*["\']?\+?256[0-9]{9}["\']?'''
+tags = ["pii", "uganda"]
+keywords = ["phone", "mobile", "256"]
+
+# ── ML/AI platform API keys ─────────────────────────────────────────────────
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API Key"
+regex = '''sk-[a-zA-Z0-9_-]{20,}'''
+tags = ["api-key", "ml"]
+keywords = ["sk-"]
+
+[[rules]]
+id = "huggingface-token"
+description = "Hugging Face Access Token"
+regex = '''hf_[a-zA-Z0-9]{30,}'''
+tags = ["api-key", "ml"]
+keywords = ["hf_"]
+
+[[rules]]
+id = "kaggle-key"
+description = "Kaggle API Key"
+regex = '''(?i)(kaggle[_\s]*(?:key|token|api))[\s]*[=:][\s]*["\']?[a-f0-9]{32}["\']?'''
+tags = ["api-key", "ml"]
+keywords = ["kaggle"]
+
+[[rules]]
+id = "google-ai-api-key"
+description = "Google AI / Gemini API Key"
+regex = '''AIza[0-9A-Za-z_-]{35}'''
+tags = ["api-key", "ml"]
+keywords = ["AIza"]
+
+[[rules]]
+id = "wandb-api-key"
+description = "Weights & Biases API Key"
+regex = '''(?i)(wandb|weights.biases)[\s]*[=:][\s]*["\']?[a-f0-9]{40}["\']?'''
+tags = ["api-key", "ml"]
+keywords = ["wandb"]
+
+# ── Mobile app secrets ───────────────────────────────────────────────────────
+
+[[rules]]
+id = "firebase-api-key"
+description = "Firebase API Key"
+regex = '''AIza[0-9A-Za-z_-]{35}'''
+tags = ["api-key", "mobile"]
+keywords = ["firebase", "AIza"]
+
+[[rules]]
+id = "android-keystore-password"
+description = "Android Keystore Password"
+regex = '''(?i)(store[_\s]?password|key[_\s]?password)[\s]*[=:][\s]*["\']?[^\s"\']{6,}["\']?'''
+tags = ["credential", "mobile"]
+keywords = ["storepassword", "keypassword"]
+
+# ── High-entropy generic patterns ────────────────────────────────────────────
+
+[[rules]]
+id = "generic-high-entropy"
+description = "High entropy string assigned to secret-like variable"
+regex = '''(?i)(secret|token|password|apikey|api_key|auth_token|access_key|private_key)[\s]*[=:][\s]*["\']?[A-Za-z0-9+/=]{32,}["\']?'''
+tags = ["generic"]
+entropy = 4.5
+
+# ── Allow-list (false positives) ─────────────────────────────────────────────
+
+[allowlist]
+description = "Global allowlist – files that are expected to contain hash-like strings"
+paths = [
+    '''\.secrets\.baseline$''',
+    '''\.env\.example$''',
+    '''package-lock\.json$''',
+    '''bun\.lockb$''',
+    '''bun\.lock$''',
+    '''poetry\.lock$''',
+    '''requirements\.txt$''',
+    '''pubspec\.lock$''',
+    '''Podfile\.lock$''',
+    '''go\.sum$''',
+    '''.*_test\.py$''',
+    '''tests/.*''',
+    '''Results/.*''',
+    '''Data/.*''',
+    '''.*\.ipynb$''',
+    '''docs/capstone/sbom-cyclonedx\.json$''',
+]

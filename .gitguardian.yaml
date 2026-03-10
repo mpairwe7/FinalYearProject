@@ -1,0 +1,60 @@
+# =============================================================================
+# GitGuardian (ggshield) Configuration – URA Chatbot (2026)
+# Docs: https://docs.gitguardian.com/ggshield-docs
+#
+# ggshield detects 400+ secret types using pattern matching + ML models.
+# Requires GITGUARDIAN_API_KEY env var (free tier: unlimited for OSS).
+# =============================================================================
+version: 2
+
+secret:
+  # Never display raw secret values in output
+  show-secrets: false
+
+  # Paths to ignore (lock files, build artifacts, data)
+  ignored-paths:
+    # Lock files (contain hashes, not secrets)
+    - '**/*.lock'
+    - '**/package-lock.json'
+    - '**/bun.lockb'
+    - '**/bun.lock'
+    - '**/poetry.lock'
+    - '**/pubspec.lock'
+    - '**/Podfile.lock'
+
+    # Secret scanning baseline
+    - '**/.secrets.baseline'
+
+    # Build artifacts & caches
+    - '**/node_modules/**'
+    - '**/__pycache__/**'
+    - '**/venv/**'
+    - '**/.venv/**'
+    - '**/test_env/**'
+    - '**/*.ipynb_checkpoints/**'
+    - '**/.next/**'
+    - '**/build/**'
+    - '**/.dart_tool/**'
+
+    # Data & results (large datasets, no secrets)
+    - '**/Results/**'
+    - '**/Data/**'
+    - '**/artifacts/**'
+
+    # Notebooks (may contain example tokens in output cells)
+    - '**/*.ipynb'
+
+    # SBOM (contains package hashes)
+    - '**/sbom-cyclonedx.json'
+
+    # Flutter/mobile build outputs
+    - '**/MobileApp/**/build/**'
+    - '**/*.apk'
+    - '**/*.ipa'
+    - '**/*.aab'
+
+  # Do not ignore any detector types
+  ignored-detectors: []
+
+  # Fail the hook if any secret is found
+  exit-zero: false

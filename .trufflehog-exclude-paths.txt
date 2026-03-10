@@ -1,0 +1,44 @@
+# =============================================================================
+# TruffleHog v3 – Path Exclusions
+# Usage: trufflehog git file://. --exclude-paths .trufflehog-exclude-paths.txt
+# =============================================================================
+
+# Lock files & package manifests (contain hashes, not secrets)
+.*\.lock$
+package-lock\.json$
+bun\.lockb$
+poetry\.lock$
+go\.sum$
+
+# Build artifacts & caches
+node_modules/
+__pycache__/
+\.venv/
+venv/
+test_env/
+\.ipynb_checkpoints/
+\.next/
+build/
+dist/
+
+# Data & results (large files, no secrets expected)
+Data/
+Results/
+artifacts/
+
+# Minified assets
+.*\.min\.js$
+.*\.min\.css$
+
+# Secret scanning baseline (contains hashed values)
+\.secrets\.baseline$
+
+# Environment template (contains placeholder values, not real secrets)
+\.env\.example$
+
+# Flutter/mobile build artifacts
+MobileApp/.*/build/
+MobileApp/.*/\.dart_tool/
+.*\.apk$
+.*\.ipa$
+.*\.aab$

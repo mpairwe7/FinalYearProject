@@ -90,6 +90,11 @@ ml/kaggle/kernel-metadata.json
 *.key
 kaggle.json
 
+# Secret scanning tool caches & reports
+.ggshield_cache/
+gitleaks-report.json
+gitleaks-report.sarif
+
 # Test artifacts
 .coverage
 htmlcov/
