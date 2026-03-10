@@ -21,6 +21,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _DB_DIR = Path(os.getenv("ANALYTICS_DB_DIR", str(_PROJECT_ROOT / "data_store")))
 _DB_PATH = _DB_DIR / "analytics.db"
 
+# Retention TTLs (days) — enforced by cleanup_expired_data()
+_CONVERSATION_TTL_DAYS = int(os.getenv("CONVERSATION_TTL_DAYS", "7"))
+_ANALYTICS_TTL_DAYS = int(os.getenv("ANALYTICS_TTL_DAYS", "365"))
+_FEEDBACK_TTL_DAYS = int(os.getenv("FEEDBACK_TTL_DAYS", "90"))
+_SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
+
 # Thread-local storage for connections with a lock for init safety
 _local = threading.local()
 _init_lock = threading.Lock()
@@ -100,6 +106,51 @@ def init_db() -> None:
     """)
     conn.commit()
     logger.info("Analytics database initialised at %s", _DB_PATH)
+
+    # Run cleanup on startup
+    cleanup_expired_data()
+
+
+# ---------------------------------------------------------------------------
+# Retention TTL enforcement
+# ---------------------------------------------------------------------------
+def cleanup_expired_data() -> dict[str, int]:
+    """Delete rows older than configured TTLs.  Returns counts deleted."""
+    conn = _get_connection()
+    now = time.time()
+    deleted: dict[str, int] = {}
+
+    ttls = [
+        ("conversations", _CONVERSATION_TTL_DAYS),
+        ("analytics_events", _ANALYTICS_TTL_DAYS),
+        ("feedback", _FEEDBACK_TTL_DAYS),
+        ("sessions", _SESSION_TTL_DAYS),
+    ]
+    ts_col = {
+        "conversations": "created_at",
+        "analytics_events": "created_at",
+        "feedback": "created_at",
+        "sessions": "last_active_at",
+    }
+
+    for table, ttl_days in ttls:
+        cutoff = now - (ttl_days * 86400)
+        col = ts_col[table]
+        try:
+            cursor = conn.execute(
+                f"DELETE FROM {table} WHERE {col} < ?",  # noqa: S608 — table/col are hardcoded above
+                (cutoff,),
+            )
+            conn.commit()
+            deleted[table] = cursor.rowcount
+            if cursor.rowcount > 0:
+                logger.info("TTL cleanup: deleted %d rows from %s (>%dd)", cursor.rowcount, table, ttl_days)
+        except Exception:
+            logger.exception("TTL cleanup failed for %s", table)
+            conn.rollback()
+            deleted[table] = 0
+
+    return deleted
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +287,7 @@ def upsert_session(
     try:
         conn.execute(
             """INSERT INTO sessions (id, started_at, last_active_at, message_count, user_agent, platform)
-               VALUES (?, ?, ?, 0, ?, ?)
+               VALUES (?, ?, ?, 1, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  last_active_at = excluded.last_active_at,
                  message_count = sessions.message_count + 1""",
@@ -327,3 +378,37 @@ def get_conversation_stats(days: int = 30) -> dict[str, Any]:
         "avg_confidence": round(row["avg_confidence"] or 0, 3),
         "top_topics": [{"tag": r["topic_tag"], "count": r["cnt"]} for r in top_topics],
     }
+
+
+# ---------------------------------------------------------------------------
+# Feedback review export (feedback loop)
+# ---------------------------------------------------------------------------
+def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
+    """Export negative feedback and low-confidence conversations for review.
+
+    Returns entries suitable for retriever/reranker tuning and regression tests.
+    """
+    conn = _get_connection()
+    cutoff = time.time() - (days * 86400)
+
+    # Thumbs-down feedback
+    down_rows = conn.execute(
+        """SELECT f.message_id, f.user_query, f.bot_reply, f.comment, f.created_at,
+                  'thumbs_down' as review_reason
+           FROM feedback f
+           WHERE f.rating = 'down' AND f.created_at >= ?
+           ORDER BY f.created_at DESC""",
+        (cutoff,),
+    ).fetchall()
+
+    # Low-confidence conversations
+    low_conf_rows = conn.execute(
+        """SELECT id as message_id, user_message as user_query, bot_reply,
+                  '' as comment, created_at, 'low_confidence' as review_reason
+           FROM conversations
+           WHERE confidence < 0.3 AND confidence > 0 AND created_at >= ?
+           ORDER BY created_at DESC LIMIT 200""",
+        (cutoff,),
+    ).fetchall()
+
+    return [dict(r) for r in down_rows] + [dict(r) for r in low_conf_rows]

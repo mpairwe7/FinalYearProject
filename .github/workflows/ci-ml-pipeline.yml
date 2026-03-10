@@ -91,6 +91,34 @@ jobs:
           echo "- Linter: ruff" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
+  # Stage 1b: Governance Compliance Check
+  # ============================================
+  governance-check:
+    name: Governance & Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Run governance compliance check
+        run: python governance/compliance_check.py
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Governance Compliance" >> "$GITHUB_STEP_SUMMARY"
+          echo "Checked: NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10, EU AI Act" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
   # Stage 2: Data Validation
   # ============================================
   data-validation:
@@ -264,7 +292,6 @@ jobs:
           python ml/pipelines/evaluate.py \
             --model-path Model \
             --output-dir Results
-        continue-on-error: true
 
       - name: Upload evaluation results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -276,13 +303,85 @@ jobs:
         run: python ml/pipelines/quality_gates.py
 
   # ============================================
+  # Stage 5b: RAG Evaluation & Quality Gates
+  # ============================================
+  evaluate-rag:
+    name: RAG Evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: evaluate-model
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install numpy pyyaml sentence-transformers torch --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Verify RAG evaluation set exists
+        run: |
+          if [ ! -f Data/eval/rag_eval.jsonl ]; then
+            echo "ERROR: RAG evaluation set Data/eval/rag_eval.jsonl is missing"
+            exit 1
+          fi
+          echo "Eval set: $(wc -l < Data/eval/rag_eval.jsonl) samples"
+
+      - name: Run RAG evaluation (English)
+        run: |
+          mkdir -p Results
+          python -m ml.pipelines.evaluate_rag \
+            --eval-set Data/eval/rag_eval.jsonl \
+            --output-dir Results \
+            --config ml/configs/training_config.yaml
+
+      - name: Verify Luganda evaluation set exists
+        run: |
+          if [ ! -f Data/eval/rag_eval_lg.jsonl ]; then
+            echo "ERROR: Luganda evaluation set Data/eval/rag_eval_lg.jsonl is missing"
+            exit 1
+          fi
+          echo "Luganda eval set: $(wc -l < Data/eval/rag_eval_lg.jsonl) samples"
+
+      - name: Run RAG evaluation (Luganda)
+        run: |
+          python -m ml.pipelines.evaluate_rag \
+            --eval-set Data/eval/rag_eval_lg.jsonl \
+            --output-dir Results/lg \
+            --config ml/configs/training_config.yaml
+
+      - name: Upload RAG evaluation results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rag-evaluation-results
+          path: |
+            Results/rag_evaluation_results.json
+            Results/rag_quality_gates.json
+            Results/lg/
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## RAG Evaluation" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f Results/rag_evaluation_results.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat Results/rag_evaluation_results.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ============================================
   # Stage 6: Push to Hugging Face Hub
   # ============================================
   push-to-huggingface:
     name: Deploy to Hugging Face
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: evaluate-model
+    needs: [evaluate-model, evaluate-rag]
     if: inputs.deploy_model == true || github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code

@@ -1,0 +1,194 @@
+"""OWASP LLM Top 10 (2025) security controls for the URA Chatbot API.
+
+Controls mapped to OWASP categories:
+- LLM01  Prompt Injection       → InputGuard.check()
+- LLM02  Sensitive Info Disclosure → OutputGuard.redact_pii()
+- LLM05  Improper Output Handling  → OutputGuard.sanitize()
+- LLM09  Misinformation           → OutputGuard.check_grounding()
+
+Reference: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", "2000"))
+STORE_RAW_PROMPTS = os.getenv("STORE_RAW_PROMPTS", "false").lower() == "true"
+ABSTENTION_THRESHOLD = float(os.getenv("ABSTENTION_THRESHOLD", "0.15"))
+ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
+
+# ---------------------------------------------------------------------------
+# Prompt-injection patterns (LLM01)
+# ---------------------------------------------------------------------------
+_INJECTION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"ignore\s+(all\s+)?previous\s+instructions",
+        r"disregard\s+(all\s+)?(previous|above|prior)",
+        r"you\s+are\s+now\s+(?:a\s+)?(?:DAN|jailbreak|evil)",
+        r"system\s*:\s*",
+        r"<\|(?:im_start|system|assistant)\|>",
+        r"\[INST\]",
+        r"###\s*(?:Instruction|System)",
+        r"ADMIN\s*(?:MODE|OVERRIDE|ACCESS)",
+        r"(?:reveal|show|print|output)\s+(?:your\s+)?(?:system\s+)?(?:prompt|instructions)",
+        r"(?:act|pretend|behave)\s+as\s+(?:if|though)\s+you",
+        r"do\s+(?:not|anything)\s+(?:I|we)\s+(?:say|ask|tell)",
+    ]
+]
+
+# Uganda-specific PII patterns (LLM02)
+# NOTE: Phone pattern uses (?:^|\s|[^\w]) instead of \b before +256
+#       because \b requires a word-char boundary and '+' is not a word char.
+_PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")),
+    ("ug_phone", re.compile(r"(?:^|(?<=\s))(?:\+256|0)(?:7[0-9]{8}|4[0-9]{8})\b")),
+    ("ug_tin", re.compile(r"\b1\d{9}\b")),
+    ("ug_nid", re.compile(r"\bC[MF]\d{2}[A-Z]{5}\d{5}[A-Z]\b")),
+    ("credit_card", re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b")),
+    ("amex_card", re.compile(r"\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b")),
+    ("ug_passport", re.compile(r"\b[A-Z]{2}\d{7}\b")),
+]
+
+
+@dataclass
+class GuardResult:
+    """Result of a guardrail check."""
+
+    allowed: bool
+    reason: str = ""
+    sanitized_text: str = ""
+    flags: list[str] = field(default_factory=list)
+
+
+class InputGuard:
+    """Validate and sanitise user inputs (OWASP LLM01 + input-side LLM02)."""
+
+    def check(self, text: str) -> GuardResult:
+        """Run all input checks and return a ``GuardResult``."""
+        if len(text) > MAX_INPUT_LENGTH:
+            return GuardResult(
+                allowed=False,
+                reason=f"Input exceeds maximum length ({MAX_INPUT_LENGTH} chars)",
+                flags=["length_exceeded"],
+            )
+
+        for pattern in _INJECTION_PATTERNS:
+            if pattern.search(text):
+                logger.warning(
+                    "Prompt injection blocked: pattern=%s input=%s",
+                    pattern.pattern[:60],
+                    text[:80],
+                )
+                return GuardResult(
+                    allowed=False,
+                    reason="Input rejected: potential prompt injection detected",
+                    flags=["prompt_injection"],
+                )
+
+        return GuardResult(allowed=True, sanitized_text=text)
+
+
+def redact_pii_text(text: str) -> str:
+    """Replace detected PII with redaction markers.
+
+    Shared utility used by both OutputGuard (response side) and
+    database writes (storage side) to prevent PII persistence.
+    """
+    result = text
+    for pii_type, pattern in _PII_PATTERNS:
+        result = pattern.sub(f"[REDACTED_{pii_type.upper()}]", result)
+    return result
+
+
+def contains_pii(text: str) -> bool:
+    """Return True if *text* contains any PII pattern."""
+    return any(pattern.search(text) for _, pattern in _PII_PATTERNS)
+
+
+class OutputGuard:
+    """Validate and sanitise model outputs (OWASP LLM02, LLM05, LLM09)."""
+
+    @staticmethod
+    def redact_pii(text: str) -> str:
+        """Replace detected PII with redaction markers (LLM02)."""
+        return redact_pii_text(text)
+
+    @staticmethod
+    def sanitize(text: str) -> str:
+        """Strip potentially dangerous output content (LLM05)."""
+        # Remove script tags
+        text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        # Remove HTML tags
+        text = re.sub(r"<[^>]+>", "", text)
+        # Remove markdown image links to non-URA domains
+        text = re.sub(
+            r"!\[.*?\]\((?!https?://ura\.go\.ug).*?\)",
+            "[link removed]",
+            text,
+        )
+        return text
+
+    @staticmethod
+    def check_grounding(
+        answer: str,
+        contexts: list[str],
+        threshold: float = 0.3,
+    ) -> GuardResult:
+        """Verify answer is grounded in retrieved contexts (LLM09).
+
+        When faithfulness falls below *threshold*, a disclaimer is appended.
+        """
+        if not contexts:
+            return GuardResult(allowed=True, sanitized_text=answer)
+
+        from .retriever import HybridRetriever
+
+        score = HybridRetriever.compute_faithfulness(answer, contexts)
+        if score < threshold:
+            warning = (
+                "\n\n---\n*Note: This response may not be fully supported by "
+                "the retrieved documents. Please verify with official URA sources "
+                "at https://ura.go.ug.*"
+            )
+            return GuardResult(
+                allowed=True,
+                sanitized_text=answer + warning,
+                reason=f"Low faithfulness score: {score:.2f}",
+                flags=["low_faithfulness"],
+            )
+
+        return GuardResult(allowed=True, sanitized_text=answer)
+
+    @staticmethod
+    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD) -> bool:
+        """Return True if the best retrieval score is too low to answer."""
+        if not hits:
+            return True
+        best_score = max(
+            h.get("score_rerank", h.get("score_rrf", 0.0)) for h in hits
+        )
+        return best_score < threshold
+
+    @staticmethod
+    def should_escalate(
+        faithfulness: float | None,
+        hits: list[dict],
+        consecutive_low: int = 0,
+        threshold: float = ESCALATION_THRESHOLD,
+    ) -> tuple[bool, str]:
+        """Determine if the response should be escalated to human review."""
+        reasons: list[str] = []
+        if faithfulness is not None and faithfulness < threshold:
+            reasons.append(f"low_faithfulness={faithfulness:.2f}")
+        if not hits:
+            reasons.append("no_retrieval_results")
+        if consecutive_low >= 3:
+            reasons.append(f"consecutive_low_confidence={consecutive_low}")
+        return (bool(reasons), "; ".join(reasons))

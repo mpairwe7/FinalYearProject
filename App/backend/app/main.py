@@ -50,6 +50,14 @@ _REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9\-]{1,128}$")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down the ChatModel singleton."""
+    # OpenTelemetry GenAI tracing (opt-in via OTEL_ENABLED=true)
+    try:
+        from .tracing import init_tracing
+
+        init_tracing()
+    except Exception:
+        logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
+
     # Initialise analytics database
     try:
         db.init_db()
@@ -142,12 +150,18 @@ def health_liveness() -> dict:
 
 @app.get("/ready", response_model=HealthResponse, tags=["system"])
 def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
-    """Readiness probe; returns 503 if model is unavailable."""
+    """Readiness probe; returns 503 if model is unavailable.
+
+    Checks both FAQ index AND Qdrant retriever health.
+    """
+    retrieval_mode = "hybrid" if model._retriever_ready else "keyword"
+    qdrant_healthy = model._retriever.is_ready if model._retriever_ready else False
     return HealthResponse(
-        status="ready",
+        status="ready" if qdrant_healthy else "degraded",
         version=app.version,
         model_loaded=True,
         tags_loaded=len(model._faq_index),
+        retrieval_mode=retrieval_mode,
     )
 
 
@@ -163,6 +177,7 @@ def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_mod
         message=body.message,
         conversation_id=body.conversation_id,
         top_k=body.top_k,
+        locale=body.locale,
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -179,22 +194,38 @@ def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_mod
         logger.warning("Classification failed during chat analytics", exc_info=True)
         metrics.inc("classification_errors_total")
 
-    # Log conversation for analytics
+    # Log conversation with PII redaction (privacy-by-design)
     try:
+        from .service import ChatModel as _CM
+
         conv_id = db.log_conversation(
             session_id=session_id or None,
-            user_message=body.message,
-            bot_reply=result["reply"],
+            user_message=_CM.redact_for_storage(body.message),
+            bot_reply=_CM.redact_for_storage(result["reply"]),
             sources=json.dumps(result.get("sources", [])),
             response_time_ms=round(elapsed_ms, 2),
             confidence=confidence,
             topic_tag=topic_tag,
         )
-        # Preserve caller's conversation_id if provided; fall back to DB-generated ID
         if not result.get("conversation_id"):
             result["conversation_id"] = conv_id
     except Exception:
         logger.warning("Conversation logging failed", exc_info=True)
+
+    # Track escalation events
+    if result.get("escalation_required"):
+        metrics.inc("escalation_total")
+        try:
+            db.track_event(
+                "escalation_required",
+                json.dumps({
+                    "reason": result.get("escalation_reason", ""),
+                    "topic_tag": topic_tag,
+                }),
+                session_id=session_id or None,
+            )
+        except Exception:
+            logger.debug("Escalation event tracking failed", exc_info=True)
 
     return ChatResponse(**result)
 
@@ -238,20 +269,65 @@ def get_faq(
     return FAQResponse(**result)
 
 
+_INDEX_API_KEY = os.getenv("INDEX_API_KEY", "")
+
+
+def _verify_index_auth(request: Request) -> None:
+    """Require a bearer token for the indexing endpoint (OWASP LLM10)."""
+    if not _INDEX_API_KEY:
+        return  # auth disabled when key is not configured
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {_INDEX_API_KEY}":
+        raise HTTPException(status_code=403, detail="Invalid or missing INDEX_API_KEY")
+
+
+@app.post("/v1/index", tags=["knowledge"])
+def trigger_indexing(
+    request: Request,
+    model: ChatModel = Depends(get_model),
+) -> dict:
+    """Trigger document re-indexing into the Qdrant vector store.
+
+    Requires ``Authorization: Bearer <INDEX_API_KEY>`` when configured.
+    Ingests all PDFs and FAQ CSVs, rebuilds the collection, and
+    re-initialises the hybrid retriever.
+    """
+    _verify_index_auth(request)
+
+    from .indexer import DATA_DIR, PDF_DIR, build_index, ingest_csvs, ingest_pdfs
+
+    documents: list[dict] = []
+    documents.extend(ingest_csvs(DATA_DIR))
+    documents.extend(ingest_pdfs(PDF_DIR))
+
+    if not documents:
+        raise HTTPException(status_code=404, detail="No documents found to index")
+
+    stats = build_index(documents, recreate=True)
+
+    # Re-initialise the retriever so it picks up the new collection
+    model._retriever_ready = model._retriever.initialize()
+    stats["retrieval_mode"] = "hybrid" if model._retriever_ready else "keyword"
+
+    return stats
+
+
 # ---------------------------------------------------------------------------
 # Feedback endpoints
 # ---------------------------------------------------------------------------
 @app.post("/v1/feedback", response_model=FeedbackResponse, tags=["feedback"])
 def submit_feedback(body: FeedbackRequest) -> FeedbackResponse:
     """Submit thumbs-up/down feedback on a chatbot response."""
+    from .service import ChatModel as _CM
+
     metrics.inc("feedback_total", labels={"rating": body.rating})
     result = db.save_feedback(
         message_id=body.message_id,
         rating=body.rating,
         comment=body.comment,
         session_id=body.session_id,
-        user_query=body.user_query,
-        bot_reply=body.bot_reply,
+        user_query=_CM.redact_for_storage(body.user_query),
+        bot_reply=_CM.redact_for_storage(body.bot_reply),
     )
     return FeedbackResponse(**result)
 
@@ -262,7 +338,9 @@ def update_feedback_comment(
     body: FeedbackCommentRequest,
 ) -> dict:
     """Add a follow-up comment to existing feedback (avoids duplicate entries)."""
-    updated = db.update_feedback_comment(message_id, body.comment)
+    from .service import ChatModel as _CM
+
+    updated = db.update_feedback_comment(message_id, _CM.redact_for_storage(body.comment))
     if not updated:
         raise HTTPException(status_code=404, detail="Feedback entry not found or already has comment")
     return {"status": "ok", "message_id": message_id}

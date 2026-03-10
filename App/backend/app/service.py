@@ -1,11 +1,25 @@
-"""URA Chatbot service layer.
+"""URA Chatbot service layer — production hybrid RAG.
 
-This module loads the FAQ knowledge base from CSV files and provides
-retrieval-augmented generation (RAG) via keyword/semantic search over
-the ingested documents.  When a fine-tuned model checkpoint is available
-the ``generate`` method delegates to it; otherwise it falls back to a
-deterministic retrieval-only response so the API remains functional
-during development and CI.
+This module provides the ``ChatModel`` singleton that backs every API
+endpoint.  It loads the FAQ CSV knowledge base into memory (for tag
+classification and as a keyword-search fallback) and, when a Qdrant
+vector store is available, performs hybrid dense + BM25 retrieval with
+cross-encoder reranking and passage-level grounding verification.
+
+Architecture (2026 RAG best practice)::
+
+    User query
+      → InputGuard (OWASP LLM01 prompt-injection check)
+      → HybridRetriever.search (dense + sparse RRF → cross-encoder rerank)
+      → fallback: _simple_search (keyword overlap)
+      → passage-level citation assembly
+      → OutputGuard (PII redaction, grounding check – LLM02/LLM05/LLM09)
+      → ChatResponse with citations + faithfulness score
+
+References:
+  - Lewis et al. "Retrieval-Augmented Generation" (nlp.cs.ucl.ac.uk)
+  - OWASP LLM Top 10 (owasp.org)
+  - RAGAS docs (docs.ragas.io)
 """
 
 from __future__ import annotations
@@ -16,6 +30,10 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+
+from .guardrails import InputGuard, OutputGuard, redact_pii_text, STORE_RAW_PROMPTS
+from .retriever import HybridRetriever
+from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +47,8 @@ _DATA_DIR = Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR)).resolve()
 if not _DATA_DIR.is_relative_to(_PROJECT_ROOT):
     logger.warning("DATA_DIR %s escapes project root; falling back to default", _DATA_DIR)
     _DATA_DIR = Path(_DEFAULT_DATA_DIR).resolve()
+
+GROUNDING_THRESHOLD = float(os.getenv("GROUNDING_THRESHOLD", "0.3"))
 
 
 def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dict[str, str]]:
@@ -78,7 +98,7 @@ def _simple_search(
     faq_index: dict[str, list[dict[str, str]]],
     top_k: int = 4,
 ) -> list[dict[str, str]]:
-    """Keyword-based retrieval: score each FAQ by word overlap with *query*."""
+    """Keyword-based retrieval fallback: score each FAQ by word overlap with *query*."""
     query_tokens = set(query.lower().split())
     scored: list[tuple[float, dict[str, str]]] = []
 
@@ -100,15 +120,25 @@ def _simple_search(
 class ChatModel:
     """Unified service that backs all API endpoints.
 
-    On initialisation it loads the FAQ CSV corpus into memory.  A future
-    iteration will initialise a vector store (Qdrant) and a fine-tuned
-    Gemma-2-9B model for full RAG.
+    On initialisation it loads the FAQ CSV corpus into memory and attempts
+    to connect to Qdrant for hybrid retrieval.  If Qdrant is unavailable
+    the service degrades gracefully to keyword-only search.
     """
 
     def __init__(self) -> None:
         self.name = "ura-gemma-2-9b"
         self._faq_index, self._tag_labels = _load_faq_data(_DATA_DIR)
-        logger.info("ChatModel initialised (knowledge base: %d tags)", len(self._faq_index))
+
+        # Hybrid retriever (graceful degradation)
+        self._retriever = HybridRetriever()
+        self._retriever_ready = self._retriever.initialize()
+
+        # OWASP LLM Top 10 guardrails
+        self._input_guard = InputGuard()
+        self._output_guard = OutputGuard()
+
+        mode = "hybrid (Qdrant)" if self._retriever_ready else "keyword-only (fallback)"
+        logger.info("ChatModel initialised – %s mode, %d tags", mode, len(self._faq_index))
 
     # -- Chat (RAG) ---------------------------------------------------------
     def generate(
@@ -116,28 +146,162 @@ class ChatModel:
         message: str,
         conversation_id: str | None = None,
         top_k: int = 4,
+        locale: str = "en",
     ) -> dict[str, Any]:
-        """Return a RAG-style answer with source citations."""
-        hits = _simple_search(message, self._faq_index, top_k=top_k)
+        """Return a grounded, cited answer via hybrid retrieval + guardrails."""
+        t0 = time.perf_counter()
 
-        if hits:
-            best = hits[0]
-            reply = best["answer"]
-            sources = list({h["source"] for h in hits})
-        else:
-            reply = (
-                "I could not find a specific answer in the URA knowledge base. "
-                "Please try rephrasing your question, or contact URA directly at "
-                "https://ura.go.ug for assistance."
+        with trace_rag_pipeline(message) as trace_ctx:
+            # 1. Input guardrails (OWASP LLM01)
+            guard = self._input_guard.check(message)
+            if not guard.allowed:
+                return {
+                    "reply": guard.reason,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "blocked",
+                    "model": self.name,
+                    "conversation_id": conversation_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                }
+
+            # 2. Try hybrid retrieval (Qdrant dense+sparse RRF → cross-encoder)
+            hits: list[dict[str, Any]] = []
+            retrieval_mode = "keyword"
+
+            # Auto-reconnect if Qdrant was lost after initial startup
+            if not self._retriever_ready and not self._retriever._ready:
+                self._retriever_ready = self._retriever.initialize()
+
+            if self._retriever_ready:
+                with trace_stage("hybrid_search"):
+                    search_t0 = time.perf_counter()
+                    hits = self._retriever.search(message, top_k=top_k)
+                    search_ms = (time.perf_counter() - search_t0) * 1000
+                if hits:
+                    retrieval_mode = "hybrid"
+                    record_retrieval_metrics(len(hits), search_ms)
+                # Update readiness if retriever was disconnected during search
+                self._retriever_ready = self._retriever._ready
+
+            # 3. Fallback to keyword search
+            if not hits:
+                with trace_stage("keyword_search"):
+                    kw_hits = _simple_search(message, self._faq_index, top_k=top_k)
+                    hits = [
+                        {
+                            "text": f"Question: {h['question']}\nAnswer: {h['answer']}",
+                            "answer": h["answer"],
+                            "question": h["question"],
+                            "source": h["source"],
+                            "chunk_id": "",
+                            "page": "",
+                            "section": "",
+                            "doc_type": "csv",
+                            "score_rrf": 0.0,
+                        }
+                        for h in kw_hits
+                    ]
+
+            # 4. Calibrated abstention — refuse to answer when confidence too low
+            if self._output_guard.should_abstain(hits):
+                reply = (
+                    "I don't have enough information to answer this question reliably. "
+                    "Please contact URA directly at https://ura.go.ug or call "
+                    "the URA Contact Centre for assistance."
+                )
+                escalate, esc_reason = self._output_guard.should_escalate(None, hits)
+                return {
+                    "reply": reply,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "abstained",
+                    "model": self.name,
+                    "conversation_id": conversation_id,
+                    "locale": locale,
+                    "escalation_required": escalate,
+                    "escalation_reason": esc_reason,
+                }
+
+            # 5. Build response with citations
+            if hits:
+                best = hits[0]
+                reply = best.get("answer") or best.get("text", "")
+                sources = list({h.get("source", "") for h in hits if h.get("source")})
+                citations = HybridRetriever.build_citations(hits)
+                contexts = [h.get("text") or h.get("answer", "") for h in hits]
+            else:
+                reply = (
+                    "I could not find a specific answer in the URA knowledge base. "
+                    "Please try rephrasing your question, or contact URA directly at "
+                    "https://ura.go.ug for assistance."
+                )
+                sources = []
+                citations = []
+                contexts = []
+
+            # 6. Output guardrails (OWASP LLM02 + LLM05)
+            reply = self._output_guard.redact_pii(reply)
+            reply = self._output_guard.sanitize(reply)
+
+            # 7. Grounding verification (OWASP LLM09)
+            faithfulness_score: float | None = None
+            if contexts:
+                faith = HybridRetriever.compute_faithfulness(reply, contexts)
+                faithfulness_score = faith
+                grounding = self._output_guard.check_grounding(
+                    reply, contexts, GROUNDING_THRESHOLD
+                )
+                reply = grounding.sanitized_text
+                trace_ctx["faithfulness"] = faith
+
+            # 8. Escalation check
+            escalate, esc_reason = self._output_guard.should_escalate(
+                faithfulness_score, hits
             )
-            sources = []
+
+            trace_ctx["num_sources"] = len(sources)
+            trace_ctx["locale"] = locale
+
+            # Record estimated token usage (word-count proxy)
+            prompt_tokens = len(message.split())
+            completion_tokens = len(reply.split())
+            record_token_usage(prompt_tokens, completion_tokens)
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "generate: mode=%s hits=%d faith=%.2f ms=%.1f locale=%s escalate=%s",
+            retrieval_mode,
+            len(hits),
+            faithfulness_score or 0,
+            elapsed_ms,
+            locale,
+            escalate,
+        )
 
         return {
             "reply": reply,
             "sources": sources,
+            "citations": citations,
+            "faithfulness_score": faithfulness_score,
+            "retrieval_mode": retrieval_mode,
             "model": self.name,
             "conversation_id": conversation_id,
+            "locale": locale,
+            "escalation_required": escalate,
+            "escalation_reason": esc_reason,
         }
+
+    @staticmethod
+    def redact_for_storage(text: str) -> str:
+        """Redact PII before database persistence (privacy-by-design)."""
+        if STORE_RAW_PROMPTS:
+            return text
+        return redact_pii_text(text)
 
     # -- Classification -----------------------------------------------------
     def classify(self, text: str, top_k: int = 1) -> dict[str, Any]:

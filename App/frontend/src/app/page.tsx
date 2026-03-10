@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useChatStore, ChatTurn, SpeechState, createTurn } from '../store/useChatStore';
+import { useChatStore, ChatTurn, Citation, SpeechState, createTurn } from '../store/useChatStore';
 import {
   initAnalytics,
   getAnalyticsSessionId,
@@ -126,12 +126,17 @@ function findPrecedingUserQuery(chat: ChatTurn[], assistantIndex: number): strin
   return '';
 }
 
+const LOCALE_OPTIONS = [
+  { value: 'en', label: 'English', speechLang: 'en-US' },
+  { value: 'lg', label: 'Luganda', speechLang: 'lg-UG' },
+] as const;
+
 export default function Page() {
   const { message, setMessage, chat, speechState, setSpeechState, addTurns } = useChatStore();
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [locale, setLocale] = useState<string>('en');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  // Track last user query separately so feedback context survives chat history truncation
   const lastUserQueryRef = useRef<string>('');
 
   // Initialise analytics on mount
@@ -155,7 +160,8 @@ export default function Page() {
     }
 
     const recog: SpeechRecognition = new SpeechRecognitionImpl();
-    recog.lang = 'en-US';
+    const speechLang = LOCALE_OPTIONS.find(l => l.value === locale)?.speechLang ?? 'en-US';
+    recog.lang = speechLang;
     recog.continuous = false;
     recog.interimResults = false;
 
@@ -169,7 +175,7 @@ export default function Page() {
 
     recognitionRef.current = recog;
     return () => recog.abort();
-  }, []);
+  }, [locale]);
 
   const sendMessage = async () => {
     const text = message.trim();
@@ -195,7 +201,7 @@ export default function Page() {
           'Content-Type': 'application/json',
           'X-Session-ID': getAnalyticsSessionId(),
         },
-        body: JSON.stringify({ message: text, top_k: 4 }),
+        body: JSON.stringify({ message: text, top_k: 4, locale }),
         signal: controller.signal,
       });
 
@@ -206,11 +212,13 @@ export default function Page() {
       const data = await response.json();
       const responseTimeMs = Date.now() - sendTime;
 
-      const sources = data.sources?.length
-        ? `\n\nSources: ${data.sources.join(', ')}`
-        : '';
-
-      const assistantTurn = createTurn('assistant', data.reply + sources);
+      const assistantTurn = createTurn('assistant', data.reply, {
+        citations: data.citations ?? [],
+        faithfulnessScore: data.faithfulness_score ?? null,
+        retrievalMode: data.retrieval_mode ?? 'keyword',
+        escalationRequired: data.escalation_required ?? false,
+        escalationReason: data.escalation_reason ?? '',
+      });
       addTurns([assistantTurn]);
 
       // Track response analytics
@@ -265,6 +273,26 @@ export default function Page() {
             Live assistant
           </div>
           <h1 className="hero-title">URA Chatbot</h1>
+          <div role="radiogroup" aria-label="Language" style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
+            {LOCALE_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setLocale(opt.value)}
+                aria-pressed={locale === opt.value}
+                style={{
+                  padding: '0.25rem 0.75rem',
+                  borderRadius: '1rem',
+                  border: locale === opt.value ? '2px solid var(--accent, #2563eb)' : '1px solid #ccc',
+                  background: locale === opt.value ? 'var(--accent, #2563eb)' : 'transparent',
+                  color: locale === opt.value ? '#fff' : 'inherit',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <p className="hero-sub">
             Natural chat with speech and text. Ask about URA services, policies, or upload workflows and get concise answers.
           </p>
@@ -298,6 +326,40 @@ export default function Page() {
                     {turn.role}
                   </div>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{turn.content}</div>
+                  {turn.role === 'assistant' && turn.id !== 'greeting-0' && turn.escalationRequired && (
+                    <div className="escalation-banner" role="alert" style={{
+                      marginTop: '0.5rem', padding: '0.4rem 0.75rem', borderRadius: '0.5rem',
+                      background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)',
+                      fontSize: '0.8rem', color: 'var(--muted)',
+                    }}>
+                      Human review recommended{turn.escalationReason ? `: ${turn.escalationReason}` : ''}
+                    </div>
+                  )}
+                  {turn.role === 'assistant' && turn.citations && turn.citations.length > 0 && (
+                    <details className="citations-detail" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }}>
+                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>
+                        Sources ({turn.citations.length})
+                        {turn.faithfulnessScore != null && (
+                          <span style={{
+                            marginLeft: '0.5rem',
+                            color: turn.faithfulnessScore >= 0.6 ? 'var(--success, #22c55e)' : 'var(--warning, #eab308)',
+                          }}>
+                            {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
+                          </span>
+                        )}
+                      </summary>
+                      <ol style={{ paddingLeft: '1.2rem', margin: '0.3rem 0 0', color: 'var(--muted)' }}>
+                        {turn.citations.map((c: Citation) => (
+                          <li key={c.ref} style={{ marginBottom: '0.2rem' }}>
+                            <strong>{c.source}</strong>
+                            {c.page ? ` p.${c.page}` : ''}
+                            {c.section ? ` — ${c.section}` : ''}
+                            {c.passage ? <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>{c.passage.slice(0, 150)}...</div> : null}
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
+                  )}
                   {turn.role === 'assistant' && turn.id !== 'greeting-0' && (
                     <FeedbackButtons
                       messageId={turn.id}
@@ -325,6 +387,7 @@ export default function Page() {
           <div className="input-row">
             <input
               className="input"
+              aria-label="Type your message"
               placeholder="Ask anything about URA..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}

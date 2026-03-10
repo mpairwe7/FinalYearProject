@@ -1,10 +1,23 @@
 import { create } from 'zustand';
 
+export interface Citation {
+  ref: string;
+  source: string;
+  page?: string;
+  section?: string;
+  passage?: string;
+}
+
 export interface ChatTurn {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  citations?: Citation[];
+  faithfulnessScore?: number | null;
+  retrievalMode?: string;
+  escalationRequired?: boolean;
+  escalationReason?: string;
 }
 
 export type SpeechState = 'idle' | 'listening' | 'unavailable' | 'error';
@@ -33,8 +46,24 @@ const initialGreeting: ChatTurn = {
   timestamp: Date.now(),
 };
 
-export function createTurn(role: 'user' | 'assistant', content: string): ChatTurn {
-  return { id: generateId(), role, content, timestamp: Date.now() };
+export function createTurn(
+  role: 'user' | 'assistant',
+  content: string,
+  meta?: {
+    citations?: Citation[];
+    faithfulnessScore?: number | null;
+    retrievalMode?: string;
+    escalationRequired?: boolean;
+    escalationReason?: string;
+  },
+): ChatTurn {
+  return {
+    id: generateId(),
+    role,
+    content,
+    timestamp: Date.now(),
+    ...meta,
+  };
 }
 
 export const useChatStore = create<ChatStore>((set) => ({

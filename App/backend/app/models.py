@@ -15,13 +15,28 @@ class ChatRequest(BaseModel):
         description="Optional conversation/session id",
     )
     top_k: int = Field(4, ge=1, le=10, description="Number of passages to retrieve")
+    locale: str = Field("en", pattern=r"^[a-z]{2}(-[A-Z]{2})?$", description="ISO 639-1 locale (e.g. en, lg)")
+
+
+class Citation(BaseModel):
+    ref: str = Field(..., description="Reference marker, e.g. '[1]'")
+    source: str = Field(..., description="Source file name")
+    page: str = Field("", description="Page number (PDFs)")
+    section: str = Field("", description="Section or heading title")
+    passage: str = Field("", max_length=500, description="Relevant passage excerpt")
 
 
 class ChatResponse(BaseModel):
     reply: str
     sources: list[str] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list, description="Passage-level citations")
+    faithfulness_score: float | None = Field(None, description="Grounding score 0-1")
+    retrieval_mode: str = Field("keyword", description="hybrid | keyword | blocked | abstained")
     model: str = "ura-gemma-2-9b"
     conversation_id: str | None = None
+    locale: str = Field("en", description="Locale used for this response")
+    escalation_required: bool = Field(False, description="Whether human review is needed")
+    escalation_reason: str = Field("", description="Why escalation was triggered")
 
 
 # ---------------------------------------------------------------------------
@@ -146,3 +161,4 @@ class HealthResponse(BaseModel):
     version: str
     model_loaded: bool
     tags_loaded: int = 0
+    retrieval_mode: str = "keyword"

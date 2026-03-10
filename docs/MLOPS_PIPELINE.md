@@ -7,27 +7,37 @@ This document describes the automated MLOps CI/CD pipeline for the URA Chatbot p
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          MLOps Pipeline Architecture                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐              │
-│  │  GitHub  │───▶│  Lint &  │───▶│  Data    │───▶│  Train   │              │
-│  │  Push/PR │    │  Test    │    │  Valid.  │    │  Model   │              │
-│  └──────────┘    └──────────┘    └──────────┘    └──────────┘              │
-│                                                        │                    │
-│                                                        ▼                    │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐              │
-│  │  Docker  │◀───│  Docker  │◀───│  HF Hub  │◀───│  Quality │              │
-│  │  Deploy  │    │  Build   │    │  Push    │    │  Gates   │              │
-│  └──────────┘    └──────────┘    └──────────┘    └──────────┘              │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────┐          │
-│  │                    Kaggle Training Pipeline                   │          │
-│  │  Push Notebook ──▶ Execute ──▶ Monitor ──▶ Download Outputs  │          │
-│  └──────────────────────────────────────────────────────────────┘          │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                          MLOps Pipeline Architecture (2026)                        │
+├───────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                    │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐   │
+│  │  GitHub  │───▶│  Lint &  │───▶│  Data    │───▶│  Train   │───▶│ Evaluate │   │
+│  │  Push/PR │    │  Test    │    │  Valid.  │    │  Model   │    │  Model   │   │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘   │
+│       │                                                                │          │
+│       │  ┌──────────────┐                                              ▼          │
+│       └─▶│  Governance  │ (parallel)                            ┌──────────┐     │
+│          │  Compliance  │                                       │ RAG Eval │     │
+│          └──────────────┘                                       │  Gates   │     │
+│                                                                  └──────────┘     │
+│                                                                       │           │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                        │           │
+│  │  Docker  │◀───│  Docker  │◀───│  HF Hub  │◀───────────────────────┘           │
+│  │  Deploy  │    │  Build   │    │  Push    │                                     │
+│  └──────────┘    └──────────┘    └──────────┘                                     │
+│                                                                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐         │
+│  │                    Kaggle Training Pipeline                           │         │
+│  │  Push Notebook ──▶ Execute ──▶ Monitor ──▶ Download Outputs          │         │
+│  └──────────────────────────────────────────────────────────────────────┘         │
+│                                                                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐         │
+│  │                    Feedback Loop                                      │         │
+│  │  Feedback DB ──▶ export_feedback.py ──▶ Retriever tuning sets         │         │
+│  └──────────────────────────────────────────────────────────────────────┘         │
+│                                                                                    │
+└───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Pipeline Components
@@ -43,12 +53,14 @@ This document describes the automated MLOps CI/CD pipeline for the URA Chatbot p
 
 | Stage | Description | Artifacts |
 |-------|-------------|-----------|
-| Lint & Test | Code quality checks (Ruff, Black, MyPy, pytest) | Coverage report |
+| Lint & Test | Code quality checks (Ruff, pytest, coverage) | Coverage report |
+| Governance Check | NIST/ISO/OWASP/EU AI Act compliance (parallel) | Compliance report |
 | Data Validation | Validates CSV/PDF data quality | Validation report |
 | Train Model | Trains classifier with CV | Model files, metrics |
-| Evaluate | Runs evaluation benchmarks | Evaluation results |
-| Push to HF | Uploads model to Hugging Face Hub | Model card |
-| Build Docker | Builds and pushes container | Docker image |
+| Evaluate Model | Runs classifier evaluation benchmarks | Evaluation results |
+| **RAG Evaluation** | Faithfulness, groundedness, citation accuracy, safety probes | RAG metrics JSON |
+| Push to HF | Uploads model to Hugging Face Hub (requires RAG eval pass) | Model card |
+| Build Docker | Builds and pushes container + Trivy scan | Docker image, SARIF |
 | Deploy Backend | Deploys API to production | Running service |
 
 ### 2. Frontend Pipeline (`.github/workflows/frontend-deploy.yml`)
@@ -137,9 +149,15 @@ FinalYearProject/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── main.py                 # FastAPI app
-│   │   ├── models.py               # Pydantic models
-│   │   └── service.py              # ML service
+│   │   ├── main.py                 # FastAPI app + lifespan + security headers
+│   │   ├── models.py               # Pydantic v2 models (ChatResponse, Citation)
+│   │   ├── service.py              # RAG pipeline service (hybrid + keyword fallback)
+│   │   ├── retriever.py            # Qdrant hybrid retriever (dense+BM25+RRF+rerank)
+│   │   ├── indexer.py              # Document indexing pipeline (PDF+CSV→Qdrant)
+│   │   ├── guardrails.py           # OWASP LLM Top 10 security controls
+│   │   ├── tracing.py              # OpenTelemetry GenAI tracing
+│   │   ├── database.py             # SQLite analytics + data retention
+│   │   └── analytics.py            # Prometheus-compatible metrics
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
@@ -249,26 +267,60 @@ FinalYearProject/
 
 ## Quality Gates
 
+### Classifier Quality Gates
+
 Models must pass these thresholds before deployment:
 
 | Metric | Minimum Threshold |
 |--------|-------------------|
-| Accuracy | 0.75 |
-| F1-Score (macro) | 0.70 |
-| Precision (macro) | 0.70 |
-| Recall (macro) | 0.65 |
+| Accuracy | 0.85 |
+| F1-Score (macro) | 0.75 |
+| Precision (macro) | 0.75 |
+| Recall (macro) | 0.70 |
 | Latency (P95) | < 100ms |
+
+### RAG Quality Gates
+
+The RAG pipeline is evaluated by `ml/pipelines/evaluate_rag.py` against `Data/eval/rag_eval.jsonl`. All gates must pass before deployment to Hugging Face.
+
+| Metric | Threshold | Description |
+|--------|-----------|-------------|
+| Faithfulness | >= 0.6 | Fraction of answer sentences grounded in context |
+| Answer Relevancy | >= 0.7 | Cosine similarity between question and answer embeddings |
+| Context Precision | >= 0.5 | Fraction of retrieved contexts containing ground-truth info |
+| Context Recall | >= 0.5 | Fraction of ground-truth covered by retrieved contexts |
+| Groundedness | >= 0.4 | Phrase-level (trigram) grounding in contexts |
+| Citation Accuracy | >= 0.4 | Whether cited contexts contain ground-truth information |
+| Safety Probe Pass Rate | >= 0.8 | Adversarial prompts blocked by InputGuard |
+| Abstention Precision | >= 0.5 | Correct refusal rate on unanswerable questions |
 
 Configure in `ml/configs/training_config.yaml`:
 
 ```yaml
 quality_gates:
-  min_accuracy: 0.75
-  min_f1_score: 0.70
-  min_precision: 0.70
-  min_recall: 0.65
+  min_accuracy: 0.85
+  min_f1_score: 0.75
+  min_precision: 0.75
+  min_recall: 0.70
   max_latency_ms: 100
+
+rag_quality_gates:
+  min_faithfulness: 0.6
+  min_answer_relevancy: 0.7
+  min_context_precision: 0.5
+  min_context_recall: 0.5
+  min_groundedness: 0.4
+  min_citation_accuracy: 0.4
+  min_safety_probe_pass_rate: 0.8
+  min_abstention_precision: 0.5
 ```
+
+### Governance Gate
+
+The `governance-check` CI job runs `governance/compliance_check.py` in parallel with lint. It verifies:
+- Required governance artifacts exist (risk manifest, guardrails, tracing, retriever, eval pipeline, etc.)
+- Required content keywords are present in each file (e.g., `InputGuard` in guardrails, `compute_groundedness` in evaluate_rag)
+- Maps to NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10, EU AI Act
 
 ## Model Export Formats
 

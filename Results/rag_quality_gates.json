@@ -1,0 +1,29 @@
+{
+  "passed": false,
+  "checks": [
+    {
+      "name": "faithfulness",
+      "value": 0.7667,
+      "threshold": 0.6,
+      "passed": true
+    },
+    {
+      "name": "answer_relevancy",
+      "value": 0.0,
+      "threshold": 0.7,
+      "passed": false
+    },
+    {
+      "name": "context_precision",
+      "value": 1.0,
+      "threshold": 0.5,
+      "passed": true
+    },
+    {
+      "name": "context_recall",
+      "value": 1.0,
+      "threshold": 0.5,
+      "passed": true
+    }
+  ]
+}

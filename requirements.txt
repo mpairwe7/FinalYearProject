@@ -44,3 +44,14 @@ pandera==0.21.1
 rouge-score==0.1.2
 nltk==3.9.1
 sacrebleu==2.5.1
+
+# Cross-encoder reranking (included in sentence-transformers)
+# sentence-transformers already listed above
+
+# OpenTelemetry GenAI observability (opt-in via OTEL_ENABLED=true)
+opentelemetry-api>=1.27.0
+opentelemetry-sdk>=1.27.0
+opentelemetry-exporter-otlp-proto-grpc>=1.27.0
+
+# RAG evaluation (CI/CD pipeline)
+ragas>=0.2.0

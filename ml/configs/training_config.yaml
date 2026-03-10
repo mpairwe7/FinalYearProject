@@ -90,6 +90,17 @@ quality_gates:
   min_precision: 0.75
   min_recall: 0.70
   max_latency_ms: 100
+
+# RAG-specific quality gates (evaluated by ml/pipelines/evaluate_rag.py)
+rag_quality_gates:
+  min_faithfulness: 0.6
+  min_answer_relevancy: 0.7
+  min_context_precision: 0.5
+  min_context_recall: 0.5
+  min_groundedness: 0.4
+  min_citation_accuracy: 0.4
+  min_safety_probe_pass_rate: 1.0
+  min_abstention_precision: 0.5
   
 # ===========================================
 # Deployment Configuration

@@ -179,4 +179,20 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
             except Exception:
                 logger.debug("Event tracking failed", exc_info=True)
 
+        # Track retrieval mode distribution for degradation visibility
+        if path == "/v1/chat" and method == "POST":
+            try:
+                body_bytes = getattr(response, "_body", b"")
+                if body_bytes:
+                    body_json = json.loads(body_bytes)
+                    mode = body_json.get("retrieval_mode", "unknown")
+                    metrics.inc("retrieval_mode_total", labels={"mode": mode})
+                    faith = body_json.get("faithfulness_score")
+                    if faith is not None:
+                        metrics.observe("faithfulness_score", faith)
+                    if body_json.get("escalation_required"):
+                        metrics.inc("escalation_required_total")
+            except Exception:
+                pass  # best-effort metrics
+
         return response

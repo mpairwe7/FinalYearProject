@@ -5,6 +5,33 @@
 
 services:
   # ---------------------------------------------------------------------------
+  # Qdrant Vector Store (first-class RAG dependency)
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:v1.13.3
+    container_name: ura-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333 && echo -e 'GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n' >&3 && cat <&3 | grep -q 'ok'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      - ura-network
+
+  # ---------------------------------------------------------------------------
   # Backend API Service
   # ---------------------------------------------------------------------------
   api:
@@ -23,6 +50,7 @@ services:
       - HF_MODEL_REPO=${HF_MODEL_REPO:-mpairweLandwind/ura-chatbot}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ANALYTICS_DB_DIR=/app/data_store
+      - QDRANT_URL=http://qdrant:6333
     env_file:
       - .env
     init: true
@@ -45,6 +73,9 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
     networks:
       - ura-network
 
@@ -146,3 +177,4 @@ networks:
 volumes:
   api_logs:
   analytics_data:
+  qdrant_data:

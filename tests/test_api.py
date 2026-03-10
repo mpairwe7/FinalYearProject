@@ -18,19 +18,19 @@ class TestHealthEndpoint:
     """Tests for health check endpoint."""
     
     def test_health_returns_ok(self):
-        """Test health endpoint returns ok status."""
-        from App.backend.app.main import health
-        
-        response = health()
-        
-        assert response["status"] == "ok"
-    
+        """Test health endpoint returns alive status."""
+        from App.backend.app.main import health_liveness
+
+        response = health_liveness()
+
+        assert response["status"] == "alive"
+
     def test_health_response_format(self):
         """Test health response has correct format."""
-        from App.backend.app.main import health
-        
-        response = health()
-        
+        from App.backend.app.main import health_liveness
+
+        response = health_liveness()
+
         assert isinstance(response, dict)
         assert "status" in response
 
@@ -110,12 +110,12 @@ class TestChatResponse:
     def test_chat_response_default_values(self):
         """Test chat response with defaults."""
         from App.backend.app.models import ChatResponse
-        
+
         response = ChatResponse(reply="Test response")
-        
+
         assert response.reply == "Test response"
         assert response.sources == []
-        assert response.model == "stub-model"
+        assert response.model == "ura-gemma-2-9b"
 
 
 class TestChatModel:
@@ -124,10 +124,10 @@ class TestChatModel:
     def test_model_initialization(self):
         """Test model initializes correctly."""
         from App.backend.app.service import ChatModel
-        
+
         model = ChatModel()
-        
-        assert model.name == "stub-model"
+
+        assert model.name == "ura-gemma-2-9b"
     
     def test_generate_returns_dict(self):
         """Test generate returns proper dict."""
@@ -152,16 +152,19 @@ class TestChatModel:
         assert "reply" in result
     
     def test_generate_response_content(self):
-        """Test generate response contains expected content."""
+        """Test generate response contains expected fields and valid content."""
         from App.backend.app.service import ChatModel
-        
+
         model = ChatModel()
         result = model.generate("What is VAT?")
-        
-        # Stub model includes message in reply
-        assert "What is VAT?" in result["reply"]
+
+        # Response must be a non-empty string with expected fields
+        assert isinstance(result["reply"], str)
+        assert len(result["reply"]) > 0
         assert isinstance(result["sources"], list)
-        assert result["model"] == "stub-model"
+        assert result["model"] == "ura-gemma-2-9b"
+        assert result["retrieval_mode"] in ("hybrid", "keyword", "abstained", "blocked")
+        assert isinstance(result["escalation_required"], bool)
 
 
 class TestChatEndpoint:
@@ -587,7 +590,7 @@ class TestDatabaseErrorHandling:
 
         stats = database.get_session_stats(days=1)
         assert stats["total_sessions"] == 1
-        assert stats["max_messages_in_session"] == 2  # 2 increments after initial 0
+        assert stats["max_messages_in_session"] == 3  # 1 initial + 2 conflict increments
 
 
 if __name__ == "__main__":

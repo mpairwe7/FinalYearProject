@@ -1,0 +1,204 @@
+# =============================================================================
+# AI Risk Manifest — NIST AI RMF 1.0 + ISO/IEC 42001:2023 + EU AI Act
+# URA AI Chatbot — Retrieval-Augmented Generation System
+# Updated: 2026-03-10
+# =============================================================================
+
+system:
+  name: "URA AI Chatbot"
+  version: "2.0.0"
+  classification: "Limited-risk AI system (EU AI Act Art. 6)"
+  description: >
+    Customer-facing chatbot for Uganda Revenue Authority (URA) that answers
+    tax-related questions using retrieval-augmented generation over official
+    URA documents, FAQ databases, and taxation handbooks.
+  intended_users: "URA taxpayers, tax agents, general public"
+  deployment_regions: ["UG"]
+  languages: ["en", "lg"]
+
+# =============================================================================
+# NIST AI RMF 1.0 + Generative AI Profile
+# Reference: https://www.nist.gov/artificial-intelligence/ai-risk-management-framework
+# =============================================================================
+nist_ai_rmf:
+  govern:
+    - control: "GOVERN 1.1 – Legal and regulatory requirements identified"
+      status: "implemented"
+      evidence: "governance/ai_risk_manifest.yaml"
+    - control: "GOVERN 1.2 – Trustworthy AI characteristics prioritised"
+      status: "implemented"
+      evidence: "SECURITY.md, App/backend/app/guardrails.py"
+    - control: "GOVERN 2.1 – Roles and responsibilities defined"
+      status: "implemented"
+      evidence: "docs/MLOPS_PIPELINE.md"
+    - control: "GOVERN 4.1 – Organisational practices for AI risk"
+      status: "implemented"
+      evidence: ".github/workflows/ci-ml-pipeline.yml (quality gates)"
+    - control: "GOVERN 6.1 – Policies for GAI content provenance"
+      status: "implemented"
+      evidence: "App/backend/app/retriever.py (citations), App/backend/app/guardrails.py (grounding)"
+
+  map:
+    - control: "MAP 1.1 – Intended purpose documented"
+      status: "implemented"
+      evidence: "docs/API_REFERENCE.md, governance/ai_risk_manifest.yaml"
+    - control: "MAP 1.6 – System interactions mapped"
+      status: "implemented"
+      evidence: "docs/data-schema-and-eval.md"
+    - control: "MAP 2.1 – Known limitations documented"
+      status: "implemented"
+      evidence: "App/backend/app/guardrails.py (low-faithfulness disclaimer)"
+    - control: "MAP 5.1 – GAI-specific risks (hallucination, CBRN) assessed"
+      status: "implemented"
+      evidence: "App/backend/app/guardrails.py (LLM09 grounding check)"
+
+  measure:
+    - control: "MEASURE 1.1 – Appropriate methods and metrics identified"
+      status: "implemented"
+      evidence: "ml/pipelines/evaluate.py, ml/pipelines/evaluate_rag.py"
+    - control: "MEASURE 2.1 – AI system evaluated using test sets"
+      status: "implemented"
+      evidence: "tests/test_api.py, tests/test_ml_pipeline.py, Results/"
+    - control: "MEASURE 2.5 – Acquired components assessed"
+      status: "implemented"
+      evidence: "requirements.txt (pinned), .github/workflows/ci-ml-pipeline.yml (Trivy)"
+    - control: "MEASURE 2.6 – Computational bias assessment"
+      status: "partial"
+      evidence: "Notebooks/DataIngestion_Augmentation.ipynb (class balance checks)"
+      gap: "Formal fairness report needed for demographic groups"
+    - control: "MEASURE 4.1 – Measurement approaches applied regularly"
+      status: "implemented"
+      evidence: ".github/workflows/ci-ml-pipeline.yml (CI runs on every push)"
+
+  manage:
+    - control: "MANAGE 1.1 – Deployment approval with risk review"
+      status: "implemented"
+      evidence: "ml/pipelines/quality_gates.py, ml/pipelines/evaluate_rag.py"
+    - control: "MANAGE 2.1 – Mechanisms for human oversight"
+      status: "implemented"
+      evidence: "App/backend/app/main.py (feedback endpoint), App/backend/app/database.py"
+    - control: "MANAGE 3.1 – Incidents logged and responded to"
+      status: "implemented"
+      evidence: "App/backend/app/analytics.py (error tracking), App/backend/app/tracing.py"
+    - control: "MANAGE 4.1 – Decommission plan"
+      status: "partial"
+      evidence: "Dockerfile (containerised, can be stopped)"
+      gap: "Formal decommission runbook"
+
+# =============================================================================
+# ISO/IEC 42001:2023 — AI Management System
+# Reference: https://www.iso.org/standard/81230.html
+# =============================================================================
+iso_42001:
+  - clause: "4.1 Understanding the organisation and its context"
+    status: "implemented"
+    evidence: "governance/ai_risk_manifest.yaml"
+  - clause: "5.1 Leadership and commitment"
+    status: "partial"
+    evidence: "SECURITY.md"
+    gap: "Formal management review record needed"
+  - clause: "6.1 Actions to address risks and opportunities"
+    status: "implemented"
+    evidence: "governance/ai_risk_manifest.yaml (risk register)"
+  - clause: "6.2 AI objectives and planning to achieve them"
+    status: "implemented"
+    evidence: "ml/configs/training_config.yaml (quality_gates, rag_quality_gates)"
+  - clause: "7.2 Competence"
+    status: "partial"
+    evidence: "docs/MLOPS_PIPELINE.md"
+    gap: "Team competency matrix"
+  - clause: "8.1 Operational planning and control"
+    status: "implemented"
+    evidence: ".github/workflows/ci-ml-pipeline.yml, Dockerfile, docker-compose.yml"
+  - clause: "8.4 AI system impact assessment"
+    status: "implemented"
+    evidence: "governance/ai_risk_manifest.yaml"
+  - clause: "9.1 Monitoring, measurement, analysis and evaluation"
+    status: "implemented"
+    evidence: "App/backend/app/analytics.py, App/backend/app/tracing.py"
+  - clause: "10.1 Continual improvement"
+    status: "implemented"
+    evidence: "App/backend/app/main.py (feedback loop), ml/pipelines/ (retraining)"
+
+# =============================================================================
+# OWASP LLM Top 10 (2025)
+# Reference: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+# =============================================================================
+owasp_llm:
+  - id: "LLM01"
+    name: "Prompt Injection"
+    status: "mitigated"
+    evidence: "App/backend/app/guardrails.py:InputGuard"
+    controls: "Regex pattern detection, input length limits"
+  - id: "LLM02"
+    name: "Sensitive Information Disclosure"
+    status: "mitigated"
+    evidence: "App/backend/app/guardrails.py:OutputGuard.redact_pii()"
+    controls: "PII pattern redaction (UG phone, TIN, NID, email, CC)"
+  - id: "LLM03"
+    name: "Supply Chain Vulnerabilities"
+    status: "mitigated"
+    evidence: ".github/workflows/ci-ml-pipeline.yml (Trivy, SHA-pinned actions)"
+    controls: "Dependency scanning, pinned versions, SBOM"
+  - id: "LLM04"
+    name: "Data and Model Poisoning"
+    status: "mitigated"
+    evidence: "ml/pipelines/validate_data.py, Notebooks/DataIngestion_Augmentation.ipynb"
+    controls: "Data validation, deduplication, source allowlist"
+  - id: "LLM05"
+    name: "Improper Output Handling"
+    status: "mitigated"
+    evidence: "App/backend/app/guardrails.py:OutputGuard.sanitize()"
+    controls: "HTML/script stripping, malicious link removal"
+  - id: "LLM06"
+    name: "Excessive Agency"
+    status: "mitigated"
+    evidence: "App/backend/app/service.py (read-only retrieval, no tool/action execution)"
+    controls: "System is retrieval-only with no write actions, no external API calls, no code execution. Responses constrained to URA knowledge base content."
+  - id: "LLM07"
+    name: "System Prompt Leakage"
+    status: "mitigated"
+    evidence: "App/backend/app/guardrails.py:InputGuard (prompt extraction patterns)"
+    controls: "Regex detection blocks 'reveal your system prompt', 'show instructions' patterns. No system prompt used in retrieval-only architecture."
+  - id: "LLM08"
+    name: "Vector and Embedding Weaknesses"
+    status: "mitigated"
+    evidence: "App/backend/app/indexer.py (trusted sources), App/backend/app/retriever.py (cross-encoder reranking)"
+    controls: "Embeddings computed from trusted URA documents only. Cross-encoder reranking validates semantic relevance. INDEX_API_KEY required for re-indexing."
+  - id: "LLM09"
+    name: "Misinformation"
+    status: "mitigated"
+    evidence: "App/backend/app/guardrails.py:OutputGuard.check_grounding()"
+    controls: "Runtime faithfulness scoring, low-confidence disclaimer, calibrated abstention"
+  - id: "LLM10"
+    name: "Unbounded Consumption"
+    status: "mitigated"
+    evidence: "App/backend/app/main.py (INDEX_API_KEY auth), App/backend/app/models.py (input limits)"
+    controls: "Input length capped at 2000 chars, top_k bounded 1-10, index endpoint requires auth token, request timeouts enforced"
+
+# =============================================================================
+# EU AI Act Compliance (full applicability 2 Aug 2026)
+# Reference: https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai
+# =============================================================================
+eu_ai_act:
+  classification: "Limited risk (Art. 6 — not in Annex III high-risk list)"
+  gpai_obligations: "N/A — system uses locally fine-tuned models, not a GPAI provider"
+  transparency_obligations:
+    - requirement: "Art. 50(1) — Users informed they are interacting with AI"
+      status: "implemented"
+      evidence: "App/app.py (UI branding as AI chatbot), App/frontend/"
+    - requirement: "Art. 50(2) — AI-generated content marked"
+      status: "implemented"
+      evidence: "App/backend/app/models.py (model field in ChatResponse)"
+  human_oversight:
+    - requirement: "Human review channel available"
+      status: "implemented"
+      evidence: "App/backend/app/main.py (feedback endpoint)"
+  risk_management:
+    - requirement: "Risk management system proportionate to risk level"
+      status: "implemented"
+      evidence: "governance/ai_risk_manifest.yaml, governance/compliance_check.py"
+  record_keeping:
+    - requirement: "Logging of AI system operation"
+      status: "implemented"
+      evidence: "App/backend/app/database.py (conversations table), App/backend/app/tracing.py"
