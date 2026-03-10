@@ -97,18 +97,16 @@ To enable offline Gemma-2B inference:
    - **Dart**: `on_device_llm.dart` — Platform channel bridge with automatic fallback
    - **Offline fallback**: `chat_provider.dart` — Falls back to on-device Gemma-2B on network errors
 
-4. **iOS: Add MediaPipe pod** (after `flutter pub get` generates Podfile):
-   ```ruby
-   # In ios/Podfile, add inside target 'Runner':
-   pod 'MediaPipeTasksGenAI', '~> 0.10.22'
+4. **iOS: Install CocoaPods** (Podfile already includes MediaPipe):
+   ```bash
+   cd ios && pod install && cd ..
    ```
-   Then run `cd ios && pod install`.
 
 ### Device Requirements (On-Device)
 
 | Platform | Min Version | Min RAM | Storage |
 |----------|-------------|---------|---------|
-| Android | 12 (API 31) | 6 GB | ~1.5 GB |
+| Android | API 24+ (recommended 12+) | 6 GB | ~1.5 GB |
 | iOS | 16.0 | iPhone 12+ | ~1.5 GB |
 
 ## Environment Variables

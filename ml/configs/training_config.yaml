@@ -127,6 +127,23 @@ deployment:
     - gguf        # on-device LLM (llama.cpp / MediaPipe)
 
 # ===========================================
+# Mobile Export Configuration (Gemma-2B GGUF)
+# ===========================================
+mobile_export:
+  base_model: "google/gemma-2-2b-it"
+  target: "mobile_gemma_2b"
+  quantization: "Q4_K_M"
+  output_dir: "artifacts/mobile"
+  model_filename: "ura-gemma-2b-q4_k_m.gguf"
+  max_context_length: 1024
+  inference_engine: "MediaPipe LLM Inference API"
+  min_android_sdk: 24
+  min_ios_version: "16.0"
+  min_ram_mb: 2000
+  android_asset_path: "models/ura-gemma-2b-q4_k_m.gguf"
+  ios_bundle_resource: "ura-gemma-2b-q4_k_m"
+
+# ===========================================
 # MLflow Tracking (Optional)
 # ===========================================
 mlflow:

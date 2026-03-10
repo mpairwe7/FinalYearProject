@@ -614,6 +614,9 @@ def train(
     warmup_ratio: float = 0.03,
     model_type: str = "gemma",
     is_t5: bool = False,
+    lora_r: int = 16,
+    lora_alpha: int = 32,
+    lora_dropout: float = 0.05,
 ):
     """Fine-tune the model using SFTTrainer or Seq2SeqTrainer."""
     import torch
@@ -764,9 +767,9 @@ def train(
         "train_samples": len(split["train"]),
         "eval_samples": len(split["test"]),
         "lora_config": {
-            "r": args.lora_r,
-            "lora_alpha": args.lora_alpha,
-            "lora_dropout": args.lora_dropout,
+            "r": lora_r,
+            "lora_alpha": lora_alpha,
+            "lora_dropout": lora_dropout,
             "target_modules": DEFAULT_LORA_CONFIG["target_modules"],
             "bias": DEFAULT_LORA_CONFIG["bias"],
             "task_type": DEFAULT_LORA_CONFIG["task_type"],
@@ -1047,6 +1050,9 @@ Examples:
             warmup_ratio=args.warmup_ratio,
             model_type=model_type,
             is_t5=is_t5,
+            lora_r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
         )
         
     except KeyboardInterrupt:

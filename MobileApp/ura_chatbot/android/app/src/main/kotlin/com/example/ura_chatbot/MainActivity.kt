@@ -183,7 +183,7 @@ class MainActivity : FlutterActivity() {
             filesDir.parentFile?.mkdirs()
             inputStream.use { input ->
                 filesDir.outputStream().use { output ->
-                    input.copyTo(output, bufferSize = 8192)
+                    input.copyTo(output, bufferSize = 1024 * 1024) // 1 MB buffer for large GGUF
                 }
             }
             filesDir.absolutePath
