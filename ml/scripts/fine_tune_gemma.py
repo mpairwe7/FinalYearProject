@@ -45,7 +45,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # Standard directory structure
 DATA_ROOT = PROJECT_ROOT / "Data"
-ARTIFACTS_DIR = DATA_ROOT / "artifacts"
+ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 OUTPUT_DIR = ARTIFACTS_DIR / "models"
 
 # PDF directories for potential additional data extraction
@@ -159,14 +159,14 @@ def check_dependencies() -> bool:
 
 def find_training_data() -> Optional[Path]:
     """Find training data file in artifacts or Data directory."""
-    search_dirs = [ARTIFACTS_DIR, DATA_ROOT]
-    
+    search_dirs = [ARTIFACTS_DIR, DATA_ROOT, DATA_ROOT / "artifacts", DATA_ROOT / "teacher_qa"]
+
     for search_dir in search_dirs:
         for filename in TRAINING_DATA_FILES:
             path = search_dir / filename
             if path.exists():
                 return path
-    
+
     return None
 
 

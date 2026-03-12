@@ -220,12 +220,17 @@ def load_teacher_qa(artifacts_dir: Path) -> list[dict[str, Any]]:
     for name in ("teacher_qa.jsonl", "teacher_qa_gemma.jsonl"):
         path = artifacts_dir / name
         if not path.exists():
-            # Also check Data/teacher_qa/
-            alt = artifacts_dir.parent / "teacher_qa" / name
+            # Check Data/teacher_qa/ (primary location from teacher_qa_generation.py)
+            alt = PROJECT_ROOT / "Data" / "teacher_qa" / name
             if alt.exists():
                 path = alt
             else:
-                continue
+                # Also check Data/artifacts/
+                alt2 = PROJECT_ROOT / "Data" / "artifacts" / name
+                if alt2.exists():
+                    path = alt2
+                else:
+                    continue
 
         try:
             with open(path, encoding="utf-8") as f:

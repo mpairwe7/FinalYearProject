@@ -53,7 +53,7 @@ import MediaPipeTasksGenAI
 
             let args = call.arguments as? [String: Any] ?? [:]
             let modelPath = args["modelPath"] as? String ?? "models/ura-gemma-2b-q4_k_m.gguf"
-            let maxTokens = args["maxTokens"] as? Int ?? 256
+            let maxTokens = args["maxTokens"] as? Int ?? 512
             let temperature = args["temperature"] as? Double ?? 0.2
             let topP = args["topP"] as? Double ?? 0.95
 
@@ -154,8 +154,11 @@ import MediaPipeTasksGenAI
     // MARK: - Dispose
 
     private func handleDispose(result: @escaping FlutterResult) {
-        llmInference = nil
-        result(nil)
+        // Deallocate on inference queue to avoid blocking main thread with ~1.5 GB free
+        inferenceQueue.async { [weak self] in
+            self?.llmInference = nil
+            DispatchQueue.main.async { result(nil) }
+        }
     }
 
     // MARK: - Helpers

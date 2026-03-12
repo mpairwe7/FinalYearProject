@@ -55,7 +55,7 @@ class MainActivity : FlutterActivity() {
             try {
                 val modelPath = call.argument<String>("modelPath")
                     ?: "models/ura-gemma-2b-q4_k_m.gguf"
-                val maxTokens = call.argument<Int>("maxTokens") ?: 256
+                val maxTokens = call.argument<Int>("maxTokens") ?: 512
                 val temperature = call.argument<Double>("temperature") ?: 0.2
                 val topP = call.argument<Double>("topP") ?: 0.95
 

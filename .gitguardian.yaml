@@ -9,10 +9,10 @@ version: 2
 
 secret:
   # Never display raw secret values in output
-  show-secrets: false
+  show_secrets: false
 
   # Paths to ignore (lock files, build artifacts, data)
-  ignored-paths:
+  ignored_paths:
     # Lock files (contain hashes, not secrets)
     - '**/*.lock'
     - '**/package-lock.json'
@@ -54,7 +54,4 @@ secret:
     - '**/*.aab'
 
   # Do not ignore any detector types
-  ignored-detectors: []
-
-  # Fail the hook if any secret is found
-  exit-zero: false
+  ignored_detectors: []
