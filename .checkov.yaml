@@ -1,0 +1,44 @@
+# =============================================================================
+# Checkov Configuration — IaC Security & Compliance Scanner
+# URA AI Chatbot (2026)
+#
+# Reference: https://www.checkov.io/2.Basics/CLI%20Command%20Reference.html
+# =============================================================================
+
+# Frameworks to scan
+framework:
+  - dockerfile
+  - github_actions
+  - secrets
+  - json         # package.json, tsconfig.json
+
+# Directories to skip
+skip-path:
+  - node_modules/
+  - .next/
+  - Data/
+  - Results/
+  - Notebooks/
+  - __pycache__/
+  - .git/
+  - artifacts/
+  - test_env/
+
+# Specific checks to skip (with justification)
+skip-check:
+  # CKV_DOCKER_2: HEALTHCHECK — we define healthchecks in docker-compose.yml instead
+  - CKV_DOCKER_2
+  # CKV_DOCKER_7: Multiple RUN in Dockerfile — we optimise layers deliberately
+  - CKV_DOCKER_7
+
+# Output format
+output:
+  - cli
+  - sarif
+
+# Compact output for CI
+compact: true
+
+# Enable all severity levels
+check-type:
+  - all

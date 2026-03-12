@@ -64,7 +64,7 @@ jobs:
 
       - name: Upload filesystem SARIF to GitHub Security
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
         with:
           sarif_file: trivy-fs-vuln.sarif
           category: trivy-filesystem
@@ -115,7 +115,7 @@ jobs:
 
       - name: Upload IaC SARIF to GitHub Security
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
         with:
           sarif_file: trivy-iac.sarif
           category: trivy-iac
@@ -239,7 +239,7 @@ jobs:
 
       - name: Upload API image SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
         with:
           sarif_file: trivy-api-image.sarif
           category: trivy-api-image
@@ -309,7 +309,7 @@ jobs:
 
       - name: Upload ML image SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
         with:
           sarif_file: trivy-ml-image.sarif
           category: trivy-ml-image
@@ -367,7 +367,7 @@ jobs:
 
       - name: Upload Frontend image SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
         with:
           sarif_file: trivy-frontend-image.sarif
           category: trivy-frontend-image

@@ -1,0 +1,254 @@
+rules:
+  # =========================================================================
+  # LLM / AI Security Rules (OWASP LLM Top 10)
+  # =========================================================================
+
+  - id: ura-llm01-raw-user-input-to-llm
+    patterns:
+      - pattern: |
+          $MODEL.generate(..., $PROMPT, ...)
+      - pattern-not-inside: |
+          $GUARD.check(...)
+          ...
+          $MODEL.generate(...)
+    message: >
+      User input passed directly to LLM without InputGuard check.
+      Always sanitise through InputGuard.check() before LLM inference.
+      OWASP LLM01: Prompt Injection
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "LLM01"
+      cwe: "CWE-74"
+      confidence: MEDIUM
+
+  - id: ura-llm02-pii-in-logs
+    patterns:
+      - pattern-either:
+          - pattern: logging.$METHOD(..., $MSG, ...)
+          - pattern: logger.$METHOD(..., $MSG, ...)
+      - metavariable-regex:
+          metavariable: $MSG
+          regex: ".*(tin|nid|phone|email|password|ssn|credit.card).*"
+    message: >
+      Potential PII being logged. Ensure PII is redacted before logging.
+      OWASP LLM02: Sensitive Information Disclosure
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      owasp: "LLM02"
+      cwe: "CWE-532"
+      confidence: LOW
+
+  - id: ura-llm05-dangerouslysetinnerhtml
+    pattern: dangerouslySetInnerHTML={...}
+    message: >
+      dangerouslySetInnerHTML can lead to XSS if LLM output contains
+      malicious content. Use DOMPurify or escape the output.
+      OWASP LLM05: Improper Output Handling
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "LLM05"
+      cwe: "CWE-79"
+      confidence: HIGH
+
+  - id: ura-llm05-eval-usage
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+    message: >
+      eval() or Function() constructor can execute arbitrary code.
+      Never use with LLM output.
+      OWASP LLM05: Improper Output Handling
+    languages: [typescript, javascript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "LLM05"
+      cwe: "CWE-95"
+      confidence: HIGH
+
+  # =========================================================================
+  # FastAPI Security Rules
+  # =========================================================================
+
+  - id: ura-fastapi-cors-wildcard
+    patterns:
+      - pattern: |
+          CORSMiddleware(..., allow_origins=["*"], ...)
+    message: >
+      CORS allow_origins=["*"] allows requests from any origin.
+      Use an explicit allowlist from environment variables.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-942"
+      confidence: HIGH
+
+  - id: ura-fastapi-no-rate-limit
+    patterns:
+      - pattern: |
+          @app.$METHOD($PATH)
+          def $FUNC(...):
+              ...
+      - pattern-not-inside: |
+          @limiter.limit(...)
+          @app.$METHOD($PATH)
+          def $FUNC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: ".*chat.*|.*classify.*|.*index.*"
+    message: >
+      Sensitive endpoint without rate limiting. Apply @limiter.limit()
+      to prevent abuse. OWASP LLM10: Unbounded Consumption
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      owasp: "LLM10"
+      cwe: "CWE-770"
+      confidence: MEDIUM
+
+  # =========================================================================
+  # Python Security Rules
+  # =========================================================================
+
+  - id: ura-python-pickle-load
+    pattern-either:
+      - pattern: pickle.load(...)
+      - pattern: pickle.loads(...)
+      - pattern: _pickle.load(...)
+      - pattern: _pickle.loads(...)
+    message: >
+      pickle.load() can execute arbitrary code during deserialization.
+      Use safetensors, JSON, or other safe formats for model/data loading.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-502"
+      confidence: HIGH
+
+  - id: ura-python-yaml-unsafe-load
+    patterns:
+      - pattern: yaml.load($DATA)
+      - pattern-not: yaml.load($DATA, Loader=yaml.SafeLoader)
+      - pattern-not: yaml.safe_load($DATA)
+    message: >
+      yaml.load() without SafeLoader can execute arbitrary code.
+      Use yaml.safe_load() or yaml.load(data, Loader=yaml.SafeLoader).
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-502"
+      confidence: HIGH
+
+  - id: ura-python-hardcoded-secret
+    patterns:
+      - pattern-either:
+          - pattern: $KEY = "..."
+          - pattern: $KEY = '...'
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: ".*(password|secret|api_key|token|private_key).*"
+      - pattern-not: $KEY = ""
+      - pattern-not: $KEY = "changeme"
+      - pattern-not: $KEY = os.getenv(...)
+      - pattern-not: $KEY = os.environ.get(...)
+    message: >
+      Potential hardcoded secret in variable assignment.
+      Use environment variables or a secrets manager instead.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-798"
+      confidence: MEDIUM
+
+  - id: ura-python-subprocess-shell
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
+          - pattern: os.system(...)
+    message: >
+      Shell execution with shell=True or os.system() is vulnerable
+      to command injection. Use subprocess.run() with a list of args.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-78"
+      confidence: HIGH
+
+  - id: ura-python-sql-injection
+    patterns:
+      - pattern-either:
+          - pattern: cursor.execute(f"...", ...)
+          - pattern: cursor.execute("..." + $VAR, ...)
+          - pattern: cursor.execute("...%s..." % $VAR, ...)
+          - pattern: |
+              $QUERY = f"..."
+              ...
+              cursor.execute($QUERY)
+    message: >
+      SQL query constructed with string formatting is vulnerable to
+      SQL injection. Use parameterised queries with ? placeholders.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89"
+      confidence: HIGH
+
+  # =========================================================================
+  # Uganda-specific PII Detection
+  # =========================================================================
+
+  - id: ura-pii-ug-tin-hardcoded
+    pattern-regex: "\\b1\\d{9}\\b"
+    paths:
+      exclude:
+        - "*.test.*"
+        - "*test_*"
+        - "tests/*"
+        - "Data/*"
+        - "*.md"
+        - "threat-model/*"
+    message: >
+      Potential Uganda TIN (Tax Identification Number) detected.
+      Ensure PII is not hardcoded in source files.
+    languages: [python, javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-359"
+      confidence: LOW
+
+  - id: ura-pii-ug-nid-hardcoded
+    pattern-regex: "C[MF]\\d{2}[A-Z]{5}\\d{5}[A-Z]"
+    paths:
+      exclude:
+        - "*.test.*"
+        - "*test_*"
+        - "tests/*"
+        - "Data/*"
+        - "*.md"
+        - "threat-model/*"
+    message: >
+      Potential Uganda National ID (NIN) detected.
+      Ensure PII is not hardcoded in source files.
+    languages: [python, javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-359"
+      confidence: MEDIUM

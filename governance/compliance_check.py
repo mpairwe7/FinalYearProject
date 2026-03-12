@@ -26,6 +26,14 @@ REQUIRED_FILES = [
     "Data/eval/rag_eval.jsonl",
     "Data/eval/rag_eval_lg.jsonl",
     "ml/pipelines/export_feedback.py",
+    # DevSecOps threat modelling artifacts
+    "threat-model/tm.py",
+    "threat-model/validate_threats.py",
+    ".semgrep/ura-chatbot-rules.yaml",
+    ".bandit.yaml",
+    ".checkov.yaml",
+    ".zap-rules.tsv",
+    ".github/workflows/devsecops-sast-dast.yml",
 ]
 
 # Content keywords that MUST appear in specific files.
@@ -64,6 +72,14 @@ REQUIRED_CONTENT: dict[str, list[str]] = {
         "LLM08",
         "LLM09",
         "LLM10",
+        "devsecops_threat_modelling",
+    ],
+    "threat-model/validate_threats.py": [
+        "THREAT_REGISTRY",
+        "STRIDE",
+        "owasp_llm",
+        "mitre_atlas",
+        "evidence",
     ],
     "ml/pipelines/evaluate_rag.py": [
         "compute_groundedness",

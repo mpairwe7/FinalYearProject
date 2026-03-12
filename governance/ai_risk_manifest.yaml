@@ -202,3 +202,113 @@ eu_ai_act:
     - requirement: "Logging of AI system operation"
       status: "implemented"
       evidence: "App/backend/app/database.py (conversations table), App/backend/app/tracing.py"
+
+# =============================================================================
+# DevSecOps Threat Modelling (2026 Industry Standard)
+# Tools: pytm, Semgrep, Bandit, pip-audit, Checkov, OWASP ZAP, OSSF Scorecard
+# =============================================================================
+devsecops_threat_modelling:
+  methodology:
+    - framework: "STRIDE"
+      tool: "pytm (Pythonic Threat Modeling)"
+      status: "implemented"
+      evidence: "threat-model/tm.py"
+      description: >
+        Automated threat model as code generating DFDs, STRIDE per-element
+        threat analysis, and sequence diagrams from architecture definition.
+    - framework: "OWASP LLM Top 10 (2025)"
+      tool: "Custom threat registry + Semgrep rules"
+      status: "implemented"
+      evidence: "threat-model/validate_threats.py, .semgrep/ura-chatbot-rules.yaml"
+      description: >
+        21 threats mapped to OWASP LLM categories with evidence-based
+        mitigation validation in CI.
+    - framework: "MITRE ATLAS"
+      tool: "Threat registry with ATLAS technique IDs"
+      status: "implemented"
+      evidence: "threat-model/validate_threats.py"
+      description: >
+        Adversarial ML threats mapped to MITRE ATLAS techniques (AML.T*)
+        for alignment with industry threat intelligence.
+
+  sast:
+    - tool: "Semgrep v1.114+"
+      type: "Multi-language SAST"
+      status: "implemented"
+      evidence: ".github/workflows/devsecops-sast-dast.yml, .semgrep/"
+      languages: ["python", "typescript", "javascript"]
+      rule_sets:
+        - "Community: OWASP Top 10, security-audit, gitleaks, docker, supply-chain"
+        - "Custom: LLM-specific rules (prompt injection, PII detection, output handling)"
+        - "Custom: Uganda-specific PII rules (TIN, NIN)"
+    - tool: "Bandit v1.8+"
+      type: "Python SAST"
+      status: "implemented"
+      evidence: ".github/workflows/devsecops-sast-dast.yml, .bandit.yaml"
+      focus: "AST-based analysis for Python security anti-patterns"
+
+  sca:
+    - tool: "pip-audit"
+      type: "Python SCA"
+      status: "implemented"
+      evidence: ".github/workflows/devsecops-sast-dast.yml"
+      description: "OSV/PyPI vulnerability database auditing for Python dependencies"
+    - tool: "Trivy"
+      type: "Multi-ecosystem SCA"
+      status: "implemented"
+      evidence: ".github/workflows/security-trivy.yml"
+
+  dast:
+    - tool: "OWASP ZAP v2.15+"
+      type: "DAST baseline scan"
+      status: "implemented"
+      evidence: ".github/workflows/devsecops-sast-dast.yml, .zap-rules.tsv"
+      description: >
+        Automated baseline scan against live API in CI. Configured with
+        custom rule severity (FAIL for XSS/SQLi, WARN for headers).
+
+  iac_security:
+    - tool: "Checkov"
+      type: "IaC compliance"
+      status: "implemented"
+      evidence: ".github/workflows/devsecops-sast-dast.yml, .checkov.yaml"
+      frameworks: ["Dockerfile", "GitHub Actions", "docker-compose"]
+      benchmarks: ["CIS Docker", "NIST 800-190"]
+    - tool: "Trivy config"
+      type: "IaC misconfiguration"
+      status: "implemented"
+      evidence: ".github/workflows/security-trivy.yml"
+
+  supply_chain:
+    - tool: "OSSF Scorecard"
+      type: "Supply chain scoring"
+      status: "implemented"
+      evidence: ".github/workflows/devsecops-sast-dast.yml"
+      description: "OpenSSF supply chain security posture scoring"
+    - tool: "SLSA v1.2 provenance"
+      status: "implemented"
+      evidence: ".github/workflows/kaggle-training.yml"
+
+  pre_commit_hooks:
+    - tool: "Semgrep"
+      purpose: "SAST on staged changes"
+      status: "implemented"
+      evidence: ".pre-commit-config.yaml"
+    - tool: "Bandit"
+      purpose: "Python security lint on staged changes"
+      status: "implemented"
+      evidence: ".pre-commit-config.yaml"
+    - tool: "TruffleHog + Gitleaks + detect-secrets + ggshield"
+      purpose: "4-layer secret detection"
+      status: "implemented"
+      evidence: ".pre-commit-config.yaml, .github/workflows/secret-scanning.yml"
+
+  threat_registry:
+    total_threats: 21
+    stride_coverage: "6/6 categories"
+    owasp_llm_coverage: "9/10 (LLM06 N/A — no excessive agency)"
+    mitre_atlas_techniques: 12
+    statuses:
+      mitigated: 20
+      accepted: 1
+    validation: "CI gate in .github/workflows/devsecops-sast-dast.yml (threat-model job)"

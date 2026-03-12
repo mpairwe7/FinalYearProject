@@ -67,6 +67,36 @@ repos:
           )$
         stages: [pre-commit]
 
+  # ── Semgrep – multi-language SAST ─────────────────────────────────────────
+  # Runs custom project rules (.semgrep/) + community OWASP/security rules.
+  # Config: .semgrep/ura-chatbot-rules.yaml
+  - repo: https://github.com/semgrep/semgrep
+    rev: v1.155.0
+    hooks:
+      - id: semgrep
+        name: Semgrep – SAST scan
+        args:
+          - --config=.semgrep/
+          - --error
+          - --severity=ERROR
+          - --metrics=off
+        stages: [pre-commit]
+
+  # ── Bandit – Python security linter ─────────────────────────────────────
+  # AST-based analysis for Python-specific security issues.
+  # Config: .bandit.yaml
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.3
+    hooks:
+      - id: bandit
+        name: Bandit – Python security scan
+        args:
+          - -c
+          - .bandit.yaml
+          - --severity-level=high
+          - --confidence-level=high
+        stages: [pre-commit]
+
   # ── Basic hygiene checks ──────────────────────────────────────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
