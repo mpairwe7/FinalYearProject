@@ -95,6 +95,9 @@ kaggle.json
 gitleaks-report.json
 gitleaks-report.sarif
 
+# Threat model generated output
+threat-model/output/
+
 # Test artifacts
 .coverage
 htmlcov/

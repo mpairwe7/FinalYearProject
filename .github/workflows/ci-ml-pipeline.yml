@@ -1,6 +1,11 @@
 # MLOps CI/CD Pipeline for URA Chatbot
 # Handles: linting, testing, data validation, Docker builds, HF deployment
 # GPU training is handled separately by kaggle-training.yml
+#
+# Security scanning is handled by dedicated workflows:
+#   - security-trivy.yml      → SCA, IaC, license, container, SBOM
+#   - devsecops-sast-dast.yml → Semgrep, Bandit, pip-audit, Checkov, ZAP, Scorecard, threat model
+#   - secret-scanning.yml     → TruffleHog, Gitleaks, ggshield, detect-secrets
 name: ML Pipeline CI/CD
 
 on:
@@ -426,7 +431,8 @@ jobs:
         run: uv pip install --system transformers peft torch --extra-index-url https://download.pytorch.org/whl/cpu
 
       - name: Validate export_mobile.py syntax and imports
-        run: python -c "import ast; ast.parse(open('ml/scripts/export_mobile.py').read()); print('export_mobile.py: syntax OK')"
+        run: |
+          python -c "import ast; ast.parse(open('ml/scripts/export_mobile.py').read()); print('export_mobile.py: syntax OK')"
 
       - name: Validate mobile config in training_config.yaml
         run: |

@@ -212,57 +212,203 @@ flowchart TD
 
 ---
 
-## 4. SAST/DAST Checklist & Sample Report
+## 4. DevSecOps Threat Modelling Toolchain (2026 Production Implementation)
 
-### 4.1 Tool Selection (2026 State of the Art)
+### 4.1 Threat Model as Code (pytm)
 
-| Tool | Type | Purpose | Integration |
-|------|------|---------|-------------|
-| **Semgrep** (v1.60+) | SAST | Python & TypeScript static analysis; OWASP rules | GitHub Actions, pre-commit |
-| **Trivy** (v0.50+) | SCA + Container | Dependency CVE scanning, container image scanning | GitHub Actions (build-docker job) |
-| **OWASP ZAP** (v2.15+) | DAST | Dynamic application security testing of live API | Manual + scheduled CI |
-| **Bandit** (v1.8+) | SAST | Python-specific security linting | GitHub Actions |
+The system architecture is defined as code in `threat-model/tm.py` using [OWASP pytm](https://github.com/OWASP/pytm), enabling automated STRIDE threat generation, DFD rendering, and CI validation.
 
-### 4.2 SAST/DAST Checklist
+**Architecture elements modelled:**
+
+| Element Type | Count | Examples |
+|-------------|-------|---------|
+| Trust boundaries | 8 | Internet, DMZ, Backend Container, ML Pipeline, Data Layer, Mobile, CI/CD |
+| Actors | 4 | Taxpayer, Mobile User, URA Admin, Adversary |
+| External entities | 4 | HuggingFace Hub, Kaggle, Docker Hub, GitHub |
+| Servers | 11 | Next.js, FastAPI, InputGuard, OutputGuard, Qdrant, Retriever, LLM Inference, Mobile App, On-device ML |
+| Datastores | 5 | FAQ CSVs, URA PDFs, SQLite Analytics, Model Artifacts, Vector Index |
+| Lambdas (CI) | 6 | CI/CD Pipeline, Training Job, Secret Scanner, Trivy, SAST, DAST, Threat Model |
+| Data flows | 27 | User→Frontend→API→Guards→Retriever→LLM→Response; Admin→GitHub→CI→Kaggle→HF |
+
+**Usage:**
+```bash
+# Generate DFD diagram
+python threat-model/tm.py --dfd | dot -Tpng -o threat-model/output/dfd.png
+
+# Generate STRIDE threat list
+python threat-model/tm.py --describe threat-model/output/threats.md
+
+# Validate threat registry (CI gate)
+python threat-model/validate_threats.py
+```
+
+### 4.2 Threat Registry (21 Threats — STRIDE × OWASP LLM × MITRE ATLAS)
+
+The threat registry (`threat-model/validate_threats.py`) tracks all identified threats with:
+- **STRIDE category** — Spoofing, Tampering, Repudiation, Info Disclosure, DoS, Elevation
+- **OWASP LLM mapping** — LLM01–LLM10 (2025 Edition)
+- **MITRE ATLAS technique** — Adversarial ML threat intelligence (AML.T*)
+- **Mitigation** — specific control implemented
+- **Evidence** — file paths proving the mitigation exists (validated in CI)
+- **Status** — mitigated / accepted / in_progress
+
+| # | Category | Threat | OWASP LLM | MITRE ATLAS | Status |
+|---|----------|--------|-----------|-------------|--------|
+| T01 | Spoofing | API client impersonation | – | AML.T0052 | Mitigated |
+| T02 | Tampering | Training data poisoning | LLM04 | AML.T0020 | Mitigated |
+| T03 | Tampering | Malicious dependency (supply chain) | LLM03 | AML.T0010 | Mitigated |
+| T04 | Repudiation | No audit trail for queries | – | – | Mitigated |
+| T05 | Info Disclosure | PII leaks in model responses | LLM02 | AML.T0024.001 | Mitigated |
+| T06 | Info Disclosure | Model weight exfiltration via API | LLM03 | AML.T0044 | Mitigated |
+| T07 | Denial of Service | Rate-limit bypass on inference | LLM10 | AML.T0029 | Mitigated |
+| T08 | Elevation | Prompt injection alters behaviour | LLM01 | AML.T0051 | Mitigated |
+| T09 | Tampering | CORS misconfiguration → CSRF | – | – | Mitigated |
+| T10 | Info Disclosure | Server error message leakage | – | – | Mitigated |
+| T11 | Spoofing | Compromised GitHub Actions workflow | – | AML.T0010 | Mitigated |
+| T12 | Elevation | XSS via chatbot response | LLM05 | – | Mitigated |
+| T13 | Info Disclosure | Secrets leaked in git history | – | – | Mitigated |
+| T14 | Tampering | Adversarial embedding attacks | LLM08 | AML.T0043 | Mitigated |
+| T15 | Info Disclosure | System prompt extraction | LLM07 | AML.T0051.001 | Mitigated |
+| T16 | Denial of Service | Resource exhaustion (large payloads) | LLM10 | AML.T0029 | Mitigated |
+| T17 | Tampering | Container escape / privilege escalation | – | – | Mitigated |
+| T18 | Info Disclosure | LLM generates unfaithful answers | LLM09 | AML.T0048 | Mitigated |
+| T19 | Tampering | IaC misconfiguration in Dockerfiles/CI | – | – | Mitigated |
+| T20 | Spoofing | Dependency confusion / typosquatting | LLM03 | AML.T0010 | Mitigated |
+| T21 | Info Disclosure | Mobile model extraction via APK RE | LLM03 | AML.T0044 | Accepted |
+
+**Coverage summary:**
+- STRIDE: **6/6** categories (100%)
+- OWASP LLM Top 10: **9/10** mapped (LLM06 N/A — system has no tool-use/agency)
+- MITRE ATLAS: **12 techniques** mapped across 21 threats
+
+### 4.3 SAST/DAST Tool Selection (2026 State of the Art)
+
+All tools are open-source and run in CI via `.github/workflows/devsecops-sast-dast.yml`:
+
+| Tool | Type | Purpose | Config File | Integration |
+|------|------|---------|-------------|-------------|
+| **Semgrep** v1.114+ | SAST | Python, TypeScript, React static analysis | `.semgrep/ura-chatbot-rules.yaml` | CI + pre-commit |
+| **Bandit** v1.8+ | SAST | Python AST-based security linting | `.bandit.yaml` | CI + pre-commit |
+| **pip-audit** | SCA | Python dependency vulnerability auditing (OSV/PyPI) | – | CI |
+| **Trivy** v0.69+ | SCA + Container + IaC + License | Full supply chain scanning | `trivy.yaml` | CI (`security-trivy.yml`) |
+| **Checkov** | IaC Security | Dockerfile, GitHub Actions, docker-compose compliance | `.checkov.yaml` | CI |
+| **OWASP ZAP** v2.15+ | DAST | Automated baseline scan against live API | `.zap-rules.tsv` | CI (main/develop) |
+| **OSSF Scorecard** | Supply Chain | OpenSSF supply chain security posture scoring | – | CI |
+| **pytm** v1.3+ | Threat Model | STRIDE DFD generation and threat analysis | `threat-model/tm.py` | CI + local |
+
+**Custom Semgrep rules** (`.semgrep/ura-chatbot-rules.yaml`) — 13 rules:
+
+| Rule ID | Severity | Category | Description |
+|---------|----------|----------|-------------|
+| `ura-llm01-raw-user-input-to-llm` | ERROR | LLM01 | User input to LLM without InputGuard |
+| `ura-llm02-pii-in-logs` | WARNING | LLM02 | PII patterns in log statements |
+| `ura-llm05-dangerouslysetinnerhtml` | ERROR | LLM05 | XSS via dangerouslySetInnerHTML |
+| `ura-llm05-eval-usage` | ERROR | LLM05 | eval()/Function() with LLM output |
+| `ura-fastapi-cors-wildcard` | ERROR | OWASP | CORS allow_origins=["*"] |
+| `ura-fastapi-no-rate-limit` | WARNING | LLM10 | Sensitive endpoint without rate limiting |
+| `ura-python-pickle-load` | ERROR | CWE-502 | Unsafe deserialization via pickle |
+| `ura-python-yaml-unsafe-load` | ERROR | CWE-502 | yaml.load without SafeLoader |
+| `ura-python-hardcoded-secret` | ERROR | CWE-798 | Hardcoded secrets in variables |
+| `ura-python-subprocess-shell` | ERROR | CWE-78 | Command injection via shell=True |
+| `ura-python-sql-injection` | ERROR | CWE-89 | SQL injection via string formatting |
+| `ura-pii-ug-tin-hardcoded` | WARNING | CWE-359 | Uganda TIN in source code |
+| `ura-pii-ug-nid-hardcoded` | WARNING | CWE-359 | Uganda NIN in source code |
+
+### 4.4 Full DevSecOps SAST/DAST Checklist
 
 | # | Check | Tool | Frequency | Status |
 |---|-------|------|-----------|--------|
-| 1 | Python code scan for injection, hardcoded secrets, unsafe deserialization | Semgrep | Every PR | Configured |
-| 2 | TypeScript/JSX scan for XSS, eval(), dangerouslySetInnerHTML | Semgrep | Every PR | Configured |
-| 3 | Dependency vulnerability scan (Python) | Trivy | Weekly + every PR | Configured |
-| 4 | Dependency vulnerability scan (npm) | Trivy | Weekly + every PR | Configured |
-| 5 | Docker image vulnerability scan | Trivy | Every build | Configured |
-| 6 | API endpoint fuzzing (DAST) | OWASP ZAP | Monthly | Manual |
-| 7 | Prompt injection testing | Manual red-team | Quarterly | Planned |
-| 8 | SBOM generation and audit | CycloneDX CLI | Every release | Configured |
+| 1 | Python code scan (injection, secrets, deserialization) | Semgrep | Every PR + pre-commit | Implemented |
+| 2 | TypeScript/JSX scan (XSS, eval, dangerouslySetInnerHTML) | Semgrep | Every PR + pre-commit | Implemented |
+| 3 | Python AST security linting (B105-B702 checks) | Bandit | Every PR + pre-commit | Implemented |
+| 4 | Dependency vulnerability scan (Python — OSV/PyPI) | pip-audit | Every PR | Implemented |
+| 5 | Dependency vulnerability scan (Python/npm/Dart) | Trivy | Weekly + every PR | Implemented |
+| 6 | Docker image vulnerability scan (API, ML, Frontend) | Trivy | Every build | Implemented |
+| 7 | IaC misconfiguration (Dockerfiles, CI workflows) | Trivy + Checkov | Every PR | Implemented |
+| 8 | License compliance (block AGPL/GPL/SSPL/BSL) | Trivy | Every PR | Implemented |
+| 9 | DAST baseline scan against live API | OWASP ZAP | Every push to main/develop | Implemented |
+| 10 | Supply chain security posture scoring | OSSF Scorecard | Weekly + push | Implemented |
+| 11 | Threat model validation (21 threats + evidence) | pytm + validate_threats.py | Every PR | Implemented |
+| 12 | SBOM generation (CycloneDX) for all images | Trivy | Every build | Implemented |
+| 13 | Secret scanning (4-layer defence-in-depth) | TruffleHog + Gitleaks + ggshield + detect-secrets | Every PR + pre-commit + weekly | Implemented |
+| 14 | Prompt injection testing | Manual red-team | Quarterly | Planned |
 
-### 4.3 Sample Semgrep Scan Report
+### 4.5 CI Security Pipeline Architecture
 
-```
-=== Semgrep Scan Results – URA Chat Bot ===
-Date: 2026-02-25
-Rules: python.lang.security, typescript.react.security, owasp.top-ten
+```mermaid
+flowchart TD
+    subgraph Trigger ["Trigger Events"]
+        PUSH[Push to main/develop]
+        PR[Pull Request]
+        SCHED[Weekly Schedule]
+    end
 
-Findings: 0 Critical, 0 High, 1 Medium, 2 Info
+    subgraph SecretScan ["Secret Scanning Pipeline"]
+        TH[TruffleHog v3]
+        GL[Gitleaks v8]
+        GG[ggshield ML]
+        DS[detect-secrets]
+    end
 
-[MEDIUM] App/backend/app/main.py:23
-  Rule: python.fastapi.security.cors-wildcard
-  Message: CORS allow_origins=["*"] with credentials is insecure
-  Status: FIXED – replaced with explicit origin allowlist
+    subgraph SAST_DAST ["DevSecOps SAST/DAST Pipeline"]
+        SG[Semgrep SAST]
+        BD[Bandit Python SAST]
+        PA[pip-audit SCA]
+        CK[Checkov IaC]
+        ZAP[OWASP ZAP DAST]
+        SC[OSSF Scorecard]
+        TM[Threat Model Validation]
+    end
 
-[INFO] App/frontend/src/app/page.tsx:210
-  Rule: typescript.react.security.aria-props
-  Message: Ensure aria-live region has appropriate role
-  Status: ACKNOWLEDGED – aria-live="polite" is intentional
+    subgraph TrivyScan ["Trivy Security Pipeline"]
+        FS[Filesystem Scan]
+        IAC[IaC Misconfig Scan]
+        LIC[License Compliance]
+        CA[Container: API Image]
+        CM[Container: ML Image]
+        CF[Container: Frontend Image]
+    end
 
-[INFO] ml/scripts/fine_tune_gemma.py:45
-  Rule: python.lang.security.audit.logging-sensitive
-  Message: Ensure no sensitive data in log statements
-  Status: VERIFIED – no PII logged
+    subgraph Gates ["Security Gates"]
+        G1[Secret Gate]
+        G2[DevSecOps Gate]
+        G3[Trivy Security Gate]
+    end
 
-Summary: All Medium+ findings resolved. No blocking issues.
+    PUSH --> SecretScan & SAST_DAST & TrivyScan
+    PR --> SecretScan & SAST_DAST & TrivyScan
+    SCHED --> SecretScan & SAST_DAST & TrivyScan
+
+    TH & GL & GG & DS --> G1
+    SG & BD & PA & CK & ZAP & SC & TM --> G2
+    FS & IAC & LIC & CA & CM & CF --> G3
+
+    G1 & G2 & G3 -->|All PASS| DEPLOY[Safe to Deploy]
+    G1 & G2 & G3 -->|Any FAIL| BLOCK[Block Merge/Deploy]
+
+    style BLOCK fill:#ff6b6b,color:#fff
+    style DEPLOY fill:#51cf66,color:#fff
 ```
 
 ---
 
-*This document is aligned with STRIDE methodology, OWASP LLM Top 10 (2025 Edition), NIST SP 800-218 (SSDF), SLSA v1.2, and ISO/IEC 42001:2023.*
+## 5. Pre-Commit Security Hooks
+
+Eight pre-commit hooks enforce security locally before code reaches CI:
+
+| Hook | Tool | Stage | Purpose |
+|------|------|-------|---------|
+| TruffleHog | v3.88.0 | pre-commit, pre-push | Verified credential detection (800+ types) |
+| Gitleaks | v8.24.0 | pre-commit | Regex + entropy secret scanning |
+| detect-secrets | v1.5.0 | pre-commit | Baseline-aware entropy scanning |
+| Semgrep | v1.114.0 | pre-commit | Multi-language SAST (custom + OWASP rules) |
+| Bandit | v1.8.3 | pre-commit | Python AST security linting |
+| Block large files | pre-commit-hooks | pre-commit | Files >500 KB blocked |
+| Detect private keys | pre-commit-hooks | pre-commit | .pem/.key/RSA header detection |
+| Block main commits | pre-commit-hooks | pre-commit | Direct commits to main/master blocked |
+
+Setup: `pip install pre-commit && pre-commit install --hook-type pre-commit --hook-type pre-push`
+
+---
+
+*This document is aligned with STRIDE methodology, OWASP LLM Top 10 (2025 Edition), MITRE ATLAS, NIST SP 800-218 (SSDF), NIST AI RMF 1.0, SLSA v1.2, CIS Docker Benchmark, OpenSSF Scorecard, and ISO/IEC 42001:2023.*

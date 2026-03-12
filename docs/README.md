@@ -20,6 +20,10 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Gradio App](GRADIO_APP.md) | Gradio web interface documentation |
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
+| **Operations & Deployment** |
+| [Deployment Guide](DEPLOYMENT.md) | Production deployment, TLS, scaling, rollback, SLOs |
+| [Monitoring & Observability](MONITORING.md) | OpenTelemetry, Prometheus, Grafana, alerting, SLOs |
+| [Mobile Setup](MOBILE_SETUP.md) | Flutter Android/iOS build, on-device LLM, App Store compliance |
 | **Security** |
 | [Security Policy](../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
 | **Governance & Compliance** |
@@ -118,7 +122,9 @@ Main Branch → Governance Check → Docker Build → HF Push → Production Dep
 | `ml/configs/training_config.yaml` | Training hyperparameters |
 | `docker-compose.yml` | Local development setup |
 | `Dockerfile` | Production container image |
-| `.pre-commit-config.yaml` | Pre-commit hook definitions (4 secret scanners) |
+| `.pre-commit-config.yaml` | Pre-commit hook definitions (11 hooks: secrets, SAST, hygiene) |
+| `trivy.yaml` | Trivy security scanner configuration |
+| `.trivyignore` | Trivy accepted-risk suppressions |
 | `.gitleaks.toml` | Gitleaks custom rules (Uganda PII, ML API keys) |
 | `.gitguardian.yaml` | ggshield path exclusions |
 | `.trufflehog-exclude-paths.txt` | TruffleHog path exclusions |

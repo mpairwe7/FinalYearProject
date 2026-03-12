@@ -1,4 +1,8 @@
 # Frontend CI/CD Pipeline - Docker Deployment
+#
+# Security scanning supplemented by dedicated workflows:
+#   - security-trivy.yml      → container image scanning, SBOM, license compliance
+#   - devsecops-sast-dast.yml → Semgrep SAST (TypeScript/React), Checkov IaC, ZAP DAST
 name: Frontend CI/CD
 
 on:

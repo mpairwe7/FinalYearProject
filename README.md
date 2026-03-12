@@ -2,13 +2,19 @@
 
 This repository describes a CI/CD pipeline for developing and training a customer-service conversation AI. The pipeline uses GitHub Actions for automation, Kaggle for model training, and Docker for containerised deployment. Backend uses Python/FastAPI with `uv` for dependency management; frontend (Next.js) uses Bun.
 
-## 📚 Documentation
+## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [Documentation Index](docs/README.md) | Getting started and project overview |
-| [MLOps Workflows](docs/mlops-workflows.md) | **Comprehensive CI/CD pipeline documentation** |
+| [MLOps Workflows](docs/mlops-workflows.md) | Comprehensive CI/CD pipeline documentation |
+| [API Reference](docs/API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) |
+| [RAG Architecture](docs/RAG_ARCHITECTURE.md) | 6-phase advanced RAG pipeline design |
+| [Deployment Guide](docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
+| [Monitoring & Observability](docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
+| [Mobile Setup](docs/MOBILE_SETUP.md) | Flutter Android/iOS build, on-device LLM |
 | [Data Schema & Evaluation](docs/data-schema-and-eval.md) | Database models and evaluation criteria |
+| [Security Policy](SECURITY.md) | Secret scanning, OWASP LLM Top 10, threat model |
 
 ## Pipeline Overview
 - **Code**: Source, data configs, and frontend live in this repo on GitHub.
@@ -179,7 +185,7 @@ Teacher QA ──▶ Fail-Fast ──▶ RAG-Aware Format ──▶ SFT (rsLoRA)
 
 > **📚 Full Documentation**: See [docs/mlops-workflows.md](docs/mlops-workflows.md) for comprehensive workflow details.
 
-Three consolidated workflows under `.github/workflows/`:
+Seven workflows under `.github/workflows/`:
 
 ### 1. `ci-ml-pipeline.yml` - Main ML Pipeline
 **Triggers**: Push to `main`/`develop`/`feat/*`, PRs, manual dispatch
@@ -221,10 +227,47 @@ Three consolidated workflows under `.github/workflows/`:
 | Process | Download and validate outputs |
 | Deploy | Push to Hugging Face |
 
-Manual dispatch highlights:
-- `accelerator`: `gpu|tpu` (default `tpu`)
-- `run_data_eda`: `false` by default for faster data-ingestion runs
-- `gpu`: deprecated compatibility input (`true` -> GPU, `false` -> TPU)
+### 4. `secret-scanning.yml` - 4-Layer Secret Scanning
+**Triggers**: Push/PR to main/develop, weekly schedule
+
+| Scanner | Coverage |
+|---------|----------|
+| TruffleHog v3 | 800+ verified credential detectors |
+| Gitleaks v8 | Regex + entropy + custom Uganda PII rules |
+| GitGuardian ggshield | 400+ ML-based secret types |
+| detect-secrets | Baseline-aware entropy scanning |
+
+### 5. `security-trivy.yml` - Trivy Security Scanning
+**Triggers**: Push/PR to main/develop, weekly schedule (Monday 03:00 UTC)
+
+| Scan | Coverage |
+|------|----------|
+| Filesystem | Python/Node.js/Dart dependency vulnerabilities |
+| IaC | Dockerfile + docker-compose misconfiguration |
+| License | Block copyleft (AGPL, GPL, SSPL) in production |
+| Container Images | API, ML trainer, Frontend (3 images) |
+| SBOM | CycloneDX generation for each image |
+| Security Gate | Aggregated pass/fail across all scans |
+
+### 6. `codeql-analysis.yml` - CodeQL SAST
+**Triggers**: Push/PR to main/develop, weekly schedule
+
+| Language | Query Suite |
+|----------|-------------|
+| Python | security-extended (SQLi, command injection, hardcoded creds) |
+| JavaScript/TypeScript | security-extended (XSS, prototype pollution) |
+
+### 7. `devsecops-sast-dast.yml` - DevSecOps Pipeline
+**Triggers**: Push/PR to main/develop, weekly schedule
+
+| Tool | Scope |
+|------|-------|
+| Semgrep | SAST for Python + TypeScript (custom + OWASP rules) |
+| Bandit | Python AST security analysis |
+| pip-audit | Python dependency audit (OSV/PyPI) |
+| Checkov | IaC compliance (CIS, NIST benchmarks) |
+| OWASP ZAP | DAST baseline scan against API |
+| OSSF Scorecard | Supply chain security scoring |
 
 ## Required Secrets
 
@@ -236,6 +279,24 @@ Manual dispatch highlights:
 | `MLFLOW_TRACKING_URI` | MLflow experiment tracking (optional) |
 | `DEPLOY_KEY`, `API_HOST` | Production server deployment |
 | `INDEX_API_KEY` | Bearer token for `/v1/index` re-indexing endpoint (OWASP LLM10) |
+| `GITGUARDIAN_API_KEY` | GitGuardian secret scanning (optional, free for OSS) |
+
+## Security Scanning
+
+The project implements **defense-in-depth** security across 7 CI/CD workflows and 11 pre-commit hooks:
+
+| Layer | Tools | Coverage |
+|-------|-------|----------|
+| **Pre-commit** | TruffleHog, Gitleaks, detect-secrets, Semgrep, Bandit + 6 hygiene checks | Secrets, SAST, code quality |
+| **Secret Scanning** | TruffleHog, Gitleaks, ggshield, detect-secrets (CI) | 4-scanner defense-in-depth |
+| **SAST** | CodeQL, Semgrep, Bandit | Python + JavaScript/TypeScript |
+| **SCA/SBOM** | Trivy (vuln + license + SBOM), pip-audit | Dependency vulnerabilities, CycloneDX |
+| **IaC** | Trivy misconfig, Checkov (CIS/NIST) | Dockerfiles, Compose, workflows |
+| **DAST** | OWASP ZAP baseline | API endpoint scanning |
+| **Supply Chain** | SHA-pinned Actions, OSSF Scorecard, Dependabot | SLSA Level 2+ compliance |
+| **Container** | Trivy image scan (3 images), non-root, cap_drop, read_only | Container hardening |
+
+All GitHub Actions are **SHA-pinned** to commit hashes (not mutable tags). See [SECURITY.md](SECURITY.md) for full details.
 
 ## RAG Quality Gates
 
@@ -354,3 +415,6 @@ gh run list --workflow=ci-ml-pipeline.yml
 - Set repository secrets in GitHub settings before running workflows
 - Configure Hugging Face repository at `mpairweLandwind/ura-chatbot`
 - Review [docs/mlops-workflows.md](docs/mlops-workflows.md) for detailed configuration
+- Review [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for production deployment guide
+- Review [docs/MONITORING.md](docs/MONITORING.md) for observability setup
+- Review [docs/MOBILE_SETUP.md](docs/MOBILE_SETUP.md) for mobile app build instructions

@@ -55,3 +55,6 @@ opentelemetry-exporter-otlp-proto-grpc>=1.27.0
 
 # RAG evaluation (CI/CD pipeline)
 ragas>=0.2.0
+
+# Threat Model as Code (STRIDE DFDs + threat generation)
+pytm>=1.3.0

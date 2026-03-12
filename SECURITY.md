@@ -58,9 +58,43 @@ Four independent secret scanners run at both pre-commit (local) and CI (remote) 
 ### Supply Chain Security
 - SHA-pinned GitHub Actions (no mutable tags)
 - Dependabot enabled for automated dependency updates
-- Trivy container image scanning in CI/CD pipeline
-- SBOM generation (CycloneDX format) for every release
+- Trivy container image scanning in CI/CD pipeline (`.github/workflows/security-trivy.yml`)
+- SBOM generation (CycloneDX format) for every release — API, ML, and Frontend images
 - SLSA v1.2 build provenance attestation
+- **pip-audit** for Python dependency vulnerability auditing against OSV/PyPI databases
+- **OSSF Scorecard** for supply chain security posture scoring
+- License compliance scanning — blocks AGPL, GPL, SSPL, BSL licenses (`trivy.yaml`)
+
+### Threat Model as Code (STRIDE + OWASP LLM + MITRE ATLAS)
+
+Automated threat modelling runs in CI via `.github/workflows/devsecops-sast-dast.yml`:
+
+| Component | Tool | Purpose |
+|-----------|------|---------|
+| **Architecture model** | [pytm](https://github.com/OWASP/pytm) | DFD generation, STRIDE per-element threat analysis |
+| **Threat registry** | `threat-model/validate_threats.py` | 21 threats with evidence-based mitigation validation |
+| **STRIDE coverage** | Automated | 6/6 categories (Spoofing, Tampering, Repudiation, Info Disclosure, DoS, Elevation) |
+| **OWASP LLM mapping** | Registry | 9/10 LLM Top 10 vulnerabilities mapped to mitigations |
+| **MITRE ATLAS** | Registry | 12 adversarial ML techniques (AML.T*) identified and tracked |
+
+Threat registry is validated on every push/PR — missing mitigations or evidence files fail the CI gate.
+
+### SAST / DAST Security Testing
+
+Static and dynamic analysis runs via `.github/workflows/devsecops-sast-dast.yml`:
+
+| Tool | Type | Languages/Targets | Integration |
+|------|------|-------------------|-------------|
+| **Semgrep** | SAST | Python, TypeScript, React | CI + pre-commit (custom + community OWASP rules) |
+| **Bandit** | SAST | Python | CI + pre-commit (AST-based security linting) |
+| **Checkov** | IaC Security | Dockerfiles, GitHub Actions, docker-compose | CI (CIS/NIST benchmarks) |
+| **OWASP ZAP** | DAST | Live API endpoints | CI baseline scan on main/develop |
+
+Custom Semgrep rules (`.semgrep/ura-chatbot-rules.yaml`) include:
+- LLM-specific rules (prompt injection detection, PII in logs, unsafe output handling)
+- FastAPI rules (CORS wildcards, missing rate limits)
+- Python anti-patterns (pickle, yaml.load, subprocess shell, SQL injection)
+- Uganda PII detection (TIN, NIN patterns in source code)
 
 ### AI/ML-Specific Security (OWASP LLM Top 10 2025)
 - **LLM01 – Prompt Injection**: `InputGuard` with 11 regex patterns; system-prompt isolation via Qwen chat template; passage delimiters (`<passage>` tags) to reduce indirect injection surface
@@ -94,14 +128,34 @@ See `.env.example` for all configurable security parameters. Never commit `.env`
 
 This project uses:
 - **Dependabot** for automated Python, JavaScript (Bun/npm), and Flutter (pub) dependency updates
-- **Trivy** for container vulnerability scanning
-- **Semgrep** for static analysis (SAST)
+- **Trivy** for container vulnerability + IaC + license + secret scanning
+- **pip-audit** for Python dependency auditing against OSV/PyPI vulnerability databases
+- **Semgrep** for multi-language static analysis (SAST) with custom OWASP LLM rules
+- **Bandit** for Python-specific AST-based security linting
+- **Checkov** for IaC security and compliance (CIS Docker, NIST 800-190)
+- **OSSF Scorecard** for supply chain security posture scoring
 - **Pre-commit autoupdate** for keeping secret scanning hooks current (`pre-commit autoupdate`)
 
 ## Compliance
 
 This project aligns with:
 - NIST SP 800-218 (Secure Software Development Framework)
+- NIST AI RMF 1.0 (AI Risk Management Framework)
 - OWASP LLM Top 10 (2025 Edition)
+- OWASP Top 10 (Web Application Security)
+- MITRE ATLAS (Adversarial Threat Landscape for AI Systems)
 - SLSA v1.2 Supply Chain Integrity
 - ISO/IEC 42001:2023 AI Management System security controls
+- EU AI Act (Art. 6 — Limited Risk, Art. 50 — Transparency)
+- Uganda NDPA 2019 (National Data Protection & Privacy Act)
+- CIS Docker Benchmark (via Checkov/Trivy)
+
+## Security CI/CD Pipelines
+
+| Workflow | File | Triggers | Purpose |
+|----------|------|----------|---------|
+| Secret Scanning | `secret-scanning.yml` | Push, PR, weekly, manual | 4-layer secret detection |
+| Trivy Security | `security-trivy.yml` | Push, PR, weekly, manual | SCA, IaC, license, container, SBOM |
+| DevSecOps SAST/DAST | `devsecops-sast-dast.yml` | Push, PR, weekly, manual | Semgrep, Bandit, pip-audit, Checkov, ZAP, Scorecard, threat model |
+| ML Pipeline | `ci-ml-pipeline.yml` | Push, PR, manual | Lint, test, governance, training, RAG eval, Docker |
+| Frontend | `frontend-deploy.yml` | Push, PR, manual | Lint, build, Docker, Trivy |
