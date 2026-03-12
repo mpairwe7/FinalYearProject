@@ -1,0 +1,17 @@
+# =============================================================================
+# Trivy Ignore File – URA Chatbot
+#
+# Add CVE IDs or check IDs to suppress known false positives or accepted risks.
+# Format: one ID per line, optional comment with # after.
+# Docs: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/#by-finding-ids
+#
+# Review this file periodically – accepted risks may become patchable.
+# =============================================================================
+
+# ── Accepted Risks (document reason and review date) ─────────────────────────
+# Example:
+# CVE-2024-XXXXX  # Low-impact in our context; no patch until upstream release. Review: 2026-06-01
+
+# ── Misconfiguration Suppressions ────────────────────────────────────────────
+# Example:
+# DS002  # Dockerfile: USER not set (we use non-root in runtime stage only)

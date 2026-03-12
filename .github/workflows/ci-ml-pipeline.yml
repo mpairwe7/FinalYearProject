@@ -535,20 +535,41 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5dc0b08b735e # v0.30.0
+      - name: Trivy vulnerability scan (SARIF → GitHub Security tab)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.version }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-results.sarif
+          trivy-config: trivy.yaml
+          ignore-unfixed: true
 
-      - name: Upload Trivy SARIF results
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-ml-pipeline
+
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.version }}
+          format: cyclonedx
+          output: sbom-api-pipeline.cdx.json
+
+      - name: Upload scan artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: trivy-sarif
-          path: trivy-results.sarif
+          name: trivy-ml-pipeline-results
+          path: |
+            trivy-results.sarif
+            sbom-api-pipeline.cdx.json
+          retention-days: 90
 
   # ============================================
   # Stage 8: Deploy Backend
