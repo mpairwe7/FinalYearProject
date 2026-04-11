@@ -39,6 +39,7 @@ pydub==0.25.1
 datasketch==1.6.5
 pyarrow==18.1.0
 pandera==0.21.1
+ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
 
 # Fine-tuning evaluation
 rouge-score==0.1.2

@@ -130,6 +130,163 @@ jobs:
           echo "Checked: NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10, EU AI Act" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
+  # Stage 1c: Data Augmentation Smoke Test (fast, PR-triggered)
+  # ============================================
+  # Runs on every PR touching ml/scripts/data_aug/ or data_augmentation.py.
+  # Dry-run mode skips file writes and heavy deps (no pyarrow, no
+  # sentence-transformers, no pymupdf4llm). Catches regressions in the
+  # data pipeline in <2 minutes instead of waiting for the 30-min
+  # prepare-training-data job, which is gated on main/manual dispatch.
+  data-aug-smoke:
+    name: Data Aug Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install minimum data-aug deps
+        run: |
+          uv pip install --system \
+            'pandas>=1.5,<2.0' 'pydantic>=2.5' pyyaml \
+            'datasketch==1.6.5' ftfy
+
+      - name: Import smoke test
+        run: |
+          python - <<'PY'
+          import importlib
+          mods = [
+              "ml.scripts.data_aug.schema",
+              "ml.scripts.data_aug.text_utils",
+              "ml.scripts.data_aug.chunkers",
+              "ml.scripts.data_aug.loaders",
+              "ml.scripts.data_aug.dedup",
+              "ml.scripts.data_aug.quality",
+              "ml.scripts.data_aug.quality_classifier",
+              "ml.scripts.data_aug.splitters",
+              "ml.scripts.data_aug.formatters",
+              "ml.scripts.data_aug.provenance",
+              "ml.scripts.data_aug.pipeline",
+              "ml.scripts.data_augmentation",
+              "ml.scripts.train_quality_classifier",
+              "ml.scripts.fine_tune_gemma",
+          ]
+          for m in mods:
+              importlib.import_module(m)
+              print(f"OK {m}")
+          PY
+
+      - name: Schema + PII unit checks
+        run: |
+          python - <<'PY'
+          from ml.scripts.data_aug.schema import (
+              TrainingExample, Message, Metadata, SourceType, TaskType, content_hash,
+          )
+          from ml.scripts.data_aug.text_utils import redact_pii, clean_text
+
+          # 1. Rejects message without an assistant turn
+          try:
+              TrainingExample(
+                  messages=[Message(role="user", content="u")],
+                  metadata=Metadata(
+                      source="x", source_type=SourceType.CSV_FAQ, task=TaskType.QA,
+                      content_hash="abc",
+                  ),
+              )
+              raise SystemExit("FAIL: accepted missing assistant")
+          except Exception:
+              pass
+
+          # 2. Hash is normalised
+          assert content_hash("VAT rate?", "18%") == content_hash("  vat rate?  ", "18%")
+
+          # 3. PII redaction
+          text, report = redact_pii(
+              "Call 0712345678 or email bob@example.com TIN 1012345678")
+          assert "[PHONE]" in text and "[EMAIL]" in text and "[TIN]" in text
+          assert report.phone == 1 and report.email == 1 and report.tin == 1
+
+          # 4. Unicode + whitespace cleaning
+          assert clean_text("  hello\u00a0 \t world ") == "hello world"
+          print("schema/PII/hash unit checks OK")
+          PY
+
+      - name: Pipeline dry-run (CSV only, no heavy deps)
+        run: |
+          python ml/scripts/data_augmentation.py \
+            --csv-dir Data/dataset \
+            --teacher-qa-dir Data/teacher_qa \
+            --output-dir /tmp/aug_smoke \
+            --no-parquet \
+            --no-pdf-corpus --no-pdf-retrieval \
+            --tokenizer-model "" \
+            --dry-run \
+            -v
+          # --dry-run must leave the output dir empty (no files written)
+          if [ -d /tmp/aug_smoke ] && [ -n "$(ls -A /tmp/aug_smoke 2>/dev/null)" ]; then
+            echo "ERROR: --dry-run wrote files to /tmp/aug_smoke"
+            ls -la /tmp/aug_smoke
+            exit 1
+          fi
+          echo "dry-run OK — no files written"
+
+      - name: Pipeline real run (CSV only, validate outputs)
+        run: |
+          python ml/scripts/data_augmentation.py \
+            --csv-dir Data/dataset \
+            --teacher-qa-dir Data/teacher_qa \
+            --output-dir /tmp/aug_real \
+            --no-parquet \
+            --no-pdf-corpus --no-pdf-retrieval \
+            --tokenizer-model "" \
+            -v
+
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          m = json.loads(Path("/tmp/aug_real/manifest.json").read_text())
+          split = m["stages"]["split"]
+          if split["contamination_leaked"] != 0:
+              print(f"ERROR: contamination={split['contamination_leaked']}")
+              sys.exit(1)
+          if split["train"] < 50:
+              print(f"ERROR: only {split['train']} train rows")
+              sys.exit(2)
+          # Every required file must exist
+          required = [
+              "train.messages.jsonl", "val.messages.jsonl", "test.messages.jsonl",
+              "train.instruction.jsonl", "training_data.jsonl",
+              "training_data.messages.jsonl",
+              "manifest.json", "DATA_CARD.md",
+          ]
+          missing = [f for f in required if not Path(f"/tmp/aug_real/{f}").exists()]
+          if missing:
+              print(f"ERROR: missing outputs: {missing}")
+              sys.exit(3)
+          print(f"OK train={split['train']} val={split['val']} test={split['test']} "
+                f"strata={split['strata_count']}")
+          PY
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Data Augmentation Smoke Test" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Modules: imported OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Schema/PII unit checks: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dry-run: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pipeline end-to-end: passed" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
   # Stage 2: Data Validation
   # ============================================
   data-validation:
@@ -164,14 +321,25 @@ jobs:
           path: Results/reports/data_validation_report.json
 
   # ============================================
-  # Stage 3: Data Augmentation & Preparation
+  # Stage 3: Data Augmentation & Preparation (2026 pipeline)
   # ============================================
+  # Runs the four-stage pipeline from ml/scripts/data_aug/:
+  #   1. train a quality classifier (FineWeb-Edu style) from gold CSV FAQs
+  #   2. run the full data augmentation pipeline using that classifier
+  #   3. upload manifest.json, DATA_CARD.md, and every messages/parquet shard
+  # Guarantees a manifest with git SHA + content hashes so downstream
+  # training jobs are byte-reproducible from the committed dataset alone.
   prepare-training-data:
     name: Prepare Training Data
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: data-validation
     if: inputs.run_training == true || github.ref == 'refs/heads/main'
+    outputs:
+      train_rows: ${{ steps.aug_stats.outputs.train_rows }}
+      val_rows: ${{ steps.aug_stats.outputs.val_rows }}
+      test_rows: ${{ steps.aug_stats.outputs.test_rows }}
+      classifier_f1: ${{ steps.classifier_train.outputs.f1 }}
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -186,34 +354,202 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
-        run: uv pip install --system pandas PyPDF2 langchain-text-splitters pyyaml
-
-      - name: Run data augmentation
+      - name: Install data-augmentation dependencies
         run: |
-          mkdir -p artifacts Data/processed
+          # Core pipeline
+          uv pip install --system \
+            'pandas>=1.5,<2.0' 'pydantic>=2.5' pyyaml \
+            'datasketch==1.6.5' 'pyarrow==18.1.0' ftfy \
+            pymupdf4llm pymupdf
+          # Quality classifier (FineWeb-Edu style)
+          uv pip install --system \
+            'scikit-learn>=1.3' joblib 'sentence-transformers>=3.0' \
+            --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Cache Hugging Face embedder
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: |
+            ~/.cache/huggingface/hub
+            ~/huggingface_cache
+          key: hf-minilm-${{ runner.os }}-${{ env.PYTHON_VERSION }}-v1
+          restore-keys: |
+            hf-minilm-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Train quality classifier (bootstrapped from CSV FAQs)
+        id: classifier_train
+        run: |
+          mkdir -p artifacts/models
+          python ml/scripts/train_quality_classifier.py \
+            --from-csv-dir Data/dataset \
+            --save-path artifacts/models/quality_classifier.joblib \
+            --max-per-class 500 \
+            -v
+          # Expose the validation F1 so the job summary can show it.
+          python - <<'PY'
+          import json, os
+          m = json.load(open("artifacts/models/quality_classifier.metrics.json"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"f1={m['f1']:.4f}\n")
+              f.write(f"accuracy={m['accuracy']:.4f}\n")
+              f.write(f"precision={m['precision']:.4f}\n")
+              f.write(f"recall={m['recall']:.4f}\n")
+          PY
+
+      - name: Run 2026 data augmentation pipeline
+        run: |
+          mkdir -p artifacts/training_data Data/processed
+          # Quality thresholds are tuned to match local smoke-test runs:
+          #  - min-tokens=8 / max-tokens=2048 matches gemma-2-2b-it max-seq
+          #  - near-dup threshold 0.85 is the same Llama/FineWeb setting
+          #  - luganda cap prevents that source dominating the dataset
+          #  - pdf workers=2 stays within GitHub runner CPU budget
           python ml/scripts/data_augmentation.py \
             --csv-dir Data/dataset \
             --pdf-dir Data/pdfs \
             --luganda-dir Data/TTT \
-            --output artifacts/training_data.jsonl \
-            --gemma-output artifacts/gemma_format.jsonl \
-            --instruction-output artifacts/instruction_format.jsonl
+            --teacher-qa-dir Data/teacher_qa \
+            --output-dir artifacts/training_data \
+            --pdf-workers 2 \
+            --max-pdfs 5 \
+            --tokenizer-model "" \
+            --min-tokens 8 --max-tokens 2048 \
+            --near-dup-threshold 0.85 \
+            --source-cap luganda_parallel=5000 \
+            --source-cap pdf_corpus=2000 \
+            --source-cap retrieval=2000 \
+            --quality-classifier artifacts/models/quality_classifier.joblib \
+            --quality-threshold 0.45 \
+            --val-ratio 0.08 --test-ratio 0.02 \
+            --seed 42 \
+            -v
 
-      - name: Upload prepared data
+      - name: Validate manifest + flag contamination
+        id: aug_stats
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+
+          manifest_path = Path("artifacts/training_data/manifest.json")
+          if not manifest_path.exists():
+              print("ERROR: manifest.json missing")
+              sys.exit(1)
+          m = json.loads(manifest_path.read_text())
+
+          split = m["stages"]["split"]
+          quality = m["stages"]["quality"]
+          dedup = m["stages"]["ingest_dedup"]
+
+          print(f"train={split['train']} val={split['val']} test={split['test']}")
+          print(f"dedup: input={dedup['input_count']} dup_removed={dedup['exact_removed']} near={dedup['near_removed']}")
+          print(f"quality: dropped_classifier={quality.get('dropped_classifier', 0)} "
+                f"classifier_report={quality.get('classifier', {})}")
+
+          if split["contamination_leaked"] > 0:
+              print(f"ERROR: {split['contamination_leaked']} train rows leaked into val/test")
+              sys.exit(2)
+          if split["train"] < 100:
+              print(f"ERROR: too few training rows ({split['train']})")
+              sys.exit(3)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"train_rows={split['train']}\n")
+              f.write(f"val_rows={split['val']}\n")
+              f.write(f"test_rows={split['test']}\n")
+          PY
+
+      - name: Verify messages-format JSONL schema
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          required_top = {"messages", "source", "source_type", "task", "language", "content_hash"}
+          required_msg = {"role", "content"}
+          seen_roles = set()
+
+          for name in ("train.messages.jsonl", "val.messages.jsonl", "test.messages.jsonl"):
+              p = Path("artifacts/training_data") / name
+              if not p.exists():
+                  print(f"ERROR: {p} missing")
+                  sys.exit(1)
+              count = 0
+              for line in p.read_text().splitlines():
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  missing = required_top - row.keys()
+                  if missing:
+                      print(f"ERROR: {name} row missing {missing}")
+                      sys.exit(2)
+                  for msg in row["messages"]:
+                      if required_msg - msg.keys():
+                          print(f"ERROR: {name} message missing role/content")
+                          sys.exit(3)
+                      seen_roles.add(msg["role"])
+                  count += 1
+              print(f"{name}: {count} rows OK")
+
+          if "assistant" not in seen_roles:
+              print("ERROR: no assistant role seen")
+              sys.exit(4)
+          if "user" not in seen_roles:
+              print("ERROR: no user role seen")
+              sys.exit(5)
+          print(f"roles seen: {sorted(seen_roles)}")
+          PY
+
+      - name: Upload training data + manifest
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: training-data
           path: |
-            artifacts/training_data.jsonl
-            artifacts/gemma_format.jsonl
-            artifacts/instruction_format.jsonl
+            artifacts/training_data/train.messages.jsonl
+            artifacts/training_data/val.messages.jsonl
+            artifacts/training_data/test.messages.jsonl
+            artifacts/training_data/train.instruction.jsonl
+            artifacts/training_data/val.instruction.jsonl
+            artifacts/training_data/test.instruction.jsonl
+            artifacts/training_data/training_data.jsonl
+            artifacts/training_data/training_data.messages.jsonl
+            artifacts/training_data/train.parquet
+            artifacts/training_data/val.parquet
+            artifacts/training_data/test.parquet
+            artifacts/training_data/manifest.json
+            artifacts/training_data/DATA_CARD.md
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload quality classifier
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: quality-classifier
+          path: |
+            artifacts/models/quality_classifier.joblib
+            artifacts/models/quality_classifier.metrics.json
+          retention-days: 30
 
       - name: Step summary
+        if: always()
         run: |
-          echo "## Training Data Statistics" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Training samples: $(wc -l < artifacts/training_data.jsonl)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Gemma format: $(wc -l < artifacts/gemma_format.jsonl)" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Training Data (2026 Pipeline)"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Train rows | ${{ steps.aug_stats.outputs.train_rows }} |"
+            echo "| Val rows   | ${{ steps.aug_stats.outputs.val_rows }} |"
+            echo "| Test rows  | ${{ steps.aug_stats.outputs.test_rows }} |"
+            echo "| Classifier F1 | ${{ steps.classifier_train.outputs.f1 }} |"
+            echo ""
+            echo "### Manifest"
+            echo '```json'
+            if [ -f artifacts/training_data/manifest.json ]; then
+              python -c "import json; m=json.load(open('artifacts/training_data/manifest.json')); print(json.dumps(m['stages'], indent=2))"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
   # Stage 4: Model Training (Dry-Run on CI)
@@ -231,7 +567,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: training-data
-          path: artifacts/
+          path: artifacts/training_data/
 
       - name: Set up uv
         uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
@@ -258,8 +594,12 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          # The 2026 data_augmentation pipeline emits train.messages.jsonl
+          # (OpenAI chat format); fine_tune_gemma.py auto-detects the
+          # ``messages`` column and applies the right chat template per
+          # model target via _messages_to_{gemma,llama,t5}_text.
           python ml/scripts/fine_tune_gemma.py \
-            --data artifacts/training_data.jsonl \
+            --data artifacts/training_data/train.messages.jsonl \
             --target web_high_accuracy \
             --output artifacts/ura-gemma-finetuned \
             --dry-run

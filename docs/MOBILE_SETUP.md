@@ -2,13 +2,16 @@
 
 Setup and build instructions for the Flutter mobile app at `MobileApp/ura_chatbot/`.
 
+> For architecture / state management / design tokens / ADRs see
+> **[MOBILE_ARCHITECTURE.md](MOBILE_ARCHITECTURE.md)**.
+
 ---
 
 ## 1. Prerequisites
 
 | Tool | Minimum Version | Notes |
 |------|----------------|-------|
-| Flutter SDK | 3.41+ | Dart SDK ^3.11.1 (bundled with Flutter) |
+| Flutter SDK | 3.41+ | Dart SDK ^3.11.0 (bundled with Flutter) |
 | Android Studio | Hedgehog+ | Android SDK, emulator images |
 | Xcode | 15+ | macOS only; required for iOS builds |
 | JDK | 17 | Required by Gradle 8.14 and the Kotlin toolchain |

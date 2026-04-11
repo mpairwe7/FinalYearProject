@@ -5,6 +5,66 @@
 
 services:
   # ---------------------------------------------------------------------------
+  # Redis — shared rate-limit buckets + distributed semantic cache
+  # (multi-worker / multi-replica correctness)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7.4-alpine
+    container_name: ura-redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    networks:
+      - ura-network
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — optional multi-replica analytics store
+  # Enable with: docker compose --profile postgres up
+  # Then set in .env: ANALYTICS_BACKEND=postgres
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16.6-alpine
+    container_name: ura-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ura}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ura}
+      - POSTGRES_DB=${POSTGRES_DB:-ura_analytics}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-ura} -d $${POSTGRES_DB:-ura_analytics}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - postgres
+    networks:
+      - ura-network
+
+  # ---------------------------------------------------------------------------
   # Qdrant Vector Store (first-class RAG dependency)
   # ---------------------------------------------------------------------------
   qdrant:
@@ -51,6 +111,10 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ANALYTICS_DB_DIR=/app/data_store
       - QDRANT_URL=http://qdrant:6333
+      # Redis-backed rate limit + semantic cache (Phase 7)
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - SLOWAPI_STORAGE_URI=${SLOWAPI_STORAGE_URI:-redis://redis:6379/1}
+      - CACHE_BACKEND=${CACHE_BACKEND:-redis}
     env_file:
       - .env
     init: true
@@ -75,6 +139,8 @@ services:
     restart: unless-stopped
     depends_on:
       qdrant:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - ura-network
@@ -102,6 +168,77 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     profiles:
       - dev
+    networks:
+      - ura-network
+
+  # ---------------------------------------------------------------------------
+  # vLLM — high-throughput LLM inference server (profile: vllm)
+  # Enable with: docker compose --profile vllm up
+  # Then set in .env: LLM_BACKEND=vllm VLLM_BASE_URL=http://vllm:8001/v1
+  # Requires an NVIDIA GPU + nvidia-container-toolkit on the host.
+  # ---------------------------------------------------------------------------
+  vllm:
+    image: vllm/vllm-openai:v0.6.6
+    container_name: ura-vllm
+    command: >
+      --model ${LLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      --port 8001
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${VLLM_GPU_MEM_UTIL:-0.85}
+      --dtype ${VLLM_DTYPE:-auto}
+    ports:
+      - "${VLLM_PORT:-8001}:8001"
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/v1/models', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles:
+      - vllm
+    networks:
+      - ura-network
+
+  # ---------------------------------------------------------------------------
+  # Caddy — automatic-TLS reverse proxy (profile: tls)
+  # Enable with: docker compose --profile tls up
+  # Point DNS at the host; Caddy auto-provisions Let's Encrypt certs.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: ura-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3 QUIC
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - CADDY_DOMAIN=${CADDY_DOMAIN:-localhost}
+      - CADDY_ACME_EMAIL=${CADDY_ACME_EMAIL:-admin@example.com}
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    profiles:
+      - tls
     networks:
       - ura-network
 
@@ -178,3 +315,8 @@ volumes:
   api_logs:
   analytics_data:
   qdrant_data:
+  redis_data:
+  postgres_data:
+  hf_cache:
+  caddy_data:
+  caddy_config:
