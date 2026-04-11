@@ -44,6 +44,10 @@ _REGISTRY: dict[str, Flag] = {
         Flag("query_rewrite", True, "Spelling / abbreviation / coreference"),
         Flag("reranker", True, "Cross-encoder reranking"),
         Flag("eval_auto_run", False, "Run evaluation harness on every Nth request"),
+        # Phase 14 — agentic workflows (feature-flagged off by default)
+        Flag("tool_use", False, "Allow the LLM to call registered tools via Qwen2.5 function-calling"),
+        Flag("agentic_mode", False, "Route requests through the supervisor-specialist agent graph"),
+        Flag("ticket_queue", False, "Persist escalations to the tickets table for human follow-up"),
     ]
 }
 
