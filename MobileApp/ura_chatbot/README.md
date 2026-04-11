@@ -1,50 +1,97 @@
-# URA Chatbot — Flutter Mobile App
+# URA Chatbot — Flutter Mobile App (2026)
 
-AI-powered tax assistant for Uganda Revenue Authority, with on-device Gemma-2B inference and remote API fallback.
+Production-ready AI tax assistant for Uganda Revenue Authority, with
+on-device Gemma-2B inference and remote API fallback.
 
 ## Architecture
 
 ```
-Flutter App
-  ├── Remote API Mode (default)
-  │     └── Dio HTTP → FastAPI backend → Qwen2.5-3B-Instruct (server)
+Flutter App (Material 3)
   │
-  └── On-Device Mode (offline capable)
-        └── Platform Channels → MediaPipe LLM Inference → Gemma-2-2B GGUF (device)
+  ├── Routing             go_router (declarative, deep-link ready)
+  ├── State               Riverpod 2.6 Notifier + AsyncNotifier
+  ├── Theme               Material 3 + ColorScheme.fromSeed(URA navy)
+  ├── Design tokens       AppSpacing / AppRadius / AppMotion / AppElevation
+  ├── Error handling      runZonedGuarded + FlutterError + ErrorWidget.builder
+  ├── Connectivity        connectivity_plus → live offline banner
+  ├── Build info          package_info_plus → real version in Settings
+  │
+  ├── Remote mode (default)
+  │     └── Dio HTTP → FastAPI → Qwen2.5-3B-Instruct (server-side)
+  │
+  └── On-device mode (offline capable)
+        └── Platform channels → MediaPipe LLM Inference → Gemma-2-2B Q4_K_M
 ```
 
-The app automatically detects whether the on-device GGUF model is bundled and uses it for offline inference. When unavailable, it falls back to the remote API.
+The app automatically detects whether the on-device GGUF model is
+bundled and uses it for offline inference. When unavailable or when a
+network error occurs, it falls back transparently to the remote API —
+and the [OfflineBanner] announces the mode to the user.
 
 ## Features
 
-- Chat with RAG-grounded answers (citations, faithfulness scores)
-- On-device Gemma-2B inference for offline use
-- Voice input (speech-to-text)
-- FAQ browsing by category (41 tags)
-- Feedback (thumbs up/down + comments)
-- Locale support (English, Luganda)
-- Dark/light theme
-- Escalation banners for low-confidence answers
+- **Chat** with RAG-grounded answers — citations, faithfulness score,
+  escalation banner for low-confidence replies, long-press to copy,
+  per-message timestamps, day separators
+- **On-device Gemma-2B** inference for offline use (1.6 GB Q4_K_M GGUF)
+- **Voice input** (speech-to-text) with pulsing indicator when recording
+- **FAQ browsing** by category with shimmer skeleton during load,
+  pull-to-refresh, empty state when no data, selectable answer text
+- **Feedback** (thumbs up/down) with optional comment sheet
+- **Settings** with Material 3 segmented buttons for theme + language,
+  live server health, build version, privacy summary
+- **Offline banner** — auto-shows when `connectivity_plus` reports no
+  network, differentiates when the on-device model is available
+- **Accessibility** — text-scale clamping, semantic labels, haptic
+  feedback on every interactive action, 48dp minimum touch targets
+- **Deep linking ready** — ``/faq/:tagId`` already a registered route
 
 ## Project Structure
 
 ```
 lib/
-├── main.dart                         # App bootstrap
+├── main.dart                            # runZonedGuarded bootstrap
 ├── core/
-│   ├── config/api_config.dart        # API endpoints + constraints
-│   ├── network/api_client.dart       # Dio HTTP client
-│   ├── inference/on_device_llm.dart  # On-device Gemma-2B (MediaPipe)
-│   ├── storage/local_storage.dart    # SharedPreferences
-│   └── theme/app_theme.dart          # Material 3 theme
+│   ├── build_info/
+│   │   └── build_info_provider.dart     # package_info_plus → BuildInfo
+│   ├── config/
+│   │   └── api_config.dart              # API_URL / DEV_API_URL env vars
+│   ├── connectivity/
+│   │   └── connectivity_provider.dart   # connectivityStatusProvider, isOnlineProvider
+│   ├── errors/
+│   │   └── error_handler.dart           # AppErrorHandler.install() + reporter hook
+│   ├── inference/
+│   │   └── on_device_llm.dart           # MediaPipe LLM Inference bridge
+│   ├── network/
+│   │   └── api_client.dart              # Dio + session + error interceptors
+│   ├── router/
+│   │   └── app_router.dart              # go_router with StatefulShellRoute
+│   ├── storage/
+│   │   └── local_storage.dart           # SharedPreferences facade
+│   ├── theme/
+│   │   ├── app_theme.dart               # Material 3 theme from seed colour
+│   │   └── tokens.dart                  # AppSpacing, AppRadius, AppMotion, AppElevation
+│   └── ui/
+│       ├── app_error_view.dart          # Retryable error surface
+│       ├── empty_state.dart             # M3 empty-screen pattern
+│       ├── loading_skeleton.dart        # Shimmer list + bubble placeholders
+│       └── offline_banner.dart          # Live-connectivity banner
+│
 └── features/
     ├── chat/
-    │   ├── models/chat_models.dart   # ChatMessage, ChatResponse, Citation
-    │   ├── providers/chat_provider.dart  # Riverpod state (API + offline)
-    │   ├── screens/chat_screen.dart
-    │   └── widgets/                  # MessageBubble, CitationCard, etc.
-    ├── faq/                          # FAQ browsing
-    └── settings/                     # Theme, locale, model settings
+    │   ├── models/chat_models.dart      # ChatMessage, ChatResponse, Citation
+    │   ├── providers/chat_provider.dart # Riverpod Notifier<ChatState>
+    │   ├── screens/chat_screen.dart     # Day-separator ListView + FAB + input
+    │   └── widgets/                     # Bubble, citation, feedback, voice, etc.
+    ├── faq/
+    │   ├── models/faq_models.dart       # TagInfo, FAQItem
+    │   ├── providers/faq_provider.dart  # FutureProvider + family
+    │   └── screens/
+    │       ├── faq_screen.dart          # Tag list
+    │       └── faq_detail_screen.dart   # Per-tag FAQ expansion
+    └── settings/
+        ├── providers/settings_provider.dart  # Notifier<AppSettings>
+        └── screens/settings_screen.dart
 ```
 
 ## Setup
@@ -70,37 +117,63 @@ flutter run
 flutter build apk --release --dart-define=API_URL=https://api.example.com
 ```
 
-### On-Device Inference Setup
+### On-Device Inference Setup (2026 pipeline)
 
 To enable offline Gemma-2B inference:
 
-1. **Fine-tune and export** the model:
+1. **Fine-tune** the model (one-time, GPU required):
    ```bash
-   # Fine-tune Gemma-2B for mobile
+   # From the project root
    python ml/scripts/fine_tune_gemma.py --target mobile_gemma_2b
-
-   # Export to GGUF INT4 (~1.5 GB)
-   python ml/scripts/export_mobile.py \
-     --adapter artifacts/models/ura-gemma-2-2b-it-*/final \
-     --quant Q4_K_M
+   # Outputs: artifacts/ura-gemma-2-2b-it-<timestamp>/final/
    ```
 
-2. **Bundle the model** in the Android app:
+2. **Export and auto-deploy** to this Flutter app:
    ```bash
-   cp artifacts/mobile/ura-gemma-2b-q4_k_m.gguf \
-     android/app/src/main/assets/models/
+   # Auto-discovers the latest fine-tune output, quantises to Q4_K_M
+   # by default, atomically copies into android/app/src/main/assets/models/
+   # AND ios/Runner/models/ with post-copy SHA-256 verification
+   python ml/scripts/export_mobile.py
    ```
 
-3. **Native MediaPipe bridge** (already implemented):
-   - **Android**: `MainActivity.kt` — Kotlin MethodChannel handler using `com.google.mediapipe:tasks-genai`
-   - **iOS**: `AppDelegate.swift` — Swift MethodChannel handler using `MediaPipeTasksGenAI`
-   - **Dart**: `on_device_llm.dart` — Platform channel bridge with automatic fallback
+   Other options:
+   ```bash
+   # Smaller mobile build (~1.2 GB) with imatrix calibration
+   python ml/scripts/export_mobile.py --quant IQ3_M --imatrix
+
+   # Skip auto-deploy (CI artifact upload only)
+   python ml/scripts/export_mobile.py --no-deploy
+
+   # Dry run — validate adapter + tools
+   python ml/scripts/export_mobile.py --dry-run
+   ```
+
+   The export pipeline writes:
+   - `artifacts/mobile/ura-gemma-2b-q4_k_m.gguf` — quantised model
+   - `artifacts/mobile/mobile_manifest.json` — pipeline version, sha256, lineage, deployed paths
+   - `artifacts/mobile/MODEL_CARD.md` — full lineage card from `training_config.json`
+   - `android/app/src/main/assets/models/ura-gemma-2b-q4_k_m.gguf` — Android asset (atomic + verified)
+   - `ios/Runner/models/ura-gemma-2b-q4_k_m.gguf` — iOS staging file
+
+3. **iOS one-time setup** — open `Runner.xcworkspace`, drag the GGUF file
+   from `Runner/models/` into the project navigator (target: Runner).
+   Subsequent re-exports replace the file in place — no Xcode action needed.
+
+4. **Native MediaPipe bridge** (already implemented):
+   - **Android**: `MainActivity.kt` — Kotlin MethodChannel using `com.google.mediapipe:tasks-genai:0.10.22`
+   - **iOS**: `AppDelegate.swift` — Swift MethodChannel using `MediaPipeTasksGenAI ~> 0.10.22`
+   - **Dart**: `lib/core/inference/on_device_llm.dart` — Platform channel bridge with automatic fallback
    - **Offline fallback**: `chat_provider.dart` — Falls back to on-device Gemma-2B on network errors
 
-4. **iOS: Install CocoaPods** (Podfile already includes MediaPipe):
+5. **iOS: Install CocoaPods** (Podfile already includes MediaPipe):
    ```bash
    cd ios && pod install && cd ..
    ```
+
+> **Android note:** `android/app/build.gradle.kts` already declares
+> `androidResources { noCompress += listOf("gguf") }`. This is mandatory —
+> without it, the GGUF file is APK-compressed and the MediaPipe LLM
+> Inference engine cannot `mmap` the model at runtime.
 
 ### Device Requirements (On-Device)
 
@@ -113,11 +186,20 @@ To enable offline Gemma-2B inference:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `API_URL` | Backend API URL | `http://10.0.2.2:8000` (emulator) |
+| `API_URL` | Backend API URL (production builds) | unset |
+| `DEV_API_URL` | Dev fallback — LAN IP of dev machine for real-device testing | unset |
 
-Pass via `--dart-define`:
+If **neither** is set, the app falls back to `http://10.0.2.2:8000`
+which is the Android emulator's loopback to the host machine.
+
 ```bash
-flutter run --dart-define=API_URL=https://api.ura-chatbot.com
+# Production release
+flutter build apk --release \
+    --dart-define=API_URL=https://api.ura-chatbot.com
+
+# Real-device dev against a LAN backend
+flutter run \
+    --dart-define=DEV_API_URL=http://192.168.1.42:8000
 ```
 
 ## Dependencies
@@ -126,19 +208,44 @@ flutter run --dart-define=API_URL=https://api.ura-chatbot.com
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `flutter_riverpod` | ^2.6.1 | State management |
+| `flutter_riverpod` | ^2.6.1 | State management (Notifier API) |
+| `go_router` | ^14.3.0 | Declarative routing + deep linking |
 | `dio` | ^5.7.0 | HTTP client |
 | `speech_to_text` | ^7.0.0 | Voice input |
 | `shared_preferences` | ^2.5.3 | Local storage |
 | `uuid` | ^4.5.1 | Message IDs |
 | `url_launcher` | ^6.3.1 | External links |
+| `package_info_plus` | ^8.0.0 | App version / build number |
+| `connectivity_plus` | ^6.0.5 | Live network status |
+| `intl` | ^0.19.0 | Date formatting |
+| `shimmer` | ^3.0.0 | Loading skeleton placeholders |
 
 ### Native (on-device inference)
 
 | Platform | Dependency | Purpose |
 |----------|-----------|---------|
-| Android | `com.google.mediapipe:tasks-genai:0.10.22` | On-device Gemma-2B LLM inference |
-| iOS | `MediaPipeTasksGenAI` (CocoaPods/SPM) | On-device Gemma-2B LLM inference |
+| Android | `com.google.mediapipe:tasks-genai:0.10.22` | On-device Gemma-2B inference |
+| iOS | `MediaPipeTasksGenAI ~> 0.10.22` (CocoaPods) | On-device Gemma-2B inference |
+
+## Testing
+
+```bash
+# Fast static analysis (tuned lints in analysis_options.yaml)
+flutter analyze                # → No issues found
+
+# Full test suite (12 tests, <15s)
+flutter test                   # → All tests passed!
+```
+
+Test coverage:
+
+- `test/widget_test.dart` — app bootstrap + navigation bar
+- `test/core/ui_components_test.dart` — EmptyState, SkeletonList,
+  AppErrorView, OfflineBanner, design token invariants, ColorTokens
+  extension regression guard
+
+See [../../docs/MOBILE_ARCHITECTURE.md](../../docs/MOBILE_ARCHITECTURE.md)
+for the full design-decision doc.
 
 ## On-Device Inference Flow
 
