@@ -30,6 +30,38 @@ embedder = None
 qa_knowledge = {}  # Store Q&A pairs for retrieval
 qa_embeddings = {}  # Pre-computed embeddings for fast retrieval
 
+# 2026 unification: when the full FastAPI backend is importable, delegate
+# generate_response() to ``ChatModel`` — we get the entire 6-phase RAG
+# pipeline (hybrid retrieval, guardrails, circuit breakers, self-reflect,
+# structured output, etc.) for free.  On HF Spaces, where only the legacy
+# classifier is shipped, this import fails and the fallback path runs.
+_chat_model = None
+_chat_model_available = None  # lazy; None=untried, True/False=resolved
+
+
+def _load_chat_model():
+    """Attempt to load the full FastAPI ChatModel singleton.
+
+    Returns the instance on success, None on failure.  Cached so we
+    don't pay the import / model-load cost more than once per process.
+    """
+    global _chat_model, _chat_model_available
+    if _chat_model_available is False:
+        return None
+    if _chat_model is not None:
+        return _chat_model
+    try:
+        from App.backend.app.service import ChatModel  # type: ignore
+
+        _chat_model = ChatModel()
+        _chat_model_available = True
+        print(f"✓ Unified ChatModel active ({len(_chat_model._faq_index)} tags)")
+        return _chat_model
+    except Exception as e:
+        _chat_model_available = False
+        print(f"ℹ Full ChatModel unavailable; using legacy classifier path ({e})")
+        return None
+
 
 def load_models():
     """Load classifier, embedder and knowledge base."""
@@ -212,13 +244,43 @@ def format_tag_display(tag: str) -> str:
 
 
 def generate_response(message: str) -> Tuple[str, str, str]:
-    """Generate response with classification info."""
+    """Generate response with classification info.
+
+    Prefers the unified :class:`ChatModel` pipeline (hybrid retrieval,
+    guardrails, LLM synthesis, self-reflection, circuit breakers)
+    when available.  Falls back to the legacy classifier+keyword
+    path on HF Spaces deployments.
+    """
     if not message.strip():
         return "", "", ""
-    
-    # Get prediction
+
+    # -- Unified path: full ChatModel (2026 production) --------------
+    chat_model = _load_chat_model()
+    if chat_model is not None:
+        try:
+            result = chat_model.generate(message=message, top_k=4, locale="en")
+            response = str(result.get("reply", "")) or "I could not find an answer in the URA knowledge base."
+            # Use the same classify() call the backend exposes so we keep
+            # the "Tag" / "Confidence" badges that the Gradio UI renders.
+            try:
+                cls = chat_model.classify(message, top_k=1)
+                if cls["predictions"]:
+                    top = cls["predictions"][0]
+                    tag_display = top.get("label") or format_tag_display(top["tag"])
+                    confidence_display = f"{top['confidence']*100:.0f}%"
+                else:
+                    tag_display = "General"
+                    confidence_display = "—"
+            except Exception:
+                tag_display = "General"
+                confidence_display = "—"
+            return response, tag_display, confidence_display
+        except Exception as e:
+            print(f"⚠ ChatModel.generate failed ({e}); falling back to legacy path")
+
+    # -- Legacy fallback: classifier + keyword answer ----------------
     result = predict_tag(message)
-    
+
     if result.get("error"):
         response = f"I apologize, but I'm having trouble processing your question. Please try again."
         tag_display = "Error"
@@ -228,10 +290,10 @@ def generate_response(message: str) -> Tuple[str, str, str]:
         confidence = result['confidence']
         tag_display = format_tag_display(tag)
         confidence_display = f"{confidence*100:.0f}%"
-        
+
         # Try to find a relevant answer
         answer = find_best_answer(message, tag)
-        
+
         if answer:
             response = answer
         else:
@@ -245,7 +307,7 @@ I can help you with information on this topic. For the most accurate and up-to-d
 • Visiting your nearest URA office
 
 Is there anything more specific I can help you with?"""
-    
+
     return response, tag_display, confidence_display
 
 

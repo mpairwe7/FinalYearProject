@@ -23,95 +23,27 @@ import re
 import threading
 import time
 from collections import Counter
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .resilience import CircuitBreaker, CircuitState  # re-export for backcompat
+
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Circuit breaker (Phase 1 – production resilience)
-# ---------------------------------------------------------------------------
-class CircuitState(Enum):
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
-
-
-class CircuitBreaker:
-    """Thread-safe circuit breaker with exponential back-off for Qdrant.
-
-    - CLOSED: requests flow normally; consecutive failures tracked.
-    - OPEN: requests rejected immediately; waits *reset_timeout* (doubles each trip).
-    - HALF_OPEN: one test request allowed; success → CLOSED, failure → OPEN.
-    """
-
-    def __init__(
-        self,
-        failure_threshold: int = 3,
-        reset_timeout: float = 10.0,
-        max_timeout: float = 300.0,
-    ) -> None:
-        self.failure_threshold = failure_threshold
-        self._base_timeout = reset_timeout
-        self._max_timeout = max_timeout
-        self._failures = 0
-        self._state = CircuitState.CLOSED
-        self._opened_at: float = 0.0
-        self._current_timeout = reset_timeout
-        self._lock = threading.Lock()
-
-    @property
-    def state(self) -> CircuitState:
-        with self._lock:
-            if self._state == CircuitState.OPEN:
-                if time.monotonic() - self._opened_at >= self._current_timeout:
-                    self._state = CircuitState.HALF_OPEN
-                    logger.info("Circuit breaker → HALF_OPEN (testing)")
-            return self._state
-
-    def allow_request(self) -> bool:
-        """Return True if the request should proceed."""
-        s = self.state
-        return s in (CircuitState.CLOSED, CircuitState.HALF_OPEN)
-
-    def record_success(self) -> None:
-        """Call after a successful operation."""
-        with self._lock:
-            if self._state in (CircuitState.HALF_OPEN, CircuitState.OPEN):
-                logger.info("Circuit breaker → CLOSED (recovered)")
-            self._failures = 0
-            self._state = CircuitState.CLOSED
-            self._current_timeout = self._base_timeout
-
-    def record_failure(self) -> None:
-        """Call after a failed operation."""
-        with self._lock:
-            self._failures += 1
-            was_half_open = self._state == CircuitState.HALF_OPEN
-            if self._failures >= self.failure_threshold or was_half_open:
-                self._state = CircuitState.OPEN
-                self._opened_at = time.monotonic()
-                # Double backoff only from HALF_OPEN→OPEN (not first trip)
-                if was_half_open:
-                    self._current_timeout = min(
-                        self._current_timeout * 2, self._max_timeout
-                    )
-                logger.warning(
-                    "Circuit breaker → OPEN (failures=%d, backoff=%.0fs)",
-                    self._failures,
-                    self._current_timeout,
-                )
+__all__ = ["CircuitBreaker", "CircuitState", "BM25SparseEncoder", "HybridRetriever"]
 
 # ---------------------------------------------------------------------------
 # Configuration via environment
 # ---------------------------------------------------------------------------
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
-DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+# 2026 default embedding: BAAI/bge-m3 — multilingual (100+ langs incl.
+# Bantu-family languages relevant to Luganda), 1024-dim, current MTEB
+# state-of-art for free models.  Set DENSE_MODEL=sentence-transformers/
+# all-MiniLM-L6-v2 to keep the 384-dim legacy index without re-indexing.
+DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-DENSE_DIM = int(os.getenv("DENSE_DIM", "384"))
+DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BM25_STATE_PATH = Path(
@@ -226,6 +158,7 @@ class HybridRetriever:
         self._sparse_encoder = BM25SparseEncoder()
         self._ready = False
         self._circuit = CircuitBreaker(
+            name="qdrant",
             failure_threshold=3,
             reset_timeout=10.0,
             max_timeout=300.0,

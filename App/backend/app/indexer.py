@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
-DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-DENSE_DIM = int(os.getenv("DENSE_DIM", "384"))
+# 2026 default: BAAI/bge-m3 multilingual embeddings (1024-dim).
+# Override DENSE_MODEL / DENSE_DIM when re-indexing legacy collections.
+DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
+DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "120"))
 BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "64"))

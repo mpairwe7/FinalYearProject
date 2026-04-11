@@ -1,10 +1,15 @@
 """OpenTelemetry GenAI tracing for the URA Chatbot.
 
-Implements OpenTelemetry semantic conventions for Generative AI (2026):
-- gen_ai.system: per-pipeline parent spans
-- gen_ai.token.usage: prompt / completion token estimates
-- rag.*: retrieval-specific child spans (embed, search, rerank)
+Implements OpenTelemetry semantic conventions for Generative AI (2025 stable):
+- gen_ai.system               – static per-process attribute
+- gen_ai.operation.name       – chat | embeddings | text_completion
+- gen_ai.request.model        – model ID requested
+- gen_ai.response.model       – model ID used (may differ, e.g. aliasing)
+- gen_ai.usage.input_tokens   – real tokenizer counts (not word proxy)
+- gen_ai.usage.output_tokens  – real tokenizer counts
+- rag.*                       – retrieval-specific child spans
 
+All attribute names are drawn from the current stable semconv as of 2025.
 Opt-in via ``OTEL_ENABLED=true``.
 
 Reference: https://opentelemetry.io/docs/specs/semconv/gen-ai/
@@ -93,27 +98,36 @@ def init_tracing() -> None:
 # Span helpers
 # ---------------------------------------------------------------------------
 @contextmanager
-def trace_rag_pipeline(query: str) -> Generator[dict[str, Any], None, None]:
+def trace_rag_pipeline(
+    query: str,
+    request_id: str | None = None,
+) -> Generator[dict[str, Any], None, None]:
     """Parent span wrapping the full RAG pipeline.
 
     The yielded *ctx* dict contains a ``timings`` sub-dict that child
     ``trace_stage`` calls populate automatically, giving a per-stage
     latency breakdown (embed, search, rerank, generate, guardrails, …).
+
+    *request_id* (if provided) is attached as ``http.request.id`` so
+    frontend-generated X-Request-IDs can be correlated end-to-end.
     """
-    ctx: dict[str, Any] = {"timings": {}}
+    ctx: dict[str, Any] = {"timings": {}, "request_id": request_id}
 
     if _tracer is None:
         yield ctx
         return
 
-    with _tracer.start_as_current_span(
-        "rag.pipeline",
-        attributes={
-            "gen_ai.system": "ura-chatbot",
-            "gen_ai.request.model": "ura-qwen2.5-3b-instruct",
-            "gen_ai.prompt.length": len(query),  # log length, not content (PII safety)
-        },
-    ) as span:
+    attributes = {
+        "gen_ai.system": "ura-chatbot",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": "ura-qwen2.5-3b-instruct",
+        # log length, not content (PII safety)
+        "gen_ai.prompt.length": len(query),
+    }
+    if request_id:
+        attributes["http.request.id"] = request_id
+
+    with _tracer.start_as_current_span("rag.pipeline", attributes=attributes) as span:
         ctx["span"] = span
         yield ctx
         # Record per-stage timings on the parent span
@@ -122,9 +136,13 @@ def trace_rag_pipeline(query: str) -> Generator[dict[str, Any], None, None]:
         if "faithfulness" in ctx:
             span.set_attribute("gen_ai.faithfulness_score", ctx["faithfulness"])
         if "num_sources" in ctx:
-            span.set_attribute("gen_ai.retrieval.num_sources", ctx["num_sources"])
+            span.set_attribute("rag.retrieval.num_results", ctx["num_sources"])
         if "locale" in ctx:
             span.set_attribute("gen_ai.request.locale", ctx["locale"])
+        if "input_tokens" in ctx:
+            span.set_attribute("gen_ai.usage.input_tokens", ctx["input_tokens"])
+        if "output_tokens" in ctx:
+            span.set_attribute("gen_ai.usage.output_tokens", ctx["output_tokens"])
 
 
 @contextmanager
@@ -161,10 +179,54 @@ def trace_stage(
 
 
 # ---------------------------------------------------------------------------
+# LLM operation span (gen_ai.operation.name = chat)
+# ---------------------------------------------------------------------------
+@contextmanager
+def trace_llm_operation(
+    model_id: str,
+    operation: str = "chat",
+) -> Generator[dict[str, Any], None, None]:
+    """Child span wrapping a single LLM inference call.
+
+    Attributes follow the stable GenAI semantic conventions (2025):
+    gen_ai.operation.name, gen_ai.request.model, gen_ai.response.model,
+    gen_ai.usage.input_tokens, gen_ai.usage.output_tokens.
+    """
+    ctx: dict[str, Any] = {}
+    if _tracer is None:
+        yield ctx
+        return
+
+    with _tracer.start_as_current_span(
+        f"gen_ai.{operation}",
+        attributes={
+            "gen_ai.system": "ura-chatbot",
+            "gen_ai.operation.name": operation,
+            "gen_ai.request.model": model_id,
+        },
+    ) as span:
+        ctx["span"] = span
+        yield ctx
+        if "input_tokens" in ctx:
+            span.set_attribute("gen_ai.usage.input_tokens", ctx["input_tokens"])
+        if "output_tokens" in ctx:
+            span.set_attribute("gen_ai.usage.output_tokens", ctx["output_tokens"])
+        if "response_model" in ctx:
+            span.set_attribute("gen_ai.response.model", ctx["response_model"])
+        if "finish_reason" in ctx:
+            span.set_attribute("gen_ai.response.finish_reasons", [ctx["finish_reason"]])
+
+
+# ---------------------------------------------------------------------------
 # Metric helpers (GenAI semantic conventions)
 # ---------------------------------------------------------------------------
-def record_token_usage(prompt_tokens: int, completion_tokens: int) -> None:
-    """Record ``gen_ai.client.token.usage`` counter."""
+def record_token_usage(input_tokens: int, output_tokens: int) -> None:
+    """Record ``gen_ai.client.token.usage`` counter (stable 2025 semconv).
+
+    The stable attribute is ``gen_ai.token.type`` with values
+    ``input``/``output`` (matching ``gen_ai.usage.input_tokens`` /
+    ``gen_ai.usage.output_tokens`` span attributes).
+    """
     global _token_counter
     if _meter is None:
         return
@@ -172,11 +234,11 @@ def record_token_usage(prompt_tokens: int, completion_tokens: int) -> None:
         if _token_counter is None:
             _token_counter = _meter.create_counter(
                 "gen_ai.client.token.usage",
-                unit="token",
+                unit="{token}",
                 description="Tokens consumed by GenAI operations",
             )
-        _token_counter.add(prompt_tokens, {"gen_ai.token.type": "input"})
-        _token_counter.add(completion_tokens, {"gen_ai.token.type": "output"})
+        _token_counter.add(input_tokens, {"gen_ai.token.type": "input"})
+        _token_counter.add(output_tokens, {"gen_ai.token.type": "output"})
     except Exception:
         logger.debug("Failed to record token usage", exc_info=True)
 

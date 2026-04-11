@@ -1,6 +1,13 @@
-"""SQLite persistence layer for analytics and feedback.
+"""Analytics persistence layer.
 
-Thread-safe via thread-local connections with WAL journaling.
+Two backends are available; selected via ``ANALYTICS_BACKEND``:
+
+- **sqlite** (default) — thread-safe via thread-local connections with
+  WAL journaling.  Fine for single-node / single-worker deploys; will
+  lock-contend across replicas.
+- **postgres** — see :mod:`postgres`.  Correct choice for multi-replica
+  deploys.  Enable with ``ANALYTICS_BACKEND=postgres`` and ``POSTGRES_DSN``.
+
 All write operations are wrapped in try/except to prevent data loss.
 """
 
@@ -16,6 +23,12 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Backend selection — import early so the dispatch module aliases below pick
+# up the right implementation.  Falls back to SQLite if psycopg missing.
+# ---------------------------------------------------------------------------
+ANALYTICS_BACKEND = os.getenv("ANALYTICS_BACKEND", "sqlite").lower()
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _DB_DIR = Path(os.getenv("ANALYTICS_DB_DIR", str(_PROJECT_ROOT / "data_store")))
@@ -432,3 +445,32 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
     ).fetchall()
 
     return [dict(r) for r in down_rows] + [dict(r) for r in low_conf_rows]
+
+
+# ---------------------------------------------------------------------------
+# Backend dispatch — when ANALYTICS_BACKEND=postgres, re-bind the module's
+# public names to the postgres implementations so callers can continue to
+# `from .database import log_conversation, ...` unchanged.
+# ---------------------------------------------------------------------------
+if ANALYTICS_BACKEND == "postgres":
+    try:
+        from . import postgres as _pg
+
+        init_db = _pg.init_db  # type: ignore
+        cleanup_expired_data = _pg.cleanup_expired_data  # type: ignore
+        save_feedback = _pg.save_feedback  # type: ignore
+        update_feedback_comment = _pg.update_feedback_comment  # type: ignore
+        get_feedback_summary = _pg.get_feedback_summary  # type: ignore
+        track_event = _pg.track_event  # type: ignore
+        get_event_counts = _pg.get_event_counts  # type: ignore
+        upsert_session = _pg.upsert_session  # type: ignore
+        get_session_stats = _pg.get_session_stats  # type: ignore
+        log_conversation = _pg.log_conversation  # type: ignore
+        get_recent_turns = _pg.get_recent_turns  # type: ignore
+        get_conversation_stats = _pg.get_conversation_stats  # type: ignore
+        export_review_feedback = _pg.export_review_feedback  # type: ignore
+        logger.info("Analytics backend: postgres")
+    except Exception:
+        logger.exception("Postgres backend requested but import failed; falling back to sqlite")
+else:
+    logger.info("Analytics backend: sqlite")

@@ -137,11 +137,20 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `API_URL` | Backend API URL | `http://localhost:8000` |
 | **LLM Generation** | | |
 | `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen2.5-3B-Instruct` |
+| `LLM_MODEL_REVISION` | Pin to a specific HF commit SHA (SLSA provenance) | _unset_ |
+| `LLM_TRUST_REMOTE_CODE` | Allow model-defined Python (OWASP LLM03 off by default) | `false` |
+| `LLM_CONTEXT_WINDOW` | Hard cap on prompt tokens (tokenizer-aware trimming) | `6144` |
 | `LLM_ENABLED` | Enable LLM generation | `true` |
 | `LLM_DEVICE` | Inference device (`auto`/`cpu`/`cuda`) | `auto` |
 | `LLM_TORCH_DTYPE` | Tensor dtype | `auto` |
 | `LLM_TEMPERATURE` | Generation temperature | `0.2` |
 | `LLM_MAX_TOKENS` | Max new tokens | `512` |
+| `LLM_DEADLINE_SECONDS` | Hard wall-clock deadline per LLM call | `45` |
+| `LLM_MAX_CONCURRENCY` | Bounded LLM thread-pool size | `2` |
+| `LLM_STRUCTURED_OUTPUT` | Emit JSON `{answer, citations, abstain}` | `false` |
+| **Self-Reflection (Self-RAG)** | | |
+| `SELF_REFLECT_ENABLED` | Regenerate once when faithfulness is weak | `false` |
+| `SELF_REFLECT_THRESHOLD` | Faithfulness below this triggers a reflect pass | `0.4` |
 | **Semantic Cache** | | |
 | `CACHE_ENABLED` | Enable semantic cache | `true` |
 | `CACHE_THRESHOLD` | Cosine similarity threshold | `0.92` |
@@ -151,37 +160,416 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `CORRECTIVE_RAG_THRESHOLD` | Min avg score before re-retrieve | `0.3` |
 | **Rate Limiting** | | |
 | `RATE_LIMIT` | Chat endpoint rate limit | `30/minute` |
+| `SLOWAPI_STORAGE_URI` | Set to `redis://host:6379` for multi-replica rate limits | _in-process_ |
 | **Retrieval** | | |
 | `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` |
 | `DENSE_MODEL` | Embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
+| **Analytics Backend (Phase 8)** | | |
+| `ANALYTICS_BACKEND` | `sqlite` (default) or `postgres` | `sqlite` |
+| `POSTGRES_DSN` | psycopg DSN when using postgres | _unset_ |
+| `POSTGRES_POOL_MIN` / `_MAX` | Pool bounds | `1` / `10` |
+| **vLLM HTTP backend (Phase 9)** | | |
+| `LLM_BACKEND` | `local` (HF Transformers) or `vllm` (HTTP) | `local` |
+| `VLLM_BASE_URL` | OpenAI-compatible endpoint | `http://vllm:8001/v1` |
+| `VLLM_API_KEY` | Bearer token for vLLM | `not-needed` |
+| `VLLM_HTTP_TIMEOUT` | Seconds per vLLM call | `60` |
+| **Caddy TLS ingress (Phase 9)** | | |
+| `CADDY_DOMAIN` | Public domain for Let's Encrypt | _unset_ |
+| `CADDY_ACME_EMAIL` | Contact email for ACME | _unset_ |
+| **Continuous evaluation (Phase 10)** | | |
+| `EVAL_SAMPLE_SIZE` | Rows per eval run | `50` |
+| `EVAL_FAITHFULNESS_MIN` | SLO gate for faithfulness | `0.7` |
+| `EVAL_ANSWER_REL_MIN` | SLO gate for answer relevancy | `0.6` |
+| `EVAL_CONTEXT_PREC_MIN` | SLO gate for context precision | `0.6` |
+| **Feature flags (Phase 11)** | | |
+| `FLAG_SELF_REFLECT` | Regenerate when faithfulness is low | `false` |
+| `FLAG_STRUCTURED_OUTPUT` | JSON-mode output | `false` |
+| `FLAG_CORRECTIVE_RAG` | Corrective re-retrieval | `true` |
+| `FLAG_SEMANTIC_CACHE` | Semantic query cache | `true` |
+| `FLAG_QUERY_REWRITE` | Spell / abbrev / coreference | `true` |
+| `FLAG_RERANKER` | Cross-encoder reranking | `true` |
+| **Host / HuggingFace** | | |
+| `HF_HOME` | Writable HF cache location | `~/.cache/huggingface` |
+| `INTERNAL_API_URL` | Next.js rewrite target (server-side) | `http://127.0.0.1:18000` |
+| `NEXT_PUBLIC_API_URL` | Browser-side API URL (bake-time) | `/api` |
+
+### 2026 production upgrade notes
+
+This directory was hardened in a phased upgrade to close the remaining
+OWASP LLM Top 10 (2025) items and align with OpenTelemetry GenAI
+semantic conventions (stable 2025). See the section below for what
+changed and why.
+
+**Phase 1 — OWASP closure**
+
+- `trust_remote_code=False` by default in `backend/app/llm.py` (LLM03).
+- New env `LLM_MODEL_REVISION` pins the HF commit SHA for reproducible
+  builds and SLSA provenance.
+- Retrieved passages are scrubbed for injection phrases before being
+  handed to the LLM (`guardrails.scan_retrieved_text`, LLM01 indirect).
+- Passages are wrapped in hash-derived spotlight markers
+  `<passage id="p1-<sha8>">…</passage>` so the model cannot be tricked
+  into treating passage text as instructions.
+- `OutputGuard.check_prompt_leakage` redacts verbatim system-prompt
+  signature phrases from responses (LLM07).
+- `_build_messages` uses tokenizer-aware trimming with a configurable
+  `LLM_CONTEXT_WINDOW` budget rather than a fixed 1500-character slice.
+
+**Phase 2 — OTel GenAI 2025 alignment**
+
+- Token accounting now uses the real Qwen tokenizer
+  (`llm.count_tokens`) rather than `len(text.split())`.
+- Span attributes follow the 2025 stable semconv:
+  `gen_ai.operation.name`, `gen_ai.usage.input_tokens`,
+  `gen_ai.usage.output_tokens`, `rag.retrieval.num_results`.
+- `X-Request-ID` is propagated into the RAG pipeline span as
+  `http.request.id` for frontend↔backend correlation.
+- New `trace_llm_operation` helper wraps individual LLM calls.
+
+**Phase 3 — Resilience**
+
+- `backend/app/resilience.py` hosts a shared `CircuitBreaker`; both
+  Qdrant (retrieval) and the LLM get their own breaker.
+- LLM calls run on a bounded `ThreadPoolExecutor` with a hard
+  `LLM_DEADLINE_SECONDS` wall-clock deadline.
+- On timeout / breaker-open / exception the pipeline gracefully
+  falls back to the best-matching FAQ answer.
+
+**Phase 4 — Structured outputs + self-reflection**
+
+- `LLM_STRUCTURED_OUTPUT=true` switches the model to JSON-mode
+  output `{answer, citations, abstain}`. Citations are validated
+  against the actual retrieved passage numbers — the model cannot
+  fabricate references.
+- `SELF_REFLECT_ENABLED=true` turns on a single-pass Self-RAG
+  reflection: when faithfulness falls below `SELF_REFLECT_THRESHOLD`,
+  the pipeline regenerates the answer once with instructions to
+  verify every claim against the retrieved contexts.
+
+**Phase 5 — Frontend modernization**
+
+- `frontend/src/app/error.tsx` — App Router error boundary with
+  analytics beacon.
+- `frontend/src/app/loading.tsx` — App Router Suspense fallback.
+- `FeedbackButtons.tsx` adopts React 19 `useOptimistic` +
+  `useTransition` so thumbs-up/down flip instantly even on slow
+  networks, and roll back automatically on network failure.
+
+**Frontend framework upgrade — Next.js 16.2.3 + React 19.2**
+
+- `frontend/package.json` pins `next@16.2.3`, `react@19.2.0`,
+  `react-dom@19.2.0`, `eslint-config-next@16.2.3`; dev deps include
+  `@eslint/eslintrc@3.2.0` for flat-config compat shim.
+- The removed `next lint` command is replaced with `bun run eslint .`
+  in the `lint` script — Next.js 16 no longer ships lint.
+- New `frontend/eslint.config.mjs` — flat-config ESLint extending
+  `next/core-web-vitals` and `next/typescript` via `FlatCompat`.
+- `frontend/Dockerfile` runtime image pinned to `node:20.18-slim`
+  (Next.js 16 requires Node.js ≥ 20.9).
+- Gap #16 fix — `backend/app/service.py::stream_llm_tokens` routes
+  the SSE streaming path through the shared `_LLM_CIRCUIT` breaker
+  with the same success/failure accounting as the sync path.
+  `backend/app/main.py::chat_stream` calls it instead of
+  `llm_module.generate_stream` directly, closing the last resilience
+  gap.
+
+**Zero-impact Next.js 16 breaking changes** (verified unused here):
+`middleware.ts` → `proxy.ts`, async `params`/`searchParams`/`cookies()`/
+`headers()`/`draftMode()`, AMP, `serverRuntimeConfig`,
+`publicRuntimeConfig`, `experimental.ppr`, `experimental.dynamicIO`,
+`next/legacy/image`, `images.domains`, parallel routes `default.js`.
+
+**Phase 7 — Redis: distributed rate limit + semantic cache**
+
+- `backend/app/main.py` — `Limiter(storage_uri=SLOWAPI_STORAGE_URI)`
+  is used when set, so the per-IP rate bucket is shared across
+  workers and replicas instead of being per-process memory.
+- `backend/app/cache.py` — new `RedisSemanticCache` class +
+  `create_cache()` factory.  `CACHE_BACKEND=redis` stores embeddings
+  as base64 numpy blobs in Redis hashes with TTL.  Falls back to
+  the in-process `SemanticCache` automatically if Redis is unreachable.
+- `backend/requirements.txt` — drops the `slowapi[redis]` extra
+  (which pinned `redis<4`) in favour of the `slowapi` base package
+  plus `limits[redis]>=3.13` (slowapi's internal storage layer), so
+  modern `redis>=5` is usable for both the cache and the rate limiter.
+- `docker-compose.yml` — first-class `redis:7.4-alpine` service
+  (LRU-evicting, 512 MB cap) with healthcheck.  The api service
+  `depends_on` it and gets `REDIS_URL`, `SLOWAPI_STORAGE_URI` and
+  `CACHE_BACKEND` wired in by default.
+
+**Phase 8 — Postgres analytics backend (opt-in)**
+
+- New `backend/app/postgres.py` — full psycopg3 + `psycopg_pool`
+  implementation mirroring every public function in `database.py`.
+  Schema is intentionally identical.
+- `backend/app/database.py` — dispatch block at the bottom re-binds
+  the public names to `postgres.*` when `ANALYTICS_BACKEND=postgres`.
+  SQLite remains the zero-config default for single-node deploys;
+  Postgres is the correct choice for multi-replica deploys.
+- `docker-compose.yml` — `postgres:16.6-alpine` behind
+  `--profile postgres` with healthcheck and named volume.
+
+**Phase 9 — vLLM runtime + Caddy TLS ingress**
+
+- `backend/app/llm.py` — new `LLM_BACKEND=local|vllm` switch plus
+  `_vllm_generate()` and `_vllm_generate_stream()` that call the
+  OpenAI-compatible `/v1/chat/completions` endpoint that vLLM exposes.
+  When `LLM_BACKEND=vllm`, no local HF model is loaded and the
+  sidecar is the sole inference runtime.
+- `docker-compose.yml` — `vllm/vllm-openai:v0.6.6` service behind
+  `--profile vllm` with `deploy.resources.reservations.devices` for
+  GPU passthrough and a `/v1/models` healthcheck.
+- `docker-compose.yml` — `caddy:2.8-alpine` reverse proxy behind
+  `--profile tls` with HTTP/2 + HTTP/3 and auto Let's Encrypt.
+- New `Caddyfile` — HSTS, CSP, security headers, SSE-safe reverse
+  proxy to `api:8000`, frontend to `frontend:3000`, JSON access logs.
+
+**Phase 10 — Continuous evaluation (Ragas-compatible)**
+
+- New `backend/app/evaluation.py` — `run_evaluation()` collects
+  samples via the existing `db.export_review_feedback()` stream and
+  computes faithfulness / answer_relevancy / context_precision.
+  Uses the real Ragas library when `ragas` + `datasets` are
+  installed, falls back to built-in heuristics otherwise.
+- New `POST /v1/evaluate` admin endpoint in `main.py`, gated by the
+  existing `INDEX_API_KEY` Bearer token.  Writes each metric into
+  the in-process Prometheus store (`ura_eval_metric{name=...}`) so
+  Grafana can chart evaluation scores alongside request metrics.
+- CLI entry point — `python -m App.backend.app.evaluation`.  Emits
+  JSON + a Prometheus text-exposition file and exits non-zero on
+  regression so CI jobs can gate on it.
+
+**Phase 11 — SLO alert rules, feature flags, embeddings, Gradio 5**
+
+- New `monitoring/prometheus-rules.yaml` — 10 alerts across 4 groups
+  (availability, latency, AI quality, resources) with SLO targets:
+  p95 latency < 3 s, error rate < 1 %, faithfulness ≥ 0.5, Qdrant
+  availability ≥ 99.9 %, LLM breaker never OPEN > 5 min.  Includes
+  `UraFaithfulnessLow`, `UraEvalRegression`, `UraEscalationSpike`.
+- New `backend/app/flags.py` — tiny env-backed feature flag registry
+  with 7 canonical flags.  `flags.is_enabled("self_reflect")`
+  resolves in this order: in-memory override → `FLAG_<NAME>` env
+  → registry default.  `service.py` uses this alongside the legacy
+  `SELF_REFLECT_ENABLED` env for back-compat.
+- `backend/app/retriever.py` + `backend/app/indexer.py` —
+  `DENSE_MODEL` default upgraded to `BAAI/bge-m3` (1024-dim,
+  multilingual, MTEB state-of-art for free models).  **Re-index
+  required** when switching collections.  See the "Host gotchas"
+  section below for driver constraints.
+- `App/requirements.txt` — Gradio bumped to `>=5.0.0,<6.0.0`
+  (SSR, improved streaming, better accessibility).
+
+**Phase 12 — `app.py` unified with the hardened ChatModel**
+
+- `App/app.py` — new `_load_chat_model()` lazy singleton attempts
+  `from App.backend.app.service import ChatModel`.  When successful,
+  `generate_response()` delegates to the full Phase 1-11 pipeline
+  (hybrid retrieval, spotlight guardrails, self-reflect, circuit
+  breakers, etc.) and the Gradio UI renders its replies.  When the
+  backend isn't installed (HF Spaces), the legacy classifier +
+  keyword fallback runs unchanged — no deployment regressions.
+
+**Feedback URL fix — same-origin via Next.js rewrite**
+
+Symptom: the frontend couldn't submit feedback because every fetch
+was going to `http://localhost:8000` — the Dockerfile default baked
+into the client JS bundle at build time (Next.js inlines
+`NEXT_PUBLIC_*` env vars during `next build`, not at runtime).
+
+Fix applied in `frontend/next.config.mjs`:
+
+- New `rewrites()` block proxies `/api/:path*` →
+  `${INTERNAL_API_URL}/:path*` (default `http://127.0.0.1:18000`).
+- CSP `connect-src` simplified to `'self'` — the browser never
+  crosses origins, so no CORS and no baked host:port.
+- Frontend rebuilt with `NEXT_PUBLIC_API_URL=/api` (relative).
+
+Result: the browser does `fetch("/api/v1/feedback", …)`, Next.js
+proxies it to the backend over the internal network, and the same
+bundle works identically on localhost, behind Caddy, over SSH port
+forwarding, and in Docker Compose — with no client-side rebuild
+when the backend moves.
+
+**Phase 13 — 2026 UI redesign (glassmorphism + Grok-inspired)**
+
+- `frontend/src/app/globals.css` completely rewritten:
+  - Animated gradient-mesh background (violet → blue → cyan blobs
+    drifting on a 32 s loop).
+  - Glass panels with 20-28 px backdrop-filter + subtle 1 px borders
+    and gradient border glow on the primary chat shell.
+  - Grok-style message layout: 36 px glass avatars, tight typography,
+    violet-gradient "user" bubbles, subtle glass "assistant" bubbles
+    with 8-bit noise overlay to prevent banding.
+  - Pill citations inside a `<details>` with collapsible source list
+    and inline faithfulness indicator (`Well grounded` / `Verify with URA`).
+  - Segmented locale switch (English / Luganda) with sliding active pill.
+  - Floating composer with focus-glow border, custom send/mic buttons,
+    gradient primary action.
+  - Custom scrollbar with gradient thumb; `prefers-reduced-motion`
+    respected throughout.
+  - Responsive breakpoint at 720 px collapses the hero and tightens
+    padding for mobile.
+- `frontend/src/app/layout.tsx` — font switched from `Space_Grotesk`
+  to **Geist + Geist_Mono** from `next/font/google`, exposed as
+  `--font-geist-sans` / `--font-geist-mono` CSS variables.  Added
+  OpenGraph metadata and a `Viewport` export.
+- `frontend/src/app/page.tsx` — refactored to use the new CSS classes
+  (`locale-switch`, `composer`, `chip-grid`, `bubble-role`,
+  `citations`, `panel-note`, `escalation-banner`, `grounding-ok` /
+  `grounding-warn`).  Every inline `style={{...}}` block removed.
+  Logic (Zustand store, SSE reader, speech recognition, feedback
+  buttons) untouched.
+
+## Host-level gotchas we hit (and how to avoid them)
+
+These are not code bugs; they're environment traps other operators
+will likely hit too.  All documented so future deploys can skip the
+diagnosis phase.
+
+1. **HF cache directory owned by root** — if `~/.cache/huggingface`
+   was created by a previous `sudo` run, the unprivileged user can't
+   write to it and model downloads fail with a confusing
+   `PermissionError at .../models--*`.  Fix: set `HF_HOME` to a
+   writable path (`~/hf-cache`) or `chown -R` the existing dir.
+2. **torch CUDA runtime vs. NVIDIA driver mismatch** — `uv pip
+   install torch` now pulls `torch==2.11+cu130` by default, which
+   requires NVIDIA driver ≥ 540.  Hosts with driver ≤ 535 (CUDA 12.2)
+   must pin an older CUDA build, e.g.:
+   ```bash
+   uv pip install --index-url https://download.pytorch.org/whl/cu121 \
+     "torch==2.5.1" "torchvision==0.20.1"
+   ```
+3. **BGE-M3 blocked by CVE-2025-32434** — BGE-M3 ships a legacy
+   `pytorch_model.bin`, and transformers refuses `torch.load()` on
+   it unless `torch >= 2.6`.  torch 2.6+ only has cu124/cu126 wheels,
+   which need driver ≥ 550.  Workarounds for driver ≤ 535:
+   - Use a safetensors embedding model instead (e.g.
+     `sentence-transformers/all-MiniLM-L6-v2`, 384-dim, or
+     `intfloat/multilingual-e5-base`, 768-dim).  Set `DENSE_DIM`
+     accordingly and re-index.
+   - Or upgrade the host NVIDIA driver to ≥ 550 and reinstall torch.
+4. **`NEXT_PUBLIC_*` env vars are inlined at build time** — setting
+   them before `next start` does nothing.  Use the new Next.js
+   rewrite pattern above to avoid ever baking a host:port into the
+   client bundle.
+5. **`next start` warns when `output: "standalone"`** — the warning
+   is cosmetic for dev, but in production use
+   `node .next/standalone/server.js` (already the Dockerfile path).
+6. **Qdrant client-server version drift warning** —
+   `qdrant-client 1.17.1` vs `qdrant/qdrant:1.13.3` prints a
+   harmless compat warning on boot; pin both or bump together.
+7. **slowapi `[redis]` extra pins redis<4** — install
+   `slowapi>=0.1.9` bare and `limits[redis]>=3.13` (slowapi's
+   internal storage layer) for modern `redis>=5` compatibility.
 
 ## Development
 
 ### Prerequisites
 
 - Python 3.11+
-- Node.js 18+ / Bun
+- Node.js 20.9+ (Next.js 16 minimum) / Bun ≥ 1.1
 - Trained model files in `Model/` directory
 
-### Quick Start
+### Quick Start (2026 stack)
+
+**Option A — minimal smoke test (SQLite, in-process cache + rate limit,
+CPU-only, no build):**
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# 1. One-time: create a Python venv and install backend deps
+uv venv .venv --python 3.11
+VIRTUAL_ENV=$PWD/.venv uv pip install -r App/backend/requirements.txt
 
-# Run Gradio app
-python app.py
+# 2. One-time: install frontend deps
+curl -fsSL https://bun.sh/install | bash     # skip if bun already installed
+cd App/frontend && bun install && cd -
 
-# App will be available at http://localhost:7860
+# 3. Start Qdrant + Redis in containers (fast — pre-built images)
+docker compose up -d qdrant redis
+
+# 4. Index the FAQs into Qdrant (uses sentence-transformers)
+QDRANT_URL=http://127.0.0.1:6333 \
+  .venv/bin/python -m App.backend.app.indexer --recreate --csvs-only
+
+# 5. Run the FastAPI backend
+LLM_ENABLED=false QDRANT_URL=http://127.0.0.1:6333 REDIS_URL=redis://127.0.0.1:6379/0 \
+  CACHE_BACKEND=redis SLOWAPI_STORAGE_URI=redis://127.0.0.1:6379/1 \
+  .venv/bin/python -m uvicorn App.backend.app.main:app --port 18000
+
+# 6. In another terminal, run the frontend
+cd App/frontend
+NEXT_PUBLIC_API_URL=/api INTERNAL_API_URL=http://127.0.0.1:18000 bun run build
+NEXT_PUBLIC_API_URL=/api INTERNAL_API_URL=http://127.0.0.1:18000 bun run next start -p 13000
 ```
+
+Open http://localhost:13000 in a browser.  Feedback, citations, and
+SSE streaming are all proxied through the `/api` rewrite so no ports
+need to be exposed beyond 13000.
+
+**Option B — enable real LLM inference on a specific GPU:**
+
+```bash
+CUDA_VISIBLE_DEVICES=6 \
+  HF_HOME=~/hf-cache \
+  LLM_ENABLED=true LLM_DEVICE=cuda LLM_TORCH_DTYPE=bfloat16 \
+  QDRANT_URL=http://127.0.0.1:6333 \
+  REDIS_URL=redis://127.0.0.1:6379/0 \
+  CACHE_BACKEND=redis SLOWAPI_STORAGE_URI=redis://127.0.0.1:6379/1 \
+  .venv/bin/python -m uvicorn App.backend.app.main:app --port 18000
+```
+
+Qwen2.5-3B downloads to `~/hf-cache` on first boot (~6 GB, one-time).
+After that, every chat hits hybrid retrieval + LLM synthesis on the
+pinned GPU.
+
+**Option C — full production stack with Postgres + vLLM + Caddy TLS:**
+
+```bash
+# Put CADDY_DOMAIN / CADDY_ACME_EMAIL / POSTGRES_PASSWORD in .env
+docker compose --profile postgres --profile vllm --profile tls up -d
+```
+
+Requires ports 80/443 free, a public domain pointing at the host,
+and NVIDIA Container Toolkit with a GPU to spare.
+
+### Legacy HF Spaces entry point
+
+```bash
+pip install -r requirements.txt
+python app.py     # Gradio 5 on http://localhost:7860
+```
+
+When `App.backend.app.service` is importable, `app.py` delegates to
+the full hardened `ChatModel` pipeline automatically.  On HF Spaces
+where only the minimal classifier is shipped, the legacy keyword
+fallback runs unchanged.
+
+## Roadmap: from FAQ chatbot to personalized tax assistant
+
+Phases 1–13 documented above ship a hardened, generic RAG chatbot
+that answers factual questions about URA policy. To move beyond
+that toward a **personalized, agentic** experience — tailored to
+individual taxpayers, with multi-step workflows, tool use, long-term
+memory, and human-in-the-loop escalation — see the companion
+roadmap:
+
+- [`docs/GAPS_AND_AGENTIC_ROADMAP.md`](../docs/GAPS_AND_AGENTIC_ROADMAP.md)
+
+That document inventories **34 concrete gaps** across identity,
+memory, actions, knowledge, agentic reasoning, evaluation, and
+operations; proposes a **supervisor-specialist agent architecture**
+with **12 MCP tool servers**; and sketches **Phases 14–20** of the
+project with scoped deliverables and code-surface pointers for each.
 
 ## Links
 
 - [GitHub Repository](https://github.com/mpairweLandwind/FinalYearProject)
 - [Hugging Face Space](https://huggingface.co/spaces/mpairweLandwind/ura-chatbot)
 - [URA Official Website](https://www.ura.go.ug)
+- [Gap Analysis & Agentic Roadmap](../docs/GAPS_AND_AGENTIC_ROADMAP.md)
 
 
 ### Python API

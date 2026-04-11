@@ -31,12 +31,16 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .cache import SemanticCache
+import concurrent.futures
+
+from .cache import SemanticCache, create_cache
 from .corrective_rag import corrective_retrieve, needs_clarification
+from .flags import flags
 from .guardrails import InputGuard, OutputGuard, redact_pii_text, STORE_RAW_PROMPTS
 from . import llm as llm_module
 from . import database as db
 from .query import rewrite as rewrite_query
+from .resilience import CircuitBreaker
 from .retriever import HybridRetriever
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
 
@@ -54,6 +58,103 @@ if not _DATA_DIR.is_relative_to(_PROJECT_ROOT):
     _DATA_DIR = Path(_DEFAULT_DATA_DIR).resolve()
 
 GROUNDING_THRESHOLD = float(os.getenv("GROUNDING_THRESHOLD", "0.3"))
+LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
+SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "true"
+SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
+
+# Shared executor for LLM calls — bounded so one slow generation cannot
+# exhaust worker threads under load.  Size is small on purpose: Qwen runs
+# one inference at a time per process anyway (no true batching without vLLM).
+_LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=int(os.getenv("LLM_MAX_CONCURRENCY", "2")),
+    thread_name_prefix="llm",
+)
+_LLM_CIRCUIT = CircuitBreaker(
+    name="llm",
+    failure_threshold=3,
+    reset_timeout=15.0,
+    max_timeout=300.0,
+)
+
+
+def _call_llm_with_deadline(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    deadline_s: float = LLM_DEADLINE_SECONDS,
+) -> str:
+    """Run ``llm_module.generate`` under a hard wall-clock deadline.
+
+    The generation runs on a bounded executor, guarded by a dedicated
+    circuit breaker.  On timeout, breaker failure, or exception we
+    return an empty string so the caller falls back to FAQ lookup.
+    """
+    if not _LLM_CIRCUIT.allow_request():
+        logger.warning("LLM circuit breaker OPEN — skipping generation")
+        return ""
+
+    future = _LLM_EXECUTOR.submit(
+        llm_module.generate,
+        query=query,
+        passages=passages,
+        conversation_history=conversation_history,
+        locale=locale,
+    )
+    try:
+        reply = future.result(timeout=deadline_s)
+        _LLM_CIRCUIT.record_success()
+        return reply or ""
+    except concurrent.futures.TimeoutError:
+        future.cancel()  # best-effort; transformers generate may ignore
+        _LLM_CIRCUIT.record_failure()
+        logger.warning("LLM deadline %.1fs exceeded", deadline_s)
+        return ""
+    except Exception:
+        _LLM_CIRCUIT.record_failure()
+        logger.exception("LLM generation raised")
+        return ""
+
+
+def stream_llm_tokens(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+) -> list[str]:
+    """Stream LLM tokens through the shared circuit breaker.
+
+    Mirrors :func:`_call_llm_with_deadline` for the SSE streaming path.
+    Returns an empty list when the breaker is OPEN, the generator raises,
+    or no tokens are produced — the caller then falls back to
+    returning the best-hit answer as a single event.
+    """
+    if not llm_module.is_available():
+        return []
+    if not _LLM_CIRCUIT.allow_request():
+        logger.warning("LLM circuit breaker OPEN — skipping stream")
+        return []
+
+    try:
+        tokens = list(
+            llm_module.generate_stream(
+                query=query,
+                passages=passages,
+                conversation_history=conversation_history,
+                locale=locale,
+            )
+        )
+        if tokens:
+            _LLM_CIRCUIT.record_success()
+        else:
+            # Empty stream counts as a soft failure — the breaker tracks
+            # it so a continually empty worker eventually trips.
+            _LLM_CIRCUIT.record_failure()
+        return tokens
+    except Exception:
+        _LLM_CIRCUIT.record_failure()
+        logger.exception("LLM streaming raised")
+        return []
 
 
 def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dict[str, str]]:
@@ -145,8 +246,9 @@ class ChatModel:
         # LLM generation (Phase 2 — true RAG)
         self._llm_available = llm_module.is_available()
 
-        # Semantic cache (Phase 5 — cost optimization)
-        self._cache = SemanticCache()
+        # Semantic cache — factory selects in-process vs Redis backend
+        # based on CACHE_BACKEND env (see cache.py).
+        self._cache = create_cache()
         if self._retriever_ready and self._retriever._dense_model:
             self._cache.set_model(self._retriever._dense_model)
 
@@ -162,11 +264,12 @@ class ChatModel:
         top_k: int = 4,
         locale: str = "en",
         session_id: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Return a grounded, cited answer via hybrid retrieval + guardrails."""
         t0 = time.perf_counter()
 
-        with trace_rag_pipeline(message) as trace_ctx:
+        with trace_rag_pipeline(message, request_id=request_id) as trace_ctx:
             timings = trace_ctx["timings"]
 
             # 0. Multi-turn memory — fetch recent conversation history (Phase 4)
@@ -301,14 +404,28 @@ class ChatModel:
                 # Phase 2: LLM synthesis from top-k passages (true RAG)
                 if self._llm_available:
                     with trace_stage("llm_generate", timings=timings):
-                        reply = llm_module.generate(
+                        reply = _call_llm_with_deadline(
                             query=rewritten,
                             passages=hits,
                             conversation_history=conversation_history or None,
                             locale=locale,
                         )
+                    # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
+                    if reply and llm_module.LLM_STRUCTURED_OUTPUT:
+                        valid_refs = [str(i) for i in range(1, len(hits) + 1)]
+                        parsed = llm_module.parse_structured_reply(reply, valid_refs)
+                        if parsed["structured"]:
+                            reply = parsed["answer"]
+                            # Filter citations to refs the model actually cited
+                            cited_refs = set(parsed["citations"])
+                            if cited_refs:
+                                citations = [c for c in citations if c["ref"].strip("[]") in cited_refs]
+                            trace_ctx["structured_output"] = True
+                            if parsed["abstain"]:
+                                retrieval_mode = "abstained"
                     if not reply:
-                        # Fallback to best-hit answer if LLM fails
+                        # Fallback to best-hit answer if LLM fails, times out,
+                        # or the circuit breaker is open
                         best = hits[0]
                         reply = best.get("answer") or best.get("text", "")
                 else:
@@ -325,22 +442,67 @@ class ChatModel:
                 citations = []
                 contexts = []
 
-            # 6. Output guardrails (OWASP LLM02 + LLM05)
+            # 6. Output guardrails (OWASP LLM02 + LLM05 + LLM07)
             with trace_stage("output_guard", timings=timings):
                 reply = self._output_guard.redact_pii(reply)
                 reply = self._output_guard.sanitize(reply)
+                # LLM07 — system prompt leakage
+                leakage = self._output_guard.check_prompt_leakage(reply)
+                reply = leakage.sanitized_text
+                if leakage.flags:
+                    trace_ctx["prompt_leakage"] = True
 
             # 7. Grounding verification (OWASP LLM09)
             faithfulness_score: float | None = None
+            reflect_fired = False
             if contexts:
                 with trace_stage("grounding", timings=timings):
                     faith = HybridRetriever.compute_faithfulness(reply, contexts)
                     faithfulness_score = faith
+
+                # 7b. Self-reflection — regenerate once if grounding is weak
+                # (Self-RAG, 2023/2024).  Feature-flagged off by default
+                # because it doubles LLM latency when triggered.
+                # Honours FLAG_SELF_REFLECT / legacy SELF_REFLECT_ENABLED env.
+                if (
+                    (flags.is_enabled("self_reflect") or SELF_REFLECT_ENABLED)
+                    and self._llm_available
+                    and faith is not None
+                    and faith < SELF_REFLECT_THRESHOLD
+                ):
+                    with trace_stage("self_reflect", timings=timings):
+                        revise_query = (
+                            f"Previous answer:\n{reply}\n\n"
+                            f"Check whether every factual claim is supported "
+                            f"by the retrieved passages. Rewrite the answer "
+                            f"so that every claim is grounded, or explicitly "
+                            f"say which parts cannot be verified.\n\n"
+                            f"Original question: {rewritten}"
+                        )
+                        revised = _call_llm_with_deadline(
+                            query=revise_query,
+                            passages=hits,
+                            conversation_history=conversation_history or None,
+                            locale=locale,
+                        )
+                    if revised:
+                        reply = self._output_guard.sanitize(
+                            self._output_guard.redact_pii(revised)
+                        )
+                        leakage = self._output_guard.check_prompt_leakage(reply)
+                        reply = leakage.sanitized_text
+                        faith = HybridRetriever.compute_faithfulness(reply, contexts)
+                        faithfulness_score = faith
+                        reflect_fired = True
+
+                with trace_stage("grounding", timings=timings):
                     grounding = self._output_guard.check_grounding(
                         reply, contexts, GROUNDING_THRESHOLD
                     )
                     reply = grounding.sanitized_text
                     trace_ctx["faithfulness"] = faith
+                    if reflect_fired:
+                        trace_ctx["self_reflected"] = True
 
             # 8. Escalation check
             escalate, esc_reason = self._output_guard.should_escalate(
@@ -350,10 +512,15 @@ class ChatModel:
             trace_ctx["num_sources"] = len(sources)
             trace_ctx["locale"] = locale
 
-            # Record estimated token usage (word-count proxy)
-            prompt_tokens = len(message.split())
-            completion_tokens = len(reply.split())
-            record_token_usage(prompt_tokens, completion_tokens)
+            # Record real token usage (gen_ai.usage.input_tokens /
+            # gen_ai.usage.output_tokens).  Uses the loaded Qwen tokenizer
+            # via llm_module.count_tokens; falls back to word count when
+            # the tokenizer is not available (LLM disabled).
+            input_tokens = llm_module.count_tokens(message)
+            output_tokens = llm_module.count_tokens(reply)
+            trace_ctx["input_tokens"] = input_tokens
+            trace_ctx["output_tokens"] = output_tokens
+            record_token_usage(input_tokens, output_tokens)
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
@@ -393,6 +560,7 @@ class ChatModel:
         top_k: int = 4,
         locale: str = "en",
         session_id: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 

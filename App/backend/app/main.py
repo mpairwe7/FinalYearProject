@@ -81,10 +81,21 @@ async def lifespan(app: FastAPI):
 
 
 # ---------------------------------------------------------------------------
-# Rate limiter (Phase 1 – production hardening, 30 req/min/IP on chat)
+# Rate limiter (2026 production: Redis-backed when SLOWAPI_STORAGE_URI set)
 # ---------------------------------------------------------------------------
+# Set SLOWAPI_STORAGE_URI=redis://redis:6379 for multi-worker / multi-replica
+# deploys.  When unset, the limiter uses an in-process memory bucket — this
+# is fine for a single-worker dev server but will NOT correctly enforce a
+# shared limit across workers or Kubernetes replicas.
 _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
-limiter = Limiter(key_func=get_remote_address, default_limits=[])
+_SLOWAPI_STORAGE_URI = os.getenv("SLOWAPI_STORAGE_URI", "")
+
+_limiter_kwargs: dict = {"key_func": get_remote_address, "default_limits": []}
+if _SLOWAPI_STORAGE_URI:
+    _limiter_kwargs["storage_uri"] = _SLOWAPI_STORAGE_URI
+    logger.info("Rate limiter using Redis storage: %s", _SLOWAPI_STORAGE_URI.split("@")[-1])
+
+limiter = Limiter(**_limiter_kwargs)
 
 app = FastAPI(
     title="URA Chatbot API",
@@ -136,6 +147,8 @@ async def security_headers(request: Request, call_next):
     # Validate X-Request-ID to prevent log injection (OWASP LLM05)
     raw_id = request.headers.get("X-Request-ID", "")
     request_id = raw_id if _REQUEST_ID_RE.match(raw_id) else str(uuid.uuid4())
+    # Stash on request.state so handlers can read it without re-parsing headers
+    request.state.request_id = request_id
     logger.info(
         "request  request_id=%s method=%s path=%s",
         request_id, request.method, request.url.path,
@@ -184,6 +197,7 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
 @limiter.limit(_RATE_LIMIT)
 def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_model)) -> ChatResponse:
     session_id = request.headers.get("X-Session-ID", "")
+    request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
 
     result = model.generate(
@@ -192,6 +206,7 @@ def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_mod
         top_k=body.top_k,
         locale=body.locale,
         session_id=session_id or None,
+        request_id=request_id,
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -252,8 +267,10 @@ def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_mod
 async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = Depends(get_model)):
     """Server-Sent Events streaming chat — tokens arrive progressively."""
     from . import llm as llm_module
+    from . import service as service_module
 
     session_id = request.headers.get("X-Session-ID", "")
+    request_id = getattr(request.state, "request_id", None)
 
     async def event_generator():
         import asyncio
@@ -274,6 +291,7 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                 top_k=body.top_k,
                 locale=body.locale,
                 session_id=session_id or None,
+                request_id=request_id,
             )
 
             # If blocked/abstained/clarification, send single event
@@ -308,16 +326,24 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
             conversation_history = result.get("_history", [])
             rewritten_query = result.get("_rewritten", body.message)
             if llm_module.is_available() and hits:
-                # Run blocking LLM stream in thread pool
+                # Run blocking LLM stream in thread pool, routed through the
+                # shared circuit breaker (Gap #16 fix — prevents the stream
+                # path from bypassing breaker/timeout guarantees).
                 def _stream_tokens():
-                    return list(llm_module.generate_stream(
-                        query=rewritten_query,  # use rewritten, not original
+                    return service_module.stream_llm_tokens(
+                        query=rewritten_query,
                         passages=hits,
                         conversation_history=conversation_history or None,
                         locale=body.locale,
-                    ))
+                    )
 
                 tokens = await asyncio.to_thread(_stream_tokens)
+                # Breaker OPEN / empty stream → fall through to single-event
+                # fallback below (same branch as "llm not available")
+                if not tokens:
+                    yield {"event": "token", "data": result.get("reply", "")}
+                    yield {"event": "done", "data": ""}
+                    return
                 for token in tokens:
                     # Sanitize each token chunk (OWASP LLM05)
                     sanitized = _output_guard.sanitize(token)
@@ -549,3 +575,34 @@ def prometheus_metrics() -> PlainTextResponse:
         content=metrics.to_prometheus(),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
+
+
+# ---------------------------------------------------------------------------
+# Continuous evaluation — admin-only
+# ---------------------------------------------------------------------------
+@app.post("/v1/evaluate", tags=["admin"])
+def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
+    """Run the RAG evaluation harness on recent conversations.
+
+    Returns the full ``EvalReport`` as JSON.  Requires the same
+    ``Authorization: Bearer <INDEX_API_KEY>`` header as ``/v1/index``.
+    Also writes each metric to the in-process Prometheus store so
+    Grafana can chart ``ura_eval_metric{name=...}`` alongside
+    request metrics.
+    """
+    _verify_index_auth(request)
+    if sample_size < 1 or sample_size > 500:
+        raise HTTPException(status_code=400, detail="sample_size must be 1..500")
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be 1..365")
+
+    from .evaluation import run_evaluation
+
+    report = run_evaluation(sample_size=sample_size, days=days)
+    for m in report.metrics:
+        metrics.observe(
+            f"ura_eval_metric",
+            m.value,
+            labels={"name": m.name, "backend": report.backend},
+        )
+    return report.to_dict()
