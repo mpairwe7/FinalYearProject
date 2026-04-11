@@ -405,13 +405,39 @@ class ChatModel:
                         "escalation_reason": "",
                     }
                 if route_decision.route == AgentRoute.ESCALATE:
+                    ticket_id = ""
+                    # Phase 14-D: create a real ticket when the queue
+                    # is enabled.  Otherwise we just return the
+                    # escalation marker (existing Phase 1-13 behaviour).
+                    if flags.is_enabled("ticket_queue"):
+                        try:
+                            ticket = db.create_ticket(
+                                reason=route_decision.reason,
+                                user_query=self.redact_for_storage(message),
+                                bot_reply="",
+                                session_id=session_id or None,
+                                conversation_id=conversation_id,
+                                priority="high" if "dispute" in route_decision.reason.lower()
+                                                or "legal" in route_decision.reason.lower()
+                                         else "normal",
+                            )
+                            ticket_id = ticket.get("id", "")
+                            trace_ctx["ticket_id"] = ticket_id
+                        except Exception:
+                            logger.exception("failed to persist escalation ticket")
+
+                    reply = (
+                        "This looks like a question best handled by a URA "
+                        "officer. I've flagged it for human review"
+                    )
+                    if ticket_id:
+                        reply += f" (ticket {ticket_id[:8]})"
+                    reply += (
+                        " — you can also contact URA directly at "
+                        "https://ura.go.ug or via the Contact Centre."
+                    )
                     return {
-                        "reply": (
-                            "This looks like a question best handled by a URA "
-                            "officer. I've flagged it for human review — you "
-                            "can also contact URA directly at https://ura.go.ug "
-                            "or via the Contact Centre."
-                        ),
+                        "reply": reply,
                         "sources": [],
                         "citations": [],
                         "faithfulness_score": None,
@@ -421,6 +447,7 @@ class ChatModel:
                         "locale": locale,
                         "escalation_required": True,
                         "escalation_reason": route_decision.reason,
+                        "ticket_id": ticket_id,
                     }
 
                 # TOOLS / SPECIALIST routes force the agentic LLM path

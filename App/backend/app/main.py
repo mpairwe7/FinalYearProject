@@ -606,3 +606,82 @@ def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
             labels={"name": m.name, "backend": report.backend},
         )
     return report.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Phase 14-D — ticket queue (admin-only)
+# ---------------------------------------------------------------------------
+@app.get("/v1/admin/tickets", tags=["admin"])
+def list_tickets_endpoint(
+    request: Request,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """List escalation tickets for URA staff triage.
+
+    Gated by the same ``Authorization: Bearer <INDEX_API_KEY>`` header
+    as ``/v1/index`` and ``/v1/evaluate``.  Filter by status via the
+    query string: ``?status=open``.
+    """
+    _verify_index_auth(request)
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be 1..500")
+    if offset < 0 or offset > 100_000:
+        raise HTTPException(status_code=400, detail="offset out of range")
+    if status and status not in ("open", "assigned", "resolved", "wontfix"):
+        raise HTTPException(status_code=400, detail="invalid status")
+
+    rows = db.list_tickets(status=status, limit=limit, offset=offset)
+    return {
+        "count": len(rows),
+        "status_filter": status or "all",
+        "limit": limit,
+        "offset": offset,
+        "tickets": rows,
+    }
+
+
+@app.get("/v1/admin/tickets/stats", tags=["admin"])
+def ticket_stats_endpoint(request: Request, days: int = 30) -> dict:
+    """Aggregate ticket statistics for the admin dashboard."""
+    _verify_index_auth(request)
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be 1..365")
+    return db.ticket_stats(days=days)
+
+
+@app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
+def get_ticket_endpoint(
+    request: Request,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
+) -> dict:
+    """Fetch a single ticket by id."""
+    _verify_index_auth(request)
+    ticket = db.get_ticket(ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    return ticket
+
+
+@app.patch("/v1/admin/tickets/{ticket_id}", tags=["admin"])
+def update_ticket_endpoint(
+    request: Request,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
+    status: str | None = None,
+    assignee: str | None = None,
+    staff_note: str | None = None,
+    priority: str | None = None,
+) -> dict:
+    """Update a ticket's status/assignee/note/priority."""
+    _verify_index_auth(request)
+    ok = db.update_ticket(
+        ticket_id,
+        status=status,
+        assignee=assignee,
+        staff_note=staff_note,
+        priority=priority,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="no-op or invalid update")
+    return {"status": "ok", "ticket_id": ticket_id}

@@ -215,6 +215,7 @@ from . import calculators as _calculators  # noqa: E402, F401
 from . import calendar as _calendar        # noqa: E402, F401
 from . import rates as _rates              # noqa: E402, F401
 from . import rag_tool as _rag_tool        # noqa: E402, F401
+from . import escalate as _escalate        # noqa: E402, F401
 
 
 __all__ = ["Tool", "ToolSchema", "ToolRegistry"]

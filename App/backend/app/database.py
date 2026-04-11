@@ -108,6 +108,29 @@ def init_db() -> None:
             created_at      REAL NOT NULL
         );
 
+        -- Phase 14-D — ticket queue for escalations.  Each ticket is
+        -- one human-required conversation the supervisor routed out
+        -- of the automated pipeline.  Staff work them via the admin
+        -- endpoints in main.py (/v1/admin/tickets).
+        CREATE TABLE IF NOT EXISTS tickets (
+            id             TEXT PRIMARY KEY,
+            conversation_id TEXT,
+            session_id     TEXT,
+            status         TEXT NOT NULL
+                           CHECK(status IN ('open','assigned','resolved','wontfix'))
+                           DEFAULT 'open',
+            priority       TEXT NOT NULL
+                           CHECK(priority IN ('low','normal','high','urgent'))
+                           DEFAULT 'normal',
+            reason         TEXT DEFAULT '',
+            user_query     TEXT DEFAULT '',
+            bot_reply      TEXT DEFAULT '',
+            assignee       TEXT DEFAULT '',
+            staff_note     TEXT DEFAULT '',
+            created_at     REAL NOT NULL,
+            updated_at     REAL NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id);
         CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
         CREATE INDEX IF NOT EXISTS idx_events_type ON analytics_events(event_type);
@@ -116,6 +139,9 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(last_active_at);
         CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
         CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at);
+        CREATE INDEX IF NOT EXISTS idx_tickets_status    ON tickets(status);
+        CREATE INDEX IF NOT EXISTS idx_tickets_priority  ON tickets(priority);
+        CREATE INDEX IF NOT EXISTS idx_tickets_created   ON tickets(created_at);
     """)
     conn.commit()
     logger.info("Analytics database initialised at %s", _DB_PATH)
@@ -445,6 +471,169 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
     ).fetchall()
 
     return [dict(r) for r in down_rows] + [dict(r) for r in low_conf_rows]
+
+
+# ---------------------------------------------------------------------------
+# Ticket queue (Phase 14-D)
+# ---------------------------------------------------------------------------
+def create_ticket(
+    reason: str,
+    user_query: str = "",
+    bot_reply: str = "",
+    session_id: str | None = None,
+    conversation_id: str | None = None,
+    priority: str = "normal",
+) -> dict[str, Any]:
+    """Create a new escalation ticket and return it.
+
+    Called from the ``escalate_to_human`` tool and from the
+    supervisor's ESCALATE route.  Priority must be one of
+    'low', 'normal', 'high', 'urgent' — invalid values are coerced
+    to 'normal' with a warning.
+    """
+    if priority not in ("low", "normal", "high", "urgent"):
+        logger.warning("create_ticket: invalid priority %r → 'normal'", priority)
+        priority = "normal"
+    conn = _get_connection()
+    ticket_id = str(uuid.uuid4())
+    now = time.time()
+    try:
+        conn.execute(
+            """INSERT INTO tickets (id, conversation_id, session_id, status, priority,
+                                    reason, user_query, bot_reply,
+                                    assignee, staff_note, created_at, updated_at)
+               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, '', '', ?, ?)""",
+            (ticket_id, conversation_id, session_id, priority,
+             reason, user_query, bot_reply, now, now),
+        )
+        conn.commit()
+        logger.info("ticket %s created (priority=%s reason=%s)",
+                    ticket_id, priority, reason[:60])
+    except Exception:
+        logger.exception("Failed to create ticket")
+        conn.rollback()
+        raise
+    return {
+        "id": ticket_id,
+        "status": "open",
+        "priority": priority,
+        "reason": reason,
+        "created_at": now,
+    }
+
+
+def list_tickets(
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """List tickets, optionally filtered by status.
+
+    Ordered newest-first.  Used by the admin endpoint so staff can
+    pull the current open queue.
+    """
+    conn = _get_connection()
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+    sql = (
+        "SELECT id, conversation_id, session_id, status, priority, reason, "
+        "       user_query, bot_reply, assignee, staff_note, created_at, updated_at "
+        "FROM tickets"
+    )
+    params: list[Any] = []
+    if status:
+        sql += " WHERE status = ?"
+        params.append(status)
+    sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_ticket(ticket_id: str) -> dict[str, Any] | None:
+    conn = _get_connection()
+    row = conn.execute(
+        "SELECT * FROM tickets WHERE id = ?",
+        (ticket_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_ticket(
+    ticket_id: str,
+    status: str | None = None,
+    assignee: str | None = None,
+    staff_note: str | None = None,
+    priority: str | None = None,
+) -> bool:
+    """Update mutable ticket fields.  Returns True if a row was touched."""
+    conn = _get_connection()
+    sets: list[str] = []
+    params: list[Any] = []
+    if status is not None:
+        if status not in ("open", "assigned", "resolved", "wontfix"):
+            return False
+        sets.append("status = ?")
+        params.append(status)
+    if assignee is not None:
+        sets.append("assignee = ?")
+        params.append(assignee[:128])
+    if staff_note is not None:
+        sets.append("staff_note = ?")
+        params.append(staff_note[:2000])
+    if priority is not None:
+        if priority not in ("low", "normal", "high", "urgent"):
+            return False
+        sets.append("priority = ?")
+        params.append(priority)
+    if not sets:
+        return False
+    sets.append("updated_at = ?")
+    params.append(time.time())
+    params.append(ticket_id)
+    try:
+        cursor = conn.execute(
+            f"UPDATE tickets SET {', '.join(sets)} WHERE id = ?",  # noqa: S608
+            params,
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception:
+        logger.exception("update_ticket failed")
+        conn.rollback()
+        return False
+
+
+def ticket_stats(days: int = 30) -> dict[str, Any]:
+    """Aggregate ticket statistics for the admin dashboard."""
+    conn = _get_connection()
+    cutoff = time.time() - (days * 86400)
+    row = conn.execute(
+        """SELECT
+             COUNT(*) as total,
+             COALESCE(SUM(CASE WHEN status='open'     THEN 1 ELSE 0 END), 0) as open_count,
+             COALESCE(SUM(CASE WHEN status='assigned' THEN 1 ELSE 0 END), 0) as assigned_count,
+             COALESCE(SUM(CASE WHEN status='resolved' THEN 1 ELSE 0 END), 0) as resolved_count,
+             COALESCE(SUM(CASE WHEN status='wontfix'  THEN 1 ELSE 0 END), 0) as wontfix_count
+           FROM tickets
+           WHERE created_at >= ?""",
+        (cutoff,),
+    ).fetchone()
+    by_priority = conn.execute(
+        """SELECT priority, COUNT(*) as cnt FROM tickets
+           WHERE created_at >= ?
+           GROUP BY priority ORDER BY cnt DESC""",
+        (cutoff,),
+    ).fetchall()
+    return {
+        "period_days": days,
+        "total": row["total"] or 0,
+        "open": row["open_count"] or 0,
+        "assigned": row["assigned_count"] or 0,
+        "resolved": row["resolved_count"] or 0,
+        "wontfix": row["wontfix_count"] or 0,
+        "by_priority": {r["priority"]: r["cnt"] for r in by_priority},
+    }
 
 
 # ---------------------------------------------------------------------------
