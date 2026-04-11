@@ -147,7 +147,10 @@ class ToolRAGSelector:
                 s = self._score_dense(query, tool)
             else:
                 s = self._score_token_overlap(query_tokens, tool)
-            if s >= min_score:
+            # Only record tools that actually matched — otherwise
+            # a zero-score tool would prevent the fallback branch
+            # from firing when the query has no relevant tools.
+            if s > 0 and s >= min_score:
                 scores[name] = round(s, 4)
 
         # Top-k by score, descending
