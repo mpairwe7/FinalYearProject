@@ -344,7 +344,7 @@ class ChatModel:
             with trace_stage("input_guard", timings=timings):
                 guard = self._input_guard.check(message)
             if not guard.allowed:
-                return {
+                blocked = {
                     "reply": guard.reason,
                     "sources": [],
                     "citations": [],
@@ -356,6 +356,9 @@ class ChatModel:
                     "escalation_required": False,
                     "escalation_reason": "",
                 }
+                self._audit_turn(message=message, result=blocked,
+                                 session_id=session_id, trace_ctx=trace_ctx)
+                return blocked
 
             # 1b. Semantic cache check AFTER guardrails (Phase 5)
             with trace_stage("cache_lookup", timings=timings):
@@ -388,7 +391,7 @@ class ChatModel:
 
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
                 if route_decision.route == AgentRoute.CLARIFY:
-                    return {
+                    clarified = {
                         "reply": route_decision.clarification_question or (
                             "Could you provide a bit more detail about your "
                             "question? I can help with VAT, PAYE, customs, "
@@ -404,6 +407,9 @@ class ChatModel:
                         "escalation_required": False,
                         "escalation_reason": "",
                     }
+                    self._audit_turn(message=message, result=clarified,
+                                     session_id=session_id, trace_ctx=trace_ctx)
+                    return clarified
                 if route_decision.route == AgentRoute.ESCALATE:
                     ticket_id = ""
                     # Phase 14-D: create a real ticket when the queue
@@ -436,7 +442,7 @@ class ChatModel:
                         " — you can also contact URA directly at "
                         "https://ura.go.ug or via the Contact Centre."
                     )
-                    return {
+                    escalated = {
                         "reply": reply,
                         "sources": [],
                         "citations": [],
@@ -449,6 +455,9 @@ class ChatModel:
                         "escalation_reason": route_decision.reason,
                         "ticket_id": ticket_id,
                     }
+                    self._audit_turn(message=message, result=escalated,
+                                     session_id=session_id, trace_ctx=trace_ctx)
+                    return escalated
 
                 # TOOLS / SPECIALIST routes force the agentic LLM path
                 # downstream, with the supervisor's suggested tool whitelist.
@@ -512,7 +521,7 @@ class ChatModel:
             # 3c. Clarification check — ask for more details if query is ambiguous
             clarification = needs_clarification(message, hits)
             if clarification:
-                return {
+                clarify_result = {
                     "reply": clarification,
                     "sources": [],
                     "citations": [],
@@ -524,6 +533,9 @@ class ChatModel:
                     "escalation_required": False,
                     "escalation_reason": "",
                 }
+                self._audit_turn(message=message, result=clarify_result,
+                                 session_id=session_id, trace_ctx=trace_ctx)
+                return clarify_result
 
             # 4. Calibrated abstention — refuse to answer when confidence too low
             with trace_stage("abstention_check", timings=timings):
@@ -535,7 +547,7 @@ class ChatModel:
                     "the URA Contact Centre for assistance."
                 )
                 escalate, esc_reason = self._output_guard.should_escalate(None, hits)
-                return {
+                abstained = {
                     "reply": reply,
                     "sources": [],
                     "citations": [],
@@ -547,6 +559,9 @@ class ChatModel:
                     "escalation_required": escalate,
                     "escalation_reason": esc_reason,
                 }
+                self._audit_turn(message=message, result=abstained,
+                                 session_id=session_id, trace_ctx=trace_ctx)
+                return abstained
 
             # 5. Build response with citations
             if hits:
@@ -726,7 +741,76 @@ class ChatModel:
         if retrieval_mode not in ("blocked", "abstained"):
             self._cache.put(rewritten, result)
 
+        # Phase 21 — audit ledger append (happy path).
+        self._audit_turn(
+            message=message,
+            result=result,
+            session_id=session_id,
+            trace_ctx=trace_ctx,
+        )
+
         return result
+
+    # -- Audit helper (Phase 21) -------------------------------------
+    def _audit_turn(
+        self,
+        *,
+        message: str,
+        result: dict[str, Any],
+        session_id: str | None,
+        trace_ctx: dict[str, Any] | None = None,
+    ) -> None:
+        """Append an immutable audit event for this turn.
+
+        Called from every return site in :py:meth:`generate` so
+        blocked / clarification / escalated / abstained / happy-path
+        outcomes all end up in the ledger.  Payload excludes raw
+        query/reply content (we store SHA-256 hashes) so the
+        audit chain is useful for regulatory replay without becoming
+        a second PII store.  Gated on ``FLAG_AUDIT_LEDGER``.
+
+        Failures are swallowed — a broken audit DB must never
+        block a user response.
+        """
+        if not flags.is_enabled("audit_ledger"):
+            return
+        try:
+            import hashlib as _hashlib
+            from .audit import get_ledger
+
+            trace_ctx = trace_ctx or {}
+            reply = result.get("reply", "") or ""
+            payload = {
+                "query_sha256": _hashlib.sha256(
+                    (message or "").encode("utf-8")
+                ).hexdigest(),
+                "reply_sha256": _hashlib.sha256(
+                    reply.encode("utf-8")
+                ).hexdigest(),
+                "retrieval_mode": result.get("retrieval_mode", ""),
+                "num_sources": len(result.get("sources", [])),
+                "num_citations": len(result.get("citations", [])),
+                "faithfulness_score": result.get("faithfulness_score"),
+                "escalation_required": bool(result.get("escalation_required")),
+                "escalation_reason": result.get("escalation_reason", ""),
+                "model": result.get("model", self.name),
+                "locale": result.get("locale", "en"),
+                "conversation_id": result.get("conversation_id") or "",
+                "input_tokens": llm_module.count_tokens(message),
+                "output_tokens": llm_module.count_tokens(reply),
+                "tool_calls": trace_ctx.get("tool_calls", []),
+                "tool_iterations": trace_ctx.get("tool_iterations", 0),
+                "agent_route": trace_ctx.get("agent_route", ""),
+                "ticket_id": result.get("ticket_id", ""),
+            }
+            get_ledger().append(
+                event_type="generate",
+                payload=payload,
+                tenant_id="default",
+                user_id=(session_id or "")[:128],
+            )
+        except Exception:
+            logger.debug("audit ledger append failed", exc_info=True)
 
     def generate_retrieval_only(
         self,
