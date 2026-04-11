@@ -64,7 +64,10 @@ _CALC_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
     ),
     (
         re.compile(
-            r"\bcapital\s+gains?\b.*\b(calculate|how\s+much|sold|gain|profit)\b",
+            # Order-agnostic lookahead: needs "capital gains" AND a
+            # calc/transaction trigger word anywhere in the query.
+            r"(?=.*\bcapital\s+gains?\b)"
+            r"(?=.*\b(calculate|how\s+much|sold|sell(?:ing)?|gain|profit|cgt)\b)",
             re.IGNORECASE,
         ),
         "Capital gains calculation intent",
@@ -72,7 +75,11 @@ _CALC_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
     ),
     (
         re.compile(
-            r"\b(import|landed\s+cost|customs\s+duty|cif)\b.*\b(how\s+much|cost|calculate)\b",
+            # Order-agnostic: needs a customs noun AND a calc trigger
+            # anywhere in the query (covers both "how much customs
+            # duty" and "customs duty for X how much").
+            r"(?=.*\b(import(?:ing)?|landed\s+cost|customs\s+duty|customs|cif)\b)"
+            r"(?=.*\b(how\s+much|cost|calculate|estimate)\b)",
             re.IGNORECASE,
         ),
         "Customs duty calculation intent",
