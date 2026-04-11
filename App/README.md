@@ -191,6 +191,10 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_SEMANTIC_CACHE` | Semantic query cache | `true` |
 | `FLAG_QUERY_REWRITE` | Spell / abbrev / coreference | `true` |
 | `FLAG_RERANKER` | Cross-encoder reranking | `true` |
+| **Agentic flags (Phase 14 A-D)** | | |
+| `FLAG_TOOL_USE` | Qwen2.5 native tool-calling loop | `false` |
+| `FLAG_AGENTIC_MODE` | Supervisor classifier routes every request | `false` |
+| `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
 | **Host / HuggingFace** | | |
 | `HF_HOME` | Writable HF cache location | `~/.cache/huggingface` |
 | `INTERNAL_API_URL` | Next.js rewrite target (server-side) | `http://127.0.0.1:18000` |
@@ -547,22 +551,83 @@ the full hardened `ChatModel` pipeline automatically.  On HF Spaces
 where only the minimal classifier is shipped, the legacy keyword
 fallback runs unchanged.
 
+## Phase 14 A-D — Agentic workflows (feat/agentic-workflows)
+
+The `feat/agentic-workflows` branch adds a **supervisor-specialist
+agent runtime** on top of the Phase 1-13 RAG pipeline.  Every new
+capability is gated behind a feature flag that defaults OFF —
+merging the branch is a no-op on the existing request path until
+an operator flips a flag.
+
+**Phase A — Tool framework + 11 starter tools** (`App/backend/app/tools/`)
+- `Tool` ABC + `ToolRegistry` with risk-tier filtering
+- Tools: `calculate_vat`, `calculate_paye`, `calculate_corporation_tax`,
+  `calculate_capital_gains`, `calculate_customs_duty` (all deterministic
+  FY2025-26 rate tables), `get_current_date`, `get_next_deadlines`,
+  `lookup_rate`, `list_available_rates`, `search_ura_knowledge_base`
+  (wraps the existing hybrid retriever), `escalate_to_human`
+- Auto-registration via `__init__.py` import hook
+
+**Phase B — Qwen2.5 tool-calling loop** (`App/backend/app/llm.py`)
+- `generate_with_tools()` — bounded (`max_iterations=3`) tool-call
+  loop using Qwen's native `apply_chat_template(tools=...)` format
+- `_parse_tool_calls()` handles parallel calls, string-encoded
+  arguments, and malformed blocks (silent skip)
+- `_call_llm_agentic()` in `service.py` routes the loop through the
+  shared `_LLM_CIRCUIT` breaker with 2× the sync deadline
+
+**Phase C — Supervisor router + state machine** (`App/backend/app/agents/`)
+- `Supervisor.classify()` — rule-based router, <1 ms per call
+- 7 routes: `RAG` (default), `TOOLS`, `TAX_SPECIALIST`,
+  `CUSTOMS_SPECIALIST`, `CLARIFY` (early-return prompt),
+  `ESCALATE` (human handoff), `BLOCKED`
+- `AgentRoute` enum (stable string values, logged to analytics)
+- `AgentState` TypedDict threaded through the pipeline
+
+**Phase D — Ticket queue + admin endpoints** (`App/backend/app/database.py`,
+`main.py`, `tools/escalate.py`)
+- New `tickets` table with status/priority/assignee/staff_note
+- `escalate_to_human` tool creates tickets from within the LLM loop
+- Supervisor `ESCALATE` route creates tickets when `FLAG_TICKET_QUEUE=true`
+- Admin REST endpoints:
+  - `GET /v1/admin/tickets?status=open&limit=50`
+  - `GET /v1/admin/tickets/stats?days=30`
+  - `GET /v1/admin/tickets/{id}`
+  - `PATCH /v1/admin/tickets/{id}` (status / assignee / note / priority)
+- `ticket_id` surfaced in `ChatResponse` so the frontend can show
+  "ticket 1234abcd" to the user
+
+**Tests** — 153 pytest tests in `tests/agents/`, fully offline
+(in-memory SQLite, no GPU/Qwen/Qdrant), **passing in 2.57 s**:
+
+```bash
+.venv/bin/python -m pytest tests/agents/ -q
+```
+
+For the full architecture — tool inventory with risk tiers,
+supervisor routing table, feature flag matrix, operational
+runbook, safety model, and the 3-step recipe for adding a new
+tool — see:
+
+- [`docs/AGENT_ARCHITECTURE.md`](../docs/AGENT_ARCHITECTURE.md)
+
 ## Roadmap: from FAQ chatbot to personalized tax assistant
 
-Phases 1–13 documented above ship a hardened, generic RAG chatbot
-that answers factual questions about URA policy. To move beyond
-that toward a **personalized, agentic** experience — tailored to
-individual taxpayers, with multi-step workflows, tool use, long-term
-memory, and human-in-the-loop escalation — see the companion
-roadmap:
+Phases 1–13 above + Phase 14 A-D ship a hardened RAG chatbot with
+an agentic runtime already in place.  For the broader journey to a
+**personalized, multi-user** tax assistant with identity,
+long-term memory, document uploads, workflow engines, and
+proactive notifications, see the companion roadmap:
 
 - [`docs/GAPS_AND_AGENTIC_ROADMAP.md`](../docs/GAPS_AND_AGENTIC_ROADMAP.md)
 
 That document inventories **34 concrete gaps** across identity,
 memory, actions, knowledge, agentic reasoning, evaluation, and
 operations; proposes a **supervisor-specialist agent architecture**
-with **12 MCP tool servers**; and sketches **Phases 14–20** of the
-project with scoped deliverables and code-surface pointers for each.
+with **12 MCP tool servers** (Phase 14 A-D ships the first 3 of
+those with 11 concrete tools + the supervisor); and sketches
+**Phases 14–20** of the project.  Phase 14 A-D covers the
+"Tool-calling foundation + supervisor" slice.
 
 ## Links
 

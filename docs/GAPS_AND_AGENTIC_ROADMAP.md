@@ -1,12 +1,20 @@
 # URA Chatbot — Production Gap Analysis & Agentic AI Roadmap
 
-> Companion to `App/README.md` (which documents Phases 1–13 already
-> shipped). This document covers **what is NOT yet in the codebase**
-> and what it would take to move from "grounded FAQ chatbot" to
-> "personalized tax assistant with agentic workflows".
+> Companion to `App/README.md` (which documents Phases 1–13) and
+> `docs/AGENT_ARCHITECTURE.md` (which documents the Phase 14 A-D
+> agent runtime that now ships on `feat/agentic-workflows`).
+>
+> This document tracks the **remaining gaps** — things that are
+> not yet in the codebase and what it would take to close them.
 >
 > Audience: engineers planning the next release cycle + URA
-> stakeholders evaluating what a production deployment looks like.
+> stakeholders evaluating what a full production deployment looks
+> like.
+>
+> **Status legend:**
+> - ⚪ — identified, not yet started
+> - 🟡 — partially delivered (see notes on each row)
+> - 🟢 — **shipped** (on `feat/agentic-workflows`)
 
 ---
 
@@ -56,15 +64,15 @@ surface that would need to change. Effort estimates are rough:
 |---|---|---|---|---|---|---|
 | G5 | **No long-term memory** across sessions. Multi-turn memory exists (`db.get_recent_turns`) but only within the 7-day retention window. | User who asks about VAT registration on Monday and returns Friday is treated as a stranger. | `conversations` table with 7-day TTL; no summarization, no facts extraction. | Add a **memory agent** that reads ended conversations and extracts facts into a `user_facts` table (k/v with provenance). Inject relevant facts into the system prompt at next turn. | New `backend/app/memory.py` (batch worker), `user_facts` table, `service.py` prompt builder | L |
 | G6 | **No topic persistence.** If a user is working on "importing a car", every reply is standalone — no awareness that they're in the middle of a workflow. | Fragmented UX for multi-step tasks. | Conversation history is fetched, but there's no "current workflow" concept. | Add `conversation_topics` table + a lightweight topic classifier; surface `current_topic` to the LLM. | `service.py`, new `topics.py` module | M |
-| G7 | **No temporal grounding.** The model doesn't know today's date, the current fiscal year, or that FY2024-25 rates are superseded by FY2025-26. | Users get stale rates/deadlines silently. | `SYSTEM_PROMPT` is static. | Inject `{"today": "2026-04-12", "fiscal_year": "FY2025-26"}` into the user turn on every call. Add a `temporal_context.py` helper. | `llm.py::_build_messages`, new `temporal.py` | S |
+| G7 🟢 | **No temporal grounding.** ~~The model doesn't know today's date, the current fiscal year…~~ **SHIPPED Phase 14-A** — `get_current_date` and `get_next_deadlines` tools return today's date, day-of-week, fiscal year (`FY2025-26`), days-into-FY, days-remaining, and the next N deadlines.  The LLM calls them explicitly whenever a query mentions "today"/"now"/"this year"/"deadline", per the supervisor's temporal patterns and the `TOOL_USE_PROMPT_SUFFIX` rules. | — | Done. | `backend/app/tools/calendar.py` | Done (S actual) |
 | G8 | **Conversation store is not an audit log.** TTL deletes data; no append-only, tamper-evident trail for regulatory disputes. | Can't answer "what did your bot tell this user on date X?" in a legal context. | SQLite / Postgres with `DELETE` on TTL. | Add an immutable `audit_events` table with hash-chained entries (each row hashes the previous); separate TTL from audit retention. | `database.py`, `postgres.py`, new `audit.py` | M |
 
 ### 2.3 Capabilities & actions
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G9 | **No tool use.** The LLM can only generate text from retrieved passages. It can't look up an exchange rate, compute a tax owed, check a filing status, or submit a form. | Users have to copy data into Excel and back. | Qwen2.5 supports function-calling but we don't expose any tools. | Introduce an **MCP server registry** (Model Context Protocol) and a tool-calling loop in the LLM layer. See §3. | New `backend/app/tools/`, `backend/app/mcp/`, refactor `llm.py` | XL |
-| G10 | **No calculators.** PAYE, VAT, CGT, customs, income tax, effective rate. | Users who need "what would I actually owe?" answers are poorly served. | Not implemented. | Ship a `mcp_tax_calculator` server with one tool per tax type. Deterministic, unit-testable, fast. | New `backend/app/tools/calculators.py` as an MCP server | M |
+| G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen2.5's native function-calling format; `ToolRegistry` dispatches via `.call()`; 11 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
+| G10 🟢 | **No calculators.** ~~PAYE, VAT, CGT, customs, income tax, effective rate.~~ **SHIPPED Phase 14-A** — 5 deterministic calculators (`calculate_vat`, `calculate_paye` with progressive bands, `calculate_corporation_tax`, `calculate_capital_gains`, `calculate_customs_duty`) all backed by FY2025-26 rate tables, unit-tested (29 pytest assertions covering arithmetic + edge cases + error paths). | — | Done. | `backend/app/tools/calculators.py` | Done (S actual) |
 | G11 | **No structured form flows.** Can't walk a user through "register for a TIN in 5 steps". | Support-centre call volume stays high. | Freeform chat only. | Add a **workflow engine** (simple finite-state-machine per flow) with slot filling. Each flow is a YAML file declaring steps, questions, validators, submission target. | New `backend/app/workflows/`, `models.py`, `page.tsx` | L |
 | G12 | **No URA account actions.** Can't fetch filing status, balance, registered tax types, next due dates — even for the authenticated user. | Bot only talks *about* URA; doesn't help users actually interact with it. | No integration. | New `mcp_ura_account` server talking to URA's internal API (behind auth); exposes `get_tin_status`, `get_filing_status`, `list_returns_due`, etc. Scoped to the authenticated user. | New `backend/app/tools/ura_account.py`, `auth.py`, secrets mgmt | XL |
 | G13 | **No document ingestion.** User can't upload a receipt, invoice, or tax cert to ask "is this correct?" | High-value use case for businesses is blocked. | Index-time PDF parsing exists (`indexer.ingest_pdfs`) but not query-time. | Add `POST /v1/upload` (size-limited, virus-scanned, PII-redacted), an OCR + table-extract pipeline, and a `mcp_document_parser` tool. Vision support via Qwen2.5-VL. | New `backend/app/uploads.py`, new `DocumentUpload.tsx`, `llm.py` multimodal branch | L |
@@ -84,9 +92,9 @@ surface that would need to change. Effort estimates are rough:
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G20 | **No planning loop.** The pipeline is strictly one-shot: retrieve → generate. No "break this question into subtasks" reasoning. | Complex questions that span 3-4 sources don't get fully answered. | Linear 6-phase RAG pipeline. | Introduce a **planner-executor** agent that produces a JSON plan, then executes each step through the existing retriever + LLM. Feature-flagged via `FLAG_AGENTIC_MODE`. | New `backend/app/agent.py`, `llm.py` tool-use, `flags.py` | L |
+| G20 🟡 | **No planning loop.** ~~The pipeline is strictly one-shot~~ **PARTIAL Phase 14-C** — the supervisor now classifies every request into 7 routes and a tool-call loop iterates up to 3 times per request.  That's not yet a full planner-executor (no JSON plan, no tree of thought), but it does break complex queries into tool-call subtasks. Flagged by `FLAG_AGENTIC_MODE`. | Full planner-executor remains future work. | Partial — upgrade to an LLM-based supervisor classifier in Phase 15 to fix the known regex soft-misses. | `backend/app/agents/supervisor.py` | Done (partial) |
 | G21 | **No ReAct / self-correction.** Self-reflection exists (`SELF_REFLECT_ENABLED`) but only fires on low faithfulness, not on reasoning mistakes. | The bot happily confabulates when retrieval is insufficient instead of refining. | Single self-reflect pass. | Add a ReAct loop: `Thought → Action → Observation → Thought → …`, bounded by a max step count, with explicit "abort and ask user" action. | `service.py`, new `react.py` | L |
-| G22 | **No per-specialty sub-agents.** A tax question should route to a tax-specialist prompt, a customs question to a customs prompt, etc. | One-size-fits-all prompting leaves quality on the table. | Single `SYSTEM_PROMPT` in `llm.py`. | Add a supervisor-specialist pattern (see §3). | New `agents/` tree | L |
+| G22 🟡 | **No per-specialty sub-agents.** ~~A tax question should route to a tax-specialist prompt…~~ **PARTIAL Phase 14-C** — the supervisor now routes customs vocabulary to `CUSTOMS_SPECIALIST` with a narrowed tool whitelist (`calculate_customs_duty`, `search_ura_knowledge_base`, `get_current_date`).  `TAX_SPECIALIST` is reserved but uses the base prompt today. | Per-specialist system prompts not yet written. | Partial — next step: add `agents/prompts/` with per-route system prompts. | `backend/app/agents/supervisor.py` | Done (partial) |
 | G23 | **No delegation between agents.** When the planner calls a specialist, the specialist can't call back to the planner for more context. | Limits the depth of reasoning chains. | N/A. | Use LangGraph-style message passing with explicit state (`AgentState` typed dict). | `agent.py` | M |
 | G24 | **No per-user prompt tuning.** The system prompt is one constant, regardless of who asks. | Beginners vs accountants get the same jargon level. | Static prompt. | Parameterize `SYSTEM_PROMPT` on user profile fields (`detail_level: beginner | intermediate | expert`). | `llm.py::_build_messages`, `service.py` | S |
 
@@ -106,7 +114,7 @@ surface that would need to change. Effort estimates are rough:
 |---|---|---|---|---|---|---|
 | G30 | **Single tenant.** One knowledge base, one prompt, one model for everyone. | Can't offer this to KCCA, NSSF, or private firms under the same codebase. | Implicit single-tenancy. | Add `tenant_id` everywhere (users, conversations, Qdrant collections, rate limits). | Backend-wide, DB schema changes | L |
 | G31 | **No admin UI.** Ops staff can't curate content, approve uploads, override bot answers, manage flags without SSH'ing to the server. | Non-technical staff can't operate the system. | CLI + curl only. | Small admin Next.js route with RBAC gating `/admin/*`. | New routes, `auth.py`, UI | L |
-| G32 | **No human-in-the-loop queue.** Escalation is detected (`escalation_required`) but there's no mechanism to route it to a live URA agent. | Escalation is a dead letter. | `escalation_required: true` in the response; frontend shows a banner. | Add a `tickets` table; escalated conversations push to a queue; staff dashboard lets agents reply, reply lands back in the user's conversation. | New `tickets.py`, staff UI, email/SMS notify | L |
+| G32 🟡 | **No human-in-the-loop queue.** ~~Escalation is detected… but there's no mechanism to route it to a live URA agent.~~ **PARTIAL Phase 14-D** — `tickets` table, `create/list/get/update/stats` CRUD, `escalate_to_human` tool, 4 admin REST endpoints (`GET/PATCH /v1/admin/tickets[/{id}][/stats]`).  Supervisor `ESCALATE` route persists tickets when `FLAG_TICKET_QUEUE=true`.  `ticket_id` surfaces in `ChatResponse`. | No staff UI yet — admin endpoints are REST-only, no Next.js `/admin/tickets` page. | Partial — next step: build the staff dashboard. | `App/backend/app/database.py`, `tools/escalate.py`, `main.py` | Done (backend) |
 | G33 | **No SLO-driven autoscaling.** Prometheus alerts exist, but no action is taken — no HPA, no Kubernetes operator. | Manual intervention during load spikes. | Alert rules only. | Kubernetes HPA on `chat_response_time_ms` p95, plus a KEDA scaler on Redis queue depth. | Infra, new `k8s/` manifests | M |
 | G34 | **No chaos / failure drills.** We've hardened against failure modes but never exercised them end-to-end. | Unknown unknowns in prod. | Unit tests only. | Add Litmus/ChaosMesh experiments: kill Redis, spike Qdrant latency, kill LLM worker, measure recovery. | `tests/chaos/`, CI schedule | M |
 
@@ -292,23 +300,38 @@ are explicit — don't start G at phase 20 if phase 15 isn't done.
 **Effort:** ~2 weeks.
 **Risks:** Auth integration delays; privacy review latency.
 
-### Phase 15 — Tool-calling foundation (G9, G10)
+### Phase 15 — Tool-calling foundation (G9, G10) 🟢 **LANDED (as Phase 14-A/B/C/D)**
 
 **Goal:** Let the LLM call deterministic tools for things it
 shouldn't be asked to generate (numbers, dates, lookups).
-**Deliverables:**
-- MCP client in `backend/app/mcp/`
-- Tool registry with schema validation
-- `mcp_rag`, `mcp_tax_calculator`, `mcp_rates`, `mcp_calendar`
-- Tool-call loop in `llm.generate()` (feature-flagged via
-  `FLAG_TOOL_USE`)
-- OTel spans around tool calls
-- Unit tests per tool
+**Delivered on `feat/agentic-workflows`:**
+- ✅ In-process tool registry with schema validation (`backend/app/tools/`).
+  MCP wire-format support deferred to Phase 15+.
+- ✅ Tool-call loop in `llm.generate_with_tools()` (feature-flagged
+  via `FLAG_TOOL_USE`), routed through the shared circuit breaker
+  via `service._call_llm_agentic()`.
+- ✅ 11 tools: `calculate_vat`, `calculate_paye`,
+  `calculate_corporation_tax`, `calculate_capital_gains`,
+  `calculate_customs_duty`, `get_current_date`, `get_next_deadlines`,
+  `lookup_rate`, `list_available_rates`, `search_ura_knowledge_base`,
+  `escalate_to_human`.
+- ✅ Supervisor router (Phase 14-C) classifies queries and scopes
+  tool whitelists per-specialist.
+- ✅ Ticket queue (Phase 14-D) closes the escalation dead-letter.
+- ✅ 153 pytest tests in `tests/agents/`, fully offline, 2.6 s total.
+- ✅ Feature flags default OFF — shipping is a no-op on the existing
+  request path.
 
-**Unlocks:** Phases 16–20.
-**Effort:** ~3 weeks.
-**Risks:** Qwen2.5-3B's tool-calling is reliable but not perfect;
-expect to fall back to text responses sometimes.
+See `docs/AGENT_ARCHITECTURE.md` for the full Phase 14 A-D design.
+
+**Still remaining for Phase 15:**
+- MCP wire format (tools currently in-process, not as separate
+  MCP servers).  Needed once we add `mcp_ura_account` +
+  `mcp_ura_actions` which must run in URA's DMZ.
+- LLM-based supervisor classifier (the rule-based one has known
+  soft misses — see `AGENT_ARCHITECTURE.md` §4).
+- Per-specialist system prompts (currently all specialists use the
+  base `SYSTEM_PROMPT`).
 
 ### Phase 16 — Workflow engine + document ingestion (G11, G13)
 
