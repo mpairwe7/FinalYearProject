@@ -30,6 +30,7 @@ wheels/
 env/
 venv/
 ENV/
+test_env/
 
 # IDE
 .vscode/
@@ -53,6 +54,12 @@ Model/*.pt
 Model/*.onnx
 Model/*.tflite
 Model/faiss_index/
+
+# On-device LLM weights (too large for Git, distribute via release/HF Hub)
+*.gguf
+MobileApp/**/models/
+MobileApp/ura_chatbot/android/app/src/main/assets/models/
+MobileApp/ura_chatbot/ios/Runner/models/
 
 # Results (regenerated)
 Results/metrics/*.json
