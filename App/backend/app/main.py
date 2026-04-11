@@ -685,3 +685,141 @@ def update_ticket_endpoint(
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")
     return {"status": "ok", "ticket_id": ticket_id}
+
+
+# ---------------------------------------------------------------------------
+# Phase 14 (2026) — /v1/me/* identity, profile, consent, subject rights
+# ---------------------------------------------------------------------------
+from .auth import AuthContext, current_user, require_user  # noqa: E402
+from .auth.models import (  # noqa: E402
+    ConsentGrantRequest,
+    ConsentWithdrawRequest,
+    ProfileUpdateRequest,
+)
+
+
+@app.get("/v1/me", tags=["me"])
+def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
+    """Return the current auth context (or anonymous)."""
+    if not ctx.is_authenticated:
+        return {"authenticated": False, "role": "public", "tenant_id": "default"}
+    # Refresh last_seen + upsert on every whoami call
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    return {
+        "authenticated": True,
+        "user_id": row["id"],
+        "external_id": row["external_id"],
+        "tenant_id": row["tenant_id"],
+        "email": row["email"],
+        "role": row["role"],
+        "granted_purposes": ctx.user.granted_purposes,
+    }
+
+
+@app.get("/v1/me/profile", tags=["me"])
+def me_get_profile(ctx: AuthContext = Depends(require_user)) -> dict:
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    profile = db.get_user_profile(row["id"])
+    if profile is None:
+        profile = db.upsert_user_profile(row["id"], {})
+    return {"user_id": row["id"], **profile}
+
+
+@app.put("/v1/me/profile", tags=["me"])
+def me_update_profile(
+    body: ProfileUpdateRequest,
+    ctx: AuthContext = Depends(require_user),
+) -> dict:
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    profile = db.upsert_user_profile(row["id"], updates)
+    return {"user_id": row["id"], **profile}
+
+
+@app.get("/v1/me/consents", tags=["me"])
+def me_list_consents(ctx: AuthContext = Depends(require_user)) -> dict:
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    return {"user_id": row["id"], "consents": db.get_active_consents(row["id"])}
+
+
+@app.post("/v1/me/consents/grant", tags=["me"])
+def me_grant_consent(
+    body: ConsentGrantRequest,
+    ctx: AuthContext = Depends(require_user),
+) -> dict:
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    granted = [
+        db.grant_consent(row["id"], p, body.version)
+        for p in body.purposes
+    ]
+    return {"user_id": row["id"], "granted": granted}
+
+
+@app.post("/v1/me/consents/withdraw", tags=["me"])
+def me_withdraw_consent(
+    body: ConsentWithdrawRequest,
+    ctx: AuthContext = Depends(require_user),
+) -> dict:
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    withdrawn = {p: db.withdraw_consent(row["id"], p) for p in body.purposes}
+    return {"user_id": row["id"], "withdrawn": withdrawn}
+
+
+@app.get("/v1/me/export", tags=["me"])
+def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
+    """UDPA 2019 data-portability export."""
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    return db.export_user_data(row["id"])
+
+
+@app.delete("/v1/me", tags=["me"])
+def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
+    """UDPA 2019 right-to-erasure endpoint.
+
+    Deletes every PII-bearing row for the user EXCEPT the audit
+    ledger (which is immutably hash-chained).  The erasure itself
+    is logged to the ledger as a tombstone event.
+    """
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    counts = db.delete_user_cascade(row["id"])
+    return {"deleted": counts, "external_id": ctx.user.user_id}
