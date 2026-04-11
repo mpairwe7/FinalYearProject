@@ -33,6 +33,7 @@ from typing import Any
 
 import concurrent.futures
 
+from .agents import AgentRoute, supervisor
 from .cache import SemanticCache, create_cache
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
@@ -157,11 +158,12 @@ def stream_llm_tokens(
         return []
 
 
-def _call_llm_agentic(
+def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     query: str,
     passages: list[dict[str, Any]],
     conversation_history: list[dict[str, str]] | None,
     locale: str,
+    *,
     tool_names: list[str] | None = None,
     max_iterations: int = 3,
     deadline_s: float = LLM_DEADLINE_SECONDS * 2,
@@ -362,6 +364,77 @@ class ChatModel:
                 logger.info("generate: cache HIT for query=%s", message[:50])
                 return cached
 
+            # 1c. Phase 14-C — supervisor routing.  When FLAG_AGENTIC_MODE
+            #     is on, the supervisor classifies the query and routes
+            #     to one of: RAG (default), TOOLS, a specialist, CLARIFY
+            #     (ask for details), or ESCALATE (human handoff).
+            route_decision = None
+            force_agentic = False
+            force_tool_whitelist: list[str] | None = None
+            if flags.is_enabled("agentic_mode"):
+                with trace_stage("supervisor", timings=timings):
+                    route_decision = supervisor.classify(
+                        rewritten,
+                        has_conversation_history=bool(conversation_history),
+                    )
+                trace_ctx["agent_route"] = route_decision.route.value
+                trace_ctx["agent_route_confidence"] = route_decision.route_confidence if hasattr(route_decision, "route_confidence") else route_decision.confidence
+                logger.info(
+                    "supervisor: route=%s confidence=%.2f reason=%s",
+                    route_decision.route.value,
+                    route_decision.confidence,
+                    route_decision.reason,
+                )
+
+                # Early returns — CLARIFY and ESCALATE don't need retrieval.
+                if route_decision.route == AgentRoute.CLARIFY:
+                    return {
+                        "reply": route_decision.clarification_question or (
+                            "Could you provide a bit more detail about your "
+                            "question? I can help with VAT, PAYE, customs, "
+                            "registration, or specific tax types."
+                        ),
+                        "sources": [],
+                        "citations": [],
+                        "faithfulness_score": None,
+                        "retrieval_mode": "clarification",
+                        "model": self.name,
+                        "conversation_id": conversation_id,
+                        "locale": locale,
+                        "escalation_required": False,
+                        "escalation_reason": "",
+                    }
+                if route_decision.route == AgentRoute.ESCALATE:
+                    return {
+                        "reply": (
+                            "This looks like a question best handled by a URA "
+                            "officer. I've flagged it for human review — you "
+                            "can also contact URA directly at https://ura.go.ug "
+                            "or via the Contact Centre."
+                        ),
+                        "sources": [],
+                        "citations": [],
+                        "faithfulness_score": None,
+                        "retrieval_mode": "escalated",
+                        "model": self.name,
+                        "conversation_id": conversation_id,
+                        "locale": locale,
+                        "escalation_required": True,
+                        "escalation_reason": route_decision.reason,
+                    }
+
+                # TOOLS / SPECIALIST routes force the agentic LLM path
+                # downstream, with the supervisor's suggested tool whitelist.
+                if route_decision.route in (
+                    AgentRoute.TOOLS,
+                    AgentRoute.TAX_SPECIALIST,
+                    AgentRoute.CUSTOMS_SPECIALIST,
+                ):
+                    force_agentic = True
+                    if route_decision.suggested_tools:
+                        force_tool_whitelist = list(route_decision.suggested_tools)
+                    trace_ctx["specialist"] = route_decision.route.value
+
             # 2. Try hybrid retrieval using rewritten query
             hits: list[dict[str, Any]] = []
             retrieval_mode = "keyword"
@@ -456,11 +529,12 @@ class ChatModel:
 
                 # Phase 2: LLM synthesis from top-k passages (true RAG)
                 if self._llm_available:
-                    # Phase 14-B: when FLAG_TOOL_USE is on, route through
-                    # the tool-calling loop.  The loop gets the RAG hits
-                    # as a seed AND is allowed to call other tools
-                    # (calculators, calendar, rates, more retrieval).
-                    use_agentic = flags.is_enabled("tool_use")
+                    # Phase 14-B/C: agentic path is active when either
+                    # FLAG_TOOL_USE is on (tool calling for everyone), or
+                    # the supervisor routed this specific request to it
+                    # (force_agentic).  The supervisor can also narrow
+                    # the tool whitelist (force_tool_whitelist).
+                    use_agentic = force_agentic or flags.is_enabled("tool_use")
                     if use_agentic:
                         with trace_stage("llm_agentic", timings=timings):
                             agentic = _call_llm_agentic(
@@ -468,6 +542,7 @@ class ChatModel:
                                 passages=hits,
                                 conversation_history=conversation_history or None,
                                 locale=locale,
+                                tool_names=force_tool_whitelist,
                             )
                         reply = agentic.get("text", "")
                         if agentic.get("tool_calls"):
