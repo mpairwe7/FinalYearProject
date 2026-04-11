@@ -581,3 +581,333 @@ def count_tokens(text: str) -> int:
     if _tokenizer is None:
         return len(text.split())
     return _count_tokens(_tokenizer, text)
+
+
+# ---------------------------------------------------------------------------
+# Phase 14-B — Tool-calling loop (Qwen2.5 native function calling)
+# ---------------------------------------------------------------------------
+# The loop below implements the supervisor-specialist agent runtime.
+# It's deliberately kept in this module so both the local HF path AND
+# the vLLM HTTP path can share the same parser, message-shape, and
+# iteration bound.
+#
+# Flow:
+#   1. Render messages + tool schemas via tokenizer.apply_chat_template
+#      (Qwen2.5 injects a Hermes-2-style tool block into the system prompt)
+#   2. Generate once
+#   3. Scan the output for `<tool_call>{"name":..., "arguments":...}</tool_call>`
+#      blocks (Qwen2.5 standard emit format)
+#   4. If no calls: return the text
+#   5. If calls: dispatch each through ToolRegistry, append a `tool`
+#      role message with the JSON result, repeat (up to max_iterations)
+#
+# The loop is bounded (default 3 hops) so a misbehaving model can't
+# call itself into an infinite loop.  Every tool call is logged for
+# OTel spans in service.py.
+#
+# Safety: only tools already registered in ToolRegistry can be called.
+# The LLM cannot introduce new tool names.  All tool execution goes
+# through ToolRegistry.call() which sandboxes exceptions.
+
+import json as _json
+import re as _re
+
+_TOOL_CALL_RE = _re.compile(
+    r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
+    _re.DOTALL,
+)
+
+
+# System-prompt extension used when tool-calling is active.  We bolt
+# this on top of the existing SYSTEM_PROMPT rather than replacing it
+# so the LLM keeps its URA persona + grounding instructions.
+TOOL_USE_PROMPT_SUFFIX = """\
+
+## Tool use
+You have access to a set of functions that return deterministic,
+authoritative data (tax rates, calculators, today's date, knowledge
+base search, etc).  Rules:
+
+- When the user asks for a number, rate, date, or calculation, **call
+  the appropriate tool** instead of guessing.  Never fabricate rates.
+- When the user asks a factual question about URA policy, call
+  `search_ura_knowledge_base` and answer ONLY from the returned
+  passages.  Cite them as [1], [2], etc.
+- If a tool returns ``{"ok": false, ...}``, read the error and either
+  retry with corrected arguments or explain the problem to the user.
+- After all necessary tool calls, write a concise, well-grounded
+  answer — do NOT repeat the raw tool output verbatim.
+"""
+
+
+def _parse_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Extract tool_call JSON blocks from a model response.
+
+    Qwen2.5's standard output format when tools are provided is:
+
+        <tool_call>
+        {"name": "calculate_vat", "arguments": {"amount": 5000}}
+        </tool_call>
+
+    Multiple blocks can appear in a single generation (parallel
+    tool calling).  Malformed JSON inside a block is silently skipped
+    — the loop will continue with whatever it could parse and the
+    model will see the non-result in the next turn.
+    """
+    calls: list[dict[str, Any]] = []
+    for match in _TOOL_CALL_RE.finditer(text):
+        raw = match.group(1).strip()
+        try:
+            data = _json.loads(raw)
+        except Exception:
+            logger.debug("tool_call block failed to parse: %s", raw[:120])
+            continue
+        if not isinstance(data, dict) or "name" not in data:
+            continue
+        name = str(data["name"])
+        args = data.get("arguments", {})
+        if isinstance(args, str):
+            # Some models emit arguments as a JSON-encoded string — decode
+            try:
+                args = _json.loads(args)
+            except Exception:
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        calls.append({"name": name, "arguments": args})
+    return calls
+
+
+def _strip_tool_calls(text: str) -> str:
+    """Remove tool_call XML blocks from the model output.
+
+    After the tool-calling loop finishes, the accumulated assistant
+    text may still contain the literal <tool_call> tags from earlier
+    iterations.  We strip them before returning to the caller so the
+    user never sees the raw tags.
+    """
+    return _TOOL_CALL_RE.sub("", text).strip()
+
+
+def _build_tool_messages(
+    query: str,
+    passages: list[dict[str, Any]] | None,
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+) -> list[dict[str, str]]:
+    """Build the initial message list for a tool-calling request.
+
+    Differs from :func:`_build_messages` in two ways:
+    1. The system prompt includes the ``TOOL_USE_PROMPT_SUFFIX``.
+    2. Retrieved passages are optional — the supervisor may call
+       ``search_ura_knowledge_base`` itself during the loop.
+    """
+    system_content = SYSTEM_PROMPT + TOOL_USE_PROMPT_SUFFIX
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_content},
+    ]
+
+    if conversation_history:
+        for turn in conversation_history[-5:]:
+            messages.append({"role": "user", "content": turn["user_message"]})
+            messages.append({"role": "assistant", "content": turn["bot_reply"]})
+
+    if passages:
+        parts: list[str] = ["## Pre-fetched passages (you may use these OR call search_ura_knowledge_base for more)"]
+        for i, p in enumerate(passages, 1):
+            source = p.get("source", "unknown")
+            page = p.get("page", "")
+            raw_text = p.get("text") or p.get("answer", "")
+            scrubbed, _ = scan_retrieved_text(raw_text)
+            trimmed = _trim_to_tokens(_tokenizer, scrubbed, 400)
+            header = f"[{i}] Source: {source}" + (f", Page {page}" if page else "")
+            parts.append(header)
+            parts.append(f'<passage id="p{i}">{trimmed}</passage>')
+            parts.append("")
+        if locale != "en":
+            parts.append(f"(Respond in locale: {locale})")
+        parts.append(f"## User question\n{query}")
+        messages.append({"role": "user", "content": "\n".join(parts)})
+    else:
+        locale_hint = f"(Respond in locale: {locale})\n\n" if locale != "en" else ""
+        messages.append({
+            "role": "user",
+            "content": f"{locale_hint}{query}",
+        })
+
+    return messages
+
+
+def generate_with_tools(
+    query: str,
+    passages: list[dict[str, Any]] | None = None,
+    tool_names: list[str] | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
+    locale: str = "en",
+    max_iterations: int = 3,
+) -> dict[str, Any]:
+    """Run a bounded tool-calling loop with the local Qwen2.5 model.
+
+    Parameters
+    ----------
+    query:
+        The user's question (possibly rewritten by query.py).
+    passages:
+        Optional pre-fetched RAG hits.  If provided, they're inlined
+        into the first user message as a seed.  If None, the agent
+        is expected to call ``search_ura_knowledge_base`` itself.
+    tool_names:
+        Optional whitelist of tool names to expose this call.  If None,
+        the whole registry is exposed.  Used by specialist agents to
+        narrow their tool scope (e.g. customs specialist gets only
+        customs + calendar tools).
+    conversation_history:
+        Multi-turn history, sliding window of 5.
+    locale:
+        User's locale ("en", "lg").
+    max_iterations:
+        Hard cap on tool-call rounds — protects against runaway loops.
+
+    Returns
+    -------
+    dict with keys:
+        ``text``        – the final natural-language answer
+        ``tool_calls``  – list of ``{"name", "arguments", "result"}``
+                          for every call executed during the loop
+        ``iterations``  – how many generation rounds were used
+        ``truncated``   – True if max_iterations was hit before the
+                          model stopped emitting tool calls
+    """
+    if LLM_BACKEND == "vllm":
+        # vLLM HTTP path: tool-calling requires the OpenAI API's
+        # `tools` + `tool_choice` parameters.  Out of scope for this
+        # commit — fall back to a regular generate call and return
+        # just the text.
+        text = _vllm_generate(_build_tool_messages(query, passages, conversation_history, locale))
+        return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
+
+    if not _load_model() or _tokenizer is None or _model is None:
+        return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+
+    # Import here to avoid a circular import (tools -> retriever -> ...)
+    from .tools import ToolRegistry  # noqa: PLC0415
+
+    if tool_names:
+        tool_specs = [
+            ToolRegistry.get(n).to_openai_spec()
+            for n in tool_names
+            if ToolRegistry.get(n) is not None
+        ]
+    else:
+        tool_specs = ToolRegistry.openai_specs()
+
+    if not tool_specs:
+        logger.warning("generate_with_tools: no tools available, falling back to generate()")
+        text = generate(query, passages or [], conversation_history, locale)
+        return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
+
+    messages = _build_tool_messages(query, passages, conversation_history, locale)
+    tool_calls_made: list[dict[str, Any]] = []
+    last_response = ""
+    truncated = False
+
+    try:
+        import torch
+    except ImportError:
+        return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+
+    for iteration in range(max_iterations):
+        try:
+            text = _tokenizer.apply_chat_template(
+                messages,
+                tools=tool_specs,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            logger.exception("apply_chat_template(tools=...) failed — maybe Qwen template doesn't support tools?")
+            # Fall back to plain generate() so the request isn't wasted
+            text = generate(query, passages or [], conversation_history, locale)
+            return {"text": text, "tool_calls": tool_calls_made, "iterations": iteration + 1, "truncated": False}
+
+        try:
+            inputs = _tokenizer([text], return_tensors="pt").to(_model.device)
+            with torch.no_grad():
+                output_ids = _model.generate(
+                    **inputs,
+                    max_new_tokens=LLM_MAX_TOKENS,
+                    temperature=max(LLM_TEMPERATURE, 0.01),
+                    top_p=0.95,
+                    do_sample=LLM_TEMPERATURE > 0,
+                    pad_token_id=_tokenizer.eos_token_id,
+                )
+            gen_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+            response = _tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
+        except Exception:
+            logger.exception("generate_with_tools: iteration %d generation failed", iteration)
+            break
+
+        last_response = response
+        parsed_calls = _parse_tool_calls(response)
+        logger.info(
+            "tool-loop iter=%d parsed_calls=%d response_len=%d",
+            iteration, len(parsed_calls), len(response),
+        )
+
+        if not parsed_calls:
+            # Terminal: no more tool calls — return the text
+            return {
+                "text": _strip_tool_calls(response),
+                "tool_calls": tool_calls_made,
+                "iterations": iteration + 1,
+                "truncated": False,
+            }
+
+        # Dispatch each parsed tool call and feed the results back
+        assistant_tool_call_entries: list[dict[str, Any]] = []
+        tool_result_messages: list[dict[str, Any]] = []
+        for idx, pc in enumerate(parsed_calls):
+            result = ToolRegistry.call(pc["name"], pc.get("arguments", {}))
+            call_id = f"call_{iteration}_{idx}"
+            tool_calls_made.append({
+                "id": call_id,
+                "name": pc["name"],
+                "arguments": pc.get("arguments", {}),
+                "result": result,
+                "iteration": iteration,
+            })
+            assistant_tool_call_entries.append({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": pc["name"],
+                    "arguments": _json.dumps(pc.get("arguments", {})),
+                },
+            })
+            tool_result_messages.append({
+                "role": "tool",
+                "name": pc["name"],
+                "tool_call_id": call_id,
+                "content": _json.dumps(result)[:2000],  # cap for safety
+            })
+
+        # Append the assistant tool-call message (empty content) + tool results
+        messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": assistant_tool_call_entries,
+        })
+        messages.extend(tool_result_messages)
+
+    # Max iterations exhausted — return whatever the last generation produced
+    truncated = True
+    logger.warning(
+        "generate_with_tools: max_iterations=%d reached (calls made: %d)",
+        max_iterations, len(tool_calls_made),
+    )
+    return {
+        "text": _strip_tool_calls(last_response) or "I wasn't able to produce a complete answer within the tool-call budget.",
+        "tool_calls": tool_calls_made,
+        "iterations": max_iterations,
+        "truncated": truncated,
+    }

@@ -157,6 +157,59 @@ def stream_llm_tokens(
         return []
 
 
+def _call_llm_agentic(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    tool_names: list[str] | None = None,
+    max_iterations: int = 3,
+    deadline_s: float = LLM_DEADLINE_SECONDS * 2,
+) -> dict[str, Any]:
+    """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
+
+    Returns the same dict shape as ``generate_with_tools``:
+    ``{"text", "tool_calls", "iterations", "truncated"}``.  On breaker
+    OPEN, timeout, or exception, returns an empty result so the caller
+    can fall back to the non-agentic path (``_call_llm_with_deadline``).
+
+    Deadline is doubled by default because the tool-call loop runs
+    multiple generations — a typical 2-hop call takes ~2x a single
+    generate().
+    """
+    empty = {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+    if not _LLM_CIRCUIT.allow_request():
+        logger.warning("LLM circuit breaker OPEN — skipping agentic path")
+        return empty
+
+    future = _LLM_EXECUTOR.submit(
+        llm_module.generate_with_tools,
+        query=query,
+        passages=passages or None,
+        tool_names=tool_names,
+        conversation_history=conversation_history,
+        locale=locale,
+        max_iterations=max_iterations,
+    )
+    try:
+        result = future.result(timeout=deadline_s)
+        if result and result.get("text"):
+            _LLM_CIRCUIT.record_success()
+            return result
+        # Empty text counts as a soft failure
+        _LLM_CIRCUIT.record_failure()
+        return result or empty
+    except concurrent.futures.TimeoutError:
+        future.cancel()
+        _LLM_CIRCUIT.record_failure()
+        logger.warning("agentic LLM deadline %.1fs exceeded", deadline_s)
+        return empty
+    except Exception:
+        _LLM_CIRCUIT.record_failure()
+        logger.exception("agentic LLM generation raised")
+        return empty
+
+
 def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dict[str, str]]:
     """Load all ``ura_*_faqs.csv`` files into an in-memory FAQ index.
 
@@ -403,15 +456,35 @@ class ChatModel:
 
                 # Phase 2: LLM synthesis from top-k passages (true RAG)
                 if self._llm_available:
-                    with trace_stage("llm_generate", timings=timings):
-                        reply = _call_llm_with_deadline(
-                            query=rewritten,
-                            passages=hits,
-                            conversation_history=conversation_history or None,
-                            locale=locale,
-                        )
+                    # Phase 14-B: when FLAG_TOOL_USE is on, route through
+                    # the tool-calling loop.  The loop gets the RAG hits
+                    # as a seed AND is allowed to call other tools
+                    # (calculators, calendar, rates, more retrieval).
+                    use_agentic = flags.is_enabled("tool_use")
+                    if use_agentic:
+                        with trace_stage("llm_agentic", timings=timings):
+                            agentic = _call_llm_agentic(
+                                query=rewritten,
+                                passages=hits,
+                                conversation_history=conversation_history or None,
+                                locale=locale,
+                            )
+                        reply = agentic.get("text", "")
+                        if agentic.get("tool_calls"):
+                            trace_ctx["tool_calls"] = [
+                                tc.get("name") for tc in agentic["tool_calls"]
+                            ]
+                            trace_ctx["tool_iterations"] = agentic.get("iterations", 0)
+                    else:
+                        with trace_stage("llm_generate", timings=timings):
+                            reply = _call_llm_with_deadline(
+                                query=rewritten,
+                                passages=hits,
+                                conversation_history=conversation_history or None,
+                                locale=locale,
+                            )
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
-                    if reply and llm_module.LLM_STRUCTURED_OUTPUT:
+                    if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
                         valid_refs = [str(i) for i in range(1, len(hits) + 1)]
                         parsed = llm_module.parse_structured_reply(reply, valid_refs)
                         if parsed["structured"]:
