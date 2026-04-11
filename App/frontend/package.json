@@ -6,20 +6,21 @@
     "dev": "bun run next dev",
     "build": "bun run next build",
     "start": "bun run next start",
-    "lint": "bun run next lint"
+    "lint": "bun run eslint ."
   },
   "dependencies": {
-    "next": "15.3.1",
-    "react": "19.1.0",
-    "react-dom": "19.1.0",
+    "next": "16.2.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
     "zustand": "5.0.5"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "3.2.0",
     "@types/node": "22.15.3",
-    "@types/react": "19.1.2",
-    "@types/react-dom": "19.1.2",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
     "eslint": "9.26.0",
-    "eslint-config-next": "15.3.1",
+    "eslint-config-next": "16.2.3",
     "typescript": "5.8.3"
   }
 }

@@ -23,7 +23,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build
 
 # Stage 3: Production runtime (minimal Node.js image)
-FROM node:20-slim AS runner
+# Next.js 16 requires Node.js 20.9+ — pin to a specific 20 LTS patch to
+# guarantee the floor at build time and prevent silent downgrades.
+FROM node:20.18-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

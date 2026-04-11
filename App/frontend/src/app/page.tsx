@@ -380,101 +380,115 @@ export default function Page() {
 
   return (
     <main>
-      <div className="hero">
+      <section className="hero">
         <div>
           <div className="badge">
             <SparklesIcon />
             Live assistant
           </div>
           <h1 className="hero-title">URA Chatbot</h1>
-          <div role="radiogroup" aria-label="Language" style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', margin: '0.5rem 0' }}>
-            {LOCALE_OPTIONS.map(opt => (
+          <p className="hero-sub">
+            Natural chat with speech and text. Ask about URA services, tax
+            policy, or process workflows — every answer is grounded in the
+            URA knowledge base with live citations.
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Language"
+            className="locale-switch"
+          >
+            {LOCALE_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 role="radio"
-                onClick={() => setLocale(opt.value)}
                 aria-checked={locale === opt.value}
-                style={{
-                  padding: '0.25rem 0.75rem',
-                  borderRadius: '1rem',
-                  border: locale === opt.value ? '2px solid var(--accent, #2563eb)' : '1px solid #ccc',
-                  background: locale === opt.value ? 'var(--accent, #2563eb)' : 'transparent',
-                  color: locale === opt.value ? '#fff' : 'inherit',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem',
-                }}
+                onClick={() => setLocale(opt.value)}
+                className="locale-btn"
               >
                 {opt.label}
               </button>
             ))}
           </div>
-          <p className="hero-sub">
-            Natural chat with speech and text. Ask about URA services, policies, or upload workflows and get concise answers.
-          </p>
         </div>
-        <div className="pill">
+        <div className="pill" aria-live="polite">
           <HeadphonesIcon />
           Voice ready
         </div>
-      </div>
+      </section>
 
       <div className="grid grid-2">
         <section className="card chat-shell" aria-label="Chat conversation">
-          <div className="section-title">
+          <header className="section-title">
             <div>
-              <h2 style={{ margin: 0 }}>Conversation</h2>
-              <div className="small">Context-aware responses powered by URA knowledge base</div>
+              <h2>Conversation</h2>
+              <div className="small">
+                Context-aware, grounded responses powered by hybrid retrieval
+              </div>
             </div>
             <div className="status">
               <MicIcon /> {speechStatusLabel}
             </div>
-          </div>
+          </header>
 
           <div className="message-list" aria-live="polite">
             {chat.map((turn: ChatTurn, index: number) => (
               <article key={turn.id} className="message-row">
-                <div className={`avatar ${turn.role === 'user' ? 'user' : 'assistant'}`} aria-hidden="true">
+                <div
+                  className={`avatar ${turn.role === 'user' ? 'user' : 'assistant'}`}
+                  aria-hidden="true"
+                >
                   {turn.role === 'user' ? <UserIcon /> : <BotIcon />}
                 </div>
                 <div className={`bubble ${turn.role}`}>
-                  <div className="small" style={{ marginBottom: '0.25rem', textTransform: 'capitalize' }}>
-                    {turn.role}
-                  </div>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{turn.content}</div>
-                  {turn.role === 'assistant' && turn.id !== 'greeting-0' && turn.escalationRequired && (
-                    <div className="escalation-banner" role="alert" style={{
-                      marginTop: '0.5rem', padding: '0.4rem 0.75rem', borderRadius: '0.5rem',
-                      background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)',
-                      fontSize: '0.8rem', color: 'var(--muted)',
-                    }}>
-                      Human review recommended{turn.escalationReason ? `: ${turn.escalationReason}` : ''}
-                    </div>
-                  )}
-                  {turn.role === 'assistant' && turn.citations && turn.citations.length > 0 && (
-                    <details className="citations-detail" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }}>
-                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>
-                        Sources ({turn.citations.length})
-                        {turn.faithfulnessScore != null && (
-                          <span style={{
-                            marginLeft: '0.5rem',
-                            color: turn.faithfulnessScore >= 0.6 ? 'var(--success, #22c55e)' : 'var(--warning, #eab308)',
-                          }}>
-                            {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
-                          </span>
-                        )}
-                      </summary>
-                      <ol style={{ paddingLeft: '1.2rem', margin: '0.3rem 0 0', color: 'var(--muted)' }}>
-                        {turn.citations.map((c: Citation) => (
-                          <li key={c.ref} style={{ marginBottom: '0.2rem' }}>
-                            <strong>{c.source}</strong>
-                            {c.page ? ` p.${c.page}` : ''}
-                            {c.section ? ` — ${c.section}` : ''}
-                            {c.passage ? <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>{c.passage.slice(0, 150)}...</div> : null}
-                          </li>
-                        ))}
-                      </ol>
-                    </details>
-                  )}
+                  <span className="bubble-role">{turn.role}</span>
+                  <div className="msg-content">{turn.content}</div>
+
+                  {turn.role === 'assistant' &&
+                    turn.id !== 'greeting-0' &&
+                    turn.escalationRequired && (
+                      <div className="escalation-banner" role="alert">
+                        <span aria-hidden="true">⚠</span> Human review recommended
+                        {turn.escalationReason ? ` — ${turn.escalationReason}` : ''}
+                      </div>
+                    )}
+
+                  {turn.role === 'assistant' &&
+                    turn.citations &&
+                    turn.citations.length > 0 && (
+                      <details className="citations">
+                        <summary>
+                          <SparklesIcon />
+                          Sources ({turn.citations.length})
+                          {turn.faithfulnessScore != null && (
+                            <span
+                              className={
+                                turn.faithfulnessScore >= 0.6
+                                  ? 'grounding-ok'
+                                  : 'grounding-warn'
+                              }
+                            >
+                              · {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
+                            </span>
+                          )}
+                        </summary>
+                        <ol>
+                          {turn.citations.map((c: Citation) => (
+                            <li key={c.ref}>
+                              <strong>{c.source}</strong>
+                              {c.page ? ` · p.${c.page}` : ''}
+                              {c.section ? ` · ${c.section}` : ''}
+                              {c.passage ? (
+                                <div className="cite-passage">
+                                  {c.passage.slice(0, 180)}
+                                  {c.passage.length > 180 ? '…' : ''}
+                                </div>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    )}
+
                   {turn.role === 'assistant' && turn.id !== 'greeting-0' && (
                     <FeedbackButtons
                       messageId={turn.id}
@@ -485,31 +499,32 @@ export default function Page() {
                 </div>
               </article>
             ))}
-            {isLoading && (() => {
-              // Suppress loading dots when streaming content is arriving
-              const lastTurn = chat[chat.length - 1];
-              const isStreaming = lastTurn?.role === 'assistant' && lastTurn.content !== '';
-              if (isStreaming) return null;
-              return (
-                <article className="message-row">
-                  <div className="avatar assistant" aria-hidden="true">
-                    <BotIcon />
-                  </div>
-                  <div className="bubble assistant">
-                    <div className="small" style={{ marginBottom: '0.25rem' }}>Assistant</div>
-                    <LoadingDots />
-                  </div>
-                </article>
-              );
-            })()}
+            {isLoading &&
+              (() => {
+                // Suppress loading dots while streaming tokens are arriving
+                const lastTurn = chat[chat.length - 1];
+                const isStreaming = lastTurn?.role === 'assistant' && lastTurn.content !== '';
+                if (isStreaming) return null;
+                return (
+                  <article className="message-row">
+                    <div className="avatar assistant" aria-hidden="true">
+                      <BotIcon />
+                    </div>
+                    <div className="bubble assistant">
+                      <span className="bubble-role">assistant</span>
+                      <LoadingDots />
+                    </div>
+                  </article>
+                );
+              })()}
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="input-row">
+          <div className="composer">
             <input
               className="input"
               aria-label="Type your message"
-              placeholder="Ask anything about URA..."
+              placeholder="Ask anything about URA…"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={(e) => {
@@ -537,34 +552,38 @@ export default function Page() {
               <SendIcon /> Send
             </button>
           </div>
-          <div className="small" style={{ marginTop: '0.35rem' }}>
-            Press Enter to send, or tap the mic to dictate.
-          </div>
+          <p className="composer-hint">
+            Press <kbd>Enter</kbd> to send, or tap the mic to dictate.
+          </p>
         </section>
 
         <aside className="card">
-          <div className="section-title">
+          <header className="section-title">
             <div>
-              <h3 style={{ margin: 0 }}>Quick prompts</h3>
-              <span className="small">Tap to fill and edit</span>
+              <h3>Quick prompts</h3>
+              <span className="small">Tap to try a question</span>
             </div>
             <div className="pill">
-              <SendIcon /> Suggestions
+              <SparklesIcon /> Suggestions
             </div>
-          </div>
+          </header>
           <div className="chip-grid">
             {starterPrompts.map((p) => (
-              <button key={p} className="chip" onClick={() => handleStarterPrompt(p)}>
+              <button
+                key={p}
+                className="chip"
+                onClick={() => handleStarterPrompt(p)}
+              >
                 <SparklesIcon /> {p}
               </button>
             ))}
           </div>
-          <div className="card panel-note">
-            <h4 style={{ marginTop: 0, marginBottom: '0.35rem' }}>Design principles</h4>
-            <ul style={{ paddingLeft: '1.1rem', margin: 0, color: 'var(--muted)', lineHeight: 1.55 }}>
-              <li>Clear affordances for text and speech.</li>
-              <li>Readable contrast, gentle glassmorphism, subtle motion.</li>
-              <li>Status hints for mic readiness and sending.</li>
+          <div className="panel-note">
+            <h4>How grounding works</h4>
+            <ul>
+              <li>Hybrid dense + BM25 retrieval over indexed URA FAQs.</li>
+              <li>Each reply shows the exact source files it was built from.</li>
+              <li>Faithfulness score indicates how well the answer is supported.</li>
             </ul>
           </div>
         </aside>

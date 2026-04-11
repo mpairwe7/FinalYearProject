@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useOptimistic, useTransition } from 'react';
 import { submitFeedback, updateFeedbackComment, trackFeedbackGiven } from '../store/useAnalyticsStore';
 
 interface FeedbackButtonsProps {
@@ -37,23 +37,39 @@ export default function FeedbackButtons({ messageId, userQuery, botReply }: Feed
   const [showComment, setShowComment] = useState(false);
   const [comment, setComment] = useState('');
   const [commentSent, setCommentSent] = useState(false);
+  const [, startTransition] = useTransition();
 
-  const handleRate = useCallback(async (value: 'up' | 'down') => {
+  // React 19 useOptimistic: flip the rating visually before the network
+  // request resolves, then roll back automatically if submitFeedback()
+  // fails.  Gives the user an instant "thumbs up received" affordance
+  // even on slow networks.
+  const [optimisticRating, setOptimisticRating] = useOptimistic<
+    'up' | 'down' | null,
+    'up' | 'down' | null
+  >(rating, (_current, next) => next);
+
+  const handleRate = useCallback((value: 'up' | 'down') => {
     if (feedbackState === 'submitted' || feedbackState === 'submitting') return;
-    setRating(value);
-    setFeedbackState('submitting');
-    trackFeedbackGiven(value);
+    // Optimistic flip must live inside a transition in React 19
+    startTransition(async () => {
+      setOptimisticRating(value);
+      setFeedbackState('submitting');
+      trackFeedbackGiven(value);
 
-    const result = await submitFeedback(messageId, value, '', userQuery, botReply);
-    if (result) {
-      setFeedbackState('submitted');
-      if (value === 'down') {
-        setShowComment(true);
+      const result = await submitFeedback(messageId, value, '', userQuery, botReply);
+      if (result) {
+        setRating(value);
+        setFeedbackState('submitted');
+        if (value === 'down') {
+          setShowComment(true);
+        }
+      } else {
+        // Roll back: clearing the optimistic state on error
+        setOptimisticRating(null);
+        setFeedbackState('error');
       }
-    } else {
-      setFeedbackState('error');
-    }
-  }, [feedbackState, messageId, userQuery, botReply]);
+    });
+  }, [feedbackState, messageId, userQuery, botReply, setOptimisticRating]);
 
   const handleCommentSubmit = useCallback(async () => {
     if (!comment.trim() || !rating) return;
@@ -77,24 +93,24 @@ export default function FeedbackButtons({ messageId, userQuery, botReply }: Feed
     <div className="feedback-container" role="group" aria-label="Response feedback">
       <div className="feedback-buttons">
         <button
-          className={`feedback-btn ${rating === 'up' ? 'active up' : ''}`}
+          className={`feedback-btn ${optimisticRating === 'up' ? 'active up' : ''}`}
           onClick={() => handleRate('up')}
           disabled={isDisabled}
           aria-label="Helpful response"
-          aria-pressed={rating === 'up'}
+          aria-pressed={optimisticRating === 'up'}
           title="Helpful"
         >
-          <ThumbsUpIcon filled={rating === 'up'} />
+          <ThumbsUpIcon filled={optimisticRating === 'up'} />
         </button>
         <button
-          className={`feedback-btn ${rating === 'down' ? 'active down' : ''}`}
+          className={`feedback-btn ${optimisticRating === 'down' ? 'active down' : ''}`}
           onClick={() => handleRate('down')}
           disabled={isDisabled}
           aria-label="Unhelpful response"
-          aria-pressed={rating === 'down'}
+          aria-pressed={optimisticRating === 'down'}
           title="Not helpful"
         >
-          <ThumbsDownIcon filled={rating === 'down'} />
+          <ThumbsDownIcon filled={optimisticRating === 'down'} />
         </button>
 
         {feedbackState === 'submitting' && (

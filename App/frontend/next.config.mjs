@@ -1,7 +1,36 @@
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Where the FastAPI backend is reachable FROM THE NEXT.JS SERVER PROCESS
+// (not from the browser).  The rewrite below proxies /api/* to this URL
+// so the browser only ever talks to the frontend origin — no CORS, no
+// hardcoded host:port baked into the client bundle.
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL || "http://127.0.0.1:18000";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
+  // Pin the Turbopack workspace root to this directory so Next.js 16
+  // doesn't walk up the filesystem and mis-detect an unrelated lockfile
+  // (e.g. ~/package-lock.json) as the workspace root.
+  turbopack: {
+    root: __dirname,
+  },
+  // Same-origin API proxy — the browser calls /api/v1/chat, Next.js
+  // proxies it to the backend over the internal network.  Works on
+  // localhost, behind Caddy, on SSH port-forward, and in Docker Compose
+  // without any client-side code changes.
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${INTERNAL_API_URL}/:path*`,
+      },
+    ];
+  },
   async headers() {
     return [
       {
@@ -20,7 +49,9 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data:",
-              "connect-src 'self' " + (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"),
+              // All API calls go through the Next.js rewrite at /api/*, so
+              // 'self' is the only origin the browser ever needs to reach.
+              "connect-src 'self'",
             ].join("; "),
           },
         ],
