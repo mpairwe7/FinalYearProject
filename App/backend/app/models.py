@@ -31,12 +31,20 @@ class ChatResponse(BaseModel):
     sources: list[str] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list, description="Passage-level citations")
     faithfulness_score: float | None = Field(None, description="Grounding score 0-1")
-    retrieval_mode: str = Field("keyword", description="hybrid | keyword | blocked | abstained")
+    retrieval_mode: str = Field(
+        "keyword",
+        description="hybrid | keyword | blocked | abstained | clarification | escalated",
+    )
     model: str = "ura-qwen2.5-3b-instruct"
     conversation_id: str | None = None
     locale: str = Field("en", description="Locale used for this response")
     escalation_required: bool = Field(False, description="Whether human review is needed")
     escalation_reason: str = Field("", description="Why escalation was triggered")
+    # Phase 14-D — when the supervisor routes a query to the ticket
+    # queue, the ticket id comes back to the frontend so the UI can
+    # display "ticket 1234abcd" to the user.  Empty string when no
+    # ticket was created.
+    ticket_id: str = Field("", description="Escalation ticket id, if one was created")
 
 
 # ---------------------------------------------------------------------------
