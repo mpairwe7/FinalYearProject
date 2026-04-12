@@ -538,3 +538,20 @@ Run through every item before go-live:
 - [ ] Google Play data safety section filled
 - [ ] Rollback procedure tested with a known-good image tag
 - [ ] SLO alerting rules loaded in Prometheus/Alertmanager
+- [ ] `python scripts/validate_env.py --env production` passes with 0 errors
+- [ ] `AUTH_DEV_SECRET` rotated from default value
+- [ ] `LLM_TRUST_REMOTE_CODE=false` (OWASP LLM03 supply chain)
+- [ ] `LLM_MODEL_REVISION` pinned to a specific commit SHA (SLSA v1.2)
+- [ ] Container images signed with cosign (`cosign verify` passes)
+- [ ] SLSA provenance attestation generated via `container-sign-provenance.yml`
+- [ ] Frontend Vitest tests pass (`cd App/frontend && bun run test`)
+- [ ] Frontend Lighthouse accessibility score >= 90
+- [ ] AI red team evaluation passes (`python scripts/ai_red_team.py` >= 90% block rate)
+- [ ] Bias & fairness audit passes (`python scripts/bias_fairness_audit.py` >= 70% parity)
+- [ ] Incident response simulation passes (`python scripts/incident_response_sim.py`)
+- [ ] Disaster recovery test passes (`bash scripts/dr_test.sh`)
+- [ ] k6 load test validates SLOs (`k6 run tests/load/k6-chat-slo.js`)
+- [ ] Monitoring stack operational (`docker compose --profile monitoring up`)
+- [ ] Grafana dashboard shows live metrics
+- [ ] Model Card reviewed and up-to-date (`docs/MODEL_CARD.md`)
+- [ ] Privacy Impact Assessment completed (`docs/capstone/PIA.md`)

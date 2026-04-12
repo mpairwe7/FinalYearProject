@@ -25,11 +25,21 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Monitoring & Observability](MONITORING.md) | OpenTelemetry, Prometheus, Grafana, alerting, SLOs |
 | [Mobile Setup](MOBILE_SETUP.md) | Flutter Android/iOS build, on-device LLM, App Store compliance |
 | [Mobile Architecture](MOBILE_ARCHITECTURE.md) | Layered architecture, Riverpod 2.6 Notifier, go_router, design tokens, 7 ADRs |
+| **Testing & Quality** |
+| [Frontend Tests](../App/frontend/vitest.config.ts) | Vitest unit/component tests + coverage thresholds |
+| [E2E Tests](../App/frontend/e2e/) | Playwright smoke + axe-core WCAG 2.1 AA accessibility audit |
+| [Load Tests](../tests/load/k6-chat-slo.js) | k6 SLO validation (p95 latency, error rate) |
 | **Security** |
 | [Security Policy](../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
+| [AI Red Team](../scripts/ai_red_team.py) | 50 adversarial prompts across 10 NIST AI 600-1 categories |
+| [Incident Response Sim](../scripts/incident_response_sim.py) | Automated playbook validation (3 AI-specific scenarios) |
 | **Governance & Compliance** |
 | [AI Risk Manifest](../governance/ai_risk_manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM, EU AI Act risk register |
 | [Compliance Gate](../governance/compliance_check.py) | CI gate script (10 files + 29 keywords) |
+| [Model Card](MODEL_CARD.md) | EU AI Act Article 53 model card (components, eval, ethics, limitations) |
+| [Privacy Impact Assessment](capstone/PIA.md) | NDPA 2019 §28 PIA (7 risks, compliance matrix, audit trail) |
+| [Bias & Fairness Audit](../scripts/bias_fairness_audit.py) | Language parity + taxpayer type parity evaluation |
+| [Carbon Tracker](../scripts/carbon_tracker.py) | Training emissions tracking (CodeCarbon + Uganda grid estimate) |
 
 ## Getting Started
 
@@ -88,6 +98,19 @@ FinalYearProject/
 │   ├── reports/          # Validation reports
 │   └── plots/            # Visualizations
 ├── Notebooks/             # Jupyter notebooks
+├── monitoring/            # Prometheus, Grafana, alerting
+│   ├── prometheus.yml    # Scrape config
+│   ├── alerting-rules.yml # SLO-based alert rules (5 rules)
+│   └── grafana/          # Provisioned dashboards + datasources
+├── scripts/               # Operational scripts
+│   ├── ai_red_team.py    # NIST AI 600-1 adversarial evaluation (50 prompts)
+│   ├── bias_fairness_audit.py  # Language + taxpayer parity audit
+│   ├── incident_response_sim.py # 3 AI-specific playbook simulations
+│   ├── carbon_tracker.py # CodeCarbon training emissions
+│   ├── validate_env.py   # Pre-deployment env validation
+│   └── dr_test.sh        # Disaster recovery test (Qdrant + SQLite + health)
+├── tests/
+│   └── load/k6-chat-slo.js # k6 load test (p95 < 3s, error rate < 1%)
 └── docs/                  # Documentation
 ```
 
@@ -121,7 +144,7 @@ Main Branch → Governance Check → Docker Build → HF Push → Production Dep
 |------|---------|
 | `requirements.txt` | Python dependencies |
 | `ml/configs/training_config.yaml` | Training hyperparameters |
-| `docker-compose.yml` | Local development setup |
+| `docker-compose.yml` | Local development + monitoring (`--profile monitoring`) |
 | `Dockerfile` | Production container image |
 | `.pre-commit-config.yaml` | Pre-commit hook definitions (11 hooks: secrets, SAST, hygiene) |
 | `trivy.yaml` | Trivy security scanner configuration |
@@ -130,6 +153,12 @@ Main Branch → Governance Check → Docker Build → HF Push → Production Dep
 | `.gitguardian.yaml` | ggshield path exclusions |
 | `.trufflehog-exclude-paths.txt` | TruffleHog path exclusions |
 | `.secrets.baseline` | detect-secrets known false-positive baseline |
+| `App/frontend/vitest.config.ts` | Vitest test runner + V8 coverage (60% threshold) |
+| `App/frontend/playwright.config.ts` | Playwright E2E + a11y audit config |
+| `App/frontend/lighthouserc.json` | Lighthouse CI (accessibility >= 90) |
+| `monitoring/prometheus.yml` | Prometheus scrape targets |
+| `monitoring/alerting-rules.yml` | 5 SLO alerting rules |
+| `.zap-rules.tsv` | OWASP ZAP DAST rule configuration |
 
 ## Support
 

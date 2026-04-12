@@ -63,6 +63,81 @@ from . import database as db
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Production environment validation (NIST SSDF PO.1.1)
+# ---------------------------------------------------------------------------
+_INSECURE_DEV_SECRET = "dev-insecure-change-me"
+
+
+def _validate_production_env() -> None:
+    """Refuse to start if production env has insecure defaults.
+
+    Checks critical configuration that, if left at dev defaults, would
+    create exploitable vulnerabilities in production.  Aligns with
+    NIST SP 800-218 (SSDF) PO.1.1 and OWASP LLM Top 10 (2025).
+    """
+    app_env = os.getenv("APP_ENV", "development").lower()
+    if app_env != "production":
+        return
+
+    errors: list[str] = []
+
+    # AUTH_DEV_SECRET must be rotated in production
+    if os.getenv("AUTH_DEV_SECRET", _INSECURE_DEV_SECRET) == _INSECURE_DEV_SECRET:
+        errors.append(
+            "AUTH_DEV_SECRET is still the default value. "
+            "Set a strong, unique secret for production."
+        )
+
+    # CORS must not be localhost in production
+    cors = os.getenv("CORS_ORIGINS", "")
+    if "localhost" in cors or "127.0.0.1" in cors:
+        errors.append(
+            "CORS_ORIGINS contains localhost. "
+            "Set explicit production origins (e.g. https://chat.ura.go.ug)."
+        )
+
+    # Rate limiting should use Redis for multi-worker deployments
+    workers = int(os.getenv("WORKERS", "4"))
+    if workers > 1 and not os.getenv("SLOWAPI_STORAGE_URI"):
+        logger.warning(
+            "SLOWAPI_STORAGE_URI not set with %d workers — rate limits are per-worker only. "
+            "Set SLOWAPI_STORAGE_URI=redis://... for cluster-wide enforcement.",
+            workers,
+        )
+
+    # LLM_TRUST_REMOTE_CODE must stay false (OWASP LLM03)
+    if os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() in ("1", "true", "yes"):
+        errors.append(
+            "LLM_TRUST_REMOTE_CODE=true in production is a supply-chain risk (OWASP LLM03). "
+            "Pin a trusted model revision instead."
+        )
+
+    # Model revision should be pinned for reproducibility (SLSA v1.2)
+    if not os.getenv("LLM_MODEL_REVISION"):
+        logger.warning(
+            "LLM_MODEL_REVISION not set — model downloads are not reproducible. "
+            "Pin a commit SHA for SLSA v1.2 compliance."
+        )
+
+    # STORE_RAW_PROMPTS must be off in production (NDPA §19 data minimisation)
+    if os.getenv("STORE_RAW_PROMPTS", "false").lower() in ("1", "true", "yes"):
+        errors.append(
+            "STORE_RAW_PROMPTS=true in production violates NDPA §19 data minimisation. "
+            "Set STORE_RAW_PROMPTS=false."
+        )
+
+    if errors:
+        msg = (
+            "PRODUCTION SAFETY CHECK FAILED — refusing to start.\n"
+            + "\n".join(f"  • {e}" for e in errors)
+        )
+        logger.critical(msg)
+        raise SystemExit(msg)
+
+    logger.info("Production environment validation passed (%d warnings suppressed)", 0)
+
+
+# ---------------------------------------------------------------------------
 # Lifespan – replaces deprecated @app.on_event("startup")
 # ---------------------------------------------------------------------------
 _TAG_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -72,6 +147,9 @@ _REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9\-]{1,128}$")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down the ChatModel singleton."""
+    # Production safety gate — blocks startup on insecure config
+    _validate_production_env()
+
     # OpenTelemetry GenAI tracing (opt-in via OTEL_ENABLED=true)
     try:
         from .tracing import init_tracing
@@ -220,7 +298,8 @@ async def security_headers(request: Request, call_next):
 # ---------------------------------------------------------------------------
 
 @app.get("/health", tags=["system"])
-def health_liveness() -> dict:
+@limiter.limit("120/minute")
+def health_liveness(request: Request) -> dict:
     """Liveness probe for orchestrators (Docker, K8s)."""
     return {"status": "alive", "version": app.version}
 
@@ -1000,7 +1079,8 @@ def analytics_dashboard(days: int = 30) -> AnalyticsDashboard:
 
 
 @app.get("/metrics", tags=["system"])
-def prometheus_metrics() -> PlainTextResponse:
+@limiter.limit("30/minute")
+def prometheus_metrics(request: Request) -> PlainTextResponse:
     """Prometheus-compatible metrics endpoint."""
     return PlainTextResponse(
         content=metrics.to_prometheus(),

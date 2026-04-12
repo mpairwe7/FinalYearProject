@@ -32,6 +32,14 @@ circuit breakers around Qdrant and LLM, hard deadlines
 - **Continuous evaluation** — Ragas-compatible harness, SLO alert rules
 - **Next.js 16.2.3 + React 19.2 frontend** with glassmorphism UI,
 SSE streaming, optimistic feedback, same-origin `/api` proxy
+- **Full test pyramid** — backend pytest (>= 80% cov), frontend Vitest +
+Playwright E2E, Flutter mobile CI, k6 load tests
+- **Production observability** — Prometheus + Grafana + Jaeger (docker-compose
+`--profile monitoring`), 5 SLO alerting rules, pre-built dashboards
+- **Security-as-code** — cosign container signing, SLSA v1.2 provenance,
+OWASP ZAP DAST, AI red teaming (50 NIST AI 600-1 prompts)
+- **Compliance artefacts** — Model Card (EU AI Act Art. 53), PIA (NDPA §28),
+bias audit, carbon tracking, incident response simulation
 
 **What this is good at:** answering *stateless, factual* questions
 about URA policy from a static knowledge base.

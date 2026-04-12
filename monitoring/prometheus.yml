@@ -1,0 +1,36 @@
+# Prometheus configuration — URA Chatbot (2026)
+# Aligned with: MONITORING.md, ISO/IEC 25010:2023 §5 (Reliability), SLOs
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alerting-rules.yml"
+
+scrape_configs:
+  # Backend API metrics
+  - job_name: "ura-api"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          service: "ura-chatbot-api"
+          environment: "production"
+
+  # Qdrant vector store
+  - job_name: "qdrant"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["qdrant:6333"]
+        labels:
+          service: "qdrant"
+
+  # Redis (requires redis_exporter sidecar — optional)
+  # - job_name: "redis"
+  #   static_configs:
+  #     - targets: ["redis-exporter:9121"]
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
