@@ -6,11 +6,11 @@ and Prometheus-compatible metrics (2026 observability standards).
 """
 
 import json
+import logging
 import os
 import re
-import uuid
-import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response
@@ -21,44 +21,43 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
 
+from . import database as db
+from .analytics import AnalyticsMiddleware, metrics
 from .models import (
+    AnalyticsDashboard,
+    AnalyticsEvent,
+    BatchClassifyRequest,
+    BatchClassifyResponse,
     ChatRequest,
     ChatResponse,
     Citation,
     ClassifyRequest,
     ClassifyResponse,
-    TagListResponse,
+    ExportConversationRequest,
+    ExportTaxSummaryRequest,
     FAQResponse,
-    BatchClassifyRequest,
-    BatchClassifyResponse,
-    HealthResponse,
+    FeedbackCommentRequest,
     FeedbackRequest,
     FeedbackResponse,
     FeedbackSummary,
-    FeedbackCommentRequest,
-    AnalyticsEvent,
-    AnalyticsDashboard,
-    TranscribeResponse,
+    HealthResponse,
+    SpeechHealthResponse,
     SynthesizeRequest,
     SynthesizeResponse,
+    TagListResponse,
+    TranscribeResponse,
     TranslateRequest,
     TranslateResponse,
-    VoiceChatRequest,
     VoiceChatResponse,
-    SpeechHealthResponse,
-    ExportConversationRequest,
-    ExportTaxSummaryRequest,
 )
 from .service import ChatModel
 from .speech_service import (
-    SpeechModel,
     SPEECH_ASR_BACKEND,
     SPEECH_ENABLED,
     SPEECH_MT_BACKEND,
     SPEECH_TTS_BACKEND,
+    SpeechModel,
 )
-from .analytics import AnalyticsMiddleware, metrics
-from . import database as db
 
 logger = logging.getLogger(__name__)
 
@@ -127,9 +126,8 @@ def _validate_production_env() -> None:
         )
 
     if errors:
-        msg = (
-            "PRODUCTION SAFETY CHECK FAILED — refusing to start.\n"
-            + "\n".join(f"  • {e}" for e in errors)
+        msg = "PRODUCTION SAFETY CHECK FAILED — refusing to start.\n" + "\n".join(
+            f"  • {e}" for e in errors
         )
         logger.critical(msg)
         raise SystemExit(msg)
@@ -179,7 +177,9 @@ async def lifespan(app: FastAPI):
             app.state.speech = SpeechModel()
             logger.info(
                 "SpeechModel ready (asr=%s tts=%s mt=%s)",
-                SPEECH_ASR_BACKEND, SPEECH_TTS_BACKEND, SPEECH_MT_BACKEND,
+                SPEECH_ASR_BACKEND,
+                SPEECH_TTS_BACKEND,
+                SPEECH_MT_BACKEND,
             )
         except Exception:
             logger.exception("SpeechModel initialisation failed — speech endpoints will 503")
@@ -252,9 +252,7 @@ def get_speech_model(request: Request) -> SpeechModel:
 # CORS – hardened (no wildcard, no credentials, explicit methods)
 # ---------------------------------------------------------------------------
 _allowed_origins: list[str] = [
-    o.strip()
-    for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
-    if o.strip()
+    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
 ]
 
 app.add_middleware(
@@ -281,7 +279,9 @@ async def security_headers(request: Request, call_next):
     request.state.request_id = request_id
     logger.info(
         "request  request_id=%s method=%s path=%s",
-        request_id, request.method, request.url.path,
+        request_id,
+        request.method,
+        request.url.path,
     )
     response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -296,6 +296,7 @@ async def security_headers(request: Request, call_next):
 # ---------------------------------------------------------------------------
 # System endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.get("/health", tags=["system"])
 @limiter.limit("120/minute")
@@ -326,7 +327,9 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
 # ---------------------------------------------------------------------------
 @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
 @limiter.limit(_RATE_LIMIT)
-def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_model)) -> ChatResponse:
+def chat(
+    body: ChatRequest, request: Request, model: ChatModel = Depends(get_model)
+) -> ChatResponse:
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
@@ -378,10 +381,12 @@ def chat(body: ChatRequest, request: Request, model: ChatModel = Depends(get_mod
         try:
             db.track_event(
                 "escalation_required",
-                json.dumps({
-                    "reason": result.get("escalation_reason", ""),
-                    "topic_tag": topic_tag,
-                }),
+                json.dumps(
+                    {
+                        "reason": result.get("escalation_reason", ""),
+                        "topic_tag": topic_tag,
+                    }
+                ),
                 session_id=session_id or None,
             )
         except Exception:
@@ -405,6 +410,7 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
 
     async def event_generator():
         import asyncio
+
         from .guardrails import OutputGuard
         from .retriever import HybridRetriever
 
@@ -427,30 +433,40 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
 
             # If blocked/abstained/clarification, send single event
             if result.get("retrieval_mode") in ("blocked", "abstained", "clarification"):
-                yield {"event": "metadata", "data": json.dumps({
-                    "sources": result.get("sources", []),
-                    "citations": result.get("citations", []),
-                    "faithfulness_score": result.get("faithfulness_score"),
-                    "retrieval_mode": result.get("retrieval_mode"),
-                    "model": result.get("model"),
-                    "conversation_id": result.get("conversation_id"),
-                    "locale": result.get("locale"),
-                    "escalation_required": result.get("escalation_required", False),
-                    "escalation_reason": result.get("escalation_reason", ""),
-                })}
+                yield {
+                    "event": "metadata",
+                    "data": json.dumps(
+                        {
+                            "sources": result.get("sources", []),
+                            "citations": result.get("citations", []),
+                            "faithfulness_score": result.get("faithfulness_score"),
+                            "retrieval_mode": result.get("retrieval_mode"),
+                            "model": result.get("model"),
+                            "conversation_id": result.get("conversation_id"),
+                            "locale": result.get("locale"),
+                            "escalation_required": result.get("escalation_required", False),
+                            "escalation_reason": result.get("escalation_reason", ""),
+                        }
+                    ),
+                }
                 yield {"event": "token", "data": result.get("reply", "")}
                 yield {"event": "done", "data": ""}
                 return
 
             # Send metadata first
-            yield {"event": "metadata", "data": json.dumps({
-                "sources": result.get("sources", []),
-                "citations": result.get("citations", []),
-                "retrieval_mode": result.get("retrieval_mode"),
-                "model": result.get("model"),
-                "conversation_id": result.get("conversation_id"),
-                "locale": result.get("locale"),
-            })}
+            yield {
+                "event": "metadata",
+                "data": json.dumps(
+                    {
+                        "sources": result.get("sources", []),
+                        "citations": result.get("citations", []),
+                        "retrieval_mode": result.get("retrieval_mode"),
+                        "model": result.get("model"),
+                        "conversation_id": result.get("conversation_id"),
+                        "locale": result.get("locale"),
+                    }
+                ),
+            }
 
             # Stream LLM tokens
             hits = result.get("_hits", [])
@@ -488,26 +504,34 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                 contexts = [h.get("text") or h.get("answer", "") for h in hits]
                 faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
                 escalate, esc_reason = _output_guard.should_escalate(faith, hits)
-                yield {"event": "grounding", "data": json.dumps({
-                    "faithfulness_score": faith,
-                    "escalation_required": escalate,
-                    "escalation_reason": esc_reason,
-                })}
+                yield {
+                    "event": "grounding",
+                    "data": json.dumps(
+                        {
+                            "faithfulness_score": faith,
+                            "escalation_required": escalate,
+                            "escalation_reason": esc_reason,
+                        }
+                    ),
+                }
 
                 # Cache the completed streaming response
                 try:
-                    model._cache.put(rewritten_query, {
-                        "reply": full_reply,
-                        "sources": result.get("sources", []),
-                        "citations": result.get("citations", []),
-                        "faithfulness_score": faith,
-                        "retrieval_mode": result.get("retrieval_mode"),
-                        "model": result.get("model"),
-                        "conversation_id": result.get("conversation_id"),
-                        "locale": result.get("locale"),
-                        "escalation_required": escalate,
-                        "escalation_reason": esc_reason,
-                    })
+                    model._cache.put(
+                        rewritten_query,
+                        {
+                            "reply": full_reply,
+                            "sources": result.get("sources", []),
+                            "citations": result.get("citations", []),
+                            "faithfulness_score": faith,
+                            "retrieval_mode": result.get("retrieval_mode"),
+                            "model": result.get("model"),
+                            "conversation_id": result.get("conversation_id"),
+                            "locale": result.get("locale"),
+                            "escalation_required": escalate,
+                            "escalation_reason": esc_reason,
+                        },
+                    )
                 except Exception:
                     logger.debug("Stream cache store failed", exc_info=True)
             else:
@@ -526,6 +550,7 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
             elapsed_ms = (time.perf_counter() - t0) * 1000
             try:
                 from .service import ChatModel as _CM
+
                 db.log_conversation(
                     session_id=session_id or None,
                     user_message=_CM.redact_for_storage(body.message),
@@ -602,9 +627,7 @@ async def synthesize_audio(
     """Synthesize text to WAV audio. Returns base64-encoded WAV bytes."""
     import base64
 
-    result = speech.synthesize(
-        text=body.text, voice=body.voice, language=body.language
-    )
+    result = speech.synthesize(text=body.text, voice=body.voice, language=body.language)
     metrics.inc("speech_tts_total")
     if result.latency_s:
         metrics.observe("speech_tts_latency_s", result.latency_s)
@@ -734,7 +757,9 @@ async def voice_chat(
     # --- Input validation (mirrors /v1/asr strictness) -----------------------
     language = request.query_params.get("language", "en")
     if not re.match(r"^[a-z]{2}$", language):
-        raise HTTPException(status_code=400, detail="language must be an ISO 639-1 code (e.g. en, lg)")
+        raise HTTPException(
+            status_code=400, detail="language must be an ISO 639-1 code (e.g. en, lg)"
+        )
 
     voice = request.query_params.get("voice") or None
     if voice and not re.match(r"^[a-zA-Z0-9_\-]{1,64}$", voice):
@@ -854,9 +879,7 @@ async def voice_chat(
     tts_sample_rate = 0
     tts_duration = 0.0
     if tts_enabled and reply_text:
-        tts_result = speech.synthesize(
-            text=reply_text, voice=voice, language=detected_lang
-        )
+        tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
         tts_latency = tts_result.latency_s
         tts_backend = tts_result.backend
         tts_sample_rate = tts_result.sample_rate
@@ -885,6 +908,7 @@ async def voice_chat(
     # Log voice conversation for analytics (mirrors /v1/chat logging)
     try:
         from .service import ChatModel as _CM
+
         db.log_conversation(
             session_id=session_id,
             user_message=_CM.redact_for_storage(transcript),
@@ -922,9 +946,7 @@ async def voice_chat(
 # Classification endpoints
 # ---------------------------------------------------------------------------
 @app.post("/classify", response_model=ClassifyResponse, tags=["classification"])
-def classify(
-    request: ClassifyRequest, model: ChatModel = Depends(get_model)
-) -> ClassifyResponse:
+def classify(request: ClassifyRequest, model: ChatModel = Depends(get_model)) -> ClassifyResponse:
     result = model.classify(text=request.text, top_k=request.top_k)
     return ClassifyResponse(**result)
 
@@ -1030,7 +1052,9 @@ def update_feedback_comment(
 
     updated = db.update_feedback_comment(message_id, _CM.redact_for_storage(body.comment))
     if not updated:
-        raise HTTPException(status_code=404, detail="Feedback entry not found or already has comment")
+        raise HTTPException(
+            status_code=404, detail="Feedback entry not found or already has comment"
+        )
     return {"status": "ok", "message_id": message_id}
 
 
@@ -1112,7 +1136,7 @@ def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
     report = run_evaluation(sample_size=sample_size, days=days)
     for m in report.metrics:
         metrics.observe(
-            f"ura_eval_metric",
+            "ura_eval_metric",
             m.value,
             labels={"name": m.name, "backend": report.backend},
         )
@@ -1284,10 +1308,7 @@ def me_grant_consent(
         email=ctx.user.email,
         role=ctx.role,
     )
-    granted = [
-        db.grant_consent(row["id"], p, body.version)
-        for p in body.purposes
-    ]
+    granted = [db.grant_consent(row["id"], p, body.version) for p in body.purposes]
     return {"user_id": row["id"], "granted": granted}
 
 

@@ -118,6 +118,28 @@
           "sha256": ""
         }
       ]
+    },
+    {
+      "id": "mms-tts-sw",
+      "title": "MMS-TTS Swahili",
+      "description": "VITS-based TTS for Swahili replies. ~40 MB. Uses Meta's MMS-TTS model.",
+      "locales": ["sw"],
+      "tier": "primary",
+      "size_bytes": 40000000,
+      "files": [
+        {
+          "role": "model",
+          "filename": "mms_tts_sw.onnx",
+          "url": "https://speech-models.ura-chatbot.example/v1/mms-tts-sw/mms_tts_sw.onnx",
+          "sha256": ""
+        },
+        {
+          "role": "tokens",
+          "filename": "tokens.txt",
+          "url": "https://speech-models.ura-chatbot.example/v1/mms-tts-sw/tokens.txt",
+          "sha256": ""
+        }
+      ]
     }
   ]
 }

@@ -212,11 +212,155 @@ def download_opus(
 # ---------------------------------------------------------------------------
 
 
+def download_masakhane(
+    src_lang: str,
+    tgt_lang: str,
+    output_dir: Path,
+    max_pairs: int = 50_000,
+) -> Path:
+    """Download Masakhane MT benchmark data from HuggingFace.
+
+    Masakhane is the largest community-driven NLP project for African
+    languages. Their MT benchmarks cover en↔lg, en↔sw, en↔nyn, en↔ach
+    with human-curated parallel pairs (CC-BY-4.0).
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("datasets library required")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"masakhane_{src_lang}_{tgt_lang}.jsonl"
+
+    if out_path.exists():
+        log.info("masakhane: %s already exists, skipping", out_path)
+        return out_path
+
+    # Masakhane uses ISO 639-3 codes with script tags.
+    _code_map = {
+        "en": "eng_Latn", "lg": "lug_Latn", "sw": "swh_Latn",
+        "nyn": "nyn_Latn", "ach": "ach_Latn",
+    }
+    src_code = _code_map.get(src_lang, f"{src_lang}_Latn")
+    tgt_code = _code_map.get(tgt_lang, f"{tgt_lang}_Latn")
+    pair = f"{src_code}-{tgt_code}"
+
+    log.info("masakhane: downloading %s (pair: %s)", pair, pair)
+
+    try:
+        ds = load_dataset(
+            "masakhane/lafand-mt",
+            pair,
+            split="train",
+            trust_remote_code=True,
+        )
+    except Exception as e:
+        log.warning("masakhane: %s not available: %s", pair, e)
+        # Try reversed pair.
+        try:
+            pair_rev = f"{tgt_code}-{src_code}"
+            ds = load_dataset(
+                "masakhane/lafand-mt",
+                pair_rev,
+                split="train",
+                trust_remote_code=True,
+            )
+        except Exception as e2:
+            log.warning("masakhane: reversed pair also failed: %s", e2)
+            out_path.write_text("")
+            return out_path
+
+    count = 0
+    with out_path.open("w", encoding="utf-8") as f:
+        for row in ds:
+            src_text = clean_text(str(row.get(src_lang, row.get("source", "")))).strip()
+            tgt_text = clean_text(str(row.get(tgt_lang, row.get("target", "")))).strip()
+
+            if not src_text or not tgt_text or len(src_text) < 5:
+                continue
+
+            f.write(json.dumps({
+                "source_text": src_text,
+                "target_text": tgt_text,
+                "source_lang": src_lang,
+                "target_lang": tgt_lang,
+                "source_type": "masakhane",
+                "license": LicenseClass.CC_BY.value,
+            }, ensure_ascii=False) + "\n")
+
+            count += 1
+            if count >= max_pairs:
+                break
+
+    log.info("masakhane: wrote %d pairs to %s", count, out_path)
+    return out_path
+
+
+def download_fleurs(
+    language: str,
+    output_dir: Path,
+    max_samples: int = 5000,
+) -> Path:
+    """Download Google FLEURS ASR eval set for a language.
+
+    FLEURS has ~12 hours per language covering 102 languages including
+    Luganda, Swahili. Used for ASR evaluation, not training.
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("datasets library required")
+
+    _fleurs_codes = {
+        "en": "en_us", "lg": "lg_ug", "sw": "sw_ke",
+    }
+    fleurs_code = _fleurs_codes.get(language)
+    if not fleurs_code:
+        log.warning("fleurs: language %s not in FLEURS", language)
+        return Path()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"fleurs_{language}.jsonl"
+
+    if out_path.exists():
+        log.info("fleurs: %s already exists", out_path)
+        return out_path
+
+    log.info("fleurs: downloading %s", fleurs_code)
+    try:
+        ds = load_dataset("google/fleurs", fleurs_code, split="test",
+                          trust_remote_code=True)
+    except Exception as e:
+        log.warning("fleurs: failed for %s: %s", language, e)
+        return Path()
+
+    count = 0
+    with out_path.open("w", encoding="utf-8") as f:
+        for row in ds:
+            text = row.get("transcription", "").strip()
+            if not text:
+                continue
+            f.write(json.dumps({
+                "reference": text,
+                "locale": language,
+                "id": f"fleurs-{language}-{count:04d}",
+                "source": "google/fleurs",
+            }, ensure_ascii=False) + "\n")
+            count += 1
+            if count >= max_samples:
+                break
+
+    log.info("fleurs: wrote %d eval samples to %s", count, out_path)
+    return out_path
+
+
 def download_all_corpora(
     output_dir: Path,
     lang_pairs: Optional[list[tuple[str, str]]] = None,
+    include_masakhane: bool = True,
+    include_fleurs: bool = True,
 ) -> list[Path]:
-    """Download JW300 + OPUS for all requested language pairs.
+    """Download JW300 + OPUS + Masakhane + FLEURS for all language pairs.
 
     Default pairs: en↔lg, en↔sw, en↔nyn, en↔ach.
     """
@@ -230,14 +374,31 @@ def download_all_corpora(
 
     paths = []
     for src, tgt in lang_pairs:
-        # JW300 is the largest freely available corpus for these pairs.
+        # JW300 — largest freely available corpus.
         paths.append(download_jw300(src, tgt, output_dir / "jw300"))
 
-        # OPUS Tatoeba for supplementary high-quality short sentences.
+        # OPUS Tatoeba — high-quality short sentences.
         try:
             paths.append(download_opus("Tatoeba", src, tgt, output_dir / "opus"))
         except Exception as e:
             log.warning("Tatoeba %s-%s unavailable: %s", src, tgt, e)
+
+        # Masakhane — community-curated African language MT.
+        if include_masakhane:
+            try:
+                paths.append(download_masakhane(src, tgt, output_dir / "masakhane"))
+            except Exception as e:
+                log.warning("Masakhane %s-%s unavailable: %s", src, tgt, e)
+
+    # FLEURS — ASR eval sets.
+    if include_fleurs:
+        for lang in {l for pair in lang_pairs for l in pair}:
+            try:
+                p = download_fleurs(lang, output_dir / "fleurs")
+                if p and p.exists():
+                    paths.append(p)
+            except Exception as e:
+                log.warning("FLEURS %s unavailable: %s", lang, e)
 
     return [p for p in paths if p.exists() and p.stat().st_size > 0]
 
@@ -320,12 +481,19 @@ def main():
         help="Language pairs as src-tgt (e.g. en-sw en-nyn)",
     )
     parser.add_argument("--max-pairs", type=int, default=50_000)
+    parser.add_argument("--no-masakhane", action="store_true", help="Skip Masakhane download")
+    parser.add_argument("--no-fleurs", action="store_true", help="Skip FLEURS download")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     pairs = [tuple(p.split("-", 1)) for p in args.lang_pairs]
-    paths = download_all_corpora(args.output_dir, lang_pairs=pairs)
+    paths = download_all_corpora(
+        args.output_dir,
+        lang_pairs=pairs,
+        include_masakhane=not args.no_masakhane,
+        include_fleurs=not args.no_fleurs,
+    )
     log.info("Downloaded %d corpus files", len(paths))
 
 

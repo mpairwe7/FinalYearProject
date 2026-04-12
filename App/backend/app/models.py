@@ -1,7 +1,8 @@
 """Pydantic v2 request/response models for the URA Chatbot API."""
 
-from pydantic import BaseModel, Field
 from typing import Annotated
+
+from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
@@ -15,7 +16,9 @@ class ChatRequest(BaseModel):
         description="Optional conversation/session id",
     )
     top_k: int = Field(4, ge=1, le=10, description="Number of passages to retrieve")
-    locale: str = Field("en", pattern=r"^[a-z]{2}(-[A-Z]{2})?$", description="ISO 639-1 locale (e.g. en, lg)")
+    locale: str = Field(
+        "en", pattern=r"^[a-z]{2}(-[A-Z]{2})?$", description="ISO 639-1 locale (e.g. en, lg)"
+    )
 
 
 class Citation(BaseModel):
@@ -271,7 +274,9 @@ class SpeechHealthResponse(BaseModel):
 # Export
 # ---------------------------------------------------------------------------
 class ExportConversationRequest(BaseModel):
-    messages: list[dict] = Field(..., min_length=1, description="List of {role, content, timestamp} dicts")
+    messages: list[dict] = Field(
+        ..., min_length=1, description="List of {role, content, timestamp} dicts"
+    )
     title: str = Field("Conversation Report", max_length=200)
     session_id: str = Field("", max_length=64)
 

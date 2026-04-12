@@ -61,6 +61,8 @@ class MTSourceType(str, Enum):
     SWAHILI_PARALLEL = "swahili_parallel"     # en↔sw parallel data
     RUNYANKOLE_PARALLEL = "runyankole_parallel"  # en↔nyn parallel data
     ACHOLI_PARALLEL = "acholi_parallel"       # en↔ach parallel data
+    MASAKHANE = "masakhane"                   # Masakhane MT benchmark (CC-BY-4.0)
+    FLEURS = "fleurs"                        # Google FLEURS ASR eval set
 
 
 class TTSSourceType(str, Enum):

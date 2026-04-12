@@ -124,7 +124,7 @@ void main() {
       expect(result.language, 'lg');
     });
 
-    test('throws luganda_model_not_ready when primary unavailable for lg', () async {
+    test('throws model_not_ready_lg when primary unavailable for lg', () async {
       final primary = _FakeEngine(
         id: 'whisper',
         supportedLocales: {'en', 'lg'},
@@ -140,7 +140,7 @@ void main() {
         () => router.transcribe(_dummyPcm, locale: 'lg'),
         throwsA(
           isA<AsrRouterException>()
-              .having((e) => e.code, 'code', 'luganda_model_not_ready'),
+              .having((e) => e.code, 'code', 'model_not_ready_lg'),
         ),
       );
     });

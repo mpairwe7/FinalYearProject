@@ -1,0 +1,10 @@
+{"id": "sw-01", "locale": "sw", "reference": "Kiwango cha kodi ya VAT nchini Uganda ni kipi", "audio_file": "sw_01.pcm", "notes": "Standard VAT rate question"}
+{"id": "sw-02", "locale": "sw", "reference": "Nitasajili vipi kupata namba ya TIN", "audio_file": "sw_02.pcm", "notes": "TIN registration"}
+{"id": "sw-03", "locale": "sw", "reference": "Nataka kuwasilisha marejesho yangu ya PAYE ya robo hii", "audio_file": "sw_03.pcm", "notes": "PAYE filing"}
+{"id": "sw-04", "locale": "sw", "reference": "Hati gani zinahitajika kwa tamko la forodha", "audio_file": "sw_04.pcm", "notes": "Customs docs"}
+{"id": "sw-05", "locale": "sw", "reference": "Tafadhali eleza mfumo wa risiti za kielektroniki wa EFRIS", "audio_file": "sw_05.pcm", "notes": "EFRIS system"}
+{"id": "sw-06", "locale": "sw", "reference": "Kiwango cha kodi ya zuio kwa huduma za kitaalamu ni kipi", "audio_file": "sw_06.pcm", "notes": "Withholding tax"}
+{"id": "sw-07", "locale": "sw", "reference": "Ninawezaje kuhesabu ushuru wa bidhaa zinazoingizwa", "audio_file": "sw_07.pcm", "notes": "Excise duty"}
+{"id": "sw-08", "locale": "sw", "reference": "Nataka kuangalia hali ya cheti changu cha kibali cha kodi", "audio_file": "sw_08.pcm", "notes": "Tax clearance"}
+{"id": "sw-09", "locale": "sw", "reference": "Tofauti kati ya CIF na FOB kwa mahesabu ya ushuru ni nini", "audio_file": "sw_09.pcm", "notes": "Trade terms"}
+{"id": "sw-10", "locale": "sw", "reference": "Ninasajili vipi biashara yangu na URSB na kupata TIN", "audio_file": "sw_10.pcm", "notes": "Business registration"}

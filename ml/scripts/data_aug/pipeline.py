@@ -244,6 +244,14 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
     for d in cfg.teacher_qa_dirs or []:
         if d.exists():
             manifest.record_input_directory(d, "teacher_qa", ["*.jsonl"])
+    if cfg.crawl_dir and cfg.crawl_dir.exists():
+        manifest.record_input_directory(cfg.crawl_dir, "web_crawl", ["*.json"])
+    for d in cfg.online_corpus_dirs:
+        if d.exists():
+            manifest.record_input_directory(d, "online_corpus", ["*.jsonl"])
+    for d in cfg.translated_faq_dirs:
+        if d.exists():
+            manifest.record_input_directory(d, "translated_faq", ["*.csv"])
 
     # --- Stage 1: ingest + dedup ------------------------------------------------
     log.info("=" * 70)

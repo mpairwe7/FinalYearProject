@@ -11,10 +11,14 @@ Endpoints:
 from __future__ import annotations
 
 import io
+import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fpdf import FPDF
+
+log = logging.getLogger(__name__)
 
 # URA brand colours (from the official style guide).
 _URA_NAVY = (26, 58, 107)
@@ -31,9 +35,32 @@ class _URAReport(FPDF):
         super().__init__()
         self._title = title
         self.set_auto_page_break(auto=True, margin=20)
-        # Use built-in Helvetica which covers Latin characters.
-        # For full Unicode (Luganda diacritics), add NotoSans TTF.
-        self.set_font("Helvetica", size=10)
+        self._font_name = self._setup_font()
+
+    def _setup_font(self) -> str:
+        """Load NotoSans for full Unicode support (African language diacritics).
+        Falls back to Helvetica if the TTF is not bundled."""
+        font_dir = Path(__file__).parent / "fonts"
+        noto_regular = font_dir / "NotoSans-Regular.ttf"
+        noto_bold = font_dir / "NotoSans-Bold.ttf"
+
+        if noto_regular.exists():
+            self.add_font("NotoSans", "", str(noto_regular), uni=True)
+            if noto_bold.exists():
+                self.add_font("NotoSans", "B", str(noto_bold), uni=True)
+            else:
+                self.add_font("NotoSans", "B", str(noto_regular), uni=True)
+            self.set_font("NotoSans", size=10)
+            return "NotoSans"
+        else:
+            log.warning(
+                "NotoSans font not found at %s — falling back to Helvetica. "
+                "African language diacritics may not render correctly. "
+                "Download NotoSans-Regular.ttf from Google Fonts.",
+                font_dir,
+            )
+            self.set_font("Helvetica", size=10)
+            return "Helvetica"
 
     def header(self):
         # Navy bar.
@@ -41,7 +68,7 @@ class _URAReport(FPDF):
         self.rect(0, 0, 210, 16, "F")
         # Title in white.
         self.set_text_color(*_WHITE)
-        self.set_font("Helvetica", "B", 12)
+        self.set_font(self._font_name, "B", 12)
         self.set_y(3)
         self.cell(0, 10, self._title, align="C")
         # Gold accent line.
@@ -52,7 +79,7 @@ class _URAReport(FPDF):
 
     def footer(self):
         self.set_y(-15)
-        self.set_font("Helvetica", "I", 7)
+        self.set_font(self._font_name, "I", 7)
         self.set_text_color(*_DARK_GRAY)
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         self.cell(

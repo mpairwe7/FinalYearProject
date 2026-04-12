@@ -154,6 +154,18 @@ mt:
       tgt: "lg"
     - src: "lg"
       tgt: "en"
+    - src: "en"
+      tgt: "sw"
+    - src: "sw"
+      tgt: "en"
+    - src: "en"
+      tgt: "nyn"
+    - src: "nyn"
+      tgt: "en"
+    - src: "en"
+      tgt: "ach"
+    - src: "ach"
+      tgt: "en"
 
   decoding:
     beam_size: 4
@@ -221,6 +233,43 @@ tts:
         license: "Apache-2.0"
         framework: "espnet"
         status: "alternative"
+
+    sw:
+      # Meta's MMS-TTS Swahili is pre-trained and available for download.
+      primary:
+        id: "mms-tts-sw"
+        license: "CC-BY-NC-4.0"     # NOTE: Non-commercial — use only for research until replaced
+        framework: "sherpa-onnx"
+        artifact: "artifacts/speech/tts/mms_tts_sw"
+        size_mb: 40
+        sample_rate: 22050
+        streaming: false
+        status: "available"
+      notes: "License is CC-BY-NC; for commercial release, train a custom Apache-2.0 VITS model"
+
+    nyn:
+      # No pre-trained TTS exists for Runyankole. Requires community voice recording.
+      primary:
+        id: "runyankole-vits-v1"
+        license: "project-internal"
+        framework: "coqui-tts"
+        artifact: "artifacts/speech/tts/runyankole_vits"
+        size_mb: 90
+        sample_rate: 22050
+        status: "community_recording_required"
+      notes: "Need 3-4 hours native speaker recording. Contact Mbarara University linguistics dept."
+
+    ach:
+      # No pre-trained TTS exists for Acholi. Requires community voice recording.
+      primary:
+        id: "acholi-vits-v1"
+        license: "project-internal"
+        framework: "coqui-tts"
+        artifact: "artifacts/speech/tts/acholi_vits"
+        size_mb: 90
+        sample_rate: 22050
+        status: "community_recording_required"
+      notes: "Need 3-4 hours native speaker recording. Contact Gulu University."
 
   # Streaming synthesis: chunk LLM output at sentence boundaries.
   streaming:
