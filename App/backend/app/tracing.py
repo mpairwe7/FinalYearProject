@@ -20,8 +20,9 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +73,7 @@ def init_tracing() -> None:
 
             # Traces
             tp = TracerProvider(resource=resource)
-            tp.add_span_processor(
-                BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_ENDPOINT))
-            )
+            tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_ENDPOINT)))
             trace.set_tracer_provider(tp)
             _tracer = trace.get_tracer("ura.chatbot.genai", "1.0.0")
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from . import Tool, ToolSchema, ToolRegistry
+from . import Tool, ToolRegistry, ToolSchema
 
 logger = logging.getLogger(__name__)
 

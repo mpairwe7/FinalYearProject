@@ -139,8 +139,13 @@ _RATE_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
 
 # Customs specialist triggers — narrower scope, specific vocabulary.
 _CUSTOMS_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(import|export|customs|bill\s+of\s+lading|cif|eac\s+cet|tariff|clearance)\b", re.IGNORECASE),
-    re.compile(r"\b(declaration|entry|port\s+of\s+entry|goods\s+at\s+the\s+border)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(import|export|customs|bill\s+of\s+lading|cif|eac\s+cet|tariff|clearance)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(declaration|entry|port\s+of\s+entry|goods\s+at\s+the\s+border)\b", re.IGNORECASE
+    ),
 ]
 
 # Escalation triggers — sensitive topics or explicit human requests.
@@ -170,8 +175,20 @@ _ESCALATE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 # Clarification triggers — queries too short or vague to answer.
 _CLARIFY_MIN_WORDS = 2
-_CLARIFY_STOP_WORDS = {"how", "what", "where", "when", "who", "why",
-                       "help", "hi", "hello", "hey", "tell", "info"}
+_CLARIFY_STOP_WORDS = {
+    "how",
+    "what",
+    "where",
+    "when",
+    "who",
+    "why",
+    "help",
+    "hi",
+    "hello",
+    "hey",
+    "tell",
+    "info",
+}
 
 
 # ---------------------------------------------------------------------------

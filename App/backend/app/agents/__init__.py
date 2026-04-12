@@ -21,7 +21,7 @@ request path (Phase 1-13 RAG) is unchanged.
 
 from __future__ import annotations
 
-from .state import AgentState, AgentRoute, RouteDecision
+from .state import AgentRoute, AgentState, RouteDecision
 from .supervisor import Supervisor, supervisor
 
 __all__ = [

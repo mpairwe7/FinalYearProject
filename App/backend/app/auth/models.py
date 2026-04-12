@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -99,11 +99,11 @@ class ConsentReceipt(BaseModel):
     receipt_id: str
     user_id: str
     purpose: Literal[
-        "personalization",       # memory, profile, tailored prompts
-        "analytics",             # usage statistics, quality metrics
-        "ticket_escalation",     # passing query + context to URA staff
-        "long_term_storage",     # retention beyond default TTL
-        "ura_account_access",    # tool access to URA account data
+        "personalization",  # memory, profile, tailored prompts
+        "analytics",  # usage statistics, quality metrics
+        "ticket_escalation",  # passing query + context to URA staff
+        "long_term_storage",  # retention beyond default TTL
+        "ura_account_access",  # tool access to URA account data
     ]
     version: str = Field(..., description="Version tag of the consent text, e.g. '2026-04'")
     granted_at: float = Field(default_factory=time.time)

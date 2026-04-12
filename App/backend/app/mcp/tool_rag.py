@@ -101,15 +101,14 @@ class ToolRAGSelector:
         if self._dense_model is None:
             return 0.0
         import numpy as np
+
         try:
             if self._tool_embeds is None:
                 self._tool_embeds = {}
             name = tool.schema.name
             if name not in self._tool_embeds:
                 text = f"{tool.schema.name}: {tool.schema.description}"
-                self._tool_embeds[name] = self._dense_model.encode(
-                    text, normalize_embeddings=True
-                )
+                self._tool_embeds[name] = self._dense_model.encode(text, normalize_embeddings=True)
             tool_emb = self._tool_embeds[name]
             query_emb = self._dense_model.encode(query, normalize_embeddings=True)
             return float(np.dot(tool_emb, query_emb))

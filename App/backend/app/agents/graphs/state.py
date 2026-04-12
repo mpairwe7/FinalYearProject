@@ -15,7 +15,7 @@ class GraphOutcome(str, Enum):
     ESCALATED = "escalated"
     BLOCKED = "blocked"
     ABSTAINED = "abstained"
-    TRUNCATED = "truncated"     # max iterations / depth reached
+    TRUNCATED = "truncated"  # max iterations / depth reached
     ERRORED = "errored"
 
 
@@ -44,7 +44,7 @@ class AgentGraphState:
     granted_purposes: list[str] = field(default_factory=list)
 
     # -- Plan --
-    plan: list[str] = field(default_factory=list)          # ordered step descriptions
+    plan: list[str] = field(default_factory=list)  # ordered step descriptions
     plan_reason: str = ""
 
     # -- Act / Observe --

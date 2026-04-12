@@ -11,21 +11,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import Tool, ToolSchema, ToolRegistry
+from . import Tool, ToolRegistry, ToolSchema
 from .calculators import _RATE_TABLES, _get_rates  # noqa: F401
 
-
 _DISPLAY_NAMES: dict[str, str] = {
-    "vat_standard":                "VAT (standard rate)",
-    "corporation_tax":             "Corporation tax",
-    "capital_gains_corporate":     "Capital gains tax (corporate)",
-    "rental_tax_individual":       "Rental tax (individual)",
-    "rental_tax_company":          "Rental tax (company)",
-    "withholding_services":        "WHT on services",
-    "withholding_goods":           "WHT on goods",
+    "vat_standard": "VAT (standard rate)",
+    "corporation_tax": "Corporation tax",
+    "capital_gains_corporate": "Capital gains tax (corporate)",
+    "rental_tax_individual": "Rental tax (individual)",
+    "rental_tax_company": "Rental tax (company)",
+    "withholding_services": "WHT on services",
+    "withholding_goods": "WHT on goods",
     "withholding_management_fees": "WHT on management fees",
-    "withholding_dividend":        "WHT on dividends",
-    "customs_duty_common":         "Customs duty (common finished goods)",
+    "withholding_dividend": "WHT on dividends",
+    "customs_duty_common": "Customs duty (common finished goods)",
 }
 
 
@@ -83,7 +82,7 @@ class LookupRateTool(Tool):
             return {
                 "ok": False,
                 "error": f"'{tax_type}' is not a simple scalar rate — "
-                         "use a more specific tool (e.g. calculate_paye).",
+                "use a more specific tool (e.g. calculate_paye).",
             }
         return {
             "ok": True,
@@ -126,12 +125,14 @@ class ListAvailableRatesTool(Tool):
         for key, display in _DISPLAY_NAMES.items():
             val = rates.get(key)
             if isinstance(val, (int, float)):
-                rows.append({
-                    "tax_type": key,
-                    "display_name": display,
-                    "rate": float(val),
-                    "rate_pct": round(float(val) * 100, 2),
-                })
+                rows.append(
+                    {
+                        "tax_type": key,
+                        "display_name": display,
+                        "rate": float(val),
+                        "rate_pct": round(float(val) * 100, 2),
+                    }
+                )
         return {
             "ok": True,
             "fiscal_year": fiscal_year,

@@ -36,7 +36,8 @@ import hashlib
 import logging
 import os
 import threading
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 
 from .guardrails import scan_retrieved_text
 
@@ -106,7 +107,7 @@ def _passage_marker(source: str, idx: int) -> str:
     ID that an attacker-controlled passage body cannot replicate without
     knowing both inputs at retrieval time.
     """
-    digest = hashlib.sha256(f"{source}:{idx}".encode("utf-8")).hexdigest()[:8]
+    digest = hashlib.sha256(f"{source}:{idx}".encode()).hexdigest()[:8]
     return f"p{idx}-{digest}"
 
 
@@ -166,9 +167,7 @@ def _build_messages(
     # ------------------------------------------------------------------
     query_tokens = _count_tokens(tokenizer, query)
     system_tokens = _count_tokens(tokenizer, system_content)
-    history_tokens = sum(
-        _count_tokens(tokenizer, m["content"]) for m in messages[1:]
-    )
+    history_tokens = sum(_count_tokens(tokenizer, m["content"]) for m in messages[1:])
     overhead_tokens = 256  # chat template, headers, section labels, markers
     available = (
         LLM_CONTEXT_WINDOW
@@ -238,7 +237,10 @@ def _load_model() -> bool:
 
             logger.info(
                 "Loading %s (device=%s, dtype=%s, revision=%s, trust_remote_code=%s)...",
-                LLM_MODEL, LLM_DEVICE, LLM_TORCH_DTYPE, LLM_MODEL_REVISION or "HEAD",
+                LLM_MODEL,
+                LLM_DEVICE,
+                LLM_TORCH_DTYPE,
+                LLM_MODEL_REVISION or "HEAD",
                 LLM_TRUST_REMOTE_CODE,
             )
 
@@ -302,17 +304,19 @@ def is_available() -> bool:
 def _vllm_generate(messages: list[dict[str, str]]) -> str:
     """Call a vLLM OpenAI-compatible /chat/completions endpoint."""
     try:
-        import urllib.request
         import json as _json
+        import urllib.request
 
-        body = _json.dumps({
-            "model": LLM_MODEL,
-            "messages": messages,
-            "temperature": LLM_TEMPERATURE,
-            "top_p": 0.95,
-            "max_tokens": LLM_MAX_TOKENS,
-            "stream": False,
-        }).encode("utf-8")
+        body = _json.dumps(
+            {
+                "model": LLM_MODEL,
+                "messages": messages,
+                "temperature": LLM_TEMPERATURE,
+                "top_p": 0.95,
+                "max_tokens": LLM_MAX_TOKENS,
+                "stream": False,
+            }
+        ).encode("utf-8")
         req = urllib.request.Request(
             f"{VLLM_BASE_URL}/chat/completions",
             data=body,
@@ -340,17 +344,19 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
     (``data: {...}\\n\\n`` lines, terminated by ``data: [DONE]``).
     """
     try:
-        import urllib.request
         import json as _json
+        import urllib.request
 
-        body = _json.dumps({
-            "model": LLM_MODEL,
-            "messages": messages,
-            "temperature": LLM_TEMPERATURE,
-            "top_p": 0.95,
-            "max_tokens": LLM_MAX_TOKENS,
-            "stream": True,
-        }).encode("utf-8")
+        body = _json.dumps(
+            {
+                "model": LLM_MODEL,
+                "messages": messages,
+                "temperature": LLM_TEMPERATURE,
+                "top_p": 0.95,
+                "max_tokens": LLM_MAX_TOKENS,
+                "stream": True,
+            }
+        ).encode("utf-8")
         req = urllib.request.Request(
             f"{VLLM_BASE_URL}/chat/completions",
             data=body,
@@ -399,7 +405,10 @@ def generate(
     if LLM_BACKEND == "vllm":
         use_structured = LLM_STRUCTURED_OUTPUT if structured is None else structured
         messages = _build_messages(
-            query, passages, conversation_history, locale,
+            query,
+            passages,
+            conversation_history,
+            locale,
             tokenizer=None,  # vLLM server tokenizes; we pass text
             structured=use_structured,
         )
@@ -410,8 +419,12 @@ def generate(
 
     use_structured = LLM_STRUCTURED_OUTPUT if structured is None else structured
     messages = _build_messages(
-        query, passages, conversation_history, locale,
-        tokenizer=_tokenizer, structured=use_structured,
+        query,
+        passages,
+        conversation_history,
+        locale,
+        tokenizer=_tokenizer,
+        structured=use_structured,
     )
 
     try:
@@ -435,7 +448,7 @@ def generate(
             )
 
         # Decode only the new tokens (exclude the prompt)
-        generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+        generated_ids = output_ids[0][inputs["input_ids"].shape[1] :]
         response = _tokenizer.decode(generated_ids, skip_special_tokens=True)
         return response.strip()
 
@@ -467,8 +480,12 @@ def generate_stream(
     """
     if LLM_BACKEND == "vllm":
         messages = _build_messages(
-            query, passages, conversation_history, locale,
-            tokenizer=None, structured=False,
+            query,
+            passages,
+            conversation_history,
+            locale,
+            tokenizer=None,
+            structured=False,
         )
         yield from _vllm_generate_stream(messages)
         return
@@ -477,12 +494,15 @@ def generate_stream(
         return
 
     messages = _build_messages(
-        query, passages, conversation_history, locale,
-        tokenizer=_tokenizer, structured=False,
+        query,
+        passages,
+        conversation_history,
+        locale,
+        tokenizer=_tokenizer,
+        structured=False,
     )
 
     try:
-        import torch
         from transformers import TextIteratorStreamer
 
         text = _tokenizer.apply_chat_template(
@@ -713,7 +733,9 @@ def _build_tool_messages(
             messages.append({"role": "assistant", "content": turn["bot_reply"]})
 
     if passages:
-        parts: list[str] = ["## Pre-fetched passages (you may use these OR call search_ura_knowledge_base for more)"]
+        parts: list[str] = [
+            "## Pre-fetched passages (you may use these OR call search_ura_knowledge_base for more)"
+        ]
         for i, p in enumerate(passages, 1):
             source = p.get("source", "unknown")
             page = p.get("page", "")
@@ -730,10 +752,12 @@ def _build_tool_messages(
         messages.append({"role": "user", "content": "\n".join(parts)})
     else:
         locale_hint = f"(Respond in locale: {locale})\n\n" if locale != "en" else ""
-        messages.append({
-            "role": "user",
-            "content": f"{locale_hint}{query}",
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": f"{locale_hint}{query}",
+            }
+        )
 
     return messages
 
@@ -825,10 +849,17 @@ def generate_with_tools(
                 add_generation_prompt=True,
             )
         except Exception:
-            logger.exception("apply_chat_template(tools=...) failed — maybe Qwen template doesn't support tools?")
+            logger.exception(
+                "apply_chat_template(tools=...) failed — maybe Qwen template doesn't support tools?"
+            )
             # Fall back to plain generate() so the request isn't wasted
             text = generate(query, passages or [], conversation_history, locale)
-            return {"text": text, "tool_calls": tool_calls_made, "iterations": iteration + 1, "truncated": False}
+            return {
+                "text": text,
+                "tool_calls": tool_calls_made,
+                "iterations": iteration + 1,
+                "truncated": False,
+            }
 
         try:
             inputs = _tokenizer([text], return_tensors="pt").to(_model.device)
@@ -841,7 +872,7 @@ def generate_with_tools(
                     do_sample=LLM_TEMPERATURE > 0,
                     pad_token_id=_tokenizer.eos_token_id,
                 )
-            gen_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+            gen_ids = output_ids[0][inputs["input_ids"].shape[1] :]
             response = _tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
         except Exception:
             logger.exception("generate_with_tools: iteration %d generation failed", iteration)
@@ -851,7 +882,9 @@ def generate_with_tools(
         parsed_calls = _parse_tool_calls(response)
         logger.info(
             "tool-loop iter=%d parsed_calls=%d response_len=%d",
-            iteration, len(parsed_calls), len(response),
+            iteration,
+            len(parsed_calls),
+            len(response),
         )
 
         if not parsed_calls:
@@ -869,44 +902,54 @@ def generate_with_tools(
         for idx, pc in enumerate(parsed_calls):
             result = ToolRegistry.call(pc["name"], pc.get("arguments", {}))
             call_id = f"call_{iteration}_{idx}"
-            tool_calls_made.append({
-                "id": call_id,
-                "name": pc["name"],
-                "arguments": pc.get("arguments", {}),
-                "result": result,
-                "iteration": iteration,
-            })
-            assistant_tool_call_entries.append({
-                "id": call_id,
-                "type": "function",
-                "function": {
+            tool_calls_made.append(
+                {
+                    "id": call_id,
                     "name": pc["name"],
-                    "arguments": _json.dumps(pc.get("arguments", {})),
-                },
-            })
-            tool_result_messages.append({
-                "role": "tool",
-                "name": pc["name"],
-                "tool_call_id": call_id,
-                "content": _json.dumps(result)[:2000],  # cap for safety
-            })
+                    "arguments": pc.get("arguments", {}),
+                    "result": result,
+                    "iteration": iteration,
+                }
+            )
+            assistant_tool_call_entries.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": pc["name"],
+                        "arguments": _json.dumps(pc.get("arguments", {})),
+                    },
+                }
+            )
+            tool_result_messages.append(
+                {
+                    "role": "tool",
+                    "name": pc["name"],
+                    "tool_call_id": call_id,
+                    "content": _json.dumps(result)[:2000],  # cap for safety
+                }
+            )
 
         # Append the assistant tool-call message (empty content) + tool results
-        messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": assistant_tool_call_entries,
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": assistant_tool_call_entries,
+            }
+        )
         messages.extend(tool_result_messages)
 
     # Max iterations exhausted — return whatever the last generation produced
     truncated = True
     logger.warning(
         "generate_with_tools: max_iterations=%d reached (calls made: %d)",
-        max_iterations, len(tool_calls_made),
+        max_iterations,
+        len(tool_calls_made),
     )
     return {
-        "text": _strip_tool_calls(last_response) or "I wasn't able to produce a complete answer within the tool-call budget.",
+        "text": _strip_tool_calls(last_response)
+        or "I wasn't able to produce a complete answer within the tool-call budget.",
         "tool_calls": tool_calls_made,
         "iterations": max_iterations,
         "truncated": truncated,

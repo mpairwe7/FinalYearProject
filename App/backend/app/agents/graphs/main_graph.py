@@ -16,11 +16,10 @@ from the audit ledger trivial.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from ..state import AgentRoute
 from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
+from ..state import AgentRoute
 from .runtime import END, GraphNode, GraphRuntime, NodeResult
 from .state import AgentGraphState, GraphOutcome
 
@@ -78,6 +77,7 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
     )
 
     import os
+
     if os.getenv("FLAG_TOOL_RAG", "false").lower() != "true":
         # Flag off → accept the supervisor's raw whitelist
         state.plan = [t for t in state.plan if t in eligible]
@@ -136,12 +136,14 @@ def node_act(state: AgentGraphState) -> NodeResult:
             user_id=state.user_id,
             iteration=state.iterations,
         )
-        state.tool_calls.append({
-            "call_id": result.call_id,
-            "name": tool_name,
-            "ok": result.ok,
-            "duration_ms": result.duration_ms,
-        })
+        state.tool_calls.append(
+            {
+                "call_id": result.call_id,
+                "name": tool_name,
+                "ok": result.ok,
+                "duration_ms": result.duration_ms,
+            }
+        )
         state.observations.append(result.result)
 
     return NodeResult(next_node="synthesize")

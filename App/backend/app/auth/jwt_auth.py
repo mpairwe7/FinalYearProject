@@ -171,8 +171,7 @@ def make_dev_token(
     """
     if APP_ENV == "production":
         raise RuntimeError(
-            "make_dev_token() is disabled under APP_ENV=production. "
-            "Use a real OIDC provider."
+            "make_dev_token() is disabled under APP_ENV=production. " "Use a real OIDC provider."
         )
 
     now = int(time.time())

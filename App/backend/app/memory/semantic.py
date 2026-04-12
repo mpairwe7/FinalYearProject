@@ -20,11 +20,10 @@ the same; callers don't know the backend changed.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from .decay import compute_decayed_confidence
@@ -37,11 +36,11 @@ class UserFact:
     fact_id: str
     user_id: str
     tenant_id: str
-    category: str          # e.g. "taxpayer_type"
-    subject: str           # usually "user"
-    predicate: str         # e.g. "is_a"
-    object_value: str      # e.g. "sole_trader"
-    confidence: float      # 0..1 at extraction time
+    category: str  # e.g. "taxpayer_type"
+    subject: str  # usually "user"
+    predicate: str  # e.g. "is_a"
+    object_value: str  # e.g. "sole_trader"
+    confidence: float  # 0..1 at extraction time
     extracted_at: float
     conversation_id: str = ""
     turn_id: str = ""
@@ -50,10 +49,18 @@ class UserFact:
 
     def to_row(self) -> tuple[Any, ...]:
         return (
-            self.fact_id, self.user_id, self.tenant_id, self.category,
-            self.subject, self.predicate, self.object_value,
-            self.confidence, self.extracted_at,
-            self.conversation_id, self.turn_id, self.extractor_model,
+            self.fact_id,
+            self.user_id,
+            self.tenant_id,
+            self.category,
+            self.subject,
+            self.predicate,
+            self.object_value,
+            self.confidence,
+            self.extracted_at,
+            self.conversation_id,
+            self.turn_id,
+            self.extractor_model,
             self.superseded_by,
         )
 
@@ -166,7 +173,7 @@ class SemanticMemory:
         if not include_superseded:
             sql += " AND superseded_by IS NULL"
         sql += " ORDER BY extracted_at DESC LIMIT ?"
-        params.append(max(1, limit * 3))   # overfetch, we'll filter by decay
+        params.append(max(1, limit * 3))  # overfetch, we'll filter by decay
 
         rows = conn.execute(sql, params).fetchall()
         now = time.time()
@@ -183,21 +190,23 @@ class SemanticMemory:
                 continue
             if row["confidence"] < min_confidence:
                 continue
-            results.append(UserFact(
-                fact_id=row["fact_id"],
-                user_id=row["user_id"],
-                tenant_id=row["tenant_id"],
-                category=row["category"],
-                subject=row["subject"],
-                predicate=row["predicate"],
-                object_value=row["object_value"],
-                confidence=decayed,   # decay-adjusted for caller convenience
-                extracted_at=row["extracted_at"],
-                conversation_id=row["conversation_id"],
-                turn_id=row["turn_id"],
-                extractor_model=row["extractor_model"],
-                superseded_by=row["superseded_by"],
-            ))
+            results.append(
+                UserFact(
+                    fact_id=row["fact_id"],
+                    user_id=row["user_id"],
+                    tenant_id=row["tenant_id"],
+                    category=row["category"],
+                    subject=row["subject"],
+                    predicate=row["predicate"],
+                    object_value=row["object_value"],
+                    confidence=decayed,  # decay-adjusted for caller convenience
+                    extracted_at=row["extracted_at"],
+                    conversation_id=row["conversation_id"],
+                    turn_id=row["turn_id"],
+                    extractor_model=row["extractor_model"],
+                    superseded_by=row["superseded_by"],
+                )
+            )
             if len(results) >= limit:
                 break
         return results

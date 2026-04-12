@@ -74,10 +74,7 @@ class EvalReport:
             "regressions": self.regressions,
             "passed": not self.regressions,
             "by_segment": {
-                dim: {
-                    seg: [asdict(m) for m in metrics]
-                    for seg, metrics in segments.items()
-                }
+                dim: {seg: [asdict(m) for m in metrics] for seg, metrics in segments.items()}
                 for dim, segments in self.by_segment.items()
             },
         }
@@ -95,9 +92,7 @@ class EvalReport:
         ]
         for m in self.metrics:
             lines.append(f'ura_eval_metric{{name="{m.name}"}} {m.value:.4f}')
-            lines.append(
-                f'ura_eval_metric_passed{{name="{m.name}"}} {1 if m.passed else 0}'
-            )
+            lines.append(f'ura_eval_metric_passed{{name="{m.name}"}} {1 if m.passed else 0}')
         # Per-segment — one label set per (metric, dim, segment_value)
         for dim, segments in self.by_segment.items():
             for seg, metrics in segments.items():
@@ -121,6 +116,7 @@ def _heuristic_faithfulness(answer: str, contexts: list[str]) -> float:
 def _heuristic_answer_relevancy(question: str, answer: str) -> float:
     """Token-overlap proxy for the Ragas answer_relevancy metric."""
     import re as _re
+
     q_tokens = set(_re.findall(r"\w+", question.lower()))
     a_tokens = set(_re.findall(r"\w+", answer.lower()))
     if not q_tokens or not a_tokens:
@@ -133,6 +129,7 @@ def _heuristic_context_precision(answer: str, contexts: list[str]) -> float:
     if not contexts or not answer:
         return 0.0
     import re as _re
+
     a_tokens = set(_re.findall(r"\w+", answer.lower()))
     hits = 0
     for ctx in contexts:
@@ -158,24 +155,26 @@ def _try_ragas(
         from datasets import Dataset
         from ragas import evaluate
         from ragas.metrics import (  # type: ignore
-            faithfulness,
             answer_relevancy,
             context_precision,
+            faithfulness,
         )
     except ImportError:
         logger.debug("Ragas not installed; using heuristic eval")
         return None
 
     try:
-        ds = Dataset.from_list([
-            {
-                "question": s["question"],
-                "answer": s["answer"],
-                "contexts": s["contexts"],
-                "ground_truth": s.get("ground_truth", s["answer"]),
-            }
-            for s in samples
-        ])
+        ds = Dataset.from_list(
+            [
+                {
+                    "question": s["question"],
+                    "answer": s["answer"],
+                    "contexts": s["contexts"],
+                    "ground_truth": s.get("ground_truth", s["answer"]),
+                }
+                for s in samples
+            ]
+        )
         result = evaluate(
             ds,
             metrics=[faithfulness, answer_relevancy, context_precision],
@@ -234,11 +233,13 @@ def collect_samples(
         # No per-row retrieved contexts persisted — use answer as a proxy
         # context so the harness is runnable.  Production deployments should
         # extend the DB schema to store the top-k contexts per conversation.
-        samples.append({
-            "question": question,
-            "answer": answer,
-            "contexts": [answer],
-        })
+        samples.append(
+            {
+                "question": question,
+                "answer": answer,
+                "contexts": [answer],
+            }
+        )
 
     return samples[:sample_size]
 
@@ -327,7 +328,6 @@ def _compute_by_segment(
     noisy single-sample scores.
     """
     from collections import defaultdict
-    import re
 
     _topic_keywords = {
         "vat": ["vat", "value added"],

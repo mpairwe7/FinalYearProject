@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from . import Tool, ToolSchema, ToolRegistry
+from . import Tool, ToolRegistry, ToolSchema
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,9 @@ def _get_retriever() -> Any:
         if _retriever_ready:
             logger.info("RAG tool: HybridRetriever initialised")
         else:
-            logger.warning("RAG tool: HybridRetriever initialisation failed — returning empty results")
+            logger.warning(
+                "RAG tool: HybridRetriever initialisation failed — returning empty results"
+            )
     except Exception:
         logger.exception("RAG tool: HybridRetriever import/init error")
         _retriever = None
@@ -138,18 +140,20 @@ class SearchKnowledgeBaseTool(Tool):
         results: list[dict[str, Any]] = []
         for i, h in enumerate(hits, 1):
             text = (h.get("text") or h.get("answer") or "")[:800]
-            results.append({
-                "ref": f"[{i}]",
-                "source": h.get("source", "unknown"),
-                "section": h.get("section", ""),
-                "page": h.get("page", ""),
-                "doc_type": h.get("doc_type", ""),
-                "score": round(
-                    float(h.get("score_rerank") or h.get("score_rrf") or 0.0),
-                    4,
-                ),
-                "passage": text,
-            })
+            results.append(
+                {
+                    "ref": f"[{i}]",
+                    "source": h.get("source", "unknown"),
+                    "section": h.get("section", ""),
+                    "page": h.get("page", ""),
+                    "doc_type": h.get("doc_type", ""),
+                    "score": round(
+                        float(h.get("score_rerank") or h.get("score_rrf") or 0.0),
+                        4,
+                    ),
+                    "passage": text,
+                }
+            )
 
         return {
             "ok": True,

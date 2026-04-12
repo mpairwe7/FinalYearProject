@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from .decay import compute_decayed_confidence, decay_factor
 from .episodic import EpisodicMemory, EpisodicSummary
-from .extractor import FactExtractor, FactCandidate
+from .extractor import FactCandidate, FactExtractor
 from .semantic import SemanticMemory, UserFact
 from .service import MemoryService, get_memory_service
 from .working import WorkingMemory

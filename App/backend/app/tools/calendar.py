@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any
 
-from . import Tool, ToolSchema, ToolRegistry
+from . import Tool, ToolRegistry, ToolSchema
 
 
 def _fiscal_year_for(date: _dt.date) -> str:
@@ -39,8 +39,20 @@ def _fiscal_year_for(date: _dt.date) -> str:
 # Each entry: (month, day, name, description, scope)
 # "Scope" names the taxpayer type: all | individual | company | vat | paye | customs
 _RECURRING_DEADLINES: list[tuple[int, int, str, str, str]] = [
-    (1, 15, "PAYE / WHT / VAT monthly", "PAYE, WHT, VAT and excise returns for the prior month are due", "all"),
-    (2, 15, "PAYE / WHT / VAT monthly", "PAYE, WHT, VAT and excise returns for the prior month are due", "all"),
+    (
+        1,
+        15,
+        "PAYE / WHT / VAT monthly",
+        "PAYE, WHT, VAT and excise returns for the prior month are due",
+        "all",
+    ),
+    (
+        2,
+        15,
+        "PAYE / WHT / VAT monthly",
+        "PAYE, WHT, VAT and excise returns for the prior month are due",
+        "all",
+    ),
     (3, 15, "PAYE / WHT / VAT monthly", "Monthly returns for Feb are due", "all"),
     (4, 15, "PAYE / WHT / VAT monthly", "Monthly returns for Mar are due", "all"),
     (5, 15, "PAYE / WHT / VAT monthly", "Monthly returns for Apr are due", "all"),
@@ -52,9 +64,27 @@ _RECURRING_DEADLINES: list[tuple[int, int, str, str, str]] = [
     (11, 15, "PAYE / WHT / VAT monthly", "Monthly returns for Oct are due", "all"),
     (12, 15, "PAYE / WHT / VAT monthly", "Monthly returns for Nov are due", "all"),
     # Annual returns
-    (9, 30, "Individual provisional income tax", "Third-month provisional return for individuals (3 months after start of FY)", "individual"),
-    (12, 31, "Company provisional income tax", "Sixth-month provisional return for companies (6 months after start of FY)", "company"),
-    (12, 31, "Final income tax return", "Final income tax return due within 6 months after FY end", "all"),
+    (
+        9,
+        30,
+        "Individual provisional income tax",
+        "Third-month provisional return for individuals (3 months after start of FY)",
+        "individual",
+    ),
+    (
+        12,
+        31,
+        "Company provisional income tax",
+        "Sixth-month provisional return for companies (6 months after start of FY)",
+        "company",
+    ),
+    (
+        12,
+        31,
+        "Final income tax return",
+        "Final income tax return due within 6 months after FY end",
+        "all",
+    ),
 ]
 
 
@@ -157,13 +187,15 @@ class NextDeadlineTool(Tool):
                     continue
                 if scope not in ("all", sc) and sc != "all":
                     continue
-                candidates.append({
-                    "date": dl.isoformat(),
-                    "days_away": (dl - today).days,
-                    "name": name,
-                    "description": desc,
-                    "scope": sc,
-                })
+                candidates.append(
+                    {
+                        "date": dl.isoformat(),
+                        "days_away": (dl - today).days,
+                        "name": name,
+                        "description": desc,
+                        "scope": sc,
+                    }
+                )
 
         candidates.sort(key=lambda c: c["date"])
         # Deduplicate by date+name when the same deadline appears in both years

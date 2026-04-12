@@ -14,8 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,12 @@ class FactCandidate:
 # ---------------------------------------------------------------------------
 _TAXPAYER_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(i\s*am|i'm|i\s+run)\s+a\s+sole[- ]?trader\b", re.IGNORECASE), "sole_trader"),
-    (re.compile(r"\b(my\s+)?(company|firm|business)\b.*\b(ltd|limited|plc|inc)\b", re.IGNORECASE), "company"),
+    (
+        re.compile(
+            r"\b(my\s+)?(company|firm|business)\b.*\b(ltd|limited|plc|inc)\b", re.IGNORECASE
+        ),
+        "company",
+    ),
     (re.compile(r"\bngo\b|\bnon[- ]profit\b", re.IGNORECASE), "ngo"),
     (re.compile(r"\bnon[- ]resident\b", re.IGNORECASE), "non_resident"),
     (re.compile(r"\bpartnership\b", re.IGNORECASE), "partnership"),
@@ -78,11 +82,7 @@ class FactExtractor:
         for i, turn in enumerate(turns):
             if turn.get("role") not in ("user", "user_message"):
                 continue
-            text = str(
-                turn.get("content")
-                or turn.get("user_message")
-                or turn.get("message", "")
-            )
+            text = str(turn.get("content") or turn.get("user_message") or turn.get("message", ""))
             if not text:
                 continue
             candidates.extend(self._scan(text, source_turn=i))
@@ -93,52 +93,60 @@ class FactExtractor:
 
         for pat, value in _TAXPAYER_TYPE_PATTERNS:
             if pat.search(text):
-                out.append(FactCandidate(
-                    category="taxpayer_type",
-                    subject="user",
-                    predicate="is_a",
-                    object_value=value,
-                    confidence=0.85,
-                    source_turn=source_turn,
-                    rule_id=f"taxpayer:{pat.pattern[:30]}",
-                ))
+                out.append(
+                    FactCandidate(
+                        category="taxpayer_type",
+                        subject="user",
+                        predicate="is_a",
+                        object_value=value,
+                        confidence=0.85,
+                        source_turn=source_turn,
+                        rule_id=f"taxpayer:{pat.pattern[:30]}",
+                    )
+                )
                 break  # one taxpayer type per user
 
         for pat, value in _INDUSTRY_PATTERNS:
             if pat.search(text):
-                out.append(FactCandidate(
-                    category="industry",
-                    subject="user",
-                    predicate="operates_in",
-                    object_value=value,
-                    confidence=0.75,
-                    source_turn=source_turn,
-                    rule_id=f"industry:{value}",
-                ))
+                out.append(
+                    FactCandidate(
+                        category="industry",
+                        subject="user",
+                        predicate="operates_in",
+                        object_value=value,
+                        confidence=0.75,
+                        source_turn=source_turn,
+                        rule_id=f"industry:{value}",
+                    )
+                )
 
         for pat, value in _REGISTRATION_PATTERNS:
             if pat.search(text):
-                out.append(FactCandidate(
-                    category="registered_vat" if value == "vat" else "registered_tax",
-                    subject="user",
-                    predicate="is_registered_for",
-                    object_value=value,
-                    confidence=0.80,
-                    source_turn=source_turn,
-                    rule_id=f"reg:{value}",
-                ))
+                out.append(
+                    FactCandidate(
+                        category="registered_vat" if value == "vat" else "registered_tax",
+                        subject="user",
+                        predicate="is_registered_for",
+                        object_value=value,
+                        confidence=0.80,
+                        source_turn=source_turn,
+                        rule_id=f"reg:{value}",
+                    )
+                )
 
         for pat, value in _LANGUAGE_PATTERNS:
             if pat.search(text):
-                out.append(FactCandidate(
-                    category="primary_language",
-                    subject="user",
-                    predicate="speaks",
-                    object_value=value,
-                    confidence=0.70,
-                    source_turn=source_turn,
-                    rule_id="language",
-                ))
+                out.append(
+                    FactCandidate(
+                        category="primary_language",
+                        subject="user",
+                        predicate="speaks",
+                        object_value=value,
+                        confidence=0.70,
+                        source_turn=source_turn,
+                        rule_id="language",
+                    )
+                )
 
         return out
 

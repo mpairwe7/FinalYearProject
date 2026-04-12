@@ -37,7 +37,8 @@ def _avg_score(hits: list[dict[str, Any]]) -> float:
 
 def _expand_query(query: str) -> str:
     """Simple query expansion for re-retrieval."""
-    from .query import expand_abbreviations, correct_spelling
+    from .query import correct_spelling, expand_abbreviations
+
     expanded = expand_abbreviations(correct_spelling(query))
     # Add "Uganda Revenue Authority" context if not present
     if "ura" not in expanded.lower() and "uganda" not in expanded.lower():
@@ -121,7 +122,14 @@ def needs_clarification(query: str, hits: list[dict[str, Any]]) -> str | None:
 
     # Only flag single-word queries that are pure stop words
     if len(words) == 1 and words[0].lower() in {
-        "how", "what", "where", "when", "who", "help", "hi", "hello",
+        "how",
+        "what",
+        "where",
+        "when",
+        "who",
+        "help",
+        "hi",
+        "hello",
     }:
         return (
             "Could you please provide more details about your question? "
