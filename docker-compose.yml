@@ -68,7 +68,7 @@ services:
   # Qdrant Vector Store (first-class RAG dependency)
   # ---------------------------------------------------------------------------
   qdrant:
-    image: qdrant/qdrant:v1.13.3
+    image: qdrant/qdrant:v1.17.1
     container_name: ura-qdrant
     ports:
       - "${QDRANT_PORT:-6333}:6333"
@@ -78,7 +78,7 @@ services:
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333 && echo -e 'GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n' >&3 && cat <&3 | grep -q 'ok'"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333 && printf 'GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q 'passed' <&3"]
       interval: 15s
       timeout: 5s
       retries: 5

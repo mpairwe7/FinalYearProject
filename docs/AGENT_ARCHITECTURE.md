@@ -14,6 +14,7 @@ request path until an operator flips one of:
 | `FLAG_TOOL_USE` | Allow the LLM to call registered tools via Qwen2.5 native function-calling. |
 | `FLAG_AGENTIC_MODE` | Route every request through the supervisor classifier before retrieval. |
 | `FLAG_TICKET_QUEUE` | Persist supervisor-driven escalations to the `tickets` table. |
+| `FLAG_AUDIT_LEDGER` | Write hash-chained audit events on every `service.generate()` return path. |
 
 Flags can be set per-process via env (`FLAG_TOOL_USE=true …`) or
 per-request in tests via `flags.set("tool_use", True)`.
@@ -48,7 +49,7 @@ per-request in tests via `flags.set("tool_use", True)`.
       └──────┬─────────────────────────────────────────┘
              ▼
       ┌─────────────────────────────────────────────────┐
-      │            Hybrid retrieval (Qdrant)            │
+      │            Hybrid retrieval (Qdrant v1.17.1)      │
       │   dense + BM25 RRF + cross-encoder rerank       │
       └──────┬──────────────────────────────────────────┘
              ▼
@@ -352,10 +353,23 @@ Ticket IDs are UUIDs — the path regex is `^[a-f0-9-]{1,64}$`.
     FLAG_TICKET_QUEUE=true
     ```
 
-2. Restart the API (`uvicorn` picks up env on boot).  Qwen weights
+2. Set infrastructure env vars for the shared-host port mappings
+   (Docker maps Qdrant/Redis to non-default ports to avoid
+   conflicts with other tenants):
+
+    ```bash
+    QDRANT_URL=http://localhost:16333      # Docker maps 16333→6333
+    REDIS_URL=redis://localhost:16379/0    # Docker maps 16379→6379
+    DENSE_MODEL=sentence-transformers/all-MiniLM-L6-v2
+    DENSE_DIM=384                          # Must match the indexed collection
+    HF_HOME=/home/developer/hf-cache       # Writable cache dir
+    CUDA_VISIBLE_DEVICES=0                 # Pin to a specific GPU
+    ```
+
+3. Restart the API (`uvicorn` picks up env on boot).  Qwen weights
    are already cached at `~/hf-cache` — restart takes ~15 s.
 
-3. Verify via `/ready` and exercise one route of each type:
+4. Verify via `/ready` and exercise one route of each type:
 
     ```bash
     # TOOLS route — calculator
@@ -562,7 +576,8 @@ follow-up PRs have clear landing spots.
 | `6330f1d` | 21 subset | Hash-chained audit ledger + per-segment eval |
 | `ec224c4` | 17-20 | Directory scaffolds + READMEs for DMZ MCP, workflows, scheduler |
 | `79c7239` | 21 wire | Audit ledger wired into `service.generate` on every return path |
-| `<current>` | tests + docs | +151 pytest tests (154 → 304), TestClient integration for /v1/me/*, this doc update |
+| `95236ae` | tests + docs | +151 pytest tests (154 → 304), TestClient integration for /v1/me/*, AGENT_ARCHITECTURE v2 |
+| `<current>` | infra | Qdrant v1.13.3 → v1.17.1 upgrade (client-server match), healthcheck fix, port mapping docs |
 
 See `git log --oneline feat/agentic-workflows ^main` for the
 authoritative list.
@@ -576,7 +591,7 @@ authoritative list.
 
 ---
 
-*Document version 2.0 — updated after Phase 14-21 delivery on
-`feat/agentic-workflows`.  Keep this file in sync with any
-subsequent Phase 14+ changes; if you add a new tool, route, or
-flag, update Sections 3, 4, and 6.*
+*Document version 2.1 — updated after Qdrant v1.17.1 upgrade and
+infrastructure connectivity fixes on `feat/agentic-workflows`.
+Keep this file in sync with any subsequent Phase 14+ changes;
+if you add a new tool, route, or flag, update Sections 3, 4, and 6.*

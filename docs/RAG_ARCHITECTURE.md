@@ -6,7 +6,7 @@ The URA Chatbot implements a production-grade Retrieval-Augmented Generation pip
 
 **API Version**: 1.2.0
 **LLM**: Qwen/Qwen2.5-3B-Instruct (local, HuggingFace transformers)
-**Retrieval**: Qdrant dense + BM25 sparse + RRF fusion + cross-encoder reranking
+**Retrieval**: Qdrant v1.17.1 dense + BM25 sparse + RRF fusion + cross-encoder reranking
 
 ## Pipeline Flow
 
@@ -67,7 +67,7 @@ User Query
 
 | Component | Details |
 |-----------|---------|
-| Dense model | `sentence-transformers/all-MiniLM-L6-v2` (384-dim) or `multilingual-e5-large` (1024-dim) |
+| Dense model | `sentence-transformers/all-MiniLM-L6-v2` (384-dim, active default) or `BAAI/bge-m3` (1024-dim, requires re-indexing). Set via `DENSE_MODEL` + `DENSE_DIM` env vars. |
 | Sparse | BM25 keyword matching |
 | Fusion | Reciprocal Rank Fusion (configurable dense/sparse weights) |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
@@ -201,7 +201,7 @@ fastapi==0.111.0, uvicorn[standard]==0.30.1, pydantic==2.7.4
 transformers>=4.46.0, torch>=2.4.0, accelerate>=1.2.0
 
 # Retrieval
-sentence-transformers==3.4.1, qdrant-client==1.13.3, numpy>=1.26.0
+sentence-transformers==3.4.1, qdrant-client==1.17.1, numpy>=1.26.0
 
 # Streaming + Rate Limiting
 sse-starlette>=2.0.0, slowapi>=0.1.9
