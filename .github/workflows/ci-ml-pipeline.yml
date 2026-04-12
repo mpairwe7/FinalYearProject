@@ -331,6 +331,25 @@ jobs:
                 f"strata={split['strata_count']}")
           PY
 
+      - name: Generate data quality plots
+        continue-on-error: true
+        run: |
+          pip install matplotlib seaborn 2>/dev/null
+          python -m ml.plots.generate_all \
+            --metrics-dir /tmp/aug_real \
+            --output-dir /tmp/aug_real/plots \
+            --format png 2>&1 | tail -5
+          echo "Generated $(ls /tmp/aug_real/plots/*.png 2>/dev/null | wc -l) plots"
+
+      - name: Upload data quality plots
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: data-quality-plots
+          path: /tmp/aug_real/plots/
+          retention-days: 7
+
       - name: Step summary
         if: always()
         run: |
@@ -339,6 +358,8 @@ jobs:
           echo "- Schema/PII unit checks: passed" >> "$GITHUB_STEP_SUMMARY"
           echo "- Dry-run: passed" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pipeline end-to-end: passed" >> "$GITHUB_STEP_SUMMARY"
+          PLOTS=$(ls /tmp/aug_real/plots/*.png 2>/dev/null | wc -l)
+          echo "- Plots generated: $PLOTS" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
   # Speech Pipeline Smoke Test (2026)
