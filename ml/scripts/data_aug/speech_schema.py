@@ -63,6 +63,11 @@ class MTSourceType(str, Enum):
     ACHOLI_PARALLEL = "acholi_parallel"       # en↔ach parallel data
     MASAKHANE = "masakhane"                   # Masakhane MT benchmark (CC-BY-4.0)
     FLEURS = "fleurs"                        # Google FLEURS ASR eval set
+    SALT = "salt"                            # Sunbird SALT parallel + ASR + TTS (CC-BY-SA-4.0)
+    SALT_ASR = "salt_asr"                    # SALT multispeaker ASR recordings
+    WAXAL_ASR = "waxal_asr"                  # Google WAXAL ASR (CC-BY-SA-4.0)
+    WAXAL_TTS = "waxal_tts"                  # Google WAXAL TTS (CC-BY-SA-4.0)
+    FLORES = "flores"                        # FLORES-200 MT eval (CC-BY-SA-4.0)
 
 
 class TTSSourceType(str, Enum):
