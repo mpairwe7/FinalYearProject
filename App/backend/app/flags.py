@@ -58,6 +58,14 @@ _REGISTRY: dict[str, Flag] = {
         Flag("memory_enabled", False, "Inject personal memory facts into agentic prompts"),
         # Phase 21 (2026) — audit ledger + per-segment eval
         Flag("audit_ledger", False, "Append every agentic turn to the hash-chained audit_events table"),
+        # Phase 22 (2026) — mobile offline voice stack
+        Flag(
+            "voice_enabled",
+            False,
+            "Enable mobile on-device voice features (ASR/TTS). Server handles "
+            "no audio — the flag only gates the mobile UI and scoped analytics "
+            "events. Per-user consent is still required on the device.",
+        ),
     ]
 }
 

@@ -26,14 +26,44 @@ openpyxl==3.1.5
 # Hybrid retrieval (BM25 sparse + cross-encoder reranking)
 rank-bm25==0.2.2
 
-# PDF ingestion
+# PDF ingestion + generation
 pymupdf4llm==0.0.17
 pymupdf==1.25.3
+fpdf2>=2.8.0
 
-# Text-to-Speech
+# Web crawling
+beautifulsoup4>=4.12.0
+
+# Text-to-Speech (legacy — kept for notebooks only, not production path)
 TTS==0.21.3; python_version < '3.12'
 gTTS>=2.5.0; python_version >= '3.12'
 pydub==0.25.1
+
+# ----------------------------------------------------------------------------
+# Speech pipeline (2026 production — Luganda/English ASR + MT + TTS)
+# ----------------------------------------------------------------------------
+# Fine-tuning stack (explicitly pinned — previously imported but missing)
+peft>=0.14.0
+trl>=0.12.0
+bitsandbytes>=0.43.0; sys_platform == 'linux'
+# ONNX export + quantisation
+optimum[onnxruntime]>=1.24.0
+onnxruntime>=1.20.0
+# Unified on-device audio runtime (ASR + VAD + TTS + lang-ID)
+sherpa-onnx>=1.11.0
+# ASR eval
+jiwer>=3.0.0
+# Audio I/O for eval + training pipelines
+librosa>=0.10.0
+soundfile>=0.12.0
+# Streaming voice activity detection
+silero-vad>=5.1.0
+# Language identification (code-switching routing)
+lingua-language-detector>=2.0.0
+# Optional: reference-free MT quality (uncomment when adopting)
+# unbabel-comet>=2.2.0
+# Optional: Luganda phoneme G2P via espnet TTS frontend
+# espnet-tts-frontend>=0.0.4
 
 # Data Ingestion & Augmentation
 datasketch==1.6.5

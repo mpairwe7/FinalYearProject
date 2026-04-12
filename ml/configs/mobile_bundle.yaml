@@ -1,0 +1,148 @@
+# ============================================================================
+# Mobile Bundle Manifest (2026 Production)
+# ----------------------------------------------------------------------------
+# Single source of truth for what ships on-device. Consumed by:
+#
+#     ml/scripts/speech/export_mobile_speech.py   — bundle builder
+#     ml/scripts/export_mobile.py                  — existing LLM exporter (reference)
+#     ml/pipelines/benchmark_mobile.py             — on-device benchmark runner
+#
+# License policy: every component's ``license`` MUST be in the commercial-safe
+# allowlist (``public_domain``, ``permissive``, ``cc_by``, ``proprietary``,
+# ``gemma_terms``). The exporter refuses to package CC-BY-NC assets.
+# ============================================================================
+
+schema_version: "2026.1"
+bundle_version: "2026.1.0"
+license_allowlist:
+  - public_domain
+  - permissive
+  - cc_by
+  - proprietary
+  - gemma_terms
+
+# ----------------------------------------------------------------------------
+# LLM (existing pipeline — ml/scripts/export_mobile.py)
+# ----------------------------------------------------------------------------
+llm:
+  component: "ura_gemma_2b"
+  filename: "ura-gemma-2b-q4_k_m.gguf"
+  runtime: "mediapipe-llm-inference"
+  quantization: "Q4_K_M"
+  size_mb_budget: 1600
+  license: "gemma_terms"
+  source: "artifacts/mobile/ura-gemma-2b-q4_k_m.gguf"
+  android_asset: "android/app/src/main/assets/models/ura-gemma-2b-q4_k_m.gguf"
+  ios_asset: "ios/Runner/models/ura-gemma-2b-q4_k_m.gguf"
+
+# ----------------------------------------------------------------------------
+# ASR — sherpa-onnx (Whisper INT8)
+# ----------------------------------------------------------------------------
+asr:
+  runtime: "sherpa-onnx"
+  components:
+    - id: "whisper-small-en"
+      filename_prefix: "whisper-small-en"
+      language: "en"
+      license: "permissive"   # MIT
+      source: "artifacts/speech/asr/sherpa/openai__whisper-small"
+      size_mb_budget: 220
+      files:
+        - "encoder.int8.onnx"
+        - "decoder.int8.onnx"
+        - "tokens.txt"
+        - "config.json"
+    - id: "whisper-small-lg-ft"
+      filename_prefix: "whisper-small-lg-ft"
+      language: "lg"
+      license: "permissive"   # derived from MIT Whisper-small
+      source: "artifacts/speech/asr/sherpa/whisper_lg"
+      size_mb_budget: 220
+      files:
+        - "encoder.int8.onnx"
+        - "decoder.int8.onnx"
+        - "tokens.txt"
+        - "config.json"
+    - id: "silero-vad"
+      filename_prefix: "silero-vad"
+      language: "multi"
+      license: "permissive"   # MIT
+      source: "artifacts/speech/asr/snakers4__silero-vad"
+      size_mb_budget: 2
+      files:
+        - "silero_vad.onnx"
+  total_size_mb_budget: 450
+  android_asset_dir: "android/app/src/main/assets/speech/asr"
+  ios_asset_dir: "ios/Runner/speech/asr"
+
+# ----------------------------------------------------------------------------
+# TTS — sherpa-onnx (Piper + Luganda VITS)
+# ----------------------------------------------------------------------------
+tts:
+  runtime: "sherpa-onnx"
+  components:
+    - id: "piper-en_US-lessac-medium"
+      language: "en"
+      license: "permissive"   # MIT
+      source: "artifacts/speech/tts/sherpa/en_US-lessac-medium"
+      size_mb_budget: 70
+      files:
+        - "model.onnx"
+        - "tokens.txt"
+        - "config.json"
+    - id: "luganda-vits-v1"
+      language: "lg"
+      license: "permissive"   # MPL-2.0 Coqui framework
+      status: "training_required"
+      source: "artifacts/speech/tts/sherpa/luganda-vits-v1"
+      size_mb_budget: 100
+      files:
+        - "model.onnx"
+        - "tokens.txt"
+        - "config.json"
+  total_size_mb_budget: 200
+  android_asset_dir: "android/app/src/main/assets/speech/tts"
+  ios_asset_dir: "ios/Runner/speech/tts"
+
+# ----------------------------------------------------------------------------
+# MT — onnxruntime (MADLAD-400 student INT8)
+# ----------------------------------------------------------------------------
+mt:
+  runtime: "onnxruntime"
+  components:
+    - id: "madlad-student-int8"
+      language: "multi"
+      license: "permissive"   # Apache-2.0
+      source: "artifacts/mt/onnx/student_int8"
+      size_mb_budget: 350
+      files:
+        - "encoder_model_int8.onnx"
+        - "decoder_model_merged_int8.onnx"
+        - "spiece.model"
+        - "tokenizer.json"
+        - "config.json"
+  total_size_mb_budget: 350
+  android_asset_dir: "android/app/src/main/assets/speech/mt"
+  ios_asset_dir: "ios/Runner/speech/mt"
+
+# ----------------------------------------------------------------------------
+# Global bundle budget (fails-soft if exceeded)
+# ----------------------------------------------------------------------------
+bundle:
+  total_size_mb_budget: 2600   # 1600 LLM + 450 ASR + 200 TTS + 350 MT
+  min_android_sdk: 24
+  min_ios_version: "16.0"
+  min_ram_mb: 2000
+  bundle_card_path: "artifacts/mobile_speech/BUNDLE_CARD.md"
+
+# ----------------------------------------------------------------------------
+# Performance budgets (enforced by benchmark_mobile.py)
+# ----------------------------------------------------------------------------
+perf_budgets:
+  asr_rtf: 0.5
+  asr_p95_latency_ms: 1500
+  mt_p95_latency_ms: 800
+  tts_rtf: 0.5
+  llm_first_token_ms: 500
+  total_round_trip_ms: 5000
+  peak_ram_mb: 1800

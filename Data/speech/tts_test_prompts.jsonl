@@ -1,0 +1,20 @@
+{"text": "Welcome to the Uganda Revenue Authority. How can I help you today?", "language": "en", "tag": "greeting"}
+{"text": "Value Added Tax is charged at eighteen percent on the supply of taxable goods and services.", "language": "en", "tag": "vat_rate"}
+{"text": "You can register for a Tax Identification Number online at the URA web portal.", "language": "en", "tag": "tin_register"}
+{"text": "Pay As You Earn is deducted monthly by employers from employee salaries.", "language": "en", "tag": "paye_intro"}
+{"text": "To file your tax return, log in to your URA account and select the Returns tab.", "language": "en", "tag": "filing"}
+{"text": "Penalties for late filing include a percentage of the outstanding tax and interest charges.", "language": "en", "tag": "penalties"}
+{"text": "Rental income is taxable and must be declared on your annual return.", "language": "en", "tag": "rental"}
+{"text": "For personalised advice about your specific tax situation, please contact URA customer service directly.", "language": "en", "tag": "escalation"}
+{"text": "I am not certain about that, so please verify with URA before acting on this information.", "language": "en", "tag": "caveat"}
+{"text": "Thank you for using the URA Tax Assistant. Goodbye.", "language": "en", "tag": "farewell"}
+{"text": "Tukwanirizza ku URA. Nkuyambe ntya leero?", "language": "lg", "tag": "greeting"}
+{"text": "Omusolo gw'emigaso gusasulwa ku busigo bw'obuwumbi kumi n'omunaana ku bintu n'obuweereza.", "language": "lg", "tag": "vat_rate"}
+{"text": "Osobola okwewandiisa ku nnamba y'omusolo okuyita ku mutimbagano gwa URA.", "language": "lg", "tag": "tin_register"}
+{"text": "Omusolo gwa PAYE gusalibwako buli mwezi okuva mu ssente z'abakozi.", "language": "lg", "tag": "paye_intro"}
+{"text": "Okusindika lipooti y'omusolo, yingira mu akkaawunti yo eya URA.", "language": "lg", "tag": "filing"}
+{"text": "Ebibonerezo ku lutalo okulwawo mulimu ekitundu ky'omusolo n'amagoba.", "language": "lg", "tag": "penalties"}
+{"text": "Ssente ezifunibwa mu kupangisa zisasulirwako omusolo.", "language": "lg", "tag": "rental"}
+{"text": "Kulaba obubaka obutuufu, tukubire URA butereevu.", "language": "lg", "tag": "escalation"}
+{"text": "Sikakasa, nsaba okakase ne URA nga tonnaba kukola kintu.", "language": "lg", "tag": "caveat"}
+{"text": "Weebale okukozesa URA Tax Assistant. Weeraba.", "language": "lg", "tag": "farewell"}

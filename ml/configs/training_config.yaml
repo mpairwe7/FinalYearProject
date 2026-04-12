@@ -109,8 +109,14 @@ rag_quality_gates:
 speech_quality_gates:
   max_wer_en: 0.15
   max_wer_lg: 0.25
+  max_wer_sw: 0.20
+  max_wer_nyn: 0.30
+  max_wer_ach: 0.30
   max_cer_en: 0.07
   max_cer_lg: 0.12
+  max_cer_sw: 0.10
+  max_cer_nyn: 0.15
+  max_cer_ach: 0.15
   max_rtf: 0.5
   max_p50_latency_ms: 800
   max_p95_latency_ms: 1500
@@ -120,8 +126,16 @@ speech_quality_gates:
 mt_quality_gates:
   min_bleu_en_lg: 15.0
   min_bleu_lg_en: 20.0
+  min_bleu_en_sw: 12.0
+  min_bleu_sw_en: 15.0
+  min_bleu_en_nyn: 8.0
+  min_bleu_nyn_en: 10.0
+  min_bleu_en_ach: 8.0
+  min_bleu_ach_en: 10.0
   min_chrf_en_lg: 0.35
   min_chrf_lg_en: 0.40
+  min_chrf_en_sw: 0.30
+  min_chrf_sw_en: 0.35
   max_length_ratio_deviation: 0.30
   max_hallucination_rate: 0.05
   min_comet_kiwi: 0.50       # optional; only enforced if unbabel-comet installed

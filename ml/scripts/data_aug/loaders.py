@@ -65,6 +65,8 @@ def _make_example(
     doc_id: Optional[str] = None,
     extra: Optional[dict[str, Any]] = None,
     system: Optional[str] = URA_SYSTEM_PROMPT,
+    grounding_score: Optional[float] = None,
+    is_synthetic: Optional[bool] = None,
 ) -> Optional[TrainingExample]:
     """Build a validated TrainingExample. Returns None if redaction left the
     example empty or trivially short."""
@@ -80,6 +82,15 @@ def _make_example(
     messages.append(Message(role="user", content=user_clean))
     messages.append(Message(role="assistant", content=assistant_clean))
 
+    # Phase 2 — default synthetic flag based on source_type. Callers can
+    # override via is_synthetic=. Teacher QA / PDF-QA are synthetic by
+    # construction; CSV FAQs / refusals / Luganda parallel are real.
+    if is_synthetic is None:
+        is_synthetic = source_type in {
+            SourceType.TEACHER_QA,
+            SourceType.PDF_QA,
+        }
+
     try:
         return TrainingExample(
             messages=messages,
@@ -93,6 +104,8 @@ def _make_example(
                 chunk_id=chunk_id,
                 doc_id=doc_id,
                 extra=extra or {},
+                grounding_score=grounding_score,
+                is_synthetic=is_synthetic,
             ),
         )
     except Exception as exc:  # Pydantic validation
@@ -478,6 +491,11 @@ def _parse_teacher_file(path: Path) -> Iterator[TrainingExample]:
 
                 source = rec.get("source_pdf") or rec.get("source") or path.name
 
+                # Phase 2 — teacher grounding score is propagated from
+                # teacher_qa_generation.filter_by_grounding so downstream
+                # quality filtering and per-row audit can see it.
+                grounding = rec.get("grounding_score")
+
                 if "question" in rec and "answer" in rec:
                     ex = _make_example(
                         user=str(rec["question"]),
@@ -486,6 +504,8 @@ def _parse_teacher_file(path: Path) -> Iterator[TrainingExample]:
                         source_type=SourceType.TEACHER_QA,
                         task=TaskType.QA,
                         tag=rec.get("type"),
+                        grounding_score=grounding,
+                        is_synthetic=True,
                     )
                     if ex is not None:
                         yield ex
@@ -502,6 +522,8 @@ def _parse_teacher_file(path: Path) -> Iterator[TrainingExample]:
                         source_type=SourceType.TEACHER_QA,
                         task=TaskType.QA,
                         tag=rec.get("type"),
+                        grounding_score=grounding,
+                        is_synthetic=True,
                     )
                     if ex is not None:
                         yield ex
@@ -519,6 +541,8 @@ def _parse_teacher_file(path: Path) -> Iterator[TrainingExample]:
                             source_type=SourceType.TEACHER_QA,
                             task=TaskType.QA,
                             tag=rec.get("type"),
+                            grounding_score=grounding,
+                            is_synthetic=True,
                         )
                         if ex is not None:
                             yield ex

@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-12",
+  "cdn_base": "https://speech-models.ura-chatbot.example/v1",
+  "bundles": [
+    {
+      "id": "whisper-small-int8",
+      "title": "Whisper Small (INT8)",
+      "description": "Primary on-device ASR. ~120 MB quantised. English + 99 other languages; used for Luganda via the domain-prompt path until a dedicated adapter bundle is shipped.",
+      "locales": ["en", "lg", "sw"],
+      "tier": "primary",
+      "size_bytes": 120000000,
+      "files": [
+        {
+          "role": "encoder",
+          "filename": "encoder.int8.onnx",
+          "url": "https://speech-models.ura-chatbot.example/v1/whisper-small-int8/encoder.int8.onnx",
+          "sha256": ""
+        },
+        {
+          "role": "decoder",
+          "filename": "decoder.int8.onnx",
+          "url": "https://speech-models.ura-chatbot.example/v1/whisper-small-int8/decoder.int8.onnx",
+          "sha256": ""
+        },
+        {
+          "role": "tokens",
+          "filename": "tokens.txt",
+          "url": "https://speech-models.ura-chatbot.example/v1/whisper-small-int8/tokens.txt",
+          "sha256": ""
+        }
+      ]
+    },
+    {
+      "id": "whisper-tiny-int8",
+      "title": "Whisper Tiny (INT8)",
+      "description": "Bandwidth-constrained fallback. ~40 MB. Use on devices with < 3 GB RAM or on metered connections.",
+      "locales": ["en", "lg", "sw"],
+      "tier": "fallback",
+      "size_bytes": 40000000,
+      "files": [
+        {
+          "role": "encoder",
+          "filename": "encoder.int8.onnx",
+          "url": "https://speech-models.ura-chatbot.example/v1/whisper-tiny-int8/encoder.int8.onnx",
+          "sha256": ""
+        },
+        {
+          "role": "decoder",
+          "filename": "decoder.int8.onnx",
+          "url": "https://speech-models.ura-chatbot.example/v1/whisper-tiny-int8/decoder.int8.onnx",
+          "sha256": ""
+        },
+        {
+          "role": "tokens",
+          "filename": "tokens.txt",
+          "url": "https://speech-models.ura-chatbot.example/v1/whisper-tiny-int8/tokens.txt",
+          "sha256": ""
+        }
+      ]
+    },
+    {
+      "id": "silero-vad-v5",
+      "title": "Silero VAD v5",
+      "description": "On-device voice activity detector. ~2 MB. Used for endpointing in the audio capture pipeline.",
+      "locales": ["*"],
+      "tier": "primary",
+      "size_bytes": 2400000,
+      "files": [
+        {
+          "role": "model",
+          "filename": "silero_vad.onnx",
+          "url": "https://speech-models.ura-chatbot.example/v1/silero-vad-v5/silero_vad.onnx",
+          "sha256": ""
+        }
+      ]
+    },
+    {
+      "id": "mms-tts-eng",
+      "title": "MMS-TTS English",
+      "description": "VITS-based TTS for English replies. ~40 MB.",
+      "locales": ["en"],
+      "tier": "primary",
+      "size_bytes": 40000000,
+      "files": [
+        {
+          "role": "model",
+          "filename": "mms_tts_eng.onnx",
+          "url": "https://speech-models.ura-chatbot.example/v1/mms-tts-eng/mms_tts_eng.onnx",
+          "sha256": ""
+        },
+        {
+          "role": "tokens",
+          "filename": "tokens.txt",
+          "url": "https://speech-models.ura-chatbot.example/v1/mms-tts-eng/tokens.txt",
+          "sha256": ""
+        }
+      ]
+    },
+    {
+      "id": "mms-tts-lug",
+      "title": "MMS-TTS Luganda",
+      "description": "VITS-based TTS for Luganda replies. ~40 MB. First open-source native Luganda voice.",
+      "locales": ["lg"],
+      "tier": "primary",
+      "size_bytes": 40000000,
+      "files": [
+        {
+          "role": "model",
+          "filename": "mms_tts_lug.onnx",
+          "url": "https://speech-models.ura-chatbot.example/v1/mms-tts-lug/mms_tts_lug.onnx",
+          "sha256": ""
+        },
+        {
+          "role": "tokens",
+          "filename": "tokens.txt",
+          "url": "https://speech-models.ura-chatbot.example/v1/mms-tts-lug/tokens.txt",
+          "sha256": ""
+        }
+      ]
+    }
+  ]
+}

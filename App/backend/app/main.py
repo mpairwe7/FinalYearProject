@@ -24,6 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 from .models import (
     ChatRequest,
     ChatResponse,
+    Citation,
     ClassifyRequest,
     ClassifyResponse,
     TagListResponse,
@@ -37,8 +38,25 @@ from .models import (
     FeedbackCommentRequest,
     AnalyticsEvent,
     AnalyticsDashboard,
+    TranscribeResponse,
+    SynthesizeRequest,
+    SynthesizeResponse,
+    TranslateRequest,
+    TranslateResponse,
+    VoiceChatRequest,
+    VoiceChatResponse,
+    SpeechHealthResponse,
+    ExportConversationRequest,
+    ExportTaxSummaryRequest,
 )
 from .service import ChatModel
+from .speech_service import (
+    SpeechModel,
+    SPEECH_ASR_BACKEND,
+    SPEECH_ENABLED,
+    SPEECH_MT_BACKEND,
+    SPEECH_TTS_BACKEND,
+)
 from .analytics import AnalyticsMiddleware, metrics
 from . import database as db
 
@@ -75,8 +93,31 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("ChatModel initialisation failed")
         app.state.model = None
+
+    # Speech pipeline (ASR + MT + TTS). Fails soft: backend still boots when
+    # speech assets are missing, so the text API is never blocked by speech.
+    if SPEECH_ENABLED:
+        try:
+            app.state.speech = SpeechModel()
+            logger.info(
+                "SpeechModel ready (asr=%s tts=%s mt=%s)",
+                SPEECH_ASR_BACKEND, SPEECH_TTS_BACKEND, SPEECH_MT_BACKEND,
+            )
+        except Exception:
+            logger.exception("SpeechModel initialisation failed — speech endpoints will 503")
+            app.state.speech = None
+    else:
+        app.state.speech = None
+        logger.info("Speech pipeline disabled via SPEECH_ENABLED=false")
+
     yield
     app.state.model = None
+    try:
+        if getattr(app.state, "speech", None) is not None:
+            app.state.speech.close()
+    except Exception:
+        logger.warning("SpeechModel close raised", exc_info=True)
+    app.state.speech = None
     logger.info("ChatModel shut down.")
 
 
@@ -116,6 +157,17 @@ def get_model(request: Request) -> ChatModel:
     if model is None:
         raise HTTPException(status_code=503, detail="Model not initialized")
     return model
+
+
+def get_speech_model(request: Request) -> SpeechModel:
+    """Retrieve the SpeechModel from app state; 503 if unavailable."""
+    speech = getattr(request.app.state, "speech", None)
+    if speech is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Speech pipeline disabled or failed to initialise (set SPEECH_ENABLED=true)",
+        )
+    return speech
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +458,385 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                 logger.warning("Stream conversation logging failed", exc_info=True)
 
     return EventSourceResponse(event_generator())
+
+
+# ---------------------------------------------------------------------------
+# Speech endpoints (2026 — ASR / TTS / MT)
+# ---------------------------------------------------------------------------
+# Audio in/out uses raw bytes to avoid the base64 tax on the fast path.
+# JSON responses carry a base64-encoded audio payload so the same route
+# can be consumed from a simple JavaScript fetch().
+@app.post("/v1/asr", response_model=TranscribeResponse, tags=["speech"])
+@limiter.limit(_RATE_LIMIT)
+async def transcribe_audio(
+    request: Request,
+    speech: SpeechModel = Depends(get_speech_model),
+) -> TranscribeResponse:
+    """Transcribe raw PCM audio posted as the request body.
+
+    Pass ``sample_rate`` and optional ``language`` as query parameters. The
+    request body must be raw PCM (int16 little-endian or float32, 1 channel).
+    """
+    sample_rate_raw = request.query_params.get("sample_rate", "16000")
+    try:
+        sample_rate = int(sample_rate_raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="sample_rate must be an integer")
+    if not 8000 <= sample_rate <= 48000:
+        raise HTTPException(status_code=400, detail="sample_rate must be in [8000, 48000]")
+    language = request.query_params.get("language")
+    if language is not None and not re.match(r"^[a-z]{2}$", language):
+        raise HTTPException(status_code=400, detail="language must be an ISO 639-1 code")
+
+    audio_bytes = await request.body()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="empty audio body")
+    # Hard cap: ~2 minutes at 16 kHz int16 stereo — protects the executor pool.
+    MAX_BYTES = 16 * 1024 * 1024
+    if len(audio_bytes) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="audio exceeds 16 MiB limit")
+
+    result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language)
+    metrics.inc("speech_asr_total")
+    if result.latency_s:
+        metrics.observe("speech_asr_latency_s", result.latency_s)
+    if result.error:
+        metrics.inc("speech_asr_errors_total")
+    return TranscribeResponse(
+        text=result.text,
+        language=result.language,
+        duration_s=result.duration_s,
+        latency_s=result.latency_s,
+        rtf=result.rtf,
+        backend=result.backend,
+        error=result.error,
+    )
+
+
+@app.post("/v1/tts", response_model=SynthesizeResponse, tags=["speech"])
+@limiter.limit(_RATE_LIMIT)
+async def synthesize_audio(
+    request: Request,
+    body: SynthesizeRequest,
+    speech: SpeechModel = Depends(get_speech_model),
+) -> SynthesizeResponse:
+    """Synthesize text to WAV audio. Returns base64-encoded WAV bytes."""
+    import base64
+
+    result = speech.synthesize(
+        text=body.text, voice=body.voice, language=body.language
+    )
+    metrics.inc("speech_tts_total")
+    if result.latency_s:
+        metrics.observe("speech_tts_latency_s", result.latency_s)
+    if result.error:
+        metrics.inc("speech_tts_errors_total")
+    return SynthesizeResponse(
+        sample_rate=result.sample_rate,
+        num_samples=result.num_samples,
+        duration_s=result.duration_s,
+        latency_s=result.latency_s,
+        backend=result.backend,
+        voice=result.voice,
+        audio_base64=base64.b64encode(result.audio).decode("ascii") if result.audio else "",
+        error=result.error,
+    )
+
+
+@app.post("/v1/translate", response_model=TranslateResponse, tags=["speech"])
+@limiter.limit(_RATE_LIMIT)
+async def translate_text(
+    request: Request,
+    body: TranslateRequest,
+    speech: SpeechModel = Depends(get_speech_model),
+) -> TranslateResponse:
+    """Machine-translate text between English and Luganda."""
+    if body.source_lang == body.target_lang:
+        return TranslateResponse(
+            text=body.text,
+            source_lang=body.source_lang,
+            target_lang=body.target_lang,
+            latency_s=0.0,
+            backend="passthrough",
+        )
+    result = speech.translate(
+        text=body.text,
+        source_lang=body.source_lang,
+        target_lang=body.target_lang,
+    )
+    metrics.inc("speech_mt_total")
+    if result.latency_s:
+        metrics.observe("speech_mt_latency_s", result.latency_s)
+    if result.error:
+        metrics.inc("speech_mt_errors_total")
+    return TranslateResponse(
+        text=result.text,
+        source_lang=result.source_lang,
+        target_lang=result.target_lang,
+        latency_s=result.latency_s,
+        backend=result.backend,
+        error=result.error,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+
+@app.post("/v1/export/conversation", tags=["export"])
+def export_conversation(body: ExportConversationRequest) -> Response:
+    """Export a conversation as a branded PDF."""
+    from .pdf_export import generate_conversation_pdf
+
+    pdf_bytes = generate_conversation_pdf(
+        body.messages,
+        title=body.title,
+        session_id=body.session_id,
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="ura_conversation_{int(time.time())}.pdf"',
+        },
+    )
+
+
+@app.post("/v1/export/tax-summary", tags=["export"])
+def export_tax_summary(body: ExportTaxSummaryRequest) -> Response:
+    """Export a tax calculation summary as a branded PDF."""
+    from .pdf_export import generate_tax_summary_pdf
+
+    pdf_bytes = generate_tax_summary_pdf(
+        body.calculation,
+        taxpayer_ref=body.taxpayer_ref,
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="ura_tax_summary_{int(time.time())}.pdf"',
+        },
+    )
+
+
+@app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])
+def speech_health(request: Request) -> SpeechHealthResponse:
+    """Report whether the speech pipeline is ready to serve requests."""
+    speech = getattr(request.app.state, "speech", None)
+    enabled = SPEECH_ENABLED and speech is not None and speech.is_ready()
+    return SpeechHealthResponse(
+        status="ready" if enabled else "unavailable",
+        enabled=SPEECH_ENABLED,
+        asr_backend=SPEECH_ASR_BACKEND,
+        tts_backend=SPEECH_TTS_BACKEND,
+        mt_backend=SPEECH_MT_BACKEND,
+    )
+
+
+@app.post("/v1/voice/chat", response_model=VoiceChatResponse, tags=["speech"])
+@limiter.limit(_RATE_LIMIT)
+async def voice_chat(
+    request: Request,
+    speech: SpeechModel = Depends(get_speech_model),
+    model: ChatModel = Depends(get_model),
+) -> VoiceChatResponse:
+    """Compound voice pipeline: audio -> ASR -> [MT] -> LLM -> [MT] -> TTS -> audio.
+
+    The request body is raw PCM audio (int16 LE, mono). Query parameters carry
+    the voice-chat metadata (language, voice, top_k, conversation_id, tts_enabled).
+    """
+    import asyncio
+    import base64
+
+    t_start = time.perf_counter()
+
+    # --- Input validation (mirrors /v1/asr strictness) -----------------------
+    language = request.query_params.get("language", "en")
+    if not re.match(r"^[a-z]{2}$", language):
+        raise HTTPException(status_code=400, detail="language must be an ISO 639-1 code (e.g. en, lg)")
+
+    voice = request.query_params.get("voice") or None
+    if voice and not re.match(r"^[a-zA-Z0-9_\-]{1,64}$", voice):
+        raise HTTPException(status_code=400, detail="voice must match [a-zA-Z0-9_-]{1,64}")
+
+    try:
+        top_k = int(request.query_params.get("top_k", "4"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="top_k must be an integer")
+    if not 1 <= top_k <= 10:
+        raise HTTPException(status_code=400, detail="top_k must be in [1, 10]")
+
+    conversation_id = request.query_params.get("conversation_id") or None
+    if conversation_id and not re.match(r"^[a-zA-Z0-9_\-]{1,64}$", conversation_id):
+        raise HTTPException(status_code=400, detail="conversation_id format invalid")
+
+    tts_enabled = request.query_params.get("tts_enabled", "true").lower() == "true"
+
+    sample_rate_raw = request.query_params.get("sample_rate", "16000")
+    try:
+        sample_rate = int(sample_rate_raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="sample_rate must be an integer")
+    if not 8000 <= sample_rate <= 48000:
+        raise HTTPException(status_code=400, detail="sample_rate must be in [8000, 48000]")
+
+    audio_bytes = await request.body()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="empty audio body")
+    if len(audio_bytes) > 16 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="audio exceeds 16 MiB limit")
+
+    # Collect per-stage errors so they surface in the response
+    stage_errors: list[str] = []
+    session_id = request.headers.get("X-Session-ID") or None
+
+    # --- 1. ASR ---------------------------------------------------------------
+    asr_result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language)
+    asr_latency = asr_result.latency_s or 0.0
+    metrics.inc("speech_asr_total")
+    if asr_result.latency_s:
+        metrics.observe("speech_asr_latency_s", asr_result.latency_s)
+    if asr_result.error:
+        metrics.inc("speech_asr_errors_total")
+        return VoiceChatResponse(
+            transcript="",
+            error=f"ASR failed: {asr_result.error}",
+            asr_latency_s=round(asr_latency, 3),
+            asr_backend=asr_result.backend,
+            total_latency_s=round(time.perf_counter() - t_start, 3),
+        )
+    transcript = asr_result.text
+    detected_lang = asr_result.language or language
+
+    # Guard: empty transcript (user said nothing / noise)
+    if not transcript.strip():
+        return VoiceChatResponse(
+            transcript="",
+            transcript_language=detected_lang,
+            error="No speech detected. Please speak clearly and try again.",
+            asr_latency_s=round(asr_latency, 3),
+            asr_backend=asr_result.backend,
+            total_latency_s=round(time.perf_counter() - t_start, 3),
+        )
+
+    # --- 2. MT (Luganda -> English) if user speaks Luganda --------------------
+    mt_latency = 0.0
+    mt_backend = ""
+    chat_text = transcript
+    if detected_lang == "lg":
+        mt_result = speech.translate(transcript, source_lang="lg", target_lang="en")
+        mt_latency += mt_result.latency_s
+        mt_backend = mt_result.backend
+        metrics.inc("speech_mt_total")
+        if mt_result.latency_s:
+            metrics.observe("speech_mt_latency_s", mt_result.latency_s)
+        if mt_result.error:
+            metrics.inc("speech_mt_errors_total")
+            stage_errors.append(f"MT(lg->en): {mt_result.error}")
+            logger.warning("Voice chat MT lg->en failed: %s", mt_result.error)
+        else:
+            chat_text = mt_result.text
+
+    # --- 3. LLM chat ---------------------------------------------------------
+    t_llm = time.perf_counter()
+    chat_result = await asyncio.to_thread(
+        model.generate,
+        message=chat_text,
+        conversation_id=conversation_id,
+        top_k=top_k,
+        locale="en",
+        session_id=session_id,
+        request_id=getattr(request.state, "request_id", None),
+    )
+    llm_latency = time.perf_counter() - t_llm
+    reply_text = chat_result.get("reply", "")
+
+    # --- 4. MT (English -> Luganda) if user language is Luganda ---------------
+    if detected_lang == "lg" and reply_text:
+        mt_result = speech.translate(reply_text, source_lang="en", target_lang="lg")
+        mt_latency += mt_result.latency_s
+        mt_backend = mt_backend or mt_result.backend
+        metrics.inc("speech_mt_total")
+        if mt_result.latency_s:
+            metrics.observe("speech_mt_latency_s", mt_result.latency_s)
+        if mt_result.error:
+            metrics.inc("speech_mt_errors_total")
+            stage_errors.append(f"MT(en->lg): {mt_result.error}")
+            logger.warning("Voice chat MT en->lg failed: %s", mt_result.error)
+        else:
+            reply_text = mt_result.text
+
+    # --- 5. TTS (synthesize reply in user's language) -------------------------
+    tts_latency = 0.0
+    tts_backend = ""
+    audio_b64 = ""
+    tts_sample_rate = 0
+    tts_duration = 0.0
+    if tts_enabled and reply_text:
+        tts_result = speech.synthesize(
+            text=reply_text, voice=voice, language=detected_lang
+        )
+        tts_latency = tts_result.latency_s
+        tts_backend = tts_result.backend
+        tts_sample_rate = tts_result.sample_rate
+        tts_duration = tts_result.duration_s
+        metrics.inc("speech_tts_total")
+        if tts_result.latency_s:
+            metrics.observe("speech_tts_latency_s", tts_result.latency_s)
+        if tts_result.error:
+            metrics.inc("speech_tts_errors_total")
+            stage_errors.append(f"TTS: {tts_result.error}")
+            logger.warning("Voice chat TTS failed: %s", tts_result.error)
+        elif tts_result.audio:
+            audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
+
+    total_latency = time.perf_counter() - t_start
+    metrics.observe("speech_voice_chat_latency_s", total_latency)
+
+    # Safe citation parsing — malformed dicts must not crash the response
+    safe_citations = []
+    for c in chat_result.get("citations", []):
+        try:
+            safe_citations.append(Citation(**c) if isinstance(c, dict) else c)
+        except Exception:
+            logger.debug("Skipping malformed citation: %s", c)
+
+    # Log voice conversation for analytics (mirrors /v1/chat logging)
+    try:
+        from .service import ChatModel as _CM
+        db.log_conversation(
+            session_id=session_id,
+            user_message=_CM.redact_for_storage(transcript),
+            bot_reply=_CM.redact_for_storage(reply_text),
+            sources=json.dumps(chat_result.get("sources", [])),
+            response_time_ms=round(total_latency * 1000, 2),
+        )
+    except Exception:
+        logger.warning("Voice conversation logging failed", exc_info=True)
+
+    return VoiceChatResponse(
+        transcript=transcript,
+        transcript_language=detected_lang,
+        reply=reply_text,
+        reply_audio_base64=audio_b64,
+        sample_rate=tts_sample_rate,
+        duration_s=tts_duration,
+        sources=chat_result.get("sources", []),
+        citations=safe_citations,
+        faithfulness_score=chat_result.get("faithfulness_score"),
+        retrieval_mode=chat_result.get("retrieval_mode", "keyword"),
+        asr_latency_s=round(asr_latency, 3),
+        mt_latency_s=round(mt_latency, 3),
+        llm_latency_s=round(llm_latency, 3),
+        tts_latency_s=round(tts_latency, 3),
+        total_latency_s=round(total_latency, 3),
+        asr_backend=asr_result.backend,
+        tts_backend=tts_backend,
+        mt_backend=mt_backend,
+        error="; ".join(stage_errors) if stage_errors else None,
+    )
 
 
 # ---------------------------------------------------------------------------

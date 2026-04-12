@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "description": "Gold evaluation set for on-device ASR quality measurement. 10 English + 10 Luganda samples with reference transcripts.",
+  "samples": [
+    {
+      "id": "en-01",
+      "locale": "en",
+      "reference": "What is the current VAT rate in Uganda",
+      "audio_file": "en_01.pcm",
+      "notes": "Standard FAQ query"
+    },
+    {
+      "id": "en-02",
+      "locale": "en",
+      "reference": "How do I register for a TIN number",
+      "audio_file": "en_02.pcm",
+      "notes": "Tests TIN acronym recognition"
+    },
+    {
+      "id": "en-03",
+      "locale": "en",
+      "reference": "I need to file my PAYE returns for this quarter",
+      "audio_file": "en_03.pcm",
+      "notes": "Tests PAYE acronym"
+    },
+    {
+      "id": "en-04",
+      "locale": "en",
+      "reference": "What documents do I need for customs declaration at Malaba border",
+      "audio_file": "en_04.pcm",
+      "notes": "Customs + location name"
+    },
+    {
+      "id": "en-05",
+      "locale": "en",
+      "reference": "Please explain the EFRIS electronic invoicing system",
+      "audio_file": "en_05.pcm",
+      "notes": "Tests EFRIS acronym"
+    },
+    {
+      "id": "en-06",
+      "locale": "en",
+      "reference": "What is the withholding tax rate on professional services",
+      "audio_file": "en_06.pcm",
+      "notes": "Withholding tax terminology"
+    },
+    {
+      "id": "en-07",
+      "locale": "en",
+      "reference": "How do I calculate excise duty on imported goods",
+      "audio_file": "en_07.pcm",
+      "notes": "Excise duty"
+    },
+    {
+      "id": "en-08",
+      "locale": "en",
+      "reference": "I want to check my tax clearance certificate status",
+      "audio_file": "en_08.pcm",
+      "notes": "Standard process query"
+    },
+    {
+      "id": "en-09",
+      "locale": "en",
+      "reference": "What is the difference between CIF and FOB for import duty calculation",
+      "audio_file": "en_09.pcm",
+      "notes": "Trade terms"
+    },
+    {
+      "id": "en-10",
+      "locale": "en",
+      "reference": "How do I register my business with URSB and get a TIN",
+      "audio_file": "en_10.pcm",
+      "notes": "Multi-acronym sentence"
+    },
+    {
+      "id": "lg-01",
+      "locale": "lg",
+      "reference": "Nnina okusasula omusolo ki ku bintu bye ntunda",
+      "audio_file": "lg_01.pcm",
+      "notes": "Basic tax question in Luganda"
+    },
+    {
+      "id": "lg-02",
+      "locale": "lg",
+      "reference": "Nnyinza ntya okufuna enamba yange eya TIN",
+      "audio_file": "lg_02.pcm",
+      "notes": "TIN registration — code-switch"
+    },
+    {
+      "id": "lg-03",
+      "locale": "lg",
+      "reference": "Omusolo gwa VAT guli ku buvuzi ki mu Uganda",
+      "audio_file": "lg_03.pcm",
+      "notes": "VAT rate query in Luganda"
+    },
+    {
+      "id": "lg-04",
+      "locale": "lg",
+      "reference": "Njagala okumanya ebikwata ku musolo gw'ennyumba",
+      "audio_file": "lg_04.pcm",
+      "notes": "Rental income tax"
+    },
+    {
+      "id": "lg-05",
+      "locale": "lg",
+      "reference": "Ebbaluwa yange eya omusolo eri mu mbeera ki",
+      "audio_file": "lg_05.pcm",
+      "notes": "Tax clearance status"
+    },
+    {
+      "id": "lg-06",
+      "locale": "lg",
+      "reference": "Ndi mulondoozi wa kampuni nnagala okumanya ku EFRIS",
+      "audio_file": "lg_06.pcm",
+      "notes": "EFRIS in Luganda context"
+    },
+    {
+      "id": "lg-07",
+      "locale": "lg",
+      "reference": "Omusolo ogusigalayo ku by'obuwaguzi bw'abakugu guli wa",
+      "audio_file": "lg_07.pcm",
+      "notes": "Withholding tax in Luganda"
+    },
+    {
+      "id": "lg-08",
+      "locale": "lg",
+      "reference": "Njagala okuyingiza ebyokulya okuva Kenya nkole ntya",
+      "audio_file": "lg_08.pcm",
+      "notes": "Import question"
+    },
+    {
+      "id": "lg-09",
+      "locale": "lg",
+      "reference": "Ssente za omusolo zisasulibwa ddi mu kwota eno",
+      "audio_file": "lg_09.pcm",
+      "notes": "Payment deadline query"
+    },
+    {
+      "id": "lg-10",
+      "locale": "lg",
+      "reference": "Nnyinza ntya okukyusa ebitabo byange mu ASYCUDA",
+      "audio_file": "lg_10.pcm",
+      "notes": "ASYCUDA system in Luganda"
+    }
+  ]
+}

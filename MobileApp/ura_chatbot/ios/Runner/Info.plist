@@ -9,9 +9,9 @@
 	<key>CFBundleDisplayName</key>
 	<string>URA Tax Assistant</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>URA Tax Assistant uses speech recognition for voice input so you can ask tax questions by speaking.</string>
+	<string>URA Tax Assistant uses speech recognition for voice input so you can ask tax questions by speaking. Recognition runs entirely on your device; audio is never uploaded.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>URA Tax Assistant needs microphone access to enable voice input.</string>
+	<string>URA Tax Assistant uses the microphone so you can ask tax questions by speaking. Audio is processed on your device and is not sent to any server.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

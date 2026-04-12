@@ -9,6 +9,7 @@
     "lint": "bun run eslint ."
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.99.0",
     "next": "16.2.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",

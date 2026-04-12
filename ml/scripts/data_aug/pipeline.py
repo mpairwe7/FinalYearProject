@@ -33,7 +33,12 @@ from ml.scripts.data_aug.loaders import (
     load_refusal_examples,
     load_teacher_qa,
 )
-from ml.scripts.data_aug.provenance import ManifestBuilder, write_data_card
+from ml.scripts.data_aug.provenance import (
+    ManifestBuilder,
+    summarise_synthetic_ratio,
+    write_croissant_metadata,
+    write_data_card,
+)
 from ml.scripts.data_aug.quality import QualityConfig, filter_quality
 from ml.scripts.data_aug.schema import TrainingExample
 from ml.scripts.data_aug.splitters import SplitConfig, stratified_split
@@ -55,10 +60,34 @@ class PipelineConfig:
     teacher_qa_dirs: list[Path] = field(default_factory=list)
     include_refusals: bool = True
 
+    # Web crawl (Phase 1 — opt-in).
+    crawl_dir: Optional[Path] = None
+    enable_web_crawl: bool = False
+
+    # Online corpora (Phase 2 — JW300, OPUS, etc.)
+    online_corpus_dirs: list[Path] = field(default_factory=list)
+
+    # Translated FAQ directories (Phase 3 — sw/nyn/ach).
+    translated_faq_dirs: list[Path] = field(default_factory=list)
+
+    # Speech-pipeline sources (2026 — optional). When set, the ingest stage
+    # additionally emits side-manifests listing ASR/MT examples so the
+    # speech pipeline can pick them up without re-scanning every file.
+    # These sources DO NOT flow into the chat training_data output — they
+    # are recorded in a separate ``speech_manifest.json`` so that the
+    # existing LLM training pipeline remains byte-identical.
+    asr_common_voice_dir: Optional[Path] = None
+    asr_salt_dir: Optional[Path] = None
+    mt_parallel_dir: Optional[Path] = None
+
     # Outputs
     output_dir: Path = Path("artifacts/training_data")
     emit_legacy_jsonl: bool = True
     emit_parquet: bool = True
+    # When true, write a supplementary speech manifest alongside the
+    # chat-training outputs so the speech pipeline can discover counts
+    # without re-scanning Data/.
+    emit_speech_manifest: bool = True
 
     # PDF
     pdf_workers: int = 1
@@ -74,6 +103,10 @@ class PipelineConfig:
 
     # Split
     split: SplitConfig = field(default_factory=SplitConfig)
+
+    # Phase 2 — canonical retrieval embedder. Written to manifest so
+    # downstream serving code can verify it has the same encoder.
+    canonical_embedder: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # Reproducibility
     seed: int = 42
@@ -141,7 +174,30 @@ def _stage_ingest(cfg: PipelineConfig) -> Iterator[TrainingExample]:
     else:
         log.info("ingest: Luganda skipped")
 
-    # 5. PDF corpus + retrieval (weakest; goes last so dedup discards rather
+    # 5. Web crawl (opt-in, above PDFs since it's fresher content)
+    if cfg.crawl_dir and cfg.crawl_dir.exists():
+        from ml.scripts.data_aug.crawler import load_crawled_pages
+
+        log.info("ingest: web crawl from %s", cfg.crawl_dir)
+        yield from load_crawled_pages(cfg.crawl_dir)
+    else:
+        log.info("ingest: web crawl skipped")
+
+    # 6. Online corpora (JW300, OPUS — multilingual parallel data)
+    for corpus_dir in cfg.online_corpus_dirs:
+        if corpus_dir.exists():
+            from ml.scripts.data_aug.dataset_downloader import load_online_corpus
+
+            log.info("ingest: online corpus from %s", corpus_dir)
+            yield from load_online_corpus(corpus_dir)
+
+    # 7. Translated FAQs (sw/nyn/ach)
+    for tfd in cfg.translated_faq_dirs:
+        if tfd.exists():
+            log.info("ingest: translated FAQs from %s", tfd)
+            yield from load_csv_faqs(tfd)
+
+    # 8. PDF corpus + retrieval (weakest; goes last so dedup discards rather
     #    than evicts FAQs when there's overlap)
     if cfg.pdf_dir and cfg.pdf_dir.exists() and (cfg.emit_pdf_corpus or cfg.emit_pdf_retrieval):
         log.info(
@@ -238,6 +294,17 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
     log.info("split: train=%d val=%d test=%d", len(train), len(val), len(test))
     manifest.record_stage("split", split_stats.as_dict())
 
+    # Phase 2 — synthetic composition audit. Recorded in the manifest for
+    # downstream consumers (data card, model card, EU AI Act Art. 10 record).
+    synthetic_summary = summarise_synthetic_ratio(train + val + test)
+    log.info(
+        "synthetic composition: %d/%d rows synthetic (%.1f%%)",
+        synthetic_summary["synthetic_rows"],
+        synthetic_summary["total_rows"],
+        synthetic_summary["synthetic_ratio"] * 100,
+    )
+    manifest.record_stage("synthetic", synthetic_summary)
+
     if cfg.dry_run:
         log.warning("DRY RUN — skipping file writes. Stages recorded:")
         for name, payload in manifest.stages.items():
@@ -280,7 +347,7 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
     n_f2 = write_messages_jsonl(train + val, flat_messages)
     manifest.record_output(flat_messages, "messages_flat_training", rows=n_f2)
 
-    # --- Manifest + data card -----------------------------------------------
+    # --- Manifest + data card + Croissant -----------------------------------
     manifest_path = out / "manifest.json"
     manifest_dict = manifest.build()
     manifest_path.write_text(
@@ -288,8 +355,78 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
     )
     log.info("manifest: %s", manifest_path)
     write_data_card(manifest_dict, out / "DATA_CARD.md")
+    # Phase 2 — Croissant 1.0 JSON-LD for HF Hub / ML Commons compliance
+    write_croissant_metadata(manifest_dict, out / "croissant.json")
+
+    # Speech-pipeline side manifest (2026). Additive only — never touches
+    # the chat training outputs, so the existing LLM pipeline is unchanged.
+    if cfg.emit_speech_manifest:
+        _write_speech_manifest(cfg, out / "speech_manifest.json")
 
     log.info("=" * 70)
     log.info("DONE — %d train / %d val / %d test", len(train), len(val), len(test))
     log.info("=" * 70)
     return manifest_dict
+
+
+# ---------------------------------------------------------------------------
+# Speech manifest (side-car, additive)
+# ---------------------------------------------------------------------------
+
+
+def _write_speech_manifest(cfg: "PipelineConfig", out_path: Path) -> None:
+    """Probe optional ASR/MT sources and write a small JSON manifest.
+
+    This does NOT materialise the rows — it only reports shape so the
+    speech training scripts can decide whether to run. Keeps the chat
+    pipeline byte-identical to the pre-2026 behaviour.
+    """
+    payload: dict = {
+        "schema_version": "2026.1",
+        "asr": {},
+        "mt": {},
+    }
+
+    if cfg.asr_common_voice_dir and cfg.asr_common_voice_dir.exists():
+        try:
+            from ml.scripts.data_aug.asr_loaders import load_common_voice_lg
+
+            rows = list(load_common_voice_lg(cfg.asr_common_voice_dir))
+            hours = round(sum(r.duration_s for r in rows) / 3600, 3)
+            payload["asr"]["common_voice"] = {
+                "path": str(cfg.asr_common_voice_dir),
+                "n_clips": len(rows),
+                "hours": hours,
+                "languages": sorted({r.language for r in rows}),
+            }
+        except Exception as exc:
+            log.warning("speech manifest: common voice probe failed: %s", exc)
+    if cfg.asr_salt_dir and cfg.asr_salt_dir.exists():
+        try:
+            from ml.scripts.data_aug.asr_loaders import load_salt_asr
+
+            rows = list(load_salt_asr(cfg.asr_salt_dir))
+            payload["asr"]["salt"] = {
+                "path": str(cfg.asr_salt_dir),
+                "n_clips": len(rows),
+                "hours": round(sum(r.duration_s for r in rows) / 3600, 3),
+                "languages": sorted({r.language for r in rows}),
+            }
+        except Exception as exc:
+            log.warning("speech manifest: salt probe failed: %s", exc)
+
+    if cfg.mt_parallel_dir and cfg.mt_parallel_dir.exists():
+        try:
+            from ml.scripts.data_aug.mt_loaders import load_parallel_directory
+
+            rows = list(load_parallel_directory(cfg.mt_parallel_dir))
+            payload["mt"]["parallel"] = {
+                "path": str(cfg.mt_parallel_dir),
+                "n_pairs": len(rows),
+                "directions": sorted({f"{r.source_lang}_{r.target_lang}" for r in rows}),
+            }
+        except Exception as exc:
+            log.warning("speech manifest: mt probe failed: %s", exc)
+
+    out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    log.info("speech manifest: %s", out_path)

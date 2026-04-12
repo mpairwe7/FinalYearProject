@@ -13,8 +13,9 @@ App/
 ├── README_HF.md       # Hugging Face Spaces README
 ├── backend/           # FastAPI backend API
 │   ├── app/
-│   │   ├── main.py          # API routes + SSE streaming + rate limiting
-│   │   ├── models.py        # Pydantic v2 request/response models
+│   │   ├── main.py          # API routes + SSE streaming + speech endpoints
+│   │   ├── models.py        # Pydantic v2 request/response models (chat + speech)
+│   │   ├── speech_service.py # SpeechModel singleton (ASR + MT + TTS orchestration)
 │   │   ├── service.py       # ChatModel (6-phase RAG orchestrator)
 │   │   ├── llm.py           # Qwen2.5-3B-Instruct local generation
 │   │   ├── query.py         # Query rewriting pipeline
@@ -23,14 +24,17 @@ App/
 │   │   ├── guardrails.py    # OWASP LLM Top 10 guards
 │   │   ├── retriever.py     # Hybrid retriever + circuit breaker
 │   │   ├── indexer.py       # PDF/CSV → Qdrant indexing
+│   │   ├── resilience.py    # Circuit breaker (used by speech + retriever)
 │   │   ├── tracing.py       # OpenTelemetry GenAI spans
 │   │   ├── analytics.py     # Prometheus metrics middleware
 │   │   └── database.py      # SQLite WAL store
 │   └── requirements.txt
-└── frontend/          # Next.js 15 web frontend
+└── frontend/          # Next.js 16 web frontend
     ├── src/
-    │   ├── app/       # Next.js pages (SSE streaming chat)
-    │   └── store/     # Zustand 5 state management
+    │   ├── app/             # Next.js pages (SSE streaming + voice UI)
+    │   ├── components/      # Reusable components (FeedbackButtons)
+    │   ├── services/        # voiceService.ts (audio capture + playback + API)
+    │   └── store/           # Zustand 5 state management + analytics
     └── package.json
 ```
 
@@ -72,6 +76,13 @@ FastAPI v0.111 REST API with 6-phase advanced RAG pipeline and local LLM inferen
 - `GET /v1/analytics/dashboard` — Comprehensive dashboard
 - `GET /metrics` — Prometheus-compatible metrics
 
+**Speech Endpoints (2026):**
+- `POST /v1/voice/chat` — Compound voice pipeline: audio -> ASR -> MT -> LLM -> MT -> TTS -> audio+text
+- `POST /v1/asr` — Server-side ASR (raw PCM audio -> transcript)
+- `POST /v1/tts` — Text-to-speech synthesis (text -> base64 WAV)
+- `POST /v1/translate` — Machine translation (English <-> Luganda)
+- `GET /v1/speech/health` — Speech pipeline readiness check
+
 **RAG Pipeline (6 Phases):**
 1. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker
 2. **LLM Generation** — Qwen2.5-3B-Instruct local inference (sync + streaming)
@@ -89,15 +100,31 @@ uvicorn app.main:app --reload
 
 ### 3. Frontend (`frontend/`)
 
-Next.js 15 + React 19 web application with SSE streaming support.
+Next.js 16 + React 19 web application with SSE streaming and full bilingual voice support.
 
 **Features:**
 - SSE streaming with `ReadableStream` reader + sync fallback
 - `requestAnimationFrame` batched token rendering
-- Speech recognition support
-- Glassmorphism design
+- Glassmorphism dark design system (Grok-inspired)
 - Zustand 5 state management with `updateLastTurn()` for streaming
-- ARIA-accessible locale selection
+- ARIA-accessible locale selection (English / Luganda)
+
+**Voice capabilities (2026):**
+- Listen button on every assistant reply (per-language TTS via `/v1/tts`)
+- Voice mode toggle (MediaRecorder -> `/v1/voice/chat` compound endpoint)
+- Auto-narrate toggle (automatically plays TTS for every reply)
+- Speech health indicator (checks `/v1/speech/health` on mount)
+- Browser Speech Recognition API with server-side ASR fallback
+- Full Luganda <-> English translation in voice pipeline
+- AudioContext playback with barge-in (stop current audio on new input)
+- WCAG AA accessible: focus-visible, contrast ratios, reduced-motion support
+
+**Key files:**
+- `src/services/voiceService.ts` — AudioRecorder, playback, all speech API wrappers
+- `src/app/page.tsx` — Chat UI with voice controls
+- `src/app/globals.css` — Design system with voice styles
+- `src/store/useChatStore.ts` — Zustand state
+- `src/store/useAnalyticsStore.ts` — Analytics with offline queue
 
 **Run locally:**
 ```bash
