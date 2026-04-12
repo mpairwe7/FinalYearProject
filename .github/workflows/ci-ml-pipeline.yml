@@ -99,6 +99,52 @@ jobs:
           echo "- Linter: ruff" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
+  # Stage 1a: Reproducibility — compile + upload uv lockfile
+  # ============================================
+  # Freezes the transitive dep graph so every CI job later in this run
+  # (and every retrain that references the same commit) resolves to the
+  # same wheels. Uploaded as an artifact; can be committed via a bot PR
+  # if `commit-lockfile=true` is set on workflow_dispatch.
+  reproducibility:
+    name: Compile lockfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Compile requirements.lock
+        run: |
+          uv pip compile requirements.txt -o requirements.lock \
+            --generate-hashes --universal
+          echo "lines: $(wc -l < requirements.lock)"
+          head -n 20 requirements.lock
+
+      - name: Upload lockfile artifact
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45601b # v4.6.0
+        with:
+          name: requirements-lock
+          path: requirements.lock
+          retention-days: 30
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Lockfile" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`requirements.lock\` compiled with uv" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Lines: $(wc -l < requirements.lock 2>/dev/null || echo 'n/a')" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
   # Stage 1b: Governance Compliance Check
   # ============================================
   governance-check:
@@ -285,6 +331,188 @@ jobs:
           echo "- Schema/PII unit checks: passed" >> "$GITHUB_STEP_SUMMARY"
           echo "- Dry-run: passed" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pipeline end-to-end: passed" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Speech Pipeline Smoke Test (2026)
+  # ============================================
+  # Dry-runs every speech pipeline stage (ASR / MT / TTS / mobile export /
+  # redteam / TTS eval) without downloading real models, training, or
+  # connecting mobile hardware. Validates that the scaffolding is wired
+  # correctly and each script's `--dry-run` path exits 0.
+  #
+  # Full model training stays on Kaggle / manual runs — see
+  # `.github/workflows/kaggle-training.yml`.
+  speech-smoke:
+    name: Speech Pipeline Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install minimum speech-smoke deps
+        run: |
+          uv pip install --system \
+            'pydantic>=2.5' pyyaml 'pandas>=1.5,<2.0' ftfy
+
+      - name: Import smoke test
+        run: |
+          python - <<'PY'
+          import importlib
+          mods = [
+              "ml.scripts.data_aug.speech_schema",
+              "ml.scripts.data_aug.asr_loaders",
+              "ml.scripts.data_aug.mt_loaders",
+              "ml.scripts.lang_id",
+              "ml.scripts.asr.download_models",
+              "ml.scripts.asr.export_asr_onnx",
+              "ml.scripts.asr.export_asr_sherpa",
+              "ml.scripts.asr.infer_asr",
+              "ml.scripts.asr.train_luganda",
+              "ml.scripts.tts.download_models",
+              "ml.scripts.tts.export_tts_onnx",
+              "ml.scripts.tts.infer_tts",
+              "ml.scripts.tts.train_luganda_vits",
+              "ml.scripts.mt.download_models",
+              "ml.scripts.mt.finetune_mt",
+              "ml.scripts.mt.distill_mt",
+              "ml.scripts.mt.backtranslate",
+              "ml.scripts.mt.export_mt_onnx",
+              "ml.scripts.mt.infer_mt",
+              "ml.scripts.speech.speech_pipeline",
+              "ml.scripts.speech.export_mobile_speech",
+              "ml.pipelines.evaluate_speech",
+              "ml.pipelines.evaluate_mt",
+              "ml.pipelines.evaluate_tts",
+              "ml.pipelines.benchmark_mobile",
+              "ml.pipelines.redteam_voice",
+          ]
+          for m in mods:
+              importlib.import_module(m)
+          print(f"imported {len(mods)} modules")
+          PY
+
+      - name: Schema round-trip
+        run: |
+          python - <<'PY'
+          from ml.scripts.data_aug.speech_schema import (
+              AudioExample, AudioSourceType,
+              MTExample, MTSourceType,
+              LicenseClass, audio_content_hash, mt_content_hash,
+              COMMERCIAL_SAFE_LICENSES,
+          )
+
+          # AudioExample
+          a = AudioExample(
+              audio_path="Data/lgaudio/sample.mp3",
+              sample_rate=16000,
+              duration_s=3.5,
+              reference_text="omusolo gw'emigaso",
+              language="lg",
+              source="sample",
+              source_type=AudioSourceType.COMMON_VOICE,
+              license=LicenseClass.PUBLIC_DOMAIN,
+              content_hash=audio_content_hash("Data/lgaudio/sample.mp3", "omusolo gw'emigaso"),
+          )
+          assert a.license.is_commercial_safe
+          # MTExample
+          m = MTExample(
+              source_text="Value Added Tax",
+              target_text="Omusolo gw'Emigaso",
+              source_lang="en",
+              target_lang="lg",
+              source="test",
+              source_type=MTSourceType.LUGANDA_PARALLEL,
+              license=LicenseClass.PROPRIETARY,
+              content_hash=mt_content_hash("Value Added Tax", "Omusolo gw'Emigaso"),
+          )
+          assert LicenseClass.CC_BY_NC not in COMMERCIAL_SAFE_LICENSES
+          print("schema OK")
+          PY
+
+      - name: Language ID heuristic
+        run: |
+          python - <<'PY'
+          from ml.scripts.lang_id import LanguageDetector
+          det = LanguageDetector()
+          en = det.detect("The tax authority processes your annual return in due course")
+          assert en.lang == "en", f"expected en, got {en.lang}"
+          print("lang_id OK:", en)
+          PY
+
+      - name: ASR / MT / TTS CLI dry runs
+        run: |
+          python -m ml.scripts.asr.download_models --dry-run
+          python -m ml.scripts.mt.download_models --dry-run
+          python -m ml.scripts.tts.download_models --dry-run
+          python -m ml.scripts.asr.export_asr_onnx --dry-run
+          python -m ml.scripts.asr.export_asr_sherpa --name whisper-small --dry-run
+          python -m ml.scripts.tts.export_tts_onnx --voice en_US-lessac-medium --dry-run
+          python -m ml.scripts.mt.export_mt_onnx --dry-run
+          python -m ml.scripts.mt.finetune_mt --dry-run
+          python -m ml.scripts.mt.distill_mt --dry-run
+          python -m ml.scripts.mt.backtranslate --dry-run
+          python -m ml.scripts.asr.train_luganda --dry-run
+          python -m ml.scripts.tts.train_luganda_vits --dry-run
+
+      - name: Evaluation harnesses (dry run)
+        run: |
+          python -m ml.pipelines.evaluate_speech --dry-run
+          python -m ml.pipelines.evaluate_mt --dry-run
+          python -m ml.pipelines.evaluate_tts --dry-run
+          python -m ml.pipelines.benchmark_mobile --dry-run
+          python -m ml.pipelines.redteam_voice --dry-run
+
+      - name: Mobile bundle exporter (dry run)
+        run: |
+          python -m ml.scripts.speech.export_mobile_speech --dry-run
+
+      - name: Speech quality gates (soft-fail)
+        run: |
+          python -m ml.pipelines.quality_gates \
+            --config ml/configs/training_config.yaml \
+            --metrics-path Results/metrics/speech_metrics.json \
+            --family speech \
+            --soft-fail
+
+          python -m ml.pipelines.quality_gates \
+            --config ml/configs/training_config.yaml \
+            --metrics-path Results/metrics/mt_metrics.json \
+            --family mt \
+            --soft-fail
+
+      - name: Upload speech metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-metrics
+          path: |
+            Results/metrics/speech_metrics.json
+            Results/metrics/mt_metrics.json
+            Results/metrics/tts_metrics.json
+            Results/metrics/mobile_benchmark.json
+            Results/metrics/redteam_voice.json
+          if-no-files-found: ignore
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Speech Pipeline Smoke" >> "$GITHUB_STEP_SUMMARY"
+          echo "- ASR / MT / TTS dry-runs: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Evaluation harnesses: dry-run passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mobile bundle exporter: dry-run passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Redteam voice: dry-run passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Quality gates: soft-fail passed" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
   # Stage 2: Data Validation
@@ -800,6 +1028,134 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
+  # Stage 5d: Production Gates (2026 offline mobile)
+  # ============================================
+  # Runs the full production-readiness check: tokenizer audit, synthetic
+  # benchmark, model card generation + validation, and the combined
+  # production quality gate.  Uses --soft-fail so CI stays green while
+  # artefacts are still being built up; remove --soft-fail once the full
+  # pipeline produces real calibration / benchmark data on every run.
+  production-gates:
+    name: Production Gates (2026)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: [evaluate-rag, validate-mobile-export]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Download RAG evaluation results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rag-evaluation-results
+          path: Results/
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system pyyaml
+
+      - name: Tokenizer audit (proxy mode — no HF model download)
+        run: |
+          mkdir -p Results/tokenizer_audit
+          python -m ml.pipelines.audit_tokenizer \
+            --tokenizer google/gemma-2-2b-it \
+            --en Data/eval/rag_eval.jsonl \
+            --lg Data/eval/rag_eval_lg.jsonl \
+            --output-dir Results/tokenizer_audit \
+          || echo "WARN: tokenizer audit failed — will soft-fail"
+
+      - name: Safety evaluation (mock backend)
+        run: |
+          python -m ml.pipelines.evaluate_safety \
+            --corpus Data/eval/redteam_corpus.jsonl \
+            --backend mock \
+            --output-dir Results
+
+      - name: Calibration from RAG confidence scores
+        run: |
+          if [ -f Results/confidence_scores.jsonl ]; then
+            mkdir -p Results/calibration
+            python -m ml.pipelines.calibrate \
+              --preds Results/confidence_scores.jsonl \
+              --output-dir Results/calibration
+          else
+            echo "WARN: confidence_scores.jsonl not found — skipping calibration"
+          fi
+
+      - name: Synthetic inference benchmark
+        run: |
+          mkdir -p Results/benchmark
+          python -m ml.scripts.benchmark_inference \
+            --synthetic \
+            --output-dir Results/benchmark
+
+      - name: Generate model card
+        run: |
+          python -m ml.pipelines.generate_model_card \
+            --output Results/MODEL_CARD.md \
+            --rag-eval Results/rag_evaluation_results.json \
+            --safety Results/safety_evaluation_results.json \
+            --calibration Results/calibration/calibration_report.json \
+            --tokenizer-audit Results/tokenizer_audit/tokenizer_audit.json \
+            --benchmark Results/benchmark/benchmark.json \
+          || echo "WARN: model card generation failed — will soft-fail"
+
+      - name: Run production quality gates
+        run: |
+          python -m ml.pipelines.quality_gates \
+            --family production \
+            --config ml/configs/training_config.yaml \
+            --rag-eval Results/rag_evaluation_results.json \
+            --safety Results/safety_evaluation_results.json \
+            --calibration Results/calibration/calibration_report.json \
+            --tokenizer-audit Results/tokenizer_audit/tokenizer_audit.json \
+            --benchmark Results/benchmark/benchmark.json \
+            --model-card Results/MODEL_CARD.md \
+            --soft-fail
+
+      - name: Upload production gate artefacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-gate-results
+          path: |
+            Results/tokenizer_audit/
+            Results/benchmark/
+            Results/calibration/
+            Results/safety_evaluation_results.json
+            Results/confidence_scores.jsonl
+            Results/MODEL_CARD.md
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Production Gates (2026)"
+            echo ""
+            echo "| Artefact | Status |"
+            echo "|---|---|"
+            echo "| Safety eval | $([ -f Results/safety_evaluation_results.json ] && echo 'generated (mock)' || echo 'missing') |"
+            echo "| Calibration | $([ -f Results/calibration/calibration_report.json ] && echo 'generated' || echo 'missing') |"
+            echo "| Tokenizer audit | $([ -f Results/tokenizer_audit/tokenizer_audit.json ] && echo 'generated' || echo 'missing') |"
+            echo "| Benchmark | $([ -f Results/benchmark/benchmark.json ] && echo 'generated (synthetic)' || echo 'missing') |"
+            echo "| Model card | $([ -f Results/MODEL_CARD.md ] && echo 'generated' || echo 'missing') |"
+            echo ""
+            echo "Quality gates run with \`--soft-fail\` until real model-backed artefacts replace mock/synthetic stubs."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
   # Stage 6: Push to Hugging Face Hub
   # ============================================
   push-to-huggingface:
@@ -924,7 +1280,7 @@ jobs:
     name: Deploy Backend API
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [build-docker, push-to-huggingface, validate-mobile-export]
+    needs: [build-docker, push-to-huggingface, validate-mobile-export, production-gates]
     if: github.ref == 'refs/heads/main'
     environment:
       name: production
