@@ -44,15 +44,40 @@ All components run **on-device**. No network calls after model download.
 |---|---|---|---|---|
 | VAD | Silero VAD | MIT | sherpa-onnx | 2 MB |
 | ASR (en) | Whisper-small | MIT | sherpa-onnx | ~220 MB |
-| ASR (lg) | Whisper-small fine-tune on Common Voice lg | MIT (derived) | sherpa-onnx | ~220 MB |
-| Lang-ID | lingua-py + Silero LID | Apache-2.0 / MIT | native wrapper | ~5 MB |
+| ASR (lg) | Whisper-small fine-tune on Common Voice + WAXAL | MIT (derived) | sherpa-onnx | ~220 MB |
+| ASR (sw) | Whisper-small (multilingual base) | MIT | sherpa-onnx | shared |
+| ASR (nyn) | Whisper-small fine-tune on WAXAL nyn (132k samples) | MIT (derived) | sherpa-onnx | shared |
+| ASR (ach) | Whisper-small fine-tune on WAXAL ach (114k samples) | MIT (derived) | sherpa-onnx | shared |
+| Lang-ID | lingua-py + trigram LID (5 languages) | Apache-2.0 / MIT | native + Dart | ~5 MB |
 | MT (backbone) | MADLAD-400-3B | **Apache-2.0** | transformers (server) | 3 B params |
 | MT (mobile student) | distilled T5-small | Apache-2.0 | onnxruntime | ~350 MB |
 | LLM | Gemma-2-2B-it | Gemma Terms (commercial OK) | MediaPipe LLM | ~1.6 GB |
 | TTS (en) | Piper en_US-lessac-medium | MIT | sherpa-onnx | ~70 MB |
-| TTS (lg) | Custom Coqui VITS (trained in-project) | MPL-2.0 | sherpa-onnx | ~100 MB |
+| TTS (lg) | VITS trained on WAXAL lug_tts (2,020 samples) | CC-BY-SA-4.0 | sherpa-onnx | ~100 MB |
+| TTS (sw) | MMS-TTS Swahili | CC-BY-NC-4.0 | sherpa-onnx | ~40 MB |
+| TTS (nyn) | VITS trained on WAXAL nyn_tts (1,990 samples) | CC-BY-SA-4.0 | sherpa-onnx | ~100 MB |
+| TTS (ach) | VITS trained on WAXAL ach_tts (2,030 samples) | CC-BY-SA-4.0 | sherpa-onnx | ~100 MB |
 
 **Total mobile bundle budget:** 2.6 GB (see `ml/configs/mobile_bundle.yaml`).
+
+## Training data sources (by priority)
+
+| # | Source | HuggingFace ID | Languages | Type | Size | License |
+|---|---|---|---|---|---|---|
+| 1 | **Sunbird SALT** | `Sunbird/salt` | en/lg/sw/nyn/ach + 5 | Parallel text + ASR + TTS | 25k sentences | CC-BY-SA-4.0 |
+| 2 | **Google WAXAL** | `google/WaxalNLP` | nyn/ach/lug + 18 | ASR (344k) + TTS (6k) | 11k+ hours | CC-BY-SA-4.0 |
+| 3 | **Mozilla Common Voice** | `mozilla-foundation/common_voice_17_0` | lg | ASR | ~80 validated hours | CC0-1.0 |
+| 4 | **JW300** | `opus/JW300` | en↔lg/sw/nyn/ach | Parallel MT | ~100k pairs/pair | CC0 (contested) |
+| 5 | **OPUS Mozilla-I10n** | `opus/Mozilla-I10n` | en↔ach | Parallel MT | 24k pairs | Open |
+| 6 | **OPUS Tatoeba** | `opus/Tatoeba` | en↔lg/sw | Short parallel | Variable | CC-BY-2.0 |
+| 7 | **Masakhane LAFAND-MT** | `masakhane/lafand-mt` | en↔lg/sw | MT benchmark | ~50k | CC-BY-NC-4.0 |
+| 8 | **FLORES-200** | `facebook/flores` | nyn/ach/lg/sw/en | MT eval | ~1k/lang | CC-BY-SA-4.0 |
+| 9 | **Google FLEURS** | `google/fleurs` | lg/sw | ASR eval | ~12h/lang | CC-BY-4.0 |
+| 10 | **URA FAQs** | Project-internal | en (+ translated) | QA pairs | 47 CSV files | Proprietary |
+| 11 | **URA PDFs** | Project-internal | en | Corpus | 47 documents | Proprietary |
+| 12 | **URA website crawl** | `Data/crawl/` | en | Web pages | Ongoing | Public |
+
+Download all: `python -m ml.scripts.data_aug.dataset_downloader --output-dir Data/online_corpora`
 
 ## Commercial-safety policy
 
@@ -69,9 +94,11 @@ Explicitly excluded (and why):
 
 We make up the gap with:
 
-* Whisper + fine-tune for Luganda ASR
-* MADLAD-400 (Apache-2.0) for MT
-* Custom Coqui VITS (MPL-2.0) for Luganda TTS — requires recording our own voice data
+* Whisper + fine-tune for ASR (all 5 languages) — MIT derived
+* MADLAD-400 (Apache-2.0) for MT backbone
+* VITS trained on WAXAL TTS data (CC-BY-SA-4.0) for lg/nyn/ach — **no custom recording needed**
+* Sunbird SALT (CC-BY-SA-4.0) for parallel text + ASR augmentation
+* Google WAXAL (CC-BY-SA-4.0) for ASR + TTS training data
 
 ## Latency budget (per turn)
 

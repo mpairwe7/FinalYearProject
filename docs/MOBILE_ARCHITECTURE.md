@@ -313,6 +313,41 @@ See: `lib/core/compliance/ai_act.dart`.
 
 ---
 
+### ADR-011 — Multilingual training data strategy (SALT + WAXAL)
+
+**Context.** The app targets 5 languages (en, lg, sw, nyn, ach) but
+Runyankole and Acholi are extremely low-resource — no Wikipedia, no
+newspaper archives, no existing NLP models. Custom voice recording
+was estimated at 3-4 hours per language and months of logistics.
+
+**Decision.** Leverage two 2025-2026 datasets that changed the picture:
+
+1. **Sunbird SALT** (`Sunbird/salt`, CC-BY-SA-4.0) — 25k parallel
+   sentences across 10 Ugandan languages including nyn + ach, with
+   multispeaker ASR recordings.
+2. **Google WAXAL** (`google/WaxalNLP`, CC-BY-SA-4.0) — 132k nyn ASR
+   + 114k ach ASR samples + ~2k studio TTS recordings per language,
+   collected by Makerere AI Lab.
+
+These are supplemented by JW300 (parallel MT), OPUS Mozilla-I10n
+(24k Acholi pairs), FLORES-200 (MT eval), and Masakhane benchmarks.
+
+**Consequences.**
+- Custom voice recording sessions are **no longer required** for nyn/ach
+  TTS — WAXAL provides studio-quality recordings.
+- ASR fine-tuning is feasible for all 5 languages with combined
+  WAXAL + SALT + Common Voice data.
+- MT training uses SALT parallel text + JW300 + OPUS, covering all
+  4 non-English target languages.
+- All datasets are downloadable via a single command:
+  `python -m ml.scripts.data_aug.dataset_downloader`
+
+See: `ml/scripts/data_aug/dataset_downloader.py`,
+`ml/docs/data_cards/mt_salt_multilingual.md`,
+`ml/docs/data_cards/asr_tts_waxal.md`.
+
+---
+
 ## 3. Performance patterns
 
 ### 3.1 Narrow subscriptions via `.select()`
