@@ -3,6 +3,21 @@
 Production observability for the URA Chatbot FastAPI backend, covering
 distributed tracing, metrics, log aggregation, and LLM-specific monitoring.
 
+## Quick Start
+
+```bash
+# Start the full monitoring stack (Prometheus + Grafana + Jaeger)
+docker compose --profile monitoring up -d
+
+# Access:
+#   Prometheus:  http://localhost:9090
+#   Grafana:     http://localhost:3001  (admin / ura2026)
+#   Jaeger:      http://localhost:16686
+```
+
+Dashboards and datasources are auto-provisioned from `monitoring/grafana/provisioning/`.
+Alert rules are loaded from `monitoring/alerting-rules.yml` (5 SLO-based rules).
+
 ---
 
 ## 1. Architecture Overview

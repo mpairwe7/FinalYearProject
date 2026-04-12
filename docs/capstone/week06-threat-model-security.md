@@ -331,7 +331,19 @@ All tools are open-source and run in CI via `.github/workflows/devsecops-sast-da
 | 11 | Threat model validation (21 threats + evidence) | pytm + validate_threats.py | Every PR | Implemented |
 | 12 | SBOM generation (CycloneDX) for all images | Trivy | Every build | Implemented |
 | 13 | Secret scanning (4-layer defence-in-depth) | TruffleHog + Gitleaks + ggshield + detect-secrets | Every PR + pre-commit + weekly | Implemented |
-| 14 | Prompt injection testing | Manual red-team | Quarterly | Planned |
+| 14 | Prompt injection testing (50 NIST AI 600-1 prompts) | `scripts/ai_red_team.py` | Pre-release + quarterly | Implemented |
+| 15 | Bias & fairness audit (language + taxpayer parity) | `scripts/bias_fairness_audit.py` | Pre-release | Implemented |
+| 16 | Incident response simulation (3 AI playbooks) | `scripts/incident_response_sim.py` | Quarterly | Implemented |
+| 17 | Frontend accessibility audit (WCAG 2.1 AA) | axe-core + Lighthouse CI | Every PR | Implemented |
+| 18 | Frontend unit/component testing | Vitest + React Testing Library | Every PR | Implemented |
+| 19 | E2E smoke testing (security headers validated) | Playwright | Every PR | Implemented |
+| 20 | Load/SLO testing (p95 < 3s, error rate < 1%) | k6 | Pre-release | Implemented |
+| 21 | Container image signing (Sigstore cosign keyless) | `container-sign-provenance.yml` | Every build | Implemented |
+| 22 | SLSA v1.2 provenance attestation | GitHub Attestations API | Every build | Implemented |
+| 23 | Production env validation (insecure defaults blocked) | `scripts/validate_env.py` + startup gate | Pre-deploy | Implemented |
+| 24 | Disaster recovery test (Qdrant + SQLite + health) | `scripts/dr_test.sh` | Quarterly | Implemented |
+| 25 | Carbon footprint tracking | `scripts/carbon_tracker.py` (CodeCarbon) | Each training run | Implemented |
+| 26 | Flutter mobile CI (analyze + test + build) | `flutter-ci.yml` | Every PR | Implemented |
 
 ### 4.5 CI Security Pipeline Architecture
 

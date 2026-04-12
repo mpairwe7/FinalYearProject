@@ -24,14 +24,22 @@ Phases 1–13 give us a hardened, generic RAG chatbot with:
 
 - **Hybrid retrieval** (Qdrant dense + BM25 RRF + cross-encoder rerank)
 - **Grounded generation** (Qwen2.5-3B-Instruct, spotlight markers,
-  token-aware trimming, structured-output option)
+token-aware trimming, structured-output option)
 - **OWASP LLM Top 10 (2025) coverage** — prompt-injection guards,
-  PII redaction, system-prompt leakage detection, grounding checks
+PII redaction, system-prompt leakage detection, grounding checks
 - **Distributed resilience** — Redis rate limit, Redis semantic cache,
-  circuit breakers around Qdrant and LLM, hard deadlines
+circuit breakers around Qdrant and LLM, hard deadlines
 - **Continuous evaluation** — Ragas-compatible harness, SLO alert rules
 - **Next.js 16.2.3 + React 19.2 frontend** with glassmorphism UI,
-  SSE streaming, optimistic feedback, same-origin `/api` proxy
+SSE streaming, optimistic feedback, same-origin `/api` proxy
+- **Full test pyramid** — backend pytest (>= 80% cov), frontend Vitest +
+Playwright E2E, Flutter mobile CI, k6 load tests
+- **Production observability** — Prometheus + Grafana + Jaeger (docker-compose
+`--profile monitoring`), 5 SLO alerting rules, pre-built dashboards
+- **Security-as-code** — cosign container signing, SLSA v1.2 provenance,
+OWASP ZAP DAST, AI red teaming (50 NIST AI 600-1 prompts)
+- **Compliance artefacts** — Model Card (EU AI Act Art. 53), PIA (NDPA §28),
+bias audit, carbon tracking, incident response simulation
 
 **What this is good at:** answering *stateless, factual* questions
 about URA policy from a static knowledge base.
@@ -128,16 +136,16 @@ Three properties of this domain make agentic AI a natural fit
 (whereas they make it a poor fit in many other contexts):
 
 1. **Bounded action space.** URA operations are a finite, well-defined
-   set: calculate tax, look up account, submit form, search policy,
-   schedule appointment, upload document. That makes it feasible to
-   enumerate tools and test each one exhaustively.
+set: calculate tax, look up account, submit form, search policy,
+schedule appointment, upload document. That makes it feasible to
+enumerate tools and test each one exhaustively.
 2. **High value per successful action.** A user who wants to register
-   a business, file a return, or challenge an assessment is motivated
-   to complete a multi-step flow. The payoff per completed workflow
-   is measurable (return filed, TIN issued, appointment booked).
+a business, file a return, or challenge an assessment is motivated
+to complete a multi-step flow. The payoff per completed workflow
+is measurable (return filed, TIN issued, appointment booked).
 3. **Clear audit boundary.** Every agent action can be logged,
-   reviewed, and reversed. This matters for a public-sector
-   deployment where accountability is non-negotiable.
+reviewed, and reversed. This matters for a public-sector
+deployment where accountability is non-negotiable.
 
 ### 3.2 Agent architecture — supervisor + specialists + tools
 
@@ -150,47 +158,47 @@ monolithic "one LLM with tools". Reasons:
 - Adding a new domain = add a new specialist, not rewriting one prompt.
 
 ```
-                       ┌─────────────────────────────┐
-                       │      Supervisor Agent       │
-                       │    (Qwen2.5-3B, T=0.1)      │
-                       │   Classifies + routes       │
-                       └──┬──────┬──────┬──────┬─────┘
-                          │      │      │      │
-      ┌───────────────────┘      │      │      └───────────────────┐
-      ▼                          ▼      ▼                          ▼
+      ┌─────────────────────────────┐
+      │      Supervisor Agent       │
+      │    (Qwen2.5-3B, T=0.1)      │
+      │   Classifies + routes       │
+      └──┬──────┬──────┬──────┬─────┘
+        │      │      │      │
+┌───────────────────┘      │      │      └───────────────────┐
+▼                          ▼      ▼                          ▼
 ┌───────────────┐        ┌───────────────┐                 ┌───────────────┐
 │  Tax Agent    │        │ Customs Agent │                 │ Account Agent │
 │ (specialist)  │        │  (specialist) │                 │  (specialist) │
 └───────┬───────┘        └───────┬───────┘                 └───────┬───────┘
-        │                        │                                 │
-        └────────────┬───────────┴─────────────┬───────────────────┘
-                     ▼                         ▼
-              ┌─────────────┐          ┌──────────────────┐
-              │   RAG Tool  │          │     MCP Tools    │
-              │  (current)  │          │                  │
-              └─────────────┘          │ • calculator     │
-                                       │ • ura_account    │
-                                       │ • document_parser│
-                                       │ • forms          │
-                                       │ • calendar       │
-                                       │ • rates          │
-                                       │ • news_search    │
-                                       └──────────────────┘
+│                        │                                 │
+└────────────┬───────────┴─────────────┬───────────────────┘
+    ▼                         ▼
+┌─────────────┐          ┌──────────────────┐
+│   RAG Tool  │          │     MCP Tools    │
+│  (current)  │          │                  │
+└─────────────┘          │ • calculator     │
+                      │ • ura_account    │
+                      │ • document_parser│
+                      │ • forms          │
+                      │ • calendar       │
+                      │ • rates          │
+                      │ • news_search    │
+                      └──────────────────┘
 ```
 
 Key design choices:
 
 - **Supervisor is small + cheap.** Qwen2.5-3B at T=0.1 is fast
-  enough to classify in <300 ms.
+enough to classify in <300 ms.
 - **Specialists share tools.** Tools are MCP servers, not code
-  embedded in any one agent — this keeps them independently testable
-  and deployable.
+embedded in any one agent — this keeps them independently testable
+and deployable.
 - **Escalation is an agent action.** "I don't know" is a first-class
-  tool call (`escalate_to_human(reason, context)`) that writes a
-  ticket rather than emitting text.
+tool call (`escalate_to_human(reason, context)`) that writes a
+ticket rather than emitting text.
 - **Memory is a tool.** `memory.read(user_id, topic)` and
-  `memory.write(user_id, fact)` — so the agent doesn't have to
-  carry state in the prompt.
+`memory.write(user_id, fact)` — so the agent doesn't have to
+carry state in the prompt.
 
 ### 3.3 MCP tool inventory (proposed)
 
@@ -217,40 +225,40 @@ public app).
 **Critical controls for high-risk tools:**
 
 - `mcp_ura_actions` requires **two-factor confirmation** — the agent
-  must show the user exactly what will be submitted, and the user
-  must click a real button in the UI (not an LLM-generated "yes").
+must show the user exactly what will be submitted, and the user
+must click a real button in the UI (not an LLM-generated "yes").
 - All writes are logged to the immutable `audit_events` table.
 - Rate-limited per-user, not per-IP.
 - Feature-flagged behind a `tier` gate — unavailable until user
-  has completed identity verification.
+has completed identity verification.
 
 ### 3.4 Memory architecture
 
 Three tiers, each with different retention and access patterns:
 
 1. **Short-term (session)** — the current conversation's turns.
-   Lives in Redis (ephemeral) or Postgres (`conversations`).
-   Already implemented via `db.get_recent_turns`.
+Lives in Redis (ephemeral) or Postgres (`conversations`).
+Already implemented via `db.get_recent_turns`.
 2. **Medium-term (episodic)** — summaries of past conversations
-   ("user asked about VAT registration 3 times this month"). Built
-   by a batch job; stored in `conversation_summaries`.
+("user asked about VAT registration 3 times this month"). Built
+by a batch job; stored in `conversation_summaries`.
 3. **Long-term (semantic)** — extracted user facts
-   (`{"taxpayer_type": "sole_trader", "registered_vat": false,
-   "industry": "retail"}`). Stored in `user_facts` with provenance
-   (which conversation the fact was learned from, confidence score,
-   extraction timestamp).
+(`{"taxpayer_type": "sole_trader", "registered_vat": false,
+"industry": "retail"}`). Stored in `user_facts` with provenance
+(which conversation the fact was learned from, confidence score,
+extraction timestamp).
 
 The memory agent runs offline after each conversation ends:
 
 ```
 conversation ended
-      │
-      ▼
+│
+▼
 ┌──────────────────┐     ┌─────────────┐
 │  Summarizer LLM  │────▶│ summaries   │
 └──────────────────┘     └─────────────┘
-      │
-      ▼
+│
+▼
 ┌──────────────────┐     ┌─────────────┐
 │  Fact extractor  │────▶│ user_facts  │
 │  (JSON-mode LLM) │     └─────────────┘
@@ -267,14 +275,14 @@ Agentic systems expand the blast radius of LLM mistakes. Three
 controls are non-negotiable:
 
 1. **No irreversible action without explicit user confirmation.**
-   The user must see a form preview and click "Submit" — the LLM
-   cannot trigger `mcp_ura_actions.*` from prose alone.
+The user must see a form preview and click "Submit" — the LLM
+cannot trigger `mcp_ura_actions.*` from prose alone.
 2. **All tool calls go through `OutputGuard`.** Tool arguments are
-   scanned for prompt-injection patterns before execution; tool
-   responses are scanned for PII on the way back.
+scanned for prompt-injection patterns before execution; tool
+responses are scanned for PII on the way back.
 3. **Append-only audit log** of every (user, agent, tool, args,
-   result, timestamp, hash of previous row). Enables forensic
-   replay for disputes.
+result, timestamp, hash of previous row). Enables forensic
+replay for disputes.
 
 Also: keep `FLAG_AGENTIC_MODE=false` as the default. Ship as an
 opt-in beta, gated on a specific user tier, for the first 90 days.
@@ -306,32 +314,32 @@ are explicit — don't start G at phase 20 if phase 15 isn't done.
 shouldn't be asked to generate (numbers, dates, lookups).
 **Delivered on `feat/agentic-workflows`:**
 - ✅ In-process tool registry with schema validation (`backend/app/tools/`).
-  MCP wire-format support deferred to Phase 15+.
+MCP wire-format support deferred to Phase 15+.
 - ✅ Tool-call loop in `llm.generate_with_tools()` (feature-flagged
-  via `FLAG_TOOL_USE`), routed through the shared circuit breaker
-  via `service._call_llm_agentic()`.
+via `FLAG_TOOL_USE`), routed through the shared circuit breaker
+via `service._call_llm_agentic()`.
 - ✅ 11 tools: `calculate_vat`, `calculate_paye`,
-  `calculate_corporation_tax`, `calculate_capital_gains`,
-  `calculate_customs_duty`, `get_current_date`, `get_next_deadlines`,
-  `lookup_rate`, `list_available_rates`, `search_ura_knowledge_base`,
-  `escalate_to_human`.
+`calculate_corporation_tax`, `calculate_capital_gains`,
+`calculate_customs_duty`, `get_current_date`, `get_next_deadlines`,
+`lookup_rate`, `list_available_rates`, `search_ura_knowledge_base`,
+`escalate_to_human`.
 - ✅ Supervisor router (Phase 14-C) classifies queries and scopes
-  tool whitelists per-specialist.
+tool whitelists per-specialist.
 - ✅ Ticket queue (Phase 14-D) closes the escalation dead-letter.
 - ✅ 153 pytest tests in `tests/agents/`, fully offline, 2.6 s total.
 - ✅ Feature flags default OFF — shipping is a no-op on the existing
-  request path.
+request path.
 
 See `docs/AGENT_ARCHITECTURE.md` for the full Phase 14 A-D design.
 
 **Still remaining for Phase 15:**
 - MCP wire format (tools currently in-process, not as separate
-  MCP servers).  Needed once we add `mcp_ura_account` +
-  `mcp_ura_actions` which must run in URA's DMZ.
+MCP servers).  Needed once we add `mcp_ura_account` +
+`mcp_ura_actions` which must run in URA's DMZ.
 - LLM-based supervisor classifier (the rule-based one has known
-  soft misses — see `AGENT_ARCHITECTURE.md` §4).
+soft misses — see `AGENT_ARCHITECTURE.md` §4).
 - Per-specialist system prompts (currently all specialists use the
-  base `SYSTEM_PROMPT`).
+base `SYSTEM_PROMPT`).
 
 ### Phase 16 — Workflow engine + document ingestion (G11, G13)
 
@@ -398,7 +406,7 @@ chain brittleness; cost if hosted.
 **Deliverables:**
 - Scheduler (APScheduler) with cron-like deadlines
 - Notification channels (email via Resend/SES, SMS via
-  Africa's Talking, in-app)
+Africa's Talking, in-app)
 - Fresh-data ingestion worker (URA news scraper + nightly reindex)
 - Index-freshness alert
 - User-facing notification preferences
@@ -413,12 +421,12 @@ chain brittleness; cost if hosted.
 If you could only ship three things next quarter, do these in order:
 
 1. **Phase 14 — Identity & profile.** Without a `user_id`, nothing
-   else personalization-related works.
+else personalization-related works.
 2. **Phase 15 — Tool-calling foundation.** Unlocks calculators and
-   live data, which is the fastest way to move users from "asked a
-   question" to "solved my problem".
+live data, which is the fastest way to move users from "asked a
+question" to "solved my problem".
 3. **Phase 17 — Long-term memory.** Turns the bot from a search box
-   into an assistant that knows the user.
+into an assistant that knows the user.
 
 Phases 16, 18, 19, 20 are high-value but stack on top of those three.
 
@@ -443,40 +451,40 @@ Phases 16, 18, 19, 20 are high-value but stack on top of those three.
 Before any phase that stores user data:
 
 - [ ] **Uganda Data Protection Act 2019** — appoint a Data Protection
-      Officer, register with the NITA-U PDPO, publish a privacy
-      notice, define lawful bases per processing purpose.
+Officer, register with the NITA-U PDPO, publish a privacy
+notice, define lawful bases per processing purpose.
 - [ ] **Purpose limitation** — each `user_facts` field must have a
-      declared purpose; the memory agent can't extract facts outside
-      those purposes.
+declared purpose; the memory agent can't extract facts outside
+those purposes.
 - [ ] **Consent versioning** — when the consent text changes, users
-      must re-consent before the new version's data is used.
+must re-consent before the new version's data is used.
 - [ ] **Subject rights** — implement `GET /v1/me/export` (data
-      portability) and `DELETE /v1/me` (right to erasure). Both must
-      cascade to Redis cache keys and Qdrant user-specific collections.
+portability) and `DELETE /v1/me` (right to erasure). Both must
+cascade to Redis cache keys and Qdrant user-specific collections.
 - [ ] **Audit & forensic replay** — append-only `audit_events` with
-      hash chaining; retention ≥ 7 years for tax-related records.
+hash chaining; retention ≥ 7 years for tax-related records.
 - [ ] **Red-team the agent** — prompt-injection, data exfiltration,
-      privilege escalation, and prompt-leak tests in CI.
+privilege escalation, and prompt-leak tests in CI.
 - [ ] **Sub-processor disclosure** — if any tool (e.g. vLLM on a
-      cloud GPU, OpenAI for embeddings) transmits data to a third
-      party, disclose it in the privacy notice.
+cloud GPU, OpenAI for embeddings) transmits data to a third
+party, disclose it in the privacy notice.
 
 ---
 
 ## 8. What this document deliberately does NOT do
 
 - **Does not re-specify Phases 1-13.** See `App/README.md` for the
-  current production-ready flow.
+current production-ready flow.
 - **Does not prescribe a specific LLM vendor.** The architecture
-  works with Qwen on-prem, vLLM-hosted Llama, or hosted APIs —
-  pick based on compliance, cost, and latency.
+works with Qwen on-prem, vLLM-hosted Llama, or hosted APIs —
+pick based on compliance, cost, and latency.
 - **Does not cover frontend redesigns beyond profile / admin /
-  ticket views.** The existing UI (Phase 13 glassmorphism) is
-  already production-grade.
+ticket views.** The existing UI (Phase 13 glassmorphism) is
+already production-grade.
 - **Does not include infra costing.** Phase 14 adds SSO + Postgres,
-  Phase 19 adds ~3x LLM calls per request (supervisor +
-  specialist + tool) — costs need modeling once tool and agent
-  selection is locked.
+Phase 19 adds ~3x LLM calls per request (supervisor +
+specialist + tool) — costs need modeling once tool and agent
+selection is locked.
 
 ---
 

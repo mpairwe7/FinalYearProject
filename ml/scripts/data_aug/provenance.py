@@ -128,11 +128,129 @@ class ManifestBuilder:
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "host": os.uname().nodename if hasattr(os, "uname") else None,
             "git": _git_head(self.repo_root),
+            # Phase 2 — canonical embedder pin. Future rewrites of the
+            # retrieval serving path must read this to confirm the
+            # embedder they're using matches what the training data
+            # was formatted against. Mismatched embedder → retrieval
+            # corpus/query distribution skew.
+            "canonical_embedder": self.config.get("canonical_embedder"),
             "config": self.config,
             "inputs": self.inputs,
             "stages": self.stages,
             "outputs": self.outputs,
         }
+
+
+def summarise_synthetic_ratio(rows: list[Any]) -> dict[str, Any]:
+    """Summarise real/synthetic composition of a row list.
+
+    Accepts either TrainingExample objects or dict rows (whichever the
+    caller has on hand). Used by the pipeline driver to enrich the
+    manifest's ``stages.synthetic`` block.
+    """
+    total = 0
+    synthetic = 0
+    by_source: dict[str, int] = {}
+    by_language: dict[str, int] = {}
+    by_task: dict[str, int] = {}
+
+    for r in rows:
+        total += 1
+        if hasattr(r, "metadata"):
+            md = r.metadata
+            is_syn = bool(getattr(md, "is_synthetic", False))
+            src = md.source_type.value if hasattr(md.source_type, "value") else str(md.source_type)
+            lang = getattr(md, "language", "en")
+            task = md.task.value if hasattr(md.task, "value") else str(md.task)
+        else:  # dict row
+            is_syn = bool(r.get("is_synthetic", False))
+            src = str(r.get("source_type", "unknown"))
+            lang = str(r.get("language", "en"))
+            task = str(r.get("task", "unknown"))
+        if is_syn:
+            synthetic += 1
+        by_source[src] = by_source.get(src, 0) + 1
+        by_language[lang] = by_language.get(lang, 0) + 1
+        by_task[task] = by_task.get(task, 0) + 1
+
+    return {
+        "total_rows": total,
+        "synthetic_rows": synthetic,
+        "real_rows": total - synthetic,
+        "synthetic_ratio": synthetic / max(1, total),
+        "by_source_type": by_source,
+        "by_language": by_language,
+        "by_task": by_task,
+    }
+
+
+def write_croissant_metadata(manifest: dict[str, Any], out_path: Path) -> Path:
+    """Write a minimal ML Commons Croissant 1.0 JSON-LD file.
+
+    Covers the mandatory core: @context, @type, name, description,
+    version, license, datePublished, and a `distribution` list of the
+    JSONL/Parquet outputs with their SHA-256s. This is what HF Hub
+    reads when the dataset is pushed so the Croissant tab populates.
+    """
+    outputs = manifest.get("outputs") or []
+    git = manifest.get("git") or {}
+    distribution: list[dict[str, Any]] = []
+    for o in outputs:
+        distribution.append({
+            "@type": "cr:FileObject",
+            "@id": f"{o['role']}",
+            "name": Path(o["path"]).name,
+            "contentUrl": o["path"],
+            "encodingFormat": _encoding_for(o["path"]),
+            "sha256": o.get("sha256"),
+            "contentSize": o.get("bytes"),
+        })
+
+    croissant = {
+        "@context": {
+            "@language": "en",
+            "@vocab": "https://schema.org/",
+            "cr": "http://mlcommons.org/croissant/",
+            "sc": "https://schema.org/",
+        },
+        "@type": "sc:Dataset",
+        "name": "ura-tax-assistant-training",
+        "description": (
+            "Bilingual (English + Luganda) training dataset for the URA Tax "
+            "Assistant: CSV FAQs, hierarchical PDF chunks, Luganda parallel "
+            "corpus, teacher-generated QA with hallucination filtering, and "
+            "curated refusal/safety examples."
+        ),
+        "version": manifest.get("pipeline_version"),
+        "datePublished": manifest.get("created_at_utc"),
+        "license": "https://creativecommons.org/licenses/by/4.0/",
+        "citation": (
+            f"URA Tax Assistant training dataset, git commit "
+            f"{git.get('commit', 'unknown')}"
+        ),
+        "cr:pipelineVersion": manifest.get("pipeline_version"),
+        "cr:schemaVersion": manifest.get("schema_version"),
+        "cr:gitCommit": git.get("commit"),
+        "cr:canonicalEmbedder": manifest.get("canonical_embedder"),
+        "distribution": distribution,
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(croissant, indent=2) + "\n", encoding="utf-8")
+    log.info("provenance: wrote croissant metadata %s", out_path)
+    return out_path
+
+
+def _encoding_for(path: str) -> str:
+    p = path.lower()
+    if p.endswith(".parquet"):
+        return "application/vnd.apache.parquet"
+    if p.endswith(".jsonl"):
+        return "application/x-jsonlines"
+    if p.endswith(".json"):
+        return "application/json"
+    if p.endswith(".md"):
+        return "text/markdown"
+    return "application/octet-stream"
 
     def write(self, out_path: Path) -> Path:
         out_path.parent.mkdir(parents=True, exist_ok=True)

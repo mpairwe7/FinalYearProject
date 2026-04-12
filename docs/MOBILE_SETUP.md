@@ -195,7 +195,13 @@ Key providers:
 |----------|------|---------|
 | `chatProvider` | `lib/features/chat/providers/chat_provider.dart` | Chat messages, send/receive, offline fallback |
 | `faqProvider` | `lib/features/faq/providers/faq_provider.dart` | FAQ tag listing and content |
-| `settingsProvider` | `lib/features/settings/providers/settings_provider.dart` | Theme mode, locale |
+| `settingsProvider` | `lib/features/settings/providers/settings_provider.dart` | Theme, locale, TTS/ASR settings |
+| `consentProvider` | `lib/features/consent/providers/consent_provider.dart` | Per-purpose voice consent (encrypted) |
+| `asrRouterProvider` | `lib/core/speech/speech_providers.dart` | Whisper + native ASR routing |
+| `ttsEngineProvider` | `lib/core/speech/speech_providers.dart` | MMS-VITS TTS engine |
+| `modelManagerProvider` | `lib/core/speech/speech_providers.dart` | Speech model download/verify |
+| `audioCaptureProvider` | `lib/core/speech/speech_providers.dart` | PCM16 mic streaming |
+| `ttsPlaybackProvider` | `lib/core/speech/speech_providers.dart` | just_audio TTS playback |
 
 ### Networking
 
@@ -236,8 +242,17 @@ lib/
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `shared_preferences` | ^2.5.3 | Local key-value storage (session, theme, locale) |
-| `speech_to_text` | ^7.0.0 | Voice input for chat |
-| `uuid` | ^4.5.1 | Message and session IDs |
+| `sherpa_onnx` | ^1.9.0 | Unified speech runtime: Whisper ASR + VITS TTS + Silero VAD |
+| `record` | ^5.1.0 | PCM16 16 kHz streaming mic capture |
+| `just_audio` | ^0.9.40 | TTS audio playback with in-memory WAV source |
+| `flutter_tts` | ^4.0.2 | Native OS TTS fallback (English only) |
+| `speech_to_text` | ^7.0.0 | Native OS ASR fallback (English only) |
+| `permission_handler` | ^11.3.0 | Mic + notification permission management |
+| `flutter_secure_storage` | ^9.2.0 | Encrypted consent grant storage |
+| `crypto` | ^3.0.5 | SHA-256 for model verification + TTS cache keys |
+| `sqflite` | ^2.3.0 | Hash-chained audit ledger |
+| `path_provider` | ^2.1.0 | App support dir for models + TTS cache |
+| `uuid` | ^4.5.1 | Message, session, and consent grant IDs |
 | `url_launcher` | ^6.3.1 | Opening external links (URA website) |
 
 ---
@@ -299,7 +314,82 @@ FAQ data fetched from the `/tags` and `/faq/{tag}` endpoints is cached locally v
 
 ---
 
-## 9. App Store Compliance
+## 9. On-Device Speech (ASR + TTS)
+
+The app includes a fully offline speech pipeline for English and Luganda.
+
+### How It Works
+
+1. **First launch** redirects to a consent screen with three scoped grants
+   (mic access, transcript storage, model improvement). The mic button
+   is disabled until `voiceRecord` consent is granted.
+
+2. **First mic tap** triggers on-demand download of speech model bundles
+   (~240 MB total) via Play Asset Delivery (Android) / HTTPS fallback.
+   Progress is shown in Settings > Speech Models.
+
+3. **Recording** uses `AudioCapture` (PCM16 16 kHz mono via the `record`
+   package) fed through `RmsVad` for voice activity detection. When the
+   user stops speaking (800 ms silence), the utterance is routed to
+   `AsrRouter.transcribe()`.
+
+4. **ASR** — primary: Whisper Small INT8 via sherpa_onnx (en/lg/sw);
+   fallback: native OS `speech_to_text` (English only). URA domain
+   glossary (TIN, PAYE, EFRIS, VAT) applied as Whisper hotwords +
+   regex post-fixups.
+
+5. **TTS** — "Listen" button on every assistant message. MMS-TTS VITS
+   for English + Luganda. LRU disk cache (50 MB, SHA-256 keyed).
+   EU AI Act Article 50 compliant: session-scoped disclosure label +
+   inaudible 19 kHz watermark on every playback.
+
+6. **Audit** — every consent event, mic open, ASR result, TTS play is
+   logged to a hash-chained SQLite ledger (`LocalLedger`). Tamper-evident
+   via SHA-256 chain. Consent grant ID threaded through all events.
+
+### Speech Model Bundles
+
+Models are declared in `assets/speech/manifest.json`:
+
+| Bundle | Size | Tier |
+|--------|------|------|
+| `whisper-small-int8` | 120 MB | Primary ASR |
+| `whisper-tiny-int8` | 40 MB | Fallback ASR (low-RAM devices) |
+| `silero-vad-v5` | 2.4 MB | Voice activity detection |
+| `mms-tts-eng` | 40 MB | English TTS |
+| `mms-tts-lug` | 40 MB | Luganda TTS |
+
+Manage downloads in Settings > Speech Models. Each bundle is SHA-256
+verified on download and can be deleted to free space.
+
+### Without Speech Models
+
+Speech models are **not required** for development. If absent, the mic
+button shows "Download the Luganda model" when tapped for Luganda, and
+falls back to native OS recognition for English. TTS buttons show
+"TTS model not available" if VITS bundles are missing.
+
+### Android Permissions
+
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO"/>
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+```
+
+### iOS Privacy Descriptions
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>Record your voice for on-device speech recognition. Audio is
+processed entirely on your phone and is never uploaded.</string>
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>On-device speech recognition to convert your voice to text.
+All processing happens locally on your device.</string>
+```
+
+---
+
+## 10. App Store Compliance
 
 ### Apple App Store -- Guideline 5.1.2(i)
 
@@ -329,7 +419,7 @@ In the App Store Connect submission:
 
 ---
 
-## 10. Testing
+## 11. Testing
 
 ### Unit and Widget Tests
 
@@ -338,7 +428,8 @@ cd MobileApp/ura_chatbot
 flutter test
 ```
 
-Existing test: `test/widget_test.dart`.
+31 tests across 6 test files (widget, UI components, ASR router,
+audio capture/VAD, TTS cache, consent provider).
 
 ### Integration Tests
 
@@ -368,7 +459,7 @@ flutter run -d <device-id>
 
 ---
 
-## 11. Build Commands -- Quick Reference
+## 12. Build Commands -- Quick Reference
 
 | Task | Command |
 |------|---------|

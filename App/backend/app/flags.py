@@ -36,7 +36,8 @@ class Flag:
 # Canonical registry.  Add a new entry here (do not read env directly in
 # callers) so flags are discoverable and auditable.
 _REGISTRY: dict[str, Flag] = {
-    f.name: f for f in [
+    f.name: f
+    for f in [
         Flag("self_reflect", False, "Regenerate once when faithfulness is weak"),
         Flag("structured_output", False, "Emit JSON answer/citations"),
         Flag("corrective_rag", True, "Re-retrieve on low initial quality"),
@@ -45,9 +46,33 @@ _REGISTRY: dict[str, Flag] = {
         Flag("reranker", True, "Cross-encoder reranking"),
         Flag("eval_auto_run", False, "Run evaluation harness on every Nth request"),
         # Phase 14 — agentic workflows (feature-flagged off by default)
-        Flag("tool_use", False, "Allow the LLM to call registered tools via Qwen2.5 function-calling"),
+        Flag(
+            "tool_use", False, "Allow the LLM to call registered tools via Qwen2.5 function-calling"
+        ),
         Flag("agentic_mode", False, "Route requests through the supervisor-specialist agent graph"),
         Flag("ticket_queue", False, "Persist escalations to the tickets table for human follow-up"),
+        # Phase 14 (2026) — identity & consent
+        Flag("auth_required", False, "Reject unauthenticated /v1/* requests"),
+        Flag("multi_tenant", False, "Enforce tenant_id isolation via RLS"),
+        # Phase 15 (2026) — MCP + Tool RAG + LangGraph orchestration
+        Flag("tool_rag", False, "Use Tool RAG selection instead of pasting all tool schemas"),
+        Flag("langgraph", False, "Route agentic requests through the graph orchestrator"),
+        # Phase 16 (2026) — personal memory
+        Flag("memory_enabled", False, "Inject personal memory facts into agentic prompts"),
+        # Phase 21 (2026) — audit ledger + per-segment eval
+        Flag(
+            "audit_ledger",
+            False,
+            "Append every agentic turn to the hash-chained audit_events table",
+        ),
+        # Phase 22 (2026) — mobile offline voice stack
+        Flag(
+            "voice_enabled",
+            False,
+            "Enable mobile on-device voice features (ASR/TTS). Server handles "
+            "no audio — the flag only gates the mobile UI and scoped analytics "
+            "events. Per-user consent is still required on the device.",
+        ),
     ]
 }
 

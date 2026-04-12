@@ -111,8 +111,11 @@ CORS_ORIGINS=https://ura-chatbot.example.com
 RATE_LIMIT=30/minute
 
 # --- Qdrant ---
-QDRANT_URL=http://qdrant:6333
+QDRANT_URL=http://qdrant:6333          # Inside Docker network (default)
+# QDRANT_URL=http://localhost:16333    # From host, if ports are remapped
 QDRANT_COLLECTION=ura_knowledge_base
+DENSE_MODEL=sentence-transformers/all-MiniLM-L6-v2
+DENSE_DIM=384                          # Must match the indexed collection
 
 # --- Frontend ---
 NEXT_PUBLIC_API_URL=https://ura-chatbot.example.com/api
@@ -133,6 +136,36 @@ HF_MODEL_REPO=mpairweLandwind/ura-chatbot
 ```
 
 > Never commit `.env` to version control. The repo `.gitignore` already excludes it.
+
+### Shared-host port remapping
+
+On multi-tenant servers where default ports (6333, 6379, 3000) are
+already claimed by other services, use env vars to remap:
+
+```bash
+# docker-compose.yml already supports these overrides:
+QDRANT_PORT=16333        # external → internal 6333
+QDRANT_GRPC_PORT=16334   # external → internal 6334
+
+# Start Qdrant with remapped ports
+QDRANT_PORT=16333 QDRANT_GRPC_PORT=16334 docker compose up -d qdrant
+
+# Point the backend at the remapped port (when running outside Docker)
+QDRANT_URL=http://localhost:16333 \
+REDIS_URL=redis://localhost:16379/0 \
+uvicorn app.main:app --host 127.0.0.1 --port 18000
+```
+
+Similarly, the Next.js frontend falls back to port 13100 if 3000 is
+occupied:
+
+```bash
+bun run next dev -p 13100 -H 127.0.0.1
+```
+
+The frontend's `next.config.mjs` rewrites `/api/*` to the backend's
+`INTERNAL_API_URL` (default `http://127.0.0.1:18000`), so no
+client-side code changes are needed.
 
 ---
 
@@ -246,12 +279,12 @@ For high-availability retrieval, run a multi-node Qdrant cluster:
 # qdrant-cluster.yml (example)
 services:
   qdrant-0:
-    image: qdrant/qdrant:v1.13.3
+    image: qdrant/qdrant:v1.17.1
     environment:
       - QDRANT__CLUSTER__ENABLED=true
     command: ./qdrant --uri http://qdrant-0:6335
   qdrant-1:
-    image: qdrant/qdrant:v1.13.3
+    image: qdrant/qdrant:v1.17.1
     environment:
       - QDRANT__CLUSTER__ENABLED=true
     command: ./qdrant --uri http://qdrant-1:6335 --bootstrap http://qdrant-0:6335
@@ -492,7 +525,9 @@ Run through every item before go-live:
 - [ ] `GET /health` returns 200
 - [ ] `GET /ready` returns `"status": "ready"` (not `"degraded"`)
 - [ ] `GET /metrics` returns Prometheus text output
-- [ ] Qdrant collection exists and has documents (`curl http://qdrant:6333/collections/ura_knowledge_base`)
+- [ ] Qdrant collection exists and has documents (`curl http://qdrant:6333/collections/ura_knowledge_base` or `http://localhost:16333/...` on shared hosts)
+- [ ] Qdrant container health shows `healthy` (not `unhealthy` — check Docker healthcheck config if stuck)
+- [ ] `DENSE_MODEL` / `DENSE_DIM` env vars match the indexed collection's vector dimensions (384 for MiniLM, 1024 for bge-m3)
 - [ ] Rate limiting active (`RATE_LIMIT=30/minute`)
 - [ ] Log rotation configured (Docker `json-file` driver with `max-size`)
 - [ ] Backup cron job scheduled for analytics DB and Qdrant snapshots
@@ -503,3 +538,20 @@ Run through every item before go-live:
 - [ ] Google Play data safety section filled
 - [ ] Rollback procedure tested with a known-good image tag
 - [ ] SLO alerting rules loaded in Prometheus/Alertmanager
+- [ ] `python scripts/validate_env.py --env production` passes with 0 errors
+- [ ] `AUTH_DEV_SECRET` rotated from default value
+- [ ] `LLM_TRUST_REMOTE_CODE=false` (OWASP LLM03 supply chain)
+- [ ] `LLM_MODEL_REVISION` pinned to a specific commit SHA (SLSA v1.2)
+- [ ] Container images signed with cosign (`cosign verify` passes)
+- [ ] SLSA provenance attestation generated via `container-sign-provenance.yml`
+- [ ] Frontend Vitest tests pass (`cd App/frontend && bun run test`)
+- [ ] Frontend Lighthouse accessibility score >= 90
+- [ ] AI red team evaluation passes (`python scripts/ai_red_team.py` >= 90% block rate)
+- [ ] Bias & fairness audit passes (`python scripts/bias_fairness_audit.py` >= 70% parity)
+- [ ] Incident response simulation passes (`python scripts/incident_response_sim.py`)
+- [ ] Disaster recovery test passes (`bash scripts/dr_test.sh`)
+- [ ] k6 load test validates SLOs (`k6 run tests/load/k6-chat-slo.js`)
+- [ ] Monitoring stack operational (`docker compose --profile monitoring up`)
+- [ ] Grafana dashboard shows live metrics
+- [ ] Model Card reviewed and up-to-date (`docs/MODEL_CARD.md`)
+- [ ] Privacy Impact Assessment completed (`docs/capstone/PIA.md`)

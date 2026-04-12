@@ -1,0 +1,77 @@
+# Alerting rules — URA Chatbot (2026)
+# Aligned with: MONITORING.md §4, SLO targets from DEPLOYMENT.md
+groups:
+  - name: ura-chatbot-slos
+    interval: 30s
+    rules:
+      # SLO: Error rate < 1%
+      - alert: HighErrorRate
+        expr: |
+          (
+            rate(ura_http_errors_total[5m])
+            / rate(ura_http_requests_total[5m])
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Error rate exceeds 1% SLO"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5m."
+          runbook: "docs/MONITORING.md#slow-responses"
+
+      # SLO: p95 latency < 2s for /v1/chat
+      - alert: HighChatLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(ura_chat_response_time_ms_bucket{path="/v1/chat"}[5m])
+          ) > 2000
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Chat p95 latency exceeds 2s SLO"
+          description: "p95 latency is {{ $value }}ms over the last 5m."
+
+      # SLO: Availability > 99.9%
+      - alert: LowAvailability
+        expr: |
+          (
+            1 - (
+              rate(ura_http_errors_total{status=~"5.."}[1h])
+              / rate(ura_http_requests_total[1h])
+            )
+          ) < 0.999
+        for: 1h
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Availability below 99.9% SLO"
+
+      # Escalation rate > 10% warrants investigation
+      - alert: HighEscalationRate
+        expr: |
+          (
+            rate(ura_escalation_total[15m])
+            / rate(ura_chat_requests_total[15m])
+          ) > 0.10
+        for: 15m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Escalation rate above 10% — check retrieval quality"
+
+      # Faithfulness degradation
+      - alert: LowFaithfulness
+        expr: |
+          avg(ura_faithfulness_score) < 0.5
+        for: 30m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Average faithfulness score dropped below 0.5"
+          description: "Current avg: {{ $value }}. Check Qdrant index freshness."

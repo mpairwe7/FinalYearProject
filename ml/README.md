@@ -9,7 +9,17 @@ ml/
 ├── pipelines/                    # ML pipeline components
 │   ├── train.py                  # Main training script
 │   ├── evaluate.py               # Model evaluation
-│   └── quality_gates.py          # Quality checks before deployment
+│   ├── evaluate_rag.py           # RAG evaluation (faithfulness, relevancy, etc.)
+│   ├── quality_gates.py          # Quality checks (classifier/speech/mt/production)
+│   ├── calibrate.py              # ECE / Brier / temperature scaling + abstention
+│   ├── audit_tokenizer.py        # Tokenizer coverage audit (Luganda fertility)
+│   ├── generate_model_card.py    # HF-Hub + EU AI Act model card generator
+│   ├── evaluate_safety.py        # Text-mode red-team safety eval (mock/llm/api)
+│   ├── evaluate_speech.py        # ASR/TTS evaluation harness
+│   ├── evaluate_mt.py            # Machine translation evaluation
+│   ├── evaluate_tts.py           # TTS roundtrip intelligibility
+│   ├── benchmark_mobile.py       # On-device benchmark orchestrator
+│   └── redteam_voice.py          # Voice-mode red-team harness
 ├── scripts/                      # Utility scripts
 │   ├── data_augmentation.py      # Thin CLI → ml.scripts.data_aug package
 │   ├── train_quality_classifier.py  # FineWeb-Edu style quality classifier CLI
@@ -27,6 +37,9 @@ ml/
 │   │   └── pipeline.py           # Four-stage orchestrator
 │   ├── teacher_qa_generation.py  # Generate synthetic QA using teacher model
 │   ├── fine_tune_gemma.py        # LoRA fine-tuning for Gemma/Llama/T5
+│   ├── export_mobile.py          # LoRA merge → GGUF quantise → deploy to mobile
+│   ├── benchmark_inference.py    # Desktop proxy for mobile inference benchmark
+│   ├── repro.py                  # Reproducibility: seed pinning + env snapshots
 │   ├── run_training_pipeline.sh  # Full pipeline orchestrator (shell)
 │   ├── run_local_2gpu.sh         # Local 2-GPU launcher
 │   ├── prepare_kaggle_notebook.py  # Prepare notebook for Kaggle training
@@ -34,7 +47,7 @@ ml/
 │   ├── monitor_kaggle.py         # Monitor Kaggle training jobs
 │   └── process_kaggle_output.py  # Process artifacts from Kaggle
 └── configs/                      # Training configurations
-    ├── training_config.yaml
+    ├── training_config.yaml      # All gate thresholds (classifier/speech/mt/production)
     └── accelerate_2gpu.yaml
 ```
 
@@ -480,9 +493,12 @@ The training scripts are integrated into two workflows. Both consume the
 |-----|---------|---------|
 | `lint-and-test` | every push / PR | ruff + pytest (runs `tests/test_data_augmentation.py`, 31 unit tests) |
 | `data-aug-smoke` | every PR / push | < 8 min. Imports all modules, runs schema + PII unit checks, runs a CSV-only dry-run, runs a real CSV-only pipeline and validates manifest + required outputs. Fast enough to gate every PR. |
+| `speech-smoke` | every PR / push | < 8 min. Import smoke + schema tests + dry-run for ASR/MT/TTS/mobile-export + speech/mt quality gates (soft-fail). |
 | `data-validation` | after `lint-and-test` | Existing Great-Expectations-style CSV validation |
 | `prepare-training-data` | main / manual | ≤ 30 min. Trains the quality classifier from gold CSVs, runs the full 2026 pipeline with `--max-pdfs 5`, validates manifest + contamination scan, uploads `training-data` + `quality-classifier` artefacts. Exposes `train_rows`, `val_rows`, `test_rows`, `classifier_f1` as job outputs. |
 | `train-model` | after `prepare-training-data` | Downloads artefacts to `artifacts/training_data/`, runs `fine_tune_gemma.py --dry-run` against `train.messages.jsonl` to verify the messages column is consumed correctly. |
+| `evaluate-rag` | after `evaluate-model` | Runs RAG evaluation on English + Luganda eval sets, uploads results. |
+| `production-gates` | after `evaluate-rag` + `validate-mobile-export` | Runs tokenizer audit (proxy mode), synthetic benchmark, model card generation, and `quality_gates.py --family production --soft-fail`. Uploads all artefacts. Gates the deploy stage. |
 
 Key snippet (full pipeline + classifier + validation):
 
@@ -617,9 +633,9 @@ gh workflow run kaggle-training.yml \
     -f accelerator=gpu
 ```
 
-## 📈 Evaluation
+## 📈 Evaluation & Production Gates
 
-After training, evaluate the model:
+### Classical evaluation
 
 ```bash
 # Run evaluation
@@ -627,10 +643,94 @@ python ml/pipelines/evaluate.py \
     --model artifacts/ura-gemma-finetuned/final \
     --test-data artifacts/test_data.jsonl
 
-# Quality gates check
+# Classifier quality gates (accuracy/f1/precision/recall/latency)
 python ml/pipelines/quality_gates.py \
     --metrics Results/metrics/evaluation_metrics.json
 ```
+
+### 2026 Production gate pipeline
+
+The production family aggregates multiple artefact files into a single
+release-readiness check. Each gate has a severity (`blocking` or `advisory`);
+advisory gates are recorded but do not fail the release, letting new checks
+ramp safely.
+
+```bash
+# 1. Calibration — ECE, Brier, temperature scaling, abstention threshold
+python -m ml.pipelines.calibrate \
+    --input Results/confidence_scores.jsonl \
+    --output-dir Results/calibration
+
+# 2. Tokenizer audit — Luganda fertility ratio vs English
+python -m ml.pipelines.audit_tokenizer \
+    --tokenizer google/gemma-2-2b-it \
+    --en Data/eval/rag_eval.jsonl \
+    --lg Data/eval/rag_eval_lg.jsonl \
+    --output-dir Results/tokenizer_audit
+
+# 3. Inference benchmark (desktop proxy; use --synthetic in CI)
+python -m ml.scripts.benchmark_inference \
+    --model-path artifacts/mobile/ura-gemma-2b-q4_k_m.gguf \
+    --output-dir Results/benchmark
+# CI mode (no model needed):
+python -m ml.scripts.benchmark_inference --synthetic --output-dir Results/benchmark
+
+# 4. Model card generation (EU AI Act Art. 10/13 compliant)
+python -m ml.pipelines.generate_model_card \
+    --output Results/MODEL_CARD.md \
+    --mobile-manifest artifacts/mobile/mobile_manifest.json \
+    --rag-eval Results/rag_evaluation_results.json \
+    --safety Results/safety_evaluation_results.json \
+    --calibration Results/calibration/calibration_report.json \
+    --tokenizer-audit Results/tokenizer_audit/tokenizer_audit.json \
+    --benchmark Results/benchmark/benchmark.json
+
+# 5. Combined production quality gate
+python -m ml.pipelines.quality_gates \
+    --family production \
+    --config ml/configs/training_config.yaml \
+    --rag-eval Results/rag_evaluation_results.json \
+    --calibration Results/calibration/calibration_report.json \
+    --tokenizer-audit Results/tokenizer_audit/tokenizer_audit.json \
+    --benchmark Results/benchmark/benchmark.json \
+    --mobile-manifest artifacts/mobile/mobile_manifest.json \
+    --model-card Results/MODEL_CARD.md \
+    --safety Results/safety_evaluation_results.json
+```
+
+### Production gate thresholds
+
+Configured in `ml/configs/training_config.yaml` under `production_gates`:
+
+| Gate | Metric | Threshold | Severity |
+|------|--------|-----------|----------|
+| RAG faithfulness | `faithfulness.mean` | >= 0.60 | blocking |
+| RAG answer relevancy | `answer_relevancy.mean` | >= 0.70 | blocking |
+| Calibration ECE | `summary.ece` | <= 0.10 | blocking |
+| Calibration Brier | `summary.brier` | <= 0.25 | blocking |
+| Safety refusal rate | `refusal_rate` | >= 0.90 | blocking |
+| Tokenizer fertility | `fertility_ratio_lg_over_en` | <= 1.80 | blocking |
+| Mobile bundle size | `size_mb` | <= 1800 | blocking |
+| Mobile SHA-256 | present | == true | blocking |
+| Model card sections | all 13 present | == true | blocking |
+| Benchmark tokens/sec | `tokens_per_sec.mean` | >= 8.0 | advisory* |
+| Benchmark TTFT p95 | `ttft_ms.p95` | <= 1500 ms | advisory* |
+| Benchmark peak RSS | `peak_rss_mb` | <= 2200 | advisory* |
+| Per-language floors | `lg.faithfulness` etc. | per-lang | blocking |
+
+\* Advisory when `--synthetic`; promoted to blocking with real benchmark data.
+
+### Reproducibility
+
+Every pipeline embeds an environment snapshot via `ml/scripts/repro.py`:
+
+```bash
+# Pin all seeds (Python, NumPy, PyTorch, transformers) + capture env
+python -c "from ml.scripts.repro import set_global_seed, env_snapshot; set_global_seed(42); print(env_snapshot('demo'))"
+```
+
+Snapshots include git SHA, branch, dirty flag, platform, CUDA status, and
+package versions. Written alongside every artefact for full audit trail.
 
 ## 🌐 Deployment
 

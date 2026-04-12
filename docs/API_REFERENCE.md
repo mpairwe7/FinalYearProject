@@ -553,6 +553,218 @@ POST /classify/batch
 
 ---
 
+## Speech Endpoints (2026)
+
+Full bilingual speech pipeline for Luganda and English. Requires
+`SPEECH_ENABLED=true` on the backend. All speech endpoints return **503**
+when the speech pipeline is disabled or failed to initialise.
+
+Rate limit: `30/minute` per IP (configurable via `RATE_LIMIT` env var).
+
+---
+
+### Speech Health Check
+
+```http
+GET /v1/speech/health
+```
+
+**Response**
+```json
+{
+  "status": "ready",
+  "enabled": true,
+  "asr_backend": "auto",
+  "tts_backend": "auto",
+  "mt_backend": "auto"
+}
+```
+
+Always returns 200 (even when speech is unavailable). Check `status` field.
+
+---
+
+### Transcribe Audio (ASR)
+
+```http
+POST /v1/asr?sample_rate=16000&language=en
+Content-Type: application/octet-stream
+
+<raw PCM16 little-endian bytes, mono channel>
+```
+
+| Query Param | Type | Default | Validation |
+|---|---|---|---|
+| `sample_rate` | int | 16000 | 8000-48000 |
+| `language` | string | (auto-detect) | ISO 639-1, e.g. `en`, `lg` |
+
+**Limits:** Max 16 MiB audio body (~2 min at 16 kHz int16).
+
+**Response**
+```json
+{
+  "text": "What is the VAT rate?",
+  "language": "en",
+  "duration_s": 2.1,
+  "latency_s": 0.85,
+  "rtf": 0.4,
+  "backend": "mock",
+  "error": null
+}
+```
+
+---
+
+### Synthesize Audio (TTS)
+
+```http
+POST /v1/tts
+Content-Type: application/json
+```
+
+**Request**
+```json
+{
+  "text": "The current VAT rate is 18 percent.",
+  "language": "en",
+  "voice": "en_US-lessac-medium",
+  "streaming": false
+}
+```
+
+| Field | Type | Default | Validation |
+|---|---|---|---|
+| `text` | string | (required) | 1-4000 chars |
+| `language` | string | `"en"` | ISO 639-1 |
+| `voice` | string | (auto by language) | `[a-zA-Z0-9_-]{1,64}` |
+| `streaming` | bool | `false` | Reserved for future use |
+
+**Response**
+```json
+{
+  "sample_rate": 22050,
+  "num_samples": 46305,
+  "duration_s": 2.1,
+  "latency_s": 0.42,
+  "backend": "mock",
+  "voice": "en_US-lessac-medium",
+  "audio_base64": "UklGR...",
+  "error": null
+}
+```
+
+The `audio_base64` field contains a base64-encoded WAV file (PCM16 mono).
+
+---
+
+### Translate Text (MT)
+
+```http
+POST /v1/translate
+Content-Type: application/json
+```
+
+**Request**
+```json
+{
+  "text": "What is income tax?",
+  "source_lang": "en",
+  "target_lang": "lg"
+}
+```
+
+| Field | Type | Default | Validation |
+|---|---|---|---|
+| `text` | string | (required) | 1-4000 chars |
+| `source_lang` | string | `"en"` | ISO 639-1 |
+| `target_lang` | string | `"lg"` | ISO 639-1 |
+
+Same-language passthrough: if `source_lang == target_lang`, returns the
+original text with `backend: "passthrough"` and `latency_s: 0.0`.
+
+**Response**
+```json
+{
+  "text": "Omusolo gw'ensimbi ki?",
+  "source_lang": "en",
+  "target_lang": "lg",
+  "latency_s": 0.31,
+  "backend": "mock",
+  "error": null
+}
+```
+
+---
+
+### Voice Chat (Compound Pipeline)
+
+Full round-trip: audio in -> ASR -> [MT] -> LLM -> [MT] -> TTS -> audio out.
+This is the primary endpoint for voice mode in the web client.
+
+```http
+POST /v1/voice/chat?language=en&sample_rate=16000&tts_enabled=true&top_k=4
+Content-Type: application/octet-stream
+X-Session-ID: <session-id>
+
+<raw PCM16 little-endian bytes, mono channel>
+```
+
+| Query Param | Type | Default | Validation |
+|---|---|---|---|
+| `language` | string | `"en"` | ISO 639-1 (`en` or `lg`) |
+| `sample_rate` | int | `16000` | 8000-48000 |
+| `tts_enabled` | bool | `true` | Whether to synthesize reply audio |
+| `top_k` | int | `4` | 1-10 (RAG retrieval depth) |
+| `voice` | string | (auto by language) | `[a-zA-Z0-9_-]{1,64}` |
+| `conversation_id` | string | (none) | `[a-zA-Z0-9_-]{1,64}` |
+
+**Limits:** Max 16 MiB audio body.
+
+**Response**
+```json
+{
+  "transcript": "What is the VAT rate?",
+  "transcript_language": "en",
+  "reply": "The current VAT rate in Uganda is 18%.",
+  "reply_audio_base64": "UklGR...",
+  "sample_rate": 22050,
+  "duration_s": 3.2,
+  "sources": ["URA_VAT_Guide.pdf"],
+  "citations": [
+    {
+      "ref": "[1]",
+      "source": "URA_VAT_Guide.pdf",
+      "page": "3",
+      "section": "VAT Rates",
+      "passage": "The standard VAT rate is 18%..."
+    }
+  ],
+  "faithfulness_score": 0.92,
+  "retrieval_mode": "hybrid",
+  "asr_latency_s": 0.85,
+  "mt_latency_s": 0.0,
+  "llm_latency_s": 1.2,
+  "tts_latency_s": 0.42,
+  "total_latency_s": 2.47,
+  "asr_backend": "mock",
+  "tts_backend": "mock",
+  "mt_backend": "",
+  "error": null
+}
+```
+
+**Error handling:** The `error` field is `null` on success. On partial
+failure (e.g. MT unavailable but LLM still works), it contains a
+semicolon-separated list of per-stage errors such as
+`"MT(lg->en): unavailable; TTS: circuit open"`. The `transcript` and
+`reply` fields are still populated on partial failure.
+
+**Metrics tracked:** `speech_asr_total`, `speech_mt_total`, `speech_tts_total`
+(counters), `speech_voice_chat_latency_s` (histogram), plus per-stage
+latency histograms and error counters.
+
+---
+
 ## Error Responses
 
 All errors follow this format:
@@ -691,6 +903,93 @@ class HealthResponse(BaseModel):
     retrieval_mode: str = "keyword"  # hybrid | keyword
 ```
 
+### SynthesizeRequest
+```python
+class SynthesizeRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+    voice: str | None = Field(None, pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
+    language: str = Field("en", pattern=r"^[a-z]{2}$")
+    streaming: bool = False
+```
+
+### SynthesizeResponse
+```python
+class SynthesizeResponse(BaseModel):
+    sample_rate: int
+    num_samples: int
+    duration_s: float
+    latency_s: float
+    backend: str
+    voice: str
+    audio_base64: str = ""   # base64-encoded WAV bytes
+    error: str | None = None
+```
+
+### TranscribeResponse
+```python
+class TranscribeResponse(BaseModel):
+    text: str
+    language: str | None = None
+    duration_s: float | None = None
+    latency_s: float | None = None
+    rtf: float | None = None
+    backend: str = "unknown"
+    error: str | None = None
+```
+
+### TranslateRequest
+```python
+class TranslateRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+    source_lang: str = Field("en", pattern=r"^[a-z]{2}$")
+    target_lang: str = Field("lg", pattern=r"^[a-z]{2}$")
+```
+
+### TranslateResponse
+```python
+class TranslateResponse(BaseModel):
+    text: str
+    source_lang: str
+    target_lang: str
+    latency_s: float
+    backend: str
+    error: str | None = None
+```
+
+### VoiceChatResponse
+```python
+class VoiceChatResponse(BaseModel):
+    transcript: str = ""
+    transcript_language: str | None = None
+    reply: str = ""
+    reply_audio_base64: str = ""  # base64-encoded WAV
+    sample_rate: int = 0
+    duration_s: float = 0.0
+    sources: list[str] = []
+    citations: list[Citation] = []
+    faithfulness_score: float | None = None
+    retrieval_mode: str = "keyword"
+    asr_latency_s: float = 0.0
+    mt_latency_s: float = 0.0
+    llm_latency_s: float = 0.0
+    tts_latency_s: float = 0.0
+    total_latency_s: float = 0.0
+    asr_backend: str = ""
+    tts_backend: str = ""
+    mt_backend: str = ""
+    error: str | None = None
+```
+
+### SpeechHealthResponse
+```python
+class SpeechHealthResponse(BaseModel):
+    status: str       # "ready" or "unavailable"
+    enabled: bool
+    asr_backend: str
+    tts_backend: str
+    mt_backend: str
+```
+
 ---
 
 ## SDK Examples
@@ -759,6 +1058,68 @@ console.log(data.reply);
 data.citations.forEach(c => console.log(`${c.ref} ${c.source} ${c.section ?? ""}`));
 ```
 
+### Python — Voice Chat
+```python
+import requests
+
+API_URL = "http://localhost:8000"
+
+def voice_chat(audio_path: str, language: str = "en") -> dict:
+    """Send a WAV file through the compound voice pipeline."""
+    import wave, struct
+
+    # Read WAV and extract raw PCM16 bytes
+    with wave.open(audio_path, "rb") as w:
+        pcm_bytes = w.readframes(w.getnframes())
+        sample_rate = w.getframerate()
+
+    response = requests.post(
+        f"{API_URL}/v1/voice/chat",
+        params={"language": language, "sample_rate": sample_rate, "tts_enabled": "true"},
+        headers={"Content-Type": "application/octet-stream", "X-Session-ID": "my-session"},
+        data=pcm_bytes,
+    )
+    data = response.json()
+    print(f"Transcript: {data['transcript']}")
+    print(f"Reply: {data['reply']}")
+    print(f"Latency: ASR={data['asr_latency_s']}s MT={data['mt_latency_s']}s "
+          f"LLM={data['llm_latency_s']}s TTS={data['tts_latency_s']}s "
+          f"Total={data['total_latency_s']}s")
+    return data
+
+# Usage
+result = voice_chat("question.wav", language="lg")
+```
+
+### JavaScript — TTS Playback
+```typescript
+const API_URL = "http://localhost:8000";
+
+async function speakReply(text: string, language = "en"): Promise<void> {
+  const res = await fetch(`${API_URL}/v1/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, language }),
+  });
+  const data = await res.json();
+  if (!data.audio_base64) return;
+
+  const binary = atob(data.audio_base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  const ctx = new AudioContext();
+  const buffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(ctx.destination);
+  source.start(0);
+}
+
+// Usage
+await speakReply("The VAT rate is 18 percent.", "en");
+```
+
 ---
 
 ## OpenAPI/Swagger
@@ -783,6 +1144,14 @@ docker run -p 8000:8000 landwind/ura-chatbot-api:latest
 | `PORT` | Server port | `8000` |
 | `WORKERS` | Uvicorn workers | `2` |
 | `LOG_LEVEL` | Logging level | `info` |
+| `SPEECH_ENABLED` | Enable speech pipeline (ASR/TTS/MT) | `true` |
+| `SPEECH_ASR_BACKEND` | ASR backend selection | `auto` |
+| `SPEECH_TTS_BACKEND` | TTS backend selection | `auto` |
+| `SPEECH_MT_BACKEND` | MT backend selection | `auto` |
+| `SPEECH_DEADLINE_S` | Max wall-clock time per speech inference | `20` |
+| `SPEECH_MAX_CONCURRENCY` | Thread pool workers for speech | `2` |
+| `SPEECH_EN_VOICE` | Default English TTS voice | `en_US-lessac-medium` |
+| `SPEECH_LG_VOICE` | Default Luganda TTS voice | `luganda-vits-v1` |
 | `HF_MODEL_REPO` | Model repository | `mpairweLandwind/ura-chatbot` |
 | `CORS_ORIGINS` | Comma-separated allowed origins | `http://localhost:3000` |
 | `DATA_DIR` | Path to FAQ CSV directory | `Data/dataset` |

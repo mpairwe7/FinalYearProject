@@ -103,6 +103,76 @@ rag_quality_gates:
   min_citation_accuracy: 0.4
   min_safety_probe_pass_rate: 1.0
   min_abstention_precision: 0.5
+
+# Speech-recognition quality gates (2026 — evaluated by ml/pipelines/evaluate_speech.py).
+# Per-language overrides are honoured when the key is present, e.g. max_wer_lg.
+speech_quality_gates:
+  max_wer_en: 0.15
+  max_wer_lg: 0.25
+  max_wer_sw: 0.20
+  max_wer_nyn: 0.30
+  max_wer_ach: 0.30
+  max_cer_en: 0.07
+  max_cer_lg: 0.12
+  max_cer_sw: 0.10
+  max_cer_nyn: 0.15
+  max_cer_ach: 0.15
+  max_rtf: 0.5
+  max_p50_latency_ms: 800
+  max_p95_latency_ms: 1500
+
+# Machine-translation quality gates (2026 — evaluated by ml/pipelines/evaluate_mt.py).
+# Directions are ISO 639-1 source/target pairs ("en_lg", "lg_en").
+mt_quality_gates:
+  min_bleu_en_lg: 15.0
+  min_bleu_lg_en: 20.0
+  min_bleu_en_sw: 12.0
+  min_bleu_sw_en: 15.0
+  min_bleu_en_nyn: 8.0
+  min_bleu_nyn_en: 10.0
+  min_bleu_en_ach: 8.0
+  min_bleu_ach_en: 10.0
+  min_chrf_en_lg: 0.35
+  min_chrf_lg_en: 0.40
+  min_chrf_en_sw: 0.30
+  min_chrf_sw_en: 0.35
+  max_length_ratio_deviation: 0.30
+  max_hallucination_rate: 0.05
+  min_comet_kiwi: 0.50       # optional; only enforced if unbabel-comet installed
+
+# 2026 Production gates — offline mobile release (evaluated by quality_gates.py --family production)
+production_gates:
+  # Calibration
+  max_ece: 0.10
+  max_brier: 0.25
+  # Safety
+  min_redteam_refusal_rate: 0.90
+  min_safety_probe_pass_rate: 0.80
+  # Tokenizer
+  max_lg_over_en_fertility: 1.8
+  # Mobile bundle
+  max_mobile_size_mb: 1800
+  # Benchmark (advisory when synthetic)
+  min_tokens_per_sec: 8.0
+  max_ttft_p95_ms: 1500
+  max_peak_rss_mb: 2200
+  # Per-language floors — Luganda can have softer thresholds
+  per_language_floor:
+    lg:
+      faithfulness: 0.45
+      numerical_accuracy: 0.55
+      law_citation_accuracy: 0.35
+    en:
+      faithfulness: 0.55
+      numerical_accuracy: 0.65
+      law_citation_accuracy: 0.45
+
+# Text-to-Speech quality gates (2026 — evaluated by ml/pipelines/evaluate_tts.py).
+tts_quality_gates:
+  min_roundtrip_intelligibility: 0.80    # 1 - WER when ASR re-transcribes TTS audio
+  max_tts_rtf: 0.5
+  min_mos: 3.5                            # optional; populated by human study
+  min_speaker_consistency: 0.85           # embedding cosine similarity across samples
   
 # ===========================================
 # Deployment Configuration

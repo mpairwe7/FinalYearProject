@@ -26,6 +26,8 @@ import hashlib
 import json
 import logging
 import os
+import platform
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -857,6 +859,215 @@ def validate_dataset(dataset, tokenizer, max_seq_length: int, model_type: str = 
     return True
 
 
+# =============================================================================
+# Phase 1 — reproducibility, env capture, MLflow wiring
+# =============================================================================
+
+
+def set_deterministic(seed: int) -> Dict[str, Any]:
+    """Enable deterministic torch/cuda/cuDNN algorithms.
+
+    Must be called BEFORE any CUDA context is created. Cannot guarantee
+    bit-exactness across GPU types (cuBLAS atomics), but matches the
+    2025 PyTorch reproducibility guide. Returns the flags it set so the
+    caller can capture them in the training manifest.
+    """
+    os.environ.setdefault("PYTHONHASHSEED", str(seed))
+    # Required when ``torch.use_deterministic_algorithms(True)`` is on with
+    # CUDA >= 10.2 — otherwise cuBLAS raises RuntimeError.
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
+    flags: Dict[str, Any] = {
+        "PYTHONHASHSEED": os.environ["PYTHONHASHSEED"],
+        "CUBLAS_WORKSPACE_CONFIG": os.environ["CUBLAS_WORKSPACE_CONFIG"],
+    }
+    try:
+        import torch
+
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        # Best-effort — some kernels (scatter_add_cuda, etc) don't have
+        # deterministic versions and must be explicitly skipped.
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            flags["torch_deterministic"] = True
+        except Exception as exc:  # pragma: no cover — environment-dependent
+            flags["torch_deterministic"] = f"warn_only_failed: {exc}"
+        flags["cudnn_deterministic"] = True
+        flags["cudnn_benchmark"] = False
+    except Exception as exc:  # pragma: no cover — torch not importable
+        flags["torch_error"] = str(exc)
+    return flags
+
+
+def capture_env() -> Dict[str, Any]:
+    """Snapshot the Python / CUDA / driver / git environment.
+
+    Every field is best-effort — missing git / nvidia-smi / torch must
+    not fail the training run. The snapshot is embedded into
+    ``training_config.json`` so every checkpoint is traceable.
+    """
+    env: Dict[str, Any] = {
+        "python_version": sys.version.split()[0],
+        "python_implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+        "hostname": platform.node(),
+    }
+
+    # Torch / CUDA
+    try:
+        import torch
+
+        env["torch_version"] = torch.__version__
+        env["cuda_available"] = torch.cuda.is_available()
+        if torch.cuda.is_available():
+            env["cuda_version"] = torch.version.cuda
+            env["cudnn_version"] = (
+                torch.backends.cudnn.version()
+                if torch.backends.cudnn.is_available()
+                else None
+            )
+            env["gpu_name"] = torch.cuda.get_device_name(0)
+            env["gpu_count"] = torch.cuda.device_count()
+    except Exception:
+        pass
+
+    # Git
+    repo = Path(__file__).resolve().parents[2]
+    for cmd, key in (
+        (["git", "rev-parse", "HEAD"], "git_commit"),
+        (["git", "rev-parse", "--abbrev-ref", "HEAD"], "git_branch"),
+    ):
+        try:
+            env[key] = subprocess.check_output(
+                cmd, cwd=repo, stderr=subprocess.DEVNULL, text=True
+            ).strip()
+        except Exception:
+            env[key] = None
+    try:
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=repo, stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        env["git_dirty"] = bool(dirty)
+    except Exception:
+        env["git_dirty"] = None
+
+    # Driver
+    try:
+        env["nvidia_driver"] = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip().splitlines()[0]
+    except Exception:
+        pass
+
+    # Pip freeze — capture key ML deps. A full freeze bloats the manifest;
+    # we only pin the stack that determines training semantics.
+    key_pkgs = [
+        "torch", "transformers", "trl", "peft", "accelerate",
+        "bitsandbytes", "datasets", "tokenizers", "safetensors",
+        "mlflow", "wandb", "codecarbon",
+    ]
+    versions: Dict[str, str] = {}
+    for pkg in key_pkgs:
+        try:
+            mod = __import__(pkg)
+            versions[pkg] = getattr(mod, "__version__", "unknown")
+        except Exception:
+            versions[pkg] = None  # type: ignore[assignment]
+    env["package_versions"] = versions
+    return env
+
+
+class _MLflowRun:
+    """Tiny MLflow wrapper — no-op if mlflow is not installed or not requested.
+
+    Uses mlflow as a context manager so logs are always flushed.
+    Logged things:
+      * every hyperparam from the call-site dict
+      * the train/val/test dataset SHAs from ``dataset_metadata``
+      * the env snapshot (git SHA, CUDA, package pins)
+      * per-step metrics from ``trainer.state.log_history`` at end-of-run
+      * the final adapter + training_config.json as artifacts
+    """
+
+    def __init__(self, *, report_to: str, run_name: str):
+        self.active = False
+        self.mlflow = None
+        self.run = None
+        if report_to not in {"mlflow", "all"}:
+            return
+        try:
+            import mlflow  # type: ignore
+        except ImportError:
+            log.warning("mlflow not installed — skipping experiment logging")
+            return
+        experiment = os.environ.get("MLFLOW_EXPERIMENT_NAME", "ura-chatbot")
+        try:
+            mlflow.set_experiment(experiment)
+            self.run = mlflow.start_run(run_name=run_name)
+            self.mlflow = mlflow
+            self.active = True
+            log.info("mlflow: logging run '%s' to experiment '%s'", run_name, experiment)
+        except Exception as exc:  # pragma: no cover — remote tracking URI may fail
+            log.warning("mlflow: failed to start run: %s", exc)
+
+    def log_params(self, params: Dict[str, Any]) -> None:
+        if not self.active:
+            return
+        flat: Dict[str, Any] = {}
+
+        def _walk(prefix: str, obj: Any) -> None:
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    _walk(f"{prefix}.{k}" if prefix else k, v)
+            elif isinstance(obj, (list, tuple)):
+                flat[prefix] = json.dumps(obj, default=str)[:500]
+            else:
+                flat[prefix] = str(obj)[:500]
+
+        _walk("", params)
+        try:
+            self.mlflow.log_params(flat)
+        except Exception as exc:
+            log.warning("mlflow: log_params failed: %s", exc)
+
+    def log_metrics_history(self, log_history: List[Dict[str, Any]]) -> None:
+        if not self.active:
+            return
+        for entry in log_history:
+            step = entry.get("step") or entry.get("global_step")
+            for k, v in entry.items():
+                if k in {"step", "global_step", "epoch"}:
+                    continue
+                if isinstance(v, (int, float)):
+                    try:
+                        self.mlflow.log_metric(k, v, step=step)
+                    except Exception:
+                        pass
+
+    def log_artifact(self, path: Path) -> None:
+        if not self.active or not path.exists():
+            return
+        try:
+            self.mlflow.log_artifact(str(path))
+        except Exception as exc:
+            log.warning("mlflow: log_artifact(%s) failed: %s", path, exc)
+
+    def end(self) -> None:
+        if not self.active or self.run is None:
+            return
+        try:
+            self.mlflow.end_run()
+        except Exception:
+            pass
+        self.active = False
+
+
 def train(
     model,
     tokenizer,
@@ -917,6 +1128,15 @@ def train(
     from transformers import EarlyStoppingCallback
 
     effective_batch = batch_size * gradient_accumulation_steps
+
+    # Reproducibility snapshot (phase 1) — always captured, even if
+    # the user hasn't opted into deterministic mode. The env block is
+    # embedded into training_config.json below so every checkpoint is
+    # traceable to its build.
+    env_snapshot = capture_env()
+
+    run_name = f"{model_type}-{output_dir.name}"
+    mlflow_run = _MLflowRun(report_to=report_to, run_name=run_name)
 
     log.info("Training configuration:")
     log.info("  Output directory:    %s", output_dir)
@@ -1129,6 +1349,33 @@ def train(
     log.info("TRAINING STARTED")
     log.info("=" * 60)
 
+    # Log hyperparams + env to MLflow upfront so they're visible even if
+    # the run crashes mid-training.
+    mlflow_run.log_params({
+        "model_id": str(model.config._name_or_path),
+        "model_type": model_type,
+        "max_seq_length": max_seq_length,
+        "num_epochs": num_epochs,
+        "batch_size": batch_size,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "effective_batch_size": effective_batch,
+        "learning_rate": learning_rate,
+        "weight_decay": weight_decay,
+        "warmup_ratio": warmup_ratio,
+        "lora_r": lora_r,
+        "lora_alpha": lora_alpha,
+        "lora_dropout": lora_dropout,
+        "use_rslora": use_rslora,
+        "use_dora": use_dora,
+        "neftune_alpha": neftune_alpha,
+        "seed": seed,
+        "report_to": report_to,
+        "train_samples": len(train_dataset),
+        "eval_samples": len(eval_dataset) if eval_dataset else 0,
+        "dataset": dataset_metadata or {},
+        "env": env_snapshot,
+    })
+
     # Support resume-from-checkpoint for failed runs.
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
@@ -1192,6 +1439,8 @@ def train(
         "dataset_sources": (
             sorted(set(train_dataset["source"])) if "source" in train_dataset.column_names else []
         ),
+        # Phase 1 — full env snapshot for reproducibility.
+        "env": env_snapshot,
     }
     with open(config_path, "w") as f:
         json.dump(training_config, f, indent=2, default=str)
@@ -1199,6 +1448,12 @@ def train(
     log.info("Model saved to:   %s", final_dir)
     log.info("Metrics saved to: %s", metrics_path)
     log.info("Config saved to:  %s", config_path)
+
+    # Flush per-step metrics + log artifacts to MLflow.
+    mlflow_run.log_metrics_history(trainer.state.log_history)
+    mlflow_run.log_artifact(config_path)
+    mlflow_run.log_artifact(metrics_path)
+    mlflow_run.log_artifact(final_dir / "adapter_config.json")
 
     # Evaluate final model
     if eval_dataset is not None:
@@ -1208,11 +1463,17 @@ def train(
             loss = eval_results.get("eval_loss")
             if loss is not None:
                 log.info("  eval_loss: %.4f", loss)
+                if mlflow_run.active:
+                    try:
+                        mlflow_run.mlflow.log_metric("final_eval_loss", float(loss))
+                    except Exception:
+                        pass
             if "eval_perplexity" in eval_results:
                 log.info("  perplexity: %.2f", eval_results["eval_perplexity"])
         except Exception as e:
             log.warning("  Evaluation failed: %s", e)
 
+    mlflow_run.end()
     return trainer
 
 
@@ -1279,6 +1540,10 @@ Examples:
     train_group.add_argument("--report-to", type=str, default="tensorboard",
                              choices=["none", "tensorboard", "wandb", "mlflow", "all"],
                              help="Observability backend (default: tensorboard)")
+    train_group.add_argument("--deterministic", action="store_true",
+                             help="Enable torch.use_deterministic_algorithms + "
+                                  "cuDNN deterministic mode. Slower but bit-closer "
+                                  "reproducible across runs on the same hardware.")
 
     # LoRA arguments
     lora_group = parser.add_argument_group("LoRA")
@@ -1347,6 +1612,10 @@ Examples:
     except Exception:
         import random
         random.seed(args.seed)
+
+    if args.deterministic:
+        det_flags = set_deterministic(args.seed)
+        log.info("Deterministic mode enabled: %s", det_flags)
 
     # Check dependencies
     if not check_dependencies():

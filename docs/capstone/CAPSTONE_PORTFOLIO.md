@@ -216,6 +216,15 @@ Defines permitted uses (tax information queries), limitations (not legal advice)
 
 A 7-step workflow with Mermaid diagram covers complaint submission, acknowledgement (≤24h), triage, investigation (≤10 days), resolution, appeal, and continuous improvement. SLAs are defined for each stage.
 
+### 6.4 Privacy Impact Assessment
+
+A formal PIA (`PIA.md`) addresses NDPA 2019 §28 requirements:
+- 7 privacy risks identified and scored (likelihood, impact, residual risk)
+- NDPA compliance matrix mapping all 10 relevant sections to implementation evidence
+- Data Protection by Design & Default controls (§19): minimal collection, on-device processing, ephemeral sessions, PII redaction pipeline
+- Data subject rights implementation via `/v1/me/*` endpoints (access, rectification, erasure, restriction, portability)
+- Hash-chained audit trail for privacy-relevant actions (consent, erasure, voice data events)
+
 ---
 
 ## 7. Intellectual Property, Licensing & Data Provenance
@@ -413,6 +422,7 @@ Applying 12 international standards to a real MLOps project was not a box-tickin
 | 38 | Full service.py implementation | Code | CLOSED | FAQ loading, keyword search, classification, tag listing |
 | 39 | Frontend: remove stub, add real API calls | Code | CLOSED | page.tsx: fetch /v1/chat, loading dots, error handling |
 | 40 | Fix frontend CI paths | Code | CLOSED | frontend-deploy.yml: `App/frontend/**` |
+| 41 | Privacy Impact Assessment (NDPA §28) | Gov | CLOSED | `PIA.md` (7 risks, compliance matrix, data subject rights) |
 
 **Result: 40/40 gaps CLOSED. Zero remaining.**
 

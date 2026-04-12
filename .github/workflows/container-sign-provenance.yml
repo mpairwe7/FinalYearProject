@@ -1,0 +1,89 @@
+# =============================================================================
+# Container Signing & SLSA Provenance (2026)
+#
+# Signs container images with Sigstore cosign and generates SLSA v1.2
+# provenance attestations.  Runs after successful Docker push in the
+# ML Pipeline and Frontend CI/CD workflows.
+#
+# Standards: SLSA v1.2 (Build L2), CISA SSDF, CycloneDX 1.6, Sigstore
+# =============================================================================
+name: "Container Sign & SLSA Provenance"
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: "Fully-qualified image reference (e.g. landwind/ura-chatbot-api:sha-abc1234)"
+        required: true
+        type: string
+      digest:
+        description: "Image digest (sha256:...)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image to sign"
+        required: true
+        type: string
+      digest:
+        description: "Image digest"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write     # Sigstore OIDC token
+  packages: write     # Push attestation to registry
+  attestations: write # GitHub Attestations API
+
+jobs:
+  sign-and-attest:
+    name: "Sign & Attest"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
+      - name: Login to DockerHub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Keyless signing via Sigstore Fulcio + Rekor (no long-lived keys)
+      - name: Sign container image (keyless)
+        run: |
+          cosign sign --yes \
+            --recursive \
+            "${{ inputs.image }}@${{ inputs.digest }}"
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+
+      - name: Verify signature
+        run: |
+          cosign verify \
+            --certificate-identity-regexp=".*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            "${{ inputs.image }}@${{ inputs.digest }}" | head -20
+
+      # Generate SLSA v1.2 provenance via GitHub's built-in attestation
+      - name: Generate SLSA provenance attestation
+        uses: actions/attest-build-provenance@520d128f165991a6c774bcb264f323e3d70747f0 # v2.2.0
+        with:
+          subject-name: ${{ inputs.image }}
+          subject-digest: ${{ inputs.digest }}
+          push-to-registry: true
+
+      - name: Step summary
+        run: |
+          echo "## Container Signing & Provenance" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image**: \`${{ inputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Digest**: \`${{ inputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Signing**: Sigstore cosign (keyless OIDC)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Provenance**: SLSA v1.2 Build L2 (GitHub Attestations)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Rekor log**: https://search.sigstore.dev/" >> "$GITHUB_STEP_SUMMARY"

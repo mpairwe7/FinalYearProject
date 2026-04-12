@@ -14,6 +14,7 @@ request path until an operator flips one of:
 | `FLAG_TOOL_USE` | Allow the LLM to call registered tools via Qwen2.5 native function-calling. |
 | `FLAG_AGENTIC_MODE` | Route every request through the supervisor classifier before retrieval. |
 | `FLAG_TICKET_QUEUE` | Persist supervisor-driven escalations to the `tickets` table. |
+| `FLAG_AUDIT_LEDGER` | Write hash-chained audit events on every `service.generate()` return path. |
 
 Flags can be set per-process via env (`FLAG_TOOL_USE=true …`) or
 per-request in tests via `flags.set("tool_use", True)`.
@@ -48,7 +49,7 @@ per-request in tests via `flags.set("tool_use", True)`.
       └──────┬─────────────────────────────────────────┘
              ▼
       ┌─────────────────────────────────────────────────┐
-      │            Hybrid retrieval (Qdrant)            │
+      │            Hybrid retrieval (Qdrant v1.17.1)      │
       │   dense + BM25 RRF + cross-encoder rerank       │
       └──────┬──────────────────────────────────────────┘
              ▼
@@ -352,10 +353,23 @@ Ticket IDs are UUIDs — the path regex is `^[a-f0-9-]{1,64}$`.
     FLAG_TICKET_QUEUE=true
     ```
 
-2. Restart the API (`uvicorn` picks up env on boot).  Qwen weights
+2. Set infrastructure env vars for the shared-host port mappings
+   (Docker maps Qdrant/Redis to non-default ports to avoid
+   conflicts with other tenants):
+
+    ```bash
+    QDRANT_URL=http://localhost:16333      # Docker maps 16333→6333
+    REDIS_URL=redis://localhost:16379/0    # Docker maps 16379→6379
+    DENSE_MODEL=sentence-transformers/all-MiniLM-L6-v2
+    DENSE_DIM=384                          # Must match the indexed collection
+    HF_HOME=/home/developer/hf-cache       # Writable cache dir
+    CUDA_VISIBLE_DEVICES=0                 # Pin to a specific GPU
+    ```
+
+3. Restart the API (`uvicorn` picks up env on boot).  Qwen weights
    are already cached at `~/hf-cache` — restart takes ~15 s.
 
-3. Verify via `/ready` and exercise one route of each type:
+4. Verify via `/ready` and exercise one route of each type:
 
     ```bash
     # TOOLS route — calculator
@@ -458,17 +472,34 @@ Three non-negotiable controls:
 
 **153 pytest tests in `tests/agents/`, running in 2.6 seconds.**
 
+**304 pytest tests in `tests/agents/`, running in ~7 seconds.**
+
 ```
 tests/agents/
-├── conftest.py             — shared fixtures (tmp_db in-memory, fresh_registry, clean_flags)
-├── test_calculators.py     — 29 tests: VAT add/extract, PAYE bands, CIT/CGT arithmetic, customs landed-cost
-├── test_calendar_rates.py  — 17 tests: get_current_date, fiscal year boundary, deadlines horizon, rate lookup
-├── test_tool_parser.py     — 17 tests: parallel tool_calls, string-encoded args, malformed, strip
-├── test_supervisor.py      — 50 tests: every route, priority ordering, RouteDecision immutability
-├── test_tools_framework.py — 11 tests: registry dispatch, risk-tier filter, OpenAI spec envelope, error paths
-├── test_tickets.py         — 21 tests: ticket CRUD, pagination, validation, escalate tool round-trip
-└── test_integration.py     —  8 tests: supervisor→tool whitelist resolution, escalation→ticket flow,
-                                        FastAPI app loads with all flags on
+├── conftest.py              — shared fixtures (tmp_db in-memory, fresh_registry, clean_flags)
+├── test_calculators.py      —  29 tests: VAT add/extract, PAYE bands, CIT/CGT arithmetic, customs landed-cost
+├── test_calendar_rates.py   —  17 tests: get_current_date, fiscal year boundary, deadlines horizon, rate lookup
+├── test_tool_parser.py      —  17 tests: parallel tool_calls, string-encoded args, malformed, strip
+├── test_supervisor.py       —  50 tests: every route, priority ordering, RouteDecision immutability
+├── test_tools_framework.py  —  11 tests: registry dispatch, risk-tier filter, OpenAI spec envelope, error paths
+├── test_tickets.py          —  21 tests: ticket CRUD, pagination, validation, escalate tool round-trip
+├── test_integration.py      —   8 tests: supervisor→tool whitelist resolution, escalation→ticket flow
+├── test_auth.py             —  37 tests: JWT roundtrip + temporal claims, AuthUser claims-to-user mapping,
+│                                         Pydantic model validation, user / profile / consent CRUD, subject rights
+├── test_mcp.py              —  23 tests: MCPClient singleton + list/describe/call, security trimming by
+│                                         risk tier + consent, audit-dict SHA256 determinism, Tool RAG scorer,
+│                                         mandatory rails, fallback path
+├── test_graph.py            —  14 tests: AgentGraphState, GraphRuntime bounded dispatch, error capture,
+│                                         node exception handling, main graph CLARIFY/ESCALATED outcomes
+├── test_memory.py           —  35 tests: decay math (half-life, clamping), working memory TTL,
+│                                         episodic + semantic CRUD with user isolation, supersede, forget,
+│                                         fact extractor patterns, MemoryService consent-gated reads
+├── test_audit.py            —  25 tests: Merkle root (empty/single/odd), hash-chained append with
+│                                         tenant isolation, monotonic seq, tamper detection,
+│                                         erasure tombstone, anchor range
+└── test_me_endpoints.py     —  17 tests: FastAPI TestClient end-to-end for /v1/me/{whoami,profile,
+                                          consents,export,delete} including full onboard→grant→
+                                          export→withdraw→erase flow
 ```
 
 Run locally:
@@ -505,20 +536,26 @@ integrations haven't been built yet:
 
 | Gap | What's needed |
 |---|---|
-| G1 — Auth | OIDC / JWT middleware.  Without it, tools can't scope to a user (e.g. `mcp_ura_account`). |
-| G2 — User profile | `users` + `user_profiles` tables so tools like `lookup_rate` can pick the user's fiscal year automatically. |
-| G5 — Long-term memory | Offline memory worker that extracts facts from ended conversations and injects them into future prompts. |
-| G13 — Document uploads | `/v1/upload` + `mcp_document_parser`.  Qwen2.5-VL integration for image + table parsing. |
-| G14 — Notifications | Scheduler for deadline reminders via email / SMS / in-app. |
-| G22 — Specialist prompts | The supervisor routes to `TAX_SPECIALIST` and `CUSTOMS_SPECIALIST` today, but both still use the base `SYSTEM_PROMPT`.  A later commit can add per-specialist prompt files. |
-| G32 — HITL staff UI | Admin ticket endpoints exist, but no Next.js `/admin/tickets` page to work the queue yet. |
+| G1 — Auth | 🟢 **Landed in Phase 14** — OIDC-ready JWT verifier + FastAPI dependencies.  HS256 dev path + RS256/JWKS stubs for Keycloak. |
+| G2 — User profile | 🟢 **Landed in Phase 14** — `users` + `user_profiles` + `consent_receipts` tables + /v1/me/* endpoints. |
+| G5 — Long-term memory | 🟢 **Landed in Phase 16** — three-tier (working + episodic + semantic) with consent-gated retrieval + temporal decay. |
+| G8 — Audit ledger | 🟢 **Landed in Phase 21 subset** — hash-chained `audit_events` + Merkle anchoring + `verify_chain` CLI. |
+| G13 — Document uploads | ⚪ `/v1/upload` + `mcp_document_parser`.  Qwen2.5-VL integration for image + table parsing.  Phase 18. |
+| G14 — Notifications | ⚪ Scheduler for deadline reminders via email / SMS / in-app.  Phase 20 (scaffolded). |
+| G22 — Specialist prompts | 🟡 The supervisor routes to `TAX_SPECIALIST` and `CUSTOMS_SPECIALIST` today, but both still use the base `SYSTEM_PROMPT`.  A later commit adds `agents/prompts/*.yaml`. |
+| G32 — HITL staff UI | 🟡 Admin ticket endpoints exist + Phase 14 auth landed, but no Next.js `/admin/tickets` page to work the queue yet.  Phase 19. |
 
-All seven have clear landing points in the current code — see the
-roadmap doc for concrete code-surface pointers.
+The remaining gaps (G12 URA DMZ, G13 uploads, G14 notifications,
+G22 specialist prompts, G32 staff UI) are all scaffolded with
+README files under `backend/app/mcp/servers/`,
+`backend/app/workflows/`, and `backend/app/scheduler/` so
+follow-up PRs have clear landing spots.
 
 ---
 
 ## 13. Change log (feat/agentic-workflows branch)
+
+**Phase A-D (original in-process agent runtime):**
 
 | Commit | Phase | Summary |
 |---|---|---|
@@ -527,12 +564,34 @@ roadmap doc for concrete code-surface pointers.
 | `0069dcd` | C | Supervisor router + agent state machine |
 | `858eda0` | D | Ticket queue for escalation handoff |
 | `55c0f38` | D hotfix | Expose `ticket_id` in `ChatResponse` schema |
+| `4066eb0` | docs | pytest suite (153 tests) + docs/AGENT_ARCHITECTURE.md v1 |
+
+**Phase 14-21 (2026 roadmap — identity, MCP, memory, audit, scaffolds):**
+
+| Commit | Phase | Summary |
+|---|---|---|
+| `15b7bc6` | 14 | Zero-trust identity, tenancy, consent, subject rights |
+| `510e634` | 15 Lite | MCP abstraction + Tool RAG + LangGraph-style orchestration |
+| `1ed7589` | 16 | Three-tier personal memory + consent gating + temporal decay |
+| `6330f1d` | 21 subset | Hash-chained audit ledger + per-segment eval |
+| `ec224c4` | 17-20 | Directory scaffolds + READMEs for DMZ MCP, workflows, scheduler |
+| `79c7239` | 21 wire | Audit ledger wired into `service.generate` on every return path |
+| `95236ae` | tests + docs | +151 pytest tests (154 → 304), TestClient integration for /v1/me/*, AGENT_ARCHITECTURE v2 |
+| `<current>` | infra | Qdrant v1.13.3 → v1.17.1 upgrade (client-server match), healthcheck fix, port mapping docs |
 
 See `git log --oneline feat/agentic-workflows ^main` for the
 authoritative list.
 
+**Test growth across the project:**
+
+| Milestone | Tests | Runtime |
+|---|:---:|:---:|
+| Phase A-D initial | 153 | 2.57 s |
+| + Phase 14-21 (this doc) | **304** | **~7 s** |
+
 ---
 
-*Document version 1.0 — authored as part of the Phase A-D delivery.
-Keep this file in sync with any subsequent Phase 14+ changes; if
-you add a new tool, route, or flag, update Sections 3, 4, and 6.*
+*Document version 2.1 — updated after Qdrant v1.17.1 upgrade and
+infrastructure connectivity fixes on `feat/agentic-workflows`.
+Keep this file in sync with any subsequent Phase 14+ changes;
+if you add a new tool, route, or flag, update Sections 3, 4, and 6.*

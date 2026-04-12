@@ -455,9 +455,81 @@ rm -rf node_modules bun.lockb
 bun install
 ```
 
+## Testing
+
+### Backend Tests
+```bash
+# Run all tests with coverage (must be >= 80%)
+pytest tests/ -v --cov=ml --cov=App/backend --cov-report=term-missing --cov-fail-under=80
+```
+
+### Frontend Tests
+```bash
+cd App/frontend
+
+# Unit & component tests (Vitest + React Testing Library)
+bun run test
+
+# With coverage report (V8, thresholds enforced)
+bun run test:coverage
+
+# E2E smoke tests (Playwright — starts dev server automatically)
+bun run test:e2e
+
+# Accessibility audit (axe-core WCAG 2.1 AA)
+bun run test:a11y
+```
+
+### Flutter Mobile Tests
+```bash
+cd MobileApp/ura_chatbot
+flutter test --coverage --reporter expanded
+```
+
+### Load Testing
+```bash
+# k6 SLO validation (requires running API at localhost:8000)
+k6 run tests/load/k6-chat-slo.js
+```
+
+## Operational Scripts
+
+```bash
+# Validate environment before deployment
+python scripts/validate_env.py --env production
+
+# AI red team evaluation (50 adversarial prompts, NIST AI 600-1)
+python scripts/ai_red_team.py --api-url http://localhost:8000
+
+# Bias & fairness audit (language + taxpayer parity)
+python scripts/bias_fairness_audit.py --api-url http://localhost:8000
+
+# Incident response simulation (3 AI-specific playbooks)
+python scripts/incident_response_sim.py --api-url http://localhost:8000
+
+# Disaster recovery test (Qdrant snapshot + SQLite backup)
+bash scripts/dr_test.sh
+
+# Carbon footprint tracking
+python scripts/carbon_tracker.py --task training --duration 3600
+```
+
+## Monitoring Stack
+
+```bash
+# Start Prometheus + Grafana + Jaeger
+docker compose --profile monitoring up -d
+
+# Prometheus:  http://localhost:9090
+# Grafana:     http://localhost:3001  (admin / ura2026)
+# Jaeger:      http://localhost:16686
+```
+
 ## Next Steps
 
 1. Read [MLOps Workflows](mlops-workflows.md) for CI/CD details
 2. Review [Data Schema](data-schema-and-eval.md) for data model
 3. Configure GitHub secrets for deployment
 4. Set up Hugging Face Space for the Gradio app
+5. Review [Model Card](MODEL_CARD.md) for EU AI Act compliance
+6. Review [PIA](capstone/PIA.md) for NDPA 2019 privacy assessment

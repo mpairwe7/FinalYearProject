@@ -1,8 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Network access for API calls -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Speech-to-text (voice input) -->
+    <!-- Speech-to-text (voice input) — captured audio is processed
+         entirely on-device and never uploaded. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Phase F: foreground download notification for on-demand
+         voice model fetches. Required on Android 13+ (API 33). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Phase C: background network access for model bundle downloads. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:label="URA Tax Assistant"

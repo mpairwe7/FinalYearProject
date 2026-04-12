@@ -45,14 +45,24 @@ The ISO/IEC 25010:2023 quality model defines 8 quality characteristics. Below is
 | Activity | Owner | Frequency | Automation |
 |----------|-------|-----------|------------|
 | Code review (PR-based) | CODEOWNERS | Every PR | GitHub branch protection |
-| Automated testing (pytest) | CI Pipeline | Every commit | GitHub Actions |
-| Static analysis (SAST) | CI Pipeline | Every PR | Semgrep, Ruff, ESLint |
-| Dependency scanning (SCA) | CI Pipeline | Weekly + PR | Trivy, Dependabot |
+| Backend testing (pytest, >= 80% cov) | CI Pipeline | Every commit | `ci-ml-pipeline.yml` (`--cov-fail-under=80`) |
+| Frontend testing (Vitest + RTL) | CI Pipeline | Every commit | `frontend-deploy.yml` (test-frontend stage) |
+| E2E smoke testing (Playwright) | CI Pipeline | Pre-release | `frontend-deploy.yml` + `playwright.config.ts` |
+| Static analysis (SAST) | CI Pipeline | Every PR | Semgrep, Ruff (S/T20/PIE/PT/SIM/TCH), ESLint |
+| Type checking (mypy strict) | CI Pipeline | Every PR | `disallow_untyped_defs=true` for backend |
+| Dependency scanning (SCA) | CI Pipeline | Weekly + PR | Trivy, Dependabot, pip-audit |
 | ML model evaluation | CI Pipeline | Every training run | quality_gates.py |
-| Container security scan | CI Pipeline | Every build | Trivy |
-| Accessibility audit | Manual + CI | Pre-release | Lighthouse |
-| Penetration testing | Manual | Quarterly | OWASP ZAP |
-| Ethics review | Project Lead | Each major release | Checklist |
+| Container security scan | CI Pipeline | Every build | Trivy + cosign signing + SLSA provenance |
+| Accessibility audit (WCAG 2.1 AA) | CI Pipeline | Every PR | axe-core + Lighthouse CI (>= 90) |
+| DAST penetration testing | CI Pipeline | Weekly + main push | OWASP ZAP baseline (`.zap-rules.tsv`) |
+| Load/performance testing | Manual | Pre-release | k6 (`tests/load/k6-chat-slo.js`) |
+| AI red team evaluation | Manual | Pre-release | `scripts/ai_red_team.py` (50 NIST prompts, >= 90% block) |
+| Bias & fairness audit | Manual | Pre-release | `scripts/bias_fairness_audit.py` (>= 70% parity) |
+| Incident response simulation | Manual | Quarterly | `scripts/incident_response_sim.py` (3 playbooks) |
+| Disaster recovery test | Manual | Quarterly | `scripts/dr_test.sh` (Qdrant + SQLite + health) |
+| Carbon footprint tracking | Manual | Each training run | `scripts/carbon_tracker.py` (CodeCarbon) |
+| Ethics review | Project Lead | Each major release | Checklist + PIA (`docs/capstone/PIA.md`) |
+| Mobile testing (Flutter) | CI Pipeline | Every commit | `flutter-ci.yml` (analyze + test + coverage) |
 
 ---
 

@@ -1,0 +1,348 @@
+# ============================================================================
+# Speech Pipeline Configuration (2026 Production)
+# ----------------------------------------------------------------------------
+# Single source of truth for the URA Chatbot Luganda <-> English speech stack:
+#
+#     mic -> VAD -> ASR -> lang-ID -> (MT) -> LLM -> (MT) -> TTS -> speaker
+#
+# All model choices in this file are commercially-usable:
+#     * Whisper       (OpenAI)        MIT
+#     * Distil-Whisper (HF)           MIT
+#     * MADLAD-400    (Google)        Apache-2.0
+#     * Piper voices  (Rhasspy)       MIT
+#     * Kokoro-82M                    Apache-2.0
+#     * Coqui VITS    (Coqui-TTS)     MPL-2.0
+#     * Silero VAD                    MIT
+#     * lingua-py lang-ID             Apache-2.0
+#
+# CC-BY-NC models (MMS, NLLB) are explicitly NOT defaults in this file.
+#
+# Consumed by:
+#     ml/scripts/asr/*.py
+#     ml/scripts/mt/*.py
+#     ml/scripts/tts/*.py
+#     ml/scripts/speech/*.py
+#     ml/pipelines/evaluate_speech.py
+#     ml/pipelines/evaluate_mt.py
+#     ml/pipelines/evaluate_tts.py
+#     App/backend/app/speech_service.py
+# ============================================================================
+
+schema_version: "2026.1"
+pipeline_version: "2026.1.0"
+
+# ============================================================================
+# Audio I/O contract
+# ============================================================================
+audio:
+  sample_rate: 16000          # Hz; single supported rate across the pipeline
+  channels: 1                 # mono
+  sample_width_bytes: 2       # 16-bit PCM
+  chunk_ms: 200               # streaming chunk size
+  max_utterance_s: 30         # hard cap for one ASR request
+  min_utterance_s: 0.3        # drop sub-300ms noise
+
+  # VAD gating (Silero)
+  vad:
+    model: "silero-vad"
+    license: "MIT"
+    min_silence_ms: 500       # endpointing threshold
+    speech_pad_ms: 100
+    threshold: 0.5            # Silero confidence
+
+# ============================================================================
+# Automatic Speech Recognition (ASR)
+# ============================================================================
+asr:
+  # Default language routing. If the mic is muted, we will not guess the lang.
+  languages: ["en", "lg", "sw", "nyn", "ach"]
+  primary_language: "en"
+
+  # Per-language model mapping. Each key is an ISO 639 code.
+  # `hf_repo` is the Hugging Face identifier; `license` is an audit field.
+  models:
+    en:
+      hf_repo: "openai/whisper-small"
+      fallback: "distil-whisper/distil-small.en"
+      license: "MIT"
+      params: "244M"
+      streaming: true
+    lg:
+      # Fine-tuned in-project from whisper-small; adapter lives under
+      # artifacts/speech/asr/whisper_lg/ after ml/scripts/asr/train_luganda.py.
+      hf_repo: "openai/whisper-small"
+      adapter: "artifacts/speech/asr/whisper_lg"
+      license: "MIT"
+      params: "244M"
+      streaming: true
+    sw:
+      hf_repo: "openai/whisper-small"
+      fallback: "openai/whisper-tiny"
+      license: "MIT"
+      params: "244M"
+      streaming: true
+      notes: "Common Voice sw has ~50 hours; fine-tune with LoRA for domain adaptation"
+    nyn:
+      hf_repo: "openai/whisper-small"
+      fallback: "openai/whisper-tiny"
+      license: "MIT"
+      params: "244M"
+      streaming: true
+      notes: "Low-resource (~1.5h Common Voice); relies on Whisper multilingual base"
+    ach:
+      hf_repo: "openai/whisper-small"
+      fallback: "openai/whisper-tiny"
+      license: "MIT"
+      params: "244M"
+      streaming: true
+      notes: "Very low-resource (<1h); community recording campaign recommended"
+
+  # Canonical decoding config.
+  decoding:
+    beam_size: 5
+    temperature: 0.0
+    no_repeat_ngram_size: 3
+    max_new_tokens: 440
+    compression_ratio_threshold: 2.4
+    logprob_threshold: -1.0
+    no_speech_threshold: 0.6
+    condition_on_previous_text: false
+
+  # Post-ASR pipeline: punctuation + truecasing. Placeholder for phase B.
+  post_processing:
+    punctuation_restore: true
+    truecase: true
+    strip_ascii_artifacts: true
+
+  # ONNX export / quantisation config for mobile.
+  export:
+    onnx_opset: 17
+    quantization: "int8"       # optimum ORTQuantizer
+    sherpa_onnx_layout: true   # write encoder.int8.onnx / decoder.int8.onnx / tokens.txt
+    output_dir: "artifacts/speech/asr"
+
+  # Quality gates. Enforced by ml/pipelines/evaluate_speech.py + quality_gates.py.
+  gates:
+    max_wer_en: 0.15
+    max_wer_lg: 0.25
+    max_cer_en: 0.07
+    max_cer_lg: 0.12
+    max_rtf: 0.5               # Real-Time Factor on target hardware
+    max_p50_latency_ms: 800
+    max_p95_latency_ms: 1500
+
+# ============================================================================
+# Machine Translation (MT)
+# ============================================================================
+mt:
+  backbone:
+    hf_repo: "google/madlad400-3b-mt"
+    license: "Apache-2.0"
+    params: "3B"
+    # Fallback 1: Opus-MT (Helsinki-NLP) — smaller, CC-BY-4.0
+    fallback_1: "Helsinki-NLP/opus-mt-mul-en"
+    # Fallback 2: reuse existing on-device Gemma-2-2B via prompting
+    fallback_2_prompted: "google/gemma-2-2b-it"
+
+  # Student distilled from backbone; shipped to mobile.
+  student:
+    target_params: "300M"
+    output_dir: "artifacts/mt/student"
+
+  directions:
+    - src: "en"
+      tgt: "lg"
+    - src: "lg"
+      tgt: "en"
+    - src: "en"
+      tgt: "sw"
+    - src: "sw"
+      tgt: "en"
+    - src: "en"
+      tgt: "nyn"
+    - src: "nyn"
+      tgt: "en"
+    - src: "en"
+      tgt: "ach"
+    - src: "ach"
+      tgt: "en"
+
+  decoding:
+    beam_size: 4
+    max_length: 512
+    length_penalty: 1.0
+    no_repeat_ngram_size: 3
+
+  # ONNX INT8 quantisation via optimum.
+  export:
+    onnx_opset: 17
+    quantization: "int8"
+    output_dir: "artifacts/mt/onnx"
+
+  # Length-ratio guardrail catches degenerate translations.
+  safety:
+    max_length_ratio: 3.0      # target / source
+    min_length_ratio: 0.33
+    max_repetition_ngram: 5
+
+  gates:
+    min_bleu_en_lg: 15.0
+    min_bleu_lg_en: 20.0
+    min_chrf_en_lg: 0.35
+    min_chrf_lg_en: 0.40
+    max_length_ratio_deviation: 0.30
+    max_hallucination_rate: 0.05
+    min_comet_kiwi: 0.50       # optional; only if unbabel-comet installed
+
+# ============================================================================
+# Text-to-Speech (TTS)
+# ============================================================================
+tts:
+  voices:
+    en:
+      # Piper - fast ONNX voices, MIT license, already ships as ONNX.
+      primary:
+        id: "piper-en_US-lessac-medium"
+        license: "MIT"
+        hf_repo: "rhasspy/piper-voices"
+        size_mb: 63
+        sample_rate: 22050
+        streaming: true
+      alternative:
+        id: "kokoro-82m"
+        license: "Apache-2.0"
+        hf_repo: "hexgrad/Kokoro-82M"
+        size_mb: 82
+        sample_rate: 24000
+        streaming: true
+    lg:
+      # Custom VITS trained on recorded Luganda voice. Voice data collection
+      # is a deferred task documented in ml/docs/NEXT_STEPS.md.
+      primary:
+        id: "luganda-vits-v1"
+        license: "MPL-2.0"
+        framework: "coqui-tts"
+        artifact: "artifacts/speech/tts/luganda_vits"
+        size_mb: 90
+        sample_rate: 22050
+        streaming: true
+        status: "training_required"   # flipped to "ready" after voice corpus + training
+      alternative:
+        # espnet VITS Apache-2.0 recipe; plan B if Coqui licence becomes a concern.
+        id: "espnet-vits-lg"
+        license: "Apache-2.0"
+        framework: "espnet"
+        status: "alternative"
+
+    sw:
+      # Meta's MMS-TTS Swahili is pre-trained and available for download.
+      primary:
+        id: "mms-tts-sw"
+        license: "CC-BY-NC-4.0"     # NOTE: Non-commercial — use only for research until replaced
+        framework: "sherpa-onnx"
+        artifact: "artifacts/speech/tts/mms_tts_sw"
+        size_mb: 40
+        sample_rate: 22050
+        streaming: false
+        status: "available"
+      notes: "License is CC-BY-NC; for commercial release, train a custom Apache-2.0 VITS model"
+
+    nyn:
+      # No pre-trained TTS exists for Runyankole. Requires community voice recording.
+      primary:
+        id: "runyankole-vits-v1"
+        license: "project-internal"
+        framework: "coqui-tts"
+        artifact: "artifacts/speech/tts/runyankole_vits"
+        size_mb: 90
+        sample_rate: 22050
+        status: "community_recording_required"
+      notes: "Need 3-4 hours native speaker recording. Contact Mbarara University linguistics dept."
+
+    ach:
+      # No pre-trained TTS exists for Acholi. Requires community voice recording.
+      primary:
+        id: "acholi-vits-v1"
+        license: "project-internal"
+        framework: "coqui-tts"
+        artifact: "artifacts/speech/tts/acholi_vits"
+        size_mb: 90
+        sample_rate: 22050
+        status: "community_recording_required"
+      notes: "Need 3-4 hours native speaker recording. Contact Gulu University."
+
+  # Streaming synthesis: chunk LLM output at sentence boundaries.
+  streaming:
+    chunk_on: ["sentence"]      # sentence | phrase | fixed_tokens
+    min_chunk_chars: 32
+    max_chunk_chars: 280
+
+  # Phoneme backend (open source). Falls back to graphemes if unavailable.
+  g2p:
+    backend: "espeak-ng"
+    en_voice: "en-us"
+    lg_voice: "sw"              # Swahili approximation until Luganda espeak lands
+    license: "GPL-3.0"          # note: espeak-ng is GPL; runtime dep only
+
+  export:
+    onnx_opset: 17
+    output_dir: "artifacts/speech/tts"
+
+  gates:
+    min_roundtrip_intelligibility: 0.80   # 1 - WER when ASR re-transcribes TTS
+    max_tts_rtf: 0.5
+    min_mos: 3.5                           # optional; populated by human study
+
+# ============================================================================
+# Language identification (for code-switching + routing)
+# ============================================================================
+lang_id:
+  backend: "lingua-py"
+  license: "Apache-2.0"
+  # lingua-py natively supports English, Swahili, and Ganda.
+  # Runyankole and Acholi are not in lingua-py; the Flutter-side
+  # trigram LID (lib/core/speech/lid.dart) handles those.
+  languages: ["ENGLISH", "SWAHILI", "GANDA"]
+  # Extended language set handled by trigram LID on mobile:
+  extended_languages: ["en", "lg", "sw", "nyn", "ach"]
+  min_confidence: 0.60
+  # When confidence falls below min_confidence we fall back to primary_language
+  # rather than guessing; this matches the existing chat fallback policy.
+
+# ============================================================================
+# Mobile bundle budgets (cross-references ml/configs/mobile_bundle.yaml)
+# ============================================================================
+mobile:
+  sherpa_onnx_version: ">=1.11"
+  onnxruntime_mobile_version: ">=1.20"
+  android_min_sdk: 24
+  ios_min_version: "16.0"
+  min_ram_mb: 2000
+  total_bundle_mb_budget: 2400   # LLM ~1.6 GB + ASR ~0.35 GB + TTS ~0.12 GB + MT ~0.3 GB
+  bundle_card_path: "artifacts/mobile_speech/BUNDLE_CARD.md"
+
+# ============================================================================
+# Dataset references (license + provenance — audit trail)
+# ============================================================================
+datasets:
+  asr_en_eval:
+    path: "Data/speech/asr_eval_en.jsonl"
+    license: "project-internal"
+    notes: "Held-out English eval set for WER/CER. Populate in Phase A."
+  asr_lg_train:
+    path: "Data/speech/lg"
+    recommended_source: "mozilla-foundation/common_voice_17_0 [config=lg]"
+    license: "CC0-1.0"
+    notes: "Common Voice Luganda — CC0 public domain."
+  asr_lg_eval:
+    path: "Data/speech/asr_eval_lg.jsonl"
+    license: "project-internal"
+  mt_lg_parallel:
+    path: "Data/TTT"
+    license: "project-internal"
+    notes: "Existing Luganda parallel data used by scripts/data_aug/loaders.py:327-430."
+  tts_lg_voice:
+    path: "Data/speech/tts/lg_voice"
+    license: "project-internal (consent required)"
+    status: "not_yet_collected"
+    recommended_duration_hours: 4

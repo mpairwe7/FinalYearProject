@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 export interface Citation {
   ref: string;
@@ -26,8 +27,10 @@ interface ChatStore {
   message: string;
   chat: ChatTurn[];
   speechState: SpeechState;
+  locale: string;
   setMessage: (value: string) => void;
   setSpeechState: (state: SpeechState) => void;
+  setLocale: (locale: string) => void;
   addTurns: (turns: ChatTurn[]) => void;
   updateLastTurn: (updater: (turn: ChatTurn) => ChatTurn) => void;
   reset: () => void;
@@ -67,24 +70,42 @@ export function createTurn(
   };
 }
 
-export const useChatStore = create<ChatStore>((set) => ({
-  message: '',
-  chat: [initialGreeting],
-  speechState: 'idle',
-  setMessage: (value) => set({ message: value }),
-  setSpeechState: (state) => set({ speechState: state }),
-  addTurns: (turns) =>
-    set((s) => {
-      const updated = [...s.chat, ...turns];
-      // Cap history at 200 turns to prevent memory exhaustion (H5 audit fix)
-      return { chat: updated.length > 200 ? updated.slice(-200) : updated };
+const MAX_CHAT_TURNS = 200;
+
+export const useChatStore = create<ChatStore>()(
+  persist(
+    (set) => ({
+      message: '',
+      chat: [initialGreeting],
+      speechState: 'idle' as SpeechState,
+      locale: 'en',
+      setMessage: (value) => set({ message: value }),
+      setSpeechState: (state) => set({ speechState: state }),
+      setLocale: (locale) => set({ locale }),
+      addTurns: (turns) =>
+        set((s) => {
+          const updated = [...s.chat, ...turns];
+          return { chat: updated.length > MAX_CHAT_TURNS ? updated.slice(-MAX_CHAT_TURNS) : updated };
+        }),
+      updateLastTurn: (updater) =>
+        set((s) => {
+          if (s.chat.length === 0) return s;
+          const updated = [...s.chat];
+          updated[updated.length - 1] = updater(updated[updated.length - 1]);
+          return { chat: updated };
+        }),
+      reset: () => set({ message: '', chat: [initialGreeting], speechState: 'idle', locale: 'en' }),
     }),
-  updateLastTurn: (updater) =>
-    set((s) => {
-      if (s.chat.length === 0) return s;
-      const updated = [...s.chat];
-      updated[updated.length - 1] = updater(updated[updated.length - 1]);
-      return { chat: updated };
-    }),
-  reset: () => set({ message: '', chat: [initialGreeting], speechState: 'idle' }),
-}));
+    {
+      name: 'ura-chat-store',
+      storage: createJSONStorage(() => {
+        if (typeof window === 'undefined') return sessionStorage;
+        return localStorage;
+      }),
+      partialize: (state) => ({
+        chat: state.chat,
+        locale: state.locale,
+      }),
+    },
+  ),
+);

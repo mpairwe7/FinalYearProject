@@ -185,7 +185,7 @@ Teacher QA ──▶ Fail-Fast ──▶ RAG-Aware Format ──▶ SFT (rsLoRA)
 
 > **📚 Full Documentation**: See [docs/mlops-workflows.md](docs/mlops-workflows.md) for comprehensive workflow details.
 
-Seven workflows under `.github/workflows/`:
+Ten workflows under `.github/workflows/`:
 
 ### 1. `ci-ml-pipeline.yml` - Main ML Pipeline
 **Triggers**: Push to `main`/`develop`/`feat/*`, PRs, manual dispatch
@@ -209,9 +209,10 @@ Seven workflows under `.github/workflows/`:
 | Stage | Description |
 |-------|-------------|
 | Lint | ESLint + TypeScript checking |
+| Unit & Component Tests | Vitest + React Testing Library (coverage thresholds enforced) |
+| Accessibility Audit | axe-core WCAG 2.1 AA + Lighthouse CI (accessibility >= 90) |
 | Build | Next.js production build |
-| Deploy Preview | PR preview deployments |
-| Build Docker | Build & push frontend Docker image |
+| Build Docker | Build & push frontend Docker image + Trivy scan |
 | Deploy Production | Production Docker deployment |
 
 ### 3. `kaggle-training.yml` - Remote Kaggle Training
@@ -269,6 +270,26 @@ Seven workflows under `.github/workflows/`:
 | OWASP ZAP | DAST baseline scan against API |
 | OSSF Scorecard | Supply chain security scoring |
 
+### 8. `flutter-ci.yml` - Flutter Mobile CI
+**Triggers**: Push to `main`/`develop`/`feat/*` (MobileApp changes), PRs
+
+| Stage | Description |
+|-------|-------------|
+| Analyse & Test | `flutter analyze`, `dart format`, unit/widget tests with coverage |
+| Build Android | Release APK build with `--dart-define=API_URL` |
+
+### 9. `container-sign-provenance.yml` - Container Signing & SLSA Provenance
+**Triggers**: Called by other workflows after Docker push, manual dispatch
+
+| Step | Description |
+|------|-------------|
+| Cosign Sign | Sigstore keyless signing (Fulcio + Rekor) |
+| Verify | Cosign signature verification |
+| SLSA Attestation | GitHub Attestations API (Build Level 2) |
+
+### 10. `codeql-analysis.yml` - CodeQL SAST
+(Existing workflow — see above)
+
 ## Required Secrets
 
 | Secret | Purpose |
@@ -293,10 +314,13 @@ The project implements **defense-in-depth** security across 7 CI/CD workflows an
 | **SCA/SBOM** | Trivy (vuln + license + SBOM), pip-audit | Dependency vulnerabilities, CycloneDX |
 | **IaC** | Trivy misconfig, Checkov (CIS/NIST) | Dockerfiles, Compose, workflows |
 | **DAST** | OWASP ZAP baseline | API endpoint scanning |
-| **Supply Chain** | SHA-pinned Actions, OSSF Scorecard, Dependabot | SLSA Level 2+ compliance |
-| **Container** | Trivy image scan (3 images), non-root, cap_drop, read_only | Container hardening |
+| **Supply Chain** | SHA-pinned Actions, OSSF Scorecard, Dependabot, cosign | SLSA Level 2+ compliance |
+| **Container** | Trivy image scan (3 images), non-root, cap_drop, read_only, cosign signed | Container hardening |
+| **AI Red Teaming** | 50 adversarial prompts (NIST AI 600-1 taxonomy) | Prompt injection, jailbreak, PII extraction |
+| **Accessibility** | axe-core WCAG 2.1 AA, Lighthouse CI (>= 90) | Frontend a11y audit in CI |
+| **Load Testing** | k6 (p95 < 3s, error rate < 1%) | SLO validation |
 
-All GitHub Actions are **SHA-pinned** to commit hashes (not mutable tags). See [SECURITY.md](SECURITY.md) for full details.
+All GitHub Actions are **SHA-pinned** to commit hashes (not mutable tags). Container images are signed with Sigstore cosign (keyless OIDC) and attested with SLSA v1.2 provenance. See [SECURITY.md](SECURITY.md) for full details.
 
 ## RAG Quality Gates
 
@@ -411,6 +435,34 @@ gh workflow run frontend-deploy.yml
 gh run list --workflow=ci-ml-pipeline.yml
 ```
 
+## Operational Scripts
+
+| Script | Description |
+|--------|-------------|
+| `scripts/validate_env.py` | Pre-deployment environment validation (production safety checks) |
+| `scripts/ai_red_team.py` | AI red team evaluation (50 NIST AI 600-1 adversarial prompts) |
+| `scripts/bias_fairness_audit.py` | Bias & fairness audit (language + taxpayer type parity >= 70%) |
+| `scripts/incident_response_sim.py` | Incident response simulation (3 AI-specific playbooks) |
+| `scripts/carbon_tracker.py` | Carbon footprint tracking (CodeCarbon wrapper) |
+| `scripts/dr_test.sh` | Disaster recovery test (Qdrant snapshot + SQLite backup + health) |
+| `tests/load/k6-chat-slo.js` | k6 load test (steady-state + spike, SLO thresholds enforced) |
+
+## Monitoring Stack
+
+Start the full observability stack:
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| Prometheus | http://localhost:9090 | Metrics scraping + alerting (5 SLO rules) |
+| Grafana | http://localhost:3001 | Pre-built dashboards (8 panels) |
+| Jaeger | http://localhost:16686 | Distributed tracing (OTel OTLP) |
+
+Dashboards and datasources are auto-provisioned via `monitoring/grafana/provisioning/`.
+
 ## Next Steps
 - Set repository secrets in GitHub settings before running workflows
 - Configure Hugging Face repository at `mpairweLandwind/ura-chatbot`
@@ -418,3 +470,4 @@ gh run list --workflow=ci-ml-pipeline.yml
 - Review [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for production deployment guide
 - Review [docs/MONITORING.md](docs/MONITORING.md) for observability setup
 - Review [docs/MOBILE_SETUP.md](docs/MOBILE_SETUP.md) for mobile app build instructions
+- Review [docs/MODEL_CARD.md](docs/MODEL_CARD.md) for EU AI Act Article 53 model card

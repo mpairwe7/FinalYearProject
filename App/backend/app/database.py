@@ -108,6 +108,62 @@ def init_db() -> None:
             created_at      REAL NOT NULL
         );
 
+        -- Phase 14 (2026) — identity, tenancy, and consent.
+        -- Tenants are a first-class concept for RLS and
+        -- multi-tenant isolation.  One tenant per URA deployment
+        -- or partner agency (KCCA, NSSF, etc).
+        CREATE TABLE IF NOT EXISTS tenants (
+            id            TEXT PRIMARY KEY,
+            display_name  TEXT NOT NULL,
+            created_at    REAL NOT NULL
+        );
+
+        -- Users map from OIDC `sub` claim to an internal id.
+        -- One row per (tenant_id, external_id).  Role is the
+        -- primary RBAC key.
+        CREATE TABLE IF NOT EXISTS users (
+            id            TEXT PRIMARY KEY,
+            tenant_id     TEXT NOT NULL DEFAULT 'default',
+            external_id   TEXT NOT NULL,
+            email         TEXT DEFAULT '',
+            role          TEXT NOT NULL DEFAULT 'public'
+                          CHECK(role IN ('public','verified_taxpayer','ura_staff','ura_admin','ura_auditor')),
+            created_at    REAL NOT NULL,
+            last_seen_at  REAL NOT NULL,
+            UNIQUE(tenant_id, external_id)
+        );
+
+        -- User profile — JSON blob for easy evolution, indexed via
+        -- SQL only on fields we actually filter on.  Stored as TEXT
+        -- in SQLite; JSONB in postgres.py mirror.
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            user_id            TEXT PRIMARY KEY
+                               REFERENCES users(id) ON DELETE CASCADE,
+            taxpayer_type      TEXT DEFAULT 'unknown',
+            industry           TEXT DEFAULT '',
+            primary_language   TEXT DEFAULT 'en',
+            detail_level       TEXT DEFAULT 'intermediate',
+            registered_tax_types TEXT DEFAULT '[]',
+            fiscal_year        TEXT DEFAULT 'FY2025-26',
+            display_name       TEXT DEFAULT '',
+            updated_at         REAL NOT NULL
+        );
+
+        -- Consent receipts — append-only.  Withdrawal is a new row
+        -- with withdrawn_at set.  One active row per (user_id, purpose, version).
+        CREATE TABLE IF NOT EXISTS consent_receipts (
+            receipt_id    TEXT PRIMARY KEY,
+            user_id       TEXT NOT NULL
+                          REFERENCES users(id) ON DELETE CASCADE,
+            purpose       TEXT NOT NULL
+                          CHECK(purpose IN ('personalization','analytics','ticket_escalation','long_term_storage','ura_account_access')),
+            version       TEXT NOT NULL,
+            granted_at    REAL NOT NULL,
+            withdrawn_at  REAL,
+            legal_basis   TEXT NOT NULL DEFAULT 'consent'
+                          CHECK(legal_basis IN ('consent','public_task','legal_obligation'))
+        );
+
         -- Phase 14-D — ticket queue for escalations.  Each ticket is
         -- one human-required conversation the supervisor routed out
         -- of the automated pipeline.  Staff work them via the admin
@@ -142,7 +198,17 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_tickets_status    ON tickets(status);
         CREATE INDEX IF NOT EXISTS idx_tickets_priority  ON tickets(priority);
         CREATE INDEX IF NOT EXISTS idx_tickets_created   ON tickets(created_at);
+        CREATE INDEX IF NOT EXISTS idx_users_tenant      ON users(tenant_id);
+        CREATE INDEX IF NOT EXISTS idx_users_last_seen   ON users(last_seen_at);
+        CREATE INDEX IF NOT EXISTS idx_consent_user      ON consent_receipts(user_id);
+        CREATE INDEX IF NOT EXISTS idx_consent_active    ON consent_receipts(user_id, purpose, withdrawn_at);
     """)
+
+    # Seed the default tenant if missing
+    conn.execute(
+        "INSERT OR IGNORE INTO tenants (id, display_name, created_at) VALUES (?, ?, ?)",
+        ("default", "URA Default Tenant", time.time()),
+    )
     conn.commit()
     logger.info("Analytics database initialised at %s", _DB_PATH)
 
@@ -602,6 +668,304 @@ def update_ticket(
         logger.exception("update_ticket failed")
         conn.rollback()
         return False
+
+
+# ---------------------------------------------------------------------------
+# Phase 14 (2026) — identity / profile / consent CRUD
+# ---------------------------------------------------------------------------
+def upsert_user(
+    external_id: str,
+    tenant_id: str = "default",
+    email: str = "",
+    role: str = "public",
+) -> dict[str, Any]:
+    """Create or refresh a user row from verified JWT claims.
+
+    Returns the full row as a dict (with the internal ``id``).
+    Idempotent — calling repeatedly with the same (tenant_id,
+    external_id) updates ``last_seen_at`` only.
+    """
+    conn = _get_connection()
+    now = time.time()
+    row = conn.execute(
+        "SELECT * FROM users WHERE tenant_id = ? AND external_id = ?",
+        (tenant_id, external_id),
+    ).fetchone()
+
+    if row is not None:
+        try:
+            conn.execute(
+                "UPDATE users SET last_seen_at = ?, email = ?, role = ? WHERE id = ?",
+                (now, email or row["email"], role or row["role"], row["id"]),
+            )
+            conn.commit()
+        except Exception:
+            logger.exception("upsert_user update failed")
+            conn.rollback()
+        return dict(
+            id=row["id"],
+            tenant_id=row["tenant_id"],
+            external_id=row["external_id"],
+            email=email or row["email"],
+            role=role or row["role"],
+            created_at=row["created_at"],
+            last_seen_at=now,
+        )
+
+    user_id = str(uuid.uuid4())
+    try:
+        conn.execute(
+            """INSERT INTO users (id, tenant_id, external_id, email, role, created_at, last_seen_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, tenant_id, external_id, email, role, now, now),
+        )
+        conn.commit()
+    except Exception:
+        logger.exception("upsert_user insert failed")
+        conn.rollback()
+        raise
+    return {
+        "id": user_id,
+        "tenant_id": tenant_id,
+        "external_id": external_id,
+        "email": email,
+        "role": role,
+        "created_at": now,
+        "last_seen_at": now,
+    }
+
+
+def get_user(user_id: str) -> dict[str, Any] | None:
+    conn = _get_connection()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_profile(user_id: str) -> dict[str, Any] | None:
+    conn = _get_connection()
+    row = conn.execute(
+        "SELECT * FROM user_profiles WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    try:
+        import json as _json
+        d["registered_tax_types"] = _json.loads(d.get("registered_tax_types", "[]"))
+    except Exception:
+        d["registered_tax_types"] = []
+    return d
+
+
+def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    """Create or patch a profile row.
+
+    Unknown keys in *updates* are silently dropped — the Pydantic
+    model above is the source of truth for allowed fields.
+    """
+    import json as _json
+    allowed = {
+        "taxpayer_type", "industry", "primary_language",
+        "detail_level", "registered_tax_types", "fiscal_year",
+        "display_name",
+    }
+    updates = {k: v for k, v in updates.items() if k in allowed}
+    if "registered_tax_types" in updates and isinstance(updates["registered_tax_types"], list):
+        updates["registered_tax_types"] = _json.dumps(updates["registered_tax_types"])
+
+    conn = _get_connection()
+    existing = conn.execute(
+        "SELECT user_id FROM user_profiles WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    now = time.time()
+
+    if existing is None:
+        # First-time insert — fall back to defaults for any missing field
+        defaults = {
+            "taxpayer_type": "unknown",
+            "industry": "",
+            "primary_language": "en",
+            "detail_level": "intermediate",
+            "registered_tax_types": "[]",
+            "fiscal_year": "FY2025-26",
+            "display_name": "",
+        }
+        defaults.update(updates)
+        try:
+            conn.execute(
+                """INSERT INTO user_profiles
+                   (user_id, taxpayer_type, industry, primary_language,
+                    detail_level, registered_tax_types, fiscal_year,
+                    display_name, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    user_id,
+                    defaults["taxpayer_type"],
+                    defaults["industry"],
+                    defaults["primary_language"],
+                    defaults["detail_level"],
+                    defaults["registered_tax_types"],
+                    defaults["fiscal_year"],
+                    defaults["display_name"],
+                    now,
+                ),
+            )
+            conn.commit()
+        except Exception:
+            logger.exception("upsert_user_profile insert failed")
+            conn.rollback()
+            raise
+    else:
+        if not updates:
+            return get_user_profile(user_id) or {}
+        sets = ", ".join(f"{k} = ?" for k in updates) + ", updated_at = ?"
+        params = list(updates.values()) + [now, user_id]
+        try:
+            conn.execute(
+                f"UPDATE user_profiles SET {sets} WHERE user_id = ?",  # noqa: S608
+                params,
+            )
+            conn.commit()
+        except Exception:
+            logger.exception("upsert_user_profile update failed")
+            conn.rollback()
+            raise
+
+    return get_user_profile(user_id) or {}
+
+
+def grant_consent(
+    user_id: str,
+    purpose: str,
+    version: str,
+    legal_basis: str = "consent",
+) -> dict[str, Any]:
+    """Issue a new consent receipt for (user, purpose, version).
+
+    If an active (not-withdrawn) row already exists for this
+    (user, purpose, version) we return it unchanged — consents are
+    idempotent.  Withdrawal of an older version is caller's job.
+    """
+    conn = _get_connection()
+    existing = conn.execute(
+        """SELECT * FROM consent_receipts
+           WHERE user_id = ? AND purpose = ? AND version = ? AND withdrawn_at IS NULL""",
+        (user_id, purpose, version),
+    ).fetchone()
+    if existing is not None:
+        return dict(existing)
+
+    receipt_id = str(uuid.uuid4())
+    now = time.time()
+    try:
+        conn.execute(
+            """INSERT INTO consent_receipts
+               (receipt_id, user_id, purpose, version, granted_at, withdrawn_at, legal_basis)
+               VALUES (?, ?, ?, ?, ?, NULL, ?)""",
+            (receipt_id, user_id, purpose, version, now, legal_basis),
+        )
+        conn.commit()
+    except Exception:
+        logger.exception("grant_consent failed")
+        conn.rollback()
+        raise
+
+    return {
+        "receipt_id": receipt_id,
+        "user_id": user_id,
+        "purpose": purpose,
+        "version": version,
+        "granted_at": now,
+        "withdrawn_at": None,
+        "legal_basis": legal_basis,
+    }
+
+
+def withdraw_consent(user_id: str, purpose: str) -> int:
+    """Mark all active consents for (user, purpose) as withdrawn.
+
+    Returns the number of rows touched.  The caller is responsible
+    for cascading cleanup (memory purge, etc.).
+    """
+    conn = _get_connection()
+    now = time.time()
+    try:
+        cursor = conn.execute(
+            """UPDATE consent_receipts
+               SET withdrawn_at = ?
+               WHERE user_id = ? AND purpose = ? AND withdrawn_at IS NULL""",
+            (now, user_id, purpose),
+        )
+        conn.commit()
+        return cursor.rowcount
+    except Exception:
+        logger.exception("withdraw_consent failed")
+        conn.rollback()
+        return 0
+
+
+def get_active_consents(user_id: str) -> list[dict[str, Any]]:
+    conn = _get_connection()
+    rows = conn.execute(
+        """SELECT * FROM consent_receipts
+           WHERE user_id = ? AND withdrawn_at IS NULL
+           ORDER BY granted_at DESC""",
+        (user_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def has_active_consent(user_id: str, purpose: str) -> bool:
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT 1 FROM consent_receipts
+           WHERE user_id = ? AND purpose = ? AND withdrawn_at IS NULL LIMIT 1""",
+        (user_id, purpose),
+    ).fetchone()
+    return row is not None
+
+
+def export_user_data(user_id: str) -> dict[str, Any]:
+    """GET /v1/me/export — subject right to data portability (UDPA 2019)."""
+    return {
+        "user": get_user(user_id),
+        "profile": get_user_profile(user_id),
+        "consents": get_active_consents(user_id),
+        "conversations": [],   # filled in by service.py (tenant + user filter)
+        "tickets": [],         # filled in by service.py
+        "facts": [],           # filled by Phase 16 memory module
+    }
+
+
+def delete_user_cascade(user_id: str) -> dict[str, int]:
+    """DELETE /v1/me — right to erasure.
+
+    Cascades through every table that holds user data.  The
+    audit ledger is INTENTIONALLY not touched — erasure must be
+    cryptographically marked, not the log rewritten (per UDPA +
+    EU precedent for audit integrity).
+    """
+    conn = _get_connection()
+    counts: dict[str, int] = {}
+    # (table, fk_column)
+    cascade = [
+        ("consent_receipts", "user_id"),
+        ("user_profiles", "user_id"),
+        ("users", "id"),
+    ]
+    for table, col in cascade:
+        try:
+            cursor = conn.execute(
+                f"DELETE FROM {table} WHERE {col} = ?",  # noqa: S608 — hardcoded list
+                (user_id,),
+            )
+            counts[table] = cursor.rowcount
+        except Exception:
+            logger.exception("delete_user_cascade: %s", table)
+            counts[table] = -1
+    conn.commit()
+    return counts
 
 
 def ticket_stats(days: int = 30) -> dict[str, Any]:
