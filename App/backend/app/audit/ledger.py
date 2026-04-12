@@ -17,13 +17,12 @@ via the existing :mod:`database` dispatch.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 
 from .merkle import compute_merkle_root, sha256_hex
@@ -46,21 +45,28 @@ class AuditEvent:
     """
 
     event_id: str
-    event_type: str          # "generate", "tool_call", "escalate", "erasure_tombstone", ...
+    event_type: str  # "generate", "tool_call", "escalate", "erasure_tombstone", ...
     tenant_id: str
     user_id: str
     payload: dict[str, Any]
     ts: float = field(default_factory=time.time)
-    seq: int = 0             # monotonic sequence within the ledger
+    seq: int = 0  # monotonic sequence within the ledger
     prev_hash: str = ""
     payload_hash: str = ""
-    row_hash: str = ""       # sha256(prev_hash + payload_hash)
+    row_hash: str = ""  # sha256(prev_hash + payload_hash)
 
     def to_row(self) -> tuple[Any, ...]:
         return (
-            self.event_id, self.event_type, self.tenant_id, self.user_id,
+            self.event_id,
+            self.event_type,
+            self.tenant_id,
+            self.user_id,
             json.dumps(self.payload, sort_keys=True, default=str),
-            self.ts, self.seq, self.prev_hash, self.payload_hash, self.row_hash,
+            self.ts,
+            self.seq,
+            self.prev_hash,
+            self.payload_hash,
+            self.row_hash,
         )
 
 
@@ -155,9 +161,7 @@ class AuditLedger:
                 seq=seq,
                 prev_hash=prev_hash,
             )
-            event.payload_hash = sha256_hex(
-                json.dumps(event.payload, sort_keys=True, default=str)
-            )
+            event.payload_hash = sha256_hex(json.dumps(event.payload, sort_keys=True, default=str))
             event.row_hash = sha256_hex(prev_hash + event.payload_hash)
 
             try:

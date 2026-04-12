@@ -20,8 +20,6 @@ import logging
 import math
 import os
 import re
-import threading
-import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -73,7 +71,7 @@ class BM25SparseEncoder:
     def _tokenize(text: str) -> list[str]:
         return re.findall(r"\w+", text.lower())
 
-    def fit(self, documents: list[str]) -> "BM25SparseEncoder":
+    def fit(self, documents: list[str]) -> BM25SparseEncoder:
         """Build vocabulary and IDF weights from *documents*."""
         n_docs = len(documents)
         doc_freq: Counter[int] = Counter()
@@ -132,7 +130,7 @@ class BM25SparseEncoder:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BM25SparseEncoder":
+    def from_dict(cls, data: dict[str, Any]) -> BM25SparseEncoder:
         enc = cls()
         enc._vocab = data["vocab"]
         enc._idf = {int(k): v for k, v in data["idf"].items()}
@@ -181,7 +179,7 @@ class HybridRetriever:
                     self._sparse_encoder = BM25SparseEncoder.from_dict(json.load(f))
                 logger.info("Loaded BM25 state from %s", BM25_STATE_PATH)
 
-            from sentence_transformers import SentenceTransformer, CrossEncoder
+            from sentence_transformers import CrossEncoder, SentenceTransformer
 
             self._dense_model = SentenceTransformer(DENSE_MODEL_NAME)
             if RERANK_ENABLED:

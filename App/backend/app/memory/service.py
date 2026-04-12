@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .episodic import EpisodicMemory, EpisodicSummary
-from .extractor import FactCandidate, FactExtractor
+from .extractor import FactExtractor
 from .semantic import SemanticMemory, UserFact
 from .working import WorkingMemory
 
@@ -61,6 +61,7 @@ class MemoryService:
             return False
         try:
             from .. import database as db
+
             return db.has_active_consent(user_id, purpose)
         except Exception:
             logger.debug("consent check failed", exc_info=True)
@@ -159,8 +160,11 @@ class MemoryService:
 
         # 2. Write an episodic summary (naive: first user turn truncated)
         first_user = next(
-            (str(t.get("content") or t.get("user_message", ""))
-             for t in turns if t.get("role") in ("user", "user_message")),
+            (
+                str(t.get("content") or t.get("user_message", ""))
+                for t in turns
+                if t.get("role") in ("user", "user_message")
+            ),
             "",
         )
         summary_text = first_user[:240] if first_user else "(empty conversation)"
@@ -213,14 +217,14 @@ class MemoryService:
 # Topic-tag heuristic (keeps the dependency count low)
 # ---------------------------------------------------------------------------
 _TOPIC_KEYWORDS = {
-    "vat":                ["vat", "value added"],
-    "paye":               ["paye", "take-home", "salary tax"],
-    "cit":                ["corporation tax", "corporate tax", "cit"],
-    "customs":            ["import", "customs", "cif", "tariff"],
-    "registration":       ["register", "tin", "sign up"],
-    "withholding":        ["withholding", "wht"],
-    "capital_gains":      ["capital gains", "cgt", "sold"],
-    "escalation":         ["human", "officer", "dispute", "appeal"],
+    "vat": ["vat", "value added"],
+    "paye": ["paye", "take-home", "salary tax"],
+    "cit": ["corporation tax", "corporate tax", "cit"],
+    "customs": ["import", "customs", "cif", "tariff"],
+    "registration": ["register", "tin", "sign up"],
+    "withholding": ["withholding", "wht"],
+    "capital_gains": ["capital gains", "cgt", "sold"],
+    "escalation": ["human", "officer", "dispute", "appeal"],
 }
 
 

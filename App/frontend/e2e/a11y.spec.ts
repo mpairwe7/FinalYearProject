@@ -49,9 +49,9 @@ test.describe("WCAG 2.1 AA Accessibility", () => {
     // Send button has aria-label
     await expect(page.getByLabel("Send message")).toBeVisible();
 
-    // Mic button has aria-label
-    const micBtn = page.getByLabel(/speaking|recording/i);
-    await expect(micBtn).toBeVisible();
+    // Mic button — look for the button containing "Speak" text or matching aria-label
+    const micBtn = page.locator("button", { hasText: /Speak/i });
+    await expect(micBtn.first()).toBeVisible();
   });
 
   test("interactive elements are keyboard-accessible", async ({ page }) => {

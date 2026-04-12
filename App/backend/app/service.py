@@ -24,6 +24,7 @@ References:
 
 from __future__ import annotations
 
+import concurrent.futures
 import csv
 import logging
 import os
@@ -31,15 +32,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-import concurrent.futures
-
+from . import database as db
+from . import llm as llm_module
 from .agents import AgentRoute, supervisor
-from .cache import SemanticCache, create_cache
+from .cache import create_cache
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
-from .guardrails import InputGuard, OutputGuard, redact_pii_text, STORE_RAW_PROMPTS
-from . import llm as llm_module
-from . import database as db
+from .guardrails import STORE_RAW_PROMPTS, InputGuard, OutputGuard, redact_pii_text
 from .query import rewrite as rewrite_query
 from .resilience import CircuitBreaker
 from .retriever import HybridRetriever
@@ -309,7 +308,9 @@ class ChatModel:
 
         mode = "hybrid (Qdrant)" if self._retriever_ready else "keyword-only (fallback)"
         gen_mode = "LLM (Qwen2.5-3B)" if self._llm_available else "FAQ lookup (fallback)"
-        logger.info("ChatModel initialised – %s mode, %s gen, %d tags", mode, gen_mode, len(self._faq_index))
+        logger.info(
+            "ChatModel initialised – %s mode, %s gen, %d tags", mode, gen_mode, len(self._faq_index)
+        )
 
     # -- Chat (RAG) ---------------------------------------------------------
     def generate(
@@ -356,8 +357,9 @@ class ChatModel:
                     "escalation_required": False,
                     "escalation_reason": "",
                 }
-                self._audit_turn(message=message, result=blocked,
-                                 session_id=session_id, trace_ctx=trace_ctx)
+                self._audit_turn(
+                    message=message, result=blocked, session_id=session_id, trace_ctx=trace_ctx
+                )
                 return blocked
 
             # 1b. Semantic cache check AFTER guardrails (Phase 5)
@@ -381,7 +383,11 @@ class ChatModel:
                         has_conversation_history=bool(conversation_history),
                     )
                 trace_ctx["agent_route"] = route_decision.route.value
-                trace_ctx["agent_route_confidence"] = route_decision.route_confidence if hasattr(route_decision, "route_confidence") else route_decision.confidence
+                trace_ctx["agent_route_confidence"] = (
+                    route_decision.route_confidence
+                    if hasattr(route_decision, "route_confidence")
+                    else route_decision.confidence
+                )
                 logger.info(
                     "supervisor: route=%s confidence=%.2f reason=%s",
                     route_decision.route.value,
@@ -392,7 +398,8 @@ class ChatModel:
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
                 if route_decision.route == AgentRoute.CLARIFY:
                     clarified = {
-                        "reply": route_decision.clarification_question or (
+                        "reply": route_decision.clarification_question
+                        or (
                             "Could you provide a bit more detail about your "
                             "question? I can help with VAT, PAYE, customs, "
                             "registration, or specific tax types."
@@ -407,8 +414,12 @@ class ChatModel:
                         "escalation_required": False,
                         "escalation_reason": "",
                     }
-                    self._audit_turn(message=message, result=clarified,
-                                     session_id=session_id, trace_ctx=trace_ctx)
+                    self._audit_turn(
+                        message=message,
+                        result=clarified,
+                        session_id=session_id,
+                        trace_ctx=trace_ctx,
+                    )
                     return clarified
                 if route_decision.route == AgentRoute.ESCALATE:
                     ticket_id = ""
@@ -423,9 +434,10 @@ class ChatModel:
                                 bot_reply="",
                                 session_id=session_id or None,
                                 conversation_id=conversation_id,
-                                priority="high" if "dispute" in route_decision.reason.lower()
-                                                or "legal" in route_decision.reason.lower()
-                                         else "normal",
+                                priority="high"
+                                if "dispute" in route_decision.reason.lower()
+                                or "legal" in route_decision.reason.lower()
+                                else "normal",
                             )
                             ticket_id = ticket.get("id", "")
                             trace_ctx["ticket_id"] = ticket_id
@@ -455,8 +467,12 @@ class ChatModel:
                         "escalation_reason": route_decision.reason,
                         "ticket_id": ticket_id,
                     }
-                    self._audit_turn(message=message, result=escalated,
-                                     session_id=session_id, trace_ctx=trace_ctx)
+                    self._audit_turn(
+                        message=message,
+                        result=escalated,
+                        session_id=session_id,
+                        trace_ctx=trace_ctx,
+                    )
                     return escalated
 
                 # TOOLS / SPECIALIST routes force the agentic LLM path
@@ -533,8 +549,12 @@ class ChatModel:
                     "escalation_required": False,
                     "escalation_reason": "",
                 }
-                self._audit_turn(message=message, result=clarify_result,
-                                 session_id=session_id, trace_ctx=trace_ctx)
+                self._audit_turn(
+                    message=message,
+                    result=clarify_result,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
                 return clarify_result
 
             # 4. Calibrated abstention — refuse to answer when confidence too low
@@ -559,8 +579,9 @@ class ChatModel:
                     "escalation_required": escalate,
                     "escalation_reason": esc_reason,
                 }
-                self._audit_turn(message=message, result=abstained,
-                                 session_id=session_id, trace_ctx=trace_ctx)
+                self._audit_turn(
+                    message=message, result=abstained, session_id=session_id, trace_ctx=trace_ctx
+                )
                 return abstained
 
             # 5. Build response with citations
@@ -609,7 +630,9 @@ class ChatModel:
                             # Filter citations to refs the model actually cited
                             cited_refs = set(parsed["citations"])
                             if cited_refs:
-                                citations = [c for c in citations if c["ref"].strip("[]") in cited_refs]
+                                citations = [
+                                    c for c in citations if c["ref"].strip("[]") in cited_refs
+                                ]
                             trace_ctx["structured_output"] = True
                             if parsed["abstain"]:
                                 retrieval_mode = "abstained"
@@ -676,9 +699,7 @@ class ChatModel:
                             locale=locale,
                         )
                     if revised:
-                        reply = self._output_guard.sanitize(
-                            self._output_guard.redact_pii(revised)
-                        )
+                        reply = self._output_guard.sanitize(self._output_guard.redact_pii(revised))
                         leakage = self._output_guard.check_prompt_leakage(reply)
                         reply = leakage.sanitized_text
                         faith = HybridRetriever.compute_faithfulness(reply, contexts)
@@ -695,9 +716,7 @@ class ChatModel:
                         trace_ctx["self_reflected"] = True
 
             # 8. Escalation check
-            escalate, esc_reason = self._output_guard.should_escalate(
-                faithfulness_score, hits
-            )
+            escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
 
             trace_ctx["num_sources"] = len(sources)
             trace_ctx["locale"] = locale
@@ -776,17 +795,14 @@ class ChatModel:
             return
         try:
             import hashlib as _hashlib
+
             from .audit import get_ledger
 
             trace_ctx = trace_ctx or {}
             reply = result.get("reply", "") or ""
             payload = {
-                "query_sha256": _hashlib.sha256(
-                    (message or "").encode("utf-8")
-                ).hexdigest(),
-                "reply_sha256": _hashlib.sha256(
-                    reply.encode("utf-8")
-                ).hexdigest(),
+                "query_sha256": _hashlib.sha256((message or "").encode("utf-8")).hexdigest(),
+                "reply_sha256": _hashlib.sha256(reply.encode("utf-8")).hexdigest(),
                 "retrieval_mode": result.get("retrieval_mode", ""),
                 "num_sources": len(result.get("sources", [])),
                 "num_citations": len(result.get("citations", [])),
@@ -892,9 +908,7 @@ class ChatModel:
 
         # Corrective RAG (Phase 6)
         if hits and self._retriever_ready:
-            hits, was_corrected = corrective_retrieve(
-                rewritten, self._retriever, hits, top_k=top_k
-            )
+            hits, was_corrected = corrective_retrieve(rewritten, self._retriever, hits, top_k=top_k)
             if was_corrected:
                 retrieval_mode = "hybrid_corrected"
 

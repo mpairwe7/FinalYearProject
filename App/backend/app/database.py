@@ -249,7 +249,9 @@ def cleanup_expired_data() -> dict[str, int]:
             conn.commit()
             deleted[table] = cursor.rowcount
             if cursor.rowcount > 0:
-                logger.info("TTL cleanup: deleted %d rows from %s (>%dd)", cursor.rowcount, table, ttl_days)
+                logger.info(
+                    "TTL cleanup: deleted %d rows from %s (>%dd)", cursor.rowcount, table, ttl_days
+                )
         except Exception:
             logger.exception("TTL cleanup failed for %s", table)
             conn.rollback()
@@ -445,8 +447,17 @@ def log_conversation(
                (id, session_id, user_message, bot_reply, sources, response_time_ms,
                 confidence, topic_tag, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (conv_id, session_id, user_message, bot_reply, sources,
-             response_time_ms, confidence, topic_tag, time.time()),
+            (
+                conv_id,
+                session_id,
+                user_message,
+                bot_reply,
+                sources,
+                response_time_ms,
+                confidence,
+                topic_tag,
+                time.time(),
+            ),
         )
         conn.commit()
     except Exception:
@@ -473,7 +484,9 @@ def get_recent_turns(
         (session_id, limit),
     ).fetchall()
     # Reverse to chronological order
-    return [{"user_message": r["user_message"], "bot_reply": r["bot_reply"]} for r in reversed(rows)]
+    return [
+        {"user_message": r["user_message"], "bot_reply": r["bot_reply"]} for r in reversed(rows)
+    ]
 
 
 def get_conversation_stats(days: int = 30) -> dict[str, Any]:
@@ -569,12 +582,20 @@ def create_ticket(
                                     reason, user_query, bot_reply,
                                     assignee, staff_note, created_at, updated_at)
                VALUES (?, ?, ?, 'open', ?, ?, ?, ?, '', '', ?, ?)""",
-            (ticket_id, conversation_id, session_id, priority,
-             reason, user_query, bot_reply, now, now),
+            (
+                ticket_id,
+                conversation_id,
+                session_id,
+                priority,
+                reason,
+                user_query,
+                bot_reply,
+                now,
+                now,
+            ),
         )
         conn.commit()
-        logger.info("ticket %s created (priority=%s reason=%s)",
-                    ticket_id, priority, reason[:60])
+        logger.info("ticket %s created (priority=%s reason=%s)", ticket_id, priority, reason[:60])
     except Exception:
         logger.exception("Failed to create ticket")
         conn.rollback()
@@ -752,6 +773,7 @@ def get_user_profile(user_id: str) -> dict[str, Any] | None:
     d = dict(row)
     try:
         import json as _json
+
         d["registered_tax_types"] = _json.loads(d.get("registered_tax_types", "[]"))
     except Exception:
         d["registered_tax_types"] = []
@@ -765,9 +787,14 @@ def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]
     model above is the source of truth for allowed fields.
     """
     import json as _json
+
     allowed = {
-        "taxpayer_type", "industry", "primary_language",
-        "detail_level", "registered_tax_types", "fiscal_year",
+        "taxpayer_type",
+        "industry",
+        "primary_language",
+        "detail_level",
+        "registered_tax_types",
+        "fiscal_year",
         "display_name",
     }
     updates = {k: v for k, v in updates.items() if k in allowed}
@@ -932,9 +959,9 @@ def export_user_data(user_id: str) -> dict[str, Any]:
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
         "consents": get_active_consents(user_id),
-        "conversations": [],   # filled in by service.py (tenant + user filter)
-        "tickets": [],         # filled in by service.py
-        "facts": [],           # filled by Phase 16 memory module
+        "conversations": [],  # filled in by service.py (tenant + user filter)
+        "tickets": [],  # filled in by service.py
+        "facts": [],  # filled by Phase 16 memory module
     }
 
 

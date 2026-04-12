@@ -85,10 +85,7 @@ class SemanticCache:
         """Remove expired entries."""
         now = time.time()
         before = len(self._entries)
-        self._entries = [
-            e for e in self._entries
-            if (now - e.created_at) < CACHE_TTL_SECONDS
-        ]
+        self._entries = [e for e in self._entries if (now - e.created_at) < CACHE_TTL_SECONDS]
         evicted = before - len(self._entries)
         if evicted:
             self._stats["evictions"] += evicted
@@ -126,7 +123,9 @@ class SemanticCache:
                 self._stats["hits"] += 1
                 logger.debug(
                     "Cache HIT: sim=%.4f query=%s → cached=%s",
-                    best_sim, query[:50], best_entry.query[:50],
+                    best_sim,
+                    query[:50],
+                    best_entry.query[:50],
                 )
                 return best_entry.response
 
@@ -149,11 +148,13 @@ class SemanticCache:
                 self._entries = self._entries[removed:]
                 self._stats["evictions"] += removed
 
-            self._entries.append(CacheEntry(
-                query=query,
-                embedding=embedding,
-                response=response,
-            ))
+            self._entries.append(
+                CacheEntry(
+                    query=query,
+                    embedding=embedding,
+                    response=response,
+                )
+            )
 
     @property
     def stats(self) -> dict[str, int]:
@@ -285,9 +286,9 @@ class RedisSemanticCache:
         size = 0
         if self._client is not None:
             try:
-                size = sum(1 for _ in self._client.scan_iter(
-                    match=f"{CACHE_REDIS_PREFIX}*", count=200
-                ))
+                size = sum(
+                    1 for _ in self._client.scan_iter(match=f"{CACHE_REDIS_PREFIX}*", count=200)
+                )
             except Exception:
                 pass
         return {**self._stats, "size": size}

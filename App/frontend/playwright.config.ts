@@ -23,6 +23,19 @@ export default defineConfig({
     baseURL: process.env.BASE_URL || "http://localhost:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    // Chromium sandbox requires specific kernel namespaces; disable in
+    // environments where they are unavailable (Docker, shared servers).
+    // CI runners (GitHub Actions) provide a compatible environment.
+    launchOptions: {
+      args: process.env.CI
+        ? []
+        : [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-gpu",
+            "--disable-software-rasterizer",
+          ],
+    },
   },
 
   projects: [

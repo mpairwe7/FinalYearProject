@@ -19,15 +19,15 @@ import time
 # (category → half_life_days).  Categories not in the table get
 # a conservative 90-day default.
 HALF_LIVES = {
-    "taxpayer_type":       5 * 365,   # ~5 years
-    "industry":            2 * 365,   # ~2 years
-    "registered_vat":      1 * 365,
-    "fiscal_year":         1 * 365,
-    "primary_language":    365,
-    "detail_level":        180,
-    "current_topic":       14,
-    "last_query":          7,
-    "session_note":        7,
+    "taxpayer_type": 5 * 365,  # ~5 years
+    "industry": 2 * 365,  # ~2 years
+    "registered_vat": 1 * 365,
+    "fiscal_year": 1 * 365,
+    "primary_language": 365,
+    "detail_level": 180,
+    "current_topic": 14,
+    "last_query": 7,
+    "session_note": 7,
 }
 DEFAULT_HALF_LIFE_DAYS = 90
 

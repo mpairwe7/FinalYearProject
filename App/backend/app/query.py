@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ def expand_abbreviations(query: str) -> str:
         key = w.lower().strip(".,;:?!\"'()")
         if key in _ABBREVIATIONS:
             # Preserve trailing punctuation
-            suffix = w[len(w.rstrip(".,;:?!\"'()")):]
+            suffix = w[len(w.rstrip(".,;:?!\"'()")) :]
             expanded.append(_ABBREVIATIONS[key] + suffix)
         else:
             expanded.append(w)

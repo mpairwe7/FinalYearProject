@@ -52,6 +52,15 @@ jobs:
           uv pip install --system -r requirements.txt
           uv pip install --system sentence-transformers
 
+      - name: Download latest datasets (SALT + WAXAL + JW300)
+        run: |
+          python -m ml.scripts.data_aug.dataset_downloader \
+            --output-dir Data/online_corpora \
+            --lang-pairs en-lg en-sw en-nyn en-ach \
+            --no-fleurs \
+            2>&1 | tail -20
+          echo "Downloaded $(find Data/online_corpora -name '*.jsonl' | wc -l) corpus files"
+
       - name: Collect feedback & detect drift
         id: drift
         run: |

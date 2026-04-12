@@ -15,24 +15,32 @@ sys.path.insert(0, str(PROJECT_ROOT / "App" / "backend"))
 
 
 class TestHealthEndpoint:
-    """Tests for health check endpoint."""
-    
+    """Tests for health check endpoint via TestClient (rate-limited endpoints
+    require a real Starlette Request, so direct function calls don't work)."""
+
     def test_health_returns_ok(self):
         """Test health endpoint returns alive status."""
-        from App.backend.app.main import health_liveness
+        from fastapi.testclient import TestClient
+        from App.backend.app.main import app
 
-        response = health_liveness()
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/health")
 
-        assert response["status"] == "alive"
+        assert response.status_code == 200
+        assert response.json()["status"] == "alive"
 
     def test_health_response_format(self):
         """Test health response has correct format."""
-        from App.backend.app.main import health_liveness
+        from fastapi.testclient import TestClient
+        from App.backend.app.main import app
 
-        response = health_liveness()
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/health")
+        data = response.json()
 
-        assert isinstance(response, dict)
-        assert "status" in response
+        assert isinstance(data, dict)
+        assert "status" in data
+        assert "version" in data
 
 
 class TestChatRequest:

@@ -235,9 +235,7 @@ class OutputGuard:
         """Return True if the best retrieval score is too low to answer."""
         if not hits:
             return True
-        best_score = max(
-            h.get("score_rerank", h.get("score_rrf", 0.0)) for h in hits
-        )
+        best_score = max(h.get("score_rerank", h.get("score_rrf", 0.0)) for h in hits)
         return best_score < threshold
 
     @staticmethod
