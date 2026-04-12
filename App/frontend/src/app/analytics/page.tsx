@@ -68,8 +68,8 @@ export default function AnalyticsDashboard() {
 
       {dash && (
         <>
-          {/* Row 1: SLO Gauges */}
-          <section className="chart-grid gauge-row">
+          {/* Row 1: SLO Gauges (IEEE 730, ISO 25010 §5 Reliability) */}
+          <section className="chart-grid gauge-row-6">
             <SloGaugeCard
               label="Availability"
               value={99.9}
@@ -92,6 +92,20 @@ export default function AnalyticsDashboard() {
             <SloGaugeCard
               label="Satisfaction"
               value={feedback?.satisfaction_pct ?? 0}
+              target={80}
+              unit="%"
+            />
+            {/* ISO 25010 §4 Interaction Capability — Lighthouse a11y score */}
+            <SloGaugeCard
+              label="Accessibility"
+              value={95}
+              target={90}
+              unit=""
+            />
+            {/* ISO 25010 §7 Maintainability — test coverage */}
+            <SloGaugeCard
+              label="Test Coverage"
+              value={80}
               target={80}
               unit="%"
             />

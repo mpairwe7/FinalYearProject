@@ -25,6 +25,7 @@ export interface DashboardData {
     avg_confidence: number;
     top_topics: { tag: string; count: number }[];
   };
+  // Inline feedback from the dashboard endpoint (mirrors FeedbackSummary)
   feedback: {
     period_days: number;
     total: number;
