@@ -296,6 +296,130 @@ def download_masakhane(
     return out_path
 
 
+# ---------------------------------------------------------------------------
+# SALT (Sunbird African Language Technology)
+# ---------------------------------------------------------------------------
+#
+# Active replacement for JW300 / OPUS-Tatoeba / lafand-mt, whose HF loaders
+# are deprecated (opus/JW300 returns 404; opus/Tatoeba unavailable; lafand-mt
+# ships none of the en-{lg,sw,nyn,ach} pairs we need).
+#
+# `Sunbird/salt` hosts a single `text-all` config where every row carries
+# parallel translations for the five Ugandan languages we care about
+# (eng / swa / lug / nyn / ach) plus teo, lgg, xog, ttj, ibo. One download
+# covers all four language pairs we target.
+
+# SALT uses ISO-639-3 column names; project uses 2-letter or short codes.
+_SALT_COL_FOR_LANG = {
+    "en": "eng_source_text",
+    "sw": "swa_text",
+    "lg": "lug_text",
+    "nyn": "nyn_text",
+    "ach": "ach_text",
+}
+
+
+def download_salt(
+    src_lang: str,
+    tgt_lang: str,
+    output_dir: Path,
+    max_pairs: int = 50_000,
+) -> Path:
+    """Download parallel pairs from the SALT multi-way corpus.
+
+    One download of the `text-all` config yields rows with all five languages
+    filled in; this function projects each row into a single src→tgt pair.
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("datasets library required")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"salt_{src_lang}_{tgt_lang}.jsonl"
+
+    if out_path.exists() and out_path.stat().st_size > 0:
+        log.info("salt: %s already exists, skipping", out_path)
+        return out_path
+
+    src_col = _SALT_COL_FOR_LANG.get(src_lang)
+    tgt_col = _SALT_COL_FOR_LANG.get(tgt_lang)
+    if not src_col or not tgt_col:
+        log.warning("salt: %s-%s not covered by SALT schema", src_lang, tgt_lang)
+        out_path.write_text("")
+        return out_path
+
+    log.info("salt: downloading text-all for %s-%s", src_lang, tgt_lang)
+    try:
+        ds = load_dataset("Sunbird/salt", "text-all", split="train")
+    except Exception as e:
+        log.warning("salt: load failed: %s", e)
+        out_path.write_text("")
+        return out_path
+
+    count = 0
+    with out_path.open("w", encoding="utf-8") as f:
+        for row in ds:
+            src_text = clean_text(str(row.get(src_col, ""))).strip()
+            tgt_text = clean_text(str(row.get(tgt_col, ""))).strip()
+            if not src_text or not tgt_text or len(src_text) < 5:
+                continue
+            f.write(json.dumps({
+                "source_text": src_text,
+                "target_text": tgt_text,
+                "source_lang": src_lang,
+                "target_lang": tgt_lang,
+                "source_type": "salt",
+                "license": LicenseClass.CC_BY.value,
+            }, ensure_ascii=False) + "\n")
+            count += 1
+            if count >= max_pairs:
+                break
+
+    log.info("salt: wrote %d pairs to %s", count, out_path)
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Common Voice (Luganda) — via `fsicoli/common_voice_19_0` mirror
+# ---------------------------------------------------------------------------
+#
+# `mozilla-foundation/common_voice_17_0` now only hosts README.md on HF;
+# `fsicoli/common_voice_19_0` mirrors the audio tarballs for every locale
+# and is the current working path via `datasets.load_dataset`.
+
+
+def download_common_voice(
+    language: str,
+    output_dir: Path,
+    repo: str = "fsicoli/common_voice_19_0",
+    split: str = "train+validation+test",
+) -> Path:
+    """Download Common Voice audio + transcripts for a language."""
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("datasets library required")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = output_dir / f"common_voice_{language}"
+
+    if target_dir.exists() and any(target_dir.iterdir()):
+        log.info("common_voice: %s already exists, skipping", target_dir)
+        return target_dir
+
+    log.info("common_voice: downloading %s / %s (split=%s)", repo, language, split)
+    try:
+        ds = load_dataset(repo, language, split=split, trust_remote_code=True)
+    except Exception as e:
+        log.warning("common_voice: %s failed: %s", repo, e)
+        return target_dir
+
+    ds.save_to_disk(str(target_dir))
+    log.info("common_voice: wrote %d clips to %s", len(ds), target_dir)
+    return target_dir
+
+
 def download_fleurs(
     language: str,
     output_dir: Path,
@@ -357,12 +481,17 @@ def download_fleurs(
 def download_all_corpora(
     output_dir: Path,
     lang_pairs: Optional[list[tuple[str, str]]] = None,
-    include_masakhane: bool = True,
+    include_salt: bool = True,
     include_fleurs: bool = True,
+    include_legacy: bool = False,
 ) -> list[Path]:
-    """Download JW300 + OPUS + Masakhane + FLEURS for all language pairs.
+    """Download SALT + FLEURS (+ legacy JW300/OPUS/Masakhane if requested).
 
     Default pairs: en↔lg, en↔sw, en↔nyn, en↔ach.
+
+    `include_legacy=False` by default because the HF loaders for
+    `opus/JW300`, `opus/Tatoeba`, and `masakhane/lafand-mt` are deprecated
+    for our language pairs; SALT covers all four with richer parallel data.
     """
     if lang_pairs is None:
         lang_pairs = [
@@ -374,17 +503,19 @@ def download_all_corpora(
 
     paths = []
     for src, tgt in lang_pairs:
-        # JW300 — largest freely available corpus.
-        paths.append(download_jw300(src, tgt, output_dir / "jw300"))
+        if include_salt:
+            try:
+                paths.append(download_salt(src, tgt, output_dir / "salt"))
+            except Exception as e:
+                log.warning("SALT %s-%s unavailable: %s", src, tgt, e)
 
-        # OPUS Tatoeba — high-quality short sentences.
-        try:
-            paths.append(download_opus("Tatoeba", src, tgt, output_dir / "opus"))
-        except Exception as e:
-            log.warning("Tatoeba %s-%s unavailable: %s", src, tgt, e)
-
-        # Masakhane — community-curated African language MT.
-        if include_masakhane:
+        if include_legacy:
+            # JW300 / OPUS Tatoeba / lafand-mt — kept as sentinels only.
+            paths.append(download_jw300(src, tgt, output_dir / "jw300"))
+            try:
+                paths.append(download_opus("Tatoeba", src, tgt, output_dir / "opus"))
+            except Exception as e:
+                log.warning("Tatoeba %s-%s unavailable: %s", src, tgt, e)
             try:
                 paths.append(download_masakhane(src, tgt, output_dir / "masakhane"))
             except Exception as e:
@@ -481,8 +612,19 @@ def main():
         help="Language pairs as src-tgt (e.g. en-sw en-nyn)",
     )
     parser.add_argument("--max-pairs", type=int, default=50_000)
-    parser.add_argument("--no-masakhane", action="store_true", help="Skip Masakhane download")
+    parser.add_argument("--no-salt", action="store_true", help="Skip SALT download")
     parser.add_argument("--no-fleurs", action="store_true", help="Skip FLEURS download")
+    parser.add_argument(
+        "--include-legacy",
+        action="store_true",
+        help="Also try JW300/OPUS Tatoeba/lafand-mt (deprecated; produces sentinels)",
+    )
+    parser.add_argument(
+        "--common-voice",
+        nargs="*",
+        default=[],
+        help="Languages to fetch via fsicoli/common_voice_19_0 (e.g. lg sw)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -491,10 +633,14 @@ def main():
     paths = download_all_corpora(
         args.output_dir,
         lang_pairs=pairs,
-        include_masakhane=not args.no_masakhane,
+        include_salt=not args.no_salt,
         include_fleurs=not args.no_fleurs,
+        include_legacy=args.include_legacy,
     )
     log.info("Downloaded %d corpus files", len(paths))
+
+    for cv_lang in args.common_voice:
+        download_common_voice(cv_lang, args.output_dir.parent)
 
 
 if __name__ == "__main__":
