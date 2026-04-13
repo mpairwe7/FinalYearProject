@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import hashlib
 from enum import Enum
-from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 SCHEMA_VERSION = "2026.1"
 
@@ -44,51 +46,51 @@ class AudioSourceType(str, Enum):
     COMMON_VOICE = "common_voice"
     SALT_ASR = "salt_asr"
     FLEURS = "fleurs"
-    PROJECT_RECORDING = "project_recording"   # URA-specific recordings
-    SYNTHETIC_TTS = "synthetic_tts"           # TTS used for ASR test-time augmentation
-    REDTEAM = "redteam"                       # adversarial voice probes
+    PROJECT_RECORDING = "project_recording"  # URA-specific recordings
+    SYNTHETIC_TTS = "synthetic_tts"  # TTS used for ASR test-time augmentation
+    REDTEAM = "redteam"  # adversarial voice probes
 
 
 class MTSourceType(str, Enum):
     """Provenance for MT parallel pairs."""
 
-    LUGANDA_PARALLEL = "luganda_parallel"     # existing Data/TTT corpus
-    BACKTRANSLATION = "backtranslation"       # synthetic Lg->En from MT model
-    CSV_FAQ_TRANSLATED = "csv_faq_translated" # URA FAQs translated
-    EVAL_GOLD = "eval_gold"                   # human-reviewed gold eval set
-    JW300 = "jw300"                           # JW300 parallel corpus (CC0)
-    OPUS = "opus"                             # OPUS parallel corpora
-    SWAHILI_PARALLEL = "swahili_parallel"     # en↔sw parallel data
+    LUGANDA_PARALLEL = "luganda_parallel"  # existing Data/TTT corpus
+    BACKTRANSLATION = "backtranslation"  # synthetic Lg->En from MT model
+    CSV_FAQ_TRANSLATED = "csv_faq_translated"  # URA FAQs translated
+    EVAL_GOLD = "eval_gold"  # human-reviewed gold eval set
+    JW300 = "jw300"  # JW300 parallel corpus (CC0)
+    OPUS = "opus"  # OPUS parallel corpora
+    SWAHILI_PARALLEL = "swahili_parallel"  # en↔sw parallel data
     RUNYANKOLE_PARALLEL = "runyankole_parallel"  # en↔nyn parallel data
-    ACHOLI_PARALLEL = "acholi_parallel"       # en↔ach parallel data
-    MASAKHANE = "masakhane"                   # Masakhane MT benchmark (CC-BY-4.0)
-    FLEURS = "fleurs"                        # Google FLEURS ASR eval set
-    SALT = "salt"                            # Sunbird SALT parallel + ASR + TTS (CC-BY-SA-4.0)
-    SALT_ASR = "salt_asr"                    # SALT multispeaker ASR recordings
-    WAXAL_ASR = "waxal_asr"                  # Google WAXAL ASR (CC-BY-SA-4.0)
-    WAXAL_TTS = "waxal_tts"                  # Google WAXAL TTS (CC-BY-SA-4.0)
-    FLORES = "flores"                        # FLORES-200 MT eval (CC-BY-SA-4.0)
+    ACHOLI_PARALLEL = "acholi_parallel"  # en↔ach parallel data
+    MASAKHANE = "masakhane"  # Masakhane MT benchmark (CC-BY-4.0)
+    FLEURS = "fleurs"  # Google FLEURS ASR eval set
+    SALT = "salt"  # Sunbird SALT parallel + ASR + TTS (CC-BY-SA-4.0)
+    SALT_ASR = "salt_asr"  # SALT multispeaker ASR recordings
+    WAXAL_ASR = "waxal_asr"  # Google WAXAL ASR (CC-BY-SA-4.0)
+    WAXAL_TTS = "waxal_tts"  # Google WAXAL TTS (CC-BY-SA-4.0)
+    FLORES = "flores"  # FLORES-200 MT eval (CC-BY-SA-4.0)
 
 
 class TTSSourceType(str, Enum):
     """Provenance for TTS training data (speaker recordings)."""
 
-    PROJECT_VOICE = "project_voice"           # project-recorded speaker
-    PUBLIC_CC0 = "public_cc0"                 # CC0 public-domain audio
+    PROJECT_VOICE = "project_voice"  # project-recorded speaker
+    PUBLIC_CC0 = "public_cc0"  # CC0 public-domain audio
     CROWDSOURCED = "crowdsourced"
 
 
 class LicenseClass(str, Enum):
     """Commercial-safety classification used by the mobile bundle filter."""
 
-    PUBLIC_DOMAIN = "public_domain"           # CC0, PDM
-    PERMISSIVE = "permissive"                 # MIT, Apache-2.0, BSD, MPL-2.0
-    CC_BY = "cc_by"                           # attribution required
-    CC_BY_SA = "cc_by_sa"                     # share-alike copyleft
-    CC_BY_NC = "cc_by_nc"                     # NON-COMMERCIAL — excluded from mobile bundle
-    PROPRIETARY = "proprietary"               # project-internal
-    GEMMA_TERMS = "gemma_terms"               # Google Gemma licence (commercial OK w/ restrictions)
-    UNKNOWN = "unknown"                       # requires manual review
+    PUBLIC_DOMAIN = "public_domain"  # CC0, PDM
+    PERMISSIVE = "permissive"  # MIT, Apache-2.0, BSD, MPL-2.0
+    CC_BY = "cc_by"  # attribution required
+    CC_BY_SA = "cc_by_sa"  # share-alike copyleft
+    CC_BY_NC = "cc_by_nc"  # NON-COMMERCIAL — excluded from mobile bundle
+    PROPRIETARY = "proprietary"  # project-internal
+    GEMMA_TERMS = "gemma_terms"  # Google Gemma licence (commercial OK w/ restrictions)
+    UNKNOWN = "unknown"  # requires manual review
 
     @property
     def is_commercial_safe(self) -> bool:
@@ -119,23 +121,23 @@ class AudioExample(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # Audio
-    audio_path: str                    # project-relative
-    sample_rate: int                   # Hz — must match speech_config.audio.sample_rate
+    audio_path: str  # project-relative
+    sample_rate: int  # Hz — must match speech_config.audio.sample_rate
     duration_s: float
     channels: int = 1
 
     # Transcript
     reference_text: str
-    language: str = "en"               # ISO 639-1: en, lg, ...
+    language: str = "en"  # ISO 639-1: en, lg, ...
 
     # Provenance + license (audit)
-    source: str                        # filename / dataset subdir
+    source: str  # filename / dataset subdir
     source_type: AudioSourceType
     license: LicenseClass = LicenseClass.UNKNOWN
-    speaker_id: Optional[str] = None   # pseudonymised
+    speaker_id: str | None = None  # pseudonymised
 
     # Deduplication key (sha256[:16] of audio_path + reference_text).
-    content_hash: Optional[str] = None
+    content_hash: str | None = None
 
     # Free-form for debugging / lineage.
     extra: dict[str, Any] = Field(default_factory=dict)
@@ -201,10 +203,10 @@ class MTExample(BaseModel):
 
     source_text: str
     target_text: str
-    source_lang: str                   # ISO 639-1
-    target_lang: str                   # ISO 639-1
+    source_lang: str  # ISO 639-1
+    target_lang: str  # ISO 639-1
 
-    source: str                        # filename / dataset id
+    source: str  # filename / dataset id
     source_type: MTSourceType
     license: LicenseClass = LicenseClass.UNKNOWN
 
@@ -212,11 +214,11 @@ class MTExample(BaseModel):
     is_synthetic: bool = False
 
     # Per-row quality score (0..1) assigned by filters.
-    quality_score: Optional[float] = None
-    length_ratio: Optional[float] = None
+    quality_score: float | None = None
+    length_ratio: float | None = None
 
-    content_hash: Optional[str] = None
-    doc_id: Optional[str] = None
+    content_hash: str | None = None
+    doc_id: str | None = None
 
     extra: dict[str, Any] = Field(default_factory=dict)
 
@@ -275,7 +277,7 @@ class TTSExample(BaseModel):
 
     text: str
     audio_path: str
-    speaker_id: str                    # pseudonymised
+    speaker_id: str  # pseudonymised
     language: str = "lg"
     sample_rate: int
     duration_s: float
@@ -285,14 +287,14 @@ class TTSExample(BaseModel):
     license: LicenseClass = LicenseClass.UNKNOWN
 
     # Consent tracking — MANDATORY for voice recordings.
-    consent_version: Optional[str] = None
-    consent_timestamp: Optional[str] = None   # ISO 8601
+    consent_version: str | None = None
+    consent_timestamp: str | None = None  # ISO 8601
 
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("consent_version")
     @classmethod
-    def _require_consent_for_real_speakers(cls, v: Optional[str]) -> Optional[str]:
+    def _require_consent_for_real_speakers(cls, v: str | None) -> str | None:
         # Pydantic v2 validates per-field; cross-field consent check is done
         # by the loader rather than here to keep this class side-effect-free.
         return v

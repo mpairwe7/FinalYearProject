@@ -33,20 +33,18 @@ class AsrResult {
   final String backend;
 
   factory AsrResult.fromMap(Map<String, dynamic> m) => AsrResult(
-        text: (m['text'] as String?) ?? '',
-        isFinal: (m['is_final'] as bool?) ?? false,
-        confidence: (m['confidence'] as num?)?.toDouble() ?? 0.0,
-        backend: (m['backend'] as String?) ?? 'unknown',
-      );
+    text: (m['text'] as String?) ?? '',
+    isFinal: (m['is_final'] as bool?) ?? false,
+    confidence: (m['confidence'] as num?)?.toDouble() ?? 0.0,
+    backend: (m['backend'] as String?) ?? 'unknown',
+  );
 }
 
 /// High-level streaming ASR service.
 class AsrService {
-  AsrService({
-    SpeechPipelineConfig? config,
-    SherpaChannel? channel,
-  })  : _config = config ?? const SpeechPipelineConfig(),
-        _channel = channel ?? SherpaChannel.instance;
+  AsrService({SpeechPipelineConfig? config, SherpaChannel? channel})
+    : _config = config ?? const SpeechPipelineConfig(),
+      _channel = channel ?? SherpaChannel.instance;
 
   final SpeechPipelineConfig _config;
   final SherpaChannel _channel;
@@ -98,7 +96,7 @@ class AsrService {
       audioInt16: samples.toList(),
       language: language,
     );
-    return AsrResult.fromMap(m.map((k, v) => MapEntry(k, v)));
+    return AsrResult.fromMap(m);
   }
 
   Future<void> dispose() async {

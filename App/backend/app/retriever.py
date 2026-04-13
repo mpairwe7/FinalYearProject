@@ -1,11 +1,13 @@
 """Qdrant-backed hybrid retrieval with dense + BM25 sparse + cross-encoder reranking.
 
 Implements the non-parametric retrieval component of the RAG architecture:
-- Dense: sentence-transformers/all-MiniLM-L6-v2 (384-dim, HNSW)
+- Dense: BAAI/bge-m3 (1024-dim, multilingual, MTEB 63.0) — default
 - Sparse: BM25-weighted token vectors (inverted index)
 - Fusion: Reciprocal Rank Fusion (RRF) via Qdrant query API
-- Reranking: cross-encoder/ms-marco-MiniLM-L-6-v2
+- Reranking: mxbai-rerank-base-v2 (BEIR 55.6, 500M, Apache-2.0)
 - Grounding: passage-level faithfulness scoring
+
+Model swap guide: see docs/MODEL_SWAP_GUIDE.md for tested alternatives.
 
 References:
 - Lewis et al. "Retrieval-Augmented Generation" (nlp.cs.ucl.ac.uk)
@@ -40,7 +42,7 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
 # state-of-art for free models.  Set DENSE_MODEL=sentence-transformers/
 # all-MiniLM-L6-v2 to keep the 384-dim legacy index without re-indexing.
 DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
-RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL", "mixedbread-ai/mxbai-rerank-base-v2")
 DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]

@@ -29,40 +29,40 @@ enum ConsentCategory {
 
 extension ConsentCategoryCopy on ConsentCategory {
   String get title => switch (this) {
-        ConsentCategory.voiceRecord => 'Microphone access',
-        ConsentCategory.voiceStoreTranscript => 'Save transcripts',
-        ConsentCategory.voiceImproveModel => 'Improve the model',
-      };
+    ConsentCategory.voiceRecord => 'Microphone access',
+    ConsentCategory.voiceStoreTranscript => 'Save transcripts',
+    ConsentCategory.voiceImproveModel => 'Improve the model',
+  };
 
   String get description => switch (this) {
-        ConsentCategory.voiceRecord =>
-          'Let the app capture audio from your microphone while you '
-              'hold or tap the voice button. Recording stops as soon '
-              'as you release or pause speaking. Audio is processed '
-              'entirely on your phone — nothing is uploaded.',
-        ConsentCategory.voiceStoreTranscript =>
-          'Keep the text version of what you said in the local chat '
-              'history on this device. Transcripts never leave the '
-              'phone. Turning this off clears the in-app history too.',
-        ConsentCategory.voiceImproveModel =>
-          'Occasionally let the app submit anonymised error samples '
-              '(short text snippets, no audio, no identifiers) so the '
-              'Luganda + English models can be improved over time. '
-              'Off by default. You can turn this on later in Settings.',
-      };
+    ConsentCategory.voiceRecord =>
+      'Let the app capture audio from your microphone while you '
+          'hold or tap the voice button. Recording stops as soon '
+          'as you release or pause speaking. Audio is processed '
+          'entirely on your phone — nothing is uploaded.',
+    ConsentCategory.voiceStoreTranscript =>
+      'Keep the text version of what you said in the local chat '
+          'history on this device. Transcripts never leave the '
+          'phone. Turning this off clears the in-app history too.',
+    ConsentCategory.voiceImproveModel =>
+      'Occasionally let the app submit anonymised error samples '
+          '(short text snippets, no audio, no identifiers) so the '
+          'Luganda + English models can be improved over time. '
+          'Off by default. You can turn this on later in Settings.',
+  };
 
   bool get defaultGranted => switch (this) {
-        // Mic and transcript default to granted *after* the consent
-        // screen explicitly asks — they are baseline-necessary for the
-        // voice feature to work. Model improvement is always off by
-        // default.
-        ConsentCategory.voiceRecord => true,
-        ConsentCategory.voiceStoreTranscript => true,
-        ConsentCategory.voiceImproveModel => false,
-      };
+    // Mic and transcript default to granted *after* the consent
+    // screen explicitly asks — they are baseline-necessary for the
+    // voice feature to work. Model improvement is always off by
+    // default.
+    ConsentCategory.voiceRecord => true,
+    ConsentCategory.voiceStoreTranscript => true,
+    ConsentCategory.voiceImproveModel => false,
+  };
 
   /// Storage key for the grant record (in `flutter_secure_storage`).
-  String get storageKey => 'consent.${name}';
+  String get storageKey => 'consent.$name';
 }
 
 /// An active consent record. Immutable — a new object is created on
@@ -103,32 +103,31 @@ class ConsentGrant {
   final int version;
 
   Map<String, Object?> toJson() => {
-        'category': category.name,
-        'granted': granted,
-        'grant_id': grantId,
-        'granted_at_ms': grantedAtMs,
-        'withdrawn_at_ms': withdrawnAtMs,
-        'version': version,
-      };
+    'category': category.name,
+    'granted': granted,
+    'grant_id': grantId,
+    'granted_at_ms': grantedAtMs,
+    'withdrawn_at_ms': withdrawnAtMs,
+    'version': version,
+  };
 
   static ConsentGrant fromJson(Map<String, Object?> json) => ConsentGrant(
-        category: ConsentCategory.values
-            .byName(json['category'] as String),
-        granted: json['granted'] as bool,
-        grantId: json['grant_id'] as String,
-        grantedAtMs: json['granted_at_ms'] as int,
-        version: json['version'] as int,
-        withdrawnAtMs: json['withdrawn_at_ms'] as int?,
-      );
+    category: ConsentCategory.values.byName(json['category'] as String),
+    granted: json['granted'] as bool,
+    grantId: json['grant_id'] as String,
+    grantedAtMs: json['granted_at_ms'] as int,
+    version: json['version'] as int,
+    withdrawnAtMs: json['withdrawn_at_ms'] as int?,
+  );
 
   ConsentGrant copyWith({bool? granted, int? withdrawnAtMs}) => ConsentGrant(
-        category: category,
-        granted: granted ?? this.granted,
-        grantId: grantId,
-        grantedAtMs: grantedAtMs,
-        version: version,
-        withdrawnAtMs: withdrawnAtMs ?? this.withdrawnAtMs,
-      );
+    category: category,
+    granted: granted ?? this.granted,
+    grantId: grantId,
+    grantedAtMs: grantedAtMs,
+    version: version,
+    withdrawnAtMs: withdrawnAtMs ?? this.withdrawnAtMs,
+  );
 }
 
 /// Immutable state owned by [ConsentNotifier]. Contains one grant per
@@ -159,12 +158,11 @@ class ConsentState {
     Map<ConsentCategory, ConsentGrant>? grants,
     bool? loaded,
     bool? bootstrapped,
-  }) =>
-      ConsentState(
-        grants: grants ?? this.grants,
-        loaded: loaded ?? this.loaded,
-        bootstrapped: bootstrapped ?? this.bootstrapped,
-      );
+  }) => ConsentState(
+    grants: grants ?? this.grants,
+    loaded: loaded ?? this.loaded,
+    bootstrapped: bootstrapped ?? this.bootstrapped,
+  );
 }
 
 /// Current consent copy version. Bump when any [ConsentCategoryCopy]

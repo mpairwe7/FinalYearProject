@@ -141,9 +141,7 @@ class _TtsPlaybackButtonState extends ConsumerState<TtsPlaybackButton> {
         setState(() => _state = PlaybackState.idle);
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(content: Text('Could not play audio')),
-          );
+          ..showSnackBar(const SnackBar(content: Text('Could not play audio')));
       }
     }
   }
@@ -169,8 +167,7 @@ class _TtsPlaybackButtonState extends ConsumerState<TtsPlaybackButton> {
             child: TextButton.icon(
               onPressed: _onTap,
               style: TextButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
                 visualDensity: VisualDensity.compact,
               ),
               icon: _state == PlaybackState.loading
@@ -203,9 +200,9 @@ class _TtsPlaybackButtonState extends ConsumerState<TtsPlaybackButton> {
               child: Text(
                 _showFullLabel ? _label!.fullLabel : _label!.shortLabel,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: cs.onSurfaceVariant.soft,
-                      fontSize: 10,
-                    ),
+                  color: cs.onSurfaceVariant.soft,
+                  fontSize: 10,
+                ),
               ),
             ),
         ],

@@ -6,8 +6,6 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
@@ -16,7 +14,7 @@ enum PlaybackState { idle, loading, playing, paused }
 
 class TtsPlayback {
   TtsPlayback({@visibleForTesting AudioPlayer? player})
-      : _player = player ?? AudioPlayer();
+    : _player = player ?? AudioPlayer();
 
   final AudioPlayer _player;
   final _stateController = StreamController<PlaybackState>.broadcast();
@@ -28,10 +26,7 @@ class TtsPlayback {
   Stream<PlaybackState> get stateStream => _stateController.stream;
 
   /// Play raw PCM16 little-endian mono audio at [sampleRate].
-  Future<void> play(
-    Uint8List pcm16, {
-    int sampleRate = 22050,
-  }) async {
+  Future<void> play(Uint8List pcm16, {int sampleRate = 22050}) async {
     // Cancel any previous completion listener to avoid leaking subs.
     await _playerSub?.cancel();
     _setState(PlaybackState.loading);
@@ -127,14 +122,17 @@ class TtsPlayback {
 }
 
 /// In-memory audio source for just_audio.
+// ignore: experimental_member_use
 class _BytesAudioSource extends StreamAudioSource {
   _BytesAudioSource(this._bytes);
   final Uint8List _bytes;
 
   @override
+  // ignore: experimental_member_use
   Future<StreamAudioResponse> request([int? start, int? end]) async {
     final s = start ?? 0;
     final e = end ?? _bytes.length;
+    // ignore: experimental_member_use
     return StreamAudioResponse(
       sourceLength: _bytes.length,
       contentLength: e - s,

@@ -36,7 +36,6 @@ import logging
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -48,9 +47,9 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class LanguageResult:
-    lang: str                       # ISO 639-1 code (en, lg, sw, unknown)
-    confidence: float               # 0..1
-    backend: str                    # "lingua" | "heuristic"
+    lang: str  # ISO 639-1 code (en, lg, sw, unknown)
+    confidence: float  # 0..1
+    backend: str  # "lingua" | "heuristic"
 
     def is_confident(self, threshold: float = 0.60) -> bool:
         return self.confidence >= threshold
@@ -70,9 +69,34 @@ class LanguageResult:
 
 _LG_DIGRAPHS = re.compile(r"(nny|nnk|nnyw|kw|mw|mpw|ww|bw|ggw|gy|ffy)", re.IGNORECASE)
 _EN_STOPWORDS = {
-    "the", "and", "of", "to", "in", "is", "are", "was", "were", "be",
-    "for", "on", "at", "with", "this", "that", "you", "your", "we",
-    "have", "has", "had", "will", "can", "not", "but", "from", "it",
+    "the",
+    "and",
+    "of",
+    "to",
+    "in",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "for",
+    "on",
+    "at",
+    "with",
+    "this",
+    "that",
+    "you",
+    "your",
+    "we",
+    "have",
+    "has",
+    "had",
+    "will",
+    "can",
+    "not",
+    "but",
+    "from",
+    "it",
 }
 _WORD_RE = re.compile(r"[A-Za-z']+")
 
@@ -94,13 +118,9 @@ def _heuristic_detect(text: str) -> LanguageResult:
     # Decision: strong English stopword presence wins. Otherwise Luganda
     # digraphs. Both low => unknown.
     if en_ratio >= 0.15:
-        return LanguageResult(
-            lang="en", confidence=min(0.5 + en_ratio, 0.85), backend="heuristic"
-        )
+        return LanguageResult(lang="en", confidence=min(0.5 + en_ratio, 0.85), backend="heuristic")
     if lg_ratio >= 0.10:
-        return LanguageResult(
-            lang="lg", confidence=min(0.5 + lg_ratio, 0.85), backend="heuristic"
-        )
+        return LanguageResult(lang="lg", confidence=min(0.5 + lg_ratio, 0.85), backend="heuristic")
     # Default to English (most content is English in this project)
     return LanguageResult(lang="en", confidence=0.4, backend="heuristic")
 
@@ -120,13 +140,11 @@ def _build_lingua_detector():
 
     languages = [
         Language.ENGLISH,
-        Language.GANDA,        # Luganda
-        Language.SWAHILI,      # common in Uganda code-switching
+        Language.GANDA,  # Luganda
+        Language.SWAHILI,  # common in Uganda code-switching
     ]
     return (
-        LanguageDetectorBuilder.from_languages(*languages)
-        .with_preloaded_language_models()
-        .build()
+        LanguageDetectorBuilder.from_languages(*languages).with_preloaded_language_models().build()
     )
 
 
@@ -137,7 +155,7 @@ _LINGUA_TO_ISO = {
 }
 
 
-def _lingua_detect(text: str) -> Optional[LanguageResult]:
+def _lingua_detect(text: str) -> LanguageResult | None:
     det = _build_lingua_detector()
     if det is None:
         return None
@@ -177,9 +195,7 @@ class LanguageDetector:
         Never raises: on any error a heuristic result is returned.
         """
         if not text or not text.strip():
-            return LanguageResult(
-                lang=self.default_lang, confidence=0.0, backend="heuristic"
-            )
+            return LanguageResult(lang=self.default_lang, confidence=0.0, backend="heuristic")
         result = _lingua_detect(text)
         if result is None:
             result = _heuristic_detect(text)
@@ -242,9 +258,7 @@ def _cli() -> int:
     args = parser.parse_args()
 
     text = args.text or sys.stdin.read()
-    det = LanguageDetector(
-        min_confidence=args.min_confidence, default_lang=args.default_lang
-    )
+    det = LanguageDetector(min_confidence=args.min_confidence, default_lang=args.default_lang)
     if args.segment:
         spans = det.detect_code_switching(text)
         json.dump([{"span": s, "lang": l, "conf": c} for s, l, c in spans], sys.stdout, indent=2)

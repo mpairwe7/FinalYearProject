@@ -32,7 +32,6 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("asr.download_models")
 
@@ -47,7 +46,7 @@ class ModelSpec:
     repo_id: str
     license: str
     params: str
-    role: str              # primary | alt | tiny | vad
+    role: str  # primary | alt | tiny | vad
     description: str
     allow_patterns: list[str] = field(default_factory=lambda: ["*"])
 
@@ -107,7 +106,7 @@ def _already_cached(spec: ModelSpec) -> bool:
     return any(dest.rglob("*"))
 
 
-def _download_spec(spec: ModelSpec, *, force: bool = False) -> Optional[Path]:
+def _download_spec(spec: ModelSpec, *, force: bool = False) -> Path | None:
     """Download one snapshot to the local cache.
 
     Returns the destination Path on success, None on failure.
@@ -143,13 +142,11 @@ def _write_manifest(entries: list[dict]) -> Path:
     """Write a SHA-free manifest so downstream scripts can discover the cache."""
     manifest_path = ASR_CACHE_DIR / "download_manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(
-        json.dumps({"entries": entries}, indent=2) + "\n", encoding="utf-8"
-    )
+    manifest_path.write_text(json.dumps({"entries": entries}, indent=2) + "\n", encoding="utf-8")
     return manifest_path
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument(
         "--model",

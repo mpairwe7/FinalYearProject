@@ -68,8 +68,8 @@ class MmsVitsEngine implements TtsEngine {
   MmsVitsEngine({
     required ModelManager manager,
     @visibleForTesting VitsRunner? runner,
-  })  : _manager = manager,
-        _runner = runner ?? _UnimplementedRunner();
+  }) : _manager = manager,
+       _runner = runner ?? _UnimplementedRunner();
 
   final ModelManager _manager;
   final VitsRunner _runner;

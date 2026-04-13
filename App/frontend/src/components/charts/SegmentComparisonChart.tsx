@@ -55,7 +55,7 @@ export default function SegmentComparisonChart({
           <YAxis domain={[0, 100]} tick={{ fill: "#94a3b8", fontSize: 11 }} />
           <Tooltip
             contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-            formatter={(v: number) => [`${v}%`, metricName]}
+            formatter={(v) => [`${v}%`, metricName]}
           />
           <ReferenceLine
             y={Math.round(threshold * 100)}

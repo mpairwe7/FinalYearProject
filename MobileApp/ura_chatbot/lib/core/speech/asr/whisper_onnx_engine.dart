@@ -16,8 +16,6 @@ library;
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 
 import '../domain_glossary.dart';
@@ -120,10 +118,7 @@ class WhisperOnnxEngine implements AsrEngine {
         _available = false;
         return false;
       }
-      await _runner.load(
-        files,
-        initialPrompt: UraDomainGlossary.initialPrompt,
-      );
+      await _runner.load(files, initialPrompt: UraDomainGlossary.initialPrompt);
       _available = true;
       return true;
     } catch (e, s) {

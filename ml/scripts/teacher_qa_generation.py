@@ -29,15 +29,14 @@ import os
 import re
 import shutil
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 import torch
 from tqdm import tqdm
 
 try:
-    import pymupdf.layout
+    import pymupdf.layout  # noqa: F401
     import pymupdf4llm
     from pymupdf4llm import to_markdown
 except ImportError:
@@ -46,10 +45,10 @@ except ImportError:
     print("Warning: pymupdf4llm not installed. Run: pip install pymupdf4llm")
 
 try:
-    from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-except ImportError:
+    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+except ImportError as err:
     print("Error: transformers not installed. Run: pip install transformers accelerate")
-    raise SystemExit(1)
+    raise SystemExit(1) from err
 
 
 # =============================================================================
@@ -77,19 +76,17 @@ def setup_kaggle_paths() -> dict:
     """Download dataset from Kaggle Hub and return resolved path dict."""
     try:
         import kagglehub
-    except ImportError:
-        raise SystemExit(
-            "kagglehub not installed. Run: pip install kagglehub"
-        )
+    except ImportError as err:
+        raise SystemExit("kagglehub not installed. Run: pip install kagglehub") from err
 
     base_path = kagglehub.dataset_download("mpairwelauben/ura-tax-data-v2")
     dataset_root = os.path.join(base_path, "dataset")
 
     paths = {
-        "pdfs":      os.path.join(dataset_root, "pdfs"),
-        "luganda":   os.path.join(dataset_root, "TTT"),
+        "pdfs": os.path.join(dataset_root, "pdfs"),
+        "luganda": os.path.join(dataset_root, "TTT"),
         "artifacts": "/kaggle/working/artifacts",
-        "cache":     "/kaggle/working/models",
+        "cache": "/kaggle/working/models",
     }
 
     os.makedirs(paths["artifacts"], exist_ok=True)
@@ -110,22 +107,22 @@ DATA_ROOT = PROJECT_ROOT / "Data"
 
 if ON_KAGGLE:
     _PATHS = setup_kaggle_paths()
-    PDF_DIR      = Path(_PATHS["pdfs"])
-    LUGANDA_DIR  = Path(_PATHS["luganda"])
+    PDF_DIR = Path(_PATHS["pdfs"])
+    LUGANDA_DIR = Path(_PATHS["luganda"])
     ARTIFACTS_DIR = Path(_PATHS["artifacts"])
-    CACHE_DIR    = _PATHS["cache"]
+    CACHE_DIR = _PATHS["cache"]
 else:
-    PDF_DIR       = DATA_ROOT / "pdfs"
-    LUGANDA_DIR   = DATA_ROOT / "TTT"
+    PDF_DIR = DATA_ROOT / "pdfs"
+    LUGANDA_DIR = DATA_ROOT / "TTT"
     ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
     # Use the existing HF hub cache so already-downloaded models are reused
-    CACHE_DIR     = os.path.join(
+    CACHE_DIR = os.path.join(
         os.getenv("HF_HOME", str(Path.home() / ".cache" / "huggingface")), "hub"
     )
 os.makedirs(str(ARTIFACTS_DIR), exist_ok=True)
 
-TEACHER_MODEL = "Qwen/Qwen2.5-7B-Instruct"
-FALLBACK_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+TEACHER_MODEL = "Qwen/Qwen3-8B"
+FALLBACK_MODEL = "Qwen/Qwen3-4B"
 
 # GPU selection — reflects what was pinned above at module init
 DEFAULT_GPU_IDS = os.environ.get("CUDA_VISIBLE_DEVICES") or None
@@ -179,13 +176,57 @@ DEFAULT_MIN_GROUNDING = 0.35
 # Small English stopword list — we deliberately do NOT use NLTK so this
 # module has no optional-dep trap. The goal isn't perfect IR, it's to
 # catch "the answer is mostly made-up" tails.
-_GROUNDING_STOPWORDS = frozenset({
-    "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "do",
-    "does", "for", "from", "has", "have", "i", "if", "in", "is", "it",
-    "its", "of", "on", "or", "should", "so", "such", "that", "the",
-    "their", "there", "this", "to", "was", "were", "what", "when", "which",
-    "who", "will", "with", "would", "you", "your", "can", "not",
-})
+_GROUNDING_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "but",
+        "by",
+        "do",
+        "does",
+        "for",
+        "from",
+        "has",
+        "have",
+        "i",
+        "if",
+        "in",
+        "is",
+        "it",
+        "its",
+        "of",
+        "on",
+        "or",
+        "should",
+        "so",
+        "such",
+        "that",
+        "the",
+        "their",
+        "there",
+        "this",
+        "to",
+        "was",
+        "were",
+        "what",
+        "when",
+        "which",
+        "who",
+        "will",
+        "with",
+        "would",
+        "you",
+        "your",
+        "can",
+        "not",
+    }
+)
 
 
 def _content_tokens(text: str) -> set[str]:
@@ -234,6 +275,7 @@ def filter_by_grounding(
 
     scores.sort()
     n = len(scores)
+
     def _pct(p: float) -> float:
         if n == 0:
             return 0.0
@@ -257,21 +299,24 @@ def filter_by_grounding(
 # Text Processing — sentence-aware chunking
 # =============================================================================
 
+
 def clean_text(text: str) -> str:
     """Clean and normalize extracted text."""
     if not text:
         return ""
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'[^\w\s.,;:!?\'\"()\-–—/&%@#$+]', '', text)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^\w\s.,;:!?\'\"()\-–—/&%@#$+]", "", text)
     return text.strip()
 
 
 def _split_sentences(text: str) -> list[str]:
     """Split text into sentences using regex-based boundary detection."""
-    return re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+    return re.split(r"(?<=[.!?])\s+(?=[A-Z])", text)
 
 
-def chunk_text(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> list[str]:
+def chunk_text(
+    text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP
+) -> list[str]:
     """Split text into overlapping chunks that respect sentence boundaries."""
     sentences = _split_sentences(text)
     chunks = []
@@ -282,17 +327,19 @@ def chunk_text(text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = D
         current_words.extend(words)
 
         if len(current_words) >= chunk_size:
-            chunk = ' '.join(current_words)
+            chunk = " ".join(current_words)
             if len(chunk) > 50:
                 chunks.append(chunk)
 
             # Backtrack by overlap words for the next chunk, aligning to sentence start
-            overlap_words = current_words[-overlap:] if overlap < len(current_words) else current_words
+            overlap_words = (
+                current_words[-overlap:] if overlap < len(current_words) else current_words
+            )
             current_words = list(overlap_words)
 
     # Final chunk
     if current_words:
-        chunk = ' '.join(current_words)
+        chunk = " ".join(current_words)
         if len(chunk) > 50:
             chunks.append(chunk)
 
@@ -303,7 +350,7 @@ def load_pdfs(
     pdf_dir: Path,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
-    max_pdfs: Optional[int] = None,
+    max_pdfs: int | None = None,
 ) -> list[dict]:
     """Load and chunk all PDFs with GPU memory management and fallback extraction.
 
@@ -319,8 +366,10 @@ def load_pdfs(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
-        print(f"  GPU memory cleared (CUDA_VISIBLE_DEVICES={gpus}, "
-              f"{torch.cuda.device_count()} device(s))")
+        print(
+            f"  GPU memory cleared (CUDA_VISIBLE_DEVICES={gpus}, "
+            f"{torch.cuda.device_count()} device(s))"
+        )
 
     pdf_files = sorted(pdf_dir.glob("*.pdf"))
     if not pdf_files:
@@ -361,10 +410,7 @@ def load_pdfs(
             text_parts: list[str] = []
             if isinstance(md, list):
                 for item in md:
-                    if isinstance(item, dict):
-                        t = item.get('text', '')
-                    else:
-                        t = str(item)
+                    t = item.get("text", "") if isinstance(item, dict) else str(item)
                     if t and t.strip():
                         text_parts.append(t.strip())
             elif isinstance(md, str) and md.strip():
@@ -382,14 +428,16 @@ def load_pdfs(
             for i, chunk in enumerate(chunks):
                 word_count = len(chunk.split())
                 if word_count >= 20:  # Skip fragments too short to be useful
-                    pdf_chunks.append({
-                        'text': chunk,
-                        'source': pdf_path.name,
-                        'chunk_id': i,
-                        'total_chunks': len(chunks),
-                        'word_count': word_count,
-                        'language': 'en',
-                    })
+                    pdf_chunks.append(
+                        {
+                            "text": chunk,
+                            "source": pdf_path.name,
+                            "chunk_id": i,
+                            "total_chunks": len(chunks),
+                            "word_count": word_count,
+                            "language": "en",
+                        }
+                    )
 
             all_chunks.extend(pdf_chunks)
             print(f"  ✓ Extracted {len(pdf_chunks)} chunks")
@@ -403,7 +451,7 @@ def load_pdfs(
 
     print(f"\n✓ Total chunks extracted: {len(all_chunks)}")
     if all_chunks:
-        avg_words = sum(c['word_count'] for c in all_chunks) / len(all_chunks)
+        avg_words = sum(c["word_count"] for c in all_chunks) / len(all_chunks)
         print(f"✓ Average chunk size: {avg_words:.1f} words")
 
     return all_chunks
@@ -416,7 +464,7 @@ def batch_chunks(
     """Group chunks into fixed-size batches for efficient GPU processing."""
     if not chunks:
         return []
-    batches = [chunks[i:i + batch_size] for i in range(0, len(chunks), batch_size)]
+    batches = [chunks[i : i + batch_size] for i in range(0, len(chunks), batch_size)]
     print(f"Created {len(batches)} batches of size {batch_size}")
     return batches
 
@@ -443,8 +491,10 @@ def load_luganda_dataset(
     try:
         import pandas as pd
     except ImportError:
-        print("Warning: pandas not installed — CSV/XLSX Luganda sources skipped. "
-              "Run: pip install pandas openpyxl")
+        print(
+            "Warning: pandas not installed — CSV/XLSX Luganda sources skipped. "
+            "Run: pip install pandas openpyxl"
+        )
         pd = None
 
     if not luganda_dir.exists():
@@ -455,8 +505,10 @@ def load_luganda_dataset(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "all")
-        print(f"  GPU memory cleared (CUDA_VISIBLE_DEVICES={gpus}, "
-              f"{torch.cuda.device_count()} device(s))")
+        print(
+            f"  GPU memory cleared (CUDA_VISIBLE_DEVICES={gpus}, "
+            f"{torch.cuda.device_count()} device(s))"
+        )
 
     all_texts: list[tuple[str, str]] = []  # (text, source_filename)
 
@@ -578,7 +630,7 @@ def load_luganda_dataset(
                 text_parts: list[str] = []
                 if isinstance(md, list):
                     for item in md:
-                        t = item.get('text', '') if isinstance(item, dict) else str(item)
+                        t = item.get("text", "") if isinstance(item, dict) else str(item)
                         if t.strip():
                             text_parts.append(t.strip())
                 elif isinstance(md, str) and md.strip():
@@ -603,18 +655,20 @@ def load_luganda_dataset(
         for i, chunk in enumerate(chunks):
             word_count = len(chunk.split())
             if word_count >= 20:
-                all_chunks.append({
-                    'text': chunk,
-                    'source': source_name,
-                    'chunk_id': i,
-                    'total_chunks': len(chunks),
-                    'word_count': word_count,
-                    'language': 'lg',
-                })
+                all_chunks.append(
+                    {
+                        "text": chunk,
+                        "source": source_name,
+                        "chunk_id": i,
+                        "total_chunks": len(chunks),
+                        "word_count": word_count,
+                        "language": "lg",
+                    }
+                )
 
     print(f"\n✓ Luganda chunks: {len(all_chunks)}")
     if all_chunks:
-        avg = sum(c['word_count'] for c in all_chunks) / len(all_chunks)
+        avg = sum(c["word_count"] for c in all_chunks) / len(all_chunks)
         print(f"✓ Average chunk size: {avg:.1f} words")
 
     return all_chunks
@@ -623,6 +677,7 @@ def load_luganda_dataset(
 # =============================================================================
 # Teacher Model — multi-GPU, chat-template, structured generation
 # =============================================================================
+
 
 class TeacherModel:
     """Teacher model for generating synthetic QA pairs with proper chat templates."""
@@ -638,6 +693,7 @@ class TeacherModel:
         """Load teacher model with HF auth, multi-GPU device_map, and bf16."""
         try:
             from huggingface_hub import login
+
             hf_token = os.getenv("HF_TOKEN")
             if hf_token:
                 login(hf_token)
@@ -692,7 +748,7 @@ class TeacherModel:
             except Exception as e:
                 print(f"Failed to load {model_id}: {e}")
                 # Clean up partial load
-                if hasattr(self, 'model') and self.model is not None:
+                if hasattr(self, "model") and self.model is not None:
                     del self.model
                     self.model = None
                 torch.cuda.empty_cache()
@@ -707,7 +763,9 @@ class TeacherModel:
         if not torch.cuda.is_available():
             return
         visible = os.getenv("CUDA_VISIBLE_DEVICES", "")
-        phys_ids = visible.split(",") if visible else [str(i) for i in range(torch.cuda.device_count())]
+        phys_ids = (
+            visible.split(",") if visible else [str(i) for i in range(torch.cuda.device_count())]
+        )
         for i in range(torch.cuda.device_count()):
             alloc = torch.cuda.memory_allocated(i) / 1e9
             total = torch.cuda.get_device_properties(i).total_memory / 1e9
@@ -750,7 +808,7 @@ class TeacherModel:
                 f"AMATEEKA:\n"
                 f"1. Emibuuzo gibeere egyirizibwa mu kintu\n"
                 f"2. Okuddamu kube kwa wanvu (ennyiriri 2-4), era kibeere kya mazima\n"
-                f"3. Yabula emika gy'emibuuzo: \"factual\", \"procedural\", \"conceptual\", \"application\"\n"
+                f'3. Yabula emika gy\'emibuuzo: "factual", "procedural", "conceptual", "application"\n'
                 f"4. Toleke emibuuzo egitaliiko nkola\n"
                 f"5. Siikiriza JSONL array yokka, toleke kintu kyonna ekindi\n\n"
                 f"FORMAT:\n"
@@ -798,10 +856,10 @@ class TeacherModel:
                 return_full_text=False,
             )
 
-            generated = result[0]['generated_text']
+            generated = result[0]["generated_text"]
             # Handle both string and list[dict] returns from chat pipelines
             if isinstance(generated, list) and len(generated) > 0:
-                generated = generated[-1].get('content', str(generated[-1]))
+                generated = generated[-1].get("content", str(generated[-1]))
             generated = str(generated).strip()
 
             questions = self._parse_questions(generated, num_questions)
@@ -816,7 +874,7 @@ class TeacherModel:
         text = text.strip()
 
         # Strategy 1: Direct JSON array parse
-        json_match = re.search(r'\[[\s\S]*\]', text)
+        json_match = re.search(r"\[[\s\S]*\]", text)
         if json_match:
             try:
                 parsed = json.loads(json_match.group(0))
@@ -840,19 +898,19 @@ class TeacherModel:
         # Strategy 3: Line-based Q/A parsing
         questions = []
         current_q: dict = {}
-        for line in text.split('\n'):
+        for line in text.split("\n"):
             line = line.strip()
-            q_match = re.search(r'(?:question|Q)\s*\d*[:.]\s*(.+)', line, re.IGNORECASE)
-            a_match = re.search(r'(?:answer|A)\s*\d*[:.]\s*(.+)', line, re.IGNORECASE)
+            q_match = re.search(r"(?:question|Q)\s*\d*[:.]\s*(.+)", line, re.IGNORECASE)
+            a_match = re.search(r"(?:answer|A)\s*\d*[:.]\s*(.+)", line, re.IGNORECASE)
 
             if q_match:
-                if current_q.get('question') and current_q.get('answer'):
+                if current_q.get("question") and current_q.get("answer"):
                     questions.append(current_q)
-                current_q = {'question': q_match.group(1).strip(), 'type': 'factual'}
-            elif a_match and current_q.get('question'):
-                current_q['answer'] = a_match.group(1).strip()
+                current_q = {"question": q_match.group(1).strip(), "type": "factual"}
+            elif a_match and current_q.get("question"):
+                current_q["answer"] = a_match.group(1).strip()
 
-        if current_q.get('question') and current_q.get('answer'):
+        if current_q.get("question") and current_q.get("answer"):
             questions.append(current_q)
 
         return questions[:expected_count]
@@ -863,30 +921,32 @@ class TeacherModel:
         for item in items:
             if not isinstance(item, dict):
                 continue
-            q = str(item.get('question', '')).strip()
-            a = str(item.get('answer', '')).strip()
+            q = str(item.get("question", "")).strip()
+            a = str(item.get("answer", "")).strip()
             if q and a:
-                valid.append({
-                    'question': q,
-                    'answer': a,
-                    'type': str(item.get('type', 'factual')).lower(),
-                })
+                valid.append(
+                    {
+                        "question": q,
+                        "answer": a,
+                        "type": str(item.get("type", "factual")).lower(),
+                    }
+                )
         return valid[:limit]
 
     def _quality_filter(self, questions: list[dict]) -> list[dict]:
         """Filter QA pairs by minimum quality criteria."""
         filtered = []
         for q in questions:
-            if len(q['question']) < MIN_QUESTION_LENGTH:
+            if len(q["question"]) < MIN_QUESTION_LENGTH:
                 continue
-            if len(q['answer']) < MIN_ANSWER_LENGTH:
+            if len(q["answer"]) < MIN_ANSWER_LENGTH:
                 continue
-            if len(q['answer']) > MAX_ANSWER_LENGTH:
-                q['answer'] = q['answer'][:MAX_ANSWER_LENGTH]
+            if len(q["answer"]) > MAX_ANSWER_LENGTH:
+                q["answer"] = q["answer"][:MAX_ANSWER_LENGTH]
             # Reject obviously bad generations
-            if q['question'].lower() == q['answer'].lower():
+            if q["question"].lower() == q["answer"].lower():
                 continue
-            if '...' in q['answer'] and len(q['answer']) < 30:
+            if "..." in q["answer"] and len(q["answer"]) < 30:
                 continue
             filtered.append(q)
         return filtered
@@ -909,6 +969,7 @@ class TeacherModel:
 # Deduplication
 # =============================================================================
 
+
 def deduplicate_qa_pairs(qa_pairs: list[dict]) -> list[dict]:
     """Remove near-duplicate QA pairs using content hashing."""
     seen_hashes: set[str] = set()
@@ -916,7 +977,7 @@ def deduplicate_qa_pairs(qa_pairs: list[dict]) -> list[dict]:
 
     for qa in qa_pairs:
         # Normalize for comparison
-        q_norm = re.sub(r'\s+', ' ', qa['question'].lower().strip())
+        q_norm = re.sub(r"\s+", " ", qa["question"].lower().strip())
         h = hashlib.md5(q_norm.encode()).hexdigest()
 
         if h not in seen_hashes:
@@ -933,21 +994,26 @@ def deduplicate_qa_pairs(qa_pairs: list[dict]) -> list[dict]:
 # Checkpoint / Resume
 # =============================================================================
 
+
 def _checkpoint_path(output_path: Path) -> Path:
-    return output_path.with_suffix('.checkpoint.jsonl')
+    return output_path.with_suffix(".checkpoint.jsonl")
 
 
 def _save_checkpoint(qa_pairs: list[dict], output_path: Path, processed_chunks: int):
     """Save progress checkpoint with metadata."""
     cp_path = _checkpoint_path(output_path)
     cp_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(cp_path, 'w', encoding='utf-8') as f:
+    with open(cp_path, "w", encoding="utf-8") as f:
         # First line: metadata
-        meta = {'_checkpoint_meta': True, 'processed_chunks': processed_chunks,
-                'total_pairs': len(qa_pairs), 'timestamp': time.time()}
-        f.write(json.dumps(meta, ensure_ascii=False) + '\n')
+        meta = {
+            "_checkpoint_meta": True,
+            "processed_chunks": processed_chunks,
+            "total_pairs": len(qa_pairs),
+            "timestamp": time.time(),
+        }
+        f.write(json.dumps(meta, ensure_ascii=False) + "\n")
         for qa in qa_pairs:
-            f.write(json.dumps(qa, ensure_ascii=False) + '\n')
+            f.write(json.dumps(qa, ensure_ascii=False) + "\n")
 
 
 def _load_checkpoint(output_path: Path) -> tuple[list[dict], int]:
@@ -959,14 +1025,14 @@ def _load_checkpoint(output_path: Path) -> tuple[list[dict], int]:
     qa_pairs = []
     start_chunk = 0
 
-    with open(cp_path, 'r', encoding='utf-8') as f:
+    with open(cp_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             data = json.loads(line)
-            if data.get('_checkpoint_meta'):
-                start_chunk = data['processed_chunks']
+            if data.get("_checkpoint_meta"):
+                start_chunk = data["processed_chunks"]
             else:
                 qa_pairs.append(data)
 
@@ -978,13 +1044,14 @@ def _load_checkpoint(output_path: Path) -> tuple[list[dict], int]:
 # Generation Pipeline
 # =============================================================================
 
+
 def generate_qa_dataset(
     chunks: list[dict],
     teacher: TeacherModel,
     questions_per_chunk: int = DEFAULT_QUESTIONS_PER_CHUNK,
-    max_chunks: Optional[int] = None,
+    max_chunks: int | None = None,
     save_interval: int = 10,
-    output_path: Optional[Path] = None,
+    output_path: Path | None = None,
     resume: bool = False,
 ) -> list[dict]:
     """Generate QA pairs from chunks with progress tracking, checkpointing, and resume."""
@@ -1006,33 +1073,34 @@ def generate_qa_dataset(
     start_time = time.time()
     failed_chunks = 0
 
-    pbar = tqdm(remaining, desc="Generating QA", unit="chunk",
-                initial=start_idx, total=len(chunks))
+    pbar = tqdm(remaining, desc="Generating QA", unit="chunk", initial=start_idx, total=len(chunks))
 
     for i, chunk in enumerate(pbar):
         abs_idx = start_idx + i
 
         try:
-            lang = chunk.get('language', 'en')
+            lang = chunk.get("language", "en")
             questions = teacher.generate_questions(
-                chunk['text'], num_questions=questions_per_chunk, language=lang
+                chunk["text"], num_questions=questions_per_chunk, language=lang
             )
 
             for q in questions:
                 record = GeneratedQA(
-                    question=q['question'],
-                    answer=q['answer'],
-                    chunk_text=chunk['text'],
-                    source_pdf=chunk['source'],
-                    chunk_id=chunk['chunk_id'],
-                    question_type=q.get('type', 'factual'),
+                    question=q["question"],
+                    answer=q["answer"],
+                    chunk_text=chunk["text"],
+                    source_pdf=chunk["source"],
+                    chunk_id=chunk["chunk_id"],
+                    question_type=q.get("type", "factual"),
                 )
                 all_qa_pairs.append(asdict(record))
 
-            pbar.set_postfix({
-                'pairs': len(all_qa_pairs),
-                'yield': f"{len(questions)}/{questions_per_chunk}",
-            })
+            pbar.set_postfix(
+                {
+                    "pairs": len(all_qa_pairs),
+                    "yield": f"{len(questions)}/{questions_per_chunk}",
+                }
+            )
 
         except Exception as e:
             failed_chunks += 1
@@ -1044,7 +1112,7 @@ def generate_qa_dataset(
 
     elapsed = time.time() - start_time
     total_chunks = len(remaining)
-    print(f"\nGeneration complete:")
+    print("\nGeneration complete:")
     print(f"  Total pairs: {len(all_qa_pairs)}")
     print(f"  Failed chunks: {failed_chunks}/{total_chunks}")
     print(f"  Time: {elapsed/60:.1f} min ({elapsed/max(total_chunks,1):.1f}s/chunk)")
@@ -1059,6 +1127,7 @@ def generate_qa_dataset(
 # =============================================================================
 # Export — multi-format
 # =============================================================================
+
 
 def export_qa_pairs(
     qa_pairs: list[dict],
@@ -1076,7 +1145,7 @@ def export_qa_pairs(
         data_copy_dir.mkdir(parents=True, exist_ok=True)
 
     def _write_and_copy(path: Path, lines: list[str], label: str):
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.writelines(lines)
         print(f"  Exported {label}: {path} ({len(lines)} lines)")
         if data_copy_dir:
@@ -1085,70 +1154,71 @@ def export_qa_pairs(
             print(f"    -> copied to {dest}")
 
     # Raw JSONL
-    if 'jsonl' in formats:
-        lines = [json.dumps(qa, ensure_ascii=False) + '\n' for qa in qa_pairs]
-        _write_and_copy(output_path.with_suffix('.jsonl'), lines, 'JSONL')
+    if "jsonl" in formats:
+        lines = [json.dumps(qa, ensure_ascii=False) + "\n" for qa in qa_pairs]
+        _write_and_copy(output_path.with_suffix(".jsonl"), lines, "JSONL")
 
     # Gemma chat format
-    if 'gemma' in formats:
+    if "gemma" in formats:
         lines = []
         for qa in qa_pairs:
             rec = {
-                'text': (
+                "text": (
                     f"<start_of_turn>user\n{qa['question']}<end_of_turn>\n"
                     f"<start_of_turn>model\n{qa['answer']}<end_of_turn>"
                 ),
-                'source': qa['source_pdf'],
-                'type': qa['question_type'],
+                "source": qa["source_pdf"],
+                "type": qa["question_type"],
             }
-            lines.append(json.dumps(rec, ensure_ascii=False) + '\n')
-        _write_and_copy(
-            output_path.with_name(output_path.stem + '_gemma.jsonl'), lines, 'Gemma'
-        )
+            lines.append(json.dumps(rec, ensure_ascii=False) + "\n")
+        _write_and_copy(output_path.with_name(output_path.stem + "_gemma.jsonl"), lines, "Gemma")
 
     # Alpaca instruction format
-    if 'instruction' in formats:
+    if "instruction" in formats:
         lines = []
         for qa in qa_pairs:
             rec = {
-                'instruction': qa['question'],
-                'input': '',
-                'output': qa['answer'],
-                'context': qa['chunk_text'][:500],
-                'source': qa['source_pdf'],
-                'type': qa['question_type'],
+                "instruction": qa["question"],
+                "input": "",
+                "output": qa["answer"],
+                "context": qa["chunk_text"][:500],
+                "source": qa["source_pdf"],
+                "type": qa["question_type"],
             }
-            lines.append(json.dumps(rec, ensure_ascii=False) + '\n')
+            lines.append(json.dumps(rec, ensure_ascii=False) + "\n")
         _write_and_copy(
-            output_path.with_name(output_path.stem + '_instruction.jsonl'), lines, 'Instruction'
+            output_path.with_name(output_path.stem + "_instruction.jsonl"), lines, "Instruction"
         )
 
     # Qwen/ChatML format
-    if 'qwen' in formats:
+    if "qwen" in formats:
         lines = []
         for qa in qa_pairs:
             rec = {
-                'messages': [
-                    {'role': 'system', 'content': 'You are a helpful Uganda Revenue Authority tax assistant.'},
-                    {'role': 'user', 'content': qa['question']},
-                    {'role': 'assistant', 'content': qa['answer']},
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful Uganda Revenue Authority tax assistant.",
+                    },
+                    {"role": "user", "content": qa["question"]},
+                    {"role": "assistant", "content": qa["answer"]},
                 ],
-                'source': qa['source_pdf'],
-                'type': qa['question_type'],
+                "source": qa["source_pdf"],
+                "type": qa["question_type"],
             }
-            lines.append(json.dumps(rec, ensure_ascii=False) + '\n')
+            lines.append(json.dumps(rec, ensure_ascii=False) + "\n")
         _write_and_copy(
-            output_path.with_name(output_path.stem + '_qwen.jsonl'), lines, 'Qwen/ChatML'
+            output_path.with_name(output_path.stem + "_qwen.jsonl"), lines, "Qwen/ChatML"
         )
 
     # Summary statistics
     sources = {}
     types = {}
     for qa in qa_pairs:
-        sources[qa['source_pdf']] = sources.get(qa['source_pdf'], 0) + 1
-        types[qa['question_type']] = types.get(qa['question_type'], 0) + 1
+        sources[qa["source_pdf"]] = sources.get(qa["source_pdf"], 0) + 1
+        types[qa["question_type"]] = types.get(qa["question_type"], 0) + 1
 
-    print(f"\nExport statistics:")
+    print("\nExport statistics:")
     print(f"  Total: {len(qa_pairs)} pairs from {len(sources)} PDFs")
     print(f"  Types: {types}")
 
@@ -1156,6 +1226,7 @@ def export_qa_pairs(
 # =============================================================================
 # Main
 # =============================================================================
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1167,48 +1238,78 @@ Examples:
   %(prog)s --gpu-ids 1,2                            # Use GPUs 1 and 2
   %(prog)s --max-pdfs 3 --chunks 10 --questions 3   # Quick test
   %(prog)s --resume                                 # Resume interrupted run
-  %(prog)s --model Qwen/Qwen2.5-3B-Instruct        # Use smaller teacher
+  %(prog)s --model Qwen/Qwen3-4B                    # Use smaller teacher
 """,
     )
 
-    parser.add_argument("--output", type=str, default=str(ARTIFACTS_DIR / "teacher_qa"),
-                        help="Output path (without extension)")
-    parser.add_argument("--pdf-dir", type=str, default=str(PDF_DIR),
-                        help=f"PDF directory (default: {PDF_DIR})")
-    parser.add_argument("--luganda-dir", type=str, default=str(LUGANDA_DIR),
-                        help=f"Luganda dataset directory (default: {LUGANDA_DIR})")
-    parser.add_argument("--skip-luganda", action="store_true",
-                        help="Skip loading Luganda dataset")
-    parser.add_argument("--model", type=str, default=TEACHER_MODEL,
-                        help=f"Teacher model (default: {TEACHER_MODEL})")
-    parser.add_argument("--questions", type=int, default=DEFAULT_QUESTIONS_PER_CHUNK,
-                        help=f"Questions per chunk (default: {DEFAULT_QUESTIONS_PER_CHUNK})")
-    parser.add_argument("--chunks", type=int, default=None,
-                        help="Max chunks to process (default: all)")
-    parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE,
-                        help=f"Words per chunk (default: {DEFAULT_CHUNK_SIZE})")
-    parser.add_argument("--max-pdfs", type=int, default=None,
-                        help="Max PDFs to process (default: all)")
-    parser.add_argument("--gpu-ids", type=str, default=DEFAULT_GPU_IDS,
-                        help=f"Comma-separated GPU IDs (default: {DEFAULT_GPU_IDS or 'all'})")
-    parser.add_argument("--formats", type=str, default="jsonl",
-                        help="Export formats, comma-separated (default: jsonl). "
-                             "Options: jsonl,gemma,instruction,qwen")
-    parser.add_argument("--resume", action="store_true",
-                        help="Resume from last checkpoint")
-    parser.add_argument("--no-data-copy", action="store_true",
-                        help="Don't copy output to Data/ folder")
-    parser.add_argument("--no-dedup", action="store_true",
-                        help="Skip deduplication")
-    parser.add_argument("--min-grounding", type=float, default=DEFAULT_MIN_GROUNDING,
-                        help=f"Phase-2 hallucination gate: drop QA whose answer has "
-                             f"less than this fraction of its content tokens in the "
-                             f"source chunk (default: {DEFAULT_MIN_GROUNDING}). "
-                             f"Set to 0 to disable.")
-    parser.add_argument("--seed", type=int, default=SEED,
-                        help=f"Random seed (default: {SEED})")
-    parser.add_argument("--save-interval", type=int, default=10,
-                        help="Checkpoint every N chunks (default: 10)")
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=str(ARTIFACTS_DIR / "teacher_qa"),
+        help="Output path (without extension)",
+    )
+    parser.add_argument(
+        "--pdf-dir", type=str, default=str(PDF_DIR), help=f"PDF directory (default: {PDF_DIR})"
+    )
+    parser.add_argument(
+        "--luganda-dir",
+        type=str,
+        default=str(LUGANDA_DIR),
+        help=f"Luganda dataset directory (default: {LUGANDA_DIR})",
+    )
+    parser.add_argument("--skip-luganda", action="store_true", help="Skip loading Luganda dataset")
+    parser.add_argument(
+        "--model", type=str, default=TEACHER_MODEL, help=f"Teacher model (default: {TEACHER_MODEL})"
+    )
+    parser.add_argument(
+        "--questions",
+        type=int,
+        default=DEFAULT_QUESTIONS_PER_CHUNK,
+        help=f"Questions per chunk (default: {DEFAULT_QUESTIONS_PER_CHUNK})",
+    )
+    parser.add_argument(
+        "--chunks", type=int, default=None, help="Max chunks to process (default: all)"
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=DEFAULT_CHUNK_SIZE,
+        help=f"Words per chunk (default: {DEFAULT_CHUNK_SIZE})",
+    )
+    parser.add_argument(
+        "--max-pdfs", type=int, default=None, help="Max PDFs to process (default: all)"
+    )
+    parser.add_argument(
+        "--gpu-ids",
+        type=str,
+        default=DEFAULT_GPU_IDS,
+        help=f"Comma-separated GPU IDs (default: {DEFAULT_GPU_IDS or 'all'})",
+    )
+    parser.add_argument(
+        "--formats",
+        type=str,
+        default="jsonl",
+        help="Export formats, comma-separated (default: jsonl). "
+        "Options: jsonl,gemma,instruction,qwen",
+    )
+    parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
+    parser.add_argument(
+        "--no-data-copy", action="store_true", help="Don't copy output to Data/ folder"
+    )
+    parser.add_argument("--no-dedup", action="store_true", help="Skip deduplication")
+    parser.add_argument(
+        "--min-grounding",
+        type=float,
+        default=DEFAULT_MIN_GROUNDING,
+        help=f"Phase-2 hallucination gate: drop QA whose answer has "
+        f"less than this fraction of its content tokens in the "
+        f"source chunk (default: {DEFAULT_MIN_GROUNDING}). "
+        f"Set to 0 to disable.",
+    )
+    parser.add_argument("--seed", type=int, default=SEED, help=f"Random seed (default: {SEED})")
+    parser.add_argument(
+        "--save-interval", type=int, default=10, help="Checkpoint every N chunks (default: 10)"
+    )
 
     args = parser.parse_args()
 
@@ -1245,8 +1346,10 @@ Examples:
     print("=" * 70)
     print("Loading PDF chunks...")
     chunks = load_pdfs(
-        pdf_dir, chunk_size=args.chunk_size,
-        chunk_overlap=DEFAULT_CHUNK_OVERLAP, max_pdfs=args.max_pdfs,
+        pdf_dir,
+        chunk_size=args.chunk_size,
+        chunk_overlap=DEFAULT_CHUNK_OVERLAP,
+        max_pdfs=args.max_pdfs,
     )
 
     # 2. Load Luganda dataset and merge
@@ -1259,8 +1362,10 @@ Examples:
             chunk_overlap=DEFAULT_CHUNK_OVERLAP,
         )
         chunks = chunks + luganda_chunks
-        print(f"Combined: {len(chunks)} total chunks "
-              f"({len(chunks) - len(luganda_chunks)} English + {len(luganda_chunks)} Luganda)")
+        print(
+            f"Combined: {len(chunks)} total chunks "
+            f"({len(chunks) - len(luganda_chunks)} English + {len(luganda_chunks)} Luganda)"
+        )
 
     if not chunks:
         print("No chunks found — nothing to process")
@@ -1303,17 +1408,21 @@ Examples:
         qa_pairs, grounding_stats = filter_by_grounding(qa_pairs, args.min_grounding)
         print(f"\nGrounding filter (min={args.min_grounding:.2f}):")
         print(f"  kept:    {grounding_stats['kept_count']}")
-        print(f"  dropped: {grounding_stats['dropped_count']} "
-              f"({grounding_stats['dropped_fraction'] * 100:.1f}%)")
+        print(
+            f"  dropped: {grounding_stats['dropped_count']} "
+            f"({grounding_stats['dropped_fraction'] * 100:.1f}%)"
+        )
         print(f"  mean:    {grounding_stats['grounding_mean']:.3f}")
-        print(f"  p10/p50/p90: {grounding_stats['grounding_p10']:.3f} / "
-              f"{grounding_stats['grounding_p50']:.3f} / "
-              f"{grounding_stats['grounding_p90']:.3f}")
+        print(
+            f"  p10/p50/p90: {grounding_stats['grounding_p10']:.3f} / "
+            f"{grounding_stats['grounding_p50']:.3f} / "
+            f"{grounding_stats['grounding_p90']:.3f}"
+        )
 
     # Persist grounding stats alongside the output so data_augmentation.py can
     # pick them up and include them in the dataset manifest.
     try:
-        stats_path = output_path.with_suffix('.grounding_stats.json')
+        stats_path = output_path.with_suffix(".grounding_stats.json")
         stats_path.parent.mkdir(parents=True, exist_ok=True)
         stats_path.write_text(json.dumps(grounding_stats, indent=2))
         print(f"  stats: {stats_path}")
@@ -1325,9 +1434,10 @@ Examples:
         return
 
     # 6. Export
-    export_formats = [f.strip() for f in args.formats.split(',')]
+    export_formats = [f.strip() for f in args.formats.split(",")]
     export_qa_pairs(
-        qa_pairs, output_path,
+        qa_pairs,
+        output_path,
         formats=export_formats,
         also_save_to_data=not args.no_data_copy,
     )

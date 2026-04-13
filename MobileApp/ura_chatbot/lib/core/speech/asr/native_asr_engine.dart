@@ -12,8 +12,6 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
@@ -21,7 +19,7 @@ import 'asr_engine.dart';
 
 class NativeAsrEngine implements AsrEngine {
   NativeAsrEngine({@visibleForTesting stt.SpeechToText? speech})
-      : _speech = speech ?? stt.SpeechToText();
+    : _speech = speech ?? stt.SpeechToText();
 
   final stt.SpeechToText _speech;
   bool _initialized = false;
@@ -41,10 +39,7 @@ class NativeAsrEngine implements AsrEngine {
     if (_initialized) return _available;
     _initialized = true;
     try {
-      _available = await _speech.initialize(
-        onError: (_) {},
-        onStatus: (_) {},
-      );
+      _available = await _speech.initialize(onError: (_) {}, onStatus: (_) {});
     } catch (_) {
       _available = false;
     }
@@ -83,7 +78,6 @@ class NativeAsrEngine implements AsrEngine {
         localeId: 'en_US',
         listenOptions: stt.SpeechListenOptions(
           listenMode: stt.ListenMode.dictation,
-          partialResults: true,
         ),
         onResult: (result) {
           controller.add(

@@ -37,7 +37,6 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +46,7 @@ class StageResult:
     name: str
     status: str = "pending"  # pending | running | success | failed | skipped
     duration_s: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
     artifacts: list[str] = field(default_factory=list)
 
 
@@ -124,15 +123,26 @@ def run_training(cfg: TrainAllConfig) -> dict:
 
     # --- Stage 1: Data augmentation ---
     if "data" not in cfg.skip_stages:
-        r = _run_stage("data_augmentation", [
-            py, "-m", "ml.scripts.data_augmentation",
-            "--csv-dir", str(cfg.data_dir / "dataset"),
-            "--pdf-dir", str(cfg.data_dir / "pdfs"),
-            "--luganda-dir", str(cfg.data_dir / "TTT"),
-            "--teacher-qa-dir", str(cfg.data_dir / "teacher_qa"),
-            "--output-dir", str(cfg.output_dir / "training_data"),
-            "-v",
-        ], dry_run=cfg.dry_run)
+        r = _run_stage(
+            "data_augmentation",
+            [
+                py,
+                "-m",
+                "ml.scripts.data_augmentation",
+                "--csv-dir",
+                str(cfg.data_dir / "dataset"),
+                "--pdf-dir",
+                str(cfg.data_dir / "pdfs"),
+                "--luganda-dir",
+                str(cfg.data_dir / "TTT"),
+                "--teacher-qa-dir",
+                str(cfg.data_dir / "teacher_qa"),
+                "--output-dir",
+                str(cfg.output_dir / "training_data"),
+                "-v",
+            ],
+            dry_run=cfg.dry_run,
+        )
         results.append(r)
         if r.status == "failed" and not cfg.dry_run:
             return _summary(results, cfg)
@@ -142,44 +152,82 @@ def run_training(cfg: TrainAllConfig) -> dict:
     # --- Stage 2: ASR fine-tune ---
     if "asr" not in cfg.skip_stages:
         for lang in cfg.asr_languages:
-            r = _run_stage(f"asr_{lang}", [
-                py, "-m", "ml.scripts.asr.train_luganda",
-                "--common-voice", str(cfg.data_dir / f"common_voice_{lang}"),
-                "--output-dir", str(cfg.output_dir / "speech" / "asr" / f"whisper_{lang}"),
-                "--language", lang,
-            ], dry_run=cfg.dry_run, timeout=14400)
+            r = _run_stage(
+                f"asr_{lang}",
+                [
+                    py,
+                    "-m",
+                    "ml.scripts.asr.train_luganda",
+                    "--common-voice",
+                    str(cfg.data_dir / f"common_voice_{lang}"),
+                    "--output-dir",
+                    str(cfg.output_dir / "speech" / "asr" / f"whisper_{lang}"),
+                    "--language",
+                    lang,
+                ],
+                dry_run=cfg.dry_run,
+                timeout=14400,
+            )
             results.append(r)
     else:
         results.append(StageResult(name="asr", status="skipped"))
 
     # --- Stage 3: MT fine-tune ---
     if "mt" not in cfg.skip_stages:
-        r = _run_stage("mt_finetune", [
-            py, "-m", "ml.scripts.mt.finetune_mt",
-            "--data-dir", str(cfg.data_dir / "TTT"),
-            "--output-dir", str(cfg.output_dir / "mt" / "teacher"),
-        ], dry_run=cfg.dry_run, timeout=14400)
+        r = _run_stage(
+            "mt_finetune",
+            [
+                py,
+                "-m",
+                "ml.scripts.mt.finetune_mt",
+                "--data-dir",
+                str(cfg.data_dir / "TTT"),
+                "--output-dir",
+                str(cfg.output_dir / "mt" / "teacher"),
+            ],
+            dry_run=cfg.dry_run,
+            timeout=14400,
+        )
         results.append(r)
 
         # Stage 3b: Distillation.
         if r.status == "success" or cfg.dry_run:
-            r2 = _run_stage("mt_distill", [
-                py, "-m", "ml.scripts.mt.distill_mt",
-                "--teacher-dir", str(cfg.output_dir / "mt" / "teacher"),
-                "--output-dir", str(cfg.output_dir / "mt" / "student"),
-            ], dry_run=cfg.dry_run, timeout=14400)
+            r2 = _run_stage(
+                "mt_distill",
+                [
+                    py,
+                    "-m",
+                    "ml.scripts.mt.distill_mt",
+                    "--teacher-dir",
+                    str(cfg.output_dir / "mt" / "teacher"),
+                    "--output-dir",
+                    str(cfg.output_dir / "mt" / "student"),
+                ],
+                dry_run=cfg.dry_run,
+                timeout=14400,
+            )
             results.append(r2)
     else:
         results.append(StageResult(name="mt", status="skipped"))
 
     # --- Stage 4: LLM fine-tune ---
     if "llm" not in cfg.skip_stages:
-        r = _run_stage("llm_finetune", [
-            py, "-m", "ml.scripts.fine_tune_gemma",
-            "--target", cfg.target,
-            "--data-dir", str(cfg.output_dir / "training_data"),
-            "--output-dir", str(cfg.output_dir / f"llm_{cfg.target}"),
-        ], dry_run=cfg.dry_run, timeout=14400)
+        r = _run_stage(
+            "llm_finetune",
+            [
+                py,
+                "-m",
+                "ml.scripts.fine_tune_gemma",
+                "--target",
+                cfg.target,
+                "--data-dir",
+                str(cfg.output_dir / "training_data"),
+                "--output-dir",
+                str(cfg.output_dir / f"llm_{cfg.target}"),
+            ],
+            dry_run=cfg.dry_run,
+            timeout=14400,
+        )
         results.append(r)
     else:
         results.append(StageResult(name="llm", status="skipped"))
@@ -190,14 +238,24 @@ def run_training(cfg: TrainAllConfig) -> dict:
             voice_dir = cfg.data_dir / "speech" / "tts" / f"{lang}_voice"
             if not voice_dir.exists() and not cfg.dry_run:
                 log.warning("TTS: voice data dir %s not found, skipping", voice_dir)
-                results.append(StageResult(name=f"tts_{lang}", status="skipped",
-                                           error="no voice data"))
+                results.append(
+                    StageResult(name=f"tts_{lang}", status="skipped", error="no voice data")
+                )
                 continue
-            r = _run_stage(f"tts_{lang}", [
-                py, "-m", "ml.scripts.tts.train_luganda_vits",
-                "--data-dir", str(voice_dir),
-                "--output-dir", str(cfg.output_dir / "speech" / "tts" / f"{lang}_vits"),
-            ], dry_run=cfg.dry_run, timeout=43200)
+            r = _run_stage(
+                f"tts_{lang}",
+                [
+                    py,
+                    "-m",
+                    "ml.scripts.tts.train_luganda_vits",
+                    "--data-dir",
+                    str(voice_dir),
+                    "--output-dir",
+                    str(cfg.output_dir / "speech" / "tts" / f"{lang}_vits"),
+                ],
+                dry_run=cfg.dry_run,
+                timeout=43200,
+            )
             results.append(r)
     else:
         results.append(StageResult(name="tts", status="skipped"))
@@ -206,14 +264,19 @@ def run_training(cfg: TrainAllConfig) -> dict:
     if "export" not in cfg.skip_stages:
         if cfg.dry_run:
             # Export scripts require real model artifacts; skip in dry-run.
-            results.append(StageResult(name="export", status="skipped",
-                                       error="dry-run: skipped"))
+            results.append(StageResult(name="export", status="skipped", error="dry-run: skipped"))
         else:
             for script in ["asr.export_asr_onnx", "mt.export_mt_onnx", "tts.export_tts_onnx"]:
-                r = _run_stage(f"export_{script.split('.')[0]}", [
-                    py, "-m", f"ml.scripts.{script}",
-                    "--artifacts-dir", str(cfg.output_dir),
-                ])
+                r = _run_stage(
+                    f"export_{script.split('.')[0]}",
+                    [
+                        py,
+                        "-m",
+                        f"ml.scripts.{script}",
+                        "--artifacts-dir",
+                        str(cfg.output_dir),
+                    ],
+                )
                 results.append(r)
     else:
         results.append(StageResult(name="export", status="skipped"))
@@ -225,16 +288,20 @@ def run_training(cfg: TrainAllConfig) -> dict:
             metrics_path = cfg.output_dir / "manifest.json"
         for family in ["classifier", "speech", "mt", "production"]:
             cmd = [
-                py, "-m", "ml.pipelines.quality_gates",
-                "--family", family,
+                py,
+                "-m",
+                "ml.pipelines.quality_gates",
+                "--family",
+                family,
                 "--soft-fail",
             ]
             if metrics_path.exists():
                 cmd.extend(["--metrics-path", str(metrics_path)])
             # quality_gates doesn't support --dry-run; skip if dry run.
             if cfg.dry_run:
-                results.append(StageResult(name=f"gates_{family}", status="skipped",
-                                           error="dry-run: skipped"))
+                results.append(
+                    StageResult(name=f"gates_{family}", status="skipped", error="dry-run: skipped")
+                )
             else:
                 r = _run_stage(f"gates_{family}", cmd, timeout=600)
                 results.append(r)
@@ -268,8 +335,9 @@ def _summary(results: list[StageResult], cfg: TrainAllConfig) -> dict:
 
     for r in results:
         icon = {"success": "+", "failed": "X", "skipped": "-", "pending": "?"}
-        log.info("  [%s] %-25s %6.1fs %s",
-                 icon.get(r.status, "?"), r.name, r.duration_s, r.error or "")
+        log.info(
+            "  [%s] %-25s %6.1fs %s", icon.get(r.status, "?"), r.name, r.duration_s, r.error or ""
+        )
 
     return summary
 
@@ -278,9 +346,11 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Unified training orchestrator")
-    parser.add_argument("--target", default="mobile_gemma_2b",
-                        choices=["web_high_accuracy", "mobile_gemma_2b",
-                                 "mobile_offline", "background_t5"])
+    parser.add_argument(
+        "--target",
+        default="mobile_gemma_2b",
+        choices=["web_high_accuracy", "mobile_gemma_2b", "mobile_offline", "background_t5"],
+    )
     parser.add_argument("--data-dir", type=Path, default=Path("Data"))
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts"))
     parser.add_argument("--skip", default="", help="Comma-separated stages to skip")

@@ -18,10 +18,7 @@ import '../models/consent_models.dart';
 /// Shared secure storage used by the consent subsystem. Exposed as a
 /// provider so tests can override it with an in-memory mock.
 final consentStorageProvider = Provider<FlutterSecureStorage>((ref) {
-  return const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    iOptions: IOSOptions(accessibility: KeychainAccessibility.unlocked),
-  );
+  return const FlutterSecureStorage();
 });
 
 class ConsentNotifier extends Notifier<ConsentState> {
@@ -94,10 +91,7 @@ class ConsentNotifier extends Notifier<ConsentState> {
     final existing = state.grants[category];
     if (existing == null || !existing.granted) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    final withdrawn = existing.copyWith(
-      granted: false,
-      withdrawnAtMs: now,
-    );
+    final withdrawn = existing.copyWith(granted: false, withdrawnAtMs: now);
     await _persist(withdrawn);
     _updateStateWith(withdrawn);
     await _logToLedger(LedgerEventType.consentWithdraw, withdrawn);
@@ -148,8 +142,9 @@ class ConsentNotifier extends Notifier<ConsentState> {
   }
 }
 
-final consentProvider =
-    NotifierProvider<ConsentNotifier, ConsentState>(ConsentNotifier.new);
+final consentProvider = NotifierProvider<ConsentNotifier, ConsentState>(
+  ConsentNotifier.new,
+);
 
 /// Convenience selector: any voice-related grant revoked?
 final voiceRecordGrantedProvider = Provider<bool>((ref) {

@@ -28,7 +28,7 @@ function getSessionId(): string {
 }
 
 // Track session start time
-let sessionStartTime = Date.now();
+const sessionStartTime = Date.now();
 
 // ---------------------------------------------------------------------------
 // Offline queue (localStorage-backed)
@@ -182,7 +182,7 @@ export function initAnalytics(): void {
     screen_width: typeof window !== 'undefined' ? window.screen.width : 0,
     screen_height: typeof window !== 'undefined' ? window.screen.height : 0,
     user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-    platform: typeof navigator !== 'undefined' ? (navigator as any).userAgentData?.platform ?? navigator.platform : '',
+    platform: typeof navigator !== 'undefined' ? (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform : '',
   });
 
   if (typeof document !== 'undefined') {

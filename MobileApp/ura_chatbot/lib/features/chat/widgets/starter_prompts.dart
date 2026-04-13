@@ -7,30 +7,12 @@ class StarterPrompts extends StatelessWidget {
   const StarterPrompts({super.key, required this.onTap});
 
   static const _prompts = [
-    (
-      icon: Icons.receipt_long,
-      text: 'How do I register for TIN?',
-    ),
-    (
-      icon: Icons.percent,
-      text: 'What is the VAT rate in Uganda?',
-    ),
-    (
-      icon: Icons.gavel,
-      text: 'What are the penalties for late filing?',
-    ),
-    (
-      icon: Icons.phone_android,
-      text: 'How do I use EFRIS?',
-    ),
-    (
-      icon: Icons.payment,
-      text: 'How can I pay taxes online?',
-    ),
-    (
-      icon: Icons.business,
-      text: 'What is corporate income tax?',
-    ),
+    (icon: Icons.receipt_long, text: 'How do I register for TIN?'),
+    (icon: Icons.percent, text: 'What is the VAT rate in Uganda?'),
+    (icon: Icons.gavel, text: 'What are the penalties for late filing?'),
+    (icon: Icons.phone_android, text: 'How do I use EFRIS?'),
+    (icon: Icons.payment, text: 'How can I pay taxes online?'),
+    (icon: Icons.business, text: 'What is corporate income tax?'),
   ];
 
   @override
@@ -68,10 +50,7 @@ class StarterPrompts extends StatelessWidget {
                   .map(
                     (p) => ActionChip(
                       avatar: Icon(p.icon, size: 18),
-                      label: Text(
-                        p.text,
-                        style: const TextStyle(fontSize: 13),
-                      ),
+                      label: Text(p.text, style: const TextStyle(fontSize: 13)),
                       onPressed: () => onTap(p.text),
                     ),
                   )

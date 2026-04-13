@@ -35,14 +35,14 @@ class FaithfulnessBadge extends StatelessWidget {
       spacing: 6,
       children: [
         // Retrieval mode chip
-        _Chip(label: modeLabel, bg: cs.surfaceContainerHighest, fg: cs.onSurfaceVariant),
+        _Chip(
+          label: modeLabel,
+          bg: cs.surfaceContainerHighest,
+          fg: cs.onSurfaceVariant,
+        ),
         // Faithfulness score
         if (score != null)
-          _Chip(
-            label: 'Grounding: ${(score! * 100).toInt()}%',
-            bg: bg,
-            fg: fg,
-          ),
+          _Chip(label: 'Grounding: ${(score! * 100).toInt()}%', bg: bg, fg: fg),
       ],
     );
   }

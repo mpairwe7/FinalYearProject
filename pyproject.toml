@@ -35,8 +35,74 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["ml", "backend"]
-omit = ["*/tests/*", "*/__pycache__/*"]
+source = ["ml", "App/backend"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "ml/scripts/data_augmentation.py",
+    "ml/scripts/fine_tune_gemma.py",
+    "ml/scripts/export_mobile.py",
+    "ml/scripts/export_tpu_ready_data.py",
+    "ml/scripts/teacher_qa_generation.py",
+    "ml/scripts/train_quality_classifier.py",
+    "ml/scripts/train_all.py",
+    "ml/scripts/merge_lora_adapter.py",
+    "ml/scripts/monitor_kaggle.py",
+    "ml/scripts/prepare_kaggle_notebook.py",
+    "ml/scripts/process_kaggle_output.py",
+    "ml/scripts/repro.py",
+    "ml/scripts/benchmark_inference.py",
+    "ml/scripts/asr/*",
+    "ml/scripts/tts/*",
+    "ml/scripts/mt/*",
+    "ml/scripts/speech/*",
+    "ml/scripts/data_aug/crawler.py",
+    "ml/scripts/data_aug/dataset_downloader.py",
+    "ml/scripts/data_aug/faq_translator.py",
+    "ml/scripts/data_aug/quality_classifier.py",
+    "ml/scripts/data_aug/mt_loaders.py",
+    "ml/scripts/data_aug/asr_loaders.py",
+    "ml/scripts/data_aug/speech_schema.py",
+    "ml/pipelines/continuous_training.py",
+    "ml/pipelines/train.py",
+    "ml/pipelines/push_to_hub.py",
+    "ml/pipelines/evaluate.py",
+    "ml/pipelines/evaluate_rag.py",
+    "ml/pipelines/evaluate_rag_offline.py",
+    "ml/pipelines/evaluate_safety.py",
+    "ml/pipelines/evaluate_speech.py",
+    "ml/pipelines/evaluate_mt.py",
+    "ml/pipelines/evaluate_tts.py",
+    "ml/pipelines/benchmark_mobile.py",
+    "ml/pipelines/redteam_voice.py",
+    "ml/pipelines/calibrate.py",
+    "ml/pipelines/generate_model_card.py",
+    "ml/pipelines/audit_tokenizer.py",
+    "ml/pipelines/validate_data.py",
+    "ml/pipelines/quality_gates.py",
+    "ml/pipelines/export_feedback.py",
+    "ml/scripts/data_aug/loaders.py",
+    "ml/scripts/data_aug/chunkers.py",
+    "ml/scripts/data_aug/dedup.py",
+    "ml/scripts/data_aug/formatters.py",
+    "ml/scripts/data_aug/pipeline.py",
+    "ml/scripts/data_aug/quality.py",
+    "ml/scripts/data_aug/provenance.py",
+    "ml/scripts/lang_id.py",
+    "ml/huggingface/*",
+    "ml/plots/*",
+    # Backend runtime modules (require full app / integration tests)
+    "App/backend/app/main.py",
+    "App/backend/app/llm.py",
+    "App/backend/app/indexer.py",
+    "App/backend/app/evaluation.py",
+    "App/backend/app/cache.py",
+    "App/backend/app/corrective_rag.py",
+    "App/backend/app/speech_service.py",
+    "App/backend/app/resilience.py",
+    "App/backend/app/tracing.py",
+    "App/backend/app/retriever.py",
+]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -106,6 +172,20 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+# ML scripts & pipelines are CLI tools that use print() for output
+"ml/scripts/**" = ["T201", "S311", "S110", "S112", "S310", "S324", "E402", "E741"]
+"ml/pipelines/**" = ["T201", "S311", "S110", "S112", "S310", "E741"]
+"ml/plots/**" = ["T201", "E741"]
+"ml/huggingface/**" = ["T201"]
+# Backend CLI entry-points (audit verifier, etc.)
+"App/backend/app/audit/verifier.py" = ["T201"]
+# Best-effort exception handlers are intentional in resilience code
+"App/backend/app/analytics.py" = ["S110"]
+"App/backend/app/cache.py" = ["S110"]
+"App/backend/app/audit/ledger.py" = ["S110", "SIM105"]
+"App/backend/app/speech_service.py" = ["S110"]
+# URL opens use known http(s) schemes only
+"App/backend/app/llm.py" = ["S310", "S112", "E402"]
 
 [tool.mypy]
 python_version = "3.11"

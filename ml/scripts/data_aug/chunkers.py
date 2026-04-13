@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING
 
 from ml.scripts.data_aug.text_utils import clean_text
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 
 @dataclass
@@ -34,7 +37,7 @@ class Chunk:
     source: str  # full basename
     chunk_id: int
     heading_trail: list[str] = field(default_factory=list)
-    token_count: Optional[int] = None
+    token_count: int | None = None
 
     @property
     def contextual_prefix(self) -> str:
@@ -72,7 +75,6 @@ def _split_headings(markdown: str) -> list[tuple[list[str], str]]:
     """
     sections: list[tuple[list[str], str]] = []
     trail: list[str] = []
-    last_end = 0
     current_body: list[str] = []
 
     def _flush():
@@ -198,7 +200,7 @@ def _recursive_chunk(
 # ---------------------------------------------------------------------------
 
 
-def extract_markdown(pdf_path: Path) -> Optional[str]:
+def extract_markdown(pdf_path: Path) -> str | None:
     """Extract PDF as markdown with table preservation.
 
     Returns None if extraction fails. Never raises — callers must be able

@@ -235,18 +235,22 @@ class Supervisor:
 
         # 2. Clarify very short / stop-word-only queries when there's
         #    no conversation history to disambiguate them.
-        if len(words) < _CLARIFY_MIN_WORDS and not has_conversation_history:
-            if words and words[0].lower() in _CLARIFY_STOP_WORDS:
-                return RouteDecision(
-                    route=AgentRoute.CLARIFY,
-                    reason=f"too short ({len(words)} word(s))",
-                    confidence=0.9,
-                    clarification_question=(
-                        "Could you share a bit more context? "
-                        "For example, are you asking about VAT, PAYE, "
-                        "customs, registration, or a specific tax type?"
-                    ),
-                )
+        if (
+            len(words) < _CLARIFY_MIN_WORDS
+            and not has_conversation_history
+            and words
+            and words[0].lower() in _CLARIFY_STOP_WORDS
+        ):
+            return RouteDecision(
+                route=AgentRoute.CLARIFY,
+                reason=f"too short ({len(words)} word(s))",
+                confidence=0.9,
+                clarification_question=(
+                    "Could you share a bit more context? "
+                    "For example, are you asking about VAT, PAYE, "
+                    "customs, registration, or a specific tax type?"
+                ),
+            )
 
         # 3. Calculation intents → tool route with calculator whitelist
         for pat, reason, tools in _CALC_PATTERNS:

@@ -107,32 +107,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final isLoading = ref.watch(chatProvider.select((s) => s.isLoading));
 
     // Auto-scroll when new messages arrive.
-    ref.listen(
-      chatProvider.select((s) => s.messages.length),
-      (prev, next) {
-        if ((prev ?? 0) < next) _scrollToBottom();
-      },
-    );
+    ref.listen(chatProvider.select((s) => s.messages.length), (prev, next) {
+      if ((prev ?? 0) < next) _scrollToBottom();
+    });
 
     // Show error snackbar on error transitions.
-    ref.listen(
-      chatProvider.select((s) => s.error),
-      (_, error) {
-        if (error == null) return;
-        final messenger = ScaffoldMessenger.of(context);
-        messenger.hideCurrentSnackBar();
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(error),
-            action: SnackBarAction(
-              label: 'Retry',
-              onPressed: () => ref.read(chatProvider.notifier).retryLast(),
-            ),
+    ref.listen(chatProvider.select((s) => s.error), (_, error) {
+      if (error == null) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => ref.read(chatProvider.notifier).retryLast(),
           ),
-        );
-        ref.read(chatProvider.notifier).clearError();
-      },
-    );
+        ),
+      );
+      ref.read(chatProvider.notifier).clearError();
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -154,9 +148,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 const SizedBox(width: 2),
                 Text(
                   locale.toUpperCase(),
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -272,16 +266,16 @@ class _MessageList extends ConsumerWidget {
         final item = items[i];
         return switch (item.kind) {
           _ItemKind.separator => RepaintBoundary(
-              child: _DaySeparator(day: item.day!),
-            ),
+            child: _DaySeparator(day: item.day!),
+          ),
           _ItemKind.typing => const RepaintBoundary(child: _TypingIndicator()),
           _ItemKind.message => RepaintBoundary(
-              child: MessageBubble(
-                message: item.message!,
-                locale: locale,
-                onFeedback: (rating) => _onFeedback(ref, item.message!, rating),
-              ),
+            child: MessageBubble(
+              message: item.message!,
+              locale: locale,
+              onFeedback: (rating) => _onFeedback(ref, item.message!, rating),
             ),
+          ),
         };
       },
     );
@@ -299,7 +293,9 @@ class _MessageList extends ConsumerWidget {
         break;
       }
     }
-    ref.read(chatProvider.notifier).submitFeedback(
+    ref
+        .read(chatProvider.notifier)
+        .submitFeedback(
           FeedbackPayload(
             messageId: msg.id,
             rating: rating,
@@ -315,7 +311,8 @@ enum _ItemKind { message, separator, typing }
 
 class _ListItem {
   const _ListItem._(this.kind, {this.message, this.day});
-  const _ListItem.message(ChatMessage m) : this._(_ItemKind.message, message: m);
+  const _ListItem.message(ChatMessage m)
+    : this._(_ItemKind.message, message: m);
   const _ListItem.separator(DateTime d) : this._(_ItemKind.separator, day: d);
   const _ListItem.typing() : this._(_ItemKind.typing);
 
@@ -331,8 +328,18 @@ class _DaySeparator extends StatelessWidget {
   final DateTime day;
 
   static const _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   String _label() {
@@ -361,9 +368,9 @@ class _DaySeparator extends StatelessWidget {
         child: Text(
           _label(),
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: cs.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
-              ),
+            color: cs.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );

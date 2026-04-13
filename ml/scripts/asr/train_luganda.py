@@ -37,7 +37,7 @@ import logging
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger("asr.train_luganda")
 
@@ -50,7 +50,7 @@ OUTPUT_DIR_DEFAULT = ARTIFACTS_DIR / "speech" / "asr" / "whisper_lg"
 MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "mobile": {
         "model_id": "openai/whisper-small",
-        "language": "luganda",        # passed to WhisperProcessor
+        "language": "swahili",  # Whisper has no Luganda; Swahili is nearest Bantu language  # passed to WhisperProcessor
         "task": "transcribe",
         "lora_r": 16,
         "lora_alpha": 32,
@@ -66,7 +66,7 @@ MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     },
     "full": {
         "model_id": "openai/whisper-small",
-        "language": "luganda",
+        "language": "swahili",  # Whisper has no Luganda; Swahili is nearest Bantu language
         "task": "transcribe",
         "lora_r": 32,
         "lora_alpha": 64,
@@ -116,9 +116,9 @@ class TrainingDataStats:
 
 def _load_rows(
     *,
-    common_voice_dir: Optional[Path],
-    salt_dir: Optional[Path],
-    extra_jsonl: Optional[list[Path]],
+    common_voice_dir: Path | None,
+    salt_dir: Path | None,
+    extra_jsonl: list[Path] | None,
     min_duration_s: float,
     max_duration_s: float,
 ) -> tuple[list[dict], TrainingDataStats]:
@@ -144,36 +144,42 @@ def _load_rows(
     if common_voice_dir is not None:
         for ex in load_common_voice_lg(common_voice_dir):
             if _accept(ex):
-                rows.append({
-                    "audio_path": ex.audio_path,
-                    "text": ex.reference_text,
-                    "language": ex.language,
-                    "sampling_rate": ex.sample_rate,
-                    "duration_s": ex.duration_s,
-                    "source": ex.source,
-                })
+                rows.append(
+                    {
+                        "audio_path": ex.audio_path,
+                        "text": ex.reference_text,
+                        "language": ex.language,
+                        "sampling_rate": ex.sample_rate,
+                        "duration_s": ex.duration_s,
+                        "source": ex.source,
+                    }
+                )
     if salt_dir is not None:
         for ex in load_salt_asr(salt_dir):
             if _accept(ex):
-                rows.append({
-                    "audio_path": ex.audio_path,
-                    "text": ex.reference_text,
-                    "language": ex.language,
-                    "sampling_rate": ex.sample_rate,
-                    "duration_s": ex.duration_s,
-                    "source": ex.source,
-                })
+                rows.append(
+                    {
+                        "audio_path": ex.audio_path,
+                        "text": ex.reference_text,
+                        "language": ex.language,
+                        "sampling_rate": ex.sample_rate,
+                        "duration_s": ex.duration_s,
+                        "source": ex.source,
+                    }
+                )
     for path in extra_jsonl or []:
         for ex in load_jsonl(path):
             if _accept(ex):
-                rows.append({
-                    "audio_path": ex.audio_path,
-                    "text": ex.reference_text,
-                    "language": ex.language,
-                    "sampling_rate": ex.sample_rate,
-                    "duration_s": ex.duration_s,
-                    "source": ex.source,
-                })
+                rows.append(
+                    {
+                        "audio_path": ex.audio_path,
+                        "text": ex.reference_text,
+                        "language": ex.language,
+                        "sampling_rate": ex.sample_rate,
+                        "duration_s": ex.duration_s,
+                        "source": ex.source,
+                    }
+                )
 
     stats.total_hours = round(sum(r["duration_s"] for r in rows) / 3600, 3)
     stats.languages = sorted({r["language"] for r in rows})
@@ -209,7 +215,7 @@ class RunResult:
     stats: TrainingDataStats
     metrics: dict[str, Any] = field(default_factory=dict)
     ok: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def _build_processor_and_model(cfg: dict[str, Any]):
@@ -240,7 +246,6 @@ def _apply_lora(model, cfg: dict[str, Any]):
 
 
 def _prepare_dataset(rows: list[dict], processor):
-    import numpy as np
     from datasets import Audio, Dataset  # type: ignore
 
     ds = Dataset.from_list(rows)
@@ -248,9 +253,7 @@ def _prepare_dataset(rows: list[dict], processor):
 
     def _prepare(example):
         audio = example["audio_path"]
-        inputs = processor.feature_extractor(
-            audio["array"], sampling_rate=audio["sampling_rate"]
-        )
+        inputs = processor.feature_extractor(audio["array"], sampling_rate=audio["sampling_rate"])
         labels = processor.tokenizer(example["text"]).input_ids
         return {"input_features": inputs.input_features[0], "labels": labels}
 
@@ -258,8 +261,6 @@ def _prepare_dataset(rows: list[dict], processor):
 
 
 def _data_collator(processor):
-    import torch
-
     def _collate(batch):
         input_features = [{"input_features": b["input_features"]} for b in batch]
         label_features = [{"input_ids": b["labels"]} for b in batch]
@@ -275,9 +276,9 @@ def _data_collator(processor):
 def run(
     *,
     target: str,
-    common_voice_dir: Optional[Path],
-    salt_dir: Optional[Path],
-    extra_jsonl: Optional[list[Path]],
+    common_voice_dir: Path | None,
+    salt_dir: Path | None,
+    extra_jsonl: list[Path] | None,
     output_dir: Path,
     dry_run: bool,
 ) -> RunResult:
@@ -385,13 +386,15 @@ def run(
     # Quick eval metrics summary.
     if val_ds is not None:
         eval_metrics = trainer.evaluate()
-        result.metrics = {k: round(float(v), 4) for k, v in eval_metrics.items() if isinstance(v, (int, float))}
+        result.metrics = {
+            k: round(float(v), 4) for k, v in eval_metrics.items() if isinstance(v, int | float)
+        }
 
     # Run manifest
     manifest = {
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
         "target": target,
-        "config": {k: v for k, v in cfg.items()},
+        "config": dict(cfg.items()),
         "stats": asdict(stats),
         "metrics": result.metrics,
         "artifacts": {
@@ -412,11 +415,9 @@ def run(
 # ---------------------------------------------------------------------------
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Whisper LoRA fine-tune for Luganda")
-    parser.add_argument(
-        "--target", choices=sorted(MODEL_CONFIGS.keys()), default="mobile"
-    )
+    parser.add_argument("--target", choices=sorted(MODEL_CONFIGS.keys()), default="mobile")
     parser.add_argument(
         "--common-voice",
         type=Path,
@@ -436,9 +437,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         default=[],
         help="Additional curated JSONL eval/train files.",
     )
-    parser.add_argument(
-        "--output-dir", type=Path, default=OUTPUT_DIR_DEFAULT
-    )
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR_DEFAULT)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -450,7 +449,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Common Voice dir may be absent; gracefully degrade to None so the loader
     # reports it cleanly in dry-run.
-    cv_dir: Optional[Path] = args.common_voice if args.common_voice and args.common_voice.exists() else None
+    cv_dir: Path | None = (
+        args.common_voice if args.common_voice and args.common_voice.exists() else None
+    )
     if cv_dir is None and args.common_voice:
         log.warning(
             "Common Voice dir not found: %s — falling back to Data/lgaudio if present",
@@ -461,7 +462,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             cv_dir = lgaudio
             log.info("using Data/lgaudio as Common Voice fallback")
 
-    salt_dir: Optional[Path] = args.salt_asr if args.salt_asr and args.salt_asr.exists() else None
+    salt_dir: Path | None = args.salt_asr if args.salt_asr and args.salt_asr.exists() else None
 
     result = run(
         target=args.target,
@@ -471,15 +472,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         output_dir=args.output_dir,
         dry_run=args.dry_run,
     )
-    print(json.dumps({
-        "target": result.target,
-        "model_id": result.model_id,
-        "output_dir": result.output_dir,
-        "stats": asdict(result.stats),
-        "metrics": result.metrics,
-        "ok": result.ok,
-        "error": result.error,
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "target": result.target,
+                "model_id": result.model_id,
+                "output_dir": result.output_dir,
+                "stats": asdict(result.stats),
+                "metrics": result.metrics,
+                "ok": result.ok,
+                "error": result.error,
+            },
+            indent=2,
+        )
+    )
     return 0 if result.ok else 1
 
 

@@ -33,7 +33,7 @@ import statistics
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -46,9 +46,9 @@ class TtsMetrics:
     n: int
     roundtrip_intelligibility: float
     rtf_mean: float
-    speaker_consistency: Optional[float]
-    mos_mean: Optional[float]
-    mos_ci: Optional[tuple[float, float]]
+    speaker_consistency: float | None
+    mos_mean: float | None
+    mos_ci: tuple[float, float] | None
     backends: dict[str, int] = field(default_factory=dict)
 
 
@@ -74,7 +74,7 @@ def _roundtrip_wer(prompts: list[dict[str, Any]]) -> tuple[float, float, dict[st
     from ml.scripts.asr.infer_asr import AsrTranscriber  # type: ignore
     from ml.scripts.tts.infer_tts import TtsSynthesizer  # type: ignore
 
-    transcriber = AsrTranscriber(backend="auto")
+    AsrTranscriber(backend="auto")
     backends: dict[str, int] = {}
 
     refs: list[str] = []
@@ -84,9 +84,7 @@ def _roundtrip_wer(prompts: list[dict[str, Any]]) -> tuple[float, float, dict[st
     for row in prompts:
         text = row["text"]
         lang = row.get("language", "en")
-        voice = (
-            "luganda-vits-v1" if lang == "lg" else "en_US-lessac-medium"
-        )
+        voice = "luganda-vits-v1" if lang == "lg" else "en_US-lessac-medium"
         synth = TtsSynthesizer(voice_id=voice, backend="auto")
         try:
             result = synth.synthesize(text)
@@ -131,7 +129,7 @@ def _mos_ci(scores: list[float]) -> tuple[float, tuple[float, float]]:
 def run(
     *,
     prompts_path: Path,
-    mos_csv: Optional[Path],
+    mos_csv: Path | None,
     mos_collection: bool,
     dry_run: bool,
 ) -> TtsMetrics:
@@ -170,8 +168,8 @@ def run(
     intelligibility, rtf, backends = _roundtrip_wer(prompts)
 
     # MOS aggregation: look for a filled-in rater sheet next to mos_csv.
-    mos_mean: Optional[float] = None
-    mos_ci: Optional[tuple[float, float]] = None
+    mos_mean: float | None = None
+    mos_ci: tuple[float, float] | None = None
     if mos_csv is not None and mos_csv.exists():
         scores = []
         with open(mos_csv, encoding="utf-8", newline="") as f:
@@ -197,7 +195,7 @@ def run(
     )
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="TTS evaluation harness")
     parser.add_argument(
         "--prompts",

@@ -14,39 +14,36 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def push_to_hub(
-    model_path: str,
-    repo_id: str,
-    commit_message: str = "Update model",
-    private: bool = False
+    model_path: str, repo_id: str, commit_message: str = "Update model", private: bool = False
 ) -> str:
     """Push model artifacts to Hugging Face Hub."""
     from huggingface_hub import HfApi, create_repo, upload_folder
-    
-    api = HfApi()
-    
+
+    HfApi()
+
     # Create repo if it doesn't exist
     try:
         create_repo(repo_id, private=private, exist_ok=True)
         print(f"✓ Repository ready: https://huggingface.co/{repo_id}")
     except Exception as e:
         print(f"Note: {e}")
-    
+
     # Upload model artifacts
     model_dir = Path(model_path)
-    
+
     # Create model card
     model_card = create_model_card(model_dir, repo_id)
     readme_path = model_dir / "README.md"
-    with open(readme_path, 'w') as f:
+    with open(readme_path, "w") as f:
         f.write(model_card)
-    
+
     # Upload
     url = upload_folder(
         folder_path=str(model_dir),
         repo_id=repo_id,
         commit_message=commit_message,
     )
-    
+
     print(f"✓ Model uploaded: {url}")
     return url
 
@@ -54,19 +51,19 @@ def push_to_hub(
 def create_model_card(model_dir: Path, repo_id: str) -> str:
     """Generate HF model card."""
     # Load metrics if available
-    metrics_path = Path(PROJECT_ROOT) / 'Results' / 'metrics' / 'training_metrics.json'
+    metrics_path = Path(PROJECT_ROOT) / "Results" / "metrics" / "training_metrics.json"
     metrics = {}
     if metrics_path.exists():
         with open(metrics_path) as f:
             metrics = json.load(f)
-    
+
     # Load class labels
-    labels_path = model_dir / 'class_labels.json'
+    labels_path = model_dir / "class_labels.json"
     labels = []
     if labels_path.exists():
         with open(labels_path) as f:
             labels = json.load(f)
-    
+
     card = f"""---
 license: mit
 tags:
@@ -178,31 +175,26 @@ MIT License
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Push model to Hugging Face Hub')
-    parser.add_argument('--model-path', type=str, required=True)
-    parser.add_argument('--repo-id', type=str, required=True)
-    parser.add_argument('--commit-message', type=str, default='Update model from CI/CD')
-    parser.add_argument('--private', action='store_true')
+    parser = argparse.ArgumentParser(description="Push model to Hugging Face Hub")
+    parser.add_argument("--model-path", type=str, required=True)
+    parser.add_argument("--repo-id", type=str, required=True)
+    parser.add_argument("--commit-message", type=str, default="Update model from CI/CD")
+    parser.add_argument("--private", action="store_true")
     args = parser.parse_args()
-    
+
     print("=" * 60)
     print("PUSH TO HUGGING FACE HUB")
     print("=" * 60)
-    
+
     # Check token
-    token = os.environ.get('HF_TOKEN')
+    token = os.environ.get("HF_TOKEN")
     if not token:
         print("ERROR: HF_TOKEN environment variable not set")
         sys.exit(1)
-    
+
     # Push
-    url = push_to_hub(
-        args.model_path,
-        args.repo_id,
-        args.commit_message,
-        args.private
-    )
-    
+    push_to_hub(args.model_path, args.repo_id, args.commit_message, args.private)
+
     print(f"\n✓ Model available at: https://huggingface.co/{args.repo_id}")
 
 

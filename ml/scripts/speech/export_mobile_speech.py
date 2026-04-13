@@ -41,7 +41,7 @@ import shutil
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger("speech.export_mobile")
 
@@ -64,14 +64,14 @@ PIPELINE_VERSION = "2026.1.0"
 @dataclass
 class ComponentReport:
     component_id: str
-    family: str                     # asr | tts | mt | llm
+    family: str  # asr | tts | mt | llm
     source_dir: str
     size_mb: float
-    size_mb_budget: Optional[float]
+    size_mb_budget: float | None
     license: str
-    files: list[dict]               # [{name, size_bytes, sha256}]
+    files: list[dict]  # [{name, size_bytes, sha256}]
     ok: bool
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 @dataclass
@@ -81,7 +81,7 @@ class BundleReport:
     timestamp: str
     components: list[ComponentReport] = field(default_factory=list)
     total_size_mb: float = 0.0
-    total_size_mb_budget: Optional[float] = None
+    total_size_mb_budget: float | None = None
     license_allowlist: list[str] = field(default_factory=list)
     ok: bool = False
     errors: list[str] = field(default_factory=list)
@@ -143,7 +143,7 @@ def _probe_component(
         return report
 
     if spec.get("status") == "training_required":
-        report.reason = f"component status=training_required (no artifact yet)"
+        report.reason = "component status=training_required (no artifact yet)"
         return report
 
     if not source.exists():
@@ -178,9 +178,7 @@ def _probe_component(
     report.size_mb = round(total / 1024 / 1024, 2)
 
     if report.size_mb_budget and report.size_mb > report.size_mb_budget:
-        report.reason = (
-            f"size {report.size_mb} MB exceeds budget {report.size_mb_budget} MB"
-        )
+        report.reason = f"size {report.size_mb} MB exceeds budget {report.size_mb_budget} MB"
         return report
 
     report.ok = True
@@ -327,7 +325,7 @@ def _write_bundle_card(report: BundleReport, path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Mobile speech bundle exporter")
     parser.add_argument(
         "--manifest",
@@ -347,9 +345,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
 
-    report = run(
-        dry_run=args.dry_run, deploy=not args.no_deploy, manifest_path=args.manifest
-    )
+    report = run(dry_run=args.dry_run, deploy=not args.no_deploy, manifest_path=args.manifest)
     print(json.dumps(report.summary(), indent=2))
     return 0 if report.ok else 1
 

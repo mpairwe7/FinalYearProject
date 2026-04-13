@@ -38,7 +38,6 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +48,7 @@ class MergeConfig:
     adapter_dir: Path = Path("artifacts/llm_mobile_gemma_2b/final")
     output_dir: Path = Path("artifacts/mobile")
     quant: str = "Q4_K_M"
-    output_name: Optional[str] = None  # auto-derived from base + quant
+    output_name: str | None = None  # auto-derived from base + quant
     dry_run: bool = False
 
 
@@ -77,10 +76,12 @@ def merge_adapter(cfg: MergeConfig) -> dict:
     # Read adapter metadata.
     with adapter_config.open() as f:
         adapter_meta = json.load(f)
-    log.info("Adapter: base_model=%s, r=%s, alpha=%s",
-             adapter_meta.get("base_model_name_or_path"),
-             adapter_meta.get("r"),
-             adapter_meta.get("lora_alpha"))
+    log.info(
+        "Adapter: base_model=%s, r=%s, alpha=%s",
+        adapter_meta.get("base_model_name_or_path"),
+        adapter_meta.get("r"),
+        adapter_meta.get("lora_alpha"),
+    )
 
     if cfg.dry_run:
         log.info("[dry-run] adapter validated, would merge into %s", cfg.base_model)
@@ -132,9 +133,13 @@ def merge_adapter(cfg: MergeConfig) -> dict:
         # Use llama.cpp's convert script if available.
         subprocess.run(
             [
-                sys.executable, "-m", "llama_cpp.convert",
-                "--outtype", cfg.quant.lower(),
-                "--outfile", str(gguf_path),
+                sys.executable,
+                "-m",
+                "llama_cpp.convert",
+                "--outtype",
+                cfg.quant.lower(),
+                "--outfile",
+                str(gguf_path),
                 str(merged_dir),
             ],
             check=True,
@@ -145,9 +150,12 @@ def merge_adapter(cfg: MergeConfig) -> dict:
         try:
             subprocess.run(
                 [
-                    sys.executable, "convert-hf-to-gguf.py",
-                    "--outtype", cfg.quant.lower(),
-                    "--outfile", str(gguf_path),
+                    sys.executable,
+                    "convert-hf-to-gguf.py",
+                    "--outtype",
+                    cfg.quant.lower(),
+                    "--outfile",
+                    str(gguf_path),
                     str(merged_dir),
                 ],
                 check=True,
@@ -184,8 +192,7 @@ def merge_adapter(cfg: MergeConfig) -> dict:
     result["gguf_path"] = str(gguf_path)
     result["sha256"] = sha256
     result["size_mb"] = round(gguf_path.stat().st_size / (1024 * 1024), 1)
-    log.info("GGUF exported: %s (%s MB, sha256=%s...)",
-             gguf_path, result["size_mb"], sha256[:16])
+    log.info("GGUF exported: %s (%s MB, sha256=%s...)", gguf_path, result["size_mb"], sha256[:16])
 
     return result
 
@@ -195,11 +202,13 @@ def main():
 
     parser = argparse.ArgumentParser(description="Merge LoRA adapter into base model")
     parser.add_argument("--base-model", default="google/gemma-2-2b-it")
-    parser.add_argument("--adapter-dir", type=Path,
-                        default=Path("artifacts/llm_mobile_gemma_2b/final"))
+    parser.add_argument(
+        "--adapter-dir", type=Path, default=Path("artifacts/llm_mobile_gemma_2b/final")
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/mobile"))
-    parser.add_argument("--quant", default="Q4_K_M",
-                        choices=["Q4_K_M", "Q4_K_S", "IQ3_M", "Q8_0", "F16"])
+    parser.add_argument(
+        "--quant", default="Q4_K_M", choices=["Q4_K_M", "Q4_K_S", "IQ3_M", "Q8_0", "F16"]
+    )
     parser.add_argument("--output-name", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

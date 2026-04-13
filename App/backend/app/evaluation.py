@@ -398,7 +398,6 @@ def main() -> int:
 
     report = run_evaluation(sample_size=args.samples, days=args.days)
     payload = report.to_dict()
-    print(json.dumps(payload, indent=2))
 
     with open(args.out, "w") as fh:
         json.dump(payload, fh, indent=2)

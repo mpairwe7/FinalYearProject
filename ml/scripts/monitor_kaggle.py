@@ -14,7 +14,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
@@ -96,7 +96,7 @@ def monitor_kernel(
 
             if state == "complete":
                 _annotate("notice", f"Kernel {kernel_id} completed successfully in {elapsed:.0f}s")
-                print(f"\nKernel completed successfully!")
+                print("\nKernel completed successfully!")
                 final_state = "complete"
                 break
             elif state in ["error", "cancelAcknowledged"]:
@@ -120,7 +120,7 @@ def monitor_kernel(
 
             if consecutive_errors >= 5:
                 _annotate("error", f"5 consecutive API errors for {kernel_id}: {e}")
-                print(f"\n5 consecutive API errors, giving up")
+                print("\n5 consecutive API errors, giving up")
                 final_state = "api_error"
                 break
 
@@ -143,7 +143,7 @@ def monitor_kernel(
             "success": success,
             "elapsed_seconds": round(elapsed, 1),
             "total_polls": total_polls,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         summary_path = Path(output_summary)
         summary_path.parent.mkdir(parents=True, exist_ok=True)

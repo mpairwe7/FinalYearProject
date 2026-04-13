@@ -66,11 +66,11 @@ class CodeSwitchPolicy {
   }
 
   static String _langName(String locale) => switch (locale) {
-        'en' => 'English',
-        'lg' => 'Luganda',
-        'sw' => 'Swahili',
-        'nyn' => 'Runyankole',
-        'ach' => 'Acholi',
-        _ => locale.toUpperCase(),
-      };
+    'en' => 'English',
+    'lg' => 'Luganda',
+    'sw' => 'Swahili',
+    'nyn' => 'Runyankole',
+    'ach' => 'Acholi',
+    _ => locale.toUpperCase(),
+  };
 }

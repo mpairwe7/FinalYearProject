@@ -124,10 +124,7 @@ class _ConsentScreenState extends ConsumerState<ConsentScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Your rights',
-                    style: tt.titleSmall,
-                  ),
+                  Text('Your rights', style: tt.titleSmall),
                   const SizedBox(height: AppSpacing.sm),
                   Text(
                     '• You can change any of these choices at any time '
@@ -247,10 +244,7 @@ class _ConsentTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: AppSpacing.md),
-            Switch(
-              value: value,
-              onChanged: onChanged,
-            ),
+            Switch(value: value, onChanged: onChanged),
           ],
         ),
       ),

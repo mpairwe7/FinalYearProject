@@ -50,6 +50,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import json
@@ -58,9 +59,9 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logging.basicConfig(
     level=logging.INFO,
@@ -101,16 +102,16 @@ QUANT_TYPES: dict[str, str] = {
     "Q4_K_S": "4-bit K-quant small — (~1.4 GB)",
     "Q5_K_M": "5-bit K-quant medium — better quality (~1.9 GB)",
     "Q5_K_S": "5-bit K-quant small — (~1.7 GB)",
-    "Q6_K":   "6-bit K-quant — near-lossless (~2.2 GB)",
-    "Q8_0":   "8-bit — highest quality short of F16 (~2.8 GB)",
+    "Q6_K": "6-bit K-quant — near-lossless (~2.2 GB)",
+    "Q8_0": "8-bit — highest quality short of F16 (~2.8 GB)",
     # IQ-series (2024+) — best sub-3-bit options, benefit from imatrix
     "IQ4_NL": "4-bit non-linear — better than Q4_K_M with imatrix (~1.5 GB)",
     "IQ4_XS": "4-bit extra small — (~1.4 GB)",
-    "IQ3_M":  "3-bit medium — sub-1.5 GB mobile (~1.2 GB) ⚠ needs imatrix",
-    "IQ3_S":  "3-bit small — (~1.1 GB) ⚠ needs imatrix",
-    "IQ2_M":  "2-bit medium — extreme compression (~0.9 GB) ⚠ needs imatrix",
+    "IQ3_M": "3-bit medium — sub-1.5 GB mobile (~1.2 GB) ⚠ needs imatrix",
+    "IQ3_S": "3-bit small — (~1.1 GB) ⚠ needs imatrix",
+    "IQ2_M": "2-bit medium — extreme compression (~0.9 GB) ⚠ needs imatrix",
     # Pass-through
-    "F16":    "float16 — no quantisation (~5.2 GB, dev/eval only)",
+    "F16": "float16 — no quantisation (~5.2 GB, dev/eval only)",
 }
 
 # Quants that are essentially unusable without an imatrix calibration.
@@ -126,11 +127,11 @@ DEFAULT_QUANT = "Q4_K_M"
 
 @dataclass
 class LlamaCppTools:
-    convert_script: Optional[Path] = None
-    quantize_bin: Optional[Path] = None
-    imatrix_bin: Optional[Path] = None
-    cli_bin: Optional[Path] = None
-    repo_root: Optional[Path] = None
+    convert_script: Path | None = None
+    quantize_bin: Path | None = None
+    imatrix_bin: Path | None = None
+    cli_bin: Path | None = None
+    repo_root: Path | None = None
 
     @property
     def has_convert(self) -> bool:
@@ -203,7 +204,7 @@ def _find_cuda_runtime_dirs() -> list[str]:
     return sorted(dirs)
 
 
-def _llama_cpp_env(tools: "LlamaCppTools") -> dict[str, str]:
+def _llama_cpp_env(tools: LlamaCppTools) -> dict[str, str]:
     """Build a subprocess env with ``LD_LIBRARY_PATH`` pointing at the
     llama.cpp build dir + discovered CUDA runtime dirs.
 
@@ -298,7 +299,7 @@ def discover_llama_cpp() -> LlamaCppTools:
 # ---------------------------------------------------------------------------
 
 
-def find_latest_adapter() -> Optional[Path]:
+def find_latest_adapter() -> Path | None:
     """Return the most recently modified ``*/final/`` directory under
     ``artifacts/`` that contains an ``adapter_config.json`` (LoRA) or
     ``config.json`` (full model)."""
@@ -307,7 +308,11 @@ def find_latest_adapter() -> Optional[Path]:
         if (d / "adapter_config.json").exists() or (d / "config.json").exists():
             candidates.append(d)
     # Also accept artifacts/models/ura-*/final layout
-    for d in (ARTIFACTS_DIR / "models").glob("ura-*/final") if (ARTIFACTS_DIR / "models").exists() else []:
+    for d in (
+        (ARTIFACTS_DIR / "models").glob("ura-*/final")
+        if (ARTIFACTS_DIR / "models").exists()
+        else []
+    ):
         if (d / "adapter_config.json").exists() or (d / "config.json").exists():
             candidates.append(d)
     if not candidates:
@@ -338,13 +343,11 @@ def read_adapter_lineage(adapter_path: Path) -> dict[str, Any]:
     # adapter_config.json gives us the base model id
     ac = adapter_path / "adapter_config.json"
     if ac.exists():
-        try:
+        with contextlib.suppress(Exception):
             lineage.setdefault(
                 "base_model_id",
                 json.loads(ac.read_text()).get("base_model_name_or_path"),
             )
-        except Exception:
-            pass
 
     return lineage
 
@@ -407,8 +410,7 @@ def merge_lora_adapter(adapter_path: Path, output_path: Path) -> tuple[Path, str
         base_model_id = adapter_config.get("base_model_name_or_path", "")
         if not base_model_id:
             raise RuntimeError(
-                f"adapter_config.json at {adapter_config_path} has no "
-                "base_model_name_or_path"
+                f"adapter_config.json at {adapter_config_path} has no " "base_model_name_or_path"
             )
         log.info("  Base model: %s", base_model_id)
     else:
@@ -509,9 +511,9 @@ def compute_imatrix(
     output_path: Path,
     tools: LlamaCppTools,
     *,
-    calibration_jsonl: Optional[Path] = None,
+    calibration_jsonl: Path | None = None,
     sample_size: int = 256,
-) -> Optional[Path]:
+) -> Path | None:
     """Compute an importance matrix for low-bit quantisation.
 
     The imatrix is a per-tensor weighting derived from running ~hundreds of
@@ -553,15 +555,12 @@ def compute_imatrix(
                 msgs = row.get("messages", [])
                 # Concatenate user + assistant for the calibration prompt
                 parts = [
-                    m.get("content", "") for m in msgs
-                    if m.get("role") in {"user", "assistant"}
+                    m.get("content", "") for m in msgs if m.get("role") in {"user", "assistant"}
                 ]
                 if parts:
                     lines.append("\n".join(parts).strip())
     else:
-        log.warning(
-            "  no calibration JSONL found — falling back to a tiny English prompt mix"
-        )
+        log.warning("  no calibration JSONL found — falling back to a tiny English prompt mix")
         lines = [
             "What is the standard VAT rate in Uganda?",
             "How do I file a tax return with URA?",
@@ -578,14 +577,21 @@ def compute_imatrix(
 
     cmd = [
         str(tools.imatrix_bin),
-        "-m", str(gguf_f16),
-        "-f", str(calib_txt),
-        "-o", str(imatrix_path),
-        "--chunks", str(min(len(lines), 100)),
+        "-m",
+        str(gguf_f16),
+        "-f",
+        str(calib_txt),
+        "-o",
+        str(imatrix_path),
+        "--chunks",
+        str(min(len(lines), 100)),
     ]
     log.info("  $ %s", " ".join(cmd))
     result = subprocess.run(
-        cmd, capture_output=True, text=True, env=_llama_cpp_env(tools),
+        cmd,
+        capture_output=True,
+        text=True,
+        env=_llama_cpp_env(tools),
     )
     if result.returncode != 0 or not imatrix_path.exists():
         log.warning("  imatrix calibration failed:\n%s", result.stderr or result.stdout)
@@ -605,7 +611,7 @@ def quantize_gguf(
     output_path: Path,
     tools: LlamaCppTools,
     quant_type: str = DEFAULT_QUANT,
-    imatrix_path: Optional[Path] = None,
+    imatrix_path: Path | None = None,
 ) -> Path:
     """Quantise GGUF model to target precision via ``llama-quantize``."""
     log.info("STAGE 3: quantising → %s", quant_type)
@@ -635,7 +641,10 @@ def quantize_gguf(
 
     log.info("  $ %s", " ".join(cmd))
     result = subprocess.run(
-        cmd, capture_output=True, text=True, env=_llama_cpp_env(tools),
+        cmd,
+        capture_output=True,
+        text=True,
+        env=_llama_cpp_env(tools),
     )
     if result.returncode != 0:
         log.error("  quantize failed:\n%s", result.stderr)
@@ -657,9 +666,9 @@ def quantize_gguf(
 @dataclass
 class ValidationResult:
     can_load: bool = False
-    test_prompt: Optional[str] = None
-    test_output: Optional[str] = None
-    error: Optional[str] = None
+    test_prompt: str | None = None
+    test_output: str | None = None
+    error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -762,7 +771,7 @@ def build_manifest(
     manifest = ExportManifest(
         pipeline_version=PIPELINE_VERSION,
         schema_version=SCHEMA_VERSION,
-        created_at_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        created_at_utc=datetime.datetime.now(datetime.UTC).isoformat(),
         git=_git_head(),
         model_name="ura-gemma-2b",
         base_model=base_model,
@@ -801,9 +810,7 @@ def build_manifest(
     )
 
     manifest_path = output_path / "mobile_manifest.json"
-    manifest_path.write_text(
-        json.dumps(asdict(manifest), indent=2) + "\n", encoding="utf-8"
-    )
+    manifest_path.write_text(json.dumps(asdict(manifest), indent=2) + "\n", encoding="utf-8")
     log.info("  manifest: %s", manifest_path)
     return manifest
 
@@ -970,9 +977,7 @@ def _atomic_copy(src: Path, dst: Path) -> str:
     dst_sha = file_sha256(tmp)
     if src_sha != dst_sha:
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"copy integrity failure: {src} → {dst} (sha mismatch)"
-        )
+        raise RuntimeError(f"copy integrity failure: {src} → {dst} (sha mismatch)")
     tmp.replace(dst)
     log.info("  → %s (%.1f MB) sha256=%s", dst, dst.stat().st_size / (1024**2), dst_sha[:12])
     return dst_sha
@@ -1026,7 +1031,7 @@ def deploy_to_mobile_app(
                     log.warning(
                         "  ⚠ %s does not appear to declare noCompress for gguf — "
                         "the GGUF file will be APK-compressed and mmap will fail "
-                        "at runtime. Add: androidResources { noCompress += listOf(\"gguf\") }",
+                        'at runtime. Add: androidResources { noCompress += listOf("gguf") }',
                         gradle,
                     )
 
@@ -1079,38 +1084,66 @@ Examples:
 """,
     )
 
-    parser.add_argument("--adapter", type=Path, default=None,
-                        help="Path to fine-tuned LoRA adapter dir (auto-discovered if omitted)")
-    parser.add_argument("--output", type=Path, default=OUTPUT_DIR,
-                        help=f"Output directory (default: {OUTPUT_DIR.relative_to(PROJECT_ROOT)})")
-    parser.add_argument("--quant", type=str, default=DEFAULT_QUANT,
-                        choices=list(QUANT_TYPES.keys()),
-                        help=f"Quantization (default: {DEFAULT_QUANT})")
+    parser.add_argument(
+        "--adapter",
+        type=Path,
+        default=None,
+        help="Path to fine-tuned LoRA adapter dir (auto-discovered if omitted)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT_DIR,
+        help=f"Output directory (default: {OUTPUT_DIR.relative_to(PROJECT_ROOT)})",
+    )
+    parser.add_argument(
+        "--quant",
+        type=str,
+        default=DEFAULT_QUANT,
+        choices=list(QUANT_TYPES.keys()),
+        help=f"Quantization (default: {DEFAULT_QUANT})",
+    )
 
-    parser.add_argument("--imatrix", action="store_true",
-                        help="Compute imatrix calibration before quantising "
-                             "(strongly recommended for IQ-series sub-3-bit quants)")
-    parser.add_argument("--imatrix-source", type=Path, default=None,
-                        help="JSONL file for imatrix calibration "
-                             "(default: artifacts/training_data/train.messages.jsonl)")
-    parser.add_argument("--imatrix-samples", type=int, default=256,
-                        help="Number of calibration prompts (default: 256)")
+    parser.add_argument(
+        "--imatrix",
+        action="store_true",
+        help="Compute imatrix calibration before quantising "
+        "(strongly recommended for IQ-series sub-3-bit quants)",
+    )
+    parser.add_argument(
+        "--imatrix-source",
+        type=Path,
+        default=None,
+        help="JSONL file for imatrix calibration "
+        "(default: artifacts/training_data/train.messages.jsonl)",
+    )
+    parser.add_argument(
+        "--imatrix-samples",
+        type=int,
+        default=256,
+        help="Number of calibration prompts (default: 256)",
+    )
 
-    parser.add_argument("--no-validate", action="store_true",
-                        help="Skip the llama-cpp-python load test")
-    parser.add_argument("--no-deploy", action="store_true",
-                        help="Skip copying to MobileApp/")
-    parser.add_argument("--no-android", action="store_true",
-                        help="Skip Android asset copy (still does iOS)")
-    parser.add_argument("--no-ios", action="store_true",
-                        help="Skip iOS staging copy (still does Android)")
+    parser.add_argument(
+        "--no-validate", action="store_true", help="Skip the llama-cpp-python load test"
+    )
+    parser.add_argument("--no-deploy", action="store_true", help="Skip copying to MobileApp/")
+    parser.add_argument(
+        "--no-android", action="store_true", help="Skip Android asset copy (still does iOS)"
+    )
+    parser.add_argument(
+        "--no-ios", action="store_true", help="Skip iOS staging copy (still does Android)"
+    )
 
-    parser.add_argument("--keep-merged", action="store_true",
-                        help="Keep the intermediate merged FP16 model (~5 GB)")
-    parser.add_argument("--keep-gguf-f16", action="store_true",
-                        help="Keep the intermediate GGUF F16 file")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Validate adapter + tools without converting")
+    parser.add_argument(
+        "--keep-merged", action="store_true", help="Keep the intermediate merged FP16 model (~5 GB)"
+    )
+    parser.add_argument(
+        "--keep-gguf-f16", action="store_true", help="Keep the intermediate GGUF F16 file"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Validate adapter + tools without converting"
+    )
 
     args = parser.parse_args()
 
@@ -1136,8 +1169,10 @@ Examples:
     print(f"  Adapter:      {args.adapter}")
     print(f"  Output:       {args.output}")
     print(f"  Quantization: {args.quant} — {QUANT_TYPES[args.quant]}")
-    print(f"  Deploy:       Android={not args.no_android and not args.no_deploy} "
-          f"iOS={not args.no_ios and not args.no_deploy}")
+    print(
+        f"  Deploy:       Android={not args.no_android and not args.no_deploy} "
+        f"iOS={not args.no_ios and not args.no_deploy}"
+    )
     print()
 
     # Tool discovery
@@ -1163,10 +1198,12 @@ Examples:
         log.info("  llama.cpp convert:   %s", bool(tools.has_convert))
         log.info("  llama-quantize:      %s", bool(tools.has_quantize))
         log.info("  llama-imatrix:       %s", bool(tools.has_imatrix))
-        log.info("  Android assets dir:  %s (exists=%s)",
-                 ANDROID_ASSETS, ANDROID_ASSETS.parent.parent.exists())
-        log.info("  iOS staging dir:     %s (exists=%s)",
-                 IOS_STAGING, IOS_STAGING.parent.exists())
+        log.info(
+            "  Android assets dir:  %s (exists=%s)",
+            ANDROID_ASSETS,
+            ANDROID_ASSETS.parent.parent.exists(),
+        )
+        log.info("  iOS staging dir:     %s (exists=%s)", IOS_STAGING, IOS_STAGING.parent.exists())
         if args.quant in QUANTS_REQUIRING_IMATRIX and not args.imatrix:
             log.warning(
                 "  ⚠ %s strongly recommends --imatrix; quality will be poor without it",
@@ -1196,23 +1233,28 @@ Examples:
     imatrix_path = None
     if args.imatrix:
         imatrix_path = compute_imatrix(
-            gguf_f16, args.output, tools,
+            gguf_f16,
+            args.output,
+            tools,
             calibration_jsonl=args.imatrix_source,
             sample_size=args.imatrix_samples,
         )
 
     # 3. Quantise
-    quant_path = quantize_gguf(
-        gguf_f16, args.output, tools, args.quant, imatrix_path=imatrix_path
-    )
+    quant_path = quantize_gguf(gguf_f16, args.output, tools, args.quant, imatrix_path=imatrix_path)
 
     # 4. Validate
     validation = validate_quantized(quant_path, skip_load_test=args.no_validate)
 
     # 5. Manifest + model card
     manifest = build_manifest(
-        quant_path, args.output, args.adapter, args.quant,
-        base_model=base_model, lineage=lineage, validation=validation,
+        quant_path,
+        args.output,
+        args.adapter,
+        args.quant,
+        base_model=base_model,
+        lineage=lineage,
+        validation=validation,
     )
     write_model_card(manifest, args.output / "MODEL_CARD.md")
 
@@ -1220,7 +1262,8 @@ Examples:
     deployment_record: dict[str, Any] = {}
     if not args.no_deploy:
         deployment_record = deploy_to_mobile_app(
-            quant_path, manifest,
+            quant_path,
+            manifest,
             deploy_android=not args.no_android,
             deploy_ios=not args.no_ios,
         )

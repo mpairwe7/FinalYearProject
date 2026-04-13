@@ -30,7 +30,6 @@ import shutil
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("asr.export_sherpa")
 
@@ -45,12 +44,12 @@ class SherpaPackage:
     name: str
     source_onnx_dir: str
     dest_dir: str
-    encoder: Optional[str] = None
-    decoder: Optional[str] = None
-    tokens: Optional[str] = None
+    encoder: str | None = None
+    decoder: str | None = None
+    tokens: str | None = None
     size_mb: float = 0.0
     ok: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def _sha256(path: Path) -> str:
@@ -61,7 +60,7 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _find_onnx(dir_: Path, keyword: str) -> Optional[Path]:
+def _find_onnx(dir_: Path, keyword: str) -> Path | None:
     """Locate an ONNX file whose filename contains ``keyword``."""
     if not dir_.exists():
         return None
@@ -173,9 +172,7 @@ def run(name: str, *, dry_run: bool) -> SherpaPackage:
                     "sha256": _sha256(p),
                 }
             )
-    (dest_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
+    (dest_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     pkg.size_mb = round(
         sum(p.stat().st_size for p in dest_dir.rglob("*") if p.is_file()) / 1024 / 1024,
@@ -186,7 +183,7 @@ def run(name: str, *, dry_run: bool) -> SherpaPackage:
     return pkg
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--name", required=True, help="ONNX export name (from export_asr_onnx)")
     parser.add_argument("--dry-run", action="store_true")

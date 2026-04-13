@@ -227,36 +227,35 @@ def get_feedback_summary(days: int = 30) -> dict[str, Any]:
             "recent": [],
         }
     cutoff = time.time() - (days * 86400)
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT COUNT(*),
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT COUNT(*),
                           COALESCE(SUM(CASE WHEN rating='up'  THEN 1 ELSE 0 END), 0),
                           COALESCE(SUM(CASE WHEN rating='down' THEN 1 ELSE 0 END), 0)
                    FROM feedback WHERE created_at >= %s""",
-                (cutoff,),
-            )
-            row = cur.fetchone()
-            total = row[0] or 0
-            up = row[1] or 0
-            down = row[2] or 0
+            (cutoff,),
+        )
+        row = cur.fetchone()
+        total = row[0] or 0
+        up = row[1] or 0
+        down = row[2] or 0
 
-            cur.execute(
-                """SELECT id, message_id, rating, comment, created_at
+        cur.execute(
+            """SELECT id, message_id, rating, comment, created_at
                    FROM feedback WHERE created_at >= %s
                    ORDER BY created_at DESC LIMIT 20""",
-                (cutoff,),
-            )
-            recent = [
-                {
-                    "id": r[0],
-                    "message_id": r[1],
-                    "rating": r[2],
-                    "comment": r[3],
-                    "created_at": r[4],
-                }
-                for r in cur.fetchall()
-            ]
+            (cutoff,),
+        )
+        recent = [
+            {
+                "id": r[0],
+                "message_id": r[1],
+                "rating": r[2],
+                "comment": r[3],
+                "created_at": r[4],
+            }
+            for r in cur.fetchall()
+        ]
     satisfaction = round(up / total * 100, 1) if total > 0 else 0.0
     return {
         "period_days": days,
@@ -290,15 +289,14 @@ def get_event_counts(days: int = 30) -> dict[str, int]:
     if pool is None:
         return {}
     cutoff = time.time() - (days * 86400)
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT event_type, COUNT(*) FROM analytics_events
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT event_type, COUNT(*) FROM analytics_events
                    WHERE created_at >= %s
                    GROUP BY event_type ORDER BY COUNT(*) DESC""",
-                (cutoff,),
-            )
-            return {r[0]: r[1] for r in cur.fetchall()}
+            (cutoff,),
+        )
+        return {r[0]: r[1] for r in cur.fetchall()}
 
 
 # ---------------------------------------------------------------------------
@@ -333,15 +331,14 @@ def get_session_stats(days: int = 30) -> dict[str, Any]:
             "max_messages_in_session": 0,
         }
     cutoff = time.time() - (days * 86400)
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT COUNT(*), COALESCE(AVG(message_count),0),
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT COUNT(*), COALESCE(AVG(message_count),0),
                           COALESCE(MAX(message_count),0)
                    FROM sessions WHERE last_active_at >= %s""",
-                (cutoff,),
-            )
-            row = cur.fetchone()
+            (cutoff,),
+        )
+        row = cur.fetchone()
     return {
         "period_days": days,
         "total_sessions": row[0] or 0,
@@ -392,15 +389,14 @@ def get_recent_turns(session_id: str, limit: int = 5) -> list[dict[str, str]]:
     pool = _get_pool()
     if pool is None:
         return []
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT user_message, bot_reply FROM conversations
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT user_message, bot_reply FROM conversations
                    WHERE session_id = %s
                    ORDER BY created_at DESC LIMIT %s""",
-                (session_id, limit),
-            )
-            rows = cur.fetchall()
+            (session_id, limit),
+        )
+        rows = cur.fetchall()
     return [{"user_message": r[0], "bot_reply": r[1]} for r in reversed(rows)]
 
 
@@ -415,23 +411,22 @@ def get_conversation_stats(days: int = 30) -> dict[str, Any]:
             "top_topics": [],
         }
     cutoff = time.time() - (days * 86400)
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT COUNT(*), COALESCE(AVG(response_time_ms),0),
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT COUNT(*), COALESCE(AVG(response_time_ms),0),
                           COALESCE(AVG(confidence),0)
                    FROM conversations WHERE created_at >= %s""",
-                (cutoff,),
-            )
-            row = cur.fetchone()
+            (cutoff,),
+        )
+        row = cur.fetchone()
 
-            cur.execute(
-                """SELECT topic_tag, COUNT(*) FROM conversations
+        cur.execute(
+            """SELECT topic_tag, COUNT(*) FROM conversations
                    WHERE created_at >= %s AND topic_tag <> ''
                    GROUP BY topic_tag ORDER BY COUNT(*) DESC LIMIT 10""",
-                (cutoff,),
-            )
-            top = [{"tag": r[0], "count": r[1]} for r in cur.fetchall()]
+            (cutoff,),
+        )
+        top = [{"tag": r[0], "count": r[1]} for r in cur.fetchall()]
 
     return {
         "period_days": days,
@@ -447,43 +442,42 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
     if pool is None:
         return []
     cutoff = time.time() - (days * 86400)
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """SELECT message_id, user_query, bot_reply, comment, created_at,
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT message_id, user_query, bot_reply, comment, created_at,
                           'thumbs_down'
                    FROM feedback
                    WHERE rating='down' AND created_at >= %s
                    ORDER BY created_at DESC""",
-                (cutoff,),
-            )
-            down = [
-                {
-                    "message_id": r[0],
-                    "user_query": r[1],
-                    "bot_reply": r[2],
-                    "comment": r[3],
-                    "created_at": r[4],
-                    "review_reason": r[5],
-                }
-                for r in cur.fetchall()
-            ]
-            cur.execute(
-                """SELECT id, user_message, bot_reply, '', created_at, 'low_confidence'
+            (cutoff,),
+        )
+        down = [
+            {
+                "message_id": r[0],
+                "user_query": r[1],
+                "bot_reply": r[2],
+                "comment": r[3],
+                "created_at": r[4],
+                "review_reason": r[5],
+            }
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            """SELECT id, user_message, bot_reply, '', created_at, 'low_confidence'
                    FROM conversations
                    WHERE confidence < 0.3 AND confidence > 0 AND created_at >= %s
                    ORDER BY created_at DESC LIMIT 200""",
-                (cutoff,),
-            )
-            low = [
-                {
-                    "message_id": r[0],
-                    "user_query": r[1],
-                    "bot_reply": r[2],
-                    "comment": r[3],
-                    "created_at": r[4],
-                    "review_reason": r[5],
-                }
-                for r in cur.fetchall()
-            ]
+            (cutoff,),
+        )
+        low = [
+            {
+                "message_id": r[0],
+                "user_query": r[1],
+                "bot_reply": r[2],
+                "comment": r[3],
+                "created_at": r[4],
+                "review_reason": r[5],
+            }
+            for r in cur.fetchall()
+        ]
     return down + low

@@ -5,7 +5,7 @@
 /// humans and machines can detect. We implement this in two layers:
 ///
 /// 1. **UI disclosure** — on the first TTS playback of a given session,
-///    the assistant bubble surfaces a visible "AI voice — <model>" chip.
+///    the assistant bubble surfaces a visible "AI voice — `<model>`" chip.
 ///    Subsequent plays show only a small speaker-icon badge to avoid
 ///    notification fatigue, matching the 2026 interpretation for
 ///    repeat-use voice assistants.
@@ -22,8 +22,6 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 
 /// Immutable label metadata surfaced to the chat UI.
@@ -112,10 +110,7 @@ class SyntheticVoiceLabeler {
   ///                  Defaults to 16000 — below Nyquist, in which case
   ///                  the function falls back to a 7.5 kHz tone that is
   ///                  still above most adult hearing thresholds.
-  Uint8List stampWatermark(
-    Uint8List pcm16, {
-    int sampleRate = 16000,
-  }) {
+  Uint8List stampWatermark(Uint8List pcm16, {int sampleRate = 16000}) {
     final out = Uint8List.fromList(pcm16);
     final bd = out.buffer.asByteData();
     final sampleCount = out.lengthInBytes ~/ 2;

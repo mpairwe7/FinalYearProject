@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChatStore, ChatTurn, SpeechState, createTurn } from '../store/useChatStore';
+import { useChatStore, ChatTurn, createTurn } from '../store/useChatStore';
 import {
   initAnalytics,
   getAnalyticsSessionId,
@@ -113,13 +113,13 @@ export default function Page() {
       recognitionRef.current.abort();
       recognitionRef.current = null;
     }
-    const Impl = typeof window !== 'undefined' &&
-      ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+    const win = typeof window !== 'undefined' ? window as Window & { SpeechRecognition?: new () => SpeechRecognition; webkitSpeechRecognition?: new () => SpeechRecognition } : null;
+    const Impl = win && (win.SpeechRecognition || win.webkitSpeechRecognition);
     if (!Impl) {
       if (!HAS_MEDIA_RECORDER) setSpeechState('unavailable');
       return;
     }
-    const recog: SpeechRecognition = new (Impl as any)();
+    const recog: SpeechRecognition = new Impl();
     recog.lang = LOCALE_OPTIONS.find((l) => l.value === locale)?.speechLang ?? 'en-US';
     recog.continuous = false;
     recog.interimResults = false;
@@ -212,7 +212,7 @@ export default function Page() {
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No body');
       const dec = new TextDecoder();
-      let buf = '', streamed = '', meta: Record<string, any> = {}, evt = 'token';
+      let buf = '', streamed = '', meta: Record<string, unknown> = {}, evt = 'token';
       let raf: number | null = null;
       try {
         while (true) {
@@ -242,7 +242,7 @@ export default function Page() {
         if (raf !== null) cancelAnimationFrame(raf);
         updateLastTurn((t) => ({ ...t, content: streamed }));
       } finally { reader.releaseLock(); }
-      trackChatReceived(Date.now() - t0, (meta.sources?.length ?? 0) > 0);
+      trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
     } catch {
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];

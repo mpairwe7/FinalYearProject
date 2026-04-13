@@ -9,11 +9,7 @@ class FeedbackButtons extends ConsumerStatefulWidget {
   final String messageId;
   final ValueChanged<String>? onFeedback;
 
-  const FeedbackButtons({
-    super.key,
-    required this.messageId,
-    this.onFeedback,
-  });
+  const FeedbackButtons({super.key, required this.messageId, this.onFeedback});
 
   @override
   ConsumerState<FeedbackButtons> createState() => _FeedbackButtonsState();
@@ -116,9 +112,7 @@ class _CommentSheetState extends State<_CommentSheet> {
             maxLength: 1000,
             maxLines: 3,
             autofocus: true,
-            decoration: const InputDecoration(
-              hintText: 'Optional feedback...',
-            ),
+            decoration: const InputDecoration(hintText: 'Optional feedback...'),
           ),
           const SizedBox(height: 12),
           Row(
@@ -177,8 +171,8 @@ class _FeedbackIcon extends StatelessWidget {
           color: isSelected
               ? color
               : isDisabled
-                  ? color.withValues(alpha: 0.24)
-                  : color.withValues(alpha: 0.56),
+              ? color.withValues(alpha: 0.24)
+              : color.withValues(alpha: 0.56),
         ),
         tooltip: tooltip,
       ),

@@ -11,6 +11,7 @@ class LocalStorage {
   static const _keySessionId = 'session_id';
   static const _keyLocale = 'locale';
   static const _keyThemeMode = 'theme_mode';
+
   /// Must be called once before runApp().
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();

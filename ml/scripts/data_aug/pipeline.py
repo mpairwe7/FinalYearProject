@@ -18,7 +18,7 @@ import random
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING
 
 from ml.scripts.data_aug.dedup import dedup_all
 from ml.scripts.data_aug.formatters import (
@@ -40,8 +40,12 @@ from ml.scripts.data_aug.provenance import (
     write_data_card,
 )
 from ml.scripts.data_aug.quality import QualityConfig, filter_quality
-from ml.scripts.data_aug.schema import TrainingExample
 from ml.scripts.data_aug.splitters import SplitConfig, stratified_split
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from ml.scripts.data_aug.schema import TrainingExample
 
 log = logging.getLogger(__name__)
 
@@ -54,14 +58,14 @@ log = logging.getLogger(__name__)
 @dataclass
 class PipelineConfig:
     # Inputs
-    csv_dir: Optional[Path] = None
-    pdf_dir: Optional[Path] = None
-    luganda_dir: Optional[Path] = None
+    csv_dir: Path | None = None
+    pdf_dir: Path | None = None
+    luganda_dir: Path | None = None
     teacher_qa_dirs: list[Path] = field(default_factory=list)
     include_refusals: bool = True
 
     # Web crawl (Phase 1 — opt-in).
-    crawl_dir: Optional[Path] = None
+    crawl_dir: Path | None = None
     enable_web_crawl: bool = False
 
     # Online corpora (Phase 2 — JW300, OPUS, etc.)
@@ -76,9 +80,9 @@ class PipelineConfig:
     # These sources DO NOT flow into the chat training_data output — they
     # are recorded in a separate ``speech_manifest.json`` so that the
     # existing LLM training pipeline remains byte-identical.
-    asr_common_voice_dir: Optional[Path] = None
-    asr_salt_dir: Optional[Path] = None
-    mt_parallel_dir: Optional[Path] = None
+    asr_common_voice_dir: Path | None = None
+    asr_salt_dir: Path | None = None
+    mt_parallel_dir: Path | None = None
 
     # Outputs
     output_dir: Path = Path("artifacts/training_data")
@@ -91,7 +95,7 @@ class PipelineConfig:
 
     # PDF
     pdf_workers: int = 1
-    max_pdfs: Optional[int] = None
+    max_pdfs: int | None = None
     emit_pdf_retrieval: bool = True
     emit_pdf_corpus: bool = True
 
@@ -127,7 +131,7 @@ class PipelineConfig:
                 return str(v)
             if isinstance(v, dict):
                 return {k: _encode(val) for k, val in v.items()}
-            if isinstance(v, (list, tuple)):
+            if isinstance(v, list | tuple):
                 return [_encode(x) for x in v]
             return v
 
@@ -238,9 +242,7 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
     if cfg.pdf_dir and cfg.pdf_dir.exists():
         manifest.record_input_directory(cfg.pdf_dir, "pdf", ["*.pdf"])
     if cfg.luganda_dir and cfg.luganda_dir.exists():
-        manifest.record_input_directory(
-            cfg.luganda_dir, "luganda", ["*.jsonl", "*.csv", "*.txt"]
-        )
+        manifest.record_input_directory(cfg.luganda_dir, "luganda", ["*.jsonl", "*.csv", "*.txt"])
     for d in cfg.teacher_qa_dirs or []:
         if d.exists():
             manifest.record_input_directory(d, "teacher_qa", ["*.jsonl"])
@@ -290,7 +292,10 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
                 log.warning(
                     "imbalance: source '%s' = %d rows (%.1f%% of total). "
                     "Consider --source-cap %s=<N> to balance.",
-                    src, n, ratio * 100, src,
+                    src,
+                    n,
+                    ratio * 100,
+                    src,
                 )
             break  # only flag the dominant source
 
@@ -358,9 +363,7 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
     # --- Manifest + data card + Croissant -----------------------------------
     manifest_path = out / "manifest.json"
     manifest_dict = manifest.build()
-    manifest_path.write_text(
-        json.dumps(manifest_dict, indent=2) + "\n", encoding="utf-8"
-    )
+    manifest_path.write_text(json.dumps(manifest_dict, indent=2) + "\n", encoding="utf-8")
     log.info("manifest: %s", manifest_path)
     write_data_card(manifest_dict, out / "DATA_CARD.md")
     # Phase 2 — Croissant 1.0 JSON-LD for HF Hub / ML Commons compliance
@@ -382,7 +385,7 @@ def run_pipeline(cfg: PipelineConfig) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _write_speech_manifest(cfg: "PipelineConfig", out_path: Path) -> None:
+def _write_speech_manifest(cfg: PipelineConfig, out_path: Path) -> None:
     """Probe optional ASR/MT sources and write a small JSON manifest.
 
     This does NOT materialise the rows — it only reports shape so the

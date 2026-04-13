@@ -36,9 +36,7 @@ from __future__ import annotations
 
 import csv
 import logging
-import re
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -153,7 +151,7 @@ def translate_faqs(
             with out_file.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=["question", "answer"])
                 writer.writeheader()
-                for q, a in zip(translated_q, translated_a):
+                for q, a in zip(translated_q, translated_a, strict=False):
                     writer.writerow({"question": q.strip(), "answer": a.strip()})
 
             count = len(translated_q)
@@ -187,7 +185,7 @@ def _read_faq_csv(path: Path) -> list[dict]:
     return rows
 
 
-def _find_col(fields: list[str], candidates: tuple[str, ...]) -> Optional[str]:
+def _find_col(fields: list[str], candidates: tuple[str, ...]) -> str | None:
     for f in fields:
         if f.lower().strip() in candidates:
             return f

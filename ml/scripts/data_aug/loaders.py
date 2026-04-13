@@ -29,7 +29,7 @@ import logging
 import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any
 
 from ml.scripts.data_aug.chunkers import Chunk, chunk_pdf
 from ml.scripts.data_aug.schema import (
@@ -43,6 +43,9 @@ from ml.scripts.data_aug.schema import (
     content_hash,
 )
 from ml.scripts.data_aug.text_utils import clean_text, redact_pii
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 log = logging.getLogger(__name__)
 
@@ -60,14 +63,14 @@ def _make_example(
     source_type: SourceType,
     task: TaskType,
     language: str = "en",
-    tag: Optional[str] = None,
-    chunk_id: Optional[int] = None,
-    doc_id: Optional[str] = None,
-    extra: Optional[dict[str, Any]] = None,
-    system: Optional[str] = URA_SYSTEM_PROMPT,
-    grounding_score: Optional[float] = None,
-    is_synthetic: Optional[bool] = None,
-) -> Optional[TrainingExample]:
+    tag: str | None = None,
+    chunk_id: int | None = None,
+    doc_id: str | None = None,
+    extra: dict[str, Any] | None = None,
+    system: str | None = URA_SYSTEM_PROMPT,
+    grounding_score: float | None = None,
+    is_synthetic: bool | None = None,
+) -> TrainingExample | None:
     """Build a validated TrainingExample. Returns None if redaction left the
     example empty or trivially short."""
     user_clean, _ = redact_pii(clean_text(user))
@@ -209,7 +212,7 @@ def _chunk_worker(pdf_path_str: str) -> list[dict[str, Any]]:
 def load_pdf_chunks(
     pdf_dir: Path,
     *,
-    max_pdfs: Optional[int] = None,
+    max_pdfs: int | None = None,
     workers: int = 1,
     as_corpus: bool = True,
     emit_retrieval: bool = True,
@@ -467,12 +470,8 @@ def load_teacher_qa(search_dirs: list[Path]) -> Iterator[TrainingExample]:
         log.info("teacher_qa: no files found in %s", [str(d) for d in search_dirs])
 
 
-_GEMMA_USER_RE = re.compile(
-    r"<start_of_turn>user\s*(.*?)<end_of_turn>", re.DOTALL
-)
-_GEMMA_MODEL_RE = re.compile(
-    r"<start_of_turn>model\s*(.*?)<end_of_turn>", re.DOTALL
-)
+_GEMMA_USER_RE = re.compile(r"<start_of_turn>user\s*(.*?)<end_of_turn>", re.DOTALL)
+_GEMMA_MODEL_RE = re.compile(r"<start_of_turn>model\s*(.*?)<end_of_turn>", re.DOTALL)
 
 
 def _parse_teacher_file(path: Path) -> Iterator[TrainingExample]:

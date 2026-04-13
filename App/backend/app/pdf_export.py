@@ -138,7 +138,7 @@ def generate_conversation_pdf(
 
         # Multi-cell for wrapping.
         x = pdf.get_x()
-        y = pdf.get_y()
+        pdf.get_y()
         pdf.set_x(x + 5)
         pdf.multi_cell(180, 5, content, fill=True)
         pdf.ln(4)

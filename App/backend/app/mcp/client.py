@@ -125,9 +125,12 @@ class MCPClient:
                 if name.startswith("ura_") and "ura_account_access" not in granted_purposes:
                     continue
             # Ticket escalation needs consent from anonymous/public users
-            if name == "escalate_to_human" and user_role == "public":
-                if "ticket_escalation" not in granted_purposes:
-                    continue
+            if (
+                name == "escalate_to_human"
+                and user_role == "public"
+                and "ticket_escalation" not in granted_purposes
+            ):
+                continue
             allowed.append(name)
         return allowed
 

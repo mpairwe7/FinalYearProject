@@ -9,11 +9,7 @@ import '../theme/tokens.dart';
 /// eventual content, not a centered spinner. Reduces perceived latency
 /// because the eye locks onto the layout immediately.
 class SkeletonList extends StatelessWidget {
-  const SkeletonList({
-    super.key,
-    this.itemCount = 6,
-    this.itemHeight = 72,
-  });
+  const SkeletonList({super.key, this.itemCount = 6, this.itemHeight = 72});
 
   final int itemCount;
   final double itemHeight;

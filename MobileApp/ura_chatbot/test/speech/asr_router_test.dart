@@ -68,7 +68,11 @@ class _FakeEngine implements AsrEngine {
 
 final _dummyPcm = Uint8List(3200); // 100ms of silence at 16kHz
 
-AsrResult _makeResult(String text, {String lang = 'en', String engine = 'test'}) {
+AsrResult _makeResult(
+  String text, {
+  String lang = 'en',
+  String engine = 'test',
+}) {
   return AsrResult(
     text: text,
     language: lang,
@@ -86,16 +90,10 @@ void main() {
         supportedLocales: {'en', 'lg'},
         result: _makeResult('hello world', engine: 'whisper'),
       );
-      final fallback = _FakeEngine(
-        id: 'native',
-        supportedLocales: {'en'},
-      );
+      final fallback = _FakeEngine(id: 'native', supportedLocales: {'en'});
       final router = AsrRouter(primary: primary, fallback: fallback);
 
-      final result = await router.transcribe(
-        _dummyPcm,
-        locale: 'en',
-      );
+      final result = await router.transcribe(_dummyPcm, locale: 'en');
 
       expect(result.text, 'hello world');
       expect(result.engineId, 'whisper');
@@ -109,16 +107,10 @@ void main() {
         supportedLocales: {'en', 'lg'},
         result: _makeResult('nkusaba', lang: 'lg', engine: 'whisper'),
       );
-      final fallback = _FakeEngine(
-        id: 'native',
-        supportedLocales: {'en'},
-      );
+      final fallback = _FakeEngine(id: 'native', supportedLocales: {'en'});
       final router = AsrRouter(primary: primary, fallback: fallback);
 
-      final result = await router.transcribe(
-        _dummyPcm,
-        locale: 'lg',
-      );
+      final result = await router.transcribe(_dummyPcm, locale: 'lg');
 
       expect(result.text, 'nkusaba');
       expect(result.language, 'lg');
@@ -130,62 +122,71 @@ void main() {
         supportedLocales: {'en', 'lg'},
         available: false,
       );
-      final fallback = _FakeEngine(
-        id: 'native',
-        supportedLocales: {'en'},
-      );
+      final fallback = _FakeEngine(id: 'native', supportedLocales: {'en'});
       final router = AsrRouter(primary: primary, fallback: fallback);
 
       expect(
         () => router.transcribe(_dummyPcm, locale: 'lg'),
         throwsA(
-          isA<AsrRouterException>()
-              .having((e) => e.code, 'code', 'model_not_ready_lg'),
+          isA<AsrRouterException>().having(
+            (e) => e.code,
+            'code',
+            'model_not_ready_lg',
+          ),
         ),
       );
     });
 
-    test('throws no_engine_available when both engines down for English', () async {
-      final primary = _FakeEngine(
-        id: 'whisper',
-        supportedLocales: {'en', 'lg'},
-        available: false,
-      );
-      final fallback = _FakeEngine(
-        id: 'native',
-        supportedLocales: {'en'},
-        available: false,
-      );
-      final router = AsrRouter(primary: primary, fallback: fallback);
+    test(
+      'throws no_engine_available when both engines down for English',
+      () async {
+        final primary = _FakeEngine(
+          id: 'whisper',
+          supportedLocales: {'en', 'lg'},
+          available: false,
+        );
+        final fallback = _FakeEngine(
+          id: 'native',
+          supportedLocales: {'en'},
+          available: false,
+        );
+        final router = AsrRouter(primary: primary, fallback: fallback);
 
-      expect(
-        () => router.transcribe(_dummyPcm, locale: 'en'),
-        throwsA(
-          isA<AsrRouterException>()
-              .having((e) => e.code, 'code', 'no_engine_available'),
-        ),
-      );
-    });
+        expect(
+          () => router.transcribe(_dummyPcm, locale: 'en'),
+          throwsA(
+            isA<AsrRouterException>().having(
+              (e) => e.code,
+              'code',
+              'no_engine_available',
+            ),
+          ),
+        );
+      },
+    );
 
-    test('falls through to error when primary returns null for English', () async {
-      final primary = _FakeEngine(
-        id: 'whisper',
-        supportedLocales: {'en', 'lg'},
-        result: null, // returns null
-      );
-      final fallback = _FakeEngine(
-        id: 'native',
-        supportedLocales: {'en'},
-        // Native can't do one-shot PCM transcription, so this path
-        // is a no-op and falls through to the error.
-      );
-      final router = AsrRouter(primary: primary, fallback: fallback);
+    test(
+      'falls through to error when primary returns null for English',
+      () async {
+        final primary = _FakeEngine(
+          id: 'whisper',
+          supportedLocales: {'en', 'lg'},
+          // result defaults to null — returns null
+        );
+        final fallback = _FakeEngine(
+          id: 'native',
+          supportedLocales: {'en'},
+          // Native can't do one-shot PCM transcription, so this path
+          // is a no-op and falls through to the error.
+        );
+        final router = AsrRouter(primary: primary, fallback: fallback);
 
-      expect(
-        () => router.transcribe(_dummyPcm, locale: 'en'),
-        throwsA(isA<AsrRouterException>()),
-      );
-    });
+        expect(
+          () => router.transcribe(_dummyPcm, locale: 'en'),
+          throwsA(isA<AsrRouterException>()),
+        );
+      },
+    );
 
     test('falls through to error when primary throws for English', () async {
       final primary = _FakeEngine(
@@ -193,10 +194,7 @@ void main() {
         supportedLocales: {'en', 'lg'},
         shouldThrow: true,
       );
-      final fallback = _FakeEngine(
-        id: 'native',
-        supportedLocales: {'en'},
-      );
+      final fallback = _FakeEngine(id: 'native', supportedLocales: {'en'});
       final router = AsrRouter(primary: primary, fallback: fallback);
 
       expect(
@@ -211,10 +209,7 @@ void main() {
         supportedLocales: {'en', 'lg'},
         result: _makeResult('obulamu', lang: 'lg', engine: 'whisper'),
       );
-      final fallback = _FakeEngine(
-        id: 'native',
-        supportedLocales: {'en'},
-      );
+      final fallback = _FakeEngine(id: 'native', supportedLocales: {'en'});
       final router = AsrRouter(primary: primary, fallback: fallback);
 
       final chunks = Stream.fromIterable([_dummyPcm]);

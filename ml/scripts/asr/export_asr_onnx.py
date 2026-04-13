@@ -33,11 +33,9 @@ import argparse
 import hashlib
 import json
 import logging
-import shutil
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("asr.export_onnx")
 
@@ -62,7 +60,7 @@ class ExportResult:
     total_size_mb: float
     quantization: str
     ok: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def _sha256(path: Path) -> str:
@@ -89,9 +87,7 @@ def _resolve_source(model_or_path: str) -> Path:
     if p.is_dir():
         return p.resolve()
     # Fall back to HF cache discovery — optimum will download on-the-fly.
-    log.warning(
-        "local cache miss for %s — optimum will attempt to fetch from HF Hub", repo_id
-    )
+    log.warning("local cache miss for %s — optimum will attempt to fetch from HF Hub", repo_id)
     return Path(repo_id)
 
 
@@ -123,9 +119,7 @@ def _export_onnx(source: Path, out_dir: Path, quantize: bool) -> list[Path]:
             from optimum.onnxruntime import ORTQuantizer  # type: ignore
             from optimum.onnxruntime.configuration import AutoQuantizationConfig  # type: ignore
         except ImportError as exc:
-            raise RuntimeError(
-                "optimum[onnxruntime] quantiser missing"
-            ) from exc
+            raise RuntimeError("optimum[onnxruntime] quantiser missing") from exc
 
         qconfig = AutoQuantizationConfig.avx512_vnni(is_static=False, per_channel=False)
         for onnx_path in list(produced):
@@ -147,7 +141,7 @@ def _write_manifest(result: ExportResult, sha_table: dict[str, str]) -> Path:
     return manifest_path
 
 
-def run(model: str, *, checkpoint: Optional[Path], quantize: bool, dry_run: bool) -> ExportResult:
+def run(model: str, *, checkpoint: Path | None, quantize: bool, dry_run: bool) -> ExportResult:
     source = checkpoint if checkpoint is not None else _resolve_source(model)
     out_dir = ONNX_OUT_DIR / (checkpoint.name if checkpoint else model.replace("/", "__"))
 
@@ -194,7 +188,7 @@ def run(model: str, *, checkpoint: Optional[Path], quantize: bool, dry_run: bool
     return result
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument(
         "--model",

@@ -54,8 +54,5 @@ final connectivityStatusProvider = StreamProvider<bool>((ref) {
 /// banner on cold start.
 final isOnlineProvider = Provider<bool>((ref) {
   final status = ref.watch(connectivityStatusProvider);
-  return status.maybeWhen(
-    data: (online) => online,
-    orElse: () => true,
-  );
+  return status.maybeWhen(data: (online) => online, orElse: () => true);
 });

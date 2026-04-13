@@ -50,10 +50,7 @@ abstract class TtsEngine {
 
   /// Synthesise [text] as PCM16 audio. Returns `null` if the engine
   /// is unavailable or the text is empty.
-  Future<TtsResult?> synthesize({
-    required String text,
-    required String locale,
-  });
+  Future<TtsResult?> synthesize({required String text, required String locale});
 
   /// Release native resources.
   Future<void> dispose();

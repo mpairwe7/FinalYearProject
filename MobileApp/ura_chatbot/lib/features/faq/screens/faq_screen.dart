@@ -61,9 +61,8 @@ class FAQScreen extends ConsumerWidget {
               padding: AppSpacing.listPadding,
               physics: const AlwaysScrollableScrollPhysics(),
               itemCount: tags.length,
-              itemBuilder: (context, i) => RepaintBoundary(
-                child: _TagCard(tag: tags[i]),
-              ),
+              itemBuilder: (context, i) =>
+                  RepaintBoundary(child: _TagCard(tag: tags[i])),
             ),
           );
         },

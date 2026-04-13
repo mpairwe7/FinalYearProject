@@ -14,9 +14,12 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Iterable, Iterator
+from typing import TYPE_CHECKING
 
-from ml.scripts.data_aug.schema import TrainingExample
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
+    from ml.scripts.data_aug.schema import TrainingExample
 
 log = logging.getLogger(__name__)
 
@@ -68,8 +71,7 @@ def _shingles(text: str, n: int = 5) -> set[bytes]:
     if len(tokens) < n:
         return {b" ".join(t.encode("utf-8") for t in tokens)} if tokens else set()
     return {
-        b" ".join(t.encode("utf-8") for t in tokens[i : i + n])
-        for i in range(len(tokens) - n + 1)
+        b" ".join(t.encode("utf-8") for t in tokens[i : i + n]) for i in range(len(tokens) - n + 1)
     }
 
 
@@ -170,10 +172,7 @@ def scan_contamination(
     if not _HAS_DATASKETCH:
         # Fall back to exact-hash comparison.
         holdout_hashes = {ex.metadata.content_hash for ex in held_out}
-        return {
-            i for i, ex in enumerate(train)
-            if ex.metadata.content_hash in holdout_hashes
-        }
+        return {i for i, ex in enumerate(train) if ex.metadata.content_hash in holdout_hashes}
 
     lsh = MinHashLSH(threshold=threshold, num_perm=num_perm)
     for i, ex in enumerate(held_out):

@@ -48,7 +48,12 @@ class TtsAudioCache {
     final key = _key(text, modelId);
     final pcm = _pcmFile(key);
     final meta = _metaFile(key);
-    if (!await pcm.exists() || !await meta.exists()) return null;
+    // ignore: avoid_slow_async_io
+    if (!await pcm.exists() ||
+        // ignore: avoid_slow_async_io
+        !await meta.exists()) {
+      return null;
+    }
 
     try {
       final metaJson =
@@ -80,12 +85,14 @@ class TtsAudioCache {
     // corrupt entries if the process is killed mid-write.
     await pcm.writeAsBytes(result.wavBytes);
     final metaTmp = File('${meta.path}.tmp');
-    await metaTmp.writeAsString(jsonEncode({
-      'sample_rate': result.sampleRate,
-      'locale': result.locale,
-      'model_id': result.modelId,
-      'duration_ms': result.durationMs,
-    }));
+    await metaTmp.writeAsString(
+      jsonEncode({
+        'sample_rate': result.sampleRate,
+        'locale': result.locale,
+        'model_id': result.modelId,
+        'duration_ms': result.durationMs,
+      }),
+    );
     await metaTmp.rename(meta.path);
 
     await _evictIfNeeded();
@@ -95,6 +102,7 @@ class TtsAudioCache {
   Future<int> sizeBytes() async {
     await init();
     final dir = Directory(_cacheDir);
+    // ignore: avoid_slow_async_io
     if (!await dir.exists()) return 0;
     int total = 0;
     await for (final entity in dir.list()) {
@@ -109,6 +117,7 @@ class TtsAudioCache {
   Future<void> clear() async {
     await init();
     final dir = Directory(_cacheDir);
+    // ignore: avoid_slow_async_io
     if (await dir.exists()) {
       await dir.delete(recursive: true);
       await dir.create(recursive: true);
@@ -117,6 +126,7 @@ class TtsAudioCache {
 
   Future<void> _evictIfNeeded() async {
     final dir = Directory(_cacheDir);
+    // ignore: avoid_slow_async_io
     if (!await dir.exists()) return;
 
     final files = <File>[];
@@ -132,10 +142,10 @@ class TtsAudioCache {
 
     // Sort by last modified (oldest first) and delete until under limit.
     // Use async stat to avoid blocking the UI thread.
+    // ignore: avoid_slow_async_io
     final stats = await Future.wait(files.map((f) => f.stat()));
     final indexed = List.generate(files.length, (i) => i);
-    indexed.sort(
-        (a, b) => stats[a].modified.compareTo(stats[b].modified));
+    indexed.sort((a, b) => stats[a].modified.compareTo(stats[b].modified));
     final sorted = indexed.map((i) => files[i]).toList();
 
     for (final file in sorted) {

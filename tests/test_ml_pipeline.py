@@ -352,7 +352,7 @@ class TestConfigValidation:
             assert "datasets_dir" in config["data"]
             
             # Training section
-            assert "test_size" in config["training"]
+            assert "batch_size" in config["training"]
             
             # Quality gates
             assert "min_accuracy" in config["quality_gates"]

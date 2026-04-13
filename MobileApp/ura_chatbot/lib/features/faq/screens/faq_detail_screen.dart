@@ -51,9 +51,8 @@ class FAQDetailScreen extends ConsumerWidget {
               padding: AppSpacing.listPadding,
               physics: const AlwaysScrollableScrollPhysics(),
               itemCount: faqs.length,
-              itemBuilder: (context, i) => RepaintBoundary(
-                child: _FAQCard(faq: faqs[i]),
-              ),
+              itemBuilder: (context, i) =>
+                  RepaintBoundary(child: _FAQCard(faq: faqs[i])),
             ),
           );
         },
@@ -76,8 +75,9 @@ class _FAQCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.cardRadius),
-        collapsedShape:
-            const RoundedRectangleBorder(borderRadius: AppRadius.cardRadius),
+        collapsedShape: const RoundedRectangleBorder(
+          borderRadius: AppRadius.cardRadius,
+        ),
         tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         childrenPadding: const EdgeInsets.fromLTRB(
           AppSpacing.lg,

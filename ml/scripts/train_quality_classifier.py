@@ -45,11 +45,12 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Iterator
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+from typing import TYPE_CHECKING
 
 from ml.scripts.data_aug.loaders import load_csv_faqs  # noqa: E402
 from ml.scripts.data_aug.quality_classifier import (  # noqa: E402
@@ -66,6 +67,9 @@ from ml.scripts.data_aug.schema import (  # noqa: E402
     TaskType,
     TrainingExample,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 log = logging.getLogger("train_quality_classifier")
 
@@ -115,7 +119,9 @@ def _load_from_jsonl(path: Path) -> Iterator[TrainingExample]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("--from-jsonl", type=Path, help="Messages-JSONL from data_augmentation.py")
     source.add_argument("--from-csv-dir", type=Path, help="Raw CSV FAQ directory (bootstrap)")
@@ -171,9 +177,7 @@ def main() -> int:
         log.error("no examples found — aborting")
         return 2
 
-    positives, negatives = build_bootstrap_dataset(
-        examples, max_per_class=args.max_per_class
-    )
+    positives, negatives = build_bootstrap_dataset(examples, max_per_class=args.max_per_class)
     log.info("bootstrap: %d positives, %d negatives", len(positives), len(negatives))
     if len(positives) < 20 or len(negatives) < 20:
         log.error(

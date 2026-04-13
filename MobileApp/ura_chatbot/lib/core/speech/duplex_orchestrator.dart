@@ -100,14 +100,7 @@ class DuplexIdle extends DuplexEvent {
 // State machine
 // ---------------------------------------------------------------------------
 
-enum DuplexState {
-  idle,
-  listening,
-  processing,
-  synthesizing,
-  bargedIn,
-  error,
-}
+enum DuplexState { idle, listening, processing, synthesizing, bargedIn, error }
 
 // ---------------------------------------------------------------------------
 // Orchestrator
@@ -341,7 +334,9 @@ class DuplexOrchestrator {
     final parts = text.split(pattern);
 
     // Only return sentences we haven't already extracted.
-    final complete = parts.length > 1 ? parts.sublist(0, parts.length - 1) : <String>[];
+    final complete = parts.length > 1
+        ? parts.sublist(0, parts.length - 1)
+        : <String>[];
     if (complete.length <= alreadyExtracted) return [];
 
     return complete

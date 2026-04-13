@@ -52,13 +52,16 @@ import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence
+from typing import TYPE_CHECKING, Any
 
 from ml.scripts.data_aug.schema import (
     SourceType,
     TaskType,
     TrainingExample,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +102,8 @@ def _lexical_features(text: str) -> list[float]:
     upper_ratio = sum(c.isupper() for c in text) / n_chars
     # Tax-domain signal words — crude but effective on Ugandan tax text.
     domain_hits = sum(
-        1 for kw in ("tax", "URA", "VAT", "income", "return", "file", "duty")
+        1
+        for kw in ("tax", "URA", "VAT", "income", "return", "file", "duty")
         if kw.lower() in text.lower()
     )
     return [
@@ -205,6 +209,7 @@ class QualityClassifier:
 
         Returns a metrics dict so the training CLI can print / persist it.
         """
+        import numpy as np
         from sklearn.linear_model import LogisticRegression  # lazy
         from sklearn.metrics import (
             accuracy_score,
@@ -213,7 +218,6 @@ class QualityClassifier:
             recall_score,
         )
         from sklearn.model_selection import train_test_split
-        import numpy as np
 
         if not positives or not negatives:
             raise ValueError(
@@ -230,10 +234,12 @@ class QualityClassifier:
         X_pos = self._featurise(positives)
         X_neg = self._featurise(negatives)
         X = np.concatenate([X_pos, X_neg], axis=0)
-        y = np.concatenate([
-            np.ones(len(positives), dtype="int64"),
-            np.zeros(len(negatives), dtype="int64"),
-        ])
+        y = np.concatenate(
+            [
+                np.ones(len(positives), dtype="int64"),
+                np.zeros(len(negatives), dtype="int64"),
+            ]
+        )
 
         X_train, X_val, y_train, y_val = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=y
@@ -263,7 +269,7 @@ class QualityClassifier:
     # Inference
     # ------------------------------------------------------------------
 
-    def score(self, examples: Sequence[TrainingExample]) -> "list[float]":
+    def score(self, examples: Sequence[TrainingExample]) -> list[float]:
         """Return P(high_quality) for each example."""
         if not self._fitted or self._classifier is None:
             raise RuntimeError("QualityClassifier is not fitted / loaded")
@@ -277,7 +283,7 @@ class QualityClassifier:
         self,
         examples: Sequence[TrainingExample],
         *,
-        threshold: Optional[float] = None,
+        threshold: float | None = None,
     ) -> tuple[list[TrainingExample], QualityScoreReport]:
         """Score, attach scores to metadata, keep only rows above threshold."""
         if not examples:
@@ -286,7 +292,7 @@ class QualityClassifier:
         t = threshold if threshold is not None else self.threshold
         scores = self.score(examples)
         kept: list[TrainingExample] = []
-        for ex, s in zip(examples, scores):
+        for ex, s in zip(examples, scores, strict=False):
             ex.metadata.quality_score = round(s, 4)
             if s >= t:
                 kept.append(ex)
@@ -328,7 +334,7 @@ class QualityClassifier:
         log.info("quality_classifier: saved to %s", path)
 
     @classmethod
-    def load(cls, path: Path) -> "QualityClassifier":
+    def load(cls, path: Path) -> QualityClassifier:
         import joblib  # lazy
 
         if not path.exists():
@@ -354,15 +360,15 @@ class QualityClassifier:
 
 
 _DEGRADERS = [
-    "truncate_15",      # keep only first 15% of assistant text
-    "shuffle_words",    # random word shuffle
-    "repeat_bomb",      # repeat the assistant 4× to trigger repetition
-    "strip_answer",     # assistant becomes empty-ish
-    "symbol_spam",      # inject symbol-heavy tail
+    "truncate_15",  # keep only first 15% of assistant text
+    "shuffle_words",  # random word shuffle
+    "repeat_bomb",  # repeat the assistant 4× to trigger repetition
+    "strip_answer",  # assistant becomes empty-ish
+    "symbol_spam",  # inject symbol-heavy tail
 ]
 
 
-def _degrade(example: TrainingExample, mode: str, rng: random.Random) -> Optional[TrainingExample]:
+def _degrade(example: TrainingExample, mode: str, rng: random.Random) -> TrainingExample | None:
     """Return a degraded copy of an example for use as a NEGATIVE sample.
 
     ``None`` if the degradation produces something Pydantic rejects (e.g.
@@ -417,9 +423,11 @@ def build_bootstrap_dataset(
     rng = random.Random(seed)
     positives: list[TrainingExample] = []
     for ex in examples:
-        if ex.metadata.source_type in {SourceType.CSV_FAQ, SourceType.TEACHER_QA}:
-            if ex.metadata.task == TaskType.QA:
-                positives.append(ex)
+        if (
+            ex.metadata.source_type in {SourceType.CSV_FAQ, SourceType.TEACHER_QA}
+            and ex.metadata.task == TaskType.QA
+        ):
+            positives.append(ex)
     rng.shuffle(positives)
     positives = positives[:max_per_class]
 
@@ -446,7 +454,7 @@ def train_classifier(
     *,
     embed_model: str = DEFAULT_EMBED_MODEL,
     threshold: float = DEFAULT_THRESHOLD,
-    save_path: Optional[Path] = None,
+    save_path: Path | None = None,
 ) -> tuple[QualityClassifier, dict]:
     """Train + optionally save. Returns (clf, metrics)."""
     clf = QualityClassifier(embed_model=embed_model, threshold=threshold)
@@ -454,7 +462,5 @@ def train_classifier(
     if save_path is not None:
         clf.save(save_path)
         # Dump metrics next to the pickle for visibility.
-        (save_path.with_suffix(".metrics.json")).write_text(
-            json.dumps(metrics, indent=2)
-        )
+        (save_path.with_suffix(".metrics.json")).write_text(json.dumps(metrics, indent=2))
     return clf, metrics

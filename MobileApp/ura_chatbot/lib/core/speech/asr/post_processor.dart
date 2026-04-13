@@ -11,9 +11,7 @@ import '../lid.dart';
 
 /// Full post-processing pipeline for an ASR transcript.
 class AsrPostProcessor {
-  const AsrPostProcessor({
-    LanguageIdentifier? lid,
-  }) : _lid = lid;
+  const AsrPostProcessor({LanguageIdentifier? lid}) : _lid = lid;
 
   final LanguageIdentifier? _lid;
 
@@ -33,10 +31,7 @@ class AsrPostProcessor {
     // 4. Language identification if a detector is provided.
     final lid = _lid?.identify(text);
 
-    return PostProcessResult(
-      text: text,
-      lid: lid,
-    );
+    return PostProcessResult(text: text, lid: lid);
   }
 
   /// Collapse sequences of single digits separated by spaces into
@@ -52,10 +47,7 @@ class AsrPostProcessor {
 }
 
 class PostProcessResult {
-  const PostProcessResult({
-    required this.text,
-    this.lid,
-  });
+  const PostProcessResult({required this.text, this.lid});
 
   final String text;
   final LidResult? lid;

@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Production environment validation (NIST SSDF PO.1.1)
 # ---------------------------------------------------------------------------
-_INSECURE_DEV_SECRET = "dev-insecure-change-me"
+_INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105
 
 
 def _validate_production_env() -> None:
@@ -584,8 +584,8 @@ async def transcribe_audio(
     sample_rate_raw = request.query_params.get("sample_rate", "16000")
     try:
         sample_rate = int(sample_rate_raw)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="sample_rate must be an integer")
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail="sample_rate must be an integer") from err
     if not 8000 <= sample_rate <= 48000:
         raise HTTPException(status_code=400, detail="sample_rate must be in [8000, 48000]")
     language = request.query_params.get("language")
@@ -767,8 +767,8 @@ async def voice_chat(
 
     try:
         top_k = int(request.query_params.get("top_k", "4"))
-    except ValueError:
-        raise HTTPException(status_code=400, detail="top_k must be an integer")
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail="top_k must be an integer") from err
     if not 1 <= top_k <= 10:
         raise HTTPException(status_code=400, detail="top_k must be in [1, 10]")
 
@@ -781,8 +781,8 @@ async def voice_chat(
     sample_rate_raw = request.query_params.get("sample_rate", "16000")
     try:
         sample_rate = int(sample_rate_raw)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="sample_rate must be an integer")
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail="sample_rate must be an integer") from err
     if not 8000 <= sample_rate <= 48000:
         raise HTTPException(status_code=400, detail="sample_rate must be in [8000, 48000]")
 
@@ -1124,10 +1124,7 @@ def analytics_comparison(request: Request, days: int = 30, dimension: str = "top
         return {
             "dimension": "topic",
             "period_days": days,
-            "segments": [
-                {"name": t["tag"], "conversations": t["count"]}
-                for t in top_topics
-            ],
+            "segments": [{"name": t["tag"], "conversations": t["count"]} for t in top_topics],
         }
 
     return {"dimension": dimension, "period_days": days, "segments": []}

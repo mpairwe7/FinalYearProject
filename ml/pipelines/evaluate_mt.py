@@ -31,7 +31,7 @@ import logging
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -55,7 +55,7 @@ def _compute_bleu(refs: list[str], hyps: list[str]) -> float:
         if not refs:
             return 0.0
         total = 0
-        for ref, hyp in zip(refs, hyps):
+        for ref, hyp in zip(refs, hyps, strict=False):
             ref_tokens = set(ref.lower().split())
             hyp_tokens = set(hyp.lower().split())
             if not hyp_tokens:
@@ -77,7 +77,7 @@ def _compute_chrf(refs: list[str], hyps: list[str]) -> float:
             return {s[i : i + 3] for i in range(len(s) - 2)}
 
         total = 0.0
-        for ref, hyp in zip(refs, hyps):
+        for ref, hyp in zip(refs, hyps, strict=False):
             r = _trigrams(ref)
             h = _trigrams(hyp)
             if not r or not h:
@@ -104,7 +104,7 @@ def _length_ratio_deviation(refs: list[str], hyps: list[str]) -> float:
     if not refs:
         return 0.0
     deviations = []
-    for ref, hyp in zip(refs, hyps):
+    for ref, hyp in zip(refs, hyps, strict=False):
         rlen = max(len(ref), 1)
         hlen = len(hyp)
         deviations.append(abs(hlen / rlen - 1))
@@ -116,20 +116,20 @@ def _hallucination_rate(refs: list[str], hyps: list[str]) -> float:
     if not refs:
         return 0.0
     count = 0
-    for ref, hyp in zip(refs, hyps):
+    for ref, hyp in zip(refs, hyps, strict=False):
         if _compute_chrf([ref], [hyp]) < 0.10:
             count += 1
     return round(count / len(refs), 4)
 
 
-def _compute_comet_kiwi(sources: list[str], hyps: list[str]) -> Optional[float]:
+def _compute_comet_kiwi(sources: list[str], hyps: list[str]) -> float | None:
     """Reference-free COMET-kiwi; None if unbabel-comet is unavailable."""
     try:
         from comet import download_model, load_from_checkpoint  # type: ignore
 
         model_path = download_model("Unbabel/wmt23-cometkiwi-da-xl")
         model = load_from_checkpoint(model_path)
-        data = [{"src": s, "mt": h} for s, h in zip(sources, hyps)]
+        data = [{"src": s, "mt": h} for s, h in zip(sources, hyps, strict=False)]
         scores = model.predict(data, batch_size=8, gpus=0).scores
         return round(sum(scores) / max(len(scores), 1), 4)
     except Exception as exc:
@@ -203,7 +203,7 @@ class MtMetrics:
     ter: float
     length_ratio_deviation: float
     hallucination_rate: float
-    comet_kiwi: Optional[float]
+    comet_kiwi: float | None
     backend: str
     directions: dict[str, DirectionMetrics] = field(default_factory=dict)
 
@@ -248,7 +248,9 @@ def run_evaluation(
     srcs: list[str] = []
     backend_used = "unknown"
     for row in rows:
-        result = translator.translate(row.source_text, source_lang=row.source_lang, target_lang=row.target_lang)
+        result = translator.translate(
+            row.source_text, source_lang=row.source_lang, target_lang=row.target_lang
+        )
         hyps.append(result.text)
         refs.append(row.target_text)
         srcs.append(row.source_text)
@@ -292,13 +294,11 @@ def _to_dict(m: MtMetrics) -> dict[str, Any]:
         "hallucination_rate": m.hallucination_rate,
         "comet_kiwi": m.comet_kiwi,
         "backend": m.backend,
-        "directions": {
-            k: asdict(v) for k, v in m.directions.items()
-        },
+        "directions": {k: asdict(v) for k, v in m.directions.items()},
     }
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="MT evaluation (BLEU / chrF / TER / COMET-kiwi)")
     parser.add_argument(
         "--eval-set",
@@ -310,7 +310,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         type=Path,
         default=PROJECT_ROOT / "Results" / "metrics" / "mt_metrics.json",
     )
-    parser.add_argument("--backend", choices=("auto", "onnx", "teacher", "base", "prompted"), default="auto")
+    parser.add_argument(
+        "--backend", choices=("auto", "onnx", "teacher", "base", "prompted"), default="auto"
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)

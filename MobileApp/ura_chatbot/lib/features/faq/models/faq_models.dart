@@ -10,10 +10,10 @@ class TagInfo {
   });
 
   factory TagInfo.fromJson(Map<String, dynamic> j) => TagInfo(
-        id: j['id'] as String? ?? '',
-        name: j['name'] as String? ?? '',
-        description: j['description'] as String? ?? '',
-      );
+    id: j['id'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    description: j['description'] as String? ?? '',
+  );
 }
 
 class FAQItem {
@@ -28,8 +28,8 @@ class FAQItem {
   });
 
   factory FAQItem.fromJson(Map<String, dynamic> j) => FAQItem(
-        question: j['question'] as String? ?? '',
-        answer: j['answer'] as String? ?? '',
-        source: j['source'] as String? ?? '',
-      );
+    question: j['question'] as String? ?? '',
+    answer: j['answer'] as String? ?? '',
+    source: j['source'] as String? ?? '',
+  );
 }

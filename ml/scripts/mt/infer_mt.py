@@ -24,7 +24,6 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("mt.infer")
 
@@ -42,7 +41,7 @@ class TranslateResult:
     target_lang: str
     latency_s: float
     backend: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +114,9 @@ def _translate_prompted(text: str, src: str, tgt: str):
     prompt = f"Translate to {lang_name}: {text}"
     t0 = time.perf_counter()
     try:
-        reply = llm_module.generate(query=prompt, passages=[], conversation_history=None, locale=tgt)
+        reply = llm_module.generate(
+            query=prompt, passages=[], conversation_history=None, locale=tgt
+        )
     except Exception as exc:
         log.debug("prompted MT failed: %s", exc)
         return None
@@ -131,8 +132,8 @@ class MtTranslator:
     def __init__(
         self,
         *,
-        onnx_dir: Optional[Path] = None,
-        teacher_dir: Optional[Path] = None,
+        onnx_dir: Path | None = None,
+        teacher_dir: Path | None = None,
         base_repo: str = DEFAULT_BASE_REPO,
         backend: str = "auto",
     ) -> None:
@@ -155,14 +156,24 @@ class MtTranslator:
 
         attempts = (
             ("onnx", lambda: _translate_onnx(self.onnx_dir, text, source_lang, target_lang)),
-            ("teacher", lambda: _translate_transformers(str(self.teacher_dir), text, source_lang, target_lang) if self.teacher_dir.exists() else None),
-            ("base", lambda: _translate_transformers(self.base_repo, text, source_lang, target_lang)),
+            (
+                "teacher",
+                lambda: _translate_transformers(
+                    str(self.teacher_dir), text, source_lang, target_lang
+                )
+                if self.teacher_dir.exists()
+                else None,
+            ),
+            (
+                "base",
+                lambda: _translate_transformers(self.base_repo, text, source_lang, target_lang),
+            ),
             ("prompted", lambda: _translate_prompted(text, source_lang, target_lang)),
         )
         if self.backend != "auto":
             attempts = tuple(a for a in attempts if a[0] == self.backend)
 
-        last_error: Optional[str] = None
+        last_error: str | None = None
         for name, fn in attempts:
             try:
                 r = fn()
@@ -192,12 +203,14 @@ class MtTranslator:
         )
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="MT inference wrapper")
     parser.add_argument("--text", required=True)
     parser.add_argument("--source-lang", default="en")
     parser.add_argument("--target-lang", default="lg")
-    parser.add_argument("--backend", choices=("auto", "onnx", "teacher", "base", "prompted"), default="auto")
+    parser.add_argument(
+        "--backend", choices=("auto", "onnx", "teacher", "base", "prompted"), default="auto"
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -207,7 +220,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     translator = MtTranslator(backend=args.backend)
-    result = translator.translate(args.text, source_lang=args.source_lang, target_lang=args.target_lang)
+    result = translator.translate(
+        args.text, source_lang=args.source_lang, target_lang=args.target_lang
+    )
     json.dump(asdict(result), sys.stdout, indent=2, ensure_ascii=False)
     print()
     return 0

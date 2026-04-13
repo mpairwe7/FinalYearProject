@@ -34,7 +34,7 @@ enum SpeechPermissionStatus {
 /// package's five-state enum into our three actionable outcomes.
 class SpeechPermissions {
   SpeechPermissions({@visibleForTesting PermissionDelegate? delegate})
-      : _delegate = delegate ?? const _RealPermissionDelegate();
+    : _delegate = delegate ?? const _RealPermissionDelegate();
 
   final PermissionDelegate _delegate;
 
@@ -72,8 +72,7 @@ class SpeechPermissions {
       PermissionStatus.denied => SpeechPermissionStatus.denied,
       PermissionStatus.permanentlyDenied =>
         SpeechPermissionStatus.permanentlyDenied,
-      PermissionStatus.restricted =>
-        SpeechPermissionStatus.permanentlyDenied,
+      PermissionStatus.restricted => SpeechPermissionStatus.permanentlyDenied,
     };
   }
 }

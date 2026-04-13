@@ -78,7 +78,7 @@ class LookupRateTool(Tool):
             }
         rate = rates[tax_type]
         # Guard against non-numeric entries (e.g. PAYE bands)
-        if not isinstance(rate, (int, float)):
+        if not isinstance(rate, int | float):
             return {
                 "ok": False,
                 "error": f"'{tax_type}' is not a simple scalar rate — "
@@ -124,7 +124,7 @@ class ListAvailableRatesTool(Tool):
         rows: list[dict[str, Any]] = []
         for key, display in _DISPLAY_NAMES.items():
             val = rates.get(key)
-            if isinstance(val, (int, float)):
+            if isinstance(val, int | float):
                 rows.append(
                     {
                         "tax_type": key,

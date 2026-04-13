@@ -39,7 +39,7 @@ import logging
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger("tts.train_luganda_vits")
 
@@ -58,7 +58,7 @@ class VitsConfig:
     grad_clip: float = 5.0
     num_loader_workers: int = 4
     use_phonemes: bool = True
-    phoneme_language: str = "sw"   # Swahili — closest espeak-ng approximation for Luganda
+    phoneme_language: str = "sw"  # Swahili — closest espeak-ng approximation for Luganda
     phoneme_cache_path: str = "phoneme_cache"
     text_cleaner: str = "phoneme_cleaners"
     save_step: int = 1000
@@ -75,7 +75,7 @@ class RunStats:
     n_clips: int = 0
     total_hours: float = 0.0
     speaker_ids: list[str] = field(default_factory=list)
-    consent_version: Optional[str] = None
+    consent_version: str | None = None
 
 
 @dataclass
@@ -85,7 +85,7 @@ class RunResult:
     config: dict[str, Any]
     stats: RunStats
     ok: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def _probe_dataset(data_dir: Path) -> RunStats:
@@ -116,7 +116,9 @@ def _probe_dataset(data_dir: Path) -> RunStats:
             if len(parts) < 2:
                 continue
             wav_rel = parts[0]
-            wav_path = wavs_dir / f"{wav_rel}.wav" if not wav_rel.endswith(".wav") else wavs_dir / wav_rel
+            wav_path = (
+                wavs_dir / f"{wav_rel}.wav" if not wav_rel.endswith(".wav") else wavs_dir / wav_rel
+            )
             if not wav_path.exists():
                 continue
             n += 1
@@ -187,13 +189,13 @@ def run(
 
     # Consent check passed. Now attempt the real Coqui TTS training run.
     try:
+        from trainer import Trainer, TrainerArgs  # type: ignore
         from TTS.config.shared_configs import BaseDatasetConfig  # type: ignore
         from TTS.tts.configs.vits_config import VitsConfig as CoquiVitsConfig  # type: ignore
         from TTS.tts.datasets import load_tts_samples  # type: ignore
         from TTS.tts.models.vits import Vits  # type: ignore
         from TTS.tts.utils.text.tokenizer import TTSTokenizer  # type: ignore
         from TTS.utils.audio import AudioProcessor  # type: ignore
-        from trainer import Trainer, TrainerArgs  # type: ignore
     except ImportError as exc:
         result.error = f"Coqui TTS not installed: {exc}. pip install TTS trainer"
         log.error(result.error)
@@ -265,7 +267,7 @@ def run(
     return result
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR_DEFAULT)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR_DEFAULT)
@@ -278,20 +280,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
 
-    result = run(
-        data_dir=args.data_dir, output_dir=args.output_dir, dry_run=args.dry_run
+    result = run(data_dir=args.data_dir, output_dir=args.output_dir, dry_run=args.dry_run)
+    print(
+        json.dumps(
+            {
+                "data_dir": result.data_dir,
+                "output_dir": result.output_dir,
+                "config": result.config,
+                "stats": asdict(result.stats),
+                "ok": result.ok,
+                "error": result.error,
+            },
+            indent=2,
+        )
     )
-    print(json.dumps(
-        {
-            "data_dir": result.data_dir,
-            "output_dir": result.output_dir,
-            "config": result.config,
-            "stats": asdict(result.stats),
-            "ok": result.ok,
-            "error": result.error,
-        },
-        indent=2,
-    ))
     return 0 if result.ok else 1
 
 

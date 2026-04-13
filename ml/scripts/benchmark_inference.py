@@ -140,7 +140,7 @@ class PromptResult:
 class BenchmarkRun:
     model_path: str
     model_size_mb: float | None
-    mode: str                      # "llama_cpp" | "synthetic"
+    mode: str  # "llama_cpp" | "synthetic"
     n_prompts: int
     peak_rss_mb: float
     per_prompt: list[PromptResult] = field(default_factory=list)
@@ -174,8 +174,9 @@ def _run_with_llama_cpp(
 ) -> list[PromptResult]:
     from llama_cpp import Llama  # type: ignore
 
-    log.info("Loading %s via llama-cpp-python (n_ctx=%d, n_threads=%d)",
-             model_path, n_ctx, n_threads)
+    log.info(
+        "Loading %s via llama-cpp-python (n_ctx=%d, n_threads=%d)", model_path, n_ctx, n_threads
+    )
     llm = Llama(
         model_path=str(model_path),
         n_ctx=n_ctx,
@@ -197,7 +198,7 @@ def _run_with_llama_cpp(
             temperature=0.0,
             stream=True,
         )
-        for chunk in stream:
+        for _chunk in stream:
             if first_token_time is None:
                 first_token_time = time.perf_counter()
             # Each chunk is either a dict with choices[0].text (modern
@@ -228,7 +229,11 @@ def _run_with_llama_cpp(
         )
         log.info(
             "[%s] ttft=%6.1fms total=%7.1fms %4.1f tok/s  (%d new)",
-            row["class"], ttft_ms, total_ms, tps, n_new,
+            row["class"],
+            ttft_ms,
+            total_ms,
+            tps,
+            n_new,
         )
     return out
 
@@ -326,6 +331,7 @@ def compare_to_baseline(
     rss_tolerance: float = 0.10,
 ) -> dict[str, Any]:
     """Check for regressions vs a saved benchmark JSON."""
+
     def _get(d: dict[str, Any], path: list[str], default: float = 0.0) -> float:
         cur: Any = d
         for p in path:
@@ -349,34 +355,40 @@ def compare_to_baseline(
     checks: list[dict[str, Any]] = []
 
     tps_drop = (base_tps - new_tps) / base_tps if base_tps else 0.0
-    checks.append({
-        "name": "tokens_per_sec",
-        "baseline": round(base_tps, 2),
-        "new": round(new_tps, 2),
-        "drop_ratio": round(tps_drop, 4),
-        "tolerance": tokens_per_sec_tolerance,
-        "passed": tps_drop <= tokens_per_sec_tolerance,
-    })
+    checks.append(
+        {
+            "name": "tokens_per_sec",
+            "baseline": round(base_tps, 2),
+            "new": round(new_tps, 2),
+            "drop_ratio": round(tps_drop, 4),
+            "tolerance": tokens_per_sec_tolerance,
+            "passed": tps_drop <= tokens_per_sec_tolerance,
+        }
+    )
 
     ttft_rise = (new_ttft - base_ttft) / base_ttft if base_ttft else 0.0
-    checks.append({
-        "name": "ttft_p95_ms",
-        "baseline": round(base_ttft, 2),
-        "new": round(new_ttft, 2),
-        "rise_ratio": round(ttft_rise, 4),
-        "tolerance": ttft_tolerance,
-        "passed": ttft_rise <= ttft_tolerance,
-    })
+    checks.append(
+        {
+            "name": "ttft_p95_ms",
+            "baseline": round(base_ttft, 2),
+            "new": round(new_ttft, 2),
+            "rise_ratio": round(ttft_rise, 4),
+            "tolerance": ttft_tolerance,
+            "passed": ttft_rise <= ttft_tolerance,
+        }
+    )
 
     rss_rise = (new_rss - base_rss) / base_rss if base_rss else 0.0
-    checks.append({
-        "name": "peak_rss_mb",
-        "baseline": round(base_rss, 2),
-        "new": round(new_rss, 2),
-        "rise_ratio": round(rss_rise, 4),
-        "tolerance": rss_tolerance,
-        "passed": rss_rise <= rss_tolerance,
-    })
+    checks.append(
+        {
+            "name": "peak_rss_mb",
+            "baseline": round(base_rss, 2),
+            "new": round(new_rss, 2),
+            "rise_ratio": round(rss_rise, 4),
+            "tolerance": rss_tolerance,
+            "passed": rss_rise <= rss_tolerance,
+        }
+    )
 
     return {
         "passed": all(c["passed"] for c in checks),
@@ -394,19 +406,27 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser(description="GGUF inference benchmark")
-    parser.add_argument("--model", type=Path, default=None,
-                        help="Path to a .gguf file. Omit for --synthetic.")
-    parser.add_argument("--synthetic", action="store_true",
-                        help="Skip model loading and emit deterministic stub numbers.")
-    parser.add_argument("--prompts", type=Path, default=None,
-                        help="JSON file overriding the default prompt schedule.")
-    parser.add_argument("--output-dir", type=Path,
-                        default=Path("artifacts/benchmark"))
+    parser.add_argument(
+        "--model", type=Path, default=None, help="Path to a .gguf file. Omit for --synthetic."
+    )
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Skip model loading and emit deterministic stub numbers.",
+    )
+    parser.add_argument(
+        "--prompts",
+        type=Path,
+        default=None,
+        help="JSON file overriding the default prompt schedule.",
+    )
+    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/benchmark"))
     parser.add_argument("--n-ctx", type=int, default=1024)
     parser.add_argument("--n-threads", type=int, default=max(1, (os.cpu_count() or 4) // 2))
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--baseline", type=Path, default=None,
-                        help="Previous benchmark.json to compare against.")
+    parser.add_argument(
+        "--baseline", type=Path, default=None, help="Previous benchmark.json to compare against."
+    )
     parser.add_argument("--tokens-per-sec-tolerance", type=float, default=0.10)
     parser.add_argument("--ttft-tolerance", type=float, default=0.15)
     parser.add_argument("--rss-tolerance", type=float, default=0.10)
@@ -436,9 +456,7 @@ def main() -> None:
             try:
                 import llama_cpp  # noqa: F401
             except ImportError:
-                log.warning(
-                    "llama-cpp-python not installed — falling back to --synthetic mode."
-                )
+                log.warning("llama-cpp-python not installed — falling back to --synthetic mode.")
                 use_synthetic = True
 
     if use_synthetic:
@@ -448,8 +466,11 @@ def main() -> None:
     else:
         assert model_path is not None
         results = _run_with_llama_cpp(
-            model_path, prompts,
-            n_ctx=args.n_ctx, n_threads=args.n_threads, seed=args.seed,
+            model_path,
+            prompts,
+            n_ctx=args.n_ctx,
+            n_threads=args.n_threads,
+            seed=args.seed,
         )
         mode = "llama_cpp"
 
@@ -518,14 +539,13 @@ def main() -> None:
             log.error("Could not parse baseline %s: %s", args.baseline, exc)
             sys.exit(1)
         cmp_ = compare_to_baseline(
-            report, baseline,
+            report,
+            baseline,
             tokens_per_sec_tolerance=args.tokens_per_sec_tolerance,
             ttft_tolerance=args.ttft_tolerance,
             rss_tolerance=args.rss_tolerance,
         )
-        (args.output_dir / "benchmark_comparison.json").write_text(
-            json.dumps(cmp_, indent=2)
-        )
+        (args.output_dir / "benchmark_comparison.json").write_text(json.dumps(cmp_, indent=2))
         print("\nRegression comparison:")
         for c in cmp_["checks"]:
             status = "PASS" if c["passed"] else "FAIL"

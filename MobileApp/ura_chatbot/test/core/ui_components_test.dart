@@ -16,16 +16,17 @@ import 'package:ura_chatbot/core/ui/loading_skeleton.dart';
 import 'package:ura_chatbot/core/ui/offline_banner.dart';
 
 Widget _wrap(Widget child) => ProviderScope(
-      child: MaterialApp(
-        theme: ThemeData(useMaterial3: true),
-        home: Scaffold(body: child),
-      ),
-    );
+  child: MaterialApp(
+    theme: ThemeData(useMaterial3: true),
+    home: Scaffold(body: child),
+  ),
+);
 
 void main() {
   group('EmptyState', () {
-    testWidgets('renders title, description, icon, and optional action',
-        (tester) async {
+    testWidgets('renders title, description, icon, and optional action', (
+      tester,
+    ) async {
       var actionTapped = false;
       await tester.pumpWidget(
         _wrap(
@@ -53,12 +54,7 @@ void main() {
 
     testWidgets('description is optional', (tester) async {
       await tester.pumpWidget(
-        _wrap(
-          const EmptyState(
-            icon: Icons.help_outline,
-            title: 'Empty',
-          ),
-        ),
+        _wrap(const EmptyState(icon: Icons.help_outline, title: 'Empty')),
       );
       expect(find.text('Empty'), findsOneWidget);
       // No exception thrown when description is null.
@@ -66,8 +62,9 @@ void main() {
   });
 
   group('SkeletonList', () {
-    testWidgets('renders the requested number of skeleton items',
-        (tester) async {
+    testWidgets('renders the requested number of skeleton items', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _wrap(
           const SizedBox(
@@ -104,15 +101,9 @@ void main() {
       expect(retries, 1);
     });
 
-    testWidgets('retry button is hidden when onRetry is null',
-        (tester) async {
+    testWidgets('retry button is hidden when onRetry is null', (tester) async {
       await tester.pumpWidget(
-        _wrap(
-          const AppErrorView(
-            title: 'Fatal',
-            message: 'Nothing to do',
-          ),
-        ),
+        _wrap(const AppErrorView(title: 'Fatal', message: 'Nothing to do')),
       );
       expect(find.text('Try again'), findsNothing);
     });

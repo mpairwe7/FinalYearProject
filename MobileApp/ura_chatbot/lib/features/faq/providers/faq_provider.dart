@@ -16,8 +16,10 @@ final tagsProvider = FutureProvider<List<TagInfo>>((ref) async {
 });
 
 /// Async family provider that fetches FAQs for a specific tag.
-final faqItemsProvider =
-    FutureProvider.family<List<FAQItem>, String>((ref, tag) async {
+final faqItemsProvider = FutureProvider.family<List<FAQItem>, String>((
+  ref,
+  tag,
+) async {
   final dio = ref.read(apiClientProvider);
   final res = await dio.get<Map<String, dynamic>>(ApiConfig.faq(tag));
   final data = res.data ?? const {};

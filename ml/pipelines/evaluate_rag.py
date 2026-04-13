@@ -98,10 +98,7 @@ def compute_answer_relevancy(
     try:
         model = _get_st_model(model_name)
         emb = model.encode([question, answer])
-        cos = float(
-            np.dot(emb[0], emb[1])
-            / (np.linalg.norm(emb[0]) * np.linalg.norm(emb[1]))
-        )
+        cos = float(np.dot(emb[0], emb[1]) / (np.linalg.norm(emb[0]) * np.linalg.norm(emb[1])))
         return cos
     except Exception:
         logger.warning("Could not compute answer_relevancy", exc_info=True)
@@ -137,8 +134,7 @@ def compute_context_recall(contexts: list[str], ground_truth: str) -> float:
     recalled = sum(
         1
         for sent in gt_sents
-        if (sw := set(re.findall(r"\w+", sent.lower())))
-        and len(sw & ctx_words) / len(sw) >= 0.4
+        if (sw := set(re.findall(r"\w+", sent.lower()))) and len(sw & ctx_words) / len(sw) >= 0.4
     )
     return recalled / len(gt_sents)
 
@@ -153,7 +149,11 @@ def compute_groundedness(answer: str, contexts: list[str]) -> float:
 
     def _ngrams(text: str, n: int = 3) -> set[tuple[str, ...]]:
         tokens = re.findall(r"\w+", text.lower())
-        return {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)} if len(tokens) >= n else set()
+        return (
+            {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
+            if len(tokens) >= n
+            else set()
+        )
 
     answer_ng = _ngrams(answer)
     if not answer_ng:
@@ -292,8 +292,10 @@ def compute_safety_probe_pass_rate(eval_fn=None) -> float:
     """Run adversarial prompts through the guardrails and check refusal rate."""
     try:
         import sys
+
         sys.path.insert(0, str(PROJECT_ROOT))
         from App.backend.app.guardrails import InputGuard
+
         guard = InputGuard()
         blocked = sum(1 for probe in _SAFETY_PROBES if not guard.check(probe).allowed)
         return blocked / len(_SAFETY_PROBES)
@@ -359,7 +361,9 @@ def evaluate_rag(eval_data: list[dict[str, Any]]) -> dict[str, Any]:
 
         # Phase 3 — per-slice breakdowns
         lang = (sample.get("language") or "en").lower()
-        category = (sample.get("category") or sample.get("tag") or sample.get("topic") or "unknown").lower()
+        category = (
+            sample.get("category") or sample.get("tag") or sample.get("topic") or "unknown"
+        ).lower()
         for name, value in row_metrics.items():
             _get_slice("by_language", lang)[name].append(value)
             _get_slice("by_category", category)[name].append(value)
@@ -373,12 +377,14 @@ def evaluate_rag(eval_data: list[dict[str, Any]]) -> dict[str, Any]:
         scores = [v for v in row_metrics.values() if v is not None]
         if scores:
             confidence = float(np.mean(scores))
-            per_sample.append({
-                "confidence": round(confidence, 4),
-                "correct": confidence >= 0.5,
-                "language": lang,
-                "category": category,
-            })
+            per_sample.append(
+                {
+                    "confidence": round(confidence, 4),
+                    "correct": confidence >= 0.5,
+                    "language": lang,
+                    "category": category,
+                }
+            )
 
         if (i + 1) % 50 == 0:
             logger.info("Evaluated %d/%d samples", i + 1, len(eval_data))
@@ -514,17 +520,19 @@ def compare_to_baseline(
         ok = (not is_regression) and meets_floor
         if not ok:
             passed = False
-        checks.append({
-            "name": name,
-            "new": round(new_val, 4),
-            "baseline": round(base_val, 4),
-            "delta": round(delta, 4),
-            "tolerance": tolerance,
-            "required_improvement": required,
-            "regression": is_regression,
-            "meets_floor": meets_floor,
-            "passed": ok,
-        })
+        checks.append(
+            {
+                "name": name,
+                "new": round(new_val, 4),
+                "baseline": round(base_val, 4),
+                "delta": round(delta, 4),
+                "tolerance": tolerance,
+                "required_improvement": required,
+                "regression": is_regression,
+                "meets_floor": meets_floor,
+                "passed": ok,
+            }
+        )
 
     return {"passed": passed, "tolerance": tolerance, "checks": checks}
 
@@ -547,8 +555,8 @@ def main() -> None:
         type=str,
         default=None,
         help="Path to a previous rag_evaluation_results.json (champion "
-             "metrics). When provided, the run fails if any metric "
-             "regresses by more than --tolerance.",
+        "metrics). When provided, the run fails if any metric "
+        "regresses by more than --tolerance.",
     )
     parser.add_argument(
         "--tolerance",
@@ -617,9 +625,7 @@ def main() -> None:
     print("-" * 50)
     for check in gate_results["checks"]:
         status = "PASS" if check["passed"] else "FAIL"
-        print(
-            f"  {check['name']:25s} {check['value']:.4f} >= {check['threshold']:.4f}  {status}"
-        )
+        print(f"  {check['name']:25s} {check['value']:.4f} >= {check['threshold']:.4f}  {status}")
 
     with open(output_dir / "rag_quality_gates.json", "w") as f:
         json.dump(gate_results, f, indent=2)
@@ -634,7 +640,9 @@ def main() -> None:
             with open(baseline_path) as f:
                 baseline = json.load(f)
             comparison = compare_to_baseline(
-                metrics, baseline, tolerance=args.tolerance,
+                metrics,
+                baseline,
+                tolerance=args.tolerance,
             )
             print("\nChampion-challenger comparison:")
             print("-" * 50)

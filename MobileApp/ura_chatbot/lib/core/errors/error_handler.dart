@@ -90,9 +90,9 @@ class _ReleaseErrorBox extends StatelessWidget {
               Text(
                 'Something went wrong rendering this view.',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: cs.onSurfaceVariant,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
               ),
             ],
           ),

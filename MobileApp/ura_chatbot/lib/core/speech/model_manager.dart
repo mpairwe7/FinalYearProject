@@ -23,8 +23,6 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -79,17 +77,13 @@ class ModelBundle {
   String fileByRole(String role) {
     final match = files.firstWhere(
       (f) => f.role == role,
-      orElse: () => throw StateError(
-        'bundle $id has no file with role "$role"',
-      ),
+      orElse: () =>
+          throw StateError('bundle $id has no file with role "$role"'),
     );
     return match.absolutePath;
   }
 
-  factory ModelBundle.fromJson(
-    Map<String, Object?> json,
-    String supportRoot,
-  ) {
+  factory ModelBundle.fromJson(Map<String, Object?> json, String supportRoot) {
     return ModelBundle(
       id: json['id'] as String,
       title: json['title'] as String,
@@ -98,10 +92,12 @@ class ModelBundle {
       description: (json['description'] as String?) ?? '',
       tier: (json['tier'] as String?) ?? 'primary',
       files: (json['files'] as List)
-          .map((f) => ModelFile.fromJson(
-                f as Map<String, Object?>,
-                p.join(supportRoot, 'speech', json['id'] as String),
-              ))
+          .map(
+            (f) => ModelFile.fromJson(
+              f as Map<String, Object?>,
+              p.join(supportRoot, 'speech', json['id'] as String),
+            ),
+          )
           .toList(),
     );
   }
@@ -125,10 +121,7 @@ class ModelFile {
 
   bool get existsLocally => File(absolutePath).existsSync();
 
-  factory ModelFile.fromJson(
-    Map<String, Object?> json,
-    String bundleDir,
-  ) {
+  factory ModelFile.fromJson(Map<String, Object?> json, String bundleDir) {
     final filename = json['filename'] as String;
     return ModelFile(
       role: json['role'] as String,
@@ -215,6 +208,7 @@ class ModelManager {
     if (bundle == null) return;
     for (final file in bundle.files) {
       final f = File(file.absolutePath);
+      // ignore: avoid_slow_async_io
       if (await f.exists()) {
         await f.delete();
       }
@@ -234,9 +228,7 @@ class ModelManager {
     _inflight[bundle.id] = completer;
 
     try {
-      final bundleDir = Directory(
-        p.join(_supportRoot, 'speech', bundle.id),
-      );
+      final bundleDir = Directory(p.join(_supportRoot, 'speech', bundle.id));
       await bundleDir.create(recursive: true);
 
       for (final file in bundle.files) {
@@ -284,7 +276,8 @@ class ModelManager {
         await sink.close();
         return false;
       }
-      final total = int.tryParse(
+      final total =
+          int.tryParse(
             response.headers.value(Headers.contentLengthHeader) ?? '0',
           ) ??
           bundle.sizeBytes;
@@ -321,7 +314,10 @@ class ModelManager {
         await sink?.close();
       } catch (_) {}
       // Clean up partial file on failure.
-      if (await tmp.exists() && !await File(file.absolutePath).exists()) {
+      // ignore: avoid_slow_async_io
+      if (await tmp.exists() &&
+          // ignore: avoid_slow_async_io
+          !await File(file.absolutePath).exists()) {
         try {
           await tmp.delete();
         } catch (_) {}
@@ -331,6 +327,7 @@ class ModelManager {
 
   Future<bool> _verifyChecksum(ModelFile file) async {
     final f = File(file.absolutePath);
+    // ignore: avoid_slow_async_io
     if (!await f.exists()) return false;
     return _verifyTempChecksum(f, file.sha256);
   }

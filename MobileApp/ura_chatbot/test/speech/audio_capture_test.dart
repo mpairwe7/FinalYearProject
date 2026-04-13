@@ -46,11 +46,7 @@ void main() {
           Endian.little,
         );
       }
-      return AudioChunk(
-        bytes: bytes,
-        sampleRate: 16000,
-        capturedAtMs: atMs,
-      );
+      return AudioChunk(bytes: bytes, sampleRate: 16000, capturedAtMs: atMs);
     }
 
     test('silent chunks yield no events', () {

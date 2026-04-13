@@ -26,8 +26,14 @@ class AppSpacing {
 
   // Common EdgeInsets built from the scale above.
   static const EdgeInsets screenPadding = EdgeInsets.all(lg);
-  static const EdgeInsets listPadding = EdgeInsets.symmetric(horizontal: md, vertical: sm);
-  static const EdgeInsets bubbleInner = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
+  static const EdgeInsets listPadding = EdgeInsets.symmetric(
+    horizontal: md,
+    vertical: sm,
+  );
+  static const EdgeInsets bubbleInner = EdgeInsets.symmetric(
+    horizontal: 14,
+    vertical: 10,
+  );
   static const EdgeInsets cardInner = EdgeInsets.all(lg);
 }
 
@@ -45,8 +51,12 @@ class AppRadius {
 
   // Reusable BorderRadius instances.
   static const BorderRadius cardRadius = BorderRadius.all(Radius.circular(lg));
-  static const BorderRadius bubbleRadius = BorderRadius.all(Radius.circular(18));
-  static const BorderRadius inputRadius = BorderRadius.all(Radius.circular(xxl));
+  static const BorderRadius bubbleRadius = BorderRadius.all(
+    Radius.circular(18),
+  );
+  static const BorderRadius inputRadius = BorderRadius.all(
+    Radius.circular(xxl),
+  );
   static const BorderRadius chipRadius = BorderRadius.all(Radius.circular(xl));
 }
 

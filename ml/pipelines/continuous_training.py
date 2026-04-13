@@ -25,10 +25,9 @@ import json
 import logging
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, Optional
 
 import numpy as np
 
@@ -81,8 +80,7 @@ def collect_feedback(feedback_dir: Path) -> list[dict]:
                 if is_negative or is_low_conf:
                     candidates.append(rec)
 
-    log.info("feedback: collected %d retraining candidates from %s",
-             len(candidates), feedback_dir)
+    log.info("feedback: collected %d retraining candidates from %s", len(candidates), feedback_dir)
     return candidates
 
 
@@ -93,7 +91,7 @@ def collect_feedback(feedback_dir: Path) -> list[dict]:
 
 def compute_drift(
     feedback_texts: list[str],
-    training_centroid_path: Optional[Path] = None,
+    training_centroid_path: Path | None = None,
     embedder_model: str = "sentence-transformers/all-MiniLM-L6-v2",
 ) -> float:
     """Compute embedding distribution drift between feedback and training set.
@@ -179,8 +177,11 @@ def run_continuous_training(cfg: ContinuousTrainingConfig) -> dict:
     result["feedback_count"] = len(candidates)
 
     if len(candidates) < cfg.min_feedback_samples:
-        log.info("only %d feedback samples (need %d); skipping",
-                 len(candidates), cfg.min_feedback_samples)
+        log.info(
+            "only %d feedback samples (need %d); skipping",
+            len(candidates),
+            cfg.min_feedback_samples,
+        )
         return result
 
     # 2. Detect drift.
@@ -192,8 +193,7 @@ def run_continuous_training(cfg: ContinuousTrainingConfig) -> dict:
     result["drift_score"] = drift
 
     if drift < cfg.drift_threshold:
-        log.info("drift %.4f < threshold %.4f; no retraining needed",
-                 drift, cfg.drift_threshold)
+        log.info("drift %.4f < threshold %.4f; no retraining needed", drift, cfg.drift_threshold)
         return result
 
     log.info("drift %.4f >= threshold %.4f; triggering retrain", drift, cfg.drift_threshold)
@@ -208,11 +208,17 @@ def run_continuous_training(cfg: ContinuousTrainingConfig) -> dict:
     try:
         subprocess.run(
             [
-                sys.executable, "-m", "ml.scripts.data_augmentation",
-                "--csv-dir", "Data/dataset",
-                "--pdf-dir", "Data/pdfs",
-                "--teacher-qa-dir", "Data/teacher_qa",
-                "--output-dir", str(cfg.output_dir / "training_data"),
+                sys.executable,
+                "-m",
+                "ml.scripts.data_augmentation",
+                "--csv-dir",
+                "Data/dataset",
+                "--pdf-dir",
+                "Data/pdfs",
+                "--teacher-qa-dir",
+                "Data/teacher_qa",
+                "--output-dir",
+                str(cfg.output_dir / "training_data"),
                 "-v",
             ],
             check=True,
@@ -226,10 +232,15 @@ def run_continuous_training(cfg: ContinuousTrainingConfig) -> dict:
     try:
         subprocess.run(
             [
-                sys.executable, "-m", "ml.scripts.fine_tune_gemma",
-                "--target", "mobile_gemma_2b",
-                "--data-dir", str(cfg.output_dir / "training_data"),
-                "--output-dir", str(cfg.output_dir / "model"),
+                sys.executable,
+                "-m",
+                "ml.scripts.fine_tune_gemma",
+                "--target",
+                "mobile_gemma_2b",
+                "--data-dir",
+                str(cfg.output_dir / "training_data"),
+                "--output-dir",
+                str(cfg.output_dir / "model"),
                 "--dry-run",
             ],
             check=True,
@@ -243,9 +254,13 @@ def run_continuous_training(cfg: ContinuousTrainingConfig) -> dict:
     try:
         subprocess.run(
             [
-                sys.executable, "-m", "ml.pipelines.quality_gates",
-                "--family", "production",
-                "--results-dir", str(cfg.output_dir),
+                sys.executable,
+                "-m",
+                "ml.pipelines.quality_gates",
+                "--family",
+                "production",
+                "--results-dir",
+                str(cfg.output_dir),
                 "--soft-fail",
             ],
             check=True,

@@ -29,7 +29,10 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 log = logging.getLogger("mt.backtranslate")
 
@@ -59,7 +62,7 @@ def run(
     direction: str,
     mono_file: Path,
     out_path: Path,
-    max_rows: Optional[int],
+    max_rows: int | None,
     dry_run: bool,
 ) -> int:
     from ml.scripts.data_aug.speech_schema import (  # type: ignore
@@ -107,7 +110,7 @@ def run(
             except Exception as exc:
                 log.warning("batch %d failed: %s", i, exc)
                 continue
-            for src_text, tgt_text in zip(batch, translations):
+            for src_text, tgt_text in zip(batch, translations, strict=False):
                 if not tgt_text or not tgt_text.strip():
                     continue
                 try:
@@ -130,7 +133,7 @@ def run(
     return 0
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--direction", choices=("en2lg", "lg2en"), default="lg2en")
     parser.add_argument(

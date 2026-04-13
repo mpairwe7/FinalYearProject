@@ -723,15 +723,15 @@ def upsert_user(
         except Exception:
             logger.exception("upsert_user update failed")
             conn.rollback()
-        return dict(
-            id=row["id"],
-            tenant_id=row["tenant_id"],
-            external_id=row["external_id"],
-            email=email or row["email"],
-            role=role or row["role"],
-            created_at=row["created_at"],
-            last_seen_at=now,
-        )
+        return {
+            "id": row["id"],
+            "tenant_id": row["tenant_id"],
+            "external_id": row["external_id"],
+            "email": email or row["email"],
+            "role": role or row["role"],
+            "created_at": row["created_at"],
+            "last_seen_at": now,
+        }
 
     user_id = str(uuid.uuid4())
     try:

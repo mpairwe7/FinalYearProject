@@ -17,8 +17,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// `dart.vm.product=true`, which flips this to `false` and makes the
 /// SpeechLab eval screen, verbose loggers, and other internal surfaces
 /// unreachable regardless of runtime flag state.
-const bool kSpeechLabEnabled =
-    !bool.fromEnvironment('dart.vm.product', defaultValue: false);
+const bool kSpeechLabEnabled = !bool.fromEnvironment('dart.vm.product');
 
 /// Canonical flag definitions. Add new flags here (don't read keys
 /// directly at the call site) so they stay discoverable and auditable.
@@ -106,8 +105,9 @@ class FeatureFlagStore {
     await _prefs.setBool(flag.key, value);
   }
 
-  Map<String, bool> snapshot() =>
-      {for (final f in FeatureFlags.all) f.key: get(f)};
+  Map<String, bool> snapshot() => {
+    for (final f in FeatureFlags.all) f.key: get(f),
+  };
 }
 
 /// Riverpod entry point. Eagerly resolves SharedPreferences once so

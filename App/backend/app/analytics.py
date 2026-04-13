@@ -12,12 +12,14 @@ import logging
 import time
 from collections import defaultdict, deque
 from threading import Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from . import database as db
+
+if TYPE_CHECKING:
+    from fastapi import Request, Response
 
 logger = logging.getLogger(__name__)
 

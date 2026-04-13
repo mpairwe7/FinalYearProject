@@ -37,14 +37,13 @@ class ChatState {
     String? conversationId,
     Object? error = _sentinel,
     bool? offlineReady,
-  }) =>
-      ChatState(
-        messages: messages ?? this.messages,
-        isLoading: isLoading ?? this.isLoading,
-        conversationId: conversationId ?? this.conversationId,
-        error: identical(error, _sentinel) ? this.error : error as String?,
-        offlineReady: offlineReady ?? this.offlineReady,
-      );
+  }) => ChatState(
+    messages: messages ?? this.messages,
+    isLoading: isLoading ?? this.isLoading,
+    conversationId: conversationId ?? this.conversationId,
+    error: identical(error, _sentinel) ? this.error : error as String?,
+    offlineReady: offlineReady ?? this.offlineReady,
+  );
 
   // Sentinel so copyWith(error: null) can explicitly clear the field.
   static const Object _sentinel = Object();
@@ -130,7 +129,8 @@ class ChatNotifier extends Notifier<ChatState> {
       _addAssistantMessage(chatRes);
     } on DioException catch (e, s) {
       // Network / connection error → fall back to on-device inference
-      final isNetworkError = e.type == DioExceptionType.connectionTimeout ||
+      final isNetworkError =
+          e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.connectionError ||
           e.type == DioExceptionType.sendTimeout;
 
@@ -232,10 +232,7 @@ class ChatNotifier extends Notifier<ChatState> {
     try {
       await _dio.post<Map<String, dynamic>>(
         ApiConfig.feedback,
-        data: {
-          ...feedback.toJson(),
-          'session_id': LocalStorage.sessionId,
-        },
+        data: {...feedback.toJson(), 'session_id': LocalStorage.sessionId},
       );
       _trackEvent('feedback_submitted', {'rating': feedback.rating});
       return true;
@@ -294,11 +291,13 @@ class ChatNotifier extends Notifier<ChatState> {
     if (state.messages.isEmpty) return null;
     try {
       final msgs = state.messages
-          .map((m) => {
-                'role': m.role,
-                'content': m.content,
-                'timestamp': m.timestamp.toIso8601String(),
-              })
+          .map(
+            (m) => {
+              'role': m.role,
+              'content': m.content,
+              'timestamp': m.timestamp.toIso8601String(),
+            },
+          )
           .toList();
       final res = await _dio.post<List<int>>(
         ApiConfig.exportConversation,

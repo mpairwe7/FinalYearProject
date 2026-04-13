@@ -40,5 +40,4 @@ output:
 compact: true
 
 # Enable all severity levels
-check-type:
-  - all
+# Note: check-type is not a valid checkov CLI option; removed to prevent errors

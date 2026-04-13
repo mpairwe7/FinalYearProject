@@ -54,7 +54,7 @@ class OnDeviceResult {
 /// is not bundled or the device doesn't meet minimum requirements.
 class OnDeviceLlm {
   OnDeviceLlm({OnDeviceLlmConfig? config})
-      : _config = config ?? const OnDeviceLlmConfig();
+    : _config = config ?? const OnDeviceLlmConfig();
 
   final OnDeviceLlmConfig _config;
   bool _initialized = false;
@@ -74,13 +74,14 @@ class OnDeviceLlm {
     if (_initialized) return _available;
 
     try {
-      final result = await _channel.invokeMethod<Map<Object?, Object?>>('initialize', {
-        'modelPath': _config.modelPath,
-        'maxTokens': _config.maxTokens,
-        'temperature': _config.temperature,
-        'topP': _config.topP,
-        'contextLength': _config.contextLength,
-      });
+      final result = await _channel
+          .invokeMethod<Map<Object?, Object?>>('initialize', {
+            'modelPath': _config.modelPath,
+            'maxTokens': _config.maxTokens,
+            'temperature': _config.temperature,
+            'topP': _config.topP,
+            'contextLength': _config.contextLength,
+          });
 
       _available = result?['success'] == true;
       _initialized = true;
@@ -123,12 +124,13 @@ class OnDeviceLlm {
       // Build prompt in the same format as the backend llm.py
       final prompt = _buildPrompt(query, passages, locale);
 
-      final result = await _channel.invokeMethod<Map<Object?, Object?>>('generate', {
-        'prompt': prompt,
-        'maxTokens': _config.maxTokens,
-        'temperature': _config.temperature,
-        'topP': _config.topP,
-      });
+      final result = await _channel
+          .invokeMethod<Map<Object?, Object?>>('generate', {
+            'prompt': prompt,
+            'maxTokens': _config.maxTokens,
+            'temperature': _config.temperature,
+            'topP': _config.topP,
+          });
 
       if (result == null) return null;
 
@@ -155,7 +157,8 @@ class OnDeviceLlm {
   }
 
   /// System prompt matching the backend llm.py SYSTEM_PROMPT.
-  static const _systemPrompt = 'You are the **URA Digital Assistant**, an official AI helper for the '
+  static const _systemPrompt =
+      'You are the **URA Digital Assistant**, an official AI helper for the '
       'Uganda Revenue Authority. Your role is to provide accurate, helpful '
       'answers about URA services, tax obligations, and procedures.\n\n'
       '## Rules\n'

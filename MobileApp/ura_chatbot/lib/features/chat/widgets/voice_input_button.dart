@@ -11,8 +11,6 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -192,9 +190,7 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
       if (mounted) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(
-            SnackBar(content: Text('Mic error: ${e.message}')),
-          );
+          ..showSnackBar(SnackBar(content: Text('Mic error: ${e.message}')));
       }
       _resetState();
     }
@@ -228,9 +224,7 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
       if (mounted) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(content: Text('Transcription failed')),
-          );
+          ..showSnackBar(const SnackBar(content: Text('Transcription failed')));
       }
     } finally {
       _resetState();
@@ -277,8 +271,8 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
       label: _listening
           ? 'Recording voice input'
           : _processing
-              ? 'Processing speech'
-              : 'Start voice input',
+          ? 'Processing speech'
+          : 'Start voice input',
       button: true,
       liveRegion: isActive,
       child: SizedBox(
@@ -332,8 +326,8 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
               tooltip: _listening
                   ? 'Stop listening'
                   : _processing
-                      ? 'Processing…'
-                      : 'Voice input',
+                  ? 'Processing…'
+                  : 'Voice input',
             ),
           ],
         ),

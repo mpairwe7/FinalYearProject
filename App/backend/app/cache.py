@@ -26,6 +26,7 @@ Environment variables:
 from __future__ import annotations
 
 import base64
+import contextlib
 import json as _json
 import logging
 import os
@@ -285,12 +286,10 @@ class RedisSemanticCache:
     def stats(self) -> dict[str, int]:
         size = 0
         if self._client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 size = sum(
                     1 for _ in self._client.scan_iter(match=f"{CACHE_REDIS_PREFIX}*", count=200)
                 )
-            except Exception:
-                pass
         return {**self._stats, "size": size}
 
 

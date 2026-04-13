@@ -32,7 +32,7 @@ import logging
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger("mt.finetune")
 
@@ -92,7 +92,7 @@ class RunResult:
     stats: RunStats
     metrics: dict[str, Any] = field(default_factory=dict)
     ok: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def check_dependencies() -> list[str]:
@@ -192,7 +192,9 @@ def run(
     stats.languages = sorted({ex.source_lang for ex in rows} | {ex.target_lang for ex in rows})
     log.info(
         "loaded %d unique pairs (dropped %d duplicates), langs=%s",
-        len(rows), dropped, stats.languages,
+        len(rows),
+        dropped,
+        stats.languages,
     )
 
     if not rows:
@@ -207,11 +209,16 @@ def run(
 
     if dry_run:
         log.info("[dry-run] train=%d val=%d test=%d", stats.n_train, stats.n_val, stats.n_test)
-        log.info("[dry-run] target=%s config=%s", target, {k: v for k, v in cfg.items() if k != "target_modules"})
+        log.info(
+            "[dry-run] target=%s config=%s",
+            target,
+            {k: v for k, v in cfg.items() if k != "target_modules"},
+        )
         result.ok = True
         return result
 
     try:
+        from peft import LoraConfig, get_peft_model  # type: ignore
         from transformers import (  # type: ignore
             AutoModelForSeq2SeqLM,
             AutoTokenizer,
@@ -219,7 +226,6 @@ def run(
             Seq2SeqTrainer,
             Seq2SeqTrainingArguments,
         )
-        from peft import LoraConfig, get_peft_model  # type: ignore
     except ImportError as exc:
         result.error = f"import failed: {exc}"
         return result
@@ -282,7 +288,9 @@ def run(
 
     if val_ds is not None:
         eval_metrics = trainer.evaluate()
-        result.metrics = {k: round(float(v), 4) for k, v in eval_metrics.items() if isinstance(v, (int, float))}
+        result.metrics = {
+            k: round(float(v), 4) for k, v in eval_metrics.items() if isinstance(v, int | float)
+        }
 
     manifest = {
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
@@ -303,7 +311,7 @@ def run(
     return result
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="MADLAD LoRA fine-tune for Luganda <-> English")
     parser.add_argument("--target", choices=sorted(MODEL_CONFIGS.keys()), default="mobile")
     parser.add_argument("--data-dir", type=Path, default=DATA_ROOT / "TTT")
@@ -323,18 +331,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         output_dir=args.output_dir,
         dry_run=args.dry_run,
     )
-    print(json.dumps(
-        {
-            "target": result.target,
-            "model_id": result.model_id,
-            "output_dir": result.output_dir,
-            "stats": asdict(result.stats),
-            "metrics": result.metrics,
-            "ok": result.ok,
-            "error": result.error,
-        },
-        indent=2,
-    ))
+    print(
+        json.dumps(
+            {
+                "target": result.target,
+                "model_id": result.model_id,
+                "output_dir": result.output_dir,
+                "stats": asdict(result.stats),
+                "metrics": result.metrics,
+                "ok": result.ok,
+                "error": result.error,
+            },
+            indent=2,
+        )
+    )
     return 0 if result.ok else 1
 
 

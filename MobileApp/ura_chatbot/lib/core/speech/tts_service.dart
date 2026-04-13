@@ -30,11 +30,9 @@ class TtsFrame {
 }
 
 class TtsService {
-  TtsService({
-    SpeechPipelineConfig? config,
-    SherpaChannel? channel,
-  })  : _config = config ?? const SpeechPipelineConfig(),
-        _channel = channel ?? SherpaChannel.instance;
+  TtsService({SpeechPipelineConfig? config, SherpaChannel? channel})
+    : _config = config ?? const SpeechPipelineConfig(),
+      _channel = channel ?? SherpaChannel.instance;
 
   final SpeechPipelineConfig _config;
   final SherpaChannel _channel;
@@ -73,9 +71,7 @@ class TtsService {
             );
           },
           onError: controller.addError,
-          onDone: () {
-            controller.close();
-          },
+          onDone: controller.close,
         );
 
     return controller.stream;

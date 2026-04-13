@@ -106,9 +106,24 @@ _DIGIT_TEMPLATES = [
 
 # Ugandan locations that must be pronounceable.
 _LOCATIONS = [
-    "Kampala", "Entebbe", "Jinja", "Gulu", "Lira", "Mbarara",
-    "Mbale", "Fort Portal", "Soroti", "Arua", "Masaka", "Kabale",
-    "Malaba", "Busia", "Katuna", "Mutukula", "Elegu", "Oraba",
+    "Kampala",
+    "Entebbe",
+    "Jinja",
+    "Gulu",
+    "Lira",
+    "Mbarara",
+    "Mbale",
+    "Fort Portal",
+    "Soroti",
+    "Arua",
+    "Masaka",
+    "Kabale",
+    "Malaba",
+    "Busia",
+    "Katuna",
+    "Mutukula",
+    "Elegu",
+    "Oraba",
 ]
 
 
@@ -129,18 +144,20 @@ def generate_prompts(
     # 2. FAQ-derived sentences (from CSV).
     faq_sentences = _load_faq_sentences(faq_dir, max_per_file=5)
     rng.shuffle(faq_sentences)
-    prompts.extend(faq_sentences[:min(200, len(faq_sentences))])
+    prompts.extend(faq_sentences[: min(200, len(faq_sentences))])
 
     # 3. Digit/currency coverage.
     for _ in range(50):
         t = rng.choice(_DIGIT_TEMPLATES)
-        prompts.append(t.format(
-            amount=f"{rng.randint(10000, 50000000):,}",
-            ref=f"REF-{rng.randint(100000, 999999)}",
-            tin=f"{rng.randint(1000000000, 9999999999)}",
-            date=f"{rng.randint(1,28)}/{rng.randint(1,12)}/2026",
-            invoice=f"INV-{rng.randint(1000, 99999)}",
-        ))
+        prompts.append(
+            t.format(
+                amount=f"{rng.randint(10000, 50000000):,}",
+                ref=f"REF-{rng.randint(100000, 999999)}",
+                tin=f"{rng.randint(1000000000, 9999999999)}",
+                date=f"{rng.randint(1,28)}/{rng.randint(1,12)}/2026",
+                invoice=f"INV-{rng.randint(1000, 99999)}",
+            )
+        )
 
     # 4. Location sentences.
     for loc in _LOCATIONS:
@@ -148,7 +165,7 @@ def generate_prompts(
 
     # 5. Pad to target count with variations.
     while len(prompts) < target_count:
-        base = rng.choice(prompts[:len(core) + 20])
+        base = rng.choice(prompts[: len(core) + 20])
         prompts.append(base)
 
     # Deduplicate preserving order.

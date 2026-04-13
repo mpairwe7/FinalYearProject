@@ -31,13 +31,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
-import statistics
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -66,7 +64,7 @@ def _percentile(values: list[float], p: float) -> float:
     return float(vs[f] + (vs[c] - vs[f]) * (k - f))
 
 
-def _peak_rss_mb() -> Optional[float]:
+def _peak_rss_mb() -> float | None:
     try:
         import resource  # Linux/macOS only
 
@@ -164,7 +162,7 @@ def run(*, eval_set: Path, dry_run: bool, target: str) -> dict[str, Any]:
     return payload
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Mobile speech pipeline benchmark")
     parser.add_argument(
         "--eval-set",
@@ -176,7 +174,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         type=Path,
         default=PROJECT_ROOT / "Results" / "metrics" / "mobile_benchmark.json",
     )
-    parser.add_argument("--target", default="dev", help="Label for this run (pixel_6a, iphone_12, dev, ...)")
+    parser.add_argument(
+        "--target", default="dev", help="Label for this run (pixel_6a, iphone_12, dev, ...)"
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)

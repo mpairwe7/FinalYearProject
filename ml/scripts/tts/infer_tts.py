@@ -30,7 +30,10 @@ import time
 import wave
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 log = logging.getLogger("tts.infer")
 
@@ -114,8 +117,8 @@ def _write_wav(path: Path, samples, sample_rate: int) -> None:
 
 def _synth_sherpa(voice_dir: Path, text: str, voice_id: str):
     try:
-        import sherpa_onnx  # type: ignore
         import numpy as np  # type: ignore
+        import sherpa_onnx  # type: ignore
     except ImportError:
         log.debug("sherpa-onnx or numpy missing")
         return None
@@ -157,8 +160,8 @@ def _synth_sherpa(voice_dir: Path, text: str, voice_id: str):
 
 def _synth_piper(voice_dir: Path, text: str):
     try:
-        from piper import PiperVoice  # type: ignore
         import numpy as np  # type: ignore
+        from piper import PiperVoice  # type: ignore
     except ImportError:
         log.debug("piper or numpy missing")
         return None
@@ -219,7 +222,7 @@ class TtsSynthesizer:
         self,
         *,
         voice_id: str,
-        sherpa_dir: Optional[Path] = None,
+        sherpa_dir: Path | None = None,
         backend: str = "auto",
     ) -> None:
         self.voice_id = voice_id
@@ -240,7 +243,7 @@ class TtsSynthesizer:
             if not attempts:
                 raise ValueError(f"unknown backend: {self.backend}")
 
-        last_error: Optional[str] = None
+        last_error: str | None = None
         for name, fn in attempts:
             try:
                 if name == "sherpa":
@@ -291,7 +294,7 @@ class TtsSynthesizer:
         return result
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--text", required=True)
     parser.add_argument("--voice", default="en_US-lessac-medium")

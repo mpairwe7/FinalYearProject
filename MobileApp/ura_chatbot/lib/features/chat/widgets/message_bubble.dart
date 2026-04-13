@@ -58,8 +58,9 @@ class MessageBubble extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: maxBubbleWidth),
         margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
         child: Column(
-          crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: isUser
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
           children: [
             // Main bubble
             Material(
@@ -67,8 +68,12 @@ class MessageBubble extends StatelessWidget {
               borderRadius: BorderRadius.only(
                 topLeft: const Radius.circular(AppRadius.lg + 2),
                 topRight: const Radius.circular(AppRadius.lg + 2),
-                bottomLeft: Radius.circular(isUser ? AppRadius.lg + 2 : AppRadius.xs),
-                bottomRight: Radius.circular(isUser ? AppRadius.xs : AppRadius.lg + 2),
+                bottomLeft: Radius.circular(
+                  isUser ? AppRadius.lg + 2 : AppRadius.xs,
+                ),
+                bottomRight: Radius.circular(
+                  isUser ? AppRadius.xs : AppRadius.lg + 2,
+                ),
               ),
               child: InkWell(
                 borderRadius: AppRadius.bubbleRadius,
@@ -138,10 +143,7 @@ class MessageBubble extends StatelessWidget {
 
               // Feedback buttons
               const SizedBox(height: AppSpacing.xs),
-              FeedbackButtons(
-                messageId: message.id,
-                onFeedback: onFeedback,
-              ),
+              FeedbackButtons(messageId: message.id, onFeedback: onFeedback),
             ],
           ],
         ),

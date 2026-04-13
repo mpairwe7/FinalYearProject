@@ -20,8 +20,7 @@ class _FakeSecureStorage implements FlutterSecureStorage {
     WebOptions? webOptions,
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
-  }) async =>
-      _store[key];
+  }) async => _store[key];
 
   @override
   Future<void> write({
@@ -70,10 +69,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   ProviderContainer makeContainer() => ProviderContainer(
-        overrides: [
-          consentStorageProvider.overrideWithValue(_FakeSecureStorage()),
-        ],
-      );
+    overrides: [consentStorageProvider.overrideWithValue(_FakeSecureStorage())],
+  );
 
   test('starts in empty, unloaded state', () async {
     final container = makeContainer();
@@ -96,18 +93,12 @@ void main() {
 
     var state = container.read(consentProvider);
     expect(state.isGranted(ConsentCategory.voiceRecord), isTrue);
-    expect(
-      state.grants[ConsentCategory.voiceRecord]!.grantId,
-      equals(grantId),
-    );
+    expect(state.grants[ConsentCategory.voiceRecord]!.grantId, equals(grantId));
 
     await notifier.withdraw(ConsentCategory.voiceRecord);
     state = container.read(consentProvider);
     expect(state.isGranted(ConsentCategory.voiceRecord), isFalse);
-    expect(
-      state.grants[ConsentCategory.voiceRecord]!.withdrawnAtMs,
-      isNotNull,
-    );
+    expect(state.grants[ConsentCategory.voiceRecord]!.withdrawnAtMs, isNotNull);
 
     container.dispose();
   });
@@ -128,11 +119,9 @@ void main() {
     await _waitForLoad(container);
 
     final notifier = container.read(consentProvider.notifier);
-    final firstId =
-        await notifier.grant(ConsentCategory.voiceStoreTranscript);
+    final firstId = await notifier.grant(ConsentCategory.voiceStoreTranscript);
     await notifier.withdraw(ConsentCategory.voiceStoreTranscript);
-    final secondId =
-        await notifier.grant(ConsentCategory.voiceStoreTranscript);
+    final secondId = await notifier.grant(ConsentCategory.voiceStoreTranscript);
 
     expect(secondId, isNot(equals(firstId)));
     container.dispose();

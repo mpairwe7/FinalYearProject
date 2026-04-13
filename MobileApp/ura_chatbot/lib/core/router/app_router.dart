@@ -47,8 +47,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final consent = ref.read(consentProvider);
       if (!consent.loaded) return null; // wait for hydrate
-      if (!consent.bootstrapped &&
-          state.matchedLocation != AppRoutes.consent) {
+      if (!consent.bootstrapped && state.matchedLocation != AppRoutes.consent) {
         return AppRoutes.consent;
       }
       return null;
@@ -77,9 +76,8 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: AppRoutes.chat,
-                pageBuilder: (context, state) => const NoTransitionPage(
-                  child: ChatScreen(),
-                ),
+                pageBuilder: (context, state) =>
+                    const NoTransitionPage(child: ChatScreen()),
               ),
             ],
           ),
@@ -90,9 +88,8 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: AppRoutes.faq,
-                pageBuilder: (context, state) => const NoTransitionPage(
-                  child: FAQScreen(),
-                ),
+                pageBuilder: (context, state) =>
+                    const NoTransitionPage(child: FAQScreen()),
                 routes: [
                   GoRoute(
                     path: ':tagId',
@@ -117,9 +114,8 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: AppRoutes.settings,
-                pageBuilder: (context, state) => const NoTransitionPage(
-                  child: SettingsScreen(),
-                ),
+                pageBuilder: (context, state) =>
+                    const NoTransitionPage(child: SettingsScreen()),
               ),
             ],
           ),
@@ -140,8 +136,7 @@ class _AppScaffold extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final offlineReady =
-        ref.watch(chatProvider.select((s) => s.offlineReady));
+    final offlineReady = ref.watch(chatProvider.select((s) => s.offlineReady));
 
     return Scaffold(
       body: Column(
@@ -187,7 +182,7 @@ class _AppScaffold extends ConsumerWidget {
 /// automatically when the user hits Continue.
 class _ConsentRefreshListenable extends ChangeNotifier {
   _ConsentRefreshListenable(this._ref) {
-    _sub = _ref.listen(consentProvider, (_, __) => notifyListeners());
+    _sub = _ref.listen(consentProvider, (_, _) => notifyListeners());
   }
 
   final Ref _ref;

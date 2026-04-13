@@ -26,7 +26,7 @@ import csv
 import json
 import logging
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING
 
 from ml.scripts.data_aug.speech_schema import (
     AudioExample,
@@ -34,6 +34,9 @@ from ml.scripts.data_aug.speech_schema import (
     LicenseClass,
     audio_content_hash,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +46,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _probe_audio_duration(path: Path) -> tuple[Optional[float], Optional[int]]:
+def _probe_audio_duration(path: Path) -> tuple[float | None, int | None]:
     """Best-effort probe for duration + sample rate. Returns (None, None) if
     soundfile/librosa are unavailable. No hard dependency so dry-runs work."""
     try:
@@ -77,7 +80,7 @@ def load_common_voice(
     *,
     language: str = "lg",
     split_tsv: str = "validated.tsv",
-    max_examples: Optional[int] = None,
+    max_examples: int | None = None,
 ) -> Iterator[AudioExample]:
     """Yield rows from a local Common Voice snapshot.
 
@@ -96,6 +99,9 @@ def load_common_voice(
     we still yield bare AudioExamples with empty ``reference_text`` so the
     pipeline can surface them as training candidates awaiting transcription.
     """
+    # Common Voice client_id fields can be very long UUIDs; raise the CSV field limit.
+    csv.field_size_limit(1 << 20)  # 1 MB
+
     if not data_dir.exists():
         log.info("common_voice: dir not found %s", data_dir)
         return
@@ -113,7 +119,9 @@ def load_common_voice(
             "common_voice: %s has audio but no TSV transcripts — emitting un-transcribed rows",
             data_dir,
         )
-        yield from _emit_untranscribed(clips_dir, language=language, source="common_voice_untranscribed")
+        yield from _emit_untranscribed(
+            clips_dir, language=language, source="common_voice_untranscribed"
+        )
         return
 
     tsv_path = tsv_paths[0]
@@ -142,7 +150,9 @@ def load_common_voice(
                     audio_path=str(audio_path.relative_to(Path.cwd()))
                     if audio_path.is_relative_to(Path.cwd())
                     else str(audio_path),
-                    sample_rate=sample_rate if sample_rate in {8000, 16000, 22050, 24000, 44100, 48000} else 16000,
+                    sample_rate=sample_rate
+                    if sample_rate in {8000, 16000, 22050, 24000, 44100, 48000}
+                    else 16000,
                     duration_s=duration if duration > 0 else 1.0,
                     reference_text=sentence.strip(),
                     language=language,
@@ -160,9 +170,7 @@ def load_common_voice(
     log.info("common_voice: %d examples", count)
 
 
-def _emit_untranscribed(
-    clips_dir: Path, *, language: str, source: str
-) -> Iterator[AudioExample]:
+def _emit_untranscribed(clips_dir: Path, *, language: str, source: str) -> Iterator[AudioExample]:
     """Yield AudioExample rows with empty reference for clips awaiting transcription."""
     count = 0
     for audio_path in sorted(clips_dir.rglob("*")):
@@ -291,9 +299,9 @@ def load_jsonl(path: Path) -> Iterator[AudioExample]:
 
 def load_asr_corpus(
     *,
-    common_voice_dir: Optional[Path] = None,
-    salt_dir: Optional[Path] = None,
-    jsonl_files: Optional[list[Path]] = None,
+    common_voice_dir: Path | None = None,
+    salt_dir: Path | None = None,
+    jsonl_files: list[Path] | None = None,
 ) -> Iterator[AudioExample]:
     """Compose every available ASR source into a single iterator."""
     if common_voice_dir is not None:

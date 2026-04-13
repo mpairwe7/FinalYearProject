@@ -14,14 +14,14 @@
 /// `ml/scripts/speech/export_mobile_speech.py`):
 ///
 ///   Android:
-///     android/app/src/main/assets/speech/asr/<component_id>/
-///     android/app/src/main/assets/speech/tts/<component_id>/
-///     android/app/src/main/assets/speech/mt/<component_id>/
+///     `android/app/src/main/assets/speech/asr/<component_id>/`
+///     `android/app/src/main/assets/speech/tts/<component_id>/`
+///     `android/app/src/main/assets/speech/mt/<component_id>/`
 ///
 ///   iOS:
-///     ios/Runner/speech/asr/<component_id>/
-///     ios/Runner/speech/tts/<component_id>/
-///     ios/Runner/speech/mt/<component_id>/
+///     `ios/Runner/speech/asr/<component_id>/`
+///     `ios/Runner/speech/tts/<component_id>/`
+///     `ios/Runner/speech/mt/<component_id>/`
 ///
 /// Each component is a sherpa-onnx directory containing `model.onnx` +
 /// `tokens.txt` + `config.json`.
@@ -36,8 +36,12 @@ class SherpaChannel {
   static final SherpaChannel instance = SherpaChannel._();
 
   static const MethodChannel _channel = MethodChannel('app.ura.sherpa_onnx');
-  static const EventChannel _asrEvents = EventChannel('app.ura.sherpa_onnx/asr_stream');
-  static const EventChannel _ttsEvents = EventChannel('app.ura.sherpa_onnx/tts_stream');
+  static const EventChannel _asrEvents = EventChannel(
+    'app.ura.sherpa_onnx/asr_stream',
+  );
+  static const EventChannel _ttsEvents = EventChannel(
+    'app.ura.sherpa_onnx/tts_stream',
+  );
 
   bool _initialised = false;
 
@@ -89,15 +93,16 @@ class SherpaChannel {
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>(
         'transcribe',
-        {
-          'audio': audioInt16,
-          'language': language,
-        },
+        {'audio': audioInt16, 'language': language},
       );
       return result?.cast<String, dynamic>() ??
           const <String, dynamic>{'text': '', 'backend': 'empty'};
     } on PlatformException catch (e) {
-      return <String, dynamic>{'text': '', 'error': e.message, 'backend': 'error'};
+      return <String, dynamic>{
+        'text': '',
+        'error': e.message,
+        'backend': 'error',
+      };
     } on MissingPluginException {
       return const <String, dynamic>{
         'text': '',
@@ -144,16 +149,20 @@ class SherpaChannel {
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>(
         'synthesize',
-        {
-          'text': text,
-          'language': language,
-          if (voice != null) 'voice': voice,
-        },
+        {'text': text, 'language': language, 'voice': ?voice},
       );
       return result?.cast<String, dynamic>() ??
-          const <String, dynamic>{'pcm': <int>[], 'sample_rate': 0, 'backend': 'empty'};
+          const <String, dynamic>{
+            'pcm': <int>[],
+            'sample_rate': 0,
+            'backend': 'empty',
+          };
     } on PlatformException catch (e) {
-      return <String, dynamic>{'pcm': <int>[], 'error': e.message, 'backend': 'error'};
+      return <String, dynamic>{
+        'pcm': <int>[],
+        'error': e.message,
+        'backend': 'error',
+      };
     } on MissingPluginException {
       return const <String, dynamic>{
         'pcm': <int>[],
@@ -170,11 +179,13 @@ class SherpaChannel {
     required String language,
     String? voice,
   }) {
-    return _ttsEvents.receiveBroadcastStream(<String, Object?>{
-      'text': text,
-      'language': language,
-      if (voice != null) 'voice': voice,
-    }).map((event) => Map<String, dynamic>.from(event as Map));
+    return _ttsEvents
+        .receiveBroadcastStream(<String, Object?>{
+          'text': text,
+          'language': language,
+          'voice': ?voice,
+        })
+        .map((event) => Map<String, dynamic>.from(event as Map));
   }
 
   /// On-device translation via the MADLAD student ONNX.
@@ -186,16 +197,16 @@ class SherpaChannel {
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>(
         'translate',
-        {
-          'text': text,
-          'source_lang': sourceLang,
-          'target_lang': targetLang,
-        },
+        {'text': text, 'source_lang': sourceLang, 'target_lang': targetLang},
       );
       return result?.cast<String, dynamic>() ??
           const <String, dynamic>{'text': '', 'backend': 'empty'};
     } on PlatformException catch (e) {
-      return <String, dynamic>{'text': text, 'error': e.message, 'backend': 'error'};
+      return <String, dynamic>{
+        'text': text,
+        'error': e.message,
+        'backend': 'error',
+      };
     } on MissingPluginException {
       return <String, dynamic>{
         'text': text,

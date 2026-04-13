@@ -32,14 +32,13 @@ class AppSettings {
     bool? ttsEnabled,
     AsrModelTier? asrModelTier,
     bool? asrAutoDownload,
-  }) =>
-      AppSettings(
-        locale: locale ?? this.locale,
-        themeMode: themeMode ?? this.themeMode,
-        ttsEnabled: ttsEnabled ?? this.ttsEnabled,
-        asrModelTier: asrModelTier ?? this.asrModelTier,
-        asrAutoDownload: asrAutoDownload ?? this.asrAutoDownload,
-      );
+  }) => AppSettings(
+    locale: locale ?? this.locale,
+    themeMode: themeMode ?? this.themeMode,
+    ttsEnabled: ttsEnabled ?? this.ttsEnabled,
+    asrModelTier: asrModelTier ?? this.asrModelTier,
+    asrAutoDownload: asrAutoDownload ?? this.asrAutoDownload,
+  );
 }
 
 /// Riverpod 2.6 [Notifier] (replaces deprecated [StateNotifier]).
@@ -88,10 +87,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
   }
 
   static ThemeMode _parseThemeMode(String s) => switch (s) {
-        'light' => ThemeMode.light,
-        'dark' => ThemeMode.dark,
-        _ => ThemeMode.system,
-      };
+    'light' => ThemeMode.light,
+    'dark' => ThemeMode.dark,
+    _ => ThemeMode.system,
+  };
 }
 
 final settingsProvider = NotifierProvider<SettingsNotifier, AppSettings>(

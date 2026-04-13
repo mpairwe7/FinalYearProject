@@ -97,7 +97,7 @@ abstract class VadDetector {
 /// initial bring-up before the ASR models have been downloaded.
 class RmsVad implements VadDetector {
   RmsVad({this.config = const VadConfig(), this.rmsThreshold = 800})
-      : _buffer = BytesBuilder(copy: false);
+    : _buffer = BytesBuilder(copy: false);
 
   final VadConfig config;
 
@@ -172,10 +172,7 @@ class RmsVad implements VadDetector {
 /// stream and produce a [VadEvent] stream. The returned stream is
 /// broadcast so multiple listeners (UI, ASR pipeline) can consume it
 /// in parallel.
-Stream<VadEvent> runVad(
-  Stream<AudioChunk> input,
-  VadDetector detector,
-) async* {
+Stream<VadEvent> runVad(Stream<AudioChunk> input, VadDetector detector) async* {
   await for (final chunk in input) {
     try {
       for (final event in detector.feed(chunk)) {

@@ -48,8 +48,7 @@ class _SpeechLabScreenState extends ConsumerState<SpeechLabScreen> {
     });
 
     try {
-      final raw =
-          await rootBundle.loadString('assets/speech/eval/gold.json');
+      final raw = await rootBundle.loadString('assets/speech/eval/gold.json');
       final json = jsonDecode(raw) as Map<String, Object?>;
       final samples = (json['samples'] as List).cast<Map<String, Object?>>();
 
@@ -61,12 +60,14 @@ class _SpeechLabScreenState extends ConsumerState<SpeechLabScreen> {
         // In a real self-test, we'd play audio and transcribe it.
         // Here we simulate by passing reference text as a proxy.
         // The actual ASR eval requires pre-recorded audio files.
-        results.add(_EvalResult(
-          locale: locale,
-          reference: reference,
-          hypothesis: '(requires audio)', // placeholder
-          wer: 0,
-        ));
+        results.add(
+          _EvalResult(
+            locale: locale,
+            reference: reference,
+            hypothesis: '(requires audio)', // placeholder
+            wer: 0,
+          ),
+        );
       }
 
       // Compute aggregate WER by locale.
@@ -78,11 +79,11 @@ class _SpeechLabScreenState extends ConsumerState<SpeechLabScreen> {
         _enWer = enResults.isEmpty
             ? null
             : enResults.map((r) => r.wer).reduce((a, b) => a + b) /
-                enResults.length;
+                  enResults.length;
         _lgWer = lgResults.isEmpty
             ? null
             : lgResults.map((r) => r.wer).reduce((a, b) => a + b) /
-                lgResults.length;
+                  lgResults.length;
         _running = false;
       });
     } catch (e) {
@@ -135,10 +136,7 @@ class _SpeechLabScreenState extends ConsumerState<SpeechLabScreen> {
                     label: 'TTS (MMS-VITS)',
                     value: 'mms-tts-eng + mms-tts-lug',
                   ),
-                  const _StatusRow(
-                    label: 'VAD',
-                    value: 'RMS (Silero pending)',
-                  ),
+                  const _StatusRow(label: 'VAD', value: 'RMS (Silero pending)'),
                 ],
               ),
             ),
@@ -191,10 +189,7 @@ class _SpeechLabScreenState extends ConsumerState<SpeechLabScreen> {
                       value: '${(_lgWer! * 100).toStringAsFixed(1)}%',
                     ),
                   if (_results != null)
-                    _StatusRow(
-                      label: 'Samples',
-                      value: '${_results!.length}',
-                    ),
+                    _StatusRow(label: 'Samples', value: '${_results!.length}'),
                   const SizedBox(height: 8),
                   FilledButton.tonal(
                     onPressed: _running ? null : _runSelfTest,
@@ -230,8 +225,8 @@ class _StatusRow extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           const Spacer(),
           Text(value, style: Theme.of(context).textTheme.bodySmall),

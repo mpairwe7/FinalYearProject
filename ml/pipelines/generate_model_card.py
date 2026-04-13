@@ -259,8 +259,7 @@ def _section_evaluation(rag_eval: dict[str, Any] | None) -> str:
 
     lines = [
         "## Evaluation\n",
-        "Aggregate metrics on the RAG evaluation set "
-        "(`Data/eval/rag_eval.jsonl`):\n",
+        "Aggregate metrics on the RAG evaluation set " "(`Data/eval/rag_eval.jsonl`):\n",
         "| Metric | Value |",
         "|--------|-------|",
         f"| Faithfulness | {_mean('faithfulness')} |",
@@ -338,8 +337,7 @@ def _section_safety(safety: dict[str, Any] | None, rag_eval: dict[str, Any] | No
         lines.append("|----------|---|--------------|")
         for cat, stats in by_cat.items():
             lines.append(
-                f"| {cat} | {stats.get('n', 0)} | "
-                f"{_na(stats.get('refusal_rate'), '{:.4f}')} |"
+                f"| {cat} | {stats.get('n', 0)} | " f"{_na(stats.get('refusal_rate'), '{:.4f}')} |"
             )
     lines.append("")
     return "\n".join(lines) + "\n"
@@ -355,10 +353,8 @@ def _section_calibration(calibration: dict[str, Any] | None) -> str:
         f"- **Samples:** {_na(s.get('n_samples'))}",
         f"- **Accuracy:** {_na(s.get('accuracy'), '{:.4f}')}",
         f"- **Mean confidence:** {_na(s.get('mean_confidence'), '{:.4f}')}",
-        f"- **Expected Calibration Error (ECE):** "
-        f"{_na(s.get('ece'), '{:.4f}')}",
-        f"- **Maximum Calibration Error (MCE):** "
-        f"{_na(s.get('mce'), '{:.4f}')}",
+        f"- **Expected Calibration Error (ECE):** " f"{_na(s.get('ece'), '{:.4f}')}",
+        f"- **Maximum Calibration Error (MCE):** " f"{_na(s.get('mce'), '{:.4f}')}",
         f"- **Brier score:** {_na(s.get('brier'), '{:.4f}')}",
     ]
     if s.get("temperature") is not None:
@@ -441,10 +437,7 @@ def _section_benchmark(bench: dict[str, Any] | None) -> str:
     for cls, stats in by_cls.items():
         cls_tps = (stats.get("tokens_per_sec") or {}).get("mean")
         cls_ttft = (stats.get("ttft_ms") or {}).get("p95")
-        lines.append(
-            f"| {cls} | {_na(cls_tps, '{:.2f}')} | "
-            f"{_na(cls_ttft, '{:.1f}')} |"
-        )
+        lines.append(f"| {cls} | {_na(cls_tps, '{:.2f}')} | " f"{_na(cls_ttft, '{:.1f}')} |")
     return "\n".join(lines) + "\n"
 
 
@@ -532,7 +525,7 @@ def generate(
 ) -> str:
     """Render the full model card as a single markdown string."""
     env = env_snapshot(script="generate_model_card")
-    now = _dt.datetime.now(tz=_dt.timezone.utc).isoformat(timespec="seconds")
+    now = _dt.datetime.now(tz=_dt.UTC).isoformat(timespec="seconds")
     parts: list[str] = [
         _yaml_frontmatter(mobile_manifest),
         "# URA Tax Assistant — Production Model Card\n",
@@ -568,7 +561,7 @@ def validate(card: str) -> dict[str, Any]:
     ``##`` has non-empty, non-placeholder content.
     """
     present: dict[str, bool] = {}
-    headings = [m for m in _SECTION_RE.finditer(card)]
+    headings = list(_SECTION_RE.finditer(card))
     for i, match in enumerate(headings):
         start = match.end()
         end = headings[i + 1].start() if i + 1 < len(headings) else len(card)
@@ -603,9 +596,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
 
-    parser = argparse.ArgumentParser(
-        description="Generate or validate the production model card"
-    )
+    parser = argparse.ArgumentParser(description="Generate or validate the production model card")
     parser.add_argument("--mobile-manifest", type=Path, default=None)
     parser.add_argument("--rag-eval", type=Path, default=None)
     parser.add_argument("--safety", type=Path, default=None)

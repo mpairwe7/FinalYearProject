@@ -56,9 +56,40 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
         r"\[INST\]",
         r"###\s*(?:Instruction|System)",
         r"ADMIN\s*(?:MODE|OVERRIDE|ACCESS)",
-        r"(?:reveal|show|print|output)\s+(?:your\s+)?(?:system\s+)?(?:prompt|instructions)",
+        r"(?:reveal|show|print|output)\s+(?:your\s+|the\s+)?(?:system\s+)?(?:prompt|instructions)",
         r"(?:act|pretend|behave)\s+as\s+(?:if|though)\s+you",
         r"do\s+(?:not|anything)\s+(?:I|we)\s+(?:say|ask|tell)",
+    ]
+]
+
+# ---------------------------------------------------------------------------
+# Harmful-intent patterns — tax fraud, evasion, forgery (domain-specific)
+# ---------------------------------------------------------------------------
+_HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        # Direct fraud/evasion requests
+        r"(?:how\s+(?:to|do\s+(?:I|you|we))|explain\s+how\s+to|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to)\s+(?:evade|avoid|dodge|escape|cheat|hide|conceal|under[\-\s]?report|misreport|falsif|forge|fake|fabricat)",
+        r"(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
+        r"(?:forge|fake|fabricat|counterfeit|falsif)\s+(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
+        r"(?:under[\-\s]?report|misreport|under[\-\s]?declare)\s+(?:income|revenue|sales|earnings|profit|expenses?|VAT)",
+        r"(?:launder|smuggl|brib)\w*",
+        r"(?:hide|conceal)\s+(?:income|money|earnings|revenue|assets?)\s+(?:from|against)\s+(?:URA|tax|government|authority)",
+        # Role-play/persona-swap evasion
+        r"(?:unrestricted|jailbroken|unfiltered)\s+(?:model|assistant|AI|mode)",
+        r"(?:you\s+are\s+(?:no\s+longer|not)\s+(?:the\s+)?URA)",
+        r"(?:prefix|begin|start)\s+(?:every|each|all)\s+(?:response|answer|reply)\s+with\b",
+        r"\bI\s+AM\s+JAILBROKEN\b",
+        # Fraud guidance under reframing (novel, research, compliance training)
+        r"(?:for\s+(?:a\s+)?(?:novel|story|fiction|book)|as\s+(?:a\s+|an\s+)?(?:exercise|scenario))\b.*(?:under[\-\s]?report|evade|forge|hide\s+income|fraud)",
+        r"(?:undeclared|offshore)\s+income",
+        r"(?:commonly|typically|usually)\s+misreport",
+        r"(?:fraud|evasion)\s+(?:script|technique|method|scheme|tactic)",
+        # Auditor/adversary perspective
+        r"(?:how\s+(?:would|does|do|can)\s+(?:a\s+)?(?:fraudster|evader|criminal))\s+(?:avoid|evade|escape|hide)",
+        r"(?:avoid|evade|escape)\s+(?:the\s+)?(?:pattern|detection|audit)",
+        # Social engineering / credential harvesting
+        r"(?:what\s+is|give\s+me|tell\s+me)\s+(?:the\s+)?(?:admin|administrator|root|system)\s+(?:password|credential|access|login)",
     ]
 ]
 
@@ -109,6 +140,23 @@ class InputGuard:
                     allowed=False,
                     reason="Input rejected: potential prompt injection detected",
                     flags=["prompt_injection"],
+                )
+
+        for pattern in _HARMFUL_INTENT_PATTERNS:
+            if pattern.search(text):
+                logger.warning(
+                    "Harmful intent blocked: pattern=%s input=%s",
+                    pattern.pattern[:60],
+                    text[:80],
+                )
+                return GuardResult(
+                    allowed=False,
+                    reason=(
+                        "I cannot provide guidance on illegal activities. "
+                        "For legitimate tax questions, please visit "
+                        "https://ura.go.ug or contact the URA Contact Centre."
+                    ),
+                    flags=["harmful_intent"],
                 )
 
         return GuardResult(allowed=True, sanitized_text=text)

@@ -12,8 +12,7 @@ import argparse
 import hashlib
 import json
 import shutil
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -69,11 +68,11 @@ def process_kaggle_output(
             missing_files.append(expected)
 
     print(f"\nFound {len(found_files)}/{len(expected_files)} expected files:")
-    for name, path in found_files:
+    for name, _path in found_files:
         print(f"  + {name}")
 
     if missing_files:
-        print(f"\nMissing files:")
+        print("\nMissing files:")
         for name in missing_files:
             print(f"  - {name}")
 
@@ -105,7 +104,7 @@ def process_kaggle_output(
         dst = output_path / "class_labels.json"
         shutil.copy(label_files[0], dst)
         checksums["class_labels.json"] = _sha256(dst)
-        print(f"  Labels: class_labels.json")
+        print("  Labels: class_labels.json")
 
     # Validate outputs
     print("\n" + "=" * 60)
@@ -122,7 +121,7 @@ def process_kaggle_output(
         try:
             import joblib
 
-            clf = joblib.load(output_path / "tag_classifier.joblib")
+            joblib.load(output_path / "tag_classifier.joblib")
             encoder = joblib.load(output_path / "label_encoder.joblib")
             classes_count = len(encoder.classes_)
             print(f"Model loaded successfully — {classes_count} classes")
@@ -139,7 +138,7 @@ def process_kaggle_output(
         "output_dir": str(output_path),
         "validation": validation_status,
         "classes_count": classes_count,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     manifest_path = output_path / "manifest.json"
@@ -147,7 +146,7 @@ def process_kaggle_output(
         json.dump(manifest, f, indent=2)
 
     # Summary of all files found
-    print(f"\n" + "=" * 60)
+    print("\n" + "=" * 60)
     print("ALL KAGGLE OUTPUT FILES")
     print("=" * 60)
     all_files = list(input_path.rglob("*"))

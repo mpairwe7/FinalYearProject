@@ -100,8 +100,7 @@ class _ModelManagerScreenState extends ConsumerState<ModelManagerScreen> {
           : ListView.separated(
               padding: const EdgeInsets.all(AppSpacing.md),
               itemCount: bundles.length,
-              separatorBuilder: (_, __) =>
-                  const SizedBox(height: AppSpacing.sm),
+              separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
               itemBuilder: (context, i) {
                 final bundle = bundles[i];
                 final installed = _installed[bundle.id] ?? false;
@@ -125,10 +124,9 @@ class _ModelManagerScreenState extends ConsumerState<ModelManagerScreen> {
                             Chip(
                               label: Text(
                                 bundle.tier.toUpperCase(),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelSmall
-                                    ?.copyWith(fontSize: 10),
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.labelSmall?.copyWith(fontSize: 10),
                               ),
                               visualDensity: VisualDensity.compact,
                             ),
@@ -137,9 +135,8 @@ class _ModelManagerScreenState extends ConsumerState<ModelManagerScreen> {
                         const SizedBox(height: 4),
                         Text(
                           bundle.description,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                              ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: cs.onSurfaceVariant),
                         ),
                         const SizedBox(height: 8),
                         Row(
@@ -198,8 +195,7 @@ class _ModelManagerScreenState extends ConsumerState<ModelManagerScreen> {
                                 child: const Text('Re-download'),
                               ),
                             ],
-                            if (isDownloading)
-                              const Text('Downloading…'),
+                            if (isDownloading) const Text('Downloading…'),
                           ],
                         ),
                       ],

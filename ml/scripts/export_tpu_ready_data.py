@@ -15,13 +15,14 @@ import hashlib
 import json
 import math
 import random
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 
-def read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
-    with open(path, "r", encoding="utf-8") as f:
+def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -38,7 +39,7 @@ def normalize_whitespace(text: str) -> str:
     return " ".join(str(text).replace("\r", " ").replace("\n", " ").split()).strip()
 
 
-def row_to_text(row: Dict[str, Any]) -> str:
+def row_to_text(row: dict[str, Any]) -> str:
     text = row.get("text")
     if text:
         return normalize_whitespace(text)
@@ -48,14 +49,11 @@ def row_to_text(row: Dict[str, Any]) -> str:
     if question and answer:
         q = normalize_whitespace(question)
         a = normalize_whitespace(answer)
-        return (
-            f"<start_of_turn>user\n{q}<end_of_turn>\n"
-            f"<start_of_turn>model\n{a}<end_of_turn>"
-        )
+        return f"<start_of_turn>user\n{q}<end_of_turn>\n" f"<start_of_turn>model\n{a}<end_of_turn>"
 
     messages = row.get("messages")
     if isinstance(messages, list) and messages:
-        parts: List[str] = []
+        parts: list[str] = []
         for msg in messages:
             if not isinstance(msg, dict):
                 continue
@@ -68,16 +66,16 @@ def row_to_text(row: Dict[str, Any]) -> str:
     return ""
 
 
-def find_first_existing(paths: List[Path]) -> Optional[Path]:
+def find_first_existing(paths: list[Path]) -> Path | None:
     for path in paths:
         if path.exists():
             return path
     return None
 
 
-def load_unique_texts(path: Path, min_chars: int, max_chars: int, max_samples: int) -> List[str]:
+def load_unique_texts(path: Path, min_chars: int, max_chars: int, max_samples: int) -> list[str]:
     seen = set()
-    texts: List[str] = []
+    texts: list[str] = []
 
     for row in read_jsonl(path):
         text = row_to_text(row)
@@ -100,7 +98,7 @@ def load_unique_texts(path: Path, min_chars: int, max_chars: int, max_samples: i
     return texts
 
 
-def split_list(items: List[Any], val_ratio: float, seed: int) -> tuple[List[Any], List[Any]]:
+def split_list(items: list[Any], val_ratio: float, seed: int) -> tuple[list[Any], list[Any]]:
     if not items:
         return [], []
 
@@ -117,7 +115,7 @@ def split_list(items: List[Any], val_ratio: float, seed: int) -> tuple[List[Any]
     return train_items, val_items
 
 
-def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> int:
+def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
     count = 0
     with open(path, "w", encoding="utf-8") as f:
         for row in rows:
@@ -129,10 +127,10 @@ def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> int:
 def write_sharded_jsonl(
     output_dir: Path,
     prefix: str,
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     shard_size: int,
-) -> List[Path]:
-    files: List[Path] = []
+) -> list[Path]:
+    files: list[Path] = []
     if not rows:
         return files
 
@@ -148,15 +146,16 @@ def write_sharded_jsonl(
 
 
 def tokenize_and_pack(
-    texts: List[str],
+    texts: list[str],
     tokenizer_name: str,
     seq_len: int,
-) -> tuple[List[List[int]], str, int]:
+) -> tuple[list[list[int]], str, int]:
     mode = "hf_tokenizer"
     eos_id = None
 
     try:
         from transformers import AutoTokenizer  # type: ignore
+
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
         if tokenizer.eos_token_id is not None:
             eos_id = tokenizer.eos_token_id
@@ -165,7 +164,7 @@ def tokenize_and_pack(
         else:
             eos_id = 1
 
-        stream: List[int] = []
+        stream: list[int] = []
         for text in texts:
             input_ids = tokenizer(
                 text,
@@ -178,7 +177,7 @@ def tokenize_and_pack(
             stream.append(eos_id)
     except Exception:
         mode = "whitespace_fallback"
-        token_to_id: Dict[str, int] = {"<eos>": 1}
+        token_to_id: dict[str, int] = {"<eos>": 1}
         next_id = 2
         stream = []
         eos_id = 1
@@ -191,15 +190,15 @@ def tokenize_and_pack(
             stream.append(eos_id)
 
     total_tokens = len(stream)
-    packed: List[List[int]] = []
+    packed: list[list[int]] = []
     for i in range(0, max(0, total_tokens - seq_len + 1), seq_len):
         packed.append(stream[i : i + seq_len])
 
     return packed, mode, total_tokens
 
 
-def to_packed_rows(chunks: List[List[int]]) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+def to_packed_rows(chunks: list[list[int]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for chunk in chunks:
         rows.append(
             {
@@ -297,7 +296,7 @@ def main() -> int:
 
     manifest = {
         "input_jsonl": str(selected_input),
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "created_at_utc": datetime.now(UTC).isoformat(),
         "tokenizer": args.tokenizer,
         "tokenization_mode": tokenization_mode,
         "seq_len": args.seq_len,

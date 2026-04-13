@@ -27,7 +27,6 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("tts.download_models")
 
@@ -101,7 +100,7 @@ def _already_cached(spec: VoiceSpec) -> bool:
     return dest.is_dir() and any(dest.rglob("*"))
 
 
-def _download_voice(spec: VoiceSpec, *, force: bool = False) -> Optional[Path]:
+def _download_voice(spec: VoiceSpec, *, force: bool = False) -> Path | None:
     dest = _voice_dest(spec)
     if _already_cached(spec) and not force:
         log.info("already cached: %s", spec.voice_id)
@@ -130,13 +129,11 @@ def _download_voice(spec: VoiceSpec, *, force: bool = False) -> Optional[Path]:
 def _write_manifest(entries: list[dict]) -> Path:
     manifest_path = TTS_CACHE_DIR / "download_manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(
-        json.dumps({"entries": entries}, indent=2) + "\n", encoding="utf-8"
-    )
+    manifest_path.write_text(json.dumps({"entries": entries}, indent=2) + "\n", encoding="utf-8")
     return manifest_path
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--all", action="store_true", help="Fetch every optional voice")
     parser.add_argument("--libritts", action="store_true")

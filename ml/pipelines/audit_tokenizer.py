@@ -55,12 +55,15 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from ml.scripts.repro import env_snapshot, set_global_seed, write_snapshot  # noqa: E402
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 log = logging.getLogger("audit_tokenizer")
 
@@ -145,7 +148,8 @@ def load_tokenizer(name: str) -> tuple[Any, bool]:
     except Exception as exc:  # pragma: no cover - best effort in CI
         log.warning(
             "Could not load tokenizer %r (%s) — using whitespace proxy",
-            name, exc,
+            name,
+            exc,
         )
         return _WordLevelProxy(), True
 
@@ -238,6 +242,7 @@ def compare(
     fertility_warn_ratio: float,
 ) -> dict[str, Any]:
     """Cross-language comparison + pass/fail flag."""
+
     def _ratio(a: float, b: float) -> float:
         return round(a / b, 4) if b else 0.0
 
@@ -260,8 +265,8 @@ def compare(
             "OK — Luganda fertility is within the 2026 production window"
             if passed
             else "WARN — Luganda tokenizer coverage is too thin; consider "
-                 "vocabulary expansion, a multilingual base model, or a "
-                 "SentencePiece retrain on a Luganda seed corpus."
+            "vocabulary expansion, a multilingual base model, or a "
+            "SentencePiece retrain on a Luganda seed corpus."
         ),
     }
 
@@ -351,7 +356,9 @@ def main() -> None:
             "lg": {"path": str(lg_path), **lg_stats},
         },
         "comparison": compare(
-            en_stats, lg_stats, fertility_warn_ratio=args.fertility_warn_ratio,
+            en_stats,
+            lg_stats,
+            fertility_warn_ratio=args.fertility_warn_ratio,
         ),
     }
 
@@ -378,8 +385,7 @@ def main() -> None:
     print("=" * 60)
     print("TOKENIZER AUDIT")
     print("=" * 60)
-    print(f"  tokenizer:    {report['tokenizer']}"
-          + (" (proxy)" if is_proxy else ""))
+    print(f"  tokenizer:    {report['tokenizer']}" + (" (proxy)" if is_proxy else ""))
     for lang, stats in report["corpora"].items():
         print(
             f"  [{lang}] n={stats['n_texts']:<4} "

@@ -31,7 +31,16 @@ import 'mt_service.dart';
 import 'speech_config.dart';
 import 'tts_service.dart';
 
-enum SpeechStage { idle, listening, asr, translating, llm, synthesising, playing, error }
+enum SpeechStage {
+  idle,
+  listening,
+  asr,
+  translating,
+  llm,
+  synthesising,
+  playing,
+  error,
+}
 
 class SpeechTurn {
   const SpeechTurn({
@@ -57,15 +66,14 @@ class SpeechTurn {
     String? reply,
     String? translatedOut,
     String? error,
-  }) =>
-      SpeechTurn(
-        stage: stage ?? this.stage,
-        transcript: transcript ?? this.transcript,
-        translatedIn: translatedIn ?? this.translatedIn,
-        reply: reply ?? this.reply,
-        translatedOut: translatedOut ?? this.translatedOut,
-        error: error ?? this.error,
-      );
+  }) => SpeechTurn(
+    stage: stage ?? this.stage,
+    transcript: transcript ?? this.transcript,
+    translatedIn: translatedIn ?? this.translatedIn,
+    reply: reply ?? this.reply,
+    translatedOut: translatedOut ?? this.translatedOut,
+    error: error ?? this.error,
+  );
 }
 
 class SpeechOrchestrator {
@@ -75,11 +83,11 @@ class SpeechOrchestrator {
     TtsService? tts,
     MtService? mt,
     OnDeviceLlm? llm,
-  })  : _config = config ?? const SpeechPipelineConfig(),
-        _asr = asr ?? AsrService(),
-        _tts = tts ?? TtsService(),
-        _mt = mt ?? MtService(),
-        _llm = llm ?? OnDeviceLlm();
+  }) : _config = config ?? const SpeechPipelineConfig(),
+       _asr = asr ?? AsrService(),
+       _tts = tts ?? TtsService(),
+       _mt = mt ?? MtService(),
+       _llm = llm ?? OnDeviceLlm();
 
   final SpeechPipelineConfig _config;
   final AsrService _asr;

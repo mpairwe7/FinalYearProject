@@ -135,7 +135,7 @@ def env_snapshot(script: str = "unknown") -> dict[str, Any]:
       * ``cuda`` — best-effort CUDA availability + device names (only if
         torch is already importable; we never trigger a fresh import)
     """
-    now = _dt.datetime.now(tz=_dt.timezone.utc).isoformat(timespec="seconds")
+    now = _dt.datetime.now(tz=_dt.UTC).isoformat(timespec="seconds")
 
     git = {
         "sha": _git("rev-parse", "HEAD"),

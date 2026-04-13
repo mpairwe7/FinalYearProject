@@ -32,7 +32,6 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("speech.pipeline")
 
@@ -65,7 +64,9 @@ def _run_llm_stage(query: str) -> tuple[str, str]:
     try:
         from App.backend.app import llm as llm_module  # type: ignore
 
-        reply = llm_module.generate(query=query, passages=[], conversation_history=None, locale="en")
+        reply = llm_module.generate(
+            query=query, passages=[], conversation_history=None, locale="en"
+        )
         return (reply or "").strip(), "backend.llm"
     except Exception as exc:
         log.debug("LLM backend unavailable: %s", exc)
@@ -77,7 +78,7 @@ def run(
     audio_path: Path,
     source_lang: str,
     target_lang: str,
-    tts_voice: Optional[str],
+    tts_voice: str | None,
 ) -> PipelineResult:
     from ml.scripts.asr.infer_asr import AsrTranscriber  # type: ignore
     from ml.scripts.mt.infer_mt import MtTranslator  # type: ignore
@@ -140,7 +141,7 @@ def run(
     )
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--audio", type=Path, required=True)
     parser.add_argument("--source-lang", default="en")

@@ -51,10 +51,12 @@ class CircuitBreaker:
     @property
     def state(self) -> CircuitState:
         with self._lock:
-            if self._state == CircuitState.OPEN:
-                if time.monotonic() - self._opened_at >= self._current_timeout:
-                    self._state = CircuitState.HALF_OPEN
-                    logger.info("Circuit breaker %s → HALF_OPEN (testing)", self.name)
+            if (
+                self._state == CircuitState.OPEN
+                and time.monotonic() - self._opened_at >= self._current_timeout
+            ):
+                self._state = CircuitState.HALF_OPEN
+                logger.info("Circuit breaker %s → HALF_OPEN (testing)", self.name)
             return self._state
 
     def allow_request(self) -> bool:

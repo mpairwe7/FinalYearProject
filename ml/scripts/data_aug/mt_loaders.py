@@ -19,9 +19,8 @@ from __future__ import annotations
 import csv
 import json
 import logging
-import re
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING
 
 from ml.scripts.data_aug.speech_schema import (
     LicenseClass,
@@ -30,6 +29,9 @@ from ml.scripts.data_aug.speech_schema import (
     mt_content_hash,
 )
 from ml.scripts.data_aug.text_utils import clean_text
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 log = logging.getLogger(__name__)
 
@@ -66,8 +68,9 @@ _PAIR_SOURCE_TYPE: dict[tuple[str, str], MTSourceType] = {
 
 
 def _infer_source_type(src: str, tgt: str) -> MTSourceType:
-    return _PAIR_SOURCE_TYPE.get((src, tgt), _PAIR_SOURCE_TYPE.get(
-        (tgt, src), MTSourceType.LUGANDA_PARALLEL))
+    return _PAIR_SOURCE_TYPE.get(
+        (src, tgt), _PAIR_SOURCE_TYPE.get((tgt, src), MTSourceType.LUGANDA_PARALLEL)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +83,7 @@ def load_tab_txt(
     *,
     source_lang: str = "en",
     target_lang: str = "lg",
-    source_type: Optional[MTSourceType] = None,
+    source_type: MTSourceType | None = None,
     license: LicenseClass = LicenseClass.PROPRIETARY,
 ) -> Iterator[MTExample]:
     """Yield MTExample rows from tab-separated parallel files."""
@@ -92,9 +95,7 @@ def load_tab_txt(
     with open(path, encoding="utf-8", errors="replace") as f:
         first = f.readline().lower()
         # Skip header if it looks like column names.
-        if not any(c in first for c in ("\t",)) or any(
-            k in first for k in _LANG_COLUMNS
-        ):
+        if not any(c in first for c in ("\t",)) or any(k in first for k in _LANG_COLUMNS):
             if "\t" not in first:
                 f.seek(0)
         else:
@@ -167,8 +168,11 @@ def load_csv(
                 detected_tgt = lang
 
         if not src_col or not tgt_col:
-            log.debug("csv: could not detect src/tgt columns in %s (fields: %s)",
-                      path.name, reader.fieldnames)
+            log.debug(
+                "csv: could not detect src/tgt columns in %s (fields: %s)",
+                path.name,
+                reader.fieldnames,
+            )
             return
 
         st = _infer_source_type(detected_src, detected_tgt)
@@ -374,9 +378,13 @@ def _cli() -> int:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)-5s %(name)s: %(message)s")
-    rows = list(load_parallel_directory(
-        args.data_dir, source_lang=args.source_lang, target_lang=args.target_lang,
-    ))
+    rows = list(
+        load_parallel_directory(
+            args.data_dir,
+            source_lang=args.source_lang,
+            target_lang=args.target_lang,
+        )
+    )
     if not rows:
         log.warning("no rows loaded")
         return 1

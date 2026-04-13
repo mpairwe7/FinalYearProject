@@ -136,14 +136,18 @@ class SettingsScreen extends ConsumerWidget {
           const _SectionHeader('About'),
           ListTile(
             leading: const Icon(Icons.info_outline),
-            title: Text(buildInfo.maybeWhen(
-              data: (b) => b.appName,
-              orElse: () => 'URA Tax Assistant',
-            )),
-            subtitle: Text(buildInfo.maybeWhen(
-              data: (b) => 'Version ${b.displayVersion}',
-              orElse: () => 'Loading version…',
-            )),
+            title: Text(
+              buildInfo.maybeWhen(
+                data: (b) => b.appName,
+                orElse: () => 'URA Tax Assistant',
+              ),
+            ),
+            subtitle: Text(
+              buildInfo.maybeWhen(
+                data: (b) => 'Version ${b.displayVersion}',
+                orElse: () => 'Loading version…',
+              ),
+            ),
           ),
           Consumer(
             builder: (context, ref, _) {
@@ -153,15 +157,14 @@ class SettingsScreen extends ConsumerWidget {
                   .length;
               final summary = consent.loaded
                   ? '$grantedCount of ${ConsentCategory.values.length} '
-                      'voice permissions granted'
+                        'voice permissions granted'
                   : 'Loading…';
               return ListTile(
                 leading: const Icon(Icons.shield_outlined),
                 title: const Text('Privacy & voice consent'),
                 subtitle: Text(summary),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () =>
-                    context.push(AppRoutes.consent, extra: false),
+                onTap: () => context.push(AppRoutes.consent, extra: false),
               );
             },
           ),
@@ -200,13 +203,13 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   static String _localeName(String code) => switch (code) {
-        'en' => 'English',
-        'lg' => 'Luganda',
-        'sw' => 'Swahili',
-        'nyn' => 'Runyankole',
-        'ach' => 'Acholi',
-        _ => code.toUpperCase(),
-      };
+    'en' => 'English',
+    'lg' => 'Luganda',
+    'sw' => 'Swahili',
+    'nyn' => 'Runyankole',
+    'ach' => 'Acholi',
+    _ => code.toUpperCase(),
+  };
 
   static String _themeLabel(ThemeMode mode) {
     return switch (mode) {

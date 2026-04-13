@@ -17,48 +17,43 @@ import 'features/settings/providers/settings_provider.dart';
 /// orientation lock, storage init) runs inside ``runZonedGuarded`` so
 /// uncaught async errors are captured and routed to [AppErrorHandler].
 Future<void> main() async {
-  await runZonedGuarded<Future<void>>(
-    () async {
-      WidgetsFlutterBinding.ensureInitialized();
+  await runZonedGuarded<Future<void>>(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
-      // Install framework + platform error handlers.
-      AppErrorHandler.install();
+    // Install framework + platform error handlers.
+    AppErrorHandler.install();
 
-      // Lock to portrait on phones (tablets inherit both).
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-      ]);
+    // Lock to portrait on phones (tablets inherit both).
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
 
-      // Preload local storage — must complete before any provider reads
-      // from SharedPreferences.
-      await LocalStorage.init();
+    // Preload local storage — must complete before any provider reads
+    // from SharedPreferences.
+    await LocalStorage.init();
 
-      // Resolve SharedPreferences once and build the feature-flag store
-      // so every notifier can read flags synchronously from `build()`.
-      final prefs = await SharedPreferences.getInstance();
-      final flagStore = FeatureFlagStore(prefs);
+    // Resolve SharedPreferences once and build the feature-flag store
+    // so every notifier can read flags synchronously from `build()`.
+    final prefs = await SharedPreferences.getInstance();
+    final flagStore = FeatureFlagStore(prefs);
 
-      // Open the local audit ledger so consent grants and (later)
-      // speech events can append without an async bootstrap race.
-      try {
-        await LocalLedger.init();
-      } catch (e, s) {
-        // Ledger failure must not block app boot — log and continue.
-        AppErrorHandler.report(e, s);
-      }
+    // Open the local audit ledger so consent grants and (later)
+    // speech events can append without an async bootstrap race.
+    try {
+      await LocalLedger.init();
+    } catch (e, s) {
+      // Ledger failure must not block app boot — log and continue.
+      AppErrorHandler.report(e, s);
+    }
 
-      runApp(
-        ProviderScope(
-          overrides: [
-            featureFlagStoreProvider.overrideWithValue(flagStore),
-          ],
-          child: const URAApp(),
-        ),
-      );
-    },
-    AppErrorHandler.report,
-  );
+    runApp(
+      ProviderScope(
+        overrides: [featureFlagStoreProvider.overrideWithValue(flagStore)],
+        child: const URAApp(),
+      ),
+    );
+  }, AppErrorHandler.report);
 }
 
 /// Root app widget.

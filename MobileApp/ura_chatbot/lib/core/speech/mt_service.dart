@@ -27,7 +27,8 @@ class MtResult {
 }
 
 class MtService {
-  MtService({SherpaChannel? channel}) : _channel = channel ?? SherpaChannel.instance;
+  MtService({SherpaChannel? channel})
+    : _channel = channel ?? SherpaChannel.instance;
 
   final SherpaChannel _channel;
 

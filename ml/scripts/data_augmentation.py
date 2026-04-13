@@ -54,7 +54,6 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Ensure the project root is on sys.path so ``ml.scripts.data_aug`` imports
 # work regardless of where the script is invoked from.
@@ -68,7 +67,6 @@ from ml.scripts.data_aug.pipeline import (  # noqa: E402
     SplitConfig,
     run_pipeline,
 )
-
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -93,7 +91,7 @@ def _setup_logging(verbosity: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _optional_path(v: str) -> Optional[Path]:
+def _optional_path(v: str) -> Path | None:
     return Path(v) if v else None
 
 
@@ -104,9 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Inputs
-    p.add_argument("--csv-dir", type=_optional_path, default=None, help="Directory containing FAQ CSVs")
+    p.add_argument(
+        "--csv-dir", type=_optional_path, default=None, help="Directory containing FAQ CSVs"
+    )
     p.add_argument("--pdf-dir", type=_optional_path, default=None, help="Directory containing PDFs")
-    p.add_argument("--luganda-dir", type=_optional_path, default=None, help="Directory with Luganda data")
+    p.add_argument(
+        "--luganda-dir", type=_optional_path, default=None, help="Directory with Luganda data"
+    )
     p.add_argument(
         "--teacher-qa-dir",
         action="append",

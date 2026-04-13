@@ -33,8 +33,8 @@ class ApiConfig {
   /// on a real device unless the developer exports ``DEV_API_URL``.
   /// Surface this in an error view so users (and devs) know why the
   /// server is unreachable.
-  static const bool hasUserBaseUrl = bool.hasEnvironment('API_URL') ||
-      bool.hasEnvironment('DEV_API_URL');
+  static const bool hasUserBaseUrl =
+      bool.hasEnvironment('API_URL') || bool.hasEnvironment('DEV_API_URL');
 
   static const Duration connectTimeout = Duration(seconds: 10);
   static const Duration receiveTimeout = Duration(seconds: 30);

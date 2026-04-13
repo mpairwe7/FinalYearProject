@@ -40,7 +40,10 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Optional
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 log = logging.getLogger("asr.infer")
 
@@ -52,11 +55,11 @@ DEFAULT_HF_CACHE = PROJECT_ROOT / "artifacts" / "speech" / "asr" / "openai__whis
 @dataclass
 class TranscribeResult:
     text: str
-    language: Optional[str] = None
-    confidence: Optional[float] = None
-    duration_s: Optional[float] = None
-    latency_s: Optional[float] = None
-    rtf: Optional[float] = None
+    language: str | None = None
+    confidence: float | None = None
+    duration_s: float | None = None
+    latency_s: float | None = None
+    rtf: float | None = None
     backend: str = "unknown"
     chunks: list[dict[str, Any]] = field(default_factory=list)
 
@@ -102,11 +105,10 @@ def _build_sherpa_recognizer(sherpa_dir: Path):
     return recognizer
 
 
-def _transcribe_sherpa(sherpa_dir: Path, samples, sample_rate: int) -> Optional[TranscribeResult]:
+def _transcribe_sherpa(sherpa_dir: Path, samples, sample_rate: int) -> TranscribeResult | None:
     rec = _build_sherpa_recognizer(sherpa_dir)
     if rec is None:
         return None
-    import sherpa_onnx  # type: ignore
 
     stream = rec.create_stream()
     stream.accept_waveform(sample_rate, samples)
@@ -131,7 +133,7 @@ def _transcribe_sherpa(sherpa_dir: Path, samples, sample_rate: int) -> Optional[
 
 def _transcribe_transformers(
     model_path: Path, samples, sample_rate: int
-) -> Optional[TranscribeResult]:
+) -> TranscribeResult | None:
     try:
         import numpy as np
         from transformers import pipeline  # type: ignore
@@ -239,8 +241,8 @@ class AsrTranscriber:
     def __init__(
         self,
         *,
-        sherpa_dir: Optional[Path] = None,
-        hf_model_dir: Optional[Path] = None,
+        sherpa_dir: Path | None = None,
+        hf_model_dir: Path | None = None,
         backend: str = "auto",
     ) -> None:
         self.sherpa_dir = Path(sherpa_dir) if sherpa_dir else DEFAULT_SHERPA_DIR
@@ -283,12 +285,14 @@ class AsrTranscriber:
 # ---------------------------------------------------------------------------
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--audio", type=Path, help="Input audio file (wav/flac/ogg/mp3)")
     parser.add_argument("--sherpa-dir", type=Path, default=None)
     parser.add_argument("--hf-model-dir", type=Path, default=None)
-    parser.add_argument("--backend", choices=("auto", "sherpa", "transformers", "mock"), default="auto")
+    parser.add_argument(
+        "--backend", choices=("auto", "sherpa", "transformers", "mock"), default="auto"
+    )
     parser.add_argument("--target-sr", type=int, default=16000)
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -309,7 +313,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     try:
         result = transcriber.transcribe_file(args.audio, target_sr=args.target_sr)
-    except Exception as exc:
+    except Exception:
         log.exception("transcribe failed")
         return 1
 

@@ -233,7 +233,7 @@ def build_index(
             if sparse_idx:
                 vectors["sparse"] = models.SparseVector(indices=sparse_idx, values=sparse_val)
 
-            payload = {k: v for k, v in doc.items()}
+            payload = dict(doc.items())
             points.append(
                 models.PointStruct(
                     id=str(uuid.uuid4()),
@@ -293,8 +293,7 @@ def main() -> None:
         logger.error("No documents to index")
         return
 
-    stats = build_index(documents, recreate=args.recreate)
-    print(json.dumps(stats, indent=2))
+    build_index(documents, recreate=args.recreate)
 
 
 if __name__ == "__main__":

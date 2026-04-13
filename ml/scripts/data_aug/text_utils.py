@@ -16,7 +16,6 @@ import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Optional
 
 try:
     import ftfy

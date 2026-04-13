@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import TYPE_CHECKING, Any
 
-from ml.scripts.data_aug.schema import TrainingExample
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+
+    from ml.scripts.data_aug.schema import TrainingExample
 
 log = logging.getLogger(__name__)
 
@@ -89,26 +92,30 @@ def _parquet_schema():
     painful at downstream consumers."""
     import pyarrow as pa  # type: ignore
 
-    message_struct = pa.struct([
-        pa.field("role", pa.string(), nullable=False),
-        pa.field("content", pa.string(), nullable=False),
-    ])
-    return pa.schema([
-        pa.field("messages", pa.list_(message_struct), nullable=False),
-        pa.field("source", pa.string(), nullable=False),
-        pa.field("source_type", pa.string(), nullable=False),
-        pa.field("task", pa.string(), nullable=False),
-        pa.field("language", pa.string(), nullable=False),
-        pa.field("tag", pa.string(), nullable=True),
-        pa.field("content_hash", pa.string(), nullable=False),
-        pa.field("token_count", pa.int64(), nullable=True),
-        pa.field("quality_score", pa.float64(), nullable=True),
-        pa.field("chunk_id", pa.int64(), nullable=True),
-        pa.field("doc_id", pa.string(), nullable=True),
-        # ``extra`` is serialised to a JSON string so heterogeneous per-row
-        # keys don't break Arrow's struct inference at scale.
-        pa.field("extra", pa.string(), nullable=True),
-    ])
+    message_struct = pa.struct(
+        [
+            pa.field("role", pa.string(), nullable=False),
+            pa.field("content", pa.string(), nullable=False),
+        ]
+    )
+    return pa.schema(
+        [
+            pa.field("messages", pa.list_(message_struct), nullable=False),
+            pa.field("source", pa.string(), nullable=False),
+            pa.field("source_type", pa.string(), nullable=False),
+            pa.field("task", pa.string(), nullable=False),
+            pa.field("language", pa.string(), nullable=False),
+            pa.field("tag", pa.string(), nullable=True),
+            pa.field("content_hash", pa.string(), nullable=False),
+            pa.field("token_count", pa.int64(), nullable=True),
+            pa.field("quality_score", pa.float64(), nullable=True),
+            pa.field("chunk_id", pa.int64(), nullable=True),
+            pa.field("doc_id", pa.string(), nullable=True),
+            # ``extra`` is serialised to a JSON string so heterogeneous per-row
+            # keys don't break Arrow's struct inference at scale.
+            pa.field("extra", pa.string(), nullable=True),
+        ]
+    )
 
 
 def _row_for_parquet(ex: TrainingExample) -> dict[str, Any]:
@@ -120,7 +127,7 @@ def _row_for_parquet(ex: TrainingExample) -> dict[str, Any]:
 def write_parquet(
     examples: Iterable[TrainingExample],
     out_path: Path,
-) -> Optional[int]:
+) -> int | None:
     """Write a Parquet file with a stable, explicit schema.
 
     Returns ``None`` (no-op with warning) if ``pyarrow`` is missing, ``0``

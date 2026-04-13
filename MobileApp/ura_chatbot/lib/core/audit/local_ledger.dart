@@ -66,13 +66,13 @@ class LedgerEvent {
   final String rowHash;
 
   Map<String, Object?> toJson() => {
-        'seq': seq,
-        'timestamp_ms': timestampMs,
-        'type': type,
-        'payload': payload,
-        'prev_hash': prevHash,
-        'row_hash': rowHash,
-      };
+    'seq': seq,
+    'timestamp_ms': timestampMs,
+    'type': type,
+    'payload': payload,
+    'prev_hash': prevHash,
+    'row_hash': rowHash,
+  };
 }
 
 /// Singleton ledger for the app. Must call [LocalLedger.init] once at
@@ -189,8 +189,7 @@ class LocalLedger {
     for (final row in rows) {
       final seq = row['seq'] as int;
       final payloadJson = row['payload'] as String;
-      final payloadHash =
-          sha256.convert(utf8.encode(payloadJson)).toString();
+      final payloadHash = sha256.convert(utf8.encode(payloadJson)).toString();
       final expected = sha256
           .convert(utf8.encode('$prev|$seq|$payloadHash'))
           .toString();
@@ -203,19 +202,14 @@ class LocalLedger {
   /// Read recent events, newest first. Used by SpeechLab.
   static Future<List<LedgerEvent>> tail({int limit = 50}) async {
     assert(_db != null);
-    final rows = await _db!.query(
-      'events',
-      orderBy: 'seq DESC',
-      limit: limit,
-    );
+    final rows = await _db!.query('events', orderBy: 'seq DESC', limit: limit);
     return rows.map(_rowToEvent).toList();
   }
 
   /// Count of events in the ledger. Cheap — O(1) on SQLite.
   static Future<int> count() async {
     assert(_db != null);
-    final rows = await _db!
-        .rawQuery('SELECT COUNT(*) AS n FROM events');
+    final rows = await _db!.rawQuery('SELECT COUNT(*) AS n FROM events');
     return (rows.first['n'] as int?) ?? 0;
   }
 
@@ -229,12 +223,11 @@ class LocalLedger {
   }
 
   static LedgerEvent _rowToEvent(Map<String, Object?> row) => LedgerEvent(
-        seq: row['seq'] as int,
-        timestampMs: row['timestamp_ms'] as int,
-        type: row['type'] as String,
-        payload: jsonDecode(row['payload'] as String)
-            as Map<String, Object?>,
-        prevHash: row['prev_hash'] as String,
-        rowHash: row['row_hash'] as String,
-      );
+    seq: row['seq'] as int,
+    timestampMs: row['timestamp_ms'] as int,
+    type: row['type'] as String,
+    payload: jsonDecode(row['payload'] as String) as Map<String, Object?>,
+    prevHash: row['prev_hash'] as String,
+    rowHash: row['row_hash'] as String,
+  );
 }

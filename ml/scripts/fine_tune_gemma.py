@@ -9,10 +9,10 @@ This script uses the output from:
 Usage:
     # Fine-tune with default settings
     python ml/scripts/fine_tune_gemma.py
-    
+
     # Fine-tune with specific target
     python ml/scripts/fine_tune_gemma.py --target web_high_accuracy
-    
+
     # Validate data without training
     python ml/scripts/fine_tune_gemma.py --dry-run
 
@@ -21,6 +21,7 @@ Requirements:
 """
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import json
@@ -30,14 +31,15 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any
 
 log = logging.getLogger("fine_tune_gemma")
 
 # Import pymupdf.layout and pymupdf4llm for PDF processing if needed
 try:
-    import pymupdf.layout
+    import pymupdf.layout  # noqa: F401
     import pymupdf4llm
+
     PYPDF_AVAILABLE = True
 except ImportError:
     PYPDF_AVAILABLE = False
@@ -60,7 +62,7 @@ PDF_DIR = DATA_ROOT / "pdfs"
 RANDOM_SEED = 42
 
 # Model configurations for different deployment targets
-MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
+MODEL_CONFIGS: dict[str, dict[str, Any]] = {
     "web_high_accuracy": {
         "model_id": "google/gemma-2-2b-it",
         "max_seq_length": 2048,
@@ -97,7 +99,7 @@ MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
 }
 
 # Default LoRA configuration
-DEFAULT_LORA_CONFIG: Dict[str, Any] = {
+DEFAULT_LORA_CONFIG: dict[str, Any] = {
     "r": 16,
     "lora_alpha": 32,
     "lora_dropout": 0.05,
@@ -132,23 +134,22 @@ TRAINING_DATA_FILES = [
 # keeps working without upgrading TRL, while still honouring the canonical
 # schema upstream.
 
-def _messages_to_gemma_text(messages: List[Dict[str, str]]) -> str:
+
+def _messages_to_gemma_text(messages: list[dict[str, str]]) -> str:
     """Render a messages list into the Gemma-2 chat template.
 
     Gemma-2's instruction-tuned template has no distinct ``system`` role, so
     we fold any leading system content into the first user turn (this is
     exactly what ``tokenizer.apply_chat_template`` does for gemma-2-it)."""
-    pending_system: Optional[str] = None
-    rendered: List[str] = []
+    pending_system: str | None = None
+    rendered: list[str] = []
     for msg in messages:
         role = str(msg.get("role", "user")).strip().lower()
         content = str(msg.get("content", "")).strip()
         if not content:
             continue
         if role == "system":
-            pending_system = (
-                f"{pending_system}\n\n{content}" if pending_system else content
-            )
+            pending_system = f"{pending_system}\n\n{content}" if pending_system else content
             continue
         if role == "user":
             body = f"{pending_system}\n\n{content}" if pending_system else content
@@ -159,11 +160,11 @@ def _messages_to_gemma_text(messages: List[Dict[str, str]]) -> str:
     return "\n".join(rendered)
 
 
-def _messages_to_llama_text(messages: List[Dict[str, str]]) -> str:
+def _messages_to_llama_text(messages: list[dict[str, str]]) -> str:
     """Render a messages list into the Llama-3 chat template.
 
     Llama-3 has a proper ``system`` role — we emit it verbatim."""
-    parts: List[str] = ["<|begin_of_text|>"]
+    parts: list[str] = ["<|begin_of_text|>"]
     for msg in messages:
         role = str(msg.get("role", "user")).strip().lower()
         content = str(msg.get("content", "")).strip()
@@ -171,38 +172,39 @@ def _messages_to_llama_text(messages: List[Dict[str, str]]) -> str:
             continue
         if role not in {"system", "user", "assistant"}:
             role = "user"
-        parts.append(
-            f"<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id|>"
-        )
+        parts.append(f"<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id|>")
     return "".join(parts)
+
 
 # =============================================================================
 # Dependency Checks
 # =============================================================================
 
+
 def check_dependencies() -> bool:
     """Check if required packages are installed."""
-    required = ['torch', 'transformers', 'datasets', 'peft', 'trl']
+    required = ["torch", "transformers", "datasets", "peft", "trl"]
     missing = []
     for pkg in required:
         try:
             __import__(pkg)
         except ImportError:
             missing.append(pkg)
-    
+
     if missing:
         print(f"❌ Missing required packages: {', '.join(missing)}")
         print(f"   Install with: pip install {' '.join(missing)}")
         return False
-    
+
     # Check for optional PDF processing
     if not PYPDF_AVAILABLE:
         print("⚠️  Optional: pymupdf4llm not installed. Install with: pip install pymupdf4llm")
         print("   This enables additional PDF-based data extraction features.")
-    
+
     # Check GPU availability
     try:
         import torch
+
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
@@ -217,15 +219,15 @@ def check_dependencies() -> bool:
                 print("   Non-interactive environment detected — continuing with CPU")
             else:
                 response = input("Continue with CPU training? (y/n): ")
-                if response.lower() != 'y':
+                if response.lower() != "y":
                     return False
     except Exception as e:
         print(f"⚠️  GPU check failed: {e}")
-    
+
     return True
 
 
-def find_training_data() -> Optional[Path]:
+def find_training_data() -> Path | None:
     """Find training data file in artifacts or Data directory.
 
     The 2026 data_augmentation pipeline writes to
@@ -252,7 +254,7 @@ def find_training_data() -> Optional[Path]:
 
 def find_sibling_splits(
     train_path: Path,
-) -> Tuple[Optional[Path], Optional[Path]]:
+) -> tuple[Path | None, Path | None]:
     """Locate sibling val + test JSONL files next to the train file.
 
     If ``train_path`` is ``.../train.messages.jsonl``, returns
@@ -266,14 +268,14 @@ def find_sibling_splits(
     if "train" not in name:
         return None, None
 
-    def _sibling(new_split: str) -> Optional[Path]:
+    def _sibling(new_split: str) -> Path | None:
         candidate = train_path.with_name(name.replace("train", new_split, 1))
         return candidate if candidate.exists() else None
 
     return _sibling("val"), _sibling("test")
 
 
-def find_dataset_manifest(train_path: Path) -> Optional[Path]:
+def find_dataset_manifest(train_path: Path) -> Path | None:
     """Return the ``manifest.json`` next to the training data, if any."""
     manifest = train_path.parent / "manifest.json"
     return manifest if manifest.exists() else None
@@ -292,10 +294,11 @@ def _digest_file(path: Path) -> str:
 # Enhanced Data Loading with PDF Extraction
 # =============================================================================
 
-def load_jsonl(path: Path) -> List[Dict[str, Any]]:
+
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
     """Load data from a JSONL file."""
     data = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if line:
@@ -306,55 +309,54 @@ def load_jsonl(path: Path) -> List[Dict[str, Any]]:
     return data
 
 
-def extract_pdf_to_training_data(pdf_path: Path, max_chunks: int = 50) -> List[Dict[str, Any]]:
+def extract_pdf_to_training_data(pdf_path: Path, max_chunks: int = 50) -> list[dict[str, Any]]:
     """Extract content from PDFs and convert to training format."""
     if not PYPDF_AVAILABLE:
         print("  ⚠️ pymupdf4llm not available for PDF extraction")
         return []
-    
+
     try:
         print(f"  Extracting text from {pdf_path.name}...")
-        
+
         # Extract text using pymupdf4llm with layout preservation
-        md_text = pymupdf4llm.to_markdown(
-            str(pdf_path),
-            pages=None,
-            show_progress=False
-        )
-        
+        md_text = pymupdf4llm.to_markdown(str(pdf_path), pages=None, show_progress=False)
+
         # Clean and chunk text
         import re
+
         text = str(md_text)
-        text = re.sub(r'\s+', ' ', text).strip()
-        
+        text = re.sub(r"\s+", " ", text).strip()
+
         if len(text) < 100:
             print(f"  ⚠️ PDF {pdf_path.name} has insufficient text ({len(text)} chars)")
             return []
-        
+
         # Simple chunking
         words = text.split()
         chunks = []
         chunk_size = 200
         for i in range(0, min(len(words), max_chunks * chunk_size), chunk_size):
-            chunk_text = ' '.join(words[i:i+chunk_size])
+            chunk_text = " ".join(words[i : i + chunk_size])
             if len(chunk_text) > 50:
                 chunks.append(chunk_text)
-        
+
         # Convert chunks to QA format
         training_data = []
         for i, chunk in enumerate(chunks[:max_chunks]):
             # Create simple instructional data from chunks
-            training_data.append({
-                "instruction": f"Summarize the following text about tax regulations:",
-                "input": chunk,
-                "output": f"This text discusses tax-related information including {chunk[:100]}...",
-                "source": pdf_path.name,
-                "chunk_id": i
-            })
-        
+            training_data.append(
+                {
+                    "instruction": "Summarize the following text about tax regulations:",
+                    "input": chunk,
+                    "output": f"This text discusses tax-related information including {chunk[:100]}...",
+                    "source": pdf_path.name,
+                    "chunk_id": i,
+                }
+            )
+
         print(f"  ✓ Extracted {len(training_data)} training examples from {pdf_path.name}")
         return training_data
-        
+
     except Exception as e:
         print(f"  ✗ Error extracting from {pdf_path.name}: {e}")
         return []
@@ -362,15 +364,15 @@ def extract_pdf_to_training_data(pdf_path: Path, max_chunks: int = 50) -> List[D
 
 def load_training_data(
     data_path: Path,
-    synthetic_path: Optional[Path] = None,
+    synthetic_path: Path | None = None,
     use_pdfs: bool = False,
-    max_pdf_chunks: int = 50
+    max_pdf_chunks: int = 50,
 ):
     """Load and combine training data from multiple sources."""
     from datasets import Dataset, concatenate_datasets
-    
+
     datasets_to_combine = []
-    
+
     # Load main training data
     if data_path.exists():
         print(f"📂 Loading main training data: {data_path}")
@@ -381,7 +383,7 @@ def load_training_data(
             print(f"   ✓ Loaded {len(main_dataset)} examples")
     else:
         print(f"⚠️  Main training data not found: {data_path}")
-    
+
     # Load synthetic QA data
     if synthetic_path and synthetic_path.exists():
         print(f"📂 Loading synthetic QA data: {synthetic_path}")
@@ -390,7 +392,7 @@ def load_training_data(
             synthetic_dataset = Dataset.from_list(synthetic_data)
             datasets_to_combine.append(synthetic_dataset)
             print(f"   ✓ Loaded {len(synthetic_dataset)} synthetic examples")
-    
+
     # Extract additional data from PDFs if requested
     if use_pdfs and PYPDF_AVAILABLE and PDF_DIR.exists():
         print(f"📂 Extracting additional data from PDFs in {PDF_DIR}")
@@ -398,25 +400,25 @@ def load_training_data(
         pdf_files = list(PDF_DIR.glob("*.pdf"))[:5]  # Limit to first 5 PDFs
         for pdf_file in pdf_files:
             pdf_data.extend(extract_pdf_to_training_data(pdf_file, max_pdf_chunks))
-        
+
         if pdf_data:
             pdf_dataset = Dataset.from_list(pdf_data)
             datasets_to_combine.append(pdf_dataset)
             print(f"   ✓ Extracted {len(pdf_dataset)} examples from PDFs")
-    
+
     if not datasets_to_combine:
         raise ValueError("No training data found!")
-    
+
     if len(datasets_to_combine) == 1:
         combined = datasets_to_combine[0]
     else:
         combined = concatenate_datasets(datasets_to_combine)
-    
+
     print(f"\n✓ Total training examples: {len(combined)}")
     return combined
 
 
-def format_for_gemma(example: Dict[str, Any]) -> Dict[str, str]:
+def format_for_gemma(example: dict[str, Any]) -> dict[str, str]:
     """Format examples for Gemma instruction tuning."""
 
     # 2026 messages format (canonical from data_augmentation.py)
@@ -433,15 +435,15 @@ def format_for_gemma(example: Dict[str, Any]) -> Dict[str, str]:
         instruction = example["instruction"]
         input_text = example.get("input", "").strip()
         output = example.get("output", "")
-        
+
         user_content = f"{instruction}\n\n{input_text}" if input_text else instruction
-        
+
         text = (
             f"<start_of_turn>user\n{user_content.strip()}<end_of_turn>\n"
             f"<start_of_turn>model\n{output.strip()}<end_of_turn>"
         )
         return {"text": text}
-    
+
     # If in QA format
     if "question" in example and "answer" in example:
         question = str(example["question"]).strip()
@@ -451,7 +453,7 @@ def format_for_gemma(example: Dict[str, Any]) -> Dict[str, str]:
             f"<start_of_turn>model\n{answer}<end_of_turn>"
         )
         return {"text": text}
-    
+
     # If in prompt/completion format
     if "prompt" in example and "completion" in example:
         prompt = str(example["prompt"]).strip()
@@ -461,11 +463,11 @@ def format_for_gemma(example: Dict[str, Any]) -> Dict[str, str]:
             f"<start_of_turn>model\n{completion}<end_of_turn>"
         )
         return {"text": text}
-    
+
     return {"text": ""}
 
 
-def format_for_llama(example: Dict[str, Any]) -> Dict[str, str]:
+def format_for_llama(example: dict[str, Any]) -> dict[str, str]:
     """Format examples for Llama 3.x instruction tuning."""
 
     # 2026 messages format (canonical from data_augmentation.py)
@@ -477,9 +479,9 @@ def format_for_llama(example: Dict[str, Any]) -> Dict[str, str]:
         instruction = example["instruction"]
         input_text = example.get("input", "").strip()
         output = example.get("output", "")
-        
+
         user_content = f"{instruction}\n\n{input_text}" if input_text else instruction
-        
+
         text = (
             f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
             f"{user_content.strip()}<|eot_id|>"
@@ -487,7 +489,7 @@ def format_for_llama(example: Dict[str, Any]) -> Dict[str, str]:
             f"{output.strip()}<|eot_id|>"
         )
         return {"text": text}
-    
+
     if "question" in example and "answer" in example:
         question = str(example["question"]).strip()
         answer = str(example["answer"]).strip()
@@ -498,7 +500,7 @@ def format_for_llama(example: Dict[str, Any]) -> Dict[str, str]:
             f"{answer}<|eot_id|>"
         )
         return {"text": text}
-    
+
     if "prompt" in example and "completion" in example:
         prompt = str(example["prompt"]).strip()
         completion = str(example["completion"]).strip()
@@ -509,17 +511,17 @@ def format_for_llama(example: Dict[str, Any]) -> Dict[str, str]:
             f"{completion}<|eot_id|>"
         )
         return {"text": text}
-    
+
     return {"text": ""}
 
 
-def format_for_t5(example: Dict[str, Any]) -> Dict[str, str]:
+def format_for_t5(example: dict[str, Any]) -> dict[str, str]:
     """Format examples for T5 models."""
     # 2026 messages format: join user turns as input, assistant text as target.
     msgs = example.get("messages")
     if isinstance(msgs, list) and msgs:
-        user_parts: List[str] = []
-        assistant_parts: List[str] = []
+        user_parts: list[str] = []
+        assistant_parts: list[str] = []
         for m in msgs:
             role = str(m.get("role", "")).lower()
             content = str(m.get("content", "")).strip()
@@ -539,23 +541,17 @@ def format_for_t5(example: Dict[str, Any]) -> Dict[str, str]:
     if "instruction" in example and "output" in example:
         instruction = example["instruction"]
         input_text = example.get("input", "")
-        
+
         if input_text:
             text = f"question: {instruction} context: {input_text}"
         else:
             text = f"question: {instruction}"
-        
-        return {
-            "input_text": text,
-            "target_text": example["output"]
-        }
-    
+
+        return {"input_text": text, "target_text": example["output"]}
+
     if "question" in example and "answer" in example:
-        return {
-            "input_text": f"question: {example['question']}",
-            "target_text": example["answer"]
-        }
-    
+        return {"input_text": f"question: {example['question']}", "target_text": example["answer"]}
+
     return {"input_text": "", "target_text": ""}
 
 
@@ -563,7 +559,8 @@ def format_for_t5(example: Dict[str, Any]) -> Dict[str, str]:
 # Enhanced Model Setup with Better Error Handling
 # =============================================================================
 
-def _try_flash_attention_2() -> Optional[str]:
+
+def _try_flash_attention_2() -> str | None:
     """Return ``"flash_attention_2"`` if flash-attn is installed and the
     GPU supports it (SM 8.0+), else ``None`` to fall back to SDPA.
 
@@ -614,8 +611,8 @@ def setup_model_and_tokenizer(
       incompatible with DDP + find_unused_parameters.
     """
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from peft import prepare_model_for_kbit_training
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     log.info("Loading model: %s", model_id)
 
@@ -678,7 +675,8 @@ def setup_model_and_tokenizer(
             if current_max < max_seq_length:
                 log.warning(
                     "  Tokenizer max length (%d) < requested (%d) — updating",
-                    current_max, max_seq_length,
+                    current_max,
+                    max_seq_length,
                 )
                 tokenizer.model_max_length = max_seq_length
         else:
@@ -707,7 +705,7 @@ def setup_model_and_tokenizer(
         else:
             model_class = AutoModelForCausalLM
 
-        model_kwargs: Dict[str, Any] = {
+        model_kwargs: dict[str, Any] = {
             "trust_remote_code": False,
         }
 
@@ -754,7 +752,7 @@ def setup_model_and_tokenizer(
 def apply_lora(
     model,
     is_t5: bool = False,
-    config: Optional[Dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
     use_rslora: bool = False,
     use_dora: bool = False,
 ):
@@ -781,14 +779,14 @@ def apply_lora(
         lora_config["task_type"] = "SEQ_2_SEQ_LM"
         lora_config["target_modules"] = ["q", "k", "v", "o", "wi", "wo"]
 
-    peft_kwargs = dict(
-        r=lora_config["r"],
-        lora_alpha=lora_config["lora_alpha"],
-        lora_dropout=lora_config["lora_dropout"],
-        bias=lora_config["bias"],
-        task_type=lora_config["task_type"],
-        target_modules=lora_config["target_modules"],
-    )
+    peft_kwargs = {
+        "r": lora_config["r"],
+        "lora_alpha": lora_config["lora_alpha"],
+        "lora_dropout": lora_config["lora_dropout"],
+        "bias": lora_config["bias"],
+        "task_type": lora_config["task_type"],
+        "target_modules": lora_config["target_modules"],
+    }
     if use_rslora:
         peft_kwargs["use_rslora"] = True
     if use_dora:
@@ -811,7 +809,9 @@ def apply_lora(
     log.info("  Target modules: %s...", ", ".join(lora_config["target_modules"][:4]))
     log.info(
         "  Trainable:      %s / %s (%.2f%%)",
-        f"{trainable:,}", f"{total:,}", 100 * trainable / total,
+        f"{trainable:,}",
+        f"{total:,}",
+        100 * trainable / total,
     )
 
     return model
@@ -821,41 +821,42 @@ def apply_lora(
 # Enhanced Training with Validation
 # =============================================================================
 
+
 def validate_dataset(dataset, tokenizer, max_seq_length: int, model_type: str = "gemma"):
     """Validate dataset tokenization and identify potential issues."""
     print(f"\n🔍 Validating dataset for {model_type}...")
-    
-    sample_texts = dataset[:min(10, len(dataset))]["text"]
-    
+
+    sample_texts = dataset[: min(10, len(dataset))]["text"]
+
     total_tokens = 0
     max_tokens = 0
-    min_tokens = float('inf')
+    min_tokens = float("inf")
     too_long = 0
-    
+
     for i, text in enumerate(sample_texts):
         tokens = tokenizer.encode(text, truncation=False)
         token_count = len(tokens)
         total_tokens += token_count
         max_tokens = max(max_tokens, token_count)
         min_tokens = min(min_tokens, token_count)
-        
+
         if token_count > max_seq_length:
             too_long += 1
             if i < 3:  # Show first 3 examples that are too long
                 print(f"  ⚠️ Example {i}: {token_count} tokens (truncation needed)")
-    
+
     avg_tokens = total_tokens / len(sample_texts)
-    
+
     print(f"  Token statistics (sample of {len(sample_texts)}):")
     print(f"    Average: {avg_tokens:.1f}")
     print(f"    Min:     {min_tokens}")
     print(f"    Max:     {max_tokens}")
     print(f"    >{max_seq_length}: {too_long} examples")
-    
+
     if too_long > len(sample_texts) * 0.5:
-        print(f"  ⚠️ Warning: More than 50% of samples exceed max sequence length")
-        print(f"    Consider increasing --max-seq-length or reducing chunk size")
-    
+        print("  ⚠️ Warning: More than 50% of samples exceed max sequence length")
+        print("    Consider increasing --max-seq-length or reducing chunk size")
+
     return True
 
 
@@ -864,7 +865,7 @@ def validate_dataset(dataset, tokenizer, max_seq_length: int, model_type: str = 
 # =============================================================================
 
 
-def set_deterministic(seed: int) -> Dict[str, Any]:
+def set_deterministic(seed: int) -> dict[str, Any]:
     """Enable deterministic torch/cuda/cuDNN algorithms.
 
     Must be called BEFORE any CUDA context is created. Cannot guarantee
@@ -877,7 +878,7 @@ def set_deterministic(seed: int) -> Dict[str, Any]:
     # CUDA >= 10.2 — otherwise cuBLAS raises RuntimeError.
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
-    flags: Dict[str, Any] = {
+    flags: dict[str, Any] = {
         "PYTHONHASHSEED": os.environ["PYTHONHASHSEED"],
         "CUBLAS_WORKSPACE_CONFIG": os.environ["CUBLAS_WORKSPACE_CONFIG"],
     }
@@ -903,14 +904,14 @@ def set_deterministic(seed: int) -> Dict[str, Any]:
     return flags
 
 
-def capture_env() -> Dict[str, Any]:
+def capture_env() -> dict[str, Any]:
     """Snapshot the Python / CUDA / driver / git environment.
 
     Every field is best-effort — missing git / nvidia-smi / torch must
     not fail the training run. The snapshot is embedded into
     ``training_config.json`` so every checkpoint is traceable.
     """
-    env: Dict[str, Any] = {
+    env: dict[str, Any] = {
         "python_version": sys.version.split()[0],
         "python_implementation": platform.python_implementation(),
         "platform": platform.platform(),
@@ -926,9 +927,7 @@ def capture_env() -> Dict[str, Any]:
         if torch.cuda.is_available():
             env["cuda_version"] = torch.version.cuda
             env["cudnn_version"] = (
-                torch.backends.cudnn.version()
-                if torch.backends.cudnn.is_available()
-                else None
+                torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else None
             )
             env["gpu_name"] = torch.cuda.get_device_name(0)
             env["gpu_count"] = torch.cuda.device_count()
@@ -950,29 +949,43 @@ def capture_env() -> Dict[str, Any]:
     try:
         dirty = subprocess.check_output(
             ["git", "status", "--porcelain"],
-            cwd=repo, stderr=subprocess.DEVNULL, text=True,
+            cwd=repo,
+            stderr=subprocess.DEVNULL,
+            text=True,
         ).strip()
         env["git_dirty"] = bool(dirty)
     except Exception:
         env["git_dirty"] = None
 
     # Driver
-    try:
-        env["nvidia_driver"] = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip().splitlines()[0]
-    except Exception:
-        pass
+    with contextlib.suppress(Exception):
+        env["nvidia_driver"] = (
+            subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            .strip()
+            .splitlines()[0]
+        )
 
     # Pip freeze — capture key ML deps. A full freeze bloats the manifest;
     # we only pin the stack that determines training semantics.
     key_pkgs = [
-        "torch", "transformers", "trl", "peft", "accelerate",
-        "bitsandbytes", "datasets", "tokenizers", "safetensors",
-        "mlflow", "wandb", "codecarbon",
+        "torch",
+        "transformers",
+        "trl",
+        "peft",
+        "accelerate",
+        "bitsandbytes",
+        "datasets",
+        "tokenizers",
+        "safetensors",
+        "mlflow",
+        "wandb",
+        "codecarbon",
     ]
-    versions: Dict[str, str] = {}
+    versions: dict[str, str] = {}
     for pkg in key_pkgs:
         try:
             mod = __import__(pkg)
@@ -1016,16 +1029,16 @@ class _MLflowRun:
         except Exception as exc:  # pragma: no cover — remote tracking URI may fail
             log.warning("mlflow: failed to start run: %s", exc)
 
-    def log_params(self, params: Dict[str, Any]) -> None:
+    def log_params(self, params: dict[str, Any]) -> None:
         if not self.active:
             return
-        flat: Dict[str, Any] = {}
+        flat: dict[str, Any] = {}
 
         def _walk(prefix: str, obj: Any) -> None:
             if isinstance(obj, dict):
                 for k, v in obj.items():
                     _walk(f"{prefix}.{k}" if prefix else k, v)
-            elif isinstance(obj, (list, tuple)):
+            elif isinstance(obj, list | tuple):
                 flat[prefix] = json.dumps(obj, default=str)[:500]
             else:
                 flat[prefix] = str(obj)[:500]
@@ -1036,7 +1049,7 @@ class _MLflowRun:
         except Exception as exc:
             log.warning("mlflow: log_params failed: %s", exc)
 
-    def log_metrics_history(self, log_history: List[Dict[str, Any]]) -> None:
+    def log_metrics_history(self, log_history: list[dict[str, Any]]) -> None:
         if not self.active:
             return
         for entry in log_history:
@@ -1044,11 +1057,9 @@ class _MLflowRun:
             for k, v in entry.items():
                 if k in {"step", "global_step", "epoch"}:
                     continue
-                if isinstance(v, (int, float)):
-                    try:
+                if isinstance(v, int | float):
+                    with contextlib.suppress(Exception):
                         self.mlflow.log_metric(k, v, step=step)
-                    except Exception:
-                        pass
 
     def log_artifact(self, path: Path) -> None:
         if not self.active or not path.exists():
@@ -1061,10 +1072,8 @@ class _MLflowRun:
     def end(self) -> None:
         if not self.active or self.run is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             self.mlflow.end_run()
-        except Exception:
-            pass
         self.active = False
 
 
@@ -1089,14 +1098,14 @@ def train(
     lora_dropout: float = 0.05,
     use_rslora: bool = False,
     use_dora: bool = False,
-    neftune_alpha: Optional[float] = 5.0,
+    neftune_alpha: float | None = 5.0,
     report_to: str = "none",
-    resume_from_checkpoint: Optional[str] = None,
-    push_to_hub: Optional[str] = None,
+    resume_from_checkpoint: str | None = None,
+    push_to_hub: str | None = None,
     save_merged: bool = False,
     group_by_length: bool = True,
     seed: int = 42,
-    dataset_metadata: Optional[Dict[str, Any]] = None,
+    dataset_metadata: dict[str, Any] | None = None,
 ):
     """Fine-tune the model using TRL 1.0 ``SFTTrainer`` / HF ``Seq2SeqTrainer``.
 
@@ -1143,7 +1152,9 @@ def train(
     log.info("  Epochs:              %d", num_epochs)
     log.info(
         "  Batch size:          %d x %d = %d",
-        batch_size, gradient_accumulation_steps, effective_batch,
+        batch_size,
+        gradient_accumulation_steps,
+        effective_batch,
     )
     log.info("  Learning rate:       %s", learning_rate)
     log.info("  Weight decay:        %s", weight_decay)
@@ -1151,7 +1162,8 @@ def train(
     log.info("  Warmup ratio:        %s", warmup_ratio)
     log.info(
         "  Model type:          %s%s",
-        model_type, " (T5)" if is_t5 else "",
+        model_type,
+        " (T5)" if is_t5 else "",
     )
     log.info("  Train samples:       %d", len(train_dataset))
     log.info("  Eval samples:        %d", len(eval_dataset) if eval_dataset else 0)
@@ -1176,6 +1188,7 @@ def train(
             return "adamw_torch"
         try:
             import bitsandbytes  # noqa: F401
+
             return "paged_adamw_8bit"
         except Exception:
             log.info("bitsandbytes unavailable — using adamw_torch_fused (no 8-bit optimizer)")
@@ -1184,46 +1197,46 @@ def train(
     chosen_optim = _pick_optimizer()
 
     # Shared TrainingArguments-equivalent fields.
-    common_args: Dict[str, Any] = dict(
-        output_dir=str(output_dir),
-        num_train_epochs=num_epochs,
-        per_device_train_batch_size=batch_size,
-        per_device_eval_batch_size=batch_size,
-        gradient_accumulation_steps=gradient_accumulation_steps,
-        learning_rate=learning_rate,
-        warmup_ratio=warmup_ratio,
-        logging_steps=10,
-        save_steps=eval_save_steps,
-        eval_steps=eval_save_steps,
-        eval_strategy="steps" if eval_dataset is not None else "no",
-        save_strategy="steps",
-        save_total_limit=3,
-        load_best_model_at_end=eval_dataset is not None,
-        metric_for_best_model="eval_loss" if eval_dataset is not None else None,
-        greater_is_better=False,
-        bf16=use_bf16,
-        fp16=not use_bf16 and torch.cuda.is_available(),
-        optim=chosen_optim,
-        report_to=report_to,
-        lr_scheduler_type="cosine",
-        seed=seed,
-        data_seed=seed,
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-        max_grad_norm=1.0,
-        weight_decay=weight_decay,
+    common_args: dict[str, Any] = {
+        "output_dir": str(output_dir),
+        "num_train_epochs": num_epochs,
+        "per_device_train_batch_size": batch_size,
+        "per_device_eval_batch_size": batch_size,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "learning_rate": learning_rate,
+        "warmup_ratio": warmup_ratio,
+        "logging_steps": 10,
+        "save_steps": eval_save_steps,
+        "eval_steps": eval_save_steps,
+        "eval_strategy": "steps" if eval_dataset is not None else "no",
+        "save_strategy": "steps",
+        "save_total_limit": 3,
+        "load_best_model_at_end": eval_dataset is not None,
+        "metric_for_best_model": "eval_loss" if eval_dataset is not None else None,
+        "greater_is_better": False,
+        "bf16": use_bf16,
+        "fp16": not use_bf16 and torch.cuda.is_available(),
+        "optim": chosen_optim,
+        "report_to": report_to,
+        "lr_scheduler_type": "cosine",
+        "seed": seed,
+        "data_seed": seed,
+        "gradient_checkpointing": True,
+        "gradient_checkpointing_kwargs": {"use_reentrant": False},
+        "max_grad_norm": 1.0,
+        "weight_decay": weight_decay,
         # Worker procs use AF_UNIX sockets to share GPU tensors which can
         # be blocked by sandboxed environments (PermissionError: socket.bind).
         # 0 workers is slower but safe everywhere; override with the env var
         # ``DATALOADER_NUM_WORKERS`` when you know your env supports it.
-        dataloader_num_workers=int(os.environ.get("DATALOADER_NUM_WORKERS", "0")),
-        dataloader_pin_memory=torch.cuda.is_available(),
-        logging_first_step=True,
-        eval_accumulation_steps=16,
-        group_by_length=group_by_length and not is_t5,  # causal LM only
+        "dataloader_num_workers": int(os.environ.get("DATALOADER_NUM_WORKERS", "0")),
+        "dataloader_pin_memory": torch.cuda.is_available(),
+        "logging_first_step": True,
+        "eval_accumulation_steps": 16,
+        "group_by_length": group_by_length and not is_t5,  # causal LM only
         # Training throughput
-        save_safetensors=True,
-    )
+        "save_safetensors": True,
+    }
     if push_to_hub:
         common_args.update(
             push_to_hub=True,
@@ -1249,13 +1262,15 @@ def train(
 
         train_t5 = train_dataset.map(
             _map_t5,
-            remove_columns=[c for c in train_dataset.column_names],
+            remove_columns=list(train_dataset.column_names),
         )
         eval_t5 = (
             eval_dataset.map(
                 _map_t5,
-                remove_columns=[c for c in eval_dataset.column_names],
-            ) if eval_dataset is not None else None
+                remove_columns=list(eval_dataset.column_names),
+            )
+            if eval_dataset is not None
+            else None
         )
 
         training_args = Seq2SeqTrainingArguments(**common_args)
@@ -1300,8 +1315,8 @@ def train(
         if eval_dataset is not None:
             eval_dataset = _strip_to_text(eval_dataset)
 
-        sft_only = dict(
-            max_length=max_seq_length,
+        sft_only = {
+            "max_length": max_seq_length,
             # Packing requires a pre-tokenisation dataset.map() pass which
             # invokes ``multiprocess.Manager`` and crashes with EOFError
             # when forked from a CUDA-initialised parent (datasets +
@@ -1310,14 +1325,14 @@ def train(
             # masking, which is correct but slightly less throughput-efficient.
             # Re-enable explicitly via SFTConfig override if your env
             # supports it (e.g. spawn-mode multiprocessing).
-            packing=False,
+            "packing": False,
             # TRL 1.0: masks user turns automatically based on chat template.
-            completion_only_loss=True,
-            dataset_text_field="text",
-            neftune_noise_alpha=neftune_alpha,
-            dataset_num_proc=None,
-            remove_unused_columns=True,
-        )
+            "completion_only_loss": True,
+            "dataset_text_field": "text",
+            "neftune_noise_alpha": neftune_alpha,
+            "dataset_num_proc": None,
+            "remove_unused_columns": True,
+        }
         # SFTConfig accepts every TrainingArguments field plus the SFT-only
         # fields above.
         try:
@@ -1326,9 +1341,16 @@ def train(
             # Fallback: some SFT-only kwargs may rename across TRL versions.
             # Try a conservative subset and log what was dropped.
             safe_sft_only = {
-                k: v for k, v in sft_only.items()
-                if k in {"max_length", "packing", "completion_only_loss",
-                         "dataset_text_field", "neftune_noise_alpha"}
+                k: v
+                for k, v in sft_only.items()
+                if k
+                in {
+                    "max_length",
+                    "packing",
+                    "completion_only_loss",
+                    "dataset_text_field",
+                    "neftune_noise_alpha",
+                }
             }
             log.warning(
                 "SFTConfig did not accept some kwargs; retrying with %s",
@@ -1351,30 +1373,32 @@ def train(
 
     # Log hyperparams + env to MLflow upfront so they're visible even if
     # the run crashes mid-training.
-    mlflow_run.log_params({
-        "model_id": str(model.config._name_or_path),
-        "model_type": model_type,
-        "max_seq_length": max_seq_length,
-        "num_epochs": num_epochs,
-        "batch_size": batch_size,
-        "gradient_accumulation_steps": gradient_accumulation_steps,
-        "effective_batch_size": effective_batch,
-        "learning_rate": learning_rate,
-        "weight_decay": weight_decay,
-        "warmup_ratio": warmup_ratio,
-        "lora_r": lora_r,
-        "lora_alpha": lora_alpha,
-        "lora_dropout": lora_dropout,
-        "use_rslora": use_rslora,
-        "use_dora": use_dora,
-        "neftune_alpha": neftune_alpha,
-        "seed": seed,
-        "report_to": report_to,
-        "train_samples": len(train_dataset),
-        "eval_samples": len(eval_dataset) if eval_dataset else 0,
-        "dataset": dataset_metadata or {},
-        "env": env_snapshot,
-    })
+    mlflow_run.log_params(
+        {
+            "model_id": str(model.config._name_or_path),
+            "model_type": model_type,
+            "max_seq_length": max_seq_length,
+            "num_epochs": num_epochs,
+            "batch_size": batch_size,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "effective_batch_size": effective_batch,
+            "learning_rate": learning_rate,
+            "weight_decay": weight_decay,
+            "warmup_ratio": warmup_ratio,
+            "lora_r": lora_r,
+            "lora_alpha": lora_alpha,
+            "lora_dropout": lora_dropout,
+            "use_rslora": use_rslora,
+            "use_dora": use_dora,
+            "neftune_alpha": neftune_alpha,
+            "seed": seed,
+            "report_to": report_to,
+            "train_samples": len(train_dataset),
+            "eval_samples": len(eval_dataset) if eval_dataset else 0,
+            "dataset": dataset_metadata or {},
+            "env": env_snapshot,
+        }
+    )
 
     # Support resume-from-checkpoint for failed runs.
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
@@ -1392,7 +1416,9 @@ def train(
         try:
             merged = trainer.model.merge_and_unload()
             merged.save_pretrained(
-                str(merged_dir), safe_serialization=True, max_shard_size="4GB",
+                str(merged_dir),
+                safe_serialization=True,
+                max_shard_size="4GB",
             )
             tokenizer.save_pretrained(str(merged_dir))
             log.info("  Merged model saved")
@@ -1464,10 +1490,8 @@ def train(
             if loss is not None:
                 log.info("  eval_loss: %.4f", loss)
                 if mlflow_run.active:
-                    try:
+                    with contextlib.suppress(Exception):
                         mlflow_run.mlflow.log_metric("final_eval_loss", float(loss))
-                    except Exception:
-                        pass
             if "eval_perplexity" in eval_results:
                 log.info("  perplexity: %.2f", eval_results["eval_perplexity"])
         except Exception as e:
@@ -1481,6 +1505,7 @@ def train(
 # Enhanced Main Function
 # =============================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Fine-tune Gemma/Llama/T5 on URA tax data using LoRA/QLoRA",
@@ -1491,103 +1516,177 @@ Examples:
   %(prog)s --target web_high_accuracy   # Use preset config
   %(prog)s --epochs 5 --lora-r 32       # Custom training
   %(prog)s --use-pdfs                   # Extract additional data from PDFs
-"""
+""",
     )
-    
+
     # Data arguments
     data_group = parser.add_argument_group("Data")
-    data_group.add_argument("--data", type=Path, default=None,
-                            help="Training data JSONL file (auto-detected if not specified)")
-    data_group.add_argument("--synthetic", type=Path, default=None,
-                            help="Additional synthetic QA data")
-    data_group.add_argument("--use-pdfs", action="store_true",
-                            help="Extract additional training data from PDFs")
-    data_group.add_argument("--max-pdf-chunks", type=int, default=50,
-                            help="Maximum chunks to extract per PDF")
-    
+    data_group.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="Training data JSONL file (auto-detected if not specified)",
+    )
+    data_group.add_argument(
+        "--synthetic", type=Path, default=None, help="Additional synthetic QA data"
+    )
+    data_group.add_argument(
+        "--use-pdfs", action="store_true", help="Extract additional training data from PDFs"
+    )
+    data_group.add_argument(
+        "--max-pdf-chunks", type=int, default=50, help="Maximum chunks to extract per PDF"
+    )
+
     # Model arguments
     model_group = parser.add_argument_group("Model")
-    model_group.add_argument("--model", type=str, default="google/gemma-2-2b-it",
-                             help="HuggingFace model ID")
-    model_group.add_argument("--target", type=str, choices=list(MODEL_CONFIGS.keys()),
-                             default=None, help="Use preset model configuration")
-    model_group.add_argument("--output", type=Path, default=None,
-                             help="Output directory for fine-tuned model")
-    
+    model_group.add_argument(
+        "--model", type=str, default="google/gemma-2-2b-it", help="HuggingFace model ID"
+    )
+    model_group.add_argument(
+        "--target",
+        type=str,
+        choices=list(MODEL_CONFIGS.keys()),
+        default=None,
+        help="Use preset model configuration",
+    )
+    model_group.add_argument(
+        "--output", type=Path, default=None, help="Output directory for fine-tuned model"
+    )
+
     # Training arguments
     train_group = parser.add_argument_group("Training")
-    train_group.add_argument("--epochs", type=int, default=None,
-                             help="Number of training epochs (overrides preset)")
+    train_group.add_argument(
+        "--epochs", type=int, default=None, help="Number of training epochs (overrides preset)"
+    )
     train_group.add_argument("--batch-size", type=int, default=4)
-    train_group.add_argument("--learning-rate", type=float, default=None,
-                             help="Learning rate (overrides preset)")
-    train_group.add_argument("--max-seq-length", type=int, default=None,
-                             help="Maximum sequence length (overrides preset)")
+    train_group.add_argument(
+        "--learning-rate", type=float, default=None, help="Learning rate (overrides preset)"
+    )
+    train_group.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=None,
+        help="Maximum sequence length (overrides preset)",
+    )
     train_group.add_argument("--warmup-ratio", type=float, default=0.03)
-    train_group.add_argument("--gradient-accumulation", type=int, default=4,
-                             help="Gradient accumulation steps")
-    
-    train_group.add_argument("--weight-decay", type=float, default=0.01,
-                             help="AdamW weight decay (default: 0.01, LoRA paper)")
-    train_group.add_argument("--neftune-alpha", type=float, default=5.0,
-                             help="NEFTune noise alpha (2023, improves generalisation). Set 0 to disable.")
-    train_group.add_argument("--no-group-by-length", action="store_true",
-                             help="Disable length-based batch grouping (10-20%% slower but simpler)")
-    train_group.add_argument("--seed", type=int, default=RANDOM_SEED,
-                             help="Random seed for reproducibility (default: 42)")
-    train_group.add_argument("--resume-from-checkpoint", type=str, default=None,
-                             help="Resume training from a checkpoint path")
-    train_group.add_argument("--report-to", type=str, default="tensorboard",
-                             choices=["none", "tensorboard", "wandb", "mlflow", "all"],
-                             help="Observability backend (default: tensorboard)")
-    train_group.add_argument("--deterministic", action="store_true",
-                             help="Enable torch.use_deterministic_algorithms + "
-                                  "cuDNN deterministic mode. Slower but bit-closer "
-                                  "reproducible across runs on the same hardware.")
+    train_group.add_argument(
+        "--gradient-accumulation", type=int, default=4, help="Gradient accumulation steps"
+    )
+
+    train_group.add_argument(
+        "--weight-decay",
+        type=float,
+        default=0.01,
+        help="AdamW weight decay (default: 0.01, LoRA paper)",
+    )
+    train_group.add_argument(
+        "--neftune-alpha",
+        type=float,
+        default=5.0,
+        help="NEFTune noise alpha (2023, improves generalisation). Set 0 to disable.",
+    )
+    train_group.add_argument(
+        "--no-group-by-length",
+        action="store_true",
+        help="Disable length-based batch grouping (10-20%% slower but simpler)",
+    )
+    train_group.add_argument(
+        "--seed",
+        type=int,
+        default=RANDOM_SEED,
+        help="Random seed for reproducibility (default: 42)",
+    )
+    train_group.add_argument(
+        "--resume-from-checkpoint",
+        type=str,
+        default=None,
+        help="Resume training from a checkpoint path",
+    )
+    train_group.add_argument(
+        "--report-to",
+        type=str,
+        default="tensorboard",
+        choices=["none", "tensorboard", "wandb", "mlflow", "all"],
+        help="Observability backend (default: tensorboard)",
+    )
+    train_group.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Enable torch.use_deterministic_algorithms + "
+        "cuDNN deterministic mode. Slower but bit-closer "
+        "reproducible across runs on the same hardware.",
+    )
 
     # LoRA arguments
     lora_group = parser.add_argument_group("LoRA")
-    lora_group.add_argument("--lora-r", type=int, default=None,
-                             help="LoRA rank (default: from preset or 16)")
-    lora_group.add_argument("--lora-alpha", type=int, default=None,
-                             help="LoRA alpha (default: from preset or 32)")
-    lora_group.add_argument("--lora-dropout", type=float, default=None,
-                             help="LoRA dropout (default: 0.05)")
-    lora_group.add_argument("--use-rslora", action="store_true",
-                             help="Use Rank-Stabilised LoRA (2024, PEFT >= 0.9). "
-                                  "Rescales alpha by sqrt(r); free accuracy gain.")
-    lora_group.add_argument("--use-dora", action="store_true",
-                             help="Use Weight-Decomposed LoRA (2024, PEFT >= 0.9). "
-                                  "Closes ~half the gap to full FT, ~10%% slower.")
+    lora_group.add_argument(
+        "--lora-r", type=int, default=None, help="LoRA rank (default: from preset or 16)"
+    )
+    lora_group.add_argument(
+        "--lora-alpha", type=int, default=None, help="LoRA alpha (default: from preset or 32)"
+    )
+    lora_group.add_argument(
+        "--lora-dropout", type=float, default=None, help="LoRA dropout (default: 0.05)"
+    )
+    lora_group.add_argument(
+        "--use-rslora",
+        action="store_true",
+        help="Use Rank-Stabilised LoRA (2024, PEFT >= 0.9). "
+        "Rescales alpha by sqrt(r); free accuracy gain.",
+    )
+    lora_group.add_argument(
+        "--use-dora",
+        action="store_true",
+        help="Use Weight-Decomposed LoRA (2024, PEFT >= 0.9). "
+        "Closes ~half the gap to full FT, ~10%% slower.",
+    )
 
     # Quantization arguments
     quant_group = parser.add_argument_group("Quantization")
     quant_group.add_argument("--no-4bit", action="store_true", help="Disable 4-bit quantization")
-    quant_group.add_argument("--use-8bit", action="store_true", help="Use 8-bit quantization instead")
-    quant_group.add_argument("--no-quant", action="store_true", help="Disable all quantization (FP16/32)")
+    quant_group.add_argument(
+        "--use-8bit", action="store_true", help="Use 8-bit quantization instead"
+    )
+    quant_group.add_argument(
+        "--no-quant", action="store_true", help="Disable all quantization (FP16/32)"
+    )
 
     # GPU arguments
     gpu_group = parser.add_argument_group("GPU")
-    gpu_group.add_argument("--gpu-ids", type=str, default=None,
-                           help="Comma-separated GPU IDs to use (e.g., '1,2'). Sets CUDA_VISIBLE_DEVICES.")
-    gpu_group.add_argument("--num-gpus", type=int, default=None,
-                           help="Number of GPUs for multi-GPU training (used with accelerate launch)")
+    gpu_group.add_argument(
+        "--gpu-ids",
+        type=str,
+        default=None,
+        help="Comma-separated GPU IDs to use (e.g., '1,2'). Sets CUDA_VISIBLE_DEVICES.",
+    )
+    gpu_group.add_argument(
+        "--num-gpus",
+        type=int,
+        default=None,
+        help="Number of GPUs for multi-GPU training (used with accelerate launch)",
+    )
 
     # Deployment / persistence
     deploy_group = parser.add_argument_group("Deployment")
-    deploy_group.add_argument("--push-to-hub", type=str, default=None,
-                              help="HuggingFace Hub repo id to push the model to (e.g. user/ura-gemma)")
-    deploy_group.add_argument("--save-merged", action="store_true",
-                              help="Also save the fully-merged FP16 model alongside the LoRA adapter")
+    deploy_group.add_argument(
+        "--push-to-hub",
+        type=str,
+        default=None,
+        help="HuggingFace Hub repo id to push the model to (e.g. user/ura-gemma)",
+    )
+    deploy_group.add_argument(
+        "--save-merged",
+        action="store_true",
+        help="Also save the fully-merged FP16 model alongside the LoRA adapter",
+    )
 
     # Other arguments
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Validate data without training")
-    parser.add_argument("--verbose", action="store_true",
-                        help="Show detailed output")
-    parser.add_argument("--force-cpu", action="store_true",
-                        help="Force CPU training even if GPU is available")
-    
+    parser.add_argument("--dry-run", action="store_true", help="Validate data without training")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed output")
+    parser.add_argument(
+        "--force-cpu", action="store_true", help="Force CPU training even if GPU is available"
+    )
+
     args = parser.parse_args()
 
     # Structured logging — also goes to the trainer via HF Trainer's logger.
@@ -1611,6 +1710,7 @@ Examples:
         log.info("Seed set to %d (transformers.set_seed)", args.seed)
     except Exception:
         import random
+
         random.seed(args.seed)
 
     if args.deterministic:
@@ -1620,7 +1720,7 @@ Examples:
     # Check dependencies
     if not check_dependencies():
         sys.exit(1)
-    
+
     # GPU selection
     if args.gpu_ids:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
@@ -1631,7 +1731,7 @@ Examples:
     if args.force_cpu:
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         print("\n⚠️  CPU training forced (--force-cpu)")
-    
+
     # Use preset config if specified
     if args.target:
         config = MODEL_CONFIGS[args.target]
@@ -1652,7 +1752,7 @@ Examples:
         print(f"   LoRA r:     {args.lora_r}")
         print(f"   Epochs:     {args.epochs}")
         print(f"   LR:         {args.learning_rate}")
-    
+
     # Set defaults for unspecified args (after preset overrides)
     if args.max_seq_length is None:
         args.max_seq_length = 2048 if "gemma" in args.model else 1024
@@ -1666,7 +1766,7 @@ Examples:
         args.lora_alpha = DEFAULT_LORA_CONFIG["lora_alpha"]
     if args.lora_dropout is None:
         args.lora_dropout = DEFAULT_LORA_CONFIG["lora_dropout"]
-    
+
     # Find training data if not specified
     if args.data is None:
         args.data = find_training_data()
@@ -1679,19 +1779,19 @@ Examples:
             print("   Or use --use-pdfs to extract from PDFs directly.")
             sys.exit(1)
         print(f"\n📂 Auto-detected training data: {args.data}")
-    
+
     # Set default output directory
     if args.output is None:
         model_name = args.model.split("/")[-1].lower()
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         args.output = OUTPUT_DIR / f"ura-{model_name}-{timestamp}"
-    
+
     # Load data — prefer pre-computed splits from the 2026 pipeline.
-    print(f"\n📥 Loading data...")
+    print("\n📥 Loading data...")
     val_path, test_path = find_sibling_splits(args.data)
     manifest_path = find_dataset_manifest(args.data)
 
-    dataset_metadata: Dict[str, Any] = {
+    dataset_metadata: dict[str, Any] = {
         "train_path": str(args.data),
         "train_sha256": _digest_file(args.data),
     }
@@ -1726,6 +1826,7 @@ Examples:
     eval_dataset = None
     if val_path is not None:
         from datasets import Dataset
+
         val_rows = load_jsonl(val_path)
         if val_rows:
             eval_dataset = Dataset.from_list(val_rows)
@@ -1760,17 +1861,23 @@ Examples:
     original_len = len(train_dataset)
 
     if model_type == "t5":
+
         def _t5_ok(x):
             return bool(
-                x.get("input_text") and len(x["input_text"]) > 10
-                and x.get("target_text") and len(x["target_text"]) > 5
+                x.get("input_text")
+                and len(x["input_text"]) > 10
+                and x.get("target_text")
+                and len(x["target_text"]) > 5
             )
+
         train_dataset = train_dataset.filter(_t5_ok)
         if eval_dataset is not None:
             eval_dataset = eval_dataset.filter(_t5_ok)
     else:
+
         def _text_ok(x):
             return bool(x.get("text") and len(x["text"]) > 10)
+
         train_dataset = train_dataset.filter(_text_ok)
         if eval_dataset is not None:
             eval_dataset = eval_dataset.filter(_text_ok)
@@ -1859,7 +1966,11 @@ Examples:
         print(f"\n📅 Starting training at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         train(
-            model, tokenizer, train_dataset, eval_dataset, args.output,
+            model,
+            tokenizer,
+            train_dataset,
+            eval_dataset,
+            args.output,
             max_seq_length=args.max_seq_length,
             num_epochs=args.epochs,
             batch_size=args.batch_size,
@@ -1883,22 +1994,23 @@ Examples:
             seed=args.seed,
             dataset_metadata=dataset_metadata,
         )
-        
+
     except KeyboardInterrupt:
-        print(f"\n⚠️ Training interrupted by user")
+        print("\n⚠️ Training interrupted by user")
         sys.exit(1)
     except Exception as e:
         print(f"\n❌ Training failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
-    
-    print("\n" + "="*70)
+
+    print("\n" + "=" * 70)
     print("✓ FINE-TUNING COMPLETE")
-    print("="*70)
+    print("=" * 70)
     print(f"\nModel saved to: {args.output / 'final'}")
     print(f"Training completed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     # Create README file for the model
     readme_path = args.output / "README.md"
     with open(readme_path, "w", encoding="utf-8") as f:

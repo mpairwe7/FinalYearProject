@@ -14,47 +14,121 @@ class UraDomainGlossary {
 
   /// Universal acronyms used across all languages.
   static const List<String> _universalAcronyms = [
-    'URA', 'TIN', 'VAT', 'PAYE', 'EFRIS', 'ASYCUDA', 'URSB', 'NTR',
-    'FOB', 'CIF',
+    'URA',
+    'TIN',
+    'VAT',
+    'PAYE',
+    'EFRIS',
+    'ASYCUDA',
+    'URSB',
+    'NTR',
+    'FOB',
+    'CIF',
   ];
 
   /// English tax terms.
   static const List<String> _englishTerms = [
     'Taxpayer Identification Number',
-    'withholding tax', 'excise duty', 'stamp duty', 'customs duty',
-    'rental income tax', 'corporation tax', 'local service tax',
-    'customs declaration', 'bill of lading', 'import declaration',
-    'Malaba', 'Busia', 'Katuna', 'Mutukula', 'Entebbe', 'Kampala',
+    'withholding tax',
+    'excise duty',
+    'stamp duty',
+    'customs duty',
+    'rental income tax',
+    'corporation tax',
+    'local service tax',
+    'customs declaration',
+    'bill of lading',
+    'import declaration',
+    'Malaba',
+    'Busia',
+    'Katuna',
+    'Mutukula',
+    'Entebbe',
+    'Kampala',
   ];
 
   /// Luganda tax terms.
   static const List<String> _lugandaTerms = [
-    'omusolo', 'ettaka', 'ssente', 'okusasula', 'enamba',
-    'ebintu', 'omuvuzi', 'ebyokulya', 'amateeka', 'gavumenti',
-    'obuwaguzi', 'entimba', 'ebisale', 'risiti',
-    'Malaba', 'Busia', 'Katuna', 'Mutukula', 'Entebbe', 'Kampala',
+    'omusolo',
+    'ettaka',
+    'ssente',
+    'okusasula',
+    'enamba',
+    'ebintu',
+    'omuvuzi',
+    'ebyokulya',
+    'amateeka',
+    'gavumenti',
+    'obuwaguzi',
+    'entimba',
+    'ebisale',
+    'risiti',
+    'Malaba',
+    'Busia',
+    'Katuna',
+    'Mutukula',
+    'Entebbe',
+    'Kampala',
   ];
 
   /// Swahili tax terms.
   static const List<String> _swahiliTerms = [
-    'kodi', 'ushuru', 'risiti', 'forodha', 'malipo',
-    'biashara', 'mapato', 'serikali', 'sheria', 'hesabu',
-    'malipa kodi', 'mfanyabiashara', 'usajili',
-    'Malaba', 'Busia', 'Katuna', 'Mutukula', 'Entebbe', 'Kampala',
+    'kodi',
+    'ushuru',
+    'risiti',
+    'forodha',
+    'malipo',
+    'biashara',
+    'mapato',
+    'serikali',
+    'sheria',
+    'hesabu',
+    'malipa kodi',
+    'mfanyabiashara',
+    'usajili',
+    'Malaba',
+    'Busia',
+    'Katuna',
+    'Mutukula',
+    'Entebbe',
+    'Kampala',
   ];
 
   /// Runyankole tax terms.
   static const List<String> _runyankoleTerms = [
-    'omushoro', 'obugyenyi', 'ebikorwa', 'amashuumi',
-    'okuriha', 'ensiimbi', 'ebyokuza', 'amateeka',
-    'Malaba', 'Busia', 'Katuna', 'Mutukula', 'Entebbe', 'Kampala',
+    'omushoro',
+    'obugyenyi',
+    'ebikorwa',
+    'amashuumi',
+    'okuriha',
+    'ensiimbi',
+    'ebyokuza',
+    'amateeka',
+    'Malaba',
+    'Busia',
+    'Katuna',
+    'Mutukula',
+    'Entebbe',
+    'Kampala',
   ];
 
   /// Acholi tax terms.
   static const List<String> _acholiTerms = [
-    'cul', 'jami', 'gamente', 'cente', 'tic',
-    'culo kwor', 'ngat ma cul', 'cobo', 'ngec',
-    'Malaba', 'Busia', 'Katuna', 'Mutukula', 'Entebbe', 'Kampala',
+    'cul',
+    'jami',
+    'gamente',
+    'cente',
+    'tic',
+    'culo kwor',
+    'ngat ma cul',
+    'cobo',
+    'ngec',
+    'Malaba',
+    'Busia',
+    'Katuna',
+    'Mutukula',
+    'Entebbe',
+    'Kampala',
   ];
 
   static const _localeTerms = <String, List<String>>{
@@ -68,10 +142,7 @@ class UraDomainGlossary {
   /// Return hotwords for a specific locale. Always includes universal
   /// acronyms + locale-specific tax vocabulary.
   static List<String> hotwordsForLocale(String locale) {
-    return [
-      ..._universalAcronyms,
-      ...(_localeTerms[locale] ?? _englishTerms),
-    ];
+    return [..._universalAcronyms, ...(_localeTerms[locale] ?? _englishTerms)];
   }
 
   /// Default hotwords (English) — backwards compatible.

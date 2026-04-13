@@ -33,7 +33,6 @@ import shutil
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("tts.export_onnx")
 
@@ -47,15 +46,15 @@ class TtsPackage:
     voice_id: str
     source_dir: str
     dest_dir: str
-    model: Optional[str] = None
-    tokens: Optional[str] = None
-    lexicon: Optional[str] = None
+    model: str | None = None
+    tokens: str | None = None
+    lexicon: str | None = None
     size_mb: float = 0.0
-    sample_rate: Optional[int] = None
-    language: Optional[str] = None
-    license: Optional[str] = None
+    sample_rate: int | None = None
+    language: str | None = None
+    license: str | None = None
     ok: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def _sha256(path: Path) -> str:
@@ -66,13 +65,13 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _find_piper_onnx(voice_dir: Path) -> Optional[Path]:
+def _find_piper_onnx(voice_dir: Path) -> Path | None:
     """Piper voices live at <voice_dir>/<lang>/<region>/<speaker>/<quality>/*.onnx."""
     matches = sorted(voice_dir.rglob("*.onnx"))
     return matches[0] if matches else None
 
 
-def _find_piper_json(voice_dir: Path) -> Optional[Path]:
+def _find_piper_json(voice_dir: Path) -> Path | None:
     matches = sorted(voice_dir.rglob("*.onnx.json"))
     if matches:
         return matches[0]
@@ -150,9 +149,7 @@ def _package_piper(voice_id: str, source_dir: Path, dest_dir: Path) -> TtsPackag
     return pkg
 
 
-def _package_vits_checkpoint(
-    voice_id: str, checkpoint: Path, dest_dir: Path
-) -> TtsPackage:
+def _package_vits_checkpoint(voice_id: str, checkpoint: Path, dest_dir: Path) -> TtsPackage:
     """Placeholder for custom VITS → ONNX export.
 
     Full export happens in train_luganda_vits.py once voice data has been
@@ -174,7 +171,7 @@ def _package_vits_checkpoint(
 def run(
     voice_id: str,
     *,
-    checkpoint: Optional[Path] = None,
+    checkpoint: Path | None = None,
     dry_run: bool = False,
 ) -> TtsPackage:
     dest_dir = SHERPA_OUT_DIR / voice_id
@@ -206,9 +203,7 @@ def run(
             "lexicon": pkg.lexicon,
             "schema_version": "2026.1",
         }
-        (dest_dir / "config.json").write_text(
-            json.dumps(config, indent=2) + "\n", encoding="utf-8"
-        )
+        (dest_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         manifest = {"files": []}
         for p in sorted(dest_dir.rglob("*")):
             if p.is_file():
@@ -225,7 +220,7 @@ def run(
     return pkg
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--voice", required=True, help="voice_id (e.g. en_US-lessac-medium)")
     parser.add_argument("--checkpoint", type=Path, default=None, help="VITS checkpoint path")

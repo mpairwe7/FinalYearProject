@@ -27,7 +27,6 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("mt.download_models")
 
@@ -82,7 +81,7 @@ def _already_cached(spec: MtModelSpec) -> bool:
     return dest.is_dir() and any(dest.rglob("*"))
 
 
-def _download(spec: MtModelSpec, *, force: bool = False) -> Optional[Path]:
+def _download(spec: MtModelSpec, *, force: bool = False) -> Path | None:
     dest = _dest(spec)
     if _already_cached(spec) and not force:
         log.info("already cached: %s", spec.repo_id)
@@ -105,7 +104,7 @@ def _download(spec: MtModelSpec, *, force: bool = False) -> Optional[Path]:
     return dest
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--full", action="store_true", help="Also fetch MADLAD-400-7B")
     parser.add_argument("--opus", action="store_true", help="Also fetch Opus-MT fallback")
@@ -140,7 +139,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.dry_run:
             log.info(
                 "[dry-run] %s (%s, %s) %s",
-                spec.repo_id, spec.license, spec.params,
+                spec.repo_id,
+                spec.license,
+                spec.params,
                 "(cached)" if cached else "(would download)",
             )
             entries.append(entry)

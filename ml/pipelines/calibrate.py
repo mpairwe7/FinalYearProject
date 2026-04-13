@@ -59,12 +59,15 @@ import logging
 import math
 import sys
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from ml.scripts.repro import env_snapshot, set_global_seed, write_snapshot  # noqa: E402
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 log = logging.getLogger("calibrate")
 
@@ -97,9 +100,7 @@ def load_predictions(path: Path) -> list[dict[str, Any]]:
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Bad JSON at {path}:{i} — {exc}") from exc
             if "confidence" not in r or "correct" not in r:
-                raise ValueError(
-                    f"Row {path}:{i} missing 'confidence' or 'correct' field"
-                )
+                raise ValueError(f"Row {path}:{i} missing 'confidence' or 'correct' field")
             r["confidence"] = float(r["confidence"])
             r["correct"] = bool(r["correct"])
             rows.append(r)
@@ -135,9 +136,9 @@ def compute_ece(
         lo, hi = edges[bi], edges[bi + 1]
         # Last bin is [lo, hi] (inclusive) — everywhere else it is [lo, hi).
         if bi < n_bins - 1:
-            in_bin = [(c, y) for c, y in zip(confidences, corrects) if lo <= c < hi]
+            in_bin = [(c, y) for c, y in zip(confidences, corrects, strict=False) if lo <= c < hi]
         else:
-            in_bin = [(c, y) for c, y in zip(confidences, corrects) if lo <= c <= hi]
+            in_bin = [(c, y) for c, y in zip(confidences, corrects, strict=False) if lo <= c <= hi]
 
         size = len(in_bin)
         if size == 0:
@@ -188,7 +189,7 @@ def compute_brier(confidences: list[float], corrects: list[bool]) -> float:
     """
     if not confidences:
         return 0.0
-    total = sum((c - (1.0 if y else 0.0)) ** 2 for c, y in zip(confidences, corrects))
+    total = sum((c - (1.0 if y else 0.0)) ** 2 for c, y in zip(confidences, corrects, strict=False))
     return round(total / len(confidences), 4)
 
 
@@ -214,7 +215,7 @@ def _nll_binary(logits: Iterable[float], corrects: Iterable[bool]) -> float:
     """
     total = 0.0
     n = 0
-    for z, y in zip(logits, corrects):
+    for z, y in zip(logits, corrects, strict=False):
         p = _sigmoid(z)
         p = max(min(p, 1.0 - 1e-12), 1e-12)
         total -= math.log(p) if y else math.log(1.0 - p)
@@ -278,11 +279,9 @@ def coverage_accuracy_curve(
     n = len(confidences)
     curve: list[dict[str, float]] = []
     for t in thresholds:
-        answered = [(c, y) for c, y in zip(confidences, corrects) if c >= t]
+        answered = [(c, y) for c, y in zip(confidences, corrects, strict=False) if c >= t]
         coverage = len(answered) / n if n else 0.0
-        accuracy = (
-            sum(1 for _, y in answered if y) / len(answered) if answered else 0.0
-        )
+        accuracy = sum(1 for _, y in answered if y) / len(answered) if answered else 0.0
         curve.append(
             {
                 "threshold": round(t, 4),
@@ -308,9 +307,7 @@ def recommend_threshold(
     reliable enough to answer that large a fraction at that accuracy).
     """
     eligible = [
-        p
-        for p in curve
-        if p["accuracy"] >= target_accuracy and p["coverage"] >= min_coverage
+        p for p in curve if p["accuracy"] >= target_accuracy and p["coverage"] >= min_coverage
     ]
     if not eligible:
         return {
@@ -417,7 +414,8 @@ def run(
         "recommended_threshold": recommendation,
         "by_language": slice_calibration(rows, "language", n_bins=n_bins),
         "by_category": slice_calibration(
-            rows, "category" if any("category" in r for r in rows) else "tag",
+            rows,
+            "category" if any("category" in r for r in rows) else "tag",
             n_bins=n_bins,
         ),
     }
@@ -432,9 +430,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
 
-    parser = argparse.ArgumentParser(
-        description="Calibration + selective-prediction analysis"
-    )
+    parser = argparse.ArgumentParser(description="Calibration + selective-prediction analysis")
     parser.add_argument(
         "--preds",
         type=Path,
@@ -476,9 +472,7 @@ def main() -> None:
     report["_env"] = env_snapshot(script="calibrate")
     report["_input"] = str(args.preds)
 
-    (output_dir / "calibration_report.json").write_text(
-        json.dumps(report, indent=2)
-    )
+    (output_dir / "calibration_report.json").write_text(json.dumps(report, indent=2))
     (output_dir / "reliability_curve.json").write_text(
         json.dumps(report["reliability_curve"], indent=2)
     )
@@ -514,9 +508,7 @@ def main() -> None:
     print(f"  report written to  {output_dir / 'calibration_report.json'}")
 
     if args.fail_on_ece is not None and s["ece"] > args.fail_on_ece:
-        log.error(
-            "ECE %.4f exceeds --fail-on-ece %.4f", s["ece"], args.fail_on_ece
-        )
+        log.error("ECE %.4f exceeds --fail-on-ece %.4f", s["ece"], args.fail_on_ece)
         sys.exit(2)
 
 

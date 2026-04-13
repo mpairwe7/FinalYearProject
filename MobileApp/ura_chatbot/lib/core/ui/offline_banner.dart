@@ -41,9 +41,7 @@ class OfflineBanner extends ConsumerWidget {
 
     final text = hasOfflineFallback ? offlineCapableMessage : offlineMessage;
     final icon = hasOfflineFallback ? Icons.offline_bolt : Icons.cloud_off;
-    final bg = hasOfflineFallback
-        ? cs.tertiaryContainer
-        : cs.errorContainer;
+    final bg = hasOfflineFallback ? cs.tertiaryContainer : cs.errorContainer;
     final fg = hasOfflineFallback
         ? cs.onTertiaryContainer
         : cs.onErrorContainer;

@@ -35,24 +35,25 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING
 
 from ml.scripts.data_aug.schema import (
+    URA_SYSTEM_PROMPT,
     Message,
     Metadata,
     SourceType,
     TaskType,
     TrainingExample,
-    URA_SYSTEM_PROMPT,
     content_hash,
 )
 from ml.scripts.data_aug.speech_schema import (
     LicenseClass,
-    MTExample,
     MTSourceType,
-    mt_content_hash,
 )
 from ml.scripts.data_aug.text_utils import clean_text
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 log = logging.getLogger(__name__)
 
@@ -128,14 +129,20 @@ def download_jw300(
             if len(src_text) < 5 or len(tgt_text) < 5:
                 continue
 
-            f.write(json.dumps({
-                "source_text": src_text,
-                "target_text": tgt_text,
-                "source_lang": src_lang,
-                "target_lang": tgt_lang,
-                "source_type": MTSourceType.JW300.value,
-                "license": LicenseClass.PUBLIC_DOMAIN.value,
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "source_text": src_text,
+                        "target_text": tgt_text,
+                        "source_lang": src_lang,
+                        "target_lang": tgt_lang,
+                        "source_type": MTSourceType.JW300.value,
+                        "license": LicenseClass.PUBLIC_DOMAIN.value,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
             count += 1
             if count >= max_pairs:
@@ -160,8 +167,8 @@ def download_opus(
     """Download any OPUS sub-corpus via HuggingFace."""
     try:
         from datasets import load_dataset
-    except ImportError:
-        raise ImportError("datasets library required")
+    except ImportError as err:
+        raise ImportError("datasets library required") from err
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"opus_{corpus_name}_{src_lang}_{tgt_lang}.jsonl"
@@ -195,14 +202,20 @@ def download_opus(
             if not src_text or not tgt_text or len(src_text) < 5:
                 continue
 
-            f.write(json.dumps({
-                "source_text": src_text,
-                "target_text": tgt_text,
-                "source_lang": src_lang,
-                "target_lang": tgt_lang,
-                "source_type": MTSourceType.OPUS.value,
-                "license": LicenseClass.CC_BY.value,
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "source_text": src_text,
+                        "target_text": tgt_text,
+                        "source_lang": src_lang,
+                        "target_lang": tgt_lang,
+                        "source_type": MTSourceType.OPUS.value,
+                        "license": LicenseClass.CC_BY.value,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
             count += 1
             if count >= max_pairs:
@@ -217,11 +230,11 @@ def download_opus(
 # ---------------------------------------------------------------------------
 
 
-def download_salt(
+def download_salt_bulk(
     output_dir: Path,
-    languages: Optional[list[str]] = None,
+    languages: list[str] | None = None,
 ) -> list[Path]:
-    """Download Sunbird SALT parallel text + speech data.
+    """Download Sunbird SALT parallel text + speech data (all languages).
 
     SALT is the single highest-value dataset for Runyankole and Acholi.
     Contains 25k parallel sentences across en/lg/sw/nyn/ach + multispeaker
@@ -232,8 +245,8 @@ def download_salt(
     """
     try:
         from datasets import load_dataset
-    except ImportError:
-        raise ImportError("datasets library required")
+    except ImportError as err:
+        raise ImportError("datasets library required") from err
 
     if languages is None:
         languages = ["ach", "nyn", "lug", "eng", "swa", "teo", "lgg", "lug"]
@@ -246,8 +259,7 @@ def download_salt(
     if not text_path.exists():
         log.info("salt: downloading text-all split")
         try:
-            ds = load_dataset("Sunbird/salt", "text-all", split="train",
-                              trust_remote_code=True)
+            ds = load_dataset("Sunbird/salt", "text-all", split="train", trust_remote_code=True)
             count = 0
             with text_path.open("w", encoding="utf-8") as f:
                 for row in ds:
@@ -256,19 +268,28 @@ def download_salt(
                     if not eng:
                         continue
                     for lang_code, col_name in [
-                        ("lg", "lug"), ("ach", "ach"), ("nyn", "nyn"),
-                        ("sw", "swa"), ("en", "eng"),
+                        ("lg", "lug"),
+                        ("ach", "ach"),
+                        ("nyn", "nyn"),
+                        ("sw", "swa"),
+                        ("en", "eng"),
                     ]:
                         text = str(row.get(col_name, "")).strip()
                         if text and lang_code != "en":
-                            f.write(json.dumps({
-                                "source_text": eng,
-                                "target_text": text,
-                                "source_lang": "en",
-                                "target_lang": lang_code,
-                                "source_type": "salt",
-                                "license": "cc_by_sa",
-                            }, ensure_ascii=False) + "\n")
+                            f.write(
+                                json.dumps(
+                                    {
+                                        "source_text": eng,
+                                        "target_text": text,
+                                        "source_lang": "en",
+                                        "target_lang": lang_code,
+                                        "source_type": "salt",
+                                        "license": "cc_by_sa",
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
                             count += 1
             log.info("salt: wrote %d parallel pairs to %s", count, text_path)
         except Exception as e:
@@ -283,21 +304,28 @@ def download_salt(
             paths.append(asr_path)
             continue
         try:
-            ds = load_dataset("Sunbird/salt", f"multispeaker-{lang}",
-                              split="train", trust_remote_code=True)
+            ds = load_dataset(
+                "Sunbird/salt", f"multispeaker-{lang}", split="train", trust_remote_code=True
+            )
             count = 0
             with asr_path.open("w", encoding="utf-8") as f:
                 for row in ds:
                     text = str(row.get("text", "")).strip()
                     if not text:
                         continue
-                    f.write(json.dumps({
-                        "reference": text,
-                        "locale": lang if lang != "lug" else "lg",
-                        "source": "Sunbird/salt",
-                        "source_type": "salt_asr",
-                        "has_audio": True,
-                    }, ensure_ascii=False) + "\n")
+                    f.write(
+                        json.dumps(
+                            {
+                                "reference": text,
+                                "locale": lang if lang != "lug" else "lg",
+                                "source": "Sunbird/salt",
+                                "source_type": "salt_asr",
+                                "has_audio": True,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
                     count += 1
             log.info("salt: wrote %d ASR samples for %s", count, lang)
             paths.append(asr_path)
@@ -314,7 +342,7 @@ def download_salt(
 
 def download_waxal(
     output_dir: Path,
-    languages: Optional[list[str]] = None,
+    languages: list[str] | None = None,
     max_samples: int = 150_000,
 ) -> list[Path]:
     """Download Google WAXAL NLP dataset (Makerere AI Lab, 2026).
@@ -329,8 +357,8 @@ def download_waxal(
     """
     try:
         from datasets import load_dataset
-    except ImportError:
-        raise ImportError("datasets library required")
+    except ImportError as err:
+        raise ImportError("datasets library required") from err
 
     if languages is None:
         languages = ["nyn", "ach", "lug"]
@@ -350,8 +378,9 @@ def download_waxal(
 
             log.info("waxal: downloading %s", config_name)
             try:
-                ds = load_dataset("google/WaxalNLP", config_name,
-                                  split="train", trust_remote_code=True)
+                ds = load_dataset(
+                    "google/WaxalNLP", config_name, split="train", trust_remote_code=True
+                )
                 count = 0
                 with out_path.open("w", encoding="utf-8") as f:
                     for row in ds:
@@ -360,13 +389,19 @@ def download_waxal(
                             continue
                         # Map 3-letter codes to our 2/3-letter codes.
                         locale = {"lug": "lg", "nyn": "nyn", "ach": "ach"}.get(lang, lang)
-                        f.write(json.dumps({
-                            "reference": text,
-                            "locale": locale,
-                            "source": "google/WaxalNLP",
-                            "source_type": f"waxal_{split_type}",
-                            "has_audio": True,
-                        }, ensure_ascii=False) + "\n")
+                        f.write(
+                            json.dumps(
+                                {
+                                    "reference": text,
+                                    "locale": locale,
+                                    "source": "google/WaxalNLP",
+                                    "source_type": f"waxal_{split_type}",
+                                    "has_audio": True,
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
                         count += 1
                         if count >= max_samples:
                             break
@@ -385,7 +420,7 @@ def download_waxal(
 
 def download_flores(
     output_dir: Path,
-    languages: Optional[list[str]] = None,
+    languages: list[str] | None = None,
 ) -> list[Path]:
     """Download FLORES-200 devtest sets for MT evaluation.
 
@@ -397,8 +432,8 @@ def download_flores(
     """
     try:
         from datasets import load_dataset
-    except ImportError:
-        raise ImportError("datasets library required")
+    except ImportError as err:
+        raise ImportError("datasets library required") from err
 
     if languages is None:
         languages = ["nyn_Latn", "ach_Latn", "lug_Latn", "swh_Latn", "eng_Latn"]
@@ -414,8 +449,7 @@ def download_flores(
 
         log.info("flores: downloading %s", lang_code)
         try:
-            ds = load_dataset("facebook/flores", lang_code, split="devtest",
-                              trust_remote_code=True)
+            ds = load_dataset("facebook/flores", lang_code, split="devtest", trust_remote_code=True)
             count = 0
             with out_path.open("w", encoding="utf-8") as f:
                 for row in ds:
@@ -425,12 +459,18 @@ def download_flores(
                     # Shorten code: nyn_Latn → nyn
                     short = lang_code.split("_")[0]
                     locale = {"lug": "lg", "swh": "sw", "eng": "en"}.get(short, short)
-                    f.write(json.dumps({
-                        "reference": text,
-                        "locale": locale,
-                        "id": f"flores-{locale}-{count:04d}",
-                        "source": "facebook/flores",
-                    }, ensure_ascii=False) + "\n")
+                    f.write(
+                        json.dumps(
+                            {
+                                "reference": text,
+                                "locale": locale,
+                                "id": f"flores-{locale}-{count:04d}",
+                                "source": "facebook/flores",
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
                     count += 1
             log.info("flores: wrote %d sentences for %s", count, lang_code)
             paths.append(out_path)
@@ -459,8 +499,8 @@ def download_masakhane(
     """
     try:
         from datasets import load_dataset
-    except ImportError:
-        raise ImportError("datasets library required")
+    except ImportError as err:
+        raise ImportError("datasets library required") from err
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"masakhane_{src_lang}_{tgt_lang}.jsonl"
@@ -471,8 +511,11 @@ def download_masakhane(
 
     # Masakhane uses ISO 639-3 codes with script tags.
     _code_map = {
-        "en": "eng_Latn", "lg": "lug_Latn", "sw": "swh_Latn",
-        "nyn": "nyn_Latn", "ach": "ach_Latn",
+        "en": "eng_Latn",
+        "lg": "lug_Latn",
+        "sw": "swh_Latn",
+        "nyn": "nyn_Latn",
+        "ach": "ach_Latn",
     }
     src_code = _code_map.get(src_lang, f"{src_lang}_Latn")
     tgt_code = _code_map.get(tgt_lang, f"{tgt_lang}_Latn")
@@ -512,14 +555,20 @@ def download_masakhane(
             if not src_text or not tgt_text or len(src_text) < 5:
                 continue
 
-            f.write(json.dumps({
-                "source_text": src_text,
-                "target_text": tgt_text,
-                "source_lang": src_lang,
-                "target_lang": tgt_lang,
-                "source_type": "masakhane",
-                "license": LicenseClass.CC_BY.value,
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "source_text": src_text,
+                        "target_text": tgt_text,
+                        "source_lang": src_lang,
+                        "target_lang": tgt_lang,
+                        "source_type": "masakhane",
+                        "license": LicenseClass.CC_BY.value,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
             count += 1
             if count >= max_pairs:
@@ -565,8 +614,8 @@ def download_salt(
     """
     try:
         from datasets import load_dataset
-    except ImportError:
-        raise ImportError("datasets library required")
+    except ImportError as err:
+        raise ImportError("datasets library required") from err
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"salt_{src_lang}_{tgt_lang}.jsonl"
@@ -597,14 +646,20 @@ def download_salt(
             tgt_text = clean_text(str(row.get(tgt_col, ""))).strip()
             if not src_text or not tgt_text or len(src_text) < 5:
                 continue
-            f.write(json.dumps({
-                "source_text": src_text,
-                "target_text": tgt_text,
-                "source_lang": src_lang,
-                "target_lang": tgt_lang,
-                "source_type": "salt",
-                "license": LicenseClass.CC_BY.value,
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "source_text": src_text,
+                        "target_text": tgt_text,
+                        "source_lang": src_lang,
+                        "target_lang": tgt_lang,
+                        "source_type": "salt",
+                        "license": LicenseClass.CC_BY.value,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
             count += 1
             if count >= max_pairs:
                 break
@@ -631,8 +686,8 @@ def download_common_voice(
     """Download Common Voice audio + transcripts for a language."""
     try:
         from datasets import load_dataset
-    except ImportError:
-        raise ImportError("datasets library required")
+    except ImportError as err:
+        raise ImportError("datasets library required") from err
 
     output_dir.mkdir(parents=True, exist_ok=True)
     target_dir = output_dir / f"common_voice_{language}"
@@ -665,11 +720,13 @@ def download_fleurs(
     """
     try:
         from datasets import load_dataset
-    except ImportError:
-        raise ImportError("datasets library required")
+    except ImportError as err:
+        raise ImportError("datasets library required") from err
 
     _fleurs_codes = {
-        "en": "en_us", "lg": "lg_ug", "sw": "sw_ke",
+        "en": "en_us",
+        "lg": "lg_ug",
+        "sw": "sw_ke",
     }
     fleurs_code = _fleurs_codes.get(language)
     if not fleurs_code:
@@ -685,8 +742,7 @@ def download_fleurs(
 
     log.info("fleurs: downloading %s", fleurs_code)
     try:
-        ds = load_dataset("google/fleurs", fleurs_code, split="test",
-                          trust_remote_code=True)
+        ds = load_dataset("google/fleurs", fleurs_code, split="test")
     except Exception as e:
         log.warning("fleurs: failed for %s: %s", language, e)
         return Path()
@@ -697,12 +753,18 @@ def download_fleurs(
             text = row.get("transcription", "").strip()
             if not text:
                 continue
-            f.write(json.dumps({
-                "reference": text,
-                "locale": language,
-                "id": f"fleurs-{language}-{count:04d}",
-                "source": "google/fleurs",
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "reference": text,
+                        "locale": language,
+                        "id": f"fleurs-{language}-{count:04d}",
+                        "source": "google/fleurs",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
             count += 1
             if count >= max_samples:
                 break
@@ -713,10 +775,12 @@ def download_fleurs(
 
 def download_all_corpora(
     output_dir: Path,
-    lang_pairs: Optional[list[tuple[str, str]]] = None,
+    lang_pairs: list[tuple[str, str]] | None = None,
     include_salt: bool = True,
     include_fleurs: bool = True,
     include_legacy: bool = False,
+    include_waxal: bool = False,
+    include_flores_eval: bool = False,
 ) -> list[Path]:
     """Download SALT + FLEURS (+ legacy JW300/OPUS/Masakhane if requested).
 
@@ -735,13 +799,6 @@ def download_all_corpora(
         ]
 
     paths = []
-
-    # --- Priority 1: Sunbird SALT (highest quality for nyn/ach) ---
-    if include_salt:
-        try:
-            paths.extend(download_salt(output_dir / "salt"))
-        except Exception as e:
-            log.warning("SALT unavailable: %s", e)
 
     # --- Priority 2: Google WAXAL (largest ASR/TTS for nyn/ach) ---
     if include_waxal:

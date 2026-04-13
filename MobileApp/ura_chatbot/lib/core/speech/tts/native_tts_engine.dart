@@ -19,7 +19,7 @@ import 'tts_engine.dart';
 
 class NativeTtsEngine implements TtsEngine {
   NativeTtsEngine({@visibleForTesting FlutterTts? tts})
-      : _tts = tts ?? FlutterTts();
+    : _tts = tts ?? FlutterTts();
 
   final FlutterTts _tts;
   bool _initialized = false;

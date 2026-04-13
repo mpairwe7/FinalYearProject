@@ -25,9 +25,9 @@ import logging
 import os
 import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ml.scripts.data_aug.schema import SCHEMA_VERSION
 from ml.scripts.data_aug.text_utils import file_sha256
@@ -46,9 +46,7 @@ def _git_head(repo: Path) -> dict[str, Any]:
     """Return commit SHA + dirty-flag + branch, or empty if not a git repo."""
 
     def _run(cmd: list[str]) -> str:
-        return subprocess.check_output(
-            cmd, cwd=repo, stderr=subprocess.DEVNULL, text=True
-        ).strip()
+        return subprocess.check_output(cmd, cwd=repo, stderr=subprocess.DEVNULL, text=True).strip()
 
     info: dict[str, Any] = {}
     try:
@@ -106,7 +104,7 @@ class ManifestBuilder:
     def record_stage(self, name: str, payload: dict[str, Any]) -> None:
         self.stages[name] = payload
 
-    def record_output(self, path: Path, role: str, rows: Optional[int] = None) -> None:
+    def record_output(self, path: Path, role: str, rows: int | None = None) -> None:
         if not path.exists() or not path.is_file():
             return
         self.outputs.append(
@@ -125,7 +123,7 @@ class ManifestBuilder:
         return {
             "pipeline_version": PIPELINE_VERSION,
             "schema_version": SCHEMA_VERSION,
-            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "created_at_utc": datetime.now(UTC).isoformat(),
             "host": os.uname().nodename if hasattr(os, "uname") else None,
             "git": _git_head(self.repo_root),
             # Phase 2 — canonical embedder pin. Future rewrites of the
@@ -196,15 +194,17 @@ def write_croissant_metadata(manifest: dict[str, Any], out_path: Path) -> Path:
     git = manifest.get("git") or {}
     distribution: list[dict[str, Any]] = []
     for o in outputs:
-        distribution.append({
-            "@type": "cr:FileObject",
-            "@id": f"{o['role']}",
-            "name": Path(o["path"]).name,
-            "contentUrl": o["path"],
-            "encodingFormat": _encoding_for(o["path"]),
-            "sha256": o.get("sha256"),
-            "contentSize": o.get("bytes"),
-        })
+        distribution.append(
+            {
+                "@type": "cr:FileObject",
+                "@id": f"{o['role']}",
+                "name": Path(o["path"]).name,
+                "contentUrl": o["path"],
+                "encodingFormat": _encoding_for(o["path"]),
+                "sha256": o.get("sha256"),
+                "contentSize": o.get("bytes"),
+            }
+        )
 
     croissant = {
         "@context": {
@@ -225,8 +225,7 @@ def write_croissant_metadata(manifest: dict[str, Any], out_path: Path) -> Path:
         "datePublished": manifest.get("created_at_utc"),
         "license": "https://creativecommons.org/licenses/by/4.0/",
         "citation": (
-            f"URA Tax Assistant training dataset, git commit "
-            f"{git.get('commit', 'unknown')}"
+            f"URA Tax Assistant training dataset, git commit " f"{git.get('commit', 'unknown')}"
         ),
         "cr:pipelineVersion": manifest.get("pipeline_version"),
         "cr:schemaVersion": manifest.get("schema_version"),

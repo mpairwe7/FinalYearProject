@@ -35,7 +35,7 @@ import logging
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger("mt.distill")
 
@@ -59,10 +59,10 @@ class DistillResult:
     stats: DistillStats
     metrics: dict[str, Any] = field(default_factory=dict)
     ok: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
-def _load_pairs(data_dir: Path, max_rows: Optional[int] = None):
+def _load_pairs(data_dir: Path, max_rows: int | None = None):
     """Load real + backtranslated pairs for distillation."""
     from ml.scripts.data_aug.mt_loaders import load_parallel_directory  # type: ignore
 
@@ -70,6 +70,7 @@ def _load_pairs(data_dir: Path, max_rows: Optional[int] = None):
     bt = ARTIFACTS_DIR / "backtranslated.jsonl"
     if bt.exists():
         from ml.scripts.data_aug.mt_loaders import load_jsonl  # type: ignore
+
         rows += list(load_jsonl(bt))
     if max_rows is not None:
         rows = rows[:max_rows]
@@ -103,13 +104,15 @@ def _generate_pseudolabels(teacher_dir: Path, rows, *, dry_run: bool) -> list[di
         inputs = tok(src, return_tensors="pt", truncation=True, max_length=512)
         outputs = model.generate(**inputs, max_new_tokens=512, num_beams=4)
         pseudo = tok.decode(outputs[0], skip_special_tokens=True)
-        pairs.append({
-            "source_text": r.source_text,
-            "source_lang": r.source_lang,
-            "target_lang": r.target_lang,
-            "pseudo_target": pseudo,
-            "real_target": r.target_text,
-        })
+        pairs.append(
+            {
+                "source_text": r.source_text,
+                "source_lang": r.source_lang,
+                "target_lang": r.target_lang,
+                "pseudo_target": pseudo,
+                "real_target": r.target_text,
+            }
+        )
     return pairs
 
 
@@ -149,7 +152,16 @@ def _train_student(
         inputs["labels"] = labels["input_ids"]
         return inputs
 
-    ds = Dataset.from_list(pseudolabels).map(_prep, remove_columns=["source_text", "source_lang", "target_lang", "pseudo_target", "real_target"])
+    ds = Dataset.from_list(pseudolabels).map(
+        _prep,
+        remove_columns=[
+            "source_text",
+            "source_lang",
+            "target_lang",
+            "pseudo_target",
+            "real_target",
+        ],
+    )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     args = Seq2SeqTrainingArguments(
@@ -175,7 +187,11 @@ def _train_student(
     trainer.train()
     model.save_pretrained(str(out_dir / "final"))
     tok.save_pretrained(str(out_dir / "final"))
-    return {"training_loss": trainer.state.log_history[-1].get("loss", 0.0) if trainer.state.log_history else 0.0}
+    return {
+        "training_loss": trainer.state.log_history[-1].get("loss", 0.0)
+        if trainer.state.log_history
+        else 0.0
+    }
 
 
 def run(
@@ -184,7 +200,7 @@ def run(
     student_model: str,
     data_dir: Path,
     output_dir: Path,
-    max_rows: Optional[int],
+    max_rows: int | None,
     dry_run: bool,
 ) -> DistillResult:
     result = DistillResult(
@@ -206,7 +222,10 @@ def run(
     if dry_run:
         log.info(
             "[dry-run] would distill %d pairs from %s -> %s (student=%s)",
-            len(rows), teacher_dir, output_dir, student_model,
+            len(rows),
+            teacher_dir,
+            output_dir,
+            student_model,
         )
         result.ok = True
         return result
@@ -237,7 +256,7 @@ def run(
     return result
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Teacher -> student MT distillation")
     parser.add_argument(
         "--teacher",
@@ -273,18 +292,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         max_rows=args.max_rows,
         dry_run=args.dry_run,
     )
-    print(json.dumps(
-        {
-            "teacher": result.teacher,
-            "student": result.student,
-            "output_dir": result.output_dir,
-            "stats": asdict(result.stats),
-            "metrics": result.metrics,
-            "ok": result.ok,
-            "error": result.error,
-        },
-        indent=2,
-    ))
+    print(
+        json.dumps(
+            {
+                "teacher": result.teacher,
+                "student": result.student,
+                "output_dir": result.output_dir,
+                "stats": asdict(result.stats),
+                "metrics": result.metrics,
+                "ok": result.ok,
+                "error": result.error,
+            },
+            indent=2,
+        )
+    )
     return 0 if result.ok else 1
 
 

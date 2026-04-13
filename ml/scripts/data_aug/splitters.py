@@ -17,10 +17,14 @@ import logging
 import random
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Iterable
+from typing import TYPE_CHECKING
 
 from ml.scripts.data_aug.dedup import scan_contamination
-from ml.scripts.data_aug.schema import TrainingExample
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ml.scripts.data_aug.schema import TrainingExample
 
 log = logging.getLogger(__name__)
 

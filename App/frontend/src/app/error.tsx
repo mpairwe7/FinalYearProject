@@ -22,7 +22,6 @@ export default function ErrorBoundary({ error, reset }: ErrorBoundaryProps) {
     // the full error message because it may contain user input (PII).
     // The digest is a stable hash Next.js emits for correlation.
     if (typeof window !== "undefined") {
-      // eslint-disable-next-line no-console
       console.error("[ura-chatbot] app error", { digest: error.digest });
       // Fire-and-forget analytics beacon
       try {

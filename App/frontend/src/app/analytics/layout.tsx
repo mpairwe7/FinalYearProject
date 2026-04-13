@@ -1,5 +1,6 @@
 import React from "react";
 import type { Metadata } from "next";
+import Link from "next/link";
 import Providers from "../../components/Providers";
 
 export const metadata: Metadata = {
@@ -11,9 +12,9 @@ export default function AnalyticsLayout({ children }: { children: React.ReactNod
   return (
     <>
       <nav className="analytics-nav">
-        <a href="/analytics" className="nav-link">Overview</a>
-        <a href="/analytics/evaluation" className="nav-link">Evaluation</a>
-        <a href="/" className="nav-link nav-back">Back to Chat</a>
+        <Link href="/analytics" className="nav-link">Overview</Link>
+        <Link href="/analytics/evaluation" className="nav-link">Evaluation</Link>
+        <Link href="/" className="nav-link nav-back">Back to Chat</Link>
       </nav>
       <Providers>{children}</Providers>
     </>

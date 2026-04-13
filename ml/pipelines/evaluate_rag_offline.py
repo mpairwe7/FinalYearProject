@@ -61,6 +61,7 @@ def load_eval_set(path: Path) -> list[dict[str, Any]]:
 def compute_token_overlap(text_a: str, text_b: str) -> float:
     """Token-level overlap score between two texts."""
     import re
+
     tokens_a = set(re.findall(r"\w+", text_a.lower()))
     tokens_b = set(re.findall(r"\w+", text_b.lower()))
     if not tokens_a or not tokens_b:
@@ -154,7 +155,9 @@ def run_evaluation(
         "mrr_mean": round(statistics.mean(r["mrr"] for r in valid), 4),
         "hit_at_k_mean": round(statistics.mean(r["hit_at_k"] for r in valid), 4),
         "latency_mean_ms": round(statistics.mean(r["latency_ms"] for r in valid), 1),
-        "latency_p95_ms": round(sorted(r["latency_ms"] for r in valid)[min(int(len(valid) * 0.95), len(valid) - 1)], 1),
+        "latency_p95_ms": round(
+            sorted(r["latency_ms"] for r in valid)[min(int(len(valid) * 0.95), len(valid) - 1)], 1
+        ),
         "total_evaluated": len(valid),
         "total_errors": len(results) - len(valid),
     }
@@ -186,8 +189,12 @@ def check_regression(
 def main():
     parser = argparse.ArgumentParser(description="Offline RAG evaluation")
     parser.add_argument("--eval-set", type=Path, required=True, help="Path to JSONL eval set")
-    parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "Results" / "eval" / "rag_offline_report.json")
-    parser.add_argument("--fail-on-regression", action="store_true", help="Exit non-zero if quality gates fail")
+    parser.add_argument(
+        "--output", type=Path, default=PROJECT_ROOT / "Results" / "eval" / "rag_offline_report.json"
+    )
+    parser.add_argument(
+        "--fail-on-regression", action="store_true", help="Exit non-zero if quality gates fail"
+    )
     args = parser.parse_args()
 
     if not args.eval_set.exists():

@@ -33,9 +33,9 @@ import json
 import logging
 import statistics
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -74,7 +74,7 @@ def _compute_wer(refs: list[str], hyps: list[str]) -> float:
         # Naive Levenshtein / length — good enough for smoke tests.
         errors = 0
         words_total = 0
-        for r, h in zip(refs, hyps):
+        for r, h in zip(refs, hyps, strict=False):
             rw = _normalise(r).split()
             hw = _normalise(h).split()
             words_total += len(rw)
@@ -98,7 +98,7 @@ def _compute_cer(refs: list[str], hyps: list[str]) -> float:
     except ImportError:
         total = 0
         errors = 0
-        for r, h in zip(refs, hyps):
+        for r, h in zip(refs, hyps, strict=False):
             total += len(r)
             errors += abs(len(r) - len(h))
         return errors / max(total, 1)
@@ -189,7 +189,7 @@ def _percentile(values: list[float], p: float) -> float:
     return float(values[f] + (values[c] - values[f]) * (k - f))
 
 
-def _transcribe_one(transcriber, record: EvalRecord) -> Optional[dict[str, Any]]:
+def _transcribe_one(transcriber, record: EvalRecord) -> dict[str, Any] | None:
     try:
         result = transcriber.transcribe_file(record.audio_path, target_sr=16000)
     except Exception as exc:
@@ -290,17 +290,25 @@ def run_evaluation(
                 language=lang,
                 n=len(lang_rows),
                 wer=round(
-                    _compute_wer([r["reference"] for r in lang_rows], [r["hypothesis"] for r in lang_rows]),
+                    _compute_wer(
+                        [r["reference"] for r in lang_rows], [r["hypothesis"] for r in lang_rows]
+                    ),
                     4,
                 ),
                 cer=round(
-                    _compute_cer([r["reference"] for r in lang_rows], [r["hypothesis"] for r in lang_rows]),
+                    _compute_cer(
+                        [r["reference"] for r in lang_rows], [r["hypothesis"] for r in lang_rows]
+                    ),
                     4,
                 ),
                 rtf_p50=round(_percentile([r["rtf"] for r in lang_rows], 0.50), 4),
                 rtf_p95=round(_percentile([r["rtf"] for r in lang_rows], 0.95), 4),
-                latency_p50_ms=round(_percentile([r["latency_s"] * 1000 for r in lang_rows], 0.50), 2),
-                latency_p95_ms=round(_percentile([r["latency_s"] * 1000 for r in lang_rows], 0.95), 2),
+                latency_p50_ms=round(
+                    _percentile([r["latency_s"] * 1000 for r in lang_rows], 0.50), 2
+                ),
+                latency_p95_ms=round(
+                    _percentile([r["latency_s"] * 1000 for r in lang_rows], 0.95), 2
+                ),
             )
         )
     return metrics
@@ -339,7 +347,7 @@ def _metrics_to_dict(m: SpeechMetrics) -> dict[str, Any]:
     }
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ASR evaluation (WER/CER/RTF)")
     parser.add_argument(
         "--eval-set",

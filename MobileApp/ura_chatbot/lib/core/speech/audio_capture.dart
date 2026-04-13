@@ -17,8 +17,6 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 
@@ -59,7 +57,7 @@ class AudioCaptureException implements Exception {
 /// Streaming PCM16 mic capture built on top of the `record` package.
 class AudioCapture {
   AudioCapture({@visibleForTesting AudioRecorder? recorder})
-      : _recorder = recorder ?? AudioRecorder();
+    : _recorder = recorder ?? AudioRecorder();
 
   final AudioRecorder _recorder;
   StreamSubscription<Uint8List>? _rawSub;
@@ -115,10 +113,7 @@ class AudioCapture {
         },
         onError: (Object err, StackTrace st) {
           _chunksController?.addError(
-            AudioCaptureException(
-              'recorder error',
-              cause: err,
-            ),
+            AudioCaptureException('recorder error', cause: err),
             st,
           );
         },

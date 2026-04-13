@@ -28,7 +28,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
@@ -42,15 +41,16 @@ def _ensure_mpl():
         return
     try:
         import matplotlib
+
         matplotlib.use("Agg")  # Non-interactive backend for CI.
         _MPL_AVAILABLE = True
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             "matplotlib required for plot generation: pip install matplotlib seaborn"
-        )
+        ) from err
 
 
-def _load_json(path: Path) -> Optional[dict]:
+def _load_json(path: Path) -> dict | None:
     if not path.exists():
         log.warning("metrics file not found: %s", path)
         return None
@@ -62,6 +62,7 @@ def _save_fig(fig, path: Path, fmt: str = "png"):
     fig.savefig(path, format=fmt, dpi=150, bbox_inches="tight", facecolor="white")
     log.info("saved: %s", path)
     import matplotlib.pyplot as plt
+
     plt.close(fig)
 
 
@@ -76,7 +77,6 @@ def plot_calibration(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
     """
     _ensure_mpl()
     import matplotlib.pyplot as plt
-    import numpy as np
 
     data = _load_json(metrics_dir / "calibration_report.json")
     if not data:
@@ -96,8 +96,15 @@ def plot_calibration(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
     counts = [b.get("count", 0) for b in bins]
 
     ax1.plot([0, 1], [0, 1], "k--", alpha=0.5, label="Perfect calibration")
-    ax1.bar(confidences, accuracies, width=0.08, alpha=0.6, color="#1a3a6b",
-            edgecolor="white", label="Model")
+    ax1.bar(
+        confidences,
+        accuracies,
+        width=0.08,
+        alpha=0.6,
+        color="#1a3a6b",
+        edgecolor="white",
+        label="Model",
+    )
     ax1.set_xlabel("Mean Predicted Confidence")
     ax1.set_ylabel("Actual Accuracy")
     ax1.set_title("Reliability Diagram")
@@ -107,9 +114,15 @@ def plot_calibration(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
 
     ece = data.get("ece", data.get("expected_calibration_error", 0))
     mce = data.get("mce", data.get("maximum_calibration_error", 0))
-    ax1.text(0.05, 0.92, f"ECE = {ece:.3f}\nMCE = {mce:.3f}",
-             transform=ax1.transAxes, fontsize=9,
-             verticalalignment="top", bbox=dict(boxstyle="round", facecolor="wheat"))
+    ax1.text(
+        0.05,
+        0.92,
+        f"ECE = {ece:.3f}\nMCE = {mce:.3f}",
+        transform=ax1.transAxes,
+        fontsize=9,
+        verticalalignment="top",
+        bbox={"boxstyle": "round", "facecolor": "wheat"},
+    )
 
     # Right: confidence histogram.
     ax2.bar(confidences, counts, width=0.08, color="#c69c2f", edgecolor="white")
@@ -178,18 +191,29 @@ def plot_speech(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
 
     # Add value labels.
     for bar in bars1:
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
-                f"{bar.get_height():.2f}", ha="center", va="bottom", fontsize=8)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.005,
+            f"{bar.get_height():.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
     for bar in bars2:
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
-                f"{bar.get_height():.2f}", ha="center", va="bottom", fontsize=8)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.005,
+            f"{bar.get_height():.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
 
     # Draw quality gate thresholds.
     gate_wer = {"en": 0.15, "lg": 0.25, "sw": 0.20, "nyn": 0.30, "ach": 0.30}
     for i, l in enumerate(langs):
         if l in gate_wer:
-            ax.hlines(gate_wer[l], i - 0.4, i + 0.4, colors="red",
-                      linestyles="dashed", linewidth=1)
+            ax.hlines(gate_wer[l], i - 0.4, i + 0.4, colors="red", linestyles="dashed", linewidth=1)
 
     fig.tight_layout()
     _save_fig(fig, output_dir / f"asr_per_language.{fmt}", fmt)
@@ -202,7 +226,6 @@ def plot_mt(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
     """Per-direction BLEU/chrF comparison."""
     _ensure_mpl()
     import matplotlib.pyplot as plt
-    import numpy as np
 
     data = _load_json(metrics_dir / "mt_metrics.json")
     if not data:
@@ -218,24 +241,42 @@ def plot_mt(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
-    colors = ["#1a3a6b", "#c69c2f", "#2d8659", "#8b4513", "#4a0e4e",
-              "#0e4a4a", "#4a2f0e", "#2f0e4a"]
+    colors = [
+        "#1a3a6b",
+        "#c69c2f",
+        "#2d8659",
+        "#8b4513",
+        "#4a0e4e",
+        "#0e4a4a",
+        "#4a2f0e",
+        "#2f0e4a",
+    ]
 
     # BLEU.
-    bars = ax1.barh(dirs, bleus, color=colors[:len(dirs)])
+    bars = ax1.barh(dirs, bleus, color=colors[: len(dirs)])
     ax1.set_xlabel("BLEU Score")
     ax1.set_title("Translation Quality (BLEU)")
-    for bar, val in zip(bars, bleus):
-        ax1.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height() / 2,
-                 f"{val:.1f}", va="center", fontsize=9)
+    for bar, val in zip(bars, bleus, strict=False):
+        ax1.text(
+            bar.get_width() + 0.3,
+            bar.get_y() + bar.get_height() / 2,
+            f"{val:.1f}",
+            va="center",
+            fontsize=9,
+        )
 
     # chrF.
-    bars2 = ax2.barh(dirs, chrfs, color=colors[:len(dirs)])
+    bars2 = ax2.barh(dirs, chrfs, color=colors[: len(dirs)])
     ax2.set_xlabel("chrF Score")
     ax2.set_title("Translation Quality (chrF)")
-    for bar, val in zip(bars2, chrfs):
-        ax2.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2,
-                 f"{val:.2f}", va="center", fontsize=9)
+    for bar, val in zip(bars2, chrfs, strict=False):
+        ax2.text(
+            bar.get_width() + 0.01,
+            bar.get_y() + bar.get_height() / 2,
+            f"{val:.2f}",
+            va="center",
+            fontsize=9,
+        )
 
     fig.suptitle("Machine Translation Performance", fontsize=14, fontweight="bold")
     fig.tight_layout()
@@ -256,8 +297,12 @@ def plot_rag(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
         return
 
     metrics_keys = [
-        "faithfulness", "answer_relevancy", "context_precision",
-        "context_recall", "groundedness", "citation_accuracy",
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall",
+        "groundedness",
+        "citation_accuracy",
         "numerical_accuracy",
     ]
     labels = [k.replace("_", " ").title() for k in metrics_keys]
@@ -268,7 +313,7 @@ def plot_rag(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
     angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
     angles += angles[:1]
 
-    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw={"polar": True})
     ax.fill(angles, values, alpha=0.25, color="#1a3a6b")
     ax.plot(angles, values, "o-", color="#1a3a6b", linewidth=2, markersize=6)
     ax.set_xticks(angles[:-1])
@@ -313,8 +358,12 @@ def plot_data_quality(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
         sizes = list(by_source.values())
         colors = plt.cm.Set3(range(len(labels)))
         wedges, texts, autotexts = ax.pie(
-            sizes, labels=labels, autopct="%1.1f%%", colors=colors,
-            pctdistance=0.85, startangle=90,
+            sizes,
+            labels=labels,
+            autopct="%1.1f%%",
+            colors=colors,
+            pctdistance=0.85,
+            startangle=90,
         )
         for t in autotexts:
             t.set_fontsize(8)
@@ -337,11 +386,21 @@ def plot_data_quality(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
         fig, ax = plt.subplots(figsize=(10, 5))
         labels = list(funnel_data.keys())
         values = list(funnel_data.values())
-        bars = ax.bar(labels, values, color=["#1a3a6b", "#2d5f8a", "#4a87b0",
-                                              "#2d8659", "#c69c2f", "#d4a84a"][:len(labels)])
-        for bar, val in zip(bars, values):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 10,
-                    f"{val:,}", ha="center", va="bottom", fontsize=9, fontweight="bold")
+        bars = ax.bar(
+            labels,
+            values,
+            color=["#1a3a6b", "#2d5f8a", "#4a87b0", "#2d8659", "#c69c2f", "#d4a84a"][: len(labels)],
+        )
+        for bar, val in zip(bars, values, strict=False):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 10,
+                f"{val:,}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                fontweight="bold",
+            )
         ax.set_title("Data Pipeline Funnel", fontsize=14, fontweight="bold")
         ax.set_ylabel("Example Count")
         ax.grid(axis="y", alpha=0.3)
@@ -370,6 +429,7 @@ def plot_benchmark(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
 
     fig, ax = plt.subplots(figsize=(9, 5))
     import numpy as np
+
     x = np.arange(len(stage_labels))
     w = 0.35
 
@@ -388,8 +448,15 @@ def plot_benchmark(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
     # Total budget line.
     total = sum(p50)
     ax.axhline(y=5000, color="red", linestyle="--", alpha=0.5, label="5s budget")
-    ax.text(len(stages) - 0.5, total + 50, f"Total P50: {total:.0f}ms",
-            fontsize=10, ha="right", color="#1a3a6b", fontweight="bold")
+    ax.text(
+        len(stages) - 0.5,
+        total + 50,
+        f"Total P50: {total:.0f}ms",
+        fontsize=10,
+        ha="right",
+        color="#1a3a6b",
+        fontweight="bold",
+    )
 
     fig.tight_layout()
     _save_fig(fig, output_dir / f"mobile_latency_breakdown.{fmt}", fmt)
@@ -436,10 +503,11 @@ def plot_quality_gates(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
             if chk in families[fam]:
                 matrix[i, j] = 1.0 if families[fam][chk].get("passed", False) else 0.0
 
-    fig, ax = plt.subplots(figsize=(max(10, len(check_names) * 0.8),
-                                     max(4, len(family_names) * 0.8)))
+    fig, ax = plt.subplots(
+        figsize=(max(10, len(check_names) * 0.8), max(4, len(family_names) * 0.8))
+    )
     cmap = plt.cm.RdYlGn
-    im = ax.imshow(matrix, cmap=cmap, aspect="auto", vmin=0, vmax=1)
+    ax.imshow(matrix, cmap=cmap, aspect="auto", vmin=0, vmax=1)
 
     ax.set_xticks(range(len(check_names)))
     ax.set_yticks(range(len(family_names)))
@@ -452,8 +520,15 @@ def plot_quality_gates(metrics_dir: Path, output_dir: Path, fmt: str = "png"):
         for j in range(len(check_names)):
             val = matrix[i, j]
             text = "PASS" if val > 0.7 else "FAIL" if val < 0.3 else "N/A"
-            ax.text(j, i, text, ha="center", va="center", fontsize=7,
-                    color="white" if val < 0.3 else "black")
+            ax.text(
+                j,
+                i,
+                text,
+                ha="center",
+                va="center",
+                fontsize=7,
+                color="white" if val < 0.3 else "black",
+            )
 
     fig.tight_layout()
     _save_fig(fig, output_dir / f"quality_gate_dashboard.{fmt}", fmt)

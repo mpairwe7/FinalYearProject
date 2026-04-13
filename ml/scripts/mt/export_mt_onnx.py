@@ -26,7 +26,6 @@ import logging
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("mt.export_onnx")
 
@@ -42,7 +41,7 @@ class ExportResult:
     onnx_files: list[str]
     total_size_mb: float
     ok: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def _sha256(path: Path) -> str:
@@ -108,9 +107,7 @@ def run(*, checkpoint: Path, output_dir: Path, quantize: bool, dry_run: bool) ->
             log.warning("quantise failed, keeping fp32: %s", exc)
 
     result.onnx_files = [str(p.relative_to(output_dir)) for p in produced]
-    result.total_size_mb = round(
-        sum(p.stat().st_size for p in produced) / 1024 / 1024, 2
-    )
+    result.total_size_mb = round(sum(p.stat().st_size for p in produced) / 1024 / 1024, 2)
 
     manifest = {
         "onnx_files": result.onnx_files,
@@ -125,7 +122,7 @@ def run(*, checkpoint: Path, output_dir: Path, quantize: bool, dry_run: bool) ->
     return result
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument(
         "--checkpoint",

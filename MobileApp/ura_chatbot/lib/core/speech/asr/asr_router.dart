@@ -14,8 +14,6 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 
 import '../../audit/local_ledger.dart';
@@ -42,10 +40,7 @@ class AsrRouter {
   /// loading only happens when the user actually speaks.
   Future<void> _ensureInitialized() async {
     // Run in parallel — the native engine and Whisper don't share state.
-    await Future.wait([
-      primary.initialize(),
-      fallback.initialize(),
-    ]);
+    await Future.wait([primary.initialize(), fallback.initialize()]);
   }
 
   Future<AsrResult> transcribe(
@@ -95,19 +90,14 @@ class AsrRouter {
     final reason = locale == 'en'
         ? 'no_engine_available'
         : 'model_not_ready_$locale';
-    await _auditError(
-      primary.id,
-      locale,
-      reason,
-      consentGrantId,
-    );
+    await _auditError(primary.id, locale, reason, consentGrantId);
     final langName = _localeName(locale);
     throw AsrRouterException(
       reason,
       locale == 'en'
           ? 'No speech engine is ready. Check model downloads in Settings.'
           : 'The $langName speech model is not yet downloaded. '
-              'Open Settings → Speech models to install it.',
+                'Open Settings → Speech models to install it.',
     );
   }
 
@@ -148,18 +138,15 @@ class AsrRouter {
   }
 
   static String _localeName(String locale) => switch (locale) {
-        'en' => 'English',
-        'lg' => 'Luganda',
-        'sw' => 'Swahili',
-        'nyn' => 'Runyankole',
-        'ach' => 'Acholi',
-        _ => locale.toUpperCase(),
-      };
+    'en' => 'English',
+    'lg' => 'Luganda',
+    'sw' => 'Swahili',
+    'nyn' => 'Runyankole',
+    'ach' => 'Acholi',
+    _ => locale.toUpperCase(),
+  };
 
-  Future<void> _auditSuccess(
-    AsrResult result,
-    String? consentGrantId,
-  ) async {
+  Future<void> _auditSuccess(AsrResult result, String? consentGrantId) async {
     try {
       await LocalLedger.append(LedgerEventType.asrResult, {
         'engine_id': result.engineId,
@@ -167,7 +154,7 @@ class AsrRouter {
         'latency_ms': result.latencyMs,
         'confidence': result.confidence,
         'text_len': result.text.length,
-        if (consentGrantId != null) 'consent_grant_id': consentGrantId,
+        'consent_grant_id': ?consentGrantId,
       });
     } catch (_) {
       // Non-fatal — transcription is already done.
@@ -185,7 +172,7 @@ class AsrRouter {
         'engine_id': engineId,
         'locale': locale,
         'reason': reason,
-        if (consentGrantId != null) 'consent_grant_id': consentGrantId,
+        'consent_grant_id': ?consentGrantId,
       });
     } catch (_) {}
   }

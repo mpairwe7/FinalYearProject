@@ -25,8 +25,11 @@ double charErrorRate(String reference, String hypothesis) {
   return dist / ref.length;
 }
 
-List<String> _tokenise(String text) =>
-    text.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+List<String> _tokenise(String text) => text
+    .toLowerCase()
+    .split(RegExp(r'\s+'))
+    .where((w) => w.isNotEmpty)
+    .toList();
 
 /// Standard Levenshtein edit distance over two lists of tokens.
 int _editDistance(List<String> a, List<String> b) {

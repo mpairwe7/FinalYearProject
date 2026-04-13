@@ -18,10 +18,13 @@ import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import TYPE_CHECKING, Any
 
 from ml.scripts.data_aug.schema import SourceType, TaskType, TrainingExample
 from ml.scripts.data_aug.text_utils import repetition_ratio, symbol_ratio
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +35,7 @@ class QualityConfig:
     max_tokens: int = 2048  # hard cap matches web_high_accuracy max_seq_length
     max_symbol_ratio: float = 0.35
     max_repetition_ratio: float = 0.25
-    tokenizer_model: Optional[str] = "google/gemma-2-2b-it"
+    tokenizer_model: str | None = "google/gemma-2-2b-it"
     source_caps: dict[str, int] = field(default_factory=dict)
     drop_short_responses_below: int = 4  # words
     min_user_chars: int = 3
@@ -40,8 +43,8 @@ class QualityConfig:
     # Optional FineWeb-Edu style learned quality classifier. When set, we
     # load the classifier from disk and drop rows below ``quality_threshold``.
     # See ``ml/scripts/train_quality_classifier.py`` for training.
-    quality_classifier_path: Optional[Path] = None
-    quality_threshold: Optional[float] = None  # overrides the model's own default
+    quality_classifier_path: Path | None = None
+    quality_threshold: float | None = None  # overrides the model's own default
 
 
 @dataclass
@@ -53,7 +56,7 @@ class QualityStats:
     dropped_capped: int = 0
     dropped_short_response: int = 0
     dropped_classifier: int = 0
-    classifier_report: Optional[dict[str, Any]] = None
+    classifier_report: dict[str, Any] | None = None
     output_count: int = 0
 
     def as_dict(self) -> dict:
@@ -82,7 +85,7 @@ class _TokenCounter:
     sequence as it will appear at training time — this is what the fine-tuner's
     ``max_seq_length`` applies to."""
 
-    def __init__(self, model_id: Optional[str]):
+    def __init__(self, model_id: str | None):
         self._model_id = model_id
         self._tokenizer = None
         self._fallback = False
@@ -115,9 +118,7 @@ class _TokenCounter:
             # whitespace approx: ~1.3 tokens per whitespace-word
             return int(len(text.split()) * 1.3) + 2
         try:
-            return len(
-                self._tokenizer(text, add_special_tokens=False)["input_ids"]
-            )
+            return len(self._tokenizer(text, add_special_tokens=False)["input_ids"])
         except Exception:
             return int(len(text.split()) * 1.3) + 2
 
@@ -204,10 +205,11 @@ def filter_quality(
 
         # Skip short-response filter for retrieval/corpus where assistant
         # text is intentionally brief citations.
-        if ex.metadata.task not in {TaskType.RETRIEVAL_QA, TaskType.CORPUS}:
-            if _is_short_response(ex, config.drop_short_responses_below):
-                stats.dropped_short_response += 1
-                continue
+        if ex.metadata.task not in {TaskType.RETRIEVAL_QA, TaskType.CORPUS} and _is_short_response(
+            ex, config.drop_short_responses_below
+        ):
+            stats.dropped_short_response += 1
+            continue
 
         tok = counter.count(ex)
         ex.metadata.token_count = tok
@@ -220,10 +222,9 @@ def filter_quality(
         if ex.metadata.source_type not in {
             SourceType.PDF_CORPUS,
             SourceType.RETRIEVAL,
-        }:
-            if not _passes_symbol_filter(ex, config.max_symbol_ratio):
-                stats.dropped_symbol += 1
-                continue
+        } and not _passes_symbol_filter(ex, config.max_symbol_ratio):
+            stats.dropped_symbol += 1
+            continue
 
         if not _passes_repetition_filter(ex, config.max_repetition_ratio):
             stats.dropped_repetition += 1
@@ -259,9 +260,7 @@ def filter_quality(
 
         if scorable_ex:
             filtered_scored, report = clf.score_and_filter(scorable_ex)
-            kept_hashes = {
-                ex.metadata.content_hash for ex in filtered_scored
-            }
+            kept_hashes = {ex.metadata.content_hash for ex in filtered_scored}
             new_kept: list[TrainingExample] = []
             for i, ex in enumerate(kept):
                 if i in scorable_idx:

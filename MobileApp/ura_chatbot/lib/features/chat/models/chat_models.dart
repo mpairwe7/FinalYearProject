@@ -16,12 +16,12 @@ class Citation {
   });
 
   factory Citation.fromJson(Map<String, dynamic> j) => Citation(
-        ref: j['ref'] as String? ?? '',
-        source: j['source'] as String? ?? '',
-        page: j['page'] as String? ?? '',
-        section: j['section'] as String? ?? '',
-        passage: j['passage'] as String? ?? '',
-      );
+    ref: j['ref'] as String? ?? '',
+    source: j['source'] as String? ?? '',
+    page: j['page'] as String? ?? '',
+    section: j['section'] as String? ?? '',
+    passage: j['passage'] as String? ?? '',
+  );
 }
 
 class ChatResponse {
@@ -50,20 +50,21 @@ class ChatResponse {
   });
 
   factory ChatResponse.fromJson(Map<String, dynamic> j) => ChatResponse(
-        reply: j['reply'] as String? ?? '',
-        sources: (j['sources'] as List?)?.cast<String>() ?? [],
-        citations: (j['citations'] as List?)
-                ?.map((c) => Citation.fromJson(c as Map<String, dynamic>))
-                .toList() ??
-            [],
-        faithfulnessScore: (j['faithfulness_score'] as num?)?.toDouble(),
-        retrievalMode: j['retrieval_mode'] as String? ?? 'keyword',
-        model: j['model'] as String? ?? 'ura-qwen2.5-3b-instruct',
-        conversationId: j['conversation_id'] as String?,
-        locale: j['locale'] as String? ?? 'en',
-        escalationRequired: j['escalation_required'] as bool? ?? false,
-        escalationReason: j['escalation_reason'] as String? ?? '',
-      );
+    reply: j['reply'] as String? ?? '',
+    sources: (j['sources'] as List?)?.cast<String>() ?? [],
+    citations:
+        (j['citations'] as List?)
+            ?.map((c) => Citation.fromJson(c as Map<String, dynamic>))
+            .toList() ??
+        [],
+    faithfulnessScore: (j['faithfulness_score'] as num?)?.toDouble(),
+    retrievalMode: j['retrieval_mode'] as String? ?? 'keyword',
+    model: j['model'] as String? ?? 'ura-qwen2.5-3b-instruct',
+    conversationId: j['conversation_id'] as String?,
+    locale: j['locale'] as String? ?? 'en',
+    escalationRequired: j['escalation_required'] as bool? ?? false,
+    escalationReason: j['escalation_reason'] as String? ?? '',
+  );
 }
 
 /// A single chat turn (user or assistant).
@@ -102,10 +103,10 @@ class FeedbackPayload {
   });
 
   Map<String, dynamic> toJson() => {
-        'message_id': messageId,
-        'rating': rating,
-        'comment': comment,
-        'user_query': userQuery,
-        'bot_reply': botReply,
-      };
+    'message_id': messageId,
+    'rating': rating,
+    'comment': comment,
+    'user_query': userQuery,
+    'bot_reply': botReply,
+  };
 }
