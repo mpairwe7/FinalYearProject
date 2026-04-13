@@ -110,15 +110,25 @@ if [ -f "$ANALYTICS_DB" ]; then
     cp "$ANALYTICS_DB" "${BACKUP_DIR}/analytics_backup.db"
     pass "Analytics DB backed up"
 
-    # Verify integrity
-    if sqlite3 "${BACKUP_DIR}/analytics_backup.db" "PRAGMA integrity_check;" | grep -q "ok"; then
-        pass "Backup integrity check passed"
+    # Verify integrity (try sqlite3 CLI, fall back to Python)
+    if command -v sqlite3 > /dev/null 2>&1; then
+        if sqlite3 "${BACKUP_DIR}/analytics_backup.db" "PRAGMA integrity_check;" | grep -q "ok"; then
+            pass "Backup integrity check passed (sqlite3 CLI)"
+        else
+            fail "Backup integrity check FAILED"
+        fi
+    elif command -v python3 > /dev/null 2>&1; then
+        if python3 -c "import sqlite3; c=sqlite3.connect('${BACKUP_DIR}/analytics_backup.db'); r=c.execute('PRAGMA integrity_check').fetchone(); exit(0 if r[0]=='ok' else 1)" 2>/dev/null; then
+            pass "Backup integrity check passed (Python sqlite3)"
+        else
+            fail "Backup integrity check FAILED"
+        fi
     else
-        fail "Backup integrity check FAILED"
+        info "Neither sqlite3 nor python3 available — skipping integrity check"
     fi
 
     # Count records
-    FEEDBACK_COUNT=$(sqlite3 "${BACKUP_DIR}/analytics_backup.db" "SELECT COUNT(*) FROM feedback;" 2>/dev/null || echo "0")
+    FEEDBACK_COUNT=$(python3 -c "import sqlite3; c=sqlite3.connect('${BACKUP_DIR}/analytics_backup.db'); print(c.execute('SELECT COUNT(*) FROM feedback').fetchone()[0])" 2>/dev/null || echo "0")
     info "Feedback records in backup: ${FEEDBACK_COUNT}"
 else
     info "No analytics DB at ${ANALYTICS_DB} — skipping (fresh deployment)"

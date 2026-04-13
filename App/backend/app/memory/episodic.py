@@ -122,10 +122,7 @@ class EpisodicMemory:
 
         conn = db._get_connection()
         cutoff = time.time() - (since_days * 86400)
-        sql = (
-            "SELECT * FROM episodic_summaries "
-            "WHERE user_id = ? AND created_at >= ?"
-        )
+        sql = "SELECT * FROM episodic_summaries " "WHERE user_id = ? AND created_at >= ?"
         params: list[Any] = [user_id, cutoff]
         if topic_tag:
             sql += " AND topic_tag = ?"

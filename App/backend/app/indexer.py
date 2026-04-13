@@ -93,7 +93,9 @@ def ingest_pdfs(pdf_dir: Path) -> list[dict[str, Any]]:
             pages = pymupdf4llm.to_markdown(str(pdf_path), page_chunks=True)
             chunk_idx = 0
             for page_data in pages:
-                page_text = page_data.get("text", "") if isinstance(page_data, dict) else str(page_data)
+                page_text = (
+                    page_data.get("text", "") if isinstance(page_data, dict) else str(page_data)
+                )
                 page_meta = page_data.get("metadata", {}) if isinstance(page_data, dict) else {}
                 page_num = str(page_meta.get("page", ""))
 
@@ -229,9 +231,7 @@ def build_index(
             sparse_idx, sparse_val = sparse_encoder.encode(doc["text"])
             vectors: dict[str, Any] = {"dense": dense_embeddings[j].tolist()}
             if sparse_idx:
-                vectors["sparse"] = models.SparseVector(
-                    indices=sparse_idx, values=sparse_val
-                )
+                vectors["sparse"] = models.SparseVector(indices=sparse_idx, values=sparse_val)
 
             payload = {k: v for k, v in doc.items()}
             points.append(

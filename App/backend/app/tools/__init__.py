@@ -45,9 +45,13 @@ class ToolSchema:
 
     name: str
     description: str
-    parameters: dict[str, Any] = field(default_factory=lambda: {
-        "type": "object", "properties": {}, "required": [],
-    })
+    parameters: dict[str, Any] = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+    )
     # Risk tier (from the roadmap):  low = pure fn / read-only,
     # medium = user-scoped PII, high = URA data, critical = writes.
     risk: str = "low"
@@ -122,8 +126,12 @@ class ToolRegistry:
         """
         name = tool.schema.name
         if name in cls._tools:
-            logger.info("Tool %s re-registered (was %s, now %s)",
-                        name, type(cls._tools[name]).__name__, type(tool).__name__)
+            logger.info(
+                "Tool %s re-registered (was %s, now %s)",
+                name,
+                type(cls._tools[name]).__name__,
+                type(tool).__name__,
+            )
         cls._tools[name] = tool
         logger.debug("Registered tool %s (risk=%s)", name, tool.schema.risk)
         return tool
@@ -212,10 +220,9 @@ class ToolRegistry:
 # Adding a new tool module means adding one line here.
 # ---------------------------------------------------------------------------
 from . import calculators as _calculators  # noqa: E402, F401
-from . import calendar as _calendar        # noqa: E402, F401
-from . import rates as _rates              # noqa: E402, F401
-from . import rag_tool as _rag_tool        # noqa: E402, F401
-from . import escalate as _escalate        # noqa: E402, F401
-
+from . import calendar as _calendar  # noqa: E402, F401
+from . import escalate as _escalate  # noqa: E402, F401
+from . import rag_tool as _rag_tool  # noqa: E402, F401
+from . import rates as _rates  # noqa: E402, F401
 
 __all__ = ["Tool", "ToolSchema", "ToolRegistry"]

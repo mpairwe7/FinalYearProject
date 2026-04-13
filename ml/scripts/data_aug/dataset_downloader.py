@@ -1,16 +1,21 @@
 """Online dataset downloader and integration (2026).
 
-Downloads parallel corpora and ASR datasets from public sources,
+Downloads parallel corpora, ASR, and TTS datasets from public sources,
 normalises them into the project's canonical JSONL format, and provides
 loaders that the augmentation pipeline can consume.
 
 Supported sources:
 
+    * **Sunbird SALT** — 25k parallel sentences for 10 Ugandan languages
+      including Runyankole + Acholi + multispeaker ASR + TTS (CC-BY-SA-4.0)
+    * **Google WAXAL** — 132k nyn ASR + 114k ach ASR + TTS samples
+      collected by Makerere AI Lab (CC-BY-SA-4.0)
     * **JW300** — CC0 parallel corpus via HuggingFace ``opus/JW300``
-      Pairs: en↔lg, en↔sw, en↔nyn, en↔ach
-    * **OPUS** — Various OPUS sub-corpora via HuggingFace ``datasets``
-    * **Common Voice** — ASR clips (delegates to ``asr_loaders.py``)
+    * **OPUS** — Various OPUS sub-corpora (Tatoeba, Mozilla-I10n)
+    * **Masakhane LAFAND-MT** — African language MT benchmark (CC-BY-NC-4.0)
+    * **FLORES-200** — MT evaluation benchmark for nyn/ach (CC-BY-SA-4.0)
     * **Google FLEURS** — ASR eval set for multilingual coverage
+    * **Common Voice** — ASR clips (delegates to ``asr_loaders.py``)
 
 All downloaded data is written to JSONL in the format that
 ``mt_loaders.load_jsonl`` already consumes.
@@ -205,6 +210,234 @@ def download_opus(
 
     log.info("opus: wrote %d pairs to %s", count, out_path)
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# Sunbird SALT — 25k parallel sentences, 10 Ugandan languages (CC-BY-SA-4.0)
+# ---------------------------------------------------------------------------
+
+
+def download_salt(
+    output_dir: Path,
+    languages: Optional[list[str]] = None,
+) -> list[Path]:
+    """Download Sunbird SALT parallel text + speech data.
+
+    SALT is the single highest-value dataset for Runyankole and Acholi.
+    Contains 25k parallel sentences across en/lg/sw/nyn/ach + multispeaker
+    ASR recordings + studio TTS recordings.
+
+    HuggingFace: ``Sunbird/salt``
+    License: CC-BY-SA-4.0
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("datasets library required")
+
+    if languages is None:
+        languages = ["ach", "nyn", "lug", "eng", "swa", "teo", "lgg", "lug"]
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+
+    # 1. Text data (parallel sentences).
+    text_path = output_dir / "salt_text_all.jsonl"
+    if not text_path.exists():
+        log.info("salt: downloading text-all split")
+        try:
+            ds = load_dataset("Sunbird/salt", "text-all", split="train",
+                              trust_remote_code=True)
+            count = 0
+            with text_path.open("w", encoding="utf-8") as f:
+                for row in ds:
+                    # SALT has columns per language: eng, lug, ach, nyn, etc.
+                    eng = str(row.get("eng", "")).strip()
+                    if not eng:
+                        continue
+                    for lang_code, col_name in [
+                        ("lg", "lug"), ("ach", "ach"), ("nyn", "nyn"),
+                        ("sw", "swa"), ("en", "eng"),
+                    ]:
+                        text = str(row.get(col_name, "")).strip()
+                        if text and lang_code != "en":
+                            f.write(json.dumps({
+                                "source_text": eng,
+                                "target_text": text,
+                                "source_lang": "en",
+                                "target_lang": lang_code,
+                                "source_type": "salt",
+                                "license": "cc_by_sa",
+                            }, ensure_ascii=False) + "\n")
+                            count += 1
+            log.info("salt: wrote %d parallel pairs to %s", count, text_path)
+        except Exception as e:
+            log.warning("salt: text download failed: %s", e)
+            text_path.write_text("")
+    paths.append(text_path)
+
+    # 2. ASR data (multispeaker recordings) — write metadata only.
+    for lang in ["ach", "nyn", "lug"]:
+        asr_path = output_dir / f"salt_asr_{lang}.jsonl"
+        if asr_path.exists():
+            paths.append(asr_path)
+            continue
+        try:
+            ds = load_dataset("Sunbird/salt", f"multispeaker-{lang}",
+                              split="train", trust_remote_code=True)
+            count = 0
+            with asr_path.open("w", encoding="utf-8") as f:
+                for row in ds:
+                    text = str(row.get("text", "")).strip()
+                    if not text:
+                        continue
+                    f.write(json.dumps({
+                        "reference": text,
+                        "locale": lang if lang != "lug" else "lg",
+                        "source": "Sunbird/salt",
+                        "source_type": "salt_asr",
+                        "has_audio": True,
+                    }, ensure_ascii=False) + "\n")
+                    count += 1
+            log.info("salt: wrote %d ASR samples for %s", count, lang)
+            paths.append(asr_path)
+        except Exception as e:
+            log.warning("salt: ASR %s failed: %s", lang, e)
+
+    return [p for p in paths if p.exists() and p.stat().st_size > 0]
+
+
+# ---------------------------------------------------------------------------
+# Google WAXAL — 132k nyn ASR + 114k ach ASR + TTS (CC-BY-SA-4.0)
+# ---------------------------------------------------------------------------
+
+
+def download_waxal(
+    output_dir: Path,
+    languages: Optional[list[str]] = None,
+    max_samples: int = 150_000,
+) -> list[Path]:
+    """Download Google WAXAL NLP dataset (Makerere AI Lab, 2026).
+
+    21 African languages, 11k+ hours. For URA Chatbot, we need:
+    - nyn_asr (132k samples) + nyn_tts (1,990 samples)
+    - ach_asr (114k samples) + ach_tts (2,030 samples)
+    - lug_asr (98.5k samples) + lug_tts (2,020 samples)
+
+    HuggingFace: ``google/WaxalNLP``
+    License: CC-BY-SA-4.0 / CC-BY-4.0
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("datasets library required")
+
+    if languages is None:
+        languages = ["nyn", "ach", "lug"]
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+
+    for lang in languages:
+        # ASR data.
+        for split_type in ["asr", "tts"]:
+            config_name = f"{lang}_{split_type}"
+            out_path = output_dir / f"waxal_{config_name}.jsonl"
+
+            if out_path.exists():
+                paths.append(out_path)
+                continue
+
+            log.info("waxal: downloading %s", config_name)
+            try:
+                ds = load_dataset("google/WaxalNLP", config_name,
+                                  split="train", trust_remote_code=True)
+                count = 0
+                with out_path.open("w", encoding="utf-8") as f:
+                    for row in ds:
+                        text = str(row.get("transcription", row.get("text", ""))).strip()
+                        if not text:
+                            continue
+                        # Map 3-letter codes to our 2/3-letter codes.
+                        locale = {"lug": "lg", "nyn": "nyn", "ach": "ach"}.get(lang, lang)
+                        f.write(json.dumps({
+                            "reference": text,
+                            "locale": locale,
+                            "source": "google/WaxalNLP",
+                            "source_type": f"waxal_{split_type}",
+                            "has_audio": True,
+                        }, ensure_ascii=False) + "\n")
+                        count += 1
+                        if count >= max_samples:
+                            break
+                log.info("waxal: wrote %d %s samples for %s", count, split_type, lang)
+                paths.append(out_path)
+            except Exception as e:
+                log.warning("waxal: %s failed: %s", config_name, e)
+
+    return [p for p in paths if p.exists() and p.stat().st_size > 0]
+
+
+# ---------------------------------------------------------------------------
+# FLORES-200 — MT evaluation benchmark (CC-BY-SA-4.0)
+# ---------------------------------------------------------------------------
+
+
+def download_flores(
+    output_dir: Path,
+    languages: Optional[list[str]] = None,
+) -> list[Path]:
+    """Download FLORES-200 devtest sets for MT evaluation.
+
+    ~1,012 high-quality sentences per language. Used as eval benchmark
+    for MT quality gates, not for training.
+
+    HuggingFace: ``facebook/flores`` or ``openlanguagedata/flores_plus``
+    License: CC-BY-SA-4.0
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        raise ImportError("datasets library required")
+
+    if languages is None:
+        languages = ["nyn_Latn", "ach_Latn", "lug_Latn", "swh_Latn", "eng_Latn"]
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+
+    for lang_code in languages:
+        out_path = output_dir / f"flores_{lang_code}.jsonl"
+        if out_path.exists():
+            paths.append(out_path)
+            continue
+
+        log.info("flores: downloading %s", lang_code)
+        try:
+            ds = load_dataset("facebook/flores", lang_code, split="devtest",
+                              trust_remote_code=True)
+            count = 0
+            with out_path.open("w", encoding="utf-8") as f:
+                for row in ds:
+                    text = str(row.get("sentence", "")).strip()
+                    if not text:
+                        continue
+                    # Shorten code: nyn_Latn → nyn
+                    short = lang_code.split("_")[0]
+                    locale = {"lug": "lg", "swh": "sw", "eng": "en"}.get(short, short)
+                    f.write(json.dumps({
+                        "reference": text,
+                        "locale": locale,
+                        "id": f"flores-{locale}-{count:04d}",
+                        "source": "facebook/flores",
+                    }, ensure_ascii=False) + "\n")
+                    count += 1
+            log.info("flores: wrote %d sentences for %s", count, lang_code)
+            paths.append(out_path)
+        except Exception as e:
+            log.warning("flores: %s failed: %s", lang_code, e)
+
+    return [p for p in paths if p.exists() and p.stat().st_size > 0]
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +735,22 @@ def download_all_corpora(
         ]
 
     paths = []
+
+    # --- Priority 1: Sunbird SALT (highest quality for nyn/ach) ---
+    if include_salt:
+        try:
+            paths.extend(download_salt(output_dir / "salt"))
+        except Exception as e:
+            log.warning("SALT unavailable: %s", e)
+
+    # --- Priority 2: Google WAXAL (largest ASR/TTS for nyn/ach) ---
+    if include_waxal:
+        try:
+            paths.extend(download_waxal(output_dir / "waxal"))
+        except Exception as e:
+            log.warning("WAXAL unavailable: %s", e)
+
+    # --- Priority 3-5: JW300 + OPUS + Masakhane per language pair ---
     for src, tgt in lang_pairs:
         if include_salt:
             try:
@@ -521,7 +770,14 @@ def download_all_corpora(
             except Exception as e:
                 log.warning("Masakhane %s-%s unavailable: %s", src, tgt, e)
 
-    # FLEURS — ASR eval sets.
+    # --- Priority 6: FLORES-200 (MT eval benchmark) ---
+    if include_flores_eval:
+        try:
+            paths.extend(download_flores(output_dir / "flores"))
+        except Exception as e:
+            log.warning("FLORES unavailable: %s", e)
+
+    # --- Priority 7: FLEURS (ASR eval) ---
     if include_fleurs:
         for lang in {l for pair in lang_pairs for l in pair}:
             try:

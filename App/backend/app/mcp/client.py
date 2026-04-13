@@ -81,6 +81,7 @@ class MCPClient:
 
     def __init__(self) -> None:
         from ..tools import ToolRegistry
+
         self._registry = ToolRegistry
 
     # -- Discovery -----------------------------------------------------

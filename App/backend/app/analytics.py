@@ -39,7 +39,9 @@ class MetricsStore:
     def __init__(self) -> None:
         self._lock = Lock()
         self._counters: dict[str, int] = defaultdict(int)
-        self._histograms: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=_MAX_HISTOGRAM_SIZE))
+        self._histograms: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=_MAX_HISTOGRAM_SIZE)
+        )
         self._start_time = time.time()
 
     def inc(self, name: str, value: int = 1, labels: dict[str, str] | None = None) -> None:
@@ -152,11 +154,17 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
         status = str(response.status_code)
 
         # Track metrics
-        metrics.inc("http_requests_total", labels={"method": method, "path": path, "status": status})
-        metrics.observe("http_request_duration_ms", elapsed_ms, labels={"method": method, "path": path})
+        metrics.inc(
+            "http_requests_total", labels={"method": method, "path": path, "status": status}
+        )
+        metrics.observe(
+            "http_request_duration_ms", elapsed_ms, labels={"method": method, "path": path}
+        )
 
         if response.status_code >= 400:
-            metrics.inc("http_errors_total", labels={"method": method, "path": path, "status": status})
+            metrics.inc(
+                "http_errors_total", labels={"method": method, "path": path, "status": status}
+            )
 
         # Track session activity
         if session_id and path.startswith("/v1/"):

@@ -35,9 +35,8 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
 
 from .resilience import CircuitBreaker
 
@@ -76,12 +75,12 @@ SPEECH_ASR_SHERPA_DIR = Path(
 @dataclass
 class TranscribeResult:
     text: str
-    language: Optional[str] = None
-    duration_s: Optional[float] = None
-    latency_s: Optional[float] = None
-    rtf: Optional[float] = None
+    language: str | None = None
+    duration_s: float | None = None
+    latency_s: float | None = None
+    rtf: float | None = None
     backend: str = "unknown"
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -93,7 +92,7 @@ class SynthesizeResult:
     latency_s: float
     backend: str
     voice: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -103,7 +102,7 @@ class TranslateResult:
     target_lang: str
     latency_s: float
     backend: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +195,7 @@ class SpeechModel:
         return self.enabled and self._initialised
 
     def transcribe(
-        self, audio_bytes: bytes, sample_rate: int = 16000, language: Optional[str] = None
+        self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
     ) -> TranscribeResult:
         """Transcribe raw PCM bytes (int16 or float32)."""
         if not self.enabled:
@@ -220,7 +219,9 @@ class SpeechModel:
         except concurrent.futures.TimeoutError:
             future.cancel()
             self._breakers["asr"].record_failure()
-            return TranscribeResult(text="", backend="timeout", error=f"deadline {SPEECH_DEADLINE_S}s exceeded")
+            return TranscribeResult(
+                text="", backend="timeout", error=f"deadline {SPEECH_DEADLINE_S}s exceeded"
+            )
         except Exception as exc:
             self._breakers["asr"].record_failure()
             logger.exception("ASR error")
@@ -229,7 +230,7 @@ class SpeechModel:
     def synthesize(
         self,
         text: str,
-        voice: Optional[str] = None,
+        voice: str | None = None,
         language: str = "en",
     ) -> SynthesizeResult:
         """Synthesize text to WAV bytes."""
@@ -321,9 +322,7 @@ class SpeechModel:
                 backend="circuit_open",
                 error="MT circuit open",
             )
-        future = self._executor.submit(
-            self._do_translate, text, source_lang, target_lang
-        )
+        future = self._executor.submit(self._do_translate, text, source_lang, target_lang)
         try:
             result = future.result(timeout=SPEECH_DEADLINE_S)
             self._breakers["mt"].record_success()

@@ -22,7 +22,6 @@ Install the optional dependency when enabling this backend::
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -219,8 +218,14 @@ def update_feedback_comment(message_id: str, comment: str) -> bool:
 def get_feedback_summary(days: int = 30) -> dict[str, Any]:
     pool = _get_pool()
     if pool is None:
-        return {"period_days": days, "total": 0, "thumbs_up": 0, "thumbs_down": 0,
-                "satisfaction_pct": 0.0, "recent": []}
+        return {
+            "period_days": days,
+            "total": 0,
+            "thumbs_up": 0,
+            "thumbs_down": 0,
+            "satisfaction_pct": 0.0,
+            "recent": [],
+        }
     cutoff = time.time() - (days * 86400)
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -243,15 +248,23 @@ def get_feedback_summary(days: int = 30) -> dict[str, Any]:
                 (cutoff,),
             )
             recent = [
-                {"id": r[0], "message_id": r[1], "rating": r[2],
-                 "comment": r[3], "created_at": r[4]}
+                {
+                    "id": r[0],
+                    "message_id": r[1],
+                    "rating": r[2],
+                    "comment": r[3],
+                    "created_at": r[4],
+                }
                 for r in cur.fetchall()
             ]
     satisfaction = round(up / total * 100, 1) if total > 0 else 0.0
     return {
-        "period_days": days, "total": total,
-        "thumbs_up": up, "thumbs_down": down,
-        "satisfaction_pct": satisfaction, "recent": recent,
+        "period_days": days,
+        "total": total,
+        "thumbs_up": up,
+        "thumbs_down": down,
+        "satisfaction_pct": satisfaction,
+        "recent": recent,
     }
 
 
@@ -313,8 +326,12 @@ def upsert_session(session_id: str, user_agent: str = "", platform: str = "") ->
 def get_session_stats(days: int = 30) -> dict[str, Any]:
     pool = _get_pool()
     if pool is None:
-        return {"period_days": days, "total_sessions": 0,
-                "avg_messages_per_session": 0.0, "max_messages_in_session": 0}
+        return {
+            "period_days": days,
+            "total_sessions": 0,
+            "avg_messages_per_session": 0.0,
+            "max_messages_in_session": 0,
+        }
     cutoff = time.time() - (days * 86400)
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -355,8 +372,17 @@ def log_conversation(
                 """INSERT INTO conversations (id, session_id, user_message, bot_reply,
                        sources, response_time_ms, confidence, topic_tag, created_at)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (conv_id, session_id, user_message, bot_reply, sources,
-                 response_time_ms, confidence, topic_tag, time.time()),
+                (
+                    conv_id,
+                    session_id,
+                    user_message,
+                    bot_reply,
+                    sources,
+                    response_time_ms,
+                    confidence,
+                    topic_tag,
+                    time.time(),
+                ),
             )
         conn.commit()
     return conv_id
@@ -381,8 +407,13 @@ def get_recent_turns(session_id: str, limit: int = 5) -> list[dict[str, str]]:
 def get_conversation_stats(days: int = 30) -> dict[str, Any]:
     pool = _get_pool()
     if pool is None:
-        return {"period_days": days, "total_conversations": 0,
-                "avg_response_time_ms": 0.0, "avg_confidence": 0.0, "top_topics": []}
+        return {
+            "period_days": days,
+            "total_conversations": 0,
+            "avg_response_time_ms": 0.0,
+            "avg_confidence": 0.0,
+            "top_topics": [],
+        }
     cutoff = time.time() - (days * 86400)
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -427,8 +458,14 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
                 (cutoff,),
             )
             down = [
-                {"message_id": r[0], "user_query": r[1], "bot_reply": r[2],
-                 "comment": r[3], "created_at": r[4], "review_reason": r[5]}
+                {
+                    "message_id": r[0],
+                    "user_query": r[1],
+                    "bot_reply": r[2],
+                    "comment": r[3],
+                    "created_at": r[4],
+                    "review_reason": r[5],
+                }
                 for r in cur.fetchall()
             ]
             cur.execute(
@@ -439,8 +476,14 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
                 (cutoff,),
             )
             low = [
-                {"message_id": r[0], "user_query": r[1], "bot_reply": r[2],
-                 "comment": r[3], "created_at": r[4], "review_reason": r[5]}
+                {
+                    "message_id": r[0],
+                    "user_query": r[1],
+                    "bot_reply": r[2],
+                    "comment": r[3],
+                    "created_at": r[4],
+                    "review_reason": r[5],
+                }
                 for r in cur.fetchall()
             ]
     return down + low

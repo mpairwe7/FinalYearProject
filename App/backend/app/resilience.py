@@ -81,10 +81,10 @@ class CircuitBreaker:
                 self._opened_at = time.monotonic()
                 # Double backoff only from HALF_OPEN→OPEN (not first trip)
                 if was_half_open:
-                    self._current_timeout = min(
-                        self._current_timeout * 2, self._max_timeout
-                    )
+                    self._current_timeout = min(self._current_timeout * 2, self._max_timeout)
                 logger.warning(
                     "Circuit breaker %s → OPEN (failures=%d, backoff=%.0fs)",
-                    self.name, self._failures, self._current_timeout,
+                    self.name,
+                    self._failures,
+                    self._current_timeout,
                 )

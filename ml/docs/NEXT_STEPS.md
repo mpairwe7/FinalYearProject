@@ -6,46 +6,63 @@ human labor that cannot be done in the scaffolding pass.
 
 ## Blocking (before first mobile bundle can ship)
 
-1. **Luganda voice data collection**
-   * Script: `Data/speech/tts/lg_voice/README.md` documents the recording
-     protocol.
-   * Need: single adult native speaker, 3-4 hours of clean speech in a
-     quiet room, ~500-1000 URA-themed prompts.
-   * Consent: `CONSENT.yaml` with a revocable, versioned agreement.
-   * Post-collection: run `ml/scripts/tts/train_luganda_vits.py` on GPU.
+All data sources are now identified and download scripts are ready.
+Run from any networked machine:
 
-2. **Common Voice Luganda download**
-   * `python -m ml.scripts.data_aug.asr_loaders` can already consume the
-     existing `Data/lgaudio/` sample, but production needs the full
-     Mozilla Common Voice snapshot.
-   * Source: `https://commonvoice.mozilla.org/en/datasets` (CC0-1.0).
-   * Place under `Data/common_voice_lg/`.
+```bash
+# Download ALL datasets in one command:
+python -m ml.scripts.data_aug.dataset_downloader \
+    --output-dir Data/online_corpora \
+    --lang-pairs en-lg en-sw en-nyn en-ach
 
-3. **Whisper fine-tune on Luganda**
-   * Once Common Voice lg is in place:
-     ```
-     python -m ml.scripts.asr.train_luganda \
-         --common-voice Data/common_voice_lg \
-         --target mobile
-     ```
-   * Needs: 1x GPU (24 GB), ~6-10 hours.
-   * Gate: WER <= 0.25 on held-out Luganda test set.
+# Or run the full training orchestrator:
+python -m ml.scripts.train_all --dry-run  # validate first
+python -m ml.scripts.train_all --target mobile_gemma_2b
+```
 
-4. **MADLAD-400 download + fine-tune**
-   * `python -m ml.scripts.mt.download_models`
+### Data downloads (require network only, no GPU)
+
+1. **Sunbird SALT** — 25k parallel sentences + ASR + TTS for nyn/ach/lg
+   * `download_salt()` in `dataset_downloader.py`
+   * CC-BY-SA-4.0 — commercial safe
+   * **Eliminates need for custom voice recording** for nyn/ach/lg TTS
+
+2. **Google WAXAL** — 132k nyn ASR + 114k ach ASR + TTS studio data
+   * `download_waxal()` in `dataset_downloader.py`
+   * CC-BY-SA-4.0 — commercial safe
+   * **Largest Ugandan language speech dataset** as of 2026
+
+3. **Common Voice Luganda** — ~80 validated hours ASR
+   * Source: `mozilla-foundation/common_voice_17_0` (CC0-1.0)
+   * Place under `Data/common_voice_lg/`
+
+4. **JW300 + OPUS + Masakhane** — parallel MT for all 4 language pairs
+   * Downloaded automatically by `download_all_corpora()`
+
+5. **FLORES-200** — MT eval benchmark (nyn/ach/lg/sw)
+   * ~1k sentences per language for evaluation
+
+### Model training (require GPU, ~30 GPU-hours total)
+
+6. **Whisper fine-tune** (all 5 languages)
+   * Data: Common Voice (lg) + WAXAL (nyn/ach/lg) + SALT (ASR configs)
+   * `python -m ml.scripts.asr.train_luganda --common-voice Data/common_voice_lg`
+   * Needs: 1x GPU (24 GB), ~6-10 hours per language
+   * Gate: WER <= 0.25 (lg), 0.30 (nyn/ach)
+
+7. **VITS TTS training** (lg/nyn/ach)
+   * Data: **WAXAL TTS** — 2k studio samples per language (no manual recording needed!)
+   * `python -m ml.scripts.tts.train_luganda_vits --data-dir Data/online_corpora/waxal/`
+   * Needs: 1x GPU, ~24 hours per voice
+
+8. **MADLAD-400 MT fine-tune** (en↔lg/sw/nyn/ach)
+   * Data: SALT parallel + JW300 + OPUS
    * `python -m ml.scripts.mt.finetune_mt`
-   * Gate: BLEU >= 15 (en->lg), >= 20 (lg->en).
-   * Needs: 1x GPU (24 GB), ~4-8 hours.
+   * Gate: BLEU >= 15 (en→lg), >= 8 (en→nyn/ach)
 
-5. **Teacher -> student distillation**
+9. **MT student distillation** + backtranslation
    * `python -m ml.scripts.mt.distill_mt`
-   * Produces the mobile-sized MT model.
-   * Needs: 1x GPU, ~4 hours.
-
-6. **Backtranslation augmentation**
    * `python -m ml.scripts.mt.backtranslate`
-   * Generates synthetic Lg->En pairs from monolingual Luganda text.
-   * Iterative: re-run `finetune_mt.py` after each backtranslation pass.
 
 ## Blocking (mobile integration)
 

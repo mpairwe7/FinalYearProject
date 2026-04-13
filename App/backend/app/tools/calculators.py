@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from . import Tool, ToolSchema, ToolRegistry
+from . import Tool, ToolRegistry, ToolSchema
 
 logger = logging.getLogger(__name__)
 
@@ -35,28 +35,28 @@ _FY2025_26_RATES = {
     # PAYE (resident individual monthly) — progressive bands in UGX
     "paye_bands_resident": [
         # (lower_bound, upper_bound, rate, flat_amount_below_upper)
-        (0,         235_000,    0.00, 0),
-        (235_000,   335_000,    0.10, 0),
-        (335_000,   410_000,    0.20, 10_000),
-        (410_000, 10_000_000,   0.30, 25_000),
+        (0, 235_000, 0.00, 0),
+        (235_000, 335_000, 0.10, 0),
+        (335_000, 410_000, 0.20, 10_000),
+        (410_000, 10_000_000, 0.30, 25_000),
         (10_000_000, float("inf"), 0.40, 2_902_500),
     ],
     # Non-resident PAYE rates (simpler, flat brackets)
     "paye_bands_non_resident": [
-        (0,         335_000,    0.10, 0),
-        (335_000,   410_000,    0.20, 33_500),
-        (410_000, 10_000_000,   0.30, 48_500),
+        (0, 335_000, 0.10, 0),
+        (335_000, 410_000, 0.20, 33_500),
+        (410_000, 10_000_000, 0.30, 48_500),
         (10_000_000, float("inf"), 0.40, 2_925_500),
     ],
     "corporation_tax": 0.30,
-    "capital_gains_corporate": 0.30,    # added to gross income
-    "rental_tax_individual": 0.12,      # 12% on gross rental income above 2.82M p.a.
+    "capital_gains_corporate": 0.30,  # added to gross income
+    "rental_tax_individual": 0.12,  # 12% on gross rental income above 2.82M p.a.
     "rental_tax_individual_threshold": 2_820_000,
     "rental_tax_company": 0.30,
     "withholding_services": 0.06,
     "withholding_goods": 0.06,
     "withholding_management_fees": 0.15,
-    "customs_duty_common": 0.25,        # typical consumer goods import
+    "customs_duty_common": 0.25,  # typical consumer goods import
     "withholding_dividend": 0.15,
 }
 
@@ -69,8 +69,7 @@ def _get_rates(fiscal_year: str = "FY2025-26") -> dict[str, Any]:
     table = _RATE_TABLES.get(fiscal_year)
     if table is None:
         raise ValueError(
-            f"Unknown fiscal year '{fiscal_year}'. "
-            f"Known years: {sorted(_RATE_TABLES.keys())}"
+            f"Unknown fiscal year '{fiscal_year}'. " f"Known years: {sorted(_RATE_TABLES.keys())}"
         )
     return table
 

@@ -14,7 +14,6 @@ for Prometheus / Grafana.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from dataclasses import asdict, dataclass, field
@@ -93,37 +92,43 @@ def verify_chain(tenant_id: str = "default") -> VerificationReport:
 
         if expected_payload_hash != row["payload_hash"]:
             report.valid = False
-            report.breaks.append(ChainBreak(
-                seq=row["seq"],
-                event_id=row["event_id"],
-                reason="payload_hash mismatch",
-                expected_payload_hash=expected_payload_hash,
-                actual_payload_hash=row["payload_hash"],
-                expected_row_hash=expected_row_hash,
-                actual_row_hash=row["row_hash"],
-            ))
+            report.breaks.append(
+                ChainBreak(
+                    seq=row["seq"],
+                    event_id=row["event_id"],
+                    reason="payload_hash mismatch",
+                    expected_payload_hash=expected_payload_hash,
+                    actual_payload_hash=row["payload_hash"],
+                    expected_row_hash=expected_row_hash,
+                    actual_row_hash=row["row_hash"],
+                )
+            )
         elif row["prev_hash"] != prev_row_hash:
             report.valid = False
-            report.breaks.append(ChainBreak(
-                seq=row["seq"],
-                event_id=row["event_id"],
-                reason="prev_hash does not match previous row_hash",
-                expected_payload_hash=expected_payload_hash,
-                actual_payload_hash=row["payload_hash"],
-                expected_row_hash=expected_row_hash,
-                actual_row_hash=row["row_hash"],
-            ))
+            report.breaks.append(
+                ChainBreak(
+                    seq=row["seq"],
+                    event_id=row["event_id"],
+                    reason="prev_hash does not match previous row_hash",
+                    expected_payload_hash=expected_payload_hash,
+                    actual_payload_hash=row["payload_hash"],
+                    expected_row_hash=expected_row_hash,
+                    actual_row_hash=row["row_hash"],
+                )
+            )
         elif expected_row_hash != row["row_hash"]:
             report.valid = False
-            report.breaks.append(ChainBreak(
-                seq=row["seq"],
-                event_id=row["event_id"],
-                reason="row_hash mismatch",
-                expected_payload_hash=expected_payload_hash,
-                actual_payload_hash=row["payload_hash"],
-                expected_row_hash=expected_row_hash,
-                actual_row_hash=row["row_hash"],
-            ))
+            report.breaks.append(
+                ChainBreak(
+                    seq=row["seq"],
+                    event_id=row["event_id"],
+                    reason="row_hash mismatch",
+                    expected_payload_hash=expected_payload_hash,
+                    actual_payload_hash=row["payload_hash"],
+                    expected_row_hash=expected_row_hash,
+                    actual_row_hash=row["row_hash"],
+                )
+            )
 
         prev_row_hash = row["row_hash"]
 
