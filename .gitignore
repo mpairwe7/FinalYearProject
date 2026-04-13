@@ -117,3 +117,4 @@ temp/
 *.tmp
 ci-ml-pipeline.yml
 .claude/
+Data/common_voice_*
