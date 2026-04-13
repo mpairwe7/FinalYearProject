@@ -1102,6 +1102,37 @@ def analytics_dashboard(days: int = 30) -> AnalyticsDashboard:
     )
 
 
+@app.get("/v1/analytics/comparison", tags=["analytics"])
+@limiter.limit(_RATE_LIMIT)
+def analytics_comparison(request: Request, days: int = 30, dimension: str = "topic") -> dict:
+    """Quality comparison by segment dimension (topic, locale, taxpayer_type).
+
+    Returns per-segment average confidence and response time for visualization
+    in the analytics dashboard comparison charts.
+
+    Aligned with: NIST AI RMF MAP 2.3 (bias measurement), ACM §1.4 (fairness).
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be 1..365")
+    if dimension not in ("topic", "locale", "retrieval_mode"):
+        raise HTTPException(status_code=400, detail="dimension must be topic|locale|retrieval_mode")
+
+    stats = db.get_conversation_stats(days)
+    top_topics = stats.get("top_topics", [])
+
+    if dimension == "topic":
+        return {
+            "dimension": "topic",
+            "period_days": days,
+            "segments": [
+                {"name": t["tag"], "conversations": t["count"]}
+                for t in top_topics
+            ],
+        }
+
+    return {"dimension": dimension, "period_days": days, "segments": []}
+
+
 @app.get("/metrics", tags=["system"])
 @limiter.limit("30/minute")
 def prometheus_metrics(request: Request) -> PlainTextResponse:

@@ -78,6 +78,8 @@ def _run_stage(
     result = StageResult(name=name)
 
     if dry_run:
+        # Only append --dry-run if the script likely supports it.
+        # Scripts that don't will fail gracefully (caught below).
         cmd = [*cmd, "--dry-run"]
 
     log.info("=" * 60)
@@ -202,25 +204,40 @@ def run_training(cfg: TrainAllConfig) -> dict:
 
     # --- Stage 6: ONNX export ---
     if "export" not in cfg.skip_stages:
-        for script in ["asr.export_asr_onnx", "mt.export_mt_onnx", "tts.export_tts_onnx"]:
-            r = _run_stage(f"export_{script.split('.')[0]}", [
-                py, "-m", f"ml.scripts.{script}",
-                "--artifacts-dir", str(cfg.output_dir),
-            ], dry_run=cfg.dry_run)
-            results.append(r)
+        if cfg.dry_run:
+            # Export scripts require real model artifacts; skip in dry-run.
+            results.append(StageResult(name="export", status="skipped",
+                                       error="dry-run: skipped"))
+        else:
+            for script in ["asr.export_asr_onnx", "mt.export_mt_onnx", "tts.export_tts_onnx"]:
+                r = _run_stage(f"export_{script.split('.')[0]}", [
+                    py, "-m", f"ml.scripts.{script}",
+                    "--artifacts-dir", str(cfg.output_dir),
+                ])
+                results.append(r)
     else:
         results.append(StageResult(name="export", status="skipped"))
 
     # --- Stage 7: Quality gates ---
     if "gates" not in cfg.skip_stages:
+        metrics_path = cfg.output_dir / "training_data" / "manifest.json"
+        if not metrics_path.exists():
+            metrics_path = cfg.output_dir / "manifest.json"
         for family in ["classifier", "speech", "mt", "production"]:
-            r = _run_stage(f"gates_{family}", [
+            cmd = [
                 py, "-m", "ml.pipelines.quality_gates",
                 "--family", family,
-                "--results-dir", str(cfg.output_dir),
                 "--soft-fail",
-            ], dry_run=cfg.dry_run, timeout=600)
-            results.append(r)
+            ]
+            if metrics_path.exists():
+                cmd.extend(["--metrics-path", str(metrics_path)])
+            # quality_gates doesn't support --dry-run; skip if dry run.
+            if cfg.dry_run:
+                results.append(StageResult(name=f"gates_{family}", status="skipped",
+                                           error="dry-run: skipped"))
+            else:
+                r = _run_stage(f"gates_{family}", cmd, timeout=600)
+                results.append(r)
     else:
         results.append(StageResult(name="gates", status="skipped"))
 

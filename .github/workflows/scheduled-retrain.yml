@@ -111,6 +111,16 @@ jobs:
             --results-dir /tmp/retrain_eval \
             --soft-fail
 
+      - name: Generate evaluation plots
+        if: steps.drift.outputs.trigger == 'True'
+        continue-on-error: true
+        run: |
+          python -m ml.plots.generate_all \
+            --metrics-dir /tmp/retrain_eval \
+            --output-dir /tmp/retrain_eval/plots \
+            --format png
+          echo "Generated $(ls /tmp/retrain_eval/plots/*.png 2>/dev/null | wc -l) plots"
+
       - name: Upload evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -119,6 +129,7 @@ jobs:
           path: |
             drift_result.json
             /tmp/retrain_eval/manifest.json
+            /tmp/retrain_eval/plots/
           retention-days: 30
 
       - name: Step summary
