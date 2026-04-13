@@ -1,5 +1,5 @@
 # Core API backend
-fastapi==0.111.0
+fastapi==0.135.3
 uvicorn[standard]==0.30.1
 pydantic==2.7.4
 
