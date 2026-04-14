@@ -1,0 +1,45 @@
+{
+  "url": "https://ura.go.ug/en/domestic-taxes/tin-application/tin-registration-individual/",
+  "title": "TIN Registration - Individual - Uganda Revenue Authority",
+  "text": "\n| SN | Individual type | Documents required |\n| --- | --- | --- |\n| 1 | 18 years and above & Ugandan Citizen | ·         National ID ( Mandatory ) ·         NSSF Card ·         Driving Permit ·         Employee’s Id ·         Voter’s Card ·         Passport ·         Village Identity Card ·         Financial Card ·         Current Bank Statement (Past 90 days) |\n| 2 | Minor | A copy of the Legal/Court document of guardianship |\n| 3 | Non-Citizens of Uganda | ·         Passport ( Mandatory ) ·         Visa ·         Work permit(M) ·         Refugee ID (M for refugees) |\n| 4 | Diplomats | ·         Diplomatic Foreign Affairs ID ·         Letter from the Ministry of Foreign Affairs In addition to non-citizen requirements |\n| 5 | Business Name | Business Name Registration Certificate (in case of a sole proprietorship) In addition to individual identification documents |\n",
+  "content_hash": "a57cde00bca652cf",
+  "timestamp": "2026-04-14T06:17:19Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "SN",
+        "Individual type",
+        "Documents required"
+      ],
+      "rows": [
+        [
+          "1",
+          "18 years and above & Ugandan Citizen",
+          "·         National ID ( Mandatory ) ·         NSSF Card ·         Driving Permit ·         Employee’s Id ·         Voter’s Card ·         Passport ·         Village Identity Card ·         Financial Card ·         Current Bank Statement (Past 90 days)"
+        ],
+        [
+          "2",
+          "Minor",
+          "A copy of the Legal/Court document of guardianship"
+        ],
+        [
+          "3",
+          "Non-Citizens of Uganda",
+          "·         Passport ( Mandatory ) ·         Visa ·         Work permit(M) ·         Refugee ID (M for refugees)"
+        ],
+        [
+          "4",
+          "Diplomats",
+          "·         Diplomatic Foreign Affairs ID ·         Letter from the Ministry of Foreign Affairs In addition to non-citizen requirements"
+        ],
+        [
+          "5",
+          "Business Name",
+          "Business Name Registration Certificate (in case of a sole proprietorship) In addition to individual identification documents"
+        ]
+      ],
+      "row_count": 5
+    }
+  ]
+}

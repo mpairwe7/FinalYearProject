@@ -1,4 +1,47 @@
 {
   "visited": {},
-  "pdf_hashes": {}
+  "pdf_hashes": {
+    "ed8b8333c9d8a9c4b17704cb06aeca25": {
+      "url": "https://ura.go.ug/storage/2023/08/OATH-OF-SECRECY-1.pdf",
+      "filename": "ura.go.ug-OATH-OF-SECRECY-1.pdf",
+      "size_bytes": 52246,
+      "timestamp": "2026-04-14T06:21:40Z"
+    },
+    "d739a4ddb4733da002490968071805a3": {
+      "url": "https://www.ura.go.ug/resources/webuploads/INLB/Employment%20Income%20English.pdf",
+      "filename": "www.ura.go.ug-Employment_20Income_20English.pdf",
+      "size_bytes": 154675,
+      "timestamp": "2026-04-14T06:21:40Z"
+    },
+    "d22b98be7c69cce58a017aa2e9c6e88d": {
+      "url": "https://ura.go.ug/storage/2026/01/A-GUIDE-TO-TAXATION-OF-THE-AGRICULTURAL-SECTOR-VOL-1-ISSUE-4-FY-2025-2026.pdf",
+      "filename": "ura.go.ug-A-GUIDE-TO-TAXATION-OF-THE-AGRICULTURAL-SECTOR-VOL-1-ISSUE-4-FY-2025-2026.pdf",
+      "size_bytes": 759288,
+      "timestamp": "2026-04-14T06:21:41Z"
+    },
+    "7925c31205c6c9e28861356dbc83e0e3": {
+      "url": "https://ura.go.ug/storage/2024/06/A-Simplified-Guide-on-DTS-FY-2024-25-2.pdf",
+      "filename": "ura.go.ug-A-Simplified-Guide-on-DTS-FY-2024-25-2.pdf",
+      "size_bytes": 1582231,
+      "timestamp": "2026-04-14T06:21:43Z"
+    },
+    "a30a457873df6802e1c0c3b858d808e9": {
+      "url": "https://ura.go.ug/storage/2024/02/CONSTRUCTION-SECTOR-2022-23-1.pdf",
+      "filename": "ura.go.ug-CONSTRUCTION-SECTOR-2022-23-1.pdf",
+      "size_bytes": 17315501,
+      "timestamp": "2026-04-14T06:21:46Z"
+    },
+    "7a3d7c7df88f8d8f77ca74787e89b53e": {
+      "url": "https://ura.go.ug/storage/2024/07/THE-EFRIS-HANDBOOK-2024.pdf",
+      "filename": "ura.go.ug-THE-EFRIS-HANDBOOK-2024.pdf",
+      "size_bytes": 2719319,
+      "timestamp": "2026-04-14T06:21:50Z"
+    },
+    "2650c4156ca01b242aabab68bc0150b0": {
+      "url": "https://ura.go.ug/storage/2024/01/A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR.pdf",
+      "filename": "ura.go.ug-A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR.pdf",
+      "size_bytes": 4011861,
+      "timestamp": "2026-04-14T06:21:50Z"
+    }
+  }
 }
