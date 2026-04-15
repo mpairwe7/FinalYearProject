@@ -1,0 +1,58 @@
+{
+  "url": "https://ura.go.ug/en/choose-agents/?agent_type=dt_agents",
+  "title": "Choose a Tax Agent - Uganda Revenue Authority",
+  "text": "\n| No. | TIN | TAX PAYER NAME | DESIGNATION PERIOD |\n| --- | --- | --- | --- |\n| No. | TIN | TAX PAYER NAME | DESIGNATION PERIOD |\n\n| Serial Number | Tax Office | Agent Name | TIN | License Number | License Issue Date | License Expiry Date | Approval Date | Application Date | Registration Status | Deactivation Date |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| Serial Number | Tax Office | Agent Name | TIN | License Number | License Issue Date | License Expiry Date | Approval Date | Application Date | Registration Status | Deactivation Date |\n",
+  "content_hash": "e49c6eef0d2e6241",
+  "timestamp": "2026-04-15T06:08:25Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "No.",
+        "TIN",
+        "TAX PAYER NAME",
+        "DESIGNATION PERIOD"
+      ],
+      "rows": [
+        [
+          "No.",
+          "TIN",
+          "TAX PAYER NAME",
+          "DESIGNATION PERIOD"
+        ]
+      ],
+      "row_count": 1
+    },
+    {
+      "headers": [
+        "Serial Number",
+        "Tax Office",
+        "Agent Name",
+        "TIN",
+        "License Number",
+        "License Issue Date",
+        "License Expiry Date",
+        "Approval Date",
+        "Application Date",
+        "Registration Status",
+        "Deactivation Date"
+      ],
+      "rows": [
+        [
+          "Serial Number",
+          "Tax Office",
+          "Agent Name",
+          "TIN",
+          "License Number",
+          "License Issue Date",
+          "License Expiry Date",
+          "Approval Date",
+          "Application Date",
+          "Registration Status",
+          "Deactivation Date"
+        ]
+      ],
+      "row_count": 1
+    }
+  ]
+}
