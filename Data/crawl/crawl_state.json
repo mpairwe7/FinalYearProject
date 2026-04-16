@@ -90,6 +90,18 @@
       "filename": "www.ura.go.ug-URA_20MOBILE_20PAYMENT.pdf",
       "size_bytes": 269835,
       "timestamp": "2026-04-15T06:16:48Z"
+    },
+    "8866647bf7060651a705aeb5ea8a3cbc": {
+      "url": "http://ura.go.ug:80/download/CGMS/SCT%20press%20brief%201.pdf",
+      "filename": "ura.go.ug-SCT_20press_20brief_201.pdf",
+      "size_bytes": 428212,
+      "timestamp": "2026-04-16T06:17:18Z"
+    },
+    "2e141f9d044d5814e5301811d5ab54ff": {
+      "url": "http://ura.go.ug:80/download/CGMS/AsycudaWorld.pdf",
+      "filename": "ura.go.ug-AsycudaWorld.pdf",
+      "size_bytes": 428212,
+      "timestamp": "2026-04-16T06:17:22Z"
     }
   }
 }
