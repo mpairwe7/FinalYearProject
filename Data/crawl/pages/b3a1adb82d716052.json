@@ -1,9 +1,9 @@
 {
-  "url": "https://ura.go.ug/en/customs-agents-3/",
-  "title": "Customs Agents - Uganda Revenue Authority",
+  "url": "https://ura.go.ug/en/choose-agents/?agent_type=customs",
+  "title": "Choose a Tax Agent - Uganda Revenue Authority",
   "text": "\n| Serial Number | Tax Office | Agent Name | TIN | License Number | License Issue Date | License Expiry Date | Approval Date | Application Date | Registration Status | Deactivation Date |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| Serial Number | Tax Office | Agent Name | TIN | License Number | License Issue Date | License Expiry Date | Approval Date | Application Date | Registration Status | Deactivation Date |\n",
   "content_hash": "b3a1adb82d716052",
-  "timestamp": "2026-04-16T06:14:15Z",
+  "timestamp": "2026-04-17T06:09:33Z",
   "discovered_pdfs": [],
   "tables": [
     {

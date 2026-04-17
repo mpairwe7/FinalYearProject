@@ -1,0 +1,27 @@
+{
+  "url": "https://ura.go.ug/en/choose-agents/?agent_type=vat_wht",
+  "title": "Choose a Tax Agent - Uganda Revenue Authority",
+  "text": "\n| Serial Number | TIN | Agent Name | Effective Date |\n| --- | --- | --- | --- |\n| Serial Number | TIN | Agent Name | Effective Date |\n",
+  "content_hash": "9c0531e5697dfd01",
+  "timestamp": "2026-04-17T06:09:34Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Serial Number",
+        "TIN",
+        "Agent Name",
+        "Effective Date"
+      ],
+      "rows": [
+        [
+          "Serial Number",
+          "TIN",
+          "Agent Name",
+          "Effective Date"
+        ]
+      ],
+      "row_count": 1
+    }
+  ]
+}
