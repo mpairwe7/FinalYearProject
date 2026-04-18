@@ -102,6 +102,18 @@
       "filename": "ura.go.ug-AsycudaWorld.pdf",
       "size_bytes": 428212,
       "timestamp": "2026-04-16T06:17:22Z"
+    },
+    "1e99a7efdb5802406a8dfb9ed96ff41b": {
+      "url": "http://ura.go.ug:80/download/CGMS/URA%20upgrades%20to%20web.pdf",
+      "filename": "ura.go.ug-URA_20upgrades_20to_20web.pdf",
+      "size_bytes": 434852,
+      "timestamp": "2026-04-18T05:55:24Z"
+    },
+    "f6e6c4fafd0a3969c945db3eeb8b9c34": {
+      "url": "http://www.ura.go.ug:80/download/CGMS/URA%20MOBILE%20PAYMENT.pdf",
+      "filename": "www.ura.go.ug-URA_20MOBILE_20PAYMENT.pdf",
+      "size_bytes": 434852,
+      "timestamp": "2026-04-18T05:55:27Z"
     }
   }
 }
