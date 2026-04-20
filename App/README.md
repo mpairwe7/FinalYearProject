@@ -13,28 +13,28 @@ App/
 ├── README_HF.md       # Hugging Face Spaces README
 ├── backend/           # FastAPI backend API
 │   ├── app/
-│   │   ├── main.py          # API routes + SSE streaming + speech endpoints
-│   │   ├── models.py        # Pydantic v2 request/response models (chat + speech)
-│   │   ├── speech_service.py # SpeechModel singleton (ASR + MT + TTS orchestration)
-│   │   ├── service.py       # ChatModel (6-phase RAG orchestrator)
-│   │   ├── llm.py           # Qwen2.5-3B-Instruct local generation
-│   │   ├── query.py         # Query rewriting pipeline
-│   │   ├── cache.py         # Semantic response cache
-│   │   ├── corrective_rag.py # Corrective re-retrieval + clarification
-│   │   ├── guardrails.py    # OWASP LLM Top 10 guards
-│   │   ├── retriever.py     # Hybrid retriever + circuit breaker
-│   │   ├── indexer.py       # PDF/CSV → Qdrant indexing
-│   │   ├── resilience.py    # Circuit breaker (used by speech + retriever)
-│   │   ├── tracing.py       # OpenTelemetry GenAI spans
-│   │   ├── analytics.py     # Prometheus metrics middleware
-│   │   └── database.py      # SQLite WAL store
+│   │   ├── main.py          # API routes + SSE streaming + speech + eval endpoints
+│   │   ├── models.py        # Pydantic v2 request/response models
+│   │   ├── speech_service.py # SpeechModel (ASR + MT + TTS, edge-tts backend)
+│   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
+│   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
+│   │   ├── flags.py         # Feature flag registry (17 flags)
+│   │   ├── agents/          # Supervisor router + agent graph runtime
+│   │   ├── tools/           # 11 tools (calculators, rates, calendar, RAG, escalate)
+│   │   ├── workflows/       # YAML-driven slot-filling engine + TIN registration
+│   │   ├── memory/          # Episodic + semantic + working memory
+│   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention
+│   │   ├── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
+│   │   └── ...              # cache, query, indexer, resilience, tracing, analytics, database
 │   └── requirements.txt
-└── frontend/          # Next.js 16 web frontend
+└── frontend/          # Next.js 16 PWA frontend
     ├── src/
-    │   ├── app/             # Next.js pages (SSE streaming + voice UI)
-    │   ├── components/      # Reusable components (FeedbackButtons)
-    │   ├── services/        # voiceService.ts (audio capture + playback + API)
-    │   └── store/           # Zustand 5 state management + analytics
+    │   ├── app/             # Pages: chat, 404, error, analytics, evaluation
+    │   ├── components/      # 12 components (Chat, Voice, Markdown, Mermaid, Consent, etc.)
+    │   ├── services/        # voiceService.ts (AudioRecorder + playback + API)
+    │   ├── hooks/           # useSpeech.ts (React Query hooks)
+    │   └── store/           # Zustand 5 + analytics (consent-gated)
+    ├── public/            # PWA: manifest, SW, icons, robots.txt
     └── package.json
 ```
 
@@ -78,14 +78,17 @@ FastAPI v0.111 REST API with 6-phase advanced RAG pipeline and local LLM inferen
 
 **Speech Endpoints (2026):**
 - `POST /v1/voice/chat` — Compound voice pipeline: audio -> ASR -> MT -> LLM -> MT -> TTS -> audio+text
-- `POST /v1/asr` — Server-side ASR (raw PCM audio -> transcript)
-- `POST /v1/tts` — Text-to-speech synthesis (text -> base64 WAV)
+- `POST /v1/asr` — Server-side ASR (Whisper via transformers, raw PCM -> transcript)
+- `POST /v1/tts` — Text-to-speech synthesis (Edge Neural TTS, text -> base64 WAV)
 - `POST /v1/translate` — Machine translation (English <-> Luganda)
 - `GET /v1/speech/health` — Speech pipeline readiness check
 
+**Evaluation Endpoints (2026):**
+- `GET /v1/evaluation/results` — Pre-computed IEEE metrics (RAG, safety, calibration, benchmark, tokenizer)
+
 **RAG Pipeline (6 Phases):**
 1. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker
-2. **LLM Generation** — Qwen2.5-3B-Instruct local inference (sync + streaming)
+2. **LLM Generation** — Qwen3-8B local inference (sync + streaming)
 3. **SSE Streaming** — `TextIteratorStreamer` with per-token OutputGuard sanitization
 4. **Query Intelligence** — Rewriting (abbreviations, spelling, coreference), semantic cache, multi-turn memory
 5. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard
@@ -100,37 +103,55 @@ uvicorn app.main:app --reload
 
 ### 3. Frontend (`frontend/`)
 
-Next.js 16 + React 19 web application with SSE streaming and full bilingual voice support.
+Next.js 16 + React 19 PWA with SSE streaming, voice modal, and IEEE evaluation dashboards.
 
 **Features:**
-- SSE streaming with `ReadableStream` reader + sync fallback
-- `requestAnimationFrame` batched token rendering
-- Glassmorphism dark design system (Grok-inspired)
-- Zustand 5 state management with `updateLastTurn()` for streaming
-- ARIA-accessible locale selection (English / Luganda)
+- SSE streaming with `ReadableStream` + `requestAnimationFrame` batched rendering
+- Markdown rendering (bold, lists, code, citations, links) + Mermaid diagram support
+- Grok-inspired glassmorphism dark design (2,283 lines CSS)
+- Copy button + timestamps on every message
+- Installable PWA (manifest, service worker, offline caching)
+- GDPR consent banner (gates analytics tracking)
+- Branded 404 page + analytics error boundary
+- Zustand 5 state management with multi-conversation persistence
 
 **Voice capabilities (2026):**
-- Listen button on every assistant reply (per-language TTS via `/v1/tts`)
-- Voice mode toggle (MediaRecorder -> `/v1/voice/chat` compound endpoint)
-- Auto-narrate toggle (automatically plays TTS for every reply)
-- Speech health indicator (checks `/v1/speech/health` on mount)
-- Browser Speech Recognition API with server-side ASR fallback
-- Full Luganda <-> English translation in voice pipeline
-- AudioContext playback with barge-in (stop current audio on new input)
-- WCAG AA accessible: focus-visible, contrast ratios, reduced-motion support
+- Full-screen voice modal (Grok-style pulse rings + waveform + transcript)
+- Voice persona selection (5 voices: 3 English + 1 default + 1 Luganda)
+- Real TTS via Microsoft Edge Neural (0.4s latency)
+- ASR via Whisper (HuggingFace transformers backend)
+- Listen button on every reply + auto-narrate toggle
+- Complete voice chat compound pipeline (ASR → LLM → TTS)
+
+**Evaluation dashboards (IEEE-standard):**
+- RAG quality radar chart (10 metrics)
+- Calibration reliability curve + coverage-accuracy plot
+- Safety refusal rates by attack category
+- Benchmark throughput by prompt class
+- Tokenizer fertility comparison (EN vs LG)
+- Confusion matrix heatmap
+- Quality gates pass/fail table
+
+**Accessibility (WCAG 2.1 AA):**
+- Skip-to-content link, ARIA labels, keyboard navigation
+- 44px minimum touch targets on mobile
+- `@prefers-reduced-motion` disables all animations
+- Focus-visible rings, semantic HTML, aria-live regions
 
 **Key files:**
-- `src/services/voiceService.ts` — AudioRecorder, playback, all speech API wrappers
-- `src/app/page.tsx` — Chat UI with voice controls
-- `src/app/globals.css` — Design system with voice styles
-- `src/store/useChatStore.ts` — Zustand state
-- `src/store/useAnalyticsStore.ts` — Analytics with offline queue
+- `src/components/VoiceModal.tsx` — Voice recording UI (pulse rings + waveform)
+- `src/components/Markdown.tsx` — Zero-dep markdown renderer with citation pills
+- `src/components/MermaidDiagram.tsx` — Lazy Mermaid diagram renderer
+- `src/components/ConsentBanner.tsx` — GDPR consent banner
+- `src/app/analytics/evaluation/page.tsx` — IEEE evaluation dashboard
+- `src/services/voiceService.ts` — AudioRecorder, playback, speech API wrappers
+- `src/store/useChatStore.ts` — Multi-conversation Zustand state
 
 **Run locally:**
 ```bash
 cd App/frontend
 bun install
-bun dev
+INTERNAL_API_URL=http://127.0.0.1:8887 bun run dev --port 3300
 ```
 
 ## Deployment
@@ -161,9 +182,9 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 |----------|-------------|---------|
 | `HF_MODEL_REPO` | Hugging Face model repository | `mpairweLandwind/ura-chatbot` |
 | `HF_TOKEN` | Hugging Face API token | - |
-| `API_URL` | Backend API URL | `http://localhost:8000` |
+| `API_URL` | Backend API URL | `http://localhost:8887` |
 | **LLM Generation** | | |
-| `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen2.5-3B-Instruct` |
+| `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen3-8B` |
 | `LLM_MODEL_REVISION` | Pin to a specific HF commit SHA (SLSA provenance) | _unset_ |
 | `LLM_TRUST_REMOTE_CODE` | Allow model-defined Python (OWASP LLM03 off by default) | `false` |
 | `LLM_CONTEXT_WINDOW` | Hard cap on prompt tokens (tokenizer-aware trimming) | `6144` |
@@ -190,7 +211,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `SLOWAPI_STORAGE_URI` | Set to `redis://host:6379` for multi-replica rate limits | _in-process_ |
 | **Retrieval** | | |
 | `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` |
-| `DENSE_MODEL` | Embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
+| `DENSE_MODEL` | Embedding model | `BAAI/bge-m3` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
@@ -218,13 +239,14 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_SEMANTIC_CACHE` | Semantic query cache | `true` |
 | `FLAG_QUERY_REWRITE` | Spell / abbrev / coreference | `true` |
 | `FLAG_RERANKER` | Cross-encoder reranking | `true` |
-| **Agentic flags (Phase 14 A-D)** | | |
-| `FLAG_TOOL_USE` | Qwen2.5 native tool-calling loop | `false` |
-| `FLAG_AGENTIC_MODE` | Supervisor classifier routes every request | `false` |
+| **Agentic flags (Phase 14–18)** | | |
+| `FLAG_TOOL_USE` | Qwen3 native tool-calling via vLLM OpenAI API | `true` |
+| `FLAG_AGENTIC_MODE` | Supervisor classifier routes every request | `true` |
 | `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
+| `FLAG_WORKFLOWS` | YAML-driven multi-step slot-filling workflows | `false` |
 | **Host / HuggingFace** | | |
 | `HF_HOME` | Writable HF cache location | `~/.cache/huggingface` |
-| `INTERNAL_API_URL` | Next.js rewrite target (server-side) | `http://127.0.0.1:18000` |
+| `INTERNAL_API_URL` | Next.js rewrite target (server-side) | `http://127.0.0.1:8887` |
 | `NEXT_PUBLIC_API_URL` | Browser-side API URL (bake-time) | `/api` |
 
 ### 2026 production upgrade notes
@@ -540,21 +562,31 @@ Open http://localhost:13000 in a browser.  Feedback, citations, and
 SSE streaming are all proxied through the `/api` rewrite so no ports
 need to be exposed beyond 13000.
 
-**Option B — enable real LLM inference on a specific GPU:**
+**Option B — vLLM inference (Qwen3-8B) with full voice pipeline:**
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 \
-  HF_HOME=~/hf-cache \
-  LLM_ENABLED=true LLM_DEVICE=cuda LLM_TORCH_DTYPE=bfloat16 \
-  QDRANT_URL=http://127.0.0.1:6333 \
-  REDIS_URL=redis://127.0.0.1:6379/0 \
-  CACHE_BACKEND=redis SLOWAPI_STORAGE_URI=redis://127.0.0.1:6379/1 \
-  .venv/bin/python -m uvicorn App.backend.app.main:app --port 18000
+# 1. Start vLLM on a free GPU
+docker run -d --name ura-vllm --gpus '"device=7"' --ipc=host \
+  -p 8011:8001 -v ~/.cache/huggingface:/root/.cache/huggingface \
+  vllm/vllm-openai:v0.8.5 \
+  --model Qwen/Qwen3-8B --port 8001 --max-model-len 8192 \
+  --enable-auto-tool-choice --tool-call-parser hermes
+
+# 2. Start the backend (embeddings on GPU 4, LLM via vLLM HTTP)
+cd App/backend
+CUDA_VISIBLE_DEVICES=4 LLM_BACKEND=vllm VLLM_BASE_URL=http://localhost:8011/v1 \
+  FLAG_TOOL_USE=true FLAG_AGENTIC_MODE=true \
+  PYTHONPATH=/path/to/FinalYearProject:/path/to/FinalYearProject/App/backend \
+  .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8009
+
+# 3. Start the frontend (in another terminal)
+cd App/frontend
+INTERNAL_API_URL=http://127.0.0.1:8009 bun run dev --port 8010
 ```
 
-Qwen2.5-3B downloads to `~/hf-cache` on first boot (~6 GB, one-time).
-After that, every chat hits hybrid retrieval + LLM synthesis on the
-pinned GPU.
+Open http://localhost:8010. All chat, voice (ASR + TTS), agentic
+tool-calling, and IEEE evaluation dashboard are proxied through
+the Next.js `/api` rewrite.
 
 **Option C — full production stack with Postgres + vLLM + Caddy TLS:**
 
@@ -637,6 +669,138 @@ runbook, safety model, and the 3-step recipe for adding a new
 tool — see:
 
 - [`docs/AGENT_ARCHITECTURE.md`](../docs/AGENT_ARCHITECTURE.md)
+
+## Phase 15–20 — Production hardening + UI redesign (April 2026)
+
+**Phase 15 — Qwen3-8B fine-tuning config + vLLM backend**
+
+- `ml/scripts/fine_tune_gemma.py` — Added `web_qwen3_8b` and `web_qwen3_4b`
+  presets to `MODEL_CONFIGS`, plus `_messages_to_qwen_text()` (ChatML template)
+  and `format_for_qwen()` for Qwen3-specific training data formatting.
+  Model type detection recognises "qwen" and routes to the correct template.
+- `App/backend/app/service.py` — Model name derived dynamically from
+  `LLM_MODEL` env var instead of hardcoded `"ura-qwen2.5-3b-instruct"`.
+- `.env.example` — Added `LLM_BACKEND`, `VLLM_BASE_URL`, `VLLM_API_KEY`,
+  `VLLM_HTTP_TIMEOUT`, and all `FLAG_*` env vars.
+
+**Phase 16 — Agentic mode activation + vLLM tool-calling**
+
+- `App/backend/app/llm.py` — New `_vllm_generate_with_tools()` function
+  implements the full OpenAI-compatible tool-calling loop over vLLM HTTP.
+  Dispatches tool calls via `ToolRegistry.call()`, feeds results back,
+  bounded by `max_iterations`. Added `_strip_thinking()` to remove
+  Qwen3's `<think>` reasoning blocks from all output paths.
+- `App/backend/app/flags.py` — `tool_use` and `agentic_mode` defaults
+  changed to `true`. Agentic tool-calling only activates when the
+  supervisor explicitly routes to TOOLS/SPECIALIST — standard RAG queries
+  bypass the tool loop entirely for performance.
+- `App/backend/app/service.py` — Fixed `use_agentic` logic: now only
+  `force_agentic` (supervisor decision), not `FLAG_TOOL_USE` alone,
+  triggers the tool-calling path. This prevents double-search degradation
+  on simple factual queries.
+
+**Phase 17 — YAML workflow engine (TIN registration PoC)**
+
+- `App/backend/app/workflows/` — New package with 4 modules:
+  - `slots.py` — Slot validators (enum, regex, boolean, text)
+  - `loader.py` — YAML → `WorkflowDefinition` dataclass parser
+  - `registry.py` — `WorkflowRegistry` + `WorkflowSession` runtime with
+    conditional step evaluation and trigger phrase matching
+  - `flows/tin_registration.yaml` — 9-step TIN registration flow with
+    conditional branching (individual/company/NGO), NIN regex validation,
+    phone/email validation, and confirmation gate
+- `App/backend/app/flags.py` — New `FLAG_WORKFLOWS` flag (default false)
+
+**Phase 18 — UI redesign (Grok-inspired, production-grade)**
+
+*New components:*
+- `VoiceModal.tsx` (202 lines) — Full-screen Grok-inspired voice recording
+  modal with animated pulse rings (3-layer CSS animation), real-time
+  waveform visualisation (Web Audio AnalyserNode → canvas), live transcript
+  display, and Cancel (red) / Send (green) action buttons.
+- `VoiceSettings.tsx` (148 lines) — Voice persona selection modal with
+  5 voice options (3 English + 1 default + 1 Luganda), preview play
+  buttons via TTS API, and "Active" badge on selected voice.
+- `Markdown.tsx` (288 lines) — Zero-dependency markdown renderer
+  supporting bold, italic, inline code, headings (h2-h4), lists, ordered
+  lists, blockquotes, code blocks, horizontal rules, links (XSS-safe:
+  only `https?://` allowed), and `[1]` citation reference pills
+  (rendered as violet superscript badges).
+- `MermaidDiagram.tsx` (140 lines) — Lazy-loaded (`React.lazy` + `Suspense`)
+  Mermaid 11 diagram renderer with dark theme matching design tokens.
+  SVG output sanitised (strips `<script>`, `on*` handlers, `<foreignObject>`).
+- `ConsentBanner.tsx` (57 lines) — GDPR/UDPA analytics consent banner
+  with Accept/Decline buttons, persists to localStorage.
+
+*Enhanced components:*
+- `ChatMessage.tsx` — Added `CopyButton` (clipboard copy with "Copied"
+  checkmark feedback), `MessageTime` timestamps on every message, split
+  action bar into left (copy + listen) and right (feedback + time).
+  Assistant messages now render through `<Markdown />` instead of plain text.
+- `Icons.tsx` — Added `GearIcon`, `CopyIcon`, `CheckIcon` (17 total).
+- `ConversationRail.tsx` — `RelativeTime` component defers to client-only
+  rendering via `useEffect` to prevent SSR hydration mismatch.
+
+*New pages:*
+- `not-found.tsx` — Branded 404 page with gradient heading + back link.
+- `analytics/error.tsx` — Segment-level error boundary for analytics routes.
+- `analytics/evaluation/page.tsx` — IEEE-standard evaluation dashboard
+  with 5 sections: RAG quality radar, calibration reliability/coverage
+  curves, safety refusal bar chart, benchmark throughput chart, tokenizer
+  fertility comparison, confusion matrix heatmap, quality gates table.
+
+*CSS additions (650+ lines):*
+- Voice modal: pulse rings, waveform canvas, transcript panel, action buttons
+- Voice settings: voice option cards, preview play, active badge
+- Markdown typography: headings, lists, code blocks, blockquotes, citation pills
+- Mermaid diagram container: dark panel, responsive SVG, loading/error states
+- Consent banner: fixed bottom, responsive (stacks on mobile)
+- Message enhancements: copy button, timestamps, split action bar
+- Mobile: composer fixed dock, 44px touch targets (WCAG 2.1 AA)
+- `@prefers-reduced-motion` disables all animations
+
+**Phase 19 — Voice pipeline fix (ASR + TTS end-to-end)**
+
+- **Root cause:** `PYTHONPATH` excluded the project root, so
+  `from ml.scripts.asr.infer_asr import AsrTranscriber` raised
+  `ModuleNotFoundError`. All speech services (ASR, TTS, MT, lang-ID)
+  failed silently on startup.
+- **ASR fix:** `ml/scripts/asr/infer_asr.py` — Transformers backend
+  now falls back to `openai/whisper-small` from HuggingFace when the
+  local model path doesn't exist (instead of returning `None`).
+- **TTS fix:** `ml/scripts/tts/infer_tts.py` — New `_synth_edge()`
+  backend using Microsoft Edge Neural TTS (0.4s latency, neural voice
+  quality). Added `edge` to backend priority chain: sherpa → edge →
+  piper → mock. Uses `imageio-ffmpeg` for MP3→WAV decode.
+- **Speech service:** `App/backend/app/speech_service.py` — Simplified
+  `_do_synthesize()` with clean priority chain instead of double-call pattern.
+- **Dependencies:** Installed `edge-tts@7.2.8`, `imageio-ffmpeg@0.6.0`.
+- **LLM prompt:** Added rule 12 to SYSTEM_PROMPT instructing Qwen3-8B
+  to include mermaid diagrams for multi-step processes.
+
+**Phase 20 — Security hardening + gap closure**
+
+- **SSE robustness:** `main.py` — Added `request.is_disconnected()` check
+  in SSE token loop + 15-second keepalive ping to prevent proxy timeouts.
+- **XSS prevention:** Markdown links block `javascript:`, `data:`,
+  `vbscript:` protocols. Mermaid SVG output sanitised before `innerHTML`.
+- **GDPR compliance:** Analytics `trackEvent()` respects consent stored
+  in `ura_analytics_consent` localStorage key.
+- **Backend evaluation API:** New `GET /v1/evaluation/results` endpoint
+  serves all pre-computed Results/ JSON files as a consolidated bundle
+  for the IEEE evaluation dashboard.
+- **PWA:** `manifest.json`, service worker (cache-first assets,
+  network-first pages), app icons (SVG), `robots.txt`, Apple Web App
+  metadata, service worker registration in layout.
+
+**Services (current running configuration):**
+
+| Service | Port | GPU | Description |
+|---------|------|-----|-------------|
+| Backend (FastAPI) | 8009 | GPU 4 (embeddings) | RAG + agentic + speech |
+| Frontend (Next.js 16) | 8010 | — | PWA + consent + voice modal |
+| vLLM | 8011 | GPU 7 | Qwen/Qwen3-8B + tool-calling |
+| Qdrant | 6333 | CPU | 4,526 vectors (dense + sparse) |
 
 ## Roadmap: from FAQ chatbot to personalized tax assistant
 
