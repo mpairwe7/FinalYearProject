@@ -5,6 +5,7 @@ ISO/IEC 42001:2023 security controls.  Includes analytics, feedback,
 and Prometheus-compatible metrics (2026 observability standards).
 """
 
+import datetime
 import json
 import logging
 import os
@@ -252,7 +253,7 @@ def get_speech_model(request: Request) -> SpeechModel:
 # CORS – hardened (no wildcard, no credentials, explicit methods)
 # ---------------------------------------------------------------------------
 _allowed_origins: list[str] = [
-    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
+    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3300").split(",") if o.strip()
 ]
 
 app.add_middleware(
@@ -491,11 +492,21 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                     yield {"event": "token", "data": result.get("reply", "")}
                     yield {"event": "done", "data": ""}
                     return
+                last_token_time = time.perf_counter()
                 for token in tokens:
+                    # Check client disconnection
+                    if await request.is_disconnected():
+                        logger.info("SSE client disconnected mid-stream")
+                        return
                     # Sanitize each token chunk (OWASP LLM05)
                     sanitized = _output_guard.sanitize(token)
                     full_reply += sanitized
                     yield {"event": "token", "data": sanitized}
+                    # Keepalive: send ping if >15s since last token
+                    now = time.perf_counter()
+                    if now - last_token_time > 15:
+                        yield {"comment": f"ping - {datetime.datetime.now(datetime.timezone.utc).isoformat()}"}
+                    last_token_time = now
 
                 # Apply PII redaction to full accumulated reply
                 full_reply = _output_guard.redact_pii(full_reply)
@@ -1383,3 +1394,67 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
     )
     counts = db.delete_user_cascade(row["id"])
     return {"deleted": counts, "external_id": ctx.user.user_id}
+
+
+# ---------------------------------------------------------------------------
+# Evaluation results — serves pre-computed Results/ JSON for the dashboard
+# ---------------------------------------------------------------------------
+@app.get("/v1/evaluation/results", tags=["evaluation"])
+def evaluation_results() -> dict:
+    """Serve all pre-computed evaluation metrics for the IEEE-standard dashboard.
+
+    Reads JSON files from the ``Results/`` directory relative to the
+    project root and returns a consolidated bundle.
+    """
+    import json as _json
+    from pathlib import Path
+
+    results_dir = Path(__file__).resolve().parent.parent.parent.parent / "Results"
+    metrics_dir = results_dir / "metrics"
+
+    def _load(path: Path) -> dict | list | None:
+        try:
+            return _json.loads(path.read_text()) if path.exists() else None
+        except Exception:
+            return None
+
+    return {
+        "rag_evaluation": _load(results_dir / "rag_evaluation_results.json"),
+        "rag_quality_gates": _load(results_dir / "rag_quality_gates.json"),
+        "safety_evaluation": _load(results_dir / "safety_evaluation_results.json"),
+        "red_team_report": _load(results_dir / "red_team_report.json"),
+        "calibration": _load(metrics_dir / "calibration_report.json"),
+        "reliability_curve": _load(metrics_dir / "reliability_curve.json"),
+        "coverage_accuracy": _load(metrics_dir / "coverage_accuracy.json"),
+        "benchmark": _load(metrics_dir / "benchmark.json"),
+        "tokenizer_audit": _load(metrics_dir / "tokenizer_audit.json"),
+        "speech_metrics": _load(metrics_dir / "speech_metrics.json"),
+        "mt_metrics": _load(metrics_dir / "mt_metrics.json"),
+        "tts_metrics": _load(metrics_dir / "tts_metrics.json"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# IEEE artifact export — generates figures/tables as PNG images
+# ---------------------------------------------------------------------------
+@app.post("/v1/export/artifacts", tags=["evaluation"])
+def export_artifacts(request: Request) -> dict:
+    """Generate IEEE-standard figures and tables as PNG images.
+
+    Reads all pre-computed Results/ JSON files and renders publication-
+    quality charts, graphs, and metric tables into the Artifacts/ folder
+    for inclusion in the final year project report.
+
+    Requires the same ``Authorization: Bearer <INDEX_API_KEY>`` header
+    as ``/v1/index`` and ``/v1/evaluate``.
+    """
+    _verify_index_auth(request)
+
+    from .artifact_export import export_all
+
+    files = export_all()
+    return {
+        "status": "ok",
+        "count": len(files),
+        "files": files,
+    }
