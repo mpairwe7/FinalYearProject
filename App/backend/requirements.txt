@@ -28,7 +28,7 @@ pandas>=2.2
 # Hybrid retrieval (dense + sparse + reranking)
 sentence-transformers>=3.4,<4
 qdrant-client>=1.13,<2
-numpy>=1.26,<3
+numpy>=2.4.4,<3
 
 # PDF ingestion
 pymupdf4llm>=0.0.17
