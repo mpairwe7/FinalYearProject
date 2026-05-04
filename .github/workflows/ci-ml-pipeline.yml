@@ -139,7 +139,7 @@ jobs:
           head -n 20 requirements.lock
 
       - name: Upload lockfile artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: requirements-lock
           path: requirements.lock
@@ -351,7 +351,7 @@ jobs:
 
       - name: Upload data quality plots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         continue-on-error: true
         with:
           name: data-quality-plots
@@ -532,7 +532,7 @@ jobs:
 
       - name: Upload speech metrics
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: speech-metrics
           path: |
@@ -582,7 +582,7 @@ jobs:
         run: python ml/pipelines/validate_data.py
 
       - name: Upload validation report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: data-validation-report
           path: Results/reports/data_validation_report.json
@@ -768,7 +768,7 @@ jobs:
           PY
 
       - name: Upload training data + manifest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: training-data
           path: |
@@ -789,7 +789,7 @@ jobs:
           retention-days: 14
 
       - name: Upload quality classifier
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: quality-classifier
           path: |
@@ -872,7 +872,7 @@ jobs:
             --dry-run
 
       - name: Upload model artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: trained-model
           path: |
@@ -928,7 +928,7 @@ jobs:
             --output-dir Results
 
       - name: Upload evaluation results
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: evaluation-results
           path: Results/
@@ -994,7 +994,7 @@ jobs:
             --config ml/configs/training_config.yaml
 
       - name: Upload RAG evaluation results
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rag-evaluation-results
           path: |
@@ -1164,7 +1164,7 @@ jobs:
 
       - name: Upload production gate artefacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: production-gate-results
           path: |
@@ -1418,7 +1418,7 @@ jobs:
 
       - name: Upload scan artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: trivy-ml-pipeline-results
           path: |
