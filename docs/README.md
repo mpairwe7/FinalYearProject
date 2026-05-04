@@ -15,8 +15,8 @@ Complete documentation for the URA Chatbot MLOps project.
 | [MLOps Workflows](mlops-workflows.md) | Comprehensive CI/CD pipeline documentation |
 | [MLOps Pipeline](MLOPS_PIPELINE.md) | Pipeline architecture and implementation details |
 | **Application** |
-| [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) and usage |
-| [RAG Architecture](RAG_ARCHITECTURE.md) | 6-phase advanced RAG pipeline design (2026) |
+| [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming + WebSocket voice) and usage |
+| [RAG Architecture](RAG_ARCHITECTURE.md) | 12-stage production RAG pipeline + streaming voice engine (2026) |
 | [Gradio App](GRADIO_APP.md) | Gradio web interface documentation |
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |

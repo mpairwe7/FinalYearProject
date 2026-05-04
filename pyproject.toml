@@ -26,6 +26,7 @@ addopts = [
     "--tb=short",
     "--strict-markers",
     "-ra",
+    "--basetemp=/tmp/pytest-fyp",
 ]
 markers = [
     "unit: Unit tests",

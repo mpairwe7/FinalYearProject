@@ -114,8 +114,8 @@ RATE_LIMIT=30/minute
 QDRANT_URL=http://qdrant:6333          # Inside Docker network (default)
 # QDRANT_URL=http://localhost:16333    # From host, if ports are remapped
 QDRANT_COLLECTION=ura_knowledge_base
-DENSE_MODEL=sentence-transformers/all-MiniLM-L6-v2
-DENSE_DIM=384                          # Must match the indexed collection
+DENSE_MODEL=BAAI/bge-m3
+DENSE_DIM=1024                         # Must match the indexed collection
 
 # --- Frontend ---
 NEXT_PUBLIC_API_URL=https://ura-chatbot.example.com/api
@@ -227,6 +227,18 @@ server {
         proxy_read_timeout 300s;
     }
 
+    # WebSocket streaming voice chat (Phase 23)
+    location /v1/voice/chat/stream {
+        proxy_pass http://backend_app;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 600s;  # Long-lived voice sessions
+        proxy_send_timeout 600s;
+    }
+
     # Block external access to metrics
     location = /metrics { return 403; }
 
@@ -246,7 +258,7 @@ The API exposes two endpoints (see `App/backend/app/main.py`):
 
 | Endpoint | Type | Behaviour |
 |---|---|---|
-| `GET /health` | **Liveness** | Returns `{"status":"alive","version":"1.2.0"}` — always 200 if the process is up. |
+| `GET /health` | **Liveness** | Returns `{"status":"alive","version":"1.3.0"}` — always 200 if the process is up. |
 | `GET /ready` | **Readiness** | Returns 200 with `status: "ready"` when both the ChatModel and Qdrant retriever are healthy. Returns 503 if the model failed to load, or `status: "degraded"` if Qdrant is unreachable (falls back to keyword search). |
 
 Docker Compose already configures a healthcheck on the `api` service hitting `/health`. For Kubernetes or external uptime monitors, probe `/ready` instead.
@@ -453,6 +465,8 @@ Include this disclosure in the App Store Connect privacy section and in the app'
 |---|---|---|
 | **Availability** | 99.9% (43 min downtime/month) | `1 - (http_errors_total{status=~"5.."} / http_requests_total)` |
 | **Latency (p95)** | < 2 seconds | `http_request_duration_ms{quantile="0.95",path="/v1/chat"}` |
+| **Voice Latency (p95)** | < 1.2 seconds | `voice_stream_total_latency_seconds{quantile="0.95"}` |
+| **Voice TTS First Byte (p95)** | < 800 ms | `voice_stream_tts_first_chunk_seconds{quantile="0.95"}` |
 | **Error rate** | < 1% | `rate(http_errors_total[5m]) / rate(http_requests_total[5m])` |
 | **Faithfulness (p50)** | > 0.7 | `faithfulness_score{quantile="0.5"}` |
 
@@ -555,3 +569,37 @@ Run through every item before go-live:
 - [ ] Grafana dashboard shows live metrics
 - [ ] Model Card reviewed and up-to-date (`docs/MODEL_CARD.md`)
 - [ ] Privacy Impact Assessment completed (`docs/capstone/PIA.md`)
+
+### v1.4.0 Additions — Quantization, Offline RAG & Voice-First
+
+**Quantization Pipeline:**
+- [ ] Quantization CI workflow tested (`python scripts/quantize_models.py --dry-run`)
+- [ ] Quality gate passes (`python scripts/quantization_quality_gate.py`)
+- [ ] Quantized models published to artifacts/ or HuggingFace Hub
+- [ ] `FLAG_QUANTIZATION=true` set for quantized model serving
+
+**Offline RAG:**
+- [ ] Offline bundle built (`python scripts/export_offline_bundle.py`)
+- [ ] Bundle size verified ≤ 150 MB compressed
+- [ ] Bundle integrity SHA-256 checksums verified
+- [ ] `FLAG_OFFLINE_RAG=true`, `FLAG_OFFLINE_SYNC=true`, `FLAG_OFFLINE_BUNDLE_API=true`
+- [ ] Delta sync tested on 3G-equivalent network (< 12s for typical daily changes)
+- [ ] `artifacts/offline/` volume mounted read-only on API container
+
+**Mobile Bundle:**
+- [ ] Mobile bundle assembled (`python scripts/export_mobile_bundle.py --validate-only`)
+- [ ] Total size verified ≤ 800 MB
+- [ ] Flutter app tested offline on mid-range Android (4GB RAM)
+- [ ] On-device vector search latency < 180ms p95
+
+**Voice-First Mobile:**
+- [ ] Voice-first UI tested on target devices (Android 10+, 4GB RAM)
+- [ ] Barge-in success rate measured ≥ 92%
+- [ ] Voice + vision endpoint tested (`/v1/voice/vision/chat`)
+- [ ] `FLAG_VOICE_FIRST_MOBILE=true`, `FLAG_VOICE_VISION=true`
+
+**Quantized Serving (Optional GPU):**
+- [ ] `docker compose --profile vllm-quantized up` starts successfully
+- [ ] AWQ model loads within 180s start period
+- [ ] p95 latency measured ≤ 1.8s for full RAG pipeline
+- [ ] Memory usage measured ≥ 38% reduction from bfloat16 baseline

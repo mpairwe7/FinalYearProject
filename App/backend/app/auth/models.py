@@ -104,6 +104,9 @@ class ConsentReceipt(BaseModel):
         "ticket_escalation",  # passing query + context to URA staff
         "long_term_storage",  # retention beyond default TTL
         "ura_account_access",  # tool access to URA account data
+        "ura_actions",  # confirmed writes/submissions through URA action APIs
+        "voice_recording",  # ASR/streaming voice processing
+        "voice_analytics",  # voice quality analytics
     ]
     version: str = Field(..., description="Version tag of the consent text, e.g. '2026-04'")
     granted_at: float = Field(default_factory=time.time)

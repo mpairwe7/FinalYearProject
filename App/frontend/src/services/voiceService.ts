@@ -12,7 +12,9 @@
  * All fetch calls respect a 30-second timeout and gracefully degrade on error.
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { authHeaders } from '@/lib/authSession';
+
+const API_URL = '/api';
 const FETCH_TIMEOUT_MS = 30_000;
 const TARGET_SAMPLE_RATE = 16000;
 
@@ -61,6 +63,7 @@ export interface TranslateResult {
 export interface VoiceChatResult {
   transcript: string;
   transcript_language: string | null;
+  conversation_id?: string | null;
   reply: string;
   reply_audio_base64: string;
   sample_rate: number;
@@ -211,6 +214,79 @@ export class AudioRecorder {
       this.stream = null;
     }
   }
+
+  /**
+   * Start streaming audio chunks via AudioWorklet.
+   *
+   * Each chunk is a PCM16 LE ArrayBuffer (~20ms of audio).
+   * The caller is responsible for sending chunks to the WebSocket.
+   *
+   * Returns a cleanup function to stop streaming.
+   */
+  async startStreaming(
+    onChunk: (pcm16: ArrayBuffer) => void,
+  ): Promise<() => void> {
+    const ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        sampleRate: { ideal: TARGET_SAMPLE_RATE },
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+
+    const source = ctx.createMediaStreamSource(this.stream);
+
+    try {
+      // Prefer AudioWorklet (modern browsers)
+      await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
+      const workletNode = new AudioWorkletNode(ctx, 'pcm16-processor');
+      workletNode.port.onmessage = (e: MessageEvent) => {
+        if (e.data instanceof ArrayBuffer) {
+          onChunk(e.data);
+        }
+      };
+      source.connect(workletNode);
+      workletNode.connect(ctx.destination);
+
+      this._recording = true;
+
+      return () => {
+        this._recording = false;
+        workletNode.disconnect();
+        source.disconnect();
+        ctx.close();
+        this.releaseStream();
+      };
+    } catch {
+      // Fallback: ScriptProcessorNode (deprecated but widely supported)
+      const bufSize = 4096;
+      const processor = ctx.createScriptProcessor(bufSize, 1, 1);
+      processor.onaudioprocess = (e: AudioProcessingEvent) => {
+        const input = e.inputBuffer.getChannelData(0);
+        const pcm16 = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          const s = Math.max(-1, Math.min(1, input[i]));
+          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        onChunk(pcm16.buffer);
+      };
+      source.connect(processor);
+      processor.connect(ctx.destination);
+
+      this._recording = true;
+
+      return () => {
+        this._recording = false;
+        processor.disconnect();
+        source.disconnect();
+        ctx.close();
+        this.releaseStream();
+      };
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +365,7 @@ export function isPlaying(): boolean {
 export async function checkSpeechHealth(): Promise<SpeechHealthStatus> {
   try {
     const res = await fetch(`${API_URL}/v1/speech/health`, {
+      headers: authHeaders(),
       signal: withTimeout(5000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -315,7 +392,10 @@ export async function transcribe(
 
   const res = await fetch(`${API_URL}/v1/asr?${params}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers: authHeaders({
+      'Content-Type': 'application/octet-stream',
+      'X-Voice-Consent': 'true',
+    }),
     body: pcm16,
     signal: withTimeout(FETCH_TIMEOUT_MS),
   });
@@ -334,7 +414,7 @@ export async function synthesize(
 ): Promise<SynthesizeResult> {
   const res = await fetch(`${API_URL}/v1/tts`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ text, language, voice: voice ?? null }),
     signal: withTimeout(FETCH_TIMEOUT_MS),
   });
@@ -353,7 +433,7 @@ export async function translate(
 ): Promise<TranslateResult> {
   const res = await fetch(`${API_URL}/v1/translate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       text,
       source_lang: sourceLang,
@@ -393,9 +473,10 @@ export async function voiceChat(
   if (opts.voice) params.set('voice', opts.voice);
   if (opts.conversationId) params.set('conversation_id', opts.conversationId);
 
-  const headers: Record<string, string> = {
+  const headers: Record<string, string> = authHeaders({
     'Content-Type': 'application/octet-stream',
-  };
+    'X-Voice-Consent': 'true',
+  });
   if (opts.sessionId) headers['X-Session-ID'] = opts.sessionId;
 
   const res = await fetch(`${API_URL}/v1/voice/chat?${params}`, {

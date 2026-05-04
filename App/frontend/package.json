@@ -6,6 +6,8 @@
     "dev": "bun run next dev",
     "build": "bun run next build",
     "start": "bun run next start",
+    "preflight:deploy": "bash ../scripts/deploy_preflight.sh",
+    "smoke:live": "bash ../scripts/live_smoke.sh",
     "lint": "bun run eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -15,6 +17,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.99.0",
+    "mermaid": "^11.14.0",
     "next": "16.2.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",

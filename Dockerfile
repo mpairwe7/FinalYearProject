@@ -34,7 +34,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
 # Install Python dependencies
 COPY App/backend/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements.txt
+    uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image
@@ -67,8 +67,8 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --chown=appuser:appuser App/backend/app ./app/
 COPY --chown=appuser:appuser App/backend/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Create necessary directories (including models, which may be empty)
-RUN mkdir -p /app/models /app/logs /app/cache && \
+# Create necessary directories (including models + offline bundle dirs)
+RUN mkdir -p /app/models /app/logs /app/cache /app/offline /app/quantized /app/hf_cache && \
     chown -R appuser:appuser /app && \
     chmod +x /usr/local/bin/entrypoint.sh
 

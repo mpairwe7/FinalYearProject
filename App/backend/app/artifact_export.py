@@ -903,12 +903,16 @@ def export_all(
     _ieee_style()
 
     if results_dir is None:
-        results_dir = Path(__file__).resolve().parents[3] / "Results"
+        from ._root import PROJECT_ROOT as _pr
+
+        results_dir = _pr / "Results"
     else:
         results_dir = Path(results_dir)
 
     if out_dir is None:
-        out_dir = Path(__file__).resolve().parents[3] / "Artifacts"
+        from ._root import PROJECT_ROOT as _pr
+
+        out_dir = _pr / "Artifacts"
     else:
         out_dir = Path(out_dir)
 

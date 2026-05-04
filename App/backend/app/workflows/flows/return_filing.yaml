@@ -1,0 +1,76 @@
+id: return_filing
+name: Return Filing
+version: "1"
+description: >
+  Guide a taxpayer through the key details needed to file a URA return
+  and highlight the next portal actions.
+requires_auth: false
+
+trigger_phrases:
+  - "file a return"
+  - "file my return"
+  - "submit a return"
+  - "submit my return"
+  - "tax return filing"
+  - "nil return"
+  - "how do i file a return"
+
+steps:
+  - id: collect_taxpayer_type
+    question: >
+      Are you filing as an **individual**, a **company**, or an **NGO**?
+    slot: taxpayer_type
+    validator: "enum[individual,company,ngo]"
+
+  - id: collect_tax_type
+    question: >
+      Which return are you filing: **VAT**, **PAYE**, **corporation tax**,
+      **withholding tax**, or **stamp duty**?
+    slot: tax_type
+    validator: "enum[vat,paye,corporation tax,withholding tax,stamp duty]"
+
+  - id: collect_period
+    question: >
+      Which filing period is involved? For example, `March 2026`,
+      `Q1 2026`, or `FY2025-26`.
+    slot: filing_period
+    validator: text
+
+  - id: collect_records_ready
+    question: >
+      Do you already have the supporting figures or schedules you need
+      to complete the return? (yes/no)
+    slot: supporting_records_ready
+    validator: boolean
+
+  - id: collect_portal_access
+    question: >
+      Can you access the URA portal account that will submit this return? (yes/no)
+    slot: portal_access
+    validator: boolean
+
+  - id: access_guidance
+    question: >
+      If portal access is blocked, recover the account first through the
+      URA portal sign-in recovery options or contact the URA Contact Centre
+      before attempting submission.
+    when: "portal_access == False"
+    slot: ""
+    validator: text
+
+  - id: records_guidance
+    question: >
+      Before submission, prepare the working papers, invoices, payroll, or
+      ledgers that support the figures in the return so you can validate the
+      declaration before filing.
+    when: "supporting_records_ready == False"
+    slot: ""
+    validator: text
+
+  - id: summary
+    question: >
+      Next step: sign in to the URA portal, open the returns module, select
+      the correct tax type and filing period, validate the declaration, submit
+      it, and keep the acknowledgement or PRN if payment is due.
+    slot: ""
+    validator: text

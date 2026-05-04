@@ -41,6 +41,20 @@ _PROMPT_SIGNATURE_REGEX = re.compile(
     "|".join(re.escape(p) for p in _PROMPT_SIGNATURE_PHRASES),
     re.IGNORECASE,
 )
+_REASONING_PREFIX_REGEX = re.compile(
+    r"^\s*(?:"
+    r"okay,\s*(?:the\s+user|let\s+me|i(?:'m| am)|looking\s+at|based\s+on|from\s+the|the\s+context)"
+    r"|the\s+user\s+is\s+asking"
+    r"|let\s+me\s+(?:check|look|see|review|think)"
+    r"|looking\s+at\s+passage"
+    r"|based\s+on\s+(?:the|these)\s+(?:provided\s+)?(?:passages|context)"
+    r"|from\s+(?:the|these)\s+(?:provided\s+)?(?:passages|context)"
+    r"|the\s+key\s+detail\s+here\s+is"
+    r"|i\s+should\s+(?:combine|answer|respond|cite|use)"
+    r"|the\s+passages?\s+(?:say|show|mention|indicate)"
+    r")\b",
+    re.IGNORECASE,
+)
 
 # ---------------------------------------------------------------------------
 # Prompt-injection patterns (LLM01)
@@ -214,6 +228,8 @@ class OutputGuard:
     @staticmethod
     def sanitize(text: str) -> str:
         """Strip potentially dangerous output content (LLM05)."""
+        # Remove explicit hidden reasoning blocks first.
+        text = re.sub(r"<think[^>]*>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove script tags
         text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove HTML tags
@@ -224,6 +240,19 @@ class OutputGuard:
             "[link removed]",
             text,
         )
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+        while paragraphs and _REASONING_PREFIX_REGEX.match(paragraphs[0]):
+            paragraphs.pop(0)
+        text = "\n\n".join(paragraphs).strip()
+
+        # Handle single-paragraph outputs where the model prepends a reasoning
+        # sentence directly before the real answer.
+        while text and _REASONING_PREFIX_REGEX.match(text):
+            split = re.search(r"(?<=[.!?])\s+", text)
+            if split is None:
+                return ""
+            text = text[split.end() :].lstrip()
+
         return text
 
     @staticmethod

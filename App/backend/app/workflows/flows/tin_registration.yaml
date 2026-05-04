@@ -1,0 +1,85 @@
+id: tin_registration
+name: TIN Registration
+version: "1"
+description: >
+  Guide a taxpayer through the steps to register for a Taxpayer
+  Identification Number (TIN) with URA.
+requires_auth: false
+
+trigger_phrases:
+  - "register for a tin"
+  - "get a tin"
+  - "tin registration"
+  - "obtain a tin"
+  - "apply for tin"
+  - "i need a tin"
+  - "how do i get a tin"
+
+steps:
+  - id: collect_type
+    question: >
+      Are you registering as an **individual**, a **company**, or an **NGO**?
+    slot: taxpayer_type
+    validator: "enum[individual,company,ngo]"
+
+  - id: collect_name
+    question: >
+      What is your full legal name (as it appears on your national ID or
+      certificate of incorporation)?
+    slot: legal_name
+    validator: text
+
+  - id: collect_nin
+    question: >
+      Please provide your National Identification Number (NIN).
+      Format: CM or CF followed by 2 digits, 5 letters, 5 digits, and 1 letter
+      (e.g. CM84ABN8400J).
+    slot: nin
+    validator: "regex[^C[MF]\\d{2}[A-Z]{5}\\d{4}[A-Z0-9]$]"
+    when: "taxpayer_type == individual"
+
+  - id: collect_company_reg
+    question: >
+      Please provide your company registration number from URSB
+      (Uganda Registration Services Bureau).
+    slot: company_reg
+    validator: text
+    when: "taxpayer_type == company"
+
+  - id: collect_ngo_reg
+    question: >
+      Please provide your NGO registration number from the
+      National Bureau for NGOs.
+    slot: ngo_reg
+    validator: text
+    when: "taxpayer_type == ngo"
+
+  - id: collect_phone
+    question: >
+      What is your phone number? (e.g. 0771234567 or +256771234567)
+    slot: phone
+    validator: "regex[^\\+?\\d{10,13}$]"
+
+  - id: collect_email
+    question: >
+      What is your email address?
+    slot: email
+    validator: "regex[^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$]"
+
+  - id: confirm
+    question: >
+      Thank you. I have collected your details. Would you like to proceed
+      with the TIN application? (yes/no)
+    slot: confirmed
+    validator: boolean
+
+  - id: summary
+    question: >
+      Your TIN registration request has been recorded. To complete the
+      process, please visit the URA web portal at https://ura.go.ug and
+      follow the online registration steps, or visit your nearest URA
+      office with your original identification documents.
+
+      Reference information has been saved to this conversation.
+    slot: ""
+    validator: text

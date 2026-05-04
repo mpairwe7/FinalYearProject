@@ -5,7 +5,12 @@
  * Aligned with RTM REQ-08 (loading indicator via state) and ISO 25010 §7.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { useChatStore, createTurn, type ChatTurn } from "../../store/useChatStore";
+import {
+  useChatStore,
+  createTurn,
+  normalizeAssistantResponse,
+  type ChatTurn,
+} from "../../store/useChatStore";
 
 const store = () => useChatStore.getState();
 
@@ -106,5 +111,16 @@ describe("createTurn", () => {
     });
     expect(turn.citations).toHaveLength(1);
     expect(turn.escalationRequired).toBe(true);
+  });
+});
+
+describe("normalizeAssistantResponse", () => {
+  it("normalizes common LLM list and callout formatting", () => {
+    const result = normalizeAssistantResponse(
+      "Steps:\n1) Open the portal\n2) Enter your details. Note: Keep your NIN nearby.",
+    );
+
+    expect(result).toContain("1. Open the portal");
+    expect(result).toContain("2. Enter your details.\n\nNote: Keep your NIN nearby.");
   });
 });

@@ -1185,6 +1185,115 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
+  # Stage 5e: Adapter Evaluation (multilingual LoRA quality gates)
+  # ============================================
+  # Dry-run evaluation of fine-tuned LoRA adapters for Qwen3 and Whisper.
+  # On CI (no GPU), validates the eval scripts can parse and run metrics.
+  # Full GPU evaluation runs on-demand via workflow_dispatch.
+  evaluate-adapters:
+    name: Adapter Evaluation (multilingual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [evaluate-rag]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system pyyaml
+
+      - name: Validate eval scripts (syntax + metric functions)
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          spec = importlib.util.spec_from_file_location(
+              "eq", "fine-tuning/scripts/10_evaluate_lora_qwen.py"
+          )
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          assert mod.compute_rouge_l("a b c", "a b c") == 1.0, "ROUGE-L identity failed"
+          assert mod.compute_bleu_1("a b c", "a b c") == 1.0, "BLEU-1 identity failed"
+          assert mod.compute_rouge_l("a b c", "x y z") == 0.0, "ROUGE-L disjoint failed"
+          print("Qwen eval metrics OK")
+
+          spec2 = importlib.util.spec_from_file_location(
+              "ew", "fine-tuning/scripts/11_evaluate_lora_whisper.py"
+          )
+          mod2 = importlib.util.module_from_spec(spec2)
+          spec2.loader.exec_module(mod2)
+          assert mod2.compute_wer("a b c", "a b c") == 0.0, "WER identity failed"
+          assert mod2.compute_cer("abc", "abc") == 0.0, "CER identity failed"
+          assert mod2.compute_wer("a b c", "x y z") == 1.0, "WER disjoint failed"
+          print("Whisper eval metrics OK")
+
+          from App.backend.app.query import detect_language
+
+          assert detect_language("How do I register for TIN?") == "en"
+          assert detect_language("Ninawezaje kupata TIN kwa biashara") == "sw"
+          print("Language detection OK")
+          print("All adapter eval validations passed")
+          PY
+
+      - name: Check adapter directory structure
+        run: |
+          echo "## Adapter Evaluation Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Language | Qwen3 Adapter | Whisper Adapter |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|---------------|-----------------|" >> "$GITHUB_STEP_SUMMARY"
+          for lang in lg sw nyn ach; do
+            qwen_dir="fine-tuning/adapters/${lang}-lora"
+            if [ "$lang" = "lg" ]; then qwen_dir="fine-tuning/adapters/luganda-lora"; fi
+            whisper_dir="fine-tuning/adapters/whisper-${lang}"
+            qwen_status="not found"
+            whisper_status="not found"
+            if [ -d "$qwen_dir" ] && [ -f "$qwen_dir/adapter_config.json" ]; then
+              qwen_status="present ($(du -sh $qwen_dir | cut -f1))"
+            fi
+            if [ -d "$whisper_dir" ] && [ -f "$whisper_dir/adapter_config.json" ]; then
+              whisper_status="present ($(du -sh $whisper_dir | cut -f1))"
+            fi
+            echo "| $lang | $qwen_status | $whisper_status |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Validate eval results (if present)
+        run: |
+          for lang in lg sw nyn ach; do
+            f="Results/eval_lora_qwen_${lang}.json"
+            if [ -f "$f" ]; then
+              python - "$f" "$lang" <<'PY'
+          import json
+          import sys
+
+          path, lang = sys.argv[1], sys.argv[2]
+          data = json.load(open(path, encoding="utf-8"))
+          ft = data.get("fine_tuned_summary", {})
+          if ft:
+              rouge = ft.get("rouge_l_mean", 0)
+              quality = ft.get("quality_mean", 0)
+              print(f"  {lang}: ROUGE-L={rouge:.3f} Quality={quality:.3f}")
+              if quality < 0.3:
+                  print(f"  WARNING: {lang} quality below threshold (0.3)")
+                  sys.exit(1)
+          else:
+              print(f"  {lang}: no fine-tuned results yet")
+          PY
+            fi
+          done
+          echo "Adapter eval gate: PASS"
+
+  # ============================================
   # Stage 6: Push to Hugging Face Hub
   # ============================================
   push-to-huggingface:

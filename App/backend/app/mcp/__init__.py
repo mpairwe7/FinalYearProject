@@ -33,7 +33,7 @@ Feature flag: ``FLAG_TOOL_RAG`` default false.
 
 from __future__ import annotations
 
-from .client import MCPCallResult, MCPClient, get_client
+from .client import MCPCallResult, MCPClient, get_client, reset_client
 from .tool_rag import ToolRAGSelector, ToolSelection
 
 __all__ = [
@@ -42,4 +42,5 @@ __all__ = [
     "ToolRAGSelector",
     "ToolSelection",
     "get_client",
+    "reset_client",
 ]

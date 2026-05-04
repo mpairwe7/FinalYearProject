@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
 # 2026 default: BAAI/bge-m3 multilingual embeddings (1024-dim).
 # Override DENSE_MODEL / DENSE_DIM when re-indexing legacy collections.
@@ -36,7 +37,7 @@ CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "120"))
 BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "64"))
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from ._root import PROJECT_ROOT as _PROJECT_ROOT
 DATA_DIR = Path(os.getenv("DATA_DIR", str(_PROJECT_ROOT / "Data" / "dataset")))
 PDF_DIR = Path(os.getenv("PDF_DIR", str(_PROJECT_ROOT / "Data" / "pdfs")))
 BM25_STATE_PATH = Path(
@@ -183,7 +184,7 @@ def build_index(
 
     from .retriever import BM25SparseEncoder
 
-    client = QdrantClient(url=QDRANT_URL, timeout=30)
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
     dense_model = SentenceTransformer(DENSE_MODEL_NAME)
 
     # -- Collection management -----------------------------------------------

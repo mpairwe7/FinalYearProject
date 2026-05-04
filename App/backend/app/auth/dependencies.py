@@ -18,18 +18,16 @@ or for optional auth (public endpoint that personalizes if signed in)::
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Request
 
+from ..flags import flags
 from .jwt_auth import JWTAuthError, JWTVerifier
 from .models import AuthUser
 
 logger = logging.getLogger(__name__)
-
-AUTH_REQUIRED = os.getenv("FLAG_AUTH_REQUIRED", "false").lower() == "true"
 
 _verifier: JWTVerifier | None = None
 
@@ -104,32 +102,13 @@ def _claims_to_user(claims: dict[str, Any]) -> AuthUser:
     )
 
 
-# ---------------------------------------------------------------------------
-# Dependency: current_user (optional)
-# ---------------------------------------------------------------------------
-def current_user(
-    request: Request,
-    authorization: str | None = Header(None),
-) -> AuthContext:
-    """Resolve auth context from the Authorization header.
-
-    - No header → anonymous AuthContext (fine for public endpoints).
-    - Invalid token → 401.
-    - Valid token → authenticated AuthContext bound to request.state.
-
-    Never raises when no token is present; use ``require_user`` if
-    the endpoint must enforce authentication.
-    """
+def _anonymous_context(request: Request) -> AuthContext:
     ctx = AuthContext()
+    request.state.auth = ctx
+    return ctx
 
-    if not authorization or not authorization.lower().startswith("bearer "):
-        # Legacy path: the existing session_id header becomes the "user_id"
-        # shim under `FLAG_AUTH_REQUIRED=false` so we don't break callers
-        # that only send X-Session-ID.  This is temporary — remove after
-        # OIDC rollout.
-        request.state.auth = ctx
-        return ctx
 
+def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext:
     token = authorization.split(" ", 1)[1].strip()
     try:
         claims = _get_verifier().verify(token)
@@ -144,16 +123,65 @@ def current_user(
 
 
 # ---------------------------------------------------------------------------
+# Dependency: optional_user (public endpoints with optional personalization)
+# ---------------------------------------------------------------------------
+def optional_user(
+    request: Request,
+    authorization: str | None = Header(None),
+) -> AuthContext:
+    """Resolve a bearer token if present, otherwise return anonymous context.
+
+    Use this for public assistant endpoints that must remain usable without
+    login. Invalid bearer tokens are still rejected so clients cannot silently
+    proceed with a broken or spoofed identity.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return _anonymous_context(request)
+    return _resolve_bearer_context(request, authorization)
+
+
+# ---------------------------------------------------------------------------
+# Dependency: current_user (auth-required aware)
+# ---------------------------------------------------------------------------
+def current_user(
+    request: Request,
+    authorization: str | None = Header(None),
+) -> AuthContext:
+    """Resolve auth context from the Authorization header.
+
+    - No header → anonymous AuthContext when auth is optional.
+    - No header with ``FLAG_AUTH_REQUIRED=true`` → 401.
+    - Invalid token → 401.
+    - Valid token → authenticated AuthContext bound to request.state.
+
+    Raises on missing tokens when production/auth-required mode is enabled;
+    use ``require_user`` for endpoints that are private in every environment.
+    """
+    ctx = AuthContext()
+
+    if not authorization or not authorization.lower().startswith("bearer "):
+        # Legacy path: the existing session_id header becomes the "user_id"
+        # shim under `FLAG_AUTH_REQUIRED=false` so we don't break callers
+        # that only send X-Session-ID.  This is temporary — remove after
+        # OIDC rollout.
+        if flags.is_enabled("auth_required"):
+            raise HTTPException(status_code=401, detail="authentication required")
+        return _anonymous_context(request)
+
+    return _resolve_bearer_context(request, authorization)
+
+
+# ---------------------------------------------------------------------------
 # Dependency: require_user (enforced)
 # ---------------------------------------------------------------------------
 def require_user(ctx: AuthContext = Depends(current_user)) -> AuthContext:
-    """Like ``current_user`` but 403s if ``FLAG_AUTH_REQUIRED`` and no user.
+    """Require an authenticated user context.
 
     Use this on endpoints that are strictly private (e.g.
-    ``/v1/me/profile``, ``/v1/admin/*``).  Public endpoints that want
-    optional enrichment should depend on ``current_user`` instead.
+    ``/v1/me/profile``). Public endpoints that want optional
+    personalization should depend on ``current_user`` instead.
     """
-    if AUTH_REQUIRED and not ctx.authenticated:
+    if not ctx.authenticated:
         raise HTTPException(status_code=401, detail="authentication required")
     return ctx
 

@@ -9,11 +9,11 @@
 | Field | Value |
 |-------|-------|
 | **Name** | URA Chatbot RAG Pipeline |
-| **Version** | 1.1.0 |
-| **Date** | 2026-04-13 |
-| **Type** | Retrieval-Augmented Generation (RAG) |
+| **Version** | 1.4.0 |
+| **Date** | 2026-04-29 |
+| **Type** | Retrieval-Augmented Generation (RAG) with agentic tool-calling |
 | **Task** | Tax domain question answering (Uganda Revenue Authority) |
-| **Languages** | English (primary), Luganda (secondary) |
+| **Languages** | English (primary), Luganda, Swahili, Runyankole, Acholi |
 | **Developer** | Mpairwe Landwind (Makerere University) |
 | **License** | Apache-2.0 (code), Gemma TOU (mobile model) |
 
@@ -21,13 +21,22 @@
 
 | Component | Model | Parameters | Purpose |
 |-----------|-------|------------|---------|
-| **LLM (server)** | Qwen/Qwen2.5-3B-Instruct | 3B | Answer generation |
+| **LLM (server)** | Qwen/Qwen3-8B | 8B | Answer generation + tool-calling (Apache-2.0, 128K context) |
 | **LLM (mobile)** | google/gemma-2-2b-it GGUF Q4_K_M | 2B (quantised) | Offline mobile inference |
-| **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings |
-| **Sparse Retriever** | BM25 | N/A | Keyword matching |
-| **Reranker** | cross-encoder/ms-marco-MiniLM-L-6-v2 | 22M | Passage reranking |
+| **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings (MTEB 63.0) |
+| **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |
+| **Reranker** | mixedbread-ai/mxbai-rerank-base-v2 | 500M | Passage reranking (BEIR 55.6, Apache-2.0) |
+| **ASR (server)** | Whisper Small + LoRA adapters | 244M | Speech-to-text (5 languages) |
+| **TTS (server)** | Piper native voices | ~40M per locale | Text-to-speech (5 languages) |
+| **MT (server)** | Qwen3-8B prompted / ONNX | varies | Machine translation (en ↔ lg/sw/nyn/ach) |
+| **Speech cloud** | Sunbird AI API | N/A (cloud) | Fallback ASR/TTS/MT for Ugandan languages |
 | **ASR (mobile)** | Whisper Small INT8 | 244M (quantised) | On-device speech recognition |
 | **TTS (mobile)** | MMS-TTS VITS | ~40M per locale | On-device speech synthesis |
+| **Supervisor** | Rule-based + LLM fallback | N/A | Query routing (7 routes) |
+| **Tool Registry** | 6 tool modules | N/A | Tax calculators, rates, deadlines, KB search |
+| **VAD** | Energy-based (numpy) | N/A | Voice Activity Detection with hysteresis |
+| **Accent Detector** | Prosodic features + SVM | ~1M | Ugandan accent classification (5 profiles) |
+| **Offline Retriever** | FAISS + ONNX bge-m3 | ~80M bundle | Offline RAG when Qdrant is unavailable |
 
 ---
 
@@ -119,10 +128,13 @@
 ## Technical Specifications
 
 ### Infrastructure
-- **Serving**: FastAPI + Uvicorn (multi-worker)
-- **Vector Store**: Qdrant v1.17.1 (HNSW index)
-- **Cache**: Redis 7.4 (semantic cache, cosine >= 0.92)
+- **Serving**: FastAPI 0.115+ / Uvicorn (multi-worker, 50+ endpoints)
+- **Vector Store**: Qdrant (HNSW index, dense + sparse)
+- **Cache**: In-memory or Redis (semantic cache, cosine >= 0.92)
+- **Database**: SQLite WAL (default) or PostgreSQL (opt-in), 11 tables
+- **Auth**: JWT (HS256 dev / RS256 OIDC prod), 5 RBAC roles
 - **Container**: Docker (non-root, read-only filesystem)
+- **Feature flags**: 18 env-backed flags for progressive rollout
 
 ### Performance (SLO Targets)
 - p95 latency: < 2s for /v1/chat
@@ -132,9 +144,12 @@
 
 ### Security
 - OWASP LLM Top 10 (2025) controls implemented
-- Input guardrails: 11 prompt injection patterns
-- Output guardrails: PII redaction, HTML sanitization, system prompt leakage detection
-- Supply chain: SHA-pinned GitHub Actions, Trivy scanning, cosign signing
+- Input guardrails: 11 prompt injection patterns + harmful intent detection
+- Output guardrails: PII redaction (7 Uganda-specific patterns), HTML sanitization, system prompt leakage detection, indirect injection scanning
+- Supply chain: `trust_remote_code=False`, SHA-pinned GitHub Actions, Trivy scanning, model revision pinning
+- Auth: JWT verification, RBAC (public/verified_taxpayer/ura_staff/ura_admin/ura_auditor)
+- Consent: Purpose-based (UDPA 2019), append-only receipts, right-to-erasure
+- Audit: Hash-chained immutable ledger with Merkle tree proofs
 
 ---
 
@@ -143,10 +158,82 @@
 1. **Not real-time**: Knowledge base reflects indexed documents, not live URA systems
 2. **No account access**: Cannot look up individual tax records or TIN status
 3. **Luganda quality**: Lower accuracy due to limited multilingual training data
-4. **Context window**: 6144 tokens — very long queries may be truncated
+4. **Context window**: 8192 tokens (configurable, Qwen3-8B supports up to 128K) — very long queries may be truncated
 5. **Offline mobile**: On-device Gemma-2B has no retrieval context, reducing accuracy
 
 ---
+
+## Quantization (v1.4.0)
+
+### Server Quantization
+
+| Format | Quant Type | Target Size (8B) | Faithfulness Target | Use Case |
+|--------|-----------|-------------------|-------------------|----------|
+| **GGUF** | Q4_K_M | ~4.8 GB | ≥ 0.89 (drop ≤ 4%) | CPU/Metal inference, llama.cpp |
+| **GGUF** | Q5_K_M | ~5.7 GB | ≥ 0.91 (drop ≤ 2%) | High-quality CPU inference |
+| **GGUF** | Q8_0 | ~8.5 GB | ≥ 0.92 (near-lossless) | Quality-critical deployments |
+| **AWQ** | w4-g128 | ~4.2 GB | ≥ 0.89 | vLLM GPU inference (2× throughput) |
+| **GPTQ** | 4bit-g128 | ~4.3 GB | ≥ 0.89 | ExLlama / HuggingFace inference |
+| **ONNX** | int8-dynamic | ~8 GB | ≥ 0.90 | Cross-platform inference |
+
+**Quality gates enforced in CI** (`scripts/quantization_quality_gate.py`):
+- Faithfulness drop from bfloat16 baseline ≤ 4%
+- Speech WER increase ≤ 3%
+- Bundle size within format-specific limits
+
+### Mobile Quantization
+
+| Model | Quant | Size | Target Device | Latency |
+|-------|-------|------|--------------|---------|
+| Gemma-2-2B | Q4_K_M | ~1.4 GB | Android 4GB+ RAM | ~2s/query |
+| bge-m3 (embedder) | ONNX int8 | ~70 MB | On-device vector search | < 50ms |
+
+## Offline RAG (v1.4.0)
+
+### Bundle Specification
+
+| Component | Format | Target Size | Purpose |
+|-----------|--------|------------|---------|
+| FAISS index | flat IP | 30-80 MB | On-device vector search |
+| Passages | JSONL.gz | 20-40 MB | Passage text + metadata |
+| ONNX embedder | int8 quantized | 40-70 MB | Query embedding |
+| **Total bundle** | tar.gz | **≤ 150 MB** | Complete offline RAG |
+
+### Offline Performance Targets
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Faithfulness | ≥ 0.82 | 50 test queries from URA FAQ corpus |
+| Retrieval latency | < 100ms | p95 on mid-range Android (4GB RAM) |
+| Delta sync | < 12s | Typical daily changes on 3G (~300 KB/s) |
+| Bundle integrity | 100% | SHA-256 per artifact, verified on load |
+
+### Delta Sync Protocol
+
+The sync engine (`offline_sync.py`) uses hash-based chunk diffing:
+1. Client sends `{version, chunk_hashes: {id: sha256}}`
+2. Server computes diff: changed + deleted chunks
+3. Client downloads only changed chunks (~200 KB/day typical)
+4. Client verifies integrity, updates local version
+
+## Voice-First Mobile (v1.4.0)
+
+### Voice Interface Modes
+
+| Mode | Endpoint | Latency Target | Description |
+|------|----------|---------------|-------------|
+| Voice chat (online) | `/v1/voice/chat` | p95 < 1.2s | ASR → LLM → TTS |
+| Voice chat (offline) | On-device | p95 < 2.0s | Whisper-tiny → local LLM → Piper |
+| Voice + vision | `/v1/voice/vision/chat` | e2e < 3.0s | ASR + OCR → LLM → TTS |
+| Streaming voice | `/v1/voice/chat/stream` | TTFF < 400ms | WebSocket real-time pipeline |
+
+### Speech Models
+
+| Component | Online Model | Offline Model | WER Target |
+|-----------|-------------|--------------|------------|
+| ASR | Whisper Small + LoRA | Whisper Tiny | ≤ 18% (Ugandan English) |
+| TTS | Piper (5 voices) | Piper Lite | N/A (intelligibility ≥ 80%) |
+| VAD | Silero VAD | Silero VAD | Barge-in ≥ 92% |
 
 ## Updates & Monitoring
 
@@ -154,6 +241,8 @@
 - **Drift detection**: Faithfulness score monitoring via Prometheus/Grafana
 - **Feedback loop**: User thumbs up/down feeds into retriever tuning pipeline
 - **Re-indexing**: Triggered via POST /v1/indexing/trigger when URA publishes new content
+- **New metrics (v1.4.0)**: `offline_mode_usage`, `offline_faithfulness`, `mobile_bundle_size_mb`, `voice_first_latency_seconds`, `offline_bundle_downloads_total`
+- **New dashboard**: "Offline & Mobile Experience" Grafana panel tracking offline adoption and sync health
 
 ---
 

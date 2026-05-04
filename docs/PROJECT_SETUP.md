@@ -114,8 +114,8 @@ QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=              # Optional, for Qdrant Cloud
 QDRANT_COLLECTION=ura_knowledge_base_v1
 
-# LLM Generation (Qwen2.5-3B-Instruct, ~6 GB auto-download)
-LLM_MODEL=Qwen/Qwen2.5-3B-Instruct
+# LLM Generation (Qwen3-8B, ~16 GB auto-download)
+LLM_MODEL=Qwen/Qwen3-8B
 LLM_ENABLED=true
 LLM_DEVICE=auto              # auto|cpu|cuda
 LLM_TORCH_DTYPE=auto         # float16|bfloat16|float32|auto
@@ -143,6 +143,56 @@ GROUNDING_THRESHOLD=0.3      # Score below which to append disclaimer
 CONVERSATION_TTL_DAYS=7      # Auto-purge conversation data
 FEEDBACK_TTL_DAYS=90         # Auto-purge feedback data
 
+# Authentication (Phase 14 — off by default)
+AUTH_ALG=HS256                # HS256 (dev) or RS256 (prod OIDC)
+AUTH_DEV_SECRET=dev-insecure-change-me  # Shared secret for HS256
+OIDC_ISSUER=                  # OIDC issuer URI (RS256)
+OIDC_AUDIENCE=ura-chatbot     # OIDC audience
+OIDC_JWKS_URL=                # JWKS endpoint (RS256)
+
+# Speech Pipeline (Phase 16 — requires speech models)
+SPEECH_ENABLED=true
+SPEECH_ASR_BACKEND=auto       # auto|sherpa|transformers|mock
+SPEECH_TTS_BACKEND=auto       # auto|sherpa|piper|mock
+SPEECH_MT_BACKEND=prompted    # auto|onnx|transformers|prompted|mock
+
+# Sunbird AI Cloud Fallback (Ugandan languages)
+SUNBIRD_API_URL=https://api.sunbird.ai
+SUNBIRD_API_TOKEN=            # Required for cloud speech/translation
+
+# Analytics Database
+ANALYTICS_BACKEND=sqlite      # sqlite|postgres
+POSTGRES_DSN=                 # e.g. postgresql://user:pw@host/db
+
+# vLLM Backend (alternative to local transformers)
+LLM_BACKEND=local             # local|vllm
+VLLM_BASE_URL=http://vllm:8001/v1
+
+# CORS & Security
+CORS_ORIGINS=http://localhost:3300  # Comma-separated, no wildcard
+
+# Feature Flags (all FLAG_<NAME> env vars, see flags.py)
+FLAG_CORRECTIVE_RAG=true      # Re-retrieve on low quality
+FLAG_SEMANTIC_CACHE=true      # Cache similar queries
+FLAG_QUERY_REWRITE=true       # Spell/abbrev/coreference
+FLAG_RERANKER=true            # Cross-encoder reranking
+FLAG_WORKFLOWS=true           # Guided multi-step workflows
+
+# Voice-First Streaming (Phase 23)
+FLAG_VOICE_STREAMING=false    # WebSocket streaming voice chat (VAD + barge-in)
+FLAG_VOICE_CONSENT=false      # Enforce voice-specific consent checks
+VOICE_VAD_ENERGY_THRESHOLD=0.015  # RMS threshold for speech detection
+VOICE_VAD_SILENCE_MS=600      # Silence before utterance end
+VOICE_VAD_MIN_SPEECH_MS=250   # Min speech duration to process
+VOICE_STORE_RAW_AUDIO=false   # Never store raw audio by default
+FLAG_HANDOFF_SUMMARIES=true   # Human triage packets
+FLAG_TOOL_USE=false           # LLM tool-calling (calculators, rates)
+FLAG_AGENTIC_MODE=false       # Supervisor routing
+FLAG_AUTH_REQUIRED=false      # Enforce JWT authentication
+FLAG_MEMORY_ENABLED=false     # Consent-gated personalization
+FLAG_AUDIT_LEDGER=false       # Hash-chained audit log
+FLAG_VOICE_ENABLED=false      # Mobile voice features
+
 # Observability (opt-in)
 OTEL_ENABLED=false
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
@@ -168,15 +218,15 @@ docker compose logs -f api
 ### Option 2: Manual Start
 
 ```bash
-# Terminal 1: Backend API
+# Terminal 1: Backend API (port 8887)
 cd App/backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8887
 
-# Terminal 2: Frontend
+# Terminal 2: Frontend (port 3300)
 cd App/frontend
 bun run dev
 
-# Terminal 3: Gradio App
+# Terminal 3: Gradio App (optional)
 python App/app.py
 ```
 
@@ -201,26 +251,82 @@ FinalYearProject/
 ├── App/                     # Application Code
 │   ├── app.py              # Full Gradio app (HF Spaces)
 │   ├── classifier.py       # Simple classifier demo
-│   ├── backend/            # FastAPI REST API (v1.2.0)
+│   ├── backend/            # FastAPI REST API (v1.3.0)
 │   │   ├── app/
-│   │   │   ├── main.py     # API routes + SSE streaming + rate limiting
-│   │   │   ├── models.py   # Pydantic v2 schemas (citations, escalation)
-│   │   │   ├── service.py  # 6-phase RAG pipeline orchestrator
-│   │   │   ├── llm.py      # Qwen2.5-3B-Instruct local generation
+│   │   │   ├── main.py     # 50+ API routes, SSE streaming, CORS, rate limiting, auth
+│   │   │   ├── models.py   # Pydantic v2 schemas (citations, escalation, speech, export)
+│   │   │   ├── service.py  # 12-stage RAG pipeline orchestrator + agentic routing
+│   │   │   ├── llm.py      # Qwen3-8B local generation + vLLM backend + tool-calling
 │   │   │   ├── query.py    # Query rewriting (abbreviations, spelling, coreference)
-│   │   │   ├── cache.py    # Semantic response cache (cosine similarity)
+│   │   │   ├── cache.py    # Semantic response cache (memory or Redis backend)
 │   │   │   ├── corrective_rag.py # Corrective re-retrieval + clarification
-│   │   │   ├── retriever.py # Hybrid retrieval (dense+sparse+RRF+rerank+circuit breaker)
+│   │   │   ├── retriever.py # Hybrid retrieval (bge-m3+BM25+RRF+rerank+circuit breaker)
 │   │   │   ├── indexer.py  # PDF/CSV ingestion → Qdrant
-│   │   │   ├── guardrails.py # OWASP LLM Top 10 (input/output guards)
-│   │   │   ├── tracing.py  # OpenTelemetry GenAI per-stage tracing
-│   │   │   ├── database.py # SQLite + WAL + conversation history + data retention TTLs
-│   │   │   └── analytics.py # Usage analytics + Prometheus metrics
+│   │   │   ├── guardrails.py # OWASP LLM Top 10 2025 (input/output/indirect injection)
+│   │   │   ├── tracing.py  # OpenTelemetry GenAI 2025 semconv tracing
+│   │   │   ├── database.py # SQLite + WAL + 11 tables + data retention TTLs
+│   │   │   ├── postgres.py # PostgreSQL analytics backend (opt-in)
+│   │   │   ├── analytics.py # Prometheus-compatible metrics + middleware
+│   │   │   ├── speech_service.py # ASR (Whisper) + TTS (Piper) + MT + streaming extensions
+│   │   │   ├── sunbird.py  # Sunbird AI cloud fallback (Ugandan languages)
+│   │   │   ├── voice_stream.py # Streaming voice engine (VAD, VoiceSession, barge-in)
+│   │   │   ├── voice_ws.py    # WebSocket handler for /v1/voice/chat/stream
+│   │   │   ├── voice_consent.py # Voice consent, audit log, retention policy
+│   │   │   ├── offline_rag.py # FAISS offline retrieval fallback
+│   │   │   ├── accent_detector.py # Prosodic accent classifier
+│   │   │   ├── flags.py    # Feature flag registry (20 flags, env-backed)
+│   │   │   ├── resilience.py # Circuit breaker (exponential backoff)
+│   │   │   ├── pdf_export.py # Branded PDF conversation/tax export
+│   │   │   ├── evaluation.py # RAG evaluation harness (8 metrics)
+│   │   │   ├── auth/       # JWT auth (HS256 dev / RS256 prod OIDC)
+│   │   │   │   ├── jwt_auth.py      # Token verification + JWKS cache
+│   │   │   │   ├── dependencies.py  # FastAPI DI (current_user, require_role)
+│   │   │   │   └── models.py        # AuthUser, UserProfile, ConsentReceipt
+│   │   │   ├── agents/     # Supervisor + specialist routing
+│   │   │   │   ├── supervisor.py    # Query router (7 routes)
+│   │   │   │   ├── state.py         # AgentRoute, RouteDecision enums
+│   │   │   │   └── graphs/          # LangGraph orchestration (scaffolded)
+│   │   │   ├── tools/      # LLM tool-calling framework
+│   │   │   │   ├── __init__.py      # Tool base class + ToolRegistry
+│   │   │   │   ├── calculators.py   # VAT, PAYE, capital gains, customs
+│   │   │   │   ├── rates.py         # Tax rate lookups
+│   │   │   │   ├── calendar.py      # Filing deadlines, fiscal year
+│   │   │   │   ├── escalate.py      # Human escalation tool
+│   │   │   │   └── rag_tool.py      # Knowledge base search tool
+│   │   │   ├── workflows/  # Guided multi-step workflow engine
+│   │   │   │   ├── registry.py      # WorkflowSession state machine
+│   │   │   │   ├── loader.py        # YAML definition loader
+│   │   │   │   ├── slots.py         # Slot validators (TIN, email, phone, date)
+│   │   │   │   └── flows/           # YAML workflow definitions
+│   │   │   ├── memory/     # Personalization memory (consent-gated)
+│   │   │   │   ├── service.py       # Unified memory interface
+│   │   │   │   ├── semantic.py      # User facts with decay
+│   │   │   │   ├── episodic.py      # Conversation summaries
+│   │   │   │   ├── working.py       # Transient session state
+│   │   │   │   ├── extractor.py     # Fact extraction from turns
+│   │   │   │   └── decay.py         # Time-based fact decay
+│   │   │   ├── audit/      # Immutable audit ledger (UDPA compliance)
+│   │   │   │   ├── ledger.py        # Hash-chained append-only log
+│   │   │   │   ├── verifier.py      # Chain integrity verification
+│   │   │   │   └── merkle.py        # Merkle tree proofs
+│   │   │   ├── voice_stream.py      # Streaming voice engine (VAD, VoiceSession, barge-in)
+│   │   │   ├── voice_ws.py         # WebSocket handler for streaming voice chat
+│   │   │   ├── voice_consent.py    # Voice consent, audit log, retention policy
+│   │   │   ├── offline_rag.py      # FAISS offline retrieval fallback
+│   │   │   └── accent_detector.py  # Prosodic accent classifier (5 UG profiles)
+│   │   ├── tests/          # Backend test suite
 │   │   └── requirements.txt
-│   └── frontend/           # Next.js 15 UI (SSE streaming, citations, escalation)
-│       ├── src/app/
+│   └── frontend/           # Next.js 16 + React 19 UI
+│       ├── src/
+│       │   ├── app/        # App Router pages (chat, analytics, evaluation)
+│       │   ├── components/ # 23 components (10 charts, 13 UI)
+│       │   ├── hooks/      # useSpeech, useVoiceWebSocket, useAnalyticsDashboard
+│       │   ├── services/   # voiceService, voiceWebSocket, analyticsApi
+│       │   └── store/      # Zustand (useChatStore, useAnalyticsStore)
+│       ├── e2e/            # Playwright E2E + a11y (axe-core)
+│       ├── public/         # PWA assets + service worker (sw.js)
 │       ├── package.json
-│       └── next.config.mjs
+│       └── next.config.mjs # CSP, security headers, API proxy
 │
 ├── Data/                    # Training Data
 │   ├── dataset/            # CSV FAQ files (41 files)
@@ -276,23 +382,25 @@ FinalYearProject/
 └── pyproject.toml          # Python tooling config
 ```
 
-## API Endpoints
+## API Endpoints (50+ routes)
 
-### Health Check
+### Health & Readiness
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8887/health
+curl http://localhost:8887/ready       # checks model + Qdrant
+curl http://localhost:8887/metrics     # Prometheus text format
 ```
 
 ### Classification
 ```bash
-curl -X POST http://localhost:8000/classify \
+curl -X POST http://localhost:8887/classify \
   -H "Content-Type: application/json" \
   -d '{"text": "How do I register for TIN?"}'
 ```
 
 ### Chat (Sync)
 ```bash
-curl -X POST http://localhost:8000/v1/chat \
+curl -X POST http://localhost:8887/v1/chat \
   -H "Content-Type: application/json" \
   -H "X-Session-ID: my-session" \
   -d '{"message": "What is VAT rate in Uganda?", "locale": "en"}'
@@ -300,10 +408,66 @@ curl -X POST http://localhost:8000/v1/chat \
 
 ### Chat (SSE Streaming)
 ```bash
-curl -N -X POST http://localhost:8000/v1/chat/stream \
+curl -N -X POST http://localhost:8887/v1/chat/stream \
   -H "Content-Type: application/json" \
   -H "X-Session-ID: my-session" \
   -d '{"message": "What is VAT rate in Uganda?", "locale": "en"}'
+```
+
+### Speech Pipeline
+```bash
+# Transcribe audio (ASR)
+curl -X POST http://localhost:8887/v1/asr \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @audio.pcm
+
+# Text-to-Speech (TTS)
+curl -X POST http://localhost:8887/v1/tts \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Welcome to URA", "language": "en"}'
+
+# Voice chat (ASR → LLM → TTS compound pipeline)
+curl -X POST "http://localhost:8887/v1/voice/chat?language=en&tts_enabled=true" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @audio.pcm
+```
+
+### Streaming Voice Chat (Phase 23 — WebSocket)
+```bash
+# Connect via websocat (install: cargo install websocat)
+websocat ws://localhost:8887/v1/voice/chat/stream
+
+# Send session_start config (JSON text frame):
+# {"type":"session_start","language":"en","sample_rate":16000,"vad_sensitivity":"medium"}
+
+# Then stream binary PCM16 audio chunks (20ms frames)
+# Server responds with: transcript_final, reply_text, binary TTS audio, latency_report
+
+# Voice audit log (admin)
+curl http://localhost:8887/v1/admin/voice_audit?days=30&limit=50
+```
+
+### Feedback & Analytics
+```bash
+# Submit feedback
+curl -X POST http://localhost:8887/v1/feedback \
+  -H "Content-Type: application/json" \
+  -d '{"message_id": "abc", "rating": "up", "user_query": "...", "bot_reply": "..."}'
+
+# Dashboard data
+curl http://localhost:8887/v1/analytics/dashboard?days=30
+```
+
+### Admin (Ticket Queue)
+```bash
+curl http://localhost:8887/v1/admin/tickets?status=open&limit=10
+curl http://localhost:8887/v1/admin/tickets/stats
+```
+
+### Identity & Consent (requires JWT)
+```bash
+curl http://localhost:8887/v1/me -H "Authorization: Bearer <token>"
+curl http://localhost:8887/v1/me/consents -H "Authorization: Bearer <token>"
 ```
 
 ## Running Tests
@@ -488,7 +652,7 @@ flutter test --coverage --reporter expanded
 
 ### Load Testing
 ```bash
-# k6 SLO validation (requires running API at localhost:8000)
+# k6 SLO validation (requires running API at localhost:8887)
 k6 run tests/load/k6-chat-slo.js
 ```
 
@@ -499,13 +663,13 @@ k6 run tests/load/k6-chat-slo.js
 python scripts/validate_env.py --env production
 
 # AI red team evaluation (50 adversarial prompts, NIST AI 600-1)
-python scripts/ai_red_team.py --api-url http://localhost:8000
+python scripts/ai_red_team.py --api-url http://localhost:8887
 
 # Bias & fairness audit (language + taxpayer parity)
-python scripts/bias_fairness_audit.py --api-url http://localhost:8000
+python scripts/bias_fairness_audit.py --api-url http://localhost:8887
 
 # Incident response simulation (3 AI-specific playbooks)
-python scripts/incident_response_sim.py --api-url http://localhost:8000
+python scripts/incident_response_sim.py --api-url http://localhost:8887
 
 # Disaster recovery test (Qdrant snapshot + SQLite backup)
 bash scripts/dr_test.sh
@@ -528,8 +692,11 @@ docker compose --profile monitoring up -d
 ## Next Steps
 
 1. Read [MLOps Workflows](mlops-workflows.md) for CI/CD details
-2. Review [Data Schema](data-schema-and-eval.md) for data model
-3. Configure GitHub secrets for deployment
-4. Set up Hugging Face Space for the Gradio app
-5. Review [Model Card](MODEL_CARD.md) for EU AI Act compliance
-6. Review [PIA](capstone/PIA.md) for NDPA 2019 privacy assessment
+2. Review [Data Schema](data-schema-and-eval.md) for data model (11 tables)
+3. Review [RAG Architecture](RAG_ARCHITECTURE.md) for the 12-stage pipeline
+4. Review [Agent Architecture](AGENT_ARCHITECTURE.md) for tool-calling and supervisor routing
+5. Review [Model Swap Guide](MODEL_SWAP_GUIDE.md) for LLM/embedding/reranker alternatives
+6. Configure GitHub secrets for deployment
+7. Set up Hugging Face Space for the Gradio app
+8. Review [Model Card](MODEL_CARD.md) for EU AI Act compliance
+9. Review [PIA](capstone/PIA.md) for NDPA 2019 privacy assessment

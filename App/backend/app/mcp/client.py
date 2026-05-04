@@ -17,6 +17,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .policy import authorize_tool_call
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,9 +122,22 @@ class MCPClient:
             risk = tool.schema.risk
             # High / critical risk → role gate
             if risk in ("high", "critical"):
-                if user_role not in ("verified_taxpayer", "ura_staff", "ura_admin"):
+                if risk == "high" and user_role not in (
+                    "verified_taxpayer",
+                    "ura_staff",
+                    "ura_admin",
+                    "ura_auditor",
+                ):
+                    continue
+                if risk == "critical" and user_role not in (
+                    "verified_taxpayer",
+                    "ura_staff",
+                    "ura_admin",
+                ):
                     continue
                 if name.startswith("ura_") and "ura_account_access" not in granted_purposes:
+                    continue
+                if risk == "critical" and "ura_actions" not in granted_purposes:
                     continue
             # Ticket escalation needs consent from anonymous/public users
             if (
@@ -142,13 +157,16 @@ class MCPClient:
         *,
         tenant_id: str = "default",
         user_id: str = "",
+        user_role: str = "public",
+        granted_purposes: list[str] | None = None,
+        confirmed: bool = False,
+        idempotency_key: str = "",
         iteration: int = 0,
     ) -> MCPCallResult:
         """Call a tool and return a structured result.
 
-        Does NOT enforce authz — callers must pre-check via
-        :py:meth:`available_for`.  This split keeps policy
-        decisions explicit and loggable.
+        Enforces dispatch-time authorization. Discovery filtering is useful
+        for UX, but this check is the actual security boundary.
         """
         import uuid
 
@@ -156,8 +174,36 @@ class MCPClient:
         call_id = str(uuid.uuid4())
         tool = self._registry.get(name)
         risk = tool.schema.risk if tool is not None else "low"
+        policy = authorize_tool_call(
+            name=name,
+            risk=risk,
+            user_role=user_role,
+            granted_purposes=granted_purposes or [],
+            user_id=user_id,
+            tenant_id=tenant_id,
+            confirmed=confirmed,
+            idempotency_key=idempotency_key,
+        )
+
+        if not policy["allowed"]:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            return MCPCallResult(
+                tool_name=name,
+                arguments=dict(arguments or {}),
+                result={"ok": False, "error": "policy_denied", "policy": policy},
+                ok=False,
+                duration_ms=round(elapsed_ms, 2),
+                iteration=iteration,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                risk_tier=risk,
+                auth_checked=True,
+                call_id=call_id,
+            )
 
         raw = self._registry.call(name, arguments)
+        if isinstance(raw, dict):
+            raw.setdefault("policy", policy)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         return MCPCallResult(

@@ -36,6 +36,7 @@ __all__ = ["CircuitBreaker", "CircuitState", "BM25SparseEncoder", "HybridRetriev
 # Configuration via environment
 # ---------------------------------------------------------------------------
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
 # 2026 default embedding: BAAI/bge-m3 — multilingual (100+ langs incl.
 # Bantu-family languages relevant to Luganda), 1024-dim, current MTEB
@@ -45,7 +46,7 @@ DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL", "mixedbread-ai/mxbai-rerank-base-v2")
 DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from ._root import PROJECT_ROOT as _PROJECT_ROOT
 BM25_STATE_PATH = Path(
     os.getenv("BM25_STATE_PATH", str(_PROJECT_ROOT / "Model" / "bm25_state.json"))
 )
@@ -169,7 +170,7 @@ class HybridRetriever:
         try:
             from qdrant_client import QdrantClient
 
-            self._client = QdrantClient(url=QDRANT_URL, timeout=10)
+            self._client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=10)
             collections = [c.name for c in self._client.get_collections().collections]
             if QDRANT_COLLECTION not in collections:
                 logger.warning("Qdrant collection '%s' not found", QDRANT_COLLECTION)
@@ -183,9 +184,9 @@ class HybridRetriever:
 
             from sentence_transformers import CrossEncoder, SentenceTransformer
 
-            self._dense_model = SentenceTransformer(DENSE_MODEL_NAME)
+            self._dense_model = SentenceTransformer(DENSE_MODEL_NAME, device="cpu")
             if RERANK_ENABLED:
-                self._reranker = CrossEncoder(RERANKER_MODEL_NAME)
+                self._reranker = CrossEncoder(RERANKER_MODEL_NAME, device="cpu")
 
             self._ready = True
             logger.info(
@@ -202,16 +203,9 @@ class HybridRetriever:
 
     @property
     def is_ready(self) -> bool:
-        """Live health check — verifies Qdrant is actually reachable."""
-        if not self._ready or self._client is None:
-            return False
-        try:
-            self._client.get_collections()
-            return True
-        except Exception:
-            logger.warning("Qdrant health check failed; marking retriever as unavailable")
-            self._ready = False
-            return False
+        """Check if retriever was initialised. Does NOT do a live call —
+        the circuit breaker in ``search()`` handles transient failures."""
+        return self._ready and self._client is not None
 
     def search(
         self,

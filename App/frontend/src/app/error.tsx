@@ -26,7 +26,7 @@ export default function ErrorBoundary({ error, reset }: ErrorBoundaryProps) {
       // Fire-and-forget analytics beacon
       try {
         navigator.sendBeacon?.(
-          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/v1/analytics/event`,
+          `/api/v1/analytics/event`,
           new Blob(
             [
               JSON.stringify({

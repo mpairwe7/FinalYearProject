@@ -243,11 +243,11 @@
     },
     {
       "type": "machine-learning-model",
-      "bom-ref": "qwen2.5-3b-instruct",
-      "name": "Qwen2.5-3B-Instruct",
-      "version": "3.0",
-      "purl": "pkg:huggingface/Qwen/Qwen2.5-3B-Instruct@3.0",
-      "description": "Qwen 2.5 3B Instruct model used for RAG generation and agentic tool-calling",
+      "bom-ref": "qwen3-8b",
+      "name": "Qwen3-8B",
+      "version": "1.0",
+      "purl": "pkg:huggingface/Qwen/Qwen3-8B@1.0",
+      "description": "Qwen 3 8B model used for RAG generation and agentic tool-calling",
       "licenses": [{"license": {"id": "Apache-2.0"}}],
       "supplier": {
         "name": "Alibaba Qwen Team"

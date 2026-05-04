@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "false").lower() == "true"
 OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "ura-chatbot-api")
 OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+GEN_AI_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen3-8B")
 
 _tracer: Any = None
 _meter: Any = None
@@ -121,7 +123,7 @@ def trace_rag_pipeline(
     attributes = {
         "gen_ai.system": "ura-chatbot",
         "gen_ai.operation.name": "chat",
-        "gen_ai.request.model": "ura-qwen2.5-3b-instruct",
+        "gen_ai.request.model": GEN_AI_MODEL,
         # log length, not content (PII safety)
         "gen_ai.prompt.length": len(query),
     }
@@ -270,3 +272,84 @@ def record_retrieval_metrics(
         _retrieval_counter.add(num_results)
     except Exception:
         logger.debug("Failed to record retrieval metrics", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 23 — Voice-specific tracing
+# ---------------------------------------------------------------------------
+
+_voice_session_hist = None
+_voice_asr_hist = None
+_voice_tts_hist = None
+
+
+@contextmanager
+def trace_voice_session(session_id: str):
+    """Top-level span for one streaming voice WebSocket session."""
+    if _tracer is None:
+        ctx = {"timings": {}}
+        yield ctx
+        return
+    with _tracer.start_as_current_span(
+        "voice.session",
+        attributes={
+            "voice.session_id": session_id,
+        },
+    ):
+        ctx = {"timings": {}}
+        yield ctx
+
+
+@contextmanager
+def trace_voice_stage(name: str, ctx: dict | None = None):
+    """Child span for a specific voice pipeline stage.
+
+    Supported names: voice.vad, voice.streaming_asr, voice.streaming_tts,
+    voice.barge_in, voice.consent_check.
+    """
+    t0 = time.perf_counter()
+    if _tracer is None:
+        yield
+        if ctx and "timings" in ctx:
+            ctx["timings"][name] = round((time.perf_counter() - t0) * 1000, 1)
+        return
+    with _tracer.start_as_current_span(f"voice.{name}"):
+        yield
+        duration = round((time.perf_counter() - t0) * 1000, 1)
+        if ctx and "timings" in ctx:
+            ctx["timings"][name] = duration
+
+
+def record_voice_metrics(
+    asr_latency_ms: float = 0,
+    tts_first_chunk_ms: float = 0,
+    session_duration_s: float = 0,
+) -> None:
+    """Record voice-specific histograms."""
+    global _voice_session_hist, _voice_asr_hist, _voice_tts_hist
+    if _meter is None:
+        return
+    try:
+        if _voice_asr_hist is None:
+            _voice_asr_hist = _meter.create_histogram(
+                "voice.asr.duration", unit="ms",
+                description="Streaming ASR latency",
+            )
+        if _voice_tts_hist is None:
+            _voice_tts_hist = _meter.create_histogram(
+                "voice.tts.first_chunk", unit="ms",
+                description="Time-to-first-TTS-audio-byte",
+            )
+        if _voice_session_hist is None:
+            _voice_session_hist = _meter.create_histogram(
+                "voice.session.duration", unit="s",
+                description="Voice WebSocket session duration",
+            )
+        if asr_latency_ms > 0:
+            _voice_asr_hist.record(asr_latency_ms)
+        if tts_first_chunk_ms > 0:
+            _voice_tts_hist.record(tts_first_chunk_ms)
+        if session_duration_s > 0:
+            _voice_session_hist.record(session_duration_s)
+    except Exception:
+        logger.debug("Failed to record voice metrics", exc_info=True)

@@ -28,7 +28,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: codeql-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}-${{ matrix.language }}
+  group: codeql-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:

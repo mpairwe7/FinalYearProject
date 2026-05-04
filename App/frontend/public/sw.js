@@ -5,8 +5,9 @@
  * to keep the bundle minimal and avoid build-tool coupling.
  */
 
-const CACHE_NAME = 'ura-v2';
-const STATIC_ASSETS = ['/', '/manifest.json', '/favicon.svg', '/icon-192x192.svg', '/icon-512x512.svg'];
+const CACHE_NAME = 'ura-v4';
+const OFFLINE_PAGE = '/offline.html';
+const STATIC_ASSETS = ['/', '/manifest.json', '/favicon.svg', '/icon-192x192.svg', '/icon-512x512.svg', OFFLINE_PAGE];
 
 // Install — pre-cache shell assets
 self.addEventListener('install', (event) => {
@@ -60,6 +61,6 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         return resp;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match(OFFLINE_PAGE)))
   );
 });

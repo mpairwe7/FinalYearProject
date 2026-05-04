@@ -33,3 +33,13 @@ export function useTicketStats(days = 30) {
     retry: 1,
   });
 }
+
+export function useTicketQueue(status = "open", limit = 8) {
+  return useQuery({
+    queryKey: ["ticketQueue", status, limit],
+    queryFn: () => analyticsApi.tickets(status, limit),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    retry: 1,
+  });
+}

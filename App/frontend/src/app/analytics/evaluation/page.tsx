@@ -18,6 +18,7 @@ import EvalRadarChart from "../../../components/charts/EvalRadarChart";
 import MetricsTable from "../../../components/charts/MetricsTable";
 import SegmentComparisonChart from "../../../components/charts/SegmentComparisonChart";
 import ConfusionMatrix from "../../../components/charts/ConfusionMatrix";
+import { authHeaders } from "@/lib/authSession";
 import "../analytics.css";
 
 // Static eval data (fallback when API is not running)
@@ -68,7 +69,7 @@ export default function EvaluationPage() {
     queryFn: async () => {
       const res = await fetch("/api/v1/evaluate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         signal: AbortSignal.timeout(30000),
       });
       if (!res.ok) return null;
