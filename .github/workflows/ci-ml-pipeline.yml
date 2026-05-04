@@ -10,7 +10,7 @@ name: ML Pipeline CI/CD
 
 on:
   push:
-    branches: [main, develop, feat/*]
+    branches: [main, dev, develop, feat/*, fix/*]
     paths:
       - 'ml/**'
       - 'App/backend/**'
@@ -19,7 +19,7 @@ on:
       - 'requirements.txt'
       - '.github/workflows/ci-ml-pipeline.yml'
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev, develop]
   workflow_dispatch:
     inputs:
       run_training:

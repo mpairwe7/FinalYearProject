@@ -17,9 +17,9 @@ name: "DevSecOps: SAST/DAST & Threat Model"
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev, develop]
   schedule:
     - cron: "30 3 * * 1"   # Weekly Monday 03:30 UTC
   workflow_dispatch:

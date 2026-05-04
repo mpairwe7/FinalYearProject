@@ -15,9 +15,9 @@ name: "Security: Trivy Scanning"
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev, develop]
   schedule:
     # Weekly full scan – catch newly disclosed CVEs against existing code
     - cron: "0 3 * * 1"  # Monday 03:00 UTC
