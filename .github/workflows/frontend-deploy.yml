@@ -122,7 +122,7 @@ jobs:
       - name: Build for a11y audit
         working-directory: ./App/frontend
         env:
-          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_API_URL: http://localhost:8087
         run: bun run build
 
       - name: Start frontend server
@@ -169,7 +169,7 @@ jobs:
       - name: Build
         working-directory: ./App/frontend
         env:
-          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:8087' }}
         run: bun run build
 
       - name: Upload build artifacts
@@ -187,6 +187,8 @@ jobs:
     timeout-minutes: 20
     needs: build-frontend
     if: github.event_name != 'pull_request'
+    outputs:
+      published: ${{ steps.docker_mode.outputs.publish }}
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -194,7 +196,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
 
+      - name: Resolve Docker publish mode
+        id: docker_mode
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "local_tag=ura-chatbot-frontend:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "DockerHub credentials are not configured; building and scanning local image only."
+          fi
+
       - name: Login to DockerHub
+        if: steps.docker_mode.outputs.publish == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -210,23 +228,37 @@ jobs:
             type=sha,prefix=
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build and push
+      - name: Build local Docker image
         uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
         with:
           context: ./App/frontend
           file: ./App/frontend/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          push: false
+          load: true
+          tags: ${{ steps.docker_mode.outputs.local_tag }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:8087' }}
+
+      - name: Push DockerHub tags
+        if: steps.docker_mode.outputs.publish == 'true'
+        env:
+          LOCAL_IMAGE: ${{ steps.docker_mode.outputs.local_tag }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            docker tag "$LOCAL_IMAGE" "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"
 
       - name: Trivy vulnerability scan (SARIF)
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
-          image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.version }}
+          image-ref: ${{ steps.docker_mode.outputs.local_tag }}
           scanners: vuln,secret
           severity: CRITICAL,HIGH
           format: sarif
@@ -235,7 +267,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Upload Trivy SARIF to GitHub Security
-        if: always()
+        if: always() && hashFiles('trivy-frontend.sarif') != ''
         uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
         with:
           sarif_file: trivy-frontend.sarif
@@ -245,7 +277,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
-          image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.version }}
+          image-ref: ${{ steps.docker_mode.outputs.local_tag }}
           format: cyclonedx
           output: sbom-frontend-pipeline.cdx.json
 
@@ -260,10 +292,22 @@ jobs:
           retention-days: 90
 
       - name: Step summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           echo "## Frontend Docker Build" >> "$GITHUB_STEP_SUMMARY"
           echo "- Image: \`${{ env.DOCKER_IMAGE }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Tags: ${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Local scan image: \`${{ steps.docker_mode.outputs.local_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- DockerHub publish: \`${{ steps.docker_mode.outputs.publish }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.docker_mode.outputs.publish }}" == "true" ]]; then
+            echo "- Published tags:" >> "$GITHUB_STEP_SUMMARY"
+            while IFS= read -r tag; do
+              [[ -n "$tag" ]] || continue
+              echo "  - \`$tag\`" >> "$GITHUB_STEP_SUMMARY"
+            done <<< "$TAGS"
+          else
+            echo "- Published tags: skipped because DockerHub credentials are not configured" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
@@ -274,7 +318,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: build-docker
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.build-docker.outputs.published == 'true'
     environment:
       name: production
       url: ${{ vars.PRODUCTION_URL }}
