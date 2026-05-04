@@ -61,7 +61,7 @@ jiwer>=3.0.0
 librosa>=0.10.0
 soundfile>=0.12.0
 # Streaming voice activity detection
-silero-vad>=5.1.0
+silero-vad>=6.2.1
 # Language identification (code-switching routing)
 lingua-language-detector>=2.0.0
 # Optional: reference-free MT quality (uncomment when adopting)
