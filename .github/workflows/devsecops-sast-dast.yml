@@ -369,8 +369,8 @@ jobs:
           target: "http://localhost:8087"
           rules_file_name: ".zap-rules.tsv"
           cmd_options: >-
-            -J zap-report.json
-            -w zap-report.md
+            -J report_json.json
+            -w report_md.md
             -z "-config scanner.threadPerHost=2"
           allow_issue_writing: false
 
@@ -380,8 +380,8 @@ jobs:
         with:
           name: zap-results
           path: |
-            zap-report.json
-            zap-report.md
+            report_json.json
+            report_md.md
           retention-days: 30
 
       - name: ZAP step summary
@@ -389,8 +389,8 @@ jobs:
         run: |
           echo "## OWASP ZAP DAST Baseline Results" >> "$GITHUB_STEP_SUMMARY"
           echo "- Target: \`http://localhost:8087\`" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f zap-report.md ]; then
-            head -50 zap-report.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -f report_md.md ]; then
+            head -50 report_md.md >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- ZAP scan did not produce results (API may not have started)" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -409,7 +409,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Only on default branch (Scorecard needs repo context)
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/dev')
     permissions:
       contents: read
       security-events: write
@@ -429,14 +429,14 @@ jobs:
           publish_results: false
 
       - name: Upload Scorecard SARIF
-        if: always()
+        if: always() && hashFiles('scorecard-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
         with:
           sarif_file: scorecard-results.sarif
           category: ossf-scorecard
 
       - name: Upload Scorecard artifact
-        if: always()
+        if: always() && hashFiles('scorecard-results.sarif') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorecard-results
