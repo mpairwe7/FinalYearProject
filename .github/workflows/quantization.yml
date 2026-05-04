@@ -8,6 +8,14 @@ name: Model Quantization Pipeline
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Execution mode: validate CI wiring only, or run production quantization"
+        required: false
+        type: choice
+        options:
+          - validate
+          - production
+        default: "validate"
       model_id:
         description: "HuggingFace model ID"
         required: false
@@ -30,6 +38,10 @@ on:
         required: false
         type: boolean
         default: false
+      runner_labels:
+        description: "JSON runs-on labels for production quantization"
+        required: false
+        default: '["self-hosted","linux","gpu"]'
 
   push:
     branches: [main, dev]
@@ -62,11 +74,13 @@ jobs:
       model_id: ${{ steps.config.outputs.model_id }}
       formats: ${{ steps.config.outputs.formats }}
       gguf_types: ${{ steps.config.outputs.gguf_types }}
+      run_quantization: ${{ steps.config.outputs.run_quantization }}
+      runner_labels: ${{ steps.config.outputs.runner_labels }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -76,22 +90,110 @@ jobs:
           MODEL="${{ inputs.model_id || env.DEFAULT_MODEL }}"
           FORMATS="${{ inputs.formats || 'gguf awq' }}"
           GGUF_TYPES="${{ inputs.gguf_types || 'Q4_K_M Q5_K_M Q8_0' }}"
+          MODE="${{ inputs.mode || 'validate' }}"
+          RUNNER_LABELS='${{ inputs.runner_labels || '["self-hosted","linux","gpu"]' }}'
+          RUN_QUANTIZATION="false"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$MODE" = "production" ]; then
+            RUN_QUANTIZATION="true"
+          fi
+
+          python3 - <<PY
+          import json
+          labels = json.loads('''${RUNNER_LABELS}''')
+          if not isinstance(labels, list) or not labels or not all(isinstance(x, str) and x for x in labels):
+              raise SystemExit("runner_labels must be a non-empty JSON string array")
+          PY
 
           echo "model_id=${MODEL}" >> "$GITHUB_OUTPUT"
           echo "formats=${FORMATS}" >> "$GITHUB_OUTPUT"
           echo "gguf_types=${GGUF_TYPES}" >> "$GITHUB_OUTPUT"
+          echo "run_quantization=${RUN_QUANTIZATION}" >> "$GITHUB_OUTPUT"
+          echo "runner_labels=${RUNNER_LABELS}" >> "$GITHUB_OUTPUT"
 
           echo "Configuration:"
           echo "  Model:      ${MODEL}"
           echo "  Formats:    ${FORMATS}"
           echo "  GGUF types: ${GGUF_TYPES}"
+          echo "  Mode:       ${MODE}"
+          echo "  Full run:   ${RUN_QUANTIZATION}"
+          echo "  Runner:     ${RUNNER_LABELS}"
 
-      - name: Dry-run validation
+          {
+            echo "## Quantization Configuration"
+            echo "- Model: \`${MODEL}\`"
+            echo "- Formats: \`${FORMATS}\`"
+            echo "- Mode: \`${MODE}\`"
+            echo "- Full quantization: \`${RUN_QUANTIZATION}\`"
+            echo "- Production runner labels: \`${RUNNER_LABELS}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compile scripts
+        run: |
+          python -m py_compile scripts/quantize_models.py scripts/quantization_quality_gate.py
+
+      - name: Dry-run quantization validation
         run: |
           python scripts/quantize_models.py \
             --model "${{ steps.config.outputs.model_id }}" \
             --formats ${{ steps.config.outputs.formats }} \
             --dry-run
+
+      - name: Smoke-test quality gate parser
+        run: |
+          MODEL_NAME=$(echo "${{ steps.config.outputs.model_id }}" | sed 's|.*/||')
+          mkdir -p "artifacts/quantized/${MODEL_NAME}"
+          export MODEL_NAME
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          model = os.environ["MODEL_NAME"]
+          manifest = {
+              "pipeline_version": "2026.1.0-ci-smoke",
+              "model": os.environ["MODEL_ID"],
+              "created_at": "2026-01-01T00:00:00+00:00",
+              "results": [
+                  {
+                      "model": os.environ["MODEL_ID"],
+                      "format": "gguf",
+                      "quant_type": "Q4_K_M",
+                      "output_path": "ci-smoke.gguf",
+                      "size_bytes": 1,
+                      "size_mb": 1.0,
+                      "sha256": "ci-smoke",
+                      "duration_s": 0,
+                      "status": "success",
+                      "error": "",
+                      "created_at": "2026-01-01T00:00:00+00:00",
+                      "metadata": {},
+                  },
+                  {
+                      "model": os.environ["MODEL_ID"],
+                      "format": "awq",
+                      "quant_type": "w4-g128",
+                      "output_path": "ci-smoke-awq",
+                      "size_bytes": 1,
+                      "size_mb": 1.0,
+                      "sha256": "ci-smoke",
+                      "duration_s": 0,
+                      "status": "success",
+                      "error": "",
+                      "created_at": "2026-01-01T00:00:00+00:00",
+                      "metadata": {},
+                  },
+              ],
+              "summary": {"total": 2, "success": 2, "failed": 0, "skipped": 0},
+          }
+          out = Path("artifacts/quantized") / model / "manifest.json"
+          out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+          PY
+          python scripts/quantization_quality_gate.py \
+            --manifest "artifacts/quantized/${MODEL_NAME}/manifest.json" \
+            --json-output "artifacts/quantized/${MODEL_NAME}/quality_gate_results.json"
+        env:
+          MODEL_ID: ${{ steps.config.outputs.model_id }}
 
   # ---------------------------------------------------------------------------
   # Job 2: GGUF Quantization (requires llama.cpp)
@@ -99,14 +201,14 @@ jobs:
   quantize-gguf:
     name: GGUF Quantization
     needs: validate
-    if: contains(needs.validate.outputs.formats, 'gguf')
-    runs-on: ubuntu-latest
+    if: needs.validate.outputs.run_quantization == 'true' && contains(needs.validate.outputs.formats, 'gguf')
+    runs-on: ${{ fromJSON(needs.validate.outputs.runner_labels) }}
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -154,14 +256,14 @@ jobs:
   quantize-awq:
     name: AWQ Quantization
     needs: validate
-    if: contains(needs.validate.outputs.formats, 'awq')
-    runs-on: ubuntu-latest
+    if: needs.validate.outputs.run_quantization == 'true' && contains(needs.validate.outputs.formats, 'awq')
+    runs-on: ${{ fromJSON(needs.validate.outputs.runner_labels) }}
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -201,14 +303,15 @@ jobs:
     needs: [validate, quantize-gguf, quantize-awq]
     if: |
       always() &&
+      needs.validate.outputs.run_quantization == 'true' &&
       !inputs.skip_quality_gate &&
       (needs.quantize-gguf.result == 'success' || needs.quantize-awq.result == 'success')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
