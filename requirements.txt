@@ -8,7 +8,7 @@ sse-starlette>=2.0.0
 httpx>=0.27,<0.29
 
 # Data / modeling stack for notebooks (CSV/PDF RAG + tagging + TTS)
-pandas>=1.5,<2.0
+pandas>=1.5,<4.0
 numpy==1.26.4
 sentence-transformers==3.4.1
 langchain==0.3.28
