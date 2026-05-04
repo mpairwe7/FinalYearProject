@@ -134,6 +134,8 @@ def node_act(state: AgentGraphState) -> NodeResult:
             {},
             tenant_id=state.tenant_id,
             user_id=state.user_id,
+            user_role=state.role,
+            granted_purposes=state.granted_purposes,
             iteration=state.iterations,
         )
         state.tool_calls.append(

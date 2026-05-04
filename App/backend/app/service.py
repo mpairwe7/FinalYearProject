@@ -28,7 +28,10 @@ import concurrent.futures
 import csv
 import logging
 import os
+import re
 import time
+import uuid
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -36,21 +39,25 @@ from . import database as db
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
 from .cache import create_cache
+from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
 from .guardrails import STORE_RAW_PROMPTS, InputGuard, OutputGuard, redact_pii_text
-from .query import rewrite as rewrite_query
+from .memory import get_memory_service
+from .query import detect_language, rewrite as rewrite_query
 from .resilience import CircuitBreaker
 from .retriever import HybridRetriever
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
+from .workflows.registry import WorkflowRegistry, WorkflowSession, auto_load_flows
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-_DEFAULT_DATA_DIR = str(Path(__file__).resolve().parents[3] / "Data" / "dataset")
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from ._root import PROJECT_ROOT as _PROJECT_ROOT
+
+_DEFAULT_DATA_DIR = str(_PROJECT_ROOT / "Data" / "dataset")
 _DATA_DIR = Path(os.getenv("DATA_DIR", _DEFAULT_DATA_DIR)).resolve()
 # Guard against path traversal via DATA_DIR env var
 if not _DATA_DIR.is_relative_to(_PROJECT_ROOT):
@@ -61,6 +68,25 @@ GROUNDING_THRESHOLD = float(os.getenv("GROUNDING_THRESHOLD", "0.3"))
 LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
 SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "true"
 SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
+_WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
+_WORKFLOW_CANCEL_WORDS = {"cancel", "stop", "quit", "exit", "nevermind", "never mind"}
+_WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
+_ACCOUNT_QUERY_RE = re.compile(
+    r"\b(my\s+tin|my\s+filing|my\s+return|my\s+account|my\s+balance)\b",
+    re.IGNORECASE,
+)
+_CUSTOMS_QUERY_RE = re.compile(
+    r"\b(import|export|customs|bill\s+of\s+lading|cif|tariff|clearance)\b",
+    re.IGNORECASE,
+)
+_OBJECTION_QUERY_RE = re.compile(
+    r"\b(dispute|objection|appeal|assessment|audit|fraud|lawyer|court)\b",
+    re.IGNORECASE,
+)
+_REGISTRATION_QUERY_RE = re.compile(
+    r"\b(register|registration|get a tin|tin registration|apply for tin|obtain a tin)\b",
+    re.IGNORECASE,
+)
 
 # Shared executor for LLM calls — bounded so one slow generation cannot
 # exhaust worker threads under load.  Size is small on purpose: Qwen runs
@@ -82,6 +108,7 @@ def _call_llm_with_deadline(
     passages: list[dict[str, Any]],
     conversation_history: list[dict[str, str]] | None,
     locale: str,
+    personalization_context: str = "",
     deadline_s: float = LLM_DEADLINE_SECONDS,
 ) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
@@ -100,6 +127,7 @@ def _call_llm_with_deadline(
         passages=passages,
         conversation_history=conversation_history,
         locale=locale,
+        personalization_context=personalization_context,
     )
     try:
         reply = future.result(timeout=deadline_s)
@@ -121,40 +149,45 @@ def stream_llm_tokens(
     passages: list[dict[str, Any]],
     conversation_history: list[dict[str, str]] | None,
     locale: str,
-) -> list[str]:
+    personalization_context: str = "",
+) -> Generator[str, None, None]:
     """Stream LLM tokens through the shared circuit breaker.
 
     Mirrors :func:`_call_llm_with_deadline` for the SSE streaming path.
-    Returns an empty list when the breaker is OPEN, the generator raises,
+    Yields nothing when the breaker is OPEN, the generator raises,
     or no tokens are produced — the caller then falls back to
     returning the best-hit answer as a single event.
     """
     if not llm_module.is_available():
-        return []
+        return
     if not _LLM_CIRCUIT.allow_request():
         logger.warning("LLM circuit breaker OPEN — skipping stream")
-        return []
+        return
 
+    saw_tokens = False
     try:
-        tokens = list(
-            llm_module.generate_stream(
-                query=query,
-                passages=passages,
-                conversation_history=conversation_history,
-                locale=locale,
-            )
-        )
-        if tokens:
+        for token in llm_module.generate_stream(
+            query=query,
+            passages=passages,
+            conversation_history=conversation_history,
+            locale=locale,
+            personalization_context=personalization_context,
+        ):
+            if not token:
+                continue
+            saw_tokens = True
+            yield token
+
+        if saw_tokens:
             _LLM_CIRCUIT.record_success()
         else:
             # Empty stream counts as a soft failure — the breaker tracks
             # it so a continually empty worker eventually trips.
             _LLM_CIRCUIT.record_failure()
-        return tokens
     except Exception:
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM streaming raised")
-        return []
+        return
 
 
 def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
@@ -165,6 +198,11 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     *,
     tool_names: list[str] | None = None,
     max_iterations: int = 3,
+    personalization_context: str = "",
+    tenant_id: str = "default",
+    user_id: str = "",
+    user_role: str = "public",
+    granted_purposes: list[str] | None = None,
     deadline_s: float = LLM_DEADLINE_SECONDS * 2,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
@@ -191,6 +229,11 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         conversation_history=conversation_history,
         locale=locale,
         max_iterations=max_iterations,
+        personalization_context=personalization_context,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        user_role=user_role,
+        granted_purposes=granted_purposes or [],
     )
     try:
         result = future.result(timeout=deadline_s)
@@ -253,25 +296,45 @@ def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dic
     return faq_index, tag_labels
 
 
+_STOP_WORDS = frozenset(
+    "a an the is are was were be been am do does did will would shall should "
+    "can could may might must have has had of in on at to for with by from "
+    "and or not no nor but so if then than that this these those it its i me "
+    "my we our you your he she they them their what which who whom how when "
+    "where why all each every any some".split()
+)
+
+
 def _simple_search(
     query: str,
     faq_index: dict[str, list[dict[str, str]]],
     top_k: int = 4,
 ) -> list[dict[str, str]]:
-    """Keyword-based retrieval fallback: score each FAQ by word overlap with *query*."""
-    query_tokens = set(query.lower().split())
+    """Keyword-based retrieval fallback: score each FAQ by content-word overlap.
+
+    Stop words are excluded so that domain terms (TIN, VAT, register, etc.)
+    dominate the scoring.  Each returned dict includes a ``_overlap`` key.
+    """
+    query_tokens = set(query.lower().split()) - _STOP_WORDS
+    if not query_tokens:
+        query_tokens = set(query.lower().split())  # fallback: keep all
     scored: list[tuple[float, dict[str, str]]] = []
 
     for entries in faq_index.values():
         for entry in entries:
-            q_tokens = set(entry["question"].lower().split())
-            a_tokens = set(entry["answer"].lower().split())
+            q_tokens = set(entry["question"].lower().split()) - _STOP_WORDS
+            a_tokens = set(entry["answer"].lower().split()) - _STOP_WORDS
             overlap = len(query_tokens & (q_tokens | a_tokens))
             if overlap > 0:
                 scored.append((overlap, entry))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [item for _, item in scored[:top_k]]
+    results = []
+    for overlap, item in scored[:top_k]:
+        out = dict(item)
+        out["_overlap"] = overlap
+        results.append(out)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +349,7 @@ class ChatModel:
     """
 
     def __init__(self) -> None:
-        self.name = "ura-qwen2.5-3b-instruct"
+        self.name = llm_module.LLM_MODEL or "unknown"
         self._faq_index, self._tag_labels = _load_faq_data(_DATA_DIR)
 
         # Hybrid retriever (graceful degradation)
@@ -306,33 +369,684 @@ class ChatModel:
         if self._retriever_ready and self._retriever._dense_model:
             self._cache.set_model(self._retriever._dense_model)
 
+        self._workflow_count = 0
+        if _WORKFLOW_FLOWS_DIR.is_dir():
+            try:
+                self._workflow_count = auto_load_flows(_WORKFLOW_FLOWS_DIR)
+            except Exception:
+                logger.exception("Workflow auto-load failed from %s", _WORKFLOW_FLOWS_DIR)
+
         mode = "hybrid (Qdrant)" if self._retriever_ready else "keyword-only (fallback)"
-        gen_mode = "LLM (Qwen2.5-3B)" if self._llm_available else "FAQ lookup (fallback)"
+        gen_mode = f"LLM ({self.name})" if self._llm_available else "FAQ lookup (fallback)"
         logger.info(
-            "ChatModel initialised – %s mode, %s gen, %d tags", mode, gen_mode, len(self._faq_index)
+            "ChatModel initialised – %s mode, %s gen, %d tags, %d workflows",
+            mode,
+            gen_mode,
+            len(self._faq_index),
+            self._workflow_count,
         )
+
+    @staticmethod
+    def _workflow_view(
+        session: WorkflowSession,
+        *,
+        name: str,
+        status: str,
+        pending_slot: str = "",
+    ) -> dict[str, Any]:
+        """Return UI-safe workflow metadata without echoing sensitive slot values."""
+        filled_slots = [k for k in session.slots if session.slots.get(k) not in ("", None)]
+        masked_slots = sorted(set(filled_slots) & _WORKFLOW_SENSITIVE_SLOTS)
+        visible_slots = sorted(set(filled_slots) - _WORKFLOW_SENSITIVE_SLOTS)
+        return {
+            "id": session.workflow_id,
+            "name": name,
+            "status": status,
+            "current_step_idx": session.current_step_idx,
+            "filled_slots": visible_slots,
+            "masked_slots": masked_slots,
+            "pending_slot": pending_slot,
+            "completed": status == "completed",
+        }
+
+    @staticmethod
+    def _default_next_actions(
+        *,
+        agent_role: str,
+        workflow: dict[str, Any] | None = None,
+        handoff: dict[str, Any] | None = None,
+        escalation_required: bool = False,
+    ) -> list[str]:
+        if workflow and workflow.get("status") == "active":
+            return [
+                "Reply with the requested detail to continue the guided process.",
+                "Send 'cancel' if you want to leave this workflow and ask a different question.",
+            ]
+        if handoff:
+            return [
+                "Prepare the listed reference details before speaking to a URA officer.",
+                "Use the URA Contact Centre if you need immediate human assistance.",
+            ]
+        if agent_role == "clarification_agent":
+            return ["Reply with the missing detail so I can answer more precisely."]
+        if escalation_required:
+            return [
+                "Review the cited URA sources before acting on this answer.",
+                "Ask for human support if your case is account-specific or time-sensitive.",
+            ]
+        return []
+
+    @staticmethod
+    def _has_inline_citations(reply: str) -> bool:
+        return bool(re.search(r"\[\d+\]", reply or ""))
+
+    def _load_personalization_state(self, user_id: str | None) -> dict[str, Any] | None:
+        """Return consent-gated profile + memory context for personalization."""
+        if not user_id or not flags.is_enabled("memory_enabled"):
+            return None
+
+        try:
+            snapshot = get_memory_service().read_all(user_id, purpose="personalization")
+        except Exception:
+            logger.debug("personalization read failed", exc_info=True)
+            return None
+
+        if not snapshot.consent_granted:
+            return None
+
+        profile = db.get_user_profile(user_id) or {}
+        lines: list[str] = []
+        prefill_slots: dict[str, Any] = {}
+
+        display_name = str(profile.get("display_name", "")).strip()
+        if display_name:
+            lines.append(f"- Preferred name: {display_name}")
+
+        taxpayer_type = str(profile.get("taxpayer_type", "")).strip().lower()
+        if taxpayer_type and taxpayer_type != "unknown":
+            lines.append(f"- Taxpayer type: {taxpayer_type.replace('_', ' ')}")
+            prefill_slots["taxpayer_type"] = taxpayer_type
+
+        detail_level = str(profile.get("detail_level", "")).strip().lower()
+        if detail_level:
+            lines.append(f"- Preferred explanation depth: {detail_level}")
+
+        registered = profile.get("registered_tax_types") or []
+        if isinstance(registered, list) and registered:
+            lines.append(f"- Registered tax types: {', '.join(str(t) for t in registered[:4])}")
+
+        fact_labels = {
+            "taxpayer_type": "Known taxpayer type",
+            "industry": "Industry",
+            "registered_tax": "Registered tax",
+            "registered_vat": "VAT registration",
+            "primary_language": "Preferred language",
+        }
+        seen_facts: set[tuple[str, str]] = set()
+        for fact in snapshot.facts[:5]:
+            label = fact_labels.get(fact.category)
+            value = str(fact.object_value).strip()
+            if not label or not value:
+                continue
+            key = (label, value.lower())
+            if key in seen_facts:
+                continue
+            seen_facts.add(key)
+            lines.append(f"- {label}: {value}")
+            if fact.category == "taxpayer_type" and "taxpayer_type" not in prefill_slots:
+                prefill_slots["taxpayer_type"] = value.lower()
+
+        for episode in snapshot.episodic[:2]:
+            summary = str(episode.get("summary", "")).strip()
+            topic = str(episode.get("topic_tag", "")).strip()
+            if not summary:
+                continue
+            summary = summary[:140] + ("..." if len(summary) > 140 else "")
+            if topic:
+                lines.append(f"- Recent topic ({topic}): {summary}")
+            else:
+                lines.append(f"- Recent topic: {summary}")
+
+        working = snapshot.working if isinstance(snapshot.working, dict) else {}
+        last_topic = str(working.get("last_topic", "")).strip()
+        if last_topic:
+            lines.append(f"- Last conversation topic: {last_topic}")
+
+        prompt_context = "\n".join(lines)
+        if not prompt_context and not prefill_slots:
+            return None
+
+        return {
+            "consent_granted": True,
+            "profile": profile,
+            "prefill_slots": prefill_slots,
+            "prompt_context": prompt_context,
+        }
+
+    @staticmethod
+    def _apply_personalization_to_workflow(
+        session: WorkflowSession,
+        personalization: dict[str, Any] | None,
+    ) -> None:
+        if not personalization:
+            return
+        for slot_name, value in (personalization.get("prefill_slots") or {}).items():
+            if slot_name and value not in ("", None) and slot_name not in session.slots:
+                session.slots[slot_name] = value
+
+    @staticmethod
+    def _extract_grounded_answer_text(hit: dict[str, Any]) -> str:
+        answer = str(hit.get("answer", "") or "").strip()
+        if answer:
+            return " ".join(answer.split())
+        text = str(hit.get("text", "") or "").strip()
+        if text.lower().startswith("question:") and "\nanswer:" in text.lower():
+            parts = re.split(r"\nanswer:\s*", text, maxsplit=1, flags=re.IGNORECASE)
+            text = parts[1] if len(parts) == 2 else text
+        return " ".join(text.split())
+
+    @classmethod
+    def _build_grounded_revision(
+        cls,
+        hits: list[dict[str, Any]],
+        citations: list[dict[str, Any]],
+    ) -> str:
+        excerpts: list[str] = []
+        for idx, hit in enumerate(hits[:2]):
+            text = cls._extract_grounded_answer_text(hit)
+            if not text:
+                continue
+            trimmed = text[:360].rsplit(" ", 1)[0] if len(text) > 360 else text
+            ref = ""
+            if idx < len(citations):
+                ref = str(citations[idx].get("ref", "")).strip()
+            if ref:
+                excerpts.append(f"{trimmed} {ref}".strip())
+            else:
+                excerpts.append(trimmed)
+        if not excerpts:
+            return ""
+        if len(excerpts) == 1:
+            return f"Based on the URA guidance I retrieved, {excerpts[0]}".strip()
+        return "Based on the URA guidance I retrieved:\n\n- " + "\n- ".join(excerpts)
+
+    def _evaluate_response_judge(
+        self,
+        *,
+        message: str,
+        reply: str,
+        hits: list[dict[str, Any]],
+        citations: list[dict[str, Any]],
+        faithfulness_score: float | None,
+        escalation_required: bool,
+        escalation_reason: str,
+        claim_report: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Classify the draft reply as approve / revise / escalate."""
+        reasons: list[str] = []
+        decision = "approve"
+
+        if escalation_required:
+            decision = "escalate"
+            if escalation_reason:
+                reasons.append(escalation_reason)
+
+        if decision != "escalate" and _ACCOUNT_QUERY_RE.search(message):
+            decision = "escalate"
+            reasons.append("account-specific query needs authenticated lookup or human review")
+
+        if not reply.strip():
+            reasons.append("reply was empty")
+
+        if decision != "escalate" and hits and citations and not self._has_inline_citations(reply):
+            reasons.append("reply did not expose visible citation markers")
+            decision = "revise"
+
+        if faithfulness_score is not None:
+            if faithfulness_score < 0.2:
+                decision = "escalate"
+                reasons.append("grounding confidence is critically low")
+            elif decision != "escalate" and faithfulness_score < max(GROUNDING_THRESHOLD, 0.35):
+                decision = "revise"
+                reasons.append("grounding confidence is below the release threshold")
+
+        if claim_report:
+            claim_decision = str(claim_report.get("decision", "approve"))
+            if claim_decision == "escalate":
+                decision = "escalate"
+                reasons.append("claim verification found unsupported factual claims")
+            elif claim_decision == "revise" and decision != "escalate":
+                decision = "revise"
+                if claim_report.get("uncited_claims"):
+                    reasons.append("claim verification found uncited factual claims")
+                if claim_report.get("unsupported_claims"):
+                    reasons.append("claim verification found weakly supported factual claims")
+
+        revised_reply = ""
+        if decision == "revise":
+            revised_reply = self._build_grounded_revision(hits, citations)
+            if not revised_reply:
+                decision = "escalate"
+                reasons.append("no deterministic grounded fallback was available")
+
+        if faithfulness_score is None:
+            confidence_band = "medium" if decision == "approve" else "low"
+        elif faithfulness_score >= 0.65 and decision == "approve":
+            confidence_band = "high"
+        elif faithfulness_score >= 0.35 and decision != "escalate":
+            confidence_band = "medium"
+        else:
+            confidence_band = "low"
+
+        return {
+            "decision": decision,
+            "final_decision": decision,
+            "applied_revision": False,
+            "reasons": reasons,
+            "confidence_band": confidence_band,
+            "revised_reply": revised_reply,
+        }
+
+    def _maybe_create_ticket(
+        self,
+        *,
+        reason: str,
+        user_query: str,
+        bot_reply: str,
+        session_id: str | None,
+        conversation_id: str,
+        priority: str = "normal",
+        handoff: dict[str, Any] | None = None,
+        response_judge: dict[str, Any] | None = None,
+    ) -> str:
+        """Persist a structured escalation ticket when the queue is enabled."""
+        if not flags.is_enabled("ticket_queue"):
+            return ""
+        if not reason and not handoff:
+            final_decision = str((response_judge or {}).get("final_decision", "")).lower()
+            if final_decision != "escalate":
+                return ""
+        try:
+            ticket = db.create_ticket(
+                reason=reason,
+                user_query=self.redact_for_storage(user_query),
+                bot_reply=self.redact_for_storage(bot_reply),
+                session_id=session_id or None,
+                conversation_id=conversation_id,
+                priority=priority,
+                handoff=handoff,
+                response_judge=response_judge,
+            )
+            ticket_id = ticket.get("id", "")
+            if handoff is not None and ticket_id:
+                handoff["ticket_id"] = ticket_id
+            return ticket_id
+        except Exception:
+            logger.exception("failed to persist escalation ticket")
+            return ""
+
+    def _persist_personalization_turn(
+        self,
+        *,
+        user_id: str | None,
+        conversation_id: str,
+        message: str,
+        reply: str,
+        agent_role: str,
+        personalization: dict[str, Any] | None,
+        workflow: dict[str, Any] | None = None,
+    ) -> None:
+        """Update working memory and absorb the latest consented turn."""
+        if not user_id or not personalization or not personalization.get("consent_granted"):
+            return
+        try:
+            memsvc = get_memory_service()
+            memsvc.update_working(
+                user_id,
+                last_topic=workflow.get("name") if workflow else agent_role,
+                last_agent_role=agent_role,
+                last_conversation_id=conversation_id,
+            )
+            turns = [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": reply},
+            ]
+            memsvc.absorb_conversation(user_id, conversation_id, turns)
+        except Exception:
+            logger.debug("personalization persistence failed", exc_info=True)
+
+    @staticmethod
+    def _handoff_topic(message: str, reason: str = "") -> str:
+        text = f"{message} {reason}".strip()
+        if _OBJECTION_QUERY_RE.search(text):
+            return "objection_or_dispute"
+        if _ACCOUNT_QUERY_RE.search(text):
+            return "account_specific"
+        if _CUSTOMS_QUERY_RE.search(text):
+            return "customs"
+        if _REGISTRATION_QUERY_RE.search(text):
+            return "registration"
+        return "general_tax_support"
+
+    @classmethod
+    def _handoff_required_details(cls, topic: str) -> list[str]:
+        lookup = {
+            "objection_or_dispute": [
+                "assessment or objection reference number",
+                "tax type and filing period",
+                "supporting notices or correspondence",
+            ],
+            "account_specific": [
+                "TIN or registered taxpayer email",
+                "tax type and return period",
+                "any reference number shown in the URA portal",
+            ],
+            "customs": [
+                "entry or declaration number",
+                "consignment or bill of lading reference",
+                "goods description and customs value details",
+            ],
+            "registration": [
+                "taxpayer type (individual, company, or NGO)",
+                "registration number or NIN where applicable",
+                "preferred callback channel",
+            ],
+            "general_tax_support": [
+                "the exact URA process you are trying to complete",
+                "the tax type involved",
+                "any deadline or notice you are working against",
+            ],
+        }
+        return lookup.get(topic, lookup["general_tax_support"])
+
+    def _build_handoff_packet(
+        self,
+        *,
+        message: str,
+        reason: str,
+        conversation_history: list[dict[str, str]] | None = None,
+        hits: list[dict[str, Any]] | None = None,
+        faithfulness_score: float | None = None,
+        ticket_id: str = "",
+    ) -> dict[str, Any]:
+        """Create a structured, UI-safe packet for human triage."""
+        topic = self._handoff_topic(message, reason)
+        priority = "normal"
+        lowered_reason = reason.lower()
+        if any(term in lowered_reason for term in ("legal", "dispute", "appeal", "audit", "fraud")):
+            priority = "high"
+        if faithfulness_score is not None and faithfulness_score < 0.2:
+            priority = "high"
+        if topic == "account_specific" and priority == "normal":
+            priority = "high"
+
+        redacted_context = [
+            self.redact_for_storage(turn.get("user_message", ""))[:180]
+            for turn in (conversation_history or [])[-2:]
+            if turn.get("user_message")
+        ]
+        sources = []
+        for hit in (hits or [])[:3]:
+            source = str(hit.get("source", "")).strip()
+            if source and source not in sources:
+                sources.append(source)
+
+        summary = (
+            f"User needs human help with {topic.replace('_', ' ')}. "
+            f"Reason: {reason or 'low-confidence automated handling'}."
+        )
+        if redacted_context:
+            summary += f" Recent context: {' | '.join(redacted_context)}."
+        if faithfulness_score is not None:
+            summary += f" Faithfulness score: {faithfulness_score:.2f}."
+
+        return {
+            "summary": summary,
+            "topic": topic,
+            "priority": priority,
+            "ticket_id": ticket_id,
+            "required_details": self._handoff_required_details(topic),
+            "recent_context": redacted_context,
+            "sources_reviewed": sources,
+            "contact_channels": [
+                "https://ura.go.ug",
+                "0800 117 000 / 0800 217 000",
+                "WhatsApp 0772 140 000",
+            ],
+        }
+
+    @staticmethod
+    def _handoff_packet_text(packet: dict[str, Any]) -> str:
+        lines = [
+            f"Handoff summary: {packet.get('summary', '')}",
+            f"Priority: {packet.get('priority', 'normal')}",
+        ]
+        required = packet.get("required_details") or []
+        if required:
+            lines.append("Required details: " + "; ".join(required))
+        sources = packet.get("sources_reviewed") or []
+        if sources:
+            lines.append("Sources reviewed: " + ", ".join(sources))
+        return "\n".join(lines)[:2000]
+
+    @staticmethod
+    def _restore_workflow_session(row: dict[str, Any]) -> WorkflowSession:
+        return WorkflowSession(
+            workflow_id=str(row.get("workflow_id", "")),
+            current_step_idx=int(row.get("current_step_idx") or 0),
+            slots=dict(row.get("slots") or {}),
+            completed=str(row.get("status", "")) == "completed",
+        )
+
+    def _advance_workflow(
+        self,
+        session: WorkflowSession,
+        user_input: str,
+    ) -> tuple[Any, list[str]]:
+        """Advance a workflow and execute any deterministic tool steps inline."""
+        tool_messages: list[str] = []
+        turn = WorkflowRegistry.advance(session, user_input)
+        while turn.tool_call:
+            try:
+                from .mcp import get_client  # noqa: PLC0415
+
+                call = get_client().call_tool(
+                    turn.tool_call.get("name", ""),
+                    turn.tool_call.get("arguments", {}) or {},
+                    user_role="public",
+                )
+                result = call.result
+            except Exception:
+                logger.exception("workflow tool execution failed")
+                result = {"ok": False, "error": "workflow tool execution failed"}
+            explanation = result.get("explanation") or result.get("message") or ""
+            if explanation:
+                tool_messages.append(str(explanation))
+            turn = WorkflowRegistry.advance(session, "")
+        return turn, tool_messages
+
+    def _maybe_handle_workflow(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+        personalization: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Start or continue a durable guided workflow when appropriate."""
+        if not flags.is_enabled("workflows") or self._workflow_count <= 0:
+            return None
+
+        persisted = db.get_workflow_session(thread_id)
+        if persisted and persisted.get("status") == "active":
+            session = self._restore_workflow_session(persisted)
+            self._apply_personalization_to_workflow(session, personalization)
+            wf = WorkflowRegistry.get(session.workflow_id)
+            if wf is None:
+                db.complete_workflow_session(thread_id, status="cancelled")
+                return None
+            user_input = (message or "").strip()
+            if user_input.lower() in _WORKFLOW_CANCEL_WORDS:
+                db.complete_workflow_session(thread_id, status="cancelled")
+                workflow = self._workflow_view(
+                    session,
+                    name=wf.name,
+                    status="cancelled",
+                )
+                return {
+                    "reply": (
+                        f"I've stopped the {wf.name} workflow. Ask a new URA question whenever "
+                        "you're ready."
+                    ),
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "workflow",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "workflow_guide",
+                    "workflow": workflow,
+                    "next_actions": ["Ask a new question or restart the guided process later."],
+                }
+
+            turn, tool_messages = self._advance_workflow(session, user_input)
+            status = "completed" if (session.completed or turn.is_complete) else "active"
+            prompt = turn.question or persisted.get("last_prompt", "") or f"Let's continue the {wf.name} workflow."
+            if tool_messages:
+                prompt = "\n\n".join(tool_messages + [prompt]).strip()
+            if status == "completed":
+                db.upsert_workflow_session(
+                    thread_id,
+                    session.workflow_id,
+                    session.current_step_idx,
+                    session.slots,
+                    status="completed",
+                    last_prompt=prompt,
+                )
+            else:
+                db.upsert_workflow_session(
+                    thread_id,
+                    session.workflow_id,
+                    session.current_step_idx,
+                    session.slots,
+                    status="active",
+                    last_prompt=prompt,
+                )
+            workflow = self._workflow_view(
+                session,
+                name=wf.name,
+                status=status,
+                pending_slot=turn.slot_name,
+            )
+            return {
+                "reply": prompt,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "workflow",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "workflow_guide",
+                "workflow": workflow,
+                "next_actions": self._default_next_actions(
+                    agent_role="workflow_guide",
+                    workflow=workflow,
+                ),
+            }
+
+        matched = WorkflowRegistry.match_trigger(message) or WorkflowRegistry.match_trigger(rewritten)
+        if matched is None:
+            return None
+
+        session = WorkflowRegistry.create_session(matched.id)
+        if session is None:
+            return None
+        self._apply_personalization_to_workflow(session, personalization)
+
+        turn, tool_messages = self._advance_workflow(session, "")
+        prompt = turn.question or f"Let's start the {matched.name} workflow."
+        if tool_messages:
+            prompt = "\n\n".join(tool_messages + [prompt]).strip()
+        status = "completed" if (session.completed or turn.is_complete) else "active"
+        db.upsert_workflow_session(
+            thread_id,
+            session.workflow_id,
+            session.current_step_idx,
+            session.slots,
+            status=status,
+            last_prompt=prompt,
+        )
+        workflow = self._workflow_view(
+            session,
+            name=matched.name,
+            status=status,
+            pending_slot=turn.slot_name,
+        )
+        reply = (
+            f"I can guide you through the {matched.name} process step by step.\n\n{prompt}"
+            if prompt
+            else f"I can guide you through the {matched.name} process step by step."
+        )
+        return {
+            "reply": reply,
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "workflow",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "workflow_guide",
+            "workflow": workflow,
+            "next_actions": self._default_next_actions(
+                agent_role="workflow_guide",
+                workflow=workflow,
+            ),
+        }
 
     # -- Chat (RAG) ---------------------------------------------------------
     def generate(
         self,
         message: str,
         conversation_id: str | None = None,
-        top_k: int = 4,
+        top_k: int = 6,
         locale: str = "en",
         session_id: str | None = None,
         request_id: str | None = None,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        user_role: str = "public",
+        granted_purposes: list[str] | None = None,
     ) -> dict[str, Any]:
         """Return a grounded, cited answer via hybrid retrieval + guardrails."""
         t0 = time.perf_counter()
+        thread_id = conversation_id or str(uuid.uuid4())
+        agent_role = "rag_answerer"
 
         with trace_rag_pipeline(message, request_id=request_id) as trace_ctx:
             timings = trace_ctx["timings"]
+            trace_ctx["user_id"] = user_id or ""
+            trace_ctx["tenant_id"] = tenant_id or "default"
 
             # 0. Multi-turn memory — fetch recent conversation history (Phase 4)
             conversation_history: list[dict[str, str]] = []
-            if session_id:
+            history_session_id = None if conversation_id else session_id
+            if conversation_id or history_session_id:
                 try:
-                    conversation_history = db.get_recent_turns(session_id, limit=5)
+                    conversation_history = db.get_recent_turns(
+                        session_id=history_session_id,
+                        conversation_id=conversation_id,
+                        limit=5,
+                    )
                 except Exception:
                     logger.debug("Failed to fetch conversation history", exc_info=True)
 
@@ -340,6 +1054,18 @@ class ChatModel:
             #     coreference resolution from history (Phase 4)
             with trace_stage("query_rewrite", timings=timings):
                 rewritten = rewrite_query(message, history=conversation_history or None)
+
+            # 0c. Language detection — auto-detect user's language for
+            #     adapter routing and locale-aware responses.
+            if locale == "en":
+                with trace_stage("lang_detect", timings=timings):
+                    detected_locale = detect_language(message)
+                    if detected_locale != "en":
+                        locale = detected_locale
+                        logger.info("Auto-detected locale: %s", locale)
+
+            personalization = self._load_personalization_state(user_id)
+            cache_allowed = personalization is None
 
             # 1. Input guardrails FIRST (OWASP LLM01) — check original message
             with trace_stage("input_guard", timings=timings):
@@ -352,22 +1078,48 @@ class ChatModel:
                     "faithfulness_score": None,
                     "retrieval_mode": "blocked",
                     "model": self.name,
-                    "conversation_id": conversation_id,
+                    "conversation_id": thread_id,
                     "locale": locale,
                     "escalation_required": False,
                     "escalation_reason": "",
+                    "agent_role": "safety_guard",
+                    "next_actions": ["Rephrase your request as a legitimate URA support question."],
                 }
                 self._audit_turn(
                     message=message, result=blocked, session_id=session_id, trace_ctx=trace_ctx
                 )
                 return blocked
 
+            if flags.is_enabled("workflows"):
+                with trace_stage("workflow_router", timings=timings):
+                    workflow_result = self._maybe_handle_workflow(
+                        message=message,
+                        rewritten=rewritten,
+                        thread_id=thread_id,
+                        locale=locale,
+                        personalization=personalization,
+                    )
+                if workflow_result:
+                    trace_ctx["agent_role"] = "workflow_guide"
+                    self._audit_turn(
+                        message=message,
+                        result=workflow_result,
+                        session_id=session_id,
+                        trace_ctx=trace_ctx,
+                    )
+                    return workflow_result
+
             # 1b. Semantic cache check AFTER guardrails (Phase 5)
-            with trace_stage("cache_lookup", timings=timings):
-                cached = self._cache.get(rewritten, locale=locale)
-            if cached:
-                logger.info("generate: cache HIT for query=%s", message[:50])
-                return cached
+            if cache_allowed:
+                with trace_stage("cache_lookup", timings=timings):
+                    cached = self._cache.get(rewritten, locale=locale)
+                if cached:
+                    logger.info("generate: cache HIT for query=%s", message[:50])
+                    return {
+                        **cached,
+                        "conversation_id": thread_id,
+                        "locale": locale,
+                    }
 
             # 1c. Phase 14-C — supervisor routing.  When FLAG_AGENTIC_MODE
             #     is on, the supervisor classifies the query and routes
@@ -409,10 +1161,14 @@ class ChatModel:
                         "faithfulness_score": None,
                         "retrieval_mode": "clarification",
                         "model": self.name,
-                        "conversation_id": conversation_id,
+                        "conversation_id": thread_id,
                         "locale": locale,
                         "escalation_required": False,
                         "escalation_reason": "",
+                        "agent_role": "clarification_agent",
+                        "next_actions": self._default_next_actions(
+                            agent_role="clarification_agent",
+                        ),
                     }
                     self._audit_turn(
                         message=message,
@@ -423,31 +1179,37 @@ class ChatModel:
                     return clarified
                 if route_decision.route == AgentRoute.ESCALATE:
                     ticket_id = ""
-                    # Phase 14-D: create a real ticket when the queue
-                    # is enabled.  Otherwise we just return the
-                    # escalation marker (existing Phase 1-13 behaviour).
-                    if flags.is_enabled("ticket_queue"):
-                        try:
-                            ticket = db.create_ticket(
-                                reason=route_decision.reason,
-                                user_query=self.redact_for_storage(message),
-                                bot_reply="",
-                                session_id=session_id or None,
-                                conversation_id=conversation_id,
-                                priority="high"
-                                if "dispute" in route_decision.reason.lower()
-                                or "legal" in route_decision.reason.lower()
-                                else "normal",
-                            )
-                            ticket_id = ticket.get("id", "")
-                            trace_ctx["ticket_id"] = ticket_id
-                        except Exception:
-                            logger.exception("failed to persist escalation ticket")
+                    handoff = None
+                    response_judge = {
+                        "decision": "escalate",
+                        "final_decision": "escalate",
+                        "applied_revision": False,
+                        "reasons": [route_decision.reason] if route_decision.reason else [],
+                        "confidence_band": "low",
+                    }
+                    if flags.is_enabled("handoff_summaries"):
+                        handoff = self._build_handoff_packet(
+                            message=message,
+                            reason=route_decision.reason,
+                            conversation_history=conversation_history or None,
+                        )
 
                     reply = (
                         "This looks like a question best handled by a URA "
                         "officer. I've flagged it for human review"
                     )
+                    ticket_id = self._maybe_create_ticket(
+                        reason=route_decision.reason,
+                        user_query=message,
+                        bot_reply=reply,
+                        session_id=session_id,
+                        conversation_id=thread_id,
+                        priority=(handoff or {}).get("priority", "normal"),
+                        handoff=handoff,
+                        response_judge=response_judge,
+                    )
+                    if ticket_id:
+                        trace_ctx["ticket_id"] = ticket_id
                     if ticket_id:
                         reply += f" (ticket {ticket_id[:8]})"
                     reply += (
@@ -461,10 +1223,18 @@ class ChatModel:
                         "faithfulness_score": None,
                         "retrieval_mode": "escalated",
                         "model": self.name,
-                        "conversation_id": conversation_id,
+                        "conversation_id": thread_id,
                         "locale": locale,
                         "escalation_required": True,
                         "escalation_reason": route_decision.reason,
+                        "agent_role": "escalation_triage",
+                        "handoff": handoff,
+                        "response_judge": response_judge,
+                        "next_actions": self._default_next_actions(
+                            agent_role="escalation_triage",
+                            handoff=handoff,
+                            escalation_required=True,
+                        ),
                         "ticket_id": ticket_id,
                     }
                     self._audit_turn(
@@ -483,6 +1253,12 @@ class ChatModel:
                     AgentRoute.CUSTOMS_SPECIALIST,
                 ):
                     force_agentic = True
+                    route_role_map = {
+                        AgentRoute.TOOLS: "tool_specialist",
+                        AgentRoute.TAX_SPECIALIST: "tax_specialist",
+                        AgentRoute.CUSTOMS_SPECIALIST: "customs_specialist",
+                    }
+                    agent_role = route_role_map.get(route_decision.route, "tool_specialist")
                     if route_decision.suggested_tools:
                         force_tool_whitelist = list(route_decision.suggested_tools)
                     trace_ctx["specialist"] = route_decision.route.value
@@ -506,9 +1282,9 @@ class ChatModel:
                 # Update readiness if retriever was disconnected during search
                 self._retriever_ready = self._retriever._ready
 
-            # 3. Fallback to keyword search
+            # 3. Fallback to keyword search if Qdrant returned nothing
             if not hits:
-                with trace_stage("keyword_search", timings=timings):
+                with trace_stage("keyword_search_fallback", timings=timings):
                     kw_hits = _simple_search(rewritten, self._faq_index, top_k=top_k)
                     hits = [
                         {
@@ -518,7 +1294,7 @@ class ChatModel:
                             "source": h["source"],
                             "chunk_id": "",
                             "page": "",
-                            "section": "",
+                            "section": h.get("tag", ""),
                             "doc_type": "csv",
                             "score_rrf": 0.0,
                         }
@@ -534,6 +1310,47 @@ class ChatModel:
                     if was_corrected:
                         retrieval_mode = "hybrid_corrected"
 
+            # 3b2. Language-aware retrieval boosting — when the detected
+            #      locale is non-English, boost hits whose metadata
+            #      matches the detected language (e.g. Luganda FAQ sources).
+            if locale != "en" and hits:
+                locale_keywords = {
+                    "lg": {"luganda", "oluganda", "lg"},
+                    "sw": {"swahili", "kiswahili", "sw"},
+                    "nyn": {"runyankole", "nkore", "nyn"},
+                    "ach": {"acholi", "ach"},
+                }
+                boost_terms = locale_keywords.get(locale, set())
+                if boost_terms:
+                    for h in hits:
+                        source = (h.get("source") or "").lower()
+                        text_preview = (h.get("text") or "")[:200].lower()
+                        if any(t in source or t in text_preview for t in boost_terms):
+                            h["score_rrf"] = h.get("score_rrf", 0.5) + 0.3
+                    # Re-sort by boosted score
+                    hits.sort(key=lambda x: x.get("score_rrf", 0), reverse=True)
+
+            # 3c. Always blend top FAQ keyword hits AFTER corrective RAG
+            #     so precise CSV FAQ steps are never filtered out by reranking.
+            with trace_stage("faq_blend", timings=timings):
+                kw_hits = _simple_search(rewritten, self._faq_index, top_k=2)
+                seen_texts = {h.get("text", "")[:80] for h in hits}
+                for h in kw_hits:
+                    faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
+                    if faq_text[:80] not in seen_texts:
+                        hits.append({
+                            "text": faq_text,
+                            "answer": h["answer"],
+                            "question": h["question"],
+                            "source": h["source"],
+                            "chunk_id": "",
+                            "page": "",
+                            "section": h.get("tag", ""),
+                            "doc_type": "csv",
+                            "score_rrf": 0.5,
+                        })
+                        seen_texts.add(faq_text[:80])
+
             # 3c. Clarification check — ask for more details if query is ambiguous
             clarification = needs_clarification(message, hits)
             if clarification:
@@ -544,10 +1361,14 @@ class ChatModel:
                     "faithfulness_score": None,
                     "retrieval_mode": "clarification",
                     "model": self.name,
-                    "conversation_id": conversation_id,
+                    "conversation_id": thread_id,
                     "locale": locale,
                     "escalation_required": False,
                     "escalation_reason": "",
+                    "agent_role": "clarification_agent",
+                    "next_actions": self._default_next_actions(
+                        agent_role="clarification_agent",
+                    ),
                 }
                 self._audit_turn(
                     message=message,
@@ -567,6 +1388,31 @@ class ChatModel:
                     "the URA Contact Centre for assistance."
                 )
                 escalate, esc_reason = self._output_guard.should_escalate(None, hits)
+                handoff = None
+                response_judge = {
+                    "decision": "escalate" if escalate else "approve",
+                    "final_decision": "escalate" if escalate else "approve",
+                    "applied_revision": False,
+                    "reasons": [esc_reason] if esc_reason else [],
+                    "confidence_band": "low",
+                }
+                if flags.is_enabled("handoff_summaries") and escalate:
+                    handoff = self._build_handoff_packet(
+                        message=message,
+                        reason=esc_reason,
+                        conversation_history=conversation_history or None,
+                        hits=hits,
+                    )
+                ticket_id = self._maybe_create_ticket(
+                    reason=esc_reason,
+                    user_query=message,
+                    bot_reply=reply,
+                    session_id=session_id,
+                    conversation_id=thread_id,
+                    priority=(handoff or {}).get("priority", "normal"),
+                    handoff=handoff,
+                    response_judge=response_judge,
+                )
                 abstained = {
                     "reply": reply,
                     "sources": [],
@@ -574,10 +1420,19 @@ class ChatModel:
                     "faithfulness_score": None,
                     "retrieval_mode": "abstained",
                     "model": self.name,
-                    "conversation_id": conversation_id,
+                    "conversation_id": thread_id,
                     "locale": locale,
                     "escalation_required": escalate,
                     "escalation_reason": esc_reason,
+                    "agent_role": agent_role,
+                    "handoff": handoff,
+                    "response_judge": response_judge,
+                    "next_actions": self._default_next_actions(
+                        agent_role=agent_role,
+                        handoff=handoff,
+                        escalation_required=escalate,
+                    ),
+                    "ticket_id": ticket_id,
                 }
                 self._audit_turn(
                     message=message, result=abstained, session_id=session_id, trace_ctx=trace_ctx
@@ -606,6 +1461,13 @@ class ChatModel:
                                 conversation_history=conversation_history or None,
                                 locale=locale,
                                 tool_names=force_tool_whitelist,
+                                personalization_context=(
+                                    (personalization or {}).get("prompt_context", "")
+                                ),
+                                tenant_id=tenant_id or "default",
+                                user_id=user_id or "",
+                                user_role=user_role,
+                                granted_purposes=granted_purposes or [],
                             )
                         reply = agentic.get("text", "")
                         if agentic.get("tool_calls"):
@@ -620,6 +1482,9 @@ class ChatModel:
                                 passages=hits,
                                 conversation_history=conversation_history or None,
                                 locale=locale,
+                                personalization_context=(
+                                    (personalization or {}).get("prompt_context", "")
+                                ),
                             )
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
@@ -697,6 +1562,9 @@ class ChatModel:
                             passages=hits,
                             conversation_history=conversation_history or None,
                             locale=locale,
+                            personalization_context=(personalization or {}).get(
+                                "prompt_context", ""
+                            ),
                         )
                     if revised:
                         reply = self._output_guard.sanitize(self._output_guard.redact_pii(revised))
@@ -717,6 +1585,82 @@ class ChatModel:
 
             # 8. Escalation check
             escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
+            claim_report = None
+            if hits and citations and reply:
+                with trace_stage("claim_verification", timings=timings):
+                    claim_report = verify_claims(reply, citations, hits)
+                    trace_ctx["claim_verification"] = {
+                        "decision": claim_report.get("decision"),
+                        "score": claim_report.get("score"),
+                        "claim_count": claim_report.get("claim_count"),
+                        "unsupported_count": len(claim_report.get("unsupported_claims") or []),
+                        "uncited_count": len(claim_report.get("uncited_claims") or []),
+                    }
+            response_judge = self._evaluate_response_judge(
+                message=message,
+                reply=reply,
+                hits=hits,
+                citations=citations,
+                faithfulness_score=faithfulness_score,
+                escalation_required=escalate,
+                escalation_reason=esc_reason,
+                claim_report=claim_report,
+            )
+            if claim_report is not None:
+                response_judge["claim_verification"] = claim_report
+            if response_judge["decision"] == "revise" and response_judge.get("revised_reply"):
+                reply = self._output_guard.sanitize(
+                    self._output_guard.redact_pii(response_judge["revised_reply"])
+                )
+                if contexts:
+                    faithfulness_score = HybridRetriever.compute_faithfulness(reply, contexts)
+                escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
+                response_judge["applied_revision"] = True
+                response_judge["final_decision"] = "escalate" if escalate else "approve"
+                if faithfulness_score is not None:
+                    response_judge["confidence_band"] = (
+                        "high" if faithfulness_score >= 0.65 else "medium"
+                    )
+                if citations:
+                    claim_report = verify_claims(reply, citations, hits)
+                    response_judge["claim_verification"] = claim_report
+                    if claim_report.get("decision") == "escalate":
+                        response_judge["final_decision"] = "escalate"
+                        response_judge.setdefault("reasons", []).append(
+                            "claim verification still found unsupported factual claims"
+                        )
+            else:
+                response_judge["final_decision"] = response_judge["decision"]
+
+            if response_judge["final_decision"] == "escalate" and not esc_reason:
+                esc_reason = "; ".join(response_judge.get("reasons") or []) or (
+                    "response_judge requested human review"
+                )
+            if response_judge["final_decision"] == "escalate":
+                escalate = True
+            response_judge.pop("revised_reply", None)
+
+            handoff = None
+            if flags.is_enabled("handoff_summaries") and escalate:
+                handoff = self._build_handoff_packet(
+                    message=message,
+                    reason=esc_reason,
+                    conversation_history=conversation_history or None,
+                    hits=hits,
+                    faithfulness_score=faithfulness_score,
+                )
+            ticket_id = self._maybe_create_ticket(
+                reason=esc_reason,
+                user_query=message,
+                bot_reply=reply,
+                session_id=session_id,
+                conversation_id=thread_id,
+                priority=(handoff or {}).get("priority", "normal"),
+                handoff=handoff,
+                response_judge=response_judge,
+            )
+            if ticket_id:
+                trace_ctx["ticket_id"] = ticket_id
 
             trace_ctx["num_sources"] = len(sources)
             trace_ctx["locale"] = locale
@@ -750,15 +1694,33 @@ class ChatModel:
             "faithfulness_score": faithfulness_score,
             "retrieval_mode": retrieval_mode,
             "model": self.name,
-            "conversation_id": conversation_id,
+            "conversation_id": thread_id,
             "locale": locale,
             "escalation_required": escalate,
             "escalation_reason": esc_reason,
+            "agent_role": agent_role,
+            "handoff": handoff,
+            "response_judge": response_judge,
+            "next_actions": self._default_next_actions(
+                agent_role=agent_role,
+                handoff=handoff,
+                escalation_required=escalate,
+            ),
+            "ticket_id": ticket_id,
         }
 
         # Store in semantic cache (Phase 5)
-        if retrieval_mode not in ("blocked", "abstained"):
+        if cache_allowed and retrieval_mode not in ("blocked", "abstained"):
             self._cache.put(rewritten, result)
+
+        self._persist_personalization_turn(
+            user_id=user_id,
+            conversation_id=thread_id,
+            message=message,
+            reply=reply,
+            agent_role=agent_role,
+            personalization=personalization,
+        )
 
         # Phase 21 — audit ledger append (happy path).
         self._audit_turn(
@@ -819,11 +1781,13 @@ class ChatModel:
                 "agent_route": trace_ctx.get("agent_route", ""),
                 "ticket_id": result.get("ticket_id", ""),
             }
+            audit_tenant_id = str(trace_ctx.get("tenant_id") or "default")[:128]
+            audit_user_id = str(trace_ctx.get("user_id") or session_id or "")[:128]
             get_ledger().append(
                 event_type="generate",
                 payload=payload,
-                tenant_id="default",
-                user_id=(session_id or "")[:128],
+                tenant_id=audit_tenant_id,
+                user_id=audit_user_id,
             )
         except Exception:
             logger.debug("audit ledger append failed", exc_info=True)
@@ -832,10 +1796,12 @@ class ChatModel:
         self,
         message: str,
         conversation_id: str | None = None,
-        top_k: int = 4,
+        top_k: int = 6,
         locale: str = "en",
         session_id: str | None = None,
         request_id: str | None = None,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
@@ -843,16 +1809,34 @@ class ChatModel:
         ``_history`` included so the streaming endpoint can pass them to
         the LLM stream.
         """
+        thread_id = conversation_id or str(uuid.uuid4())
+        agent_role = "rag_answerer"
+
         # Multi-turn memory (Phase 4)
         conversation_history: list[dict[str, str]] = []
-        if session_id:
+        history_session_id = None if conversation_id else session_id
+        if conversation_id or history_session_id:
             try:
-                conversation_history = db.get_recent_turns(session_id, limit=5)
+                conversation_history = db.get_recent_turns(
+                    session_id=history_session_id,
+                    conversation_id=conversation_id,
+                    limit=5,
+                )
             except Exception:
                 logger.debug("Failed to fetch conversation history", exc_info=True)
 
         # Query rewriting (Phase 4)
         rewritten = rewrite_query(message, history=conversation_history or None)
+
+        # Language detection — auto-detect for adapter routing
+        if locale == "en":
+            detected_locale = detect_language(message)
+            if detected_locale != "en":
+                locale = detected_locale
+                logger.info("Auto-detected locale: %s (streaming)", locale)
+
+        personalization = self._load_personalization_state(user_id)
+        cache_allowed = personalization is None
 
         # Input guardrails (OWASP LLM01)
         guard = self._input_guard.check(message)
@@ -864,18 +1848,131 @@ class ChatModel:
                 "faithfulness_score": None,
                 "retrieval_mode": "blocked",
                 "model": self.name,
-                "conversation_id": conversation_id,
+                "conversation_id": thread_id,
                 "locale": locale,
                 "escalation_required": False,
                 "escalation_reason": "",
+                "agent_role": "safety_guard",
+                "next_actions": ["Rephrase your request as a legitimate URA support question."],
                 "_hits": [],
                 "_history": [],
             }
 
+        workflow_result = self._maybe_handle_workflow(
+            message=message,
+            rewritten=rewritten,
+            thread_id=thread_id,
+            locale=locale,
+            personalization=personalization,
+        )
+        if workflow_result:
+            return {
+                **workflow_result,
+                "_hits": [],
+                "_history": conversation_history,
+                "_rewritten": rewritten,
+                "_personalization_context": (personalization or {}).get("prompt_context", ""),
+            }
+
         # Semantic cache check (Phase 5)
-        cached = self._cache.get(rewritten, locale=locale)
-        if cached:
-            return cached
+        if cache_allowed:
+            cached = self._cache.get(rewritten, locale=locale)
+            if cached:
+                return {
+                    **cached,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                }
+
+        route_decision = None
+        if flags.is_enabled("agentic_mode"):
+            route_decision = supervisor.classify(
+                rewritten,
+                has_conversation_history=bool(conversation_history),
+            )
+            if route_decision.route == AgentRoute.CLARIFY:
+                return {
+                    "reply": route_decision.clarification_question
+                    or (
+                        "Could you share a bit more context? For example, are you "
+                        "asking about VAT, PAYE, customs, registration, or a specific tax type?"
+                    ),
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "clarification",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "clarification_agent",
+                    "next_actions": self._default_next_actions(
+                        agent_role="clarification_agent",
+                    ),
+                    "_hits": [],
+                    "_history": [],
+                }
+            if route_decision.route == AgentRoute.ESCALATE:
+                ticket_id = ""
+                handoff = None
+                response_judge = {
+                    "decision": "escalate",
+                    "final_decision": "escalate",
+                    "applied_revision": False,
+                    "reasons": [route_decision.reason] if route_decision.reason else [],
+                    "confidence_band": "low",
+                }
+                if flags.is_enabled("handoff_summaries"):
+                    handoff = self._build_handoff_packet(
+                        message=message,
+                        reason=route_decision.reason,
+                        conversation_history=conversation_history or None,
+                    )
+                reply = (
+                    "This looks like a question best handled by a URA officer. "
+                    "Please use the Contact Centre or request human follow-up."
+                )
+                ticket_id = self._maybe_create_ticket(
+                    reason=route_decision.reason,
+                    user_query=message,
+                    bot_reply=reply,
+                    session_id=session_id,
+                    conversation_id=thread_id,
+                    priority=(handoff or {}).get("priority", "normal"),
+                    handoff=handoff,
+                    response_judge=response_judge,
+                )
+                return {
+                    "reply": reply,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "escalated",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": True,
+                    "escalation_reason": route_decision.reason,
+                    "agent_role": "escalation_triage",
+                    "handoff": handoff,
+                    "response_judge": response_judge,
+                    "next_actions": self._default_next_actions(
+                        agent_role="escalation_triage",
+                        handoff=handoff,
+                        escalation_required=True,
+                    ),
+                    "ticket_id": ticket_id,
+                    "_hits": [],
+                    "_history": [],
+                    "_personalization_context": (personalization or {}).get("prompt_context", ""),
+                }
+            if route_decision.route == AgentRoute.TOOLS:
+                agent_role = "tool_specialist"
+            elif route_decision.route == AgentRoute.TAX_SPECIALIST:
+                agent_role = "tax_specialist"
+            elif route_decision.route == AgentRoute.CUSTOMS_SPECIALIST:
+                agent_role = "customs_specialist"
 
         hits: list[dict[str, Any]] = []
         retrieval_mode = "keyword"
@@ -897,11 +1994,8 @@ class ChatModel:
                     "answer": h["answer"],
                     "question": h["question"],
                     "source": h["source"],
-                    "chunk_id": "",
-                    "page": "",
-                    "section": "",
-                    "doc_type": "csv",
-                    "score_rrf": 0.0,
+                    "chunk_id": "", "page": "", "section": h.get("tag", ""),
+                    "doc_type": "csv", "score_rrf": 0.0,
                 }
                 for h in kw_hits
             ]
@@ -911,6 +2005,37 @@ class ChatModel:
             hits, was_corrected = corrective_retrieve(rewritten, self._retriever, hits, top_k=top_k)
             if was_corrected:
                 retrieval_mode = "hybrid_corrected"
+
+        # Language-aware retrieval boosting (streaming path)
+        if locale != "en" and hits:
+            locale_keywords = {
+                "lg": {"luganda", "oluganda", "lg"},
+                "sw": {"swahili", "kiswahili", "sw"},
+                "nyn": {"runyankole", "nkore", "nyn"},
+                "ach": {"acholi", "ach"},
+            }
+            boost_terms = locale_keywords.get(locale, set())
+            if boost_terms:
+                for h in hits:
+                    source = (h.get("source") or "").lower()
+                    text_preview = (h.get("text") or "")[:200].lower()
+                    if any(t in source or t in text_preview for t in boost_terms):
+                        h["score_rrf"] = h.get("score_rrf", 0.5) + 0.3
+                hits.sort(key=lambda x: x.get("score_rrf", 0), reverse=True)
+
+        # Blend top FAQ keyword hits after corrective RAG
+        kw_hits = _simple_search(rewritten, self._faq_index, top_k=2)
+        seen_texts = {h.get("text", "")[:80] for h in hits}
+        for h in kw_hits:
+            faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
+            if faq_text[:80] not in seen_texts:
+                hits.append({
+                    "text": faq_text, "answer": h["answer"],
+                    "question": h["question"], "source": h["source"],
+                    "chunk_id": "", "page": "", "section": h.get("tag", ""),
+                    "doc_type": "csv", "score_rrf": 0.5,
+                })
+                seen_texts.add(faq_text[:80])
 
         # Clarification check (Phase 6)
         clarification = needs_clarification(message, hits)
@@ -922,10 +2047,14 @@ class ChatModel:
                 "faithfulness_score": None,
                 "retrieval_mode": "clarification",
                 "model": self.name,
-                "conversation_id": conversation_id,
+                "conversation_id": thread_id,
                 "locale": locale,
                 "escalation_required": False,
                 "escalation_reason": "",
+                "agent_role": "clarification_agent",
+                "next_actions": self._default_next_actions(
+                    agent_role="clarification_agent",
+                ),
                 "_hits": [],
                 "_history": [],
             }
@@ -937,6 +2066,31 @@ class ChatModel:
                 "the URA Contact Centre for assistance."
             )
             escalate, esc_reason = self._output_guard.should_escalate(None, hits)
+            handoff = None
+            response_judge = {
+                "decision": "escalate" if escalate else "approve",
+                "final_decision": "escalate" if escalate else "approve",
+                "applied_revision": False,
+                "reasons": [esc_reason] if esc_reason else [],
+                "confidence_band": "low",
+            }
+            if flags.is_enabled("handoff_summaries") and escalate:
+                handoff = self._build_handoff_packet(
+                    message=message,
+                    reason=esc_reason,
+                    conversation_history=conversation_history or None,
+                    hits=hits,
+                )
+            ticket_id = self._maybe_create_ticket(
+                reason=esc_reason,
+                user_query=message,
+                bot_reply=reply,
+                session_id=session_id,
+                conversation_id=thread_id,
+                priority=(handoff or {}).get("priority", "normal"),
+                handoff=handoff,
+                response_judge=response_judge,
+            )
             return {
                 "reply": reply,
                 "sources": [],
@@ -944,12 +2098,22 @@ class ChatModel:
                 "faithfulness_score": None,
                 "retrieval_mode": "abstained",
                 "model": self.name,
-                "conversation_id": conversation_id,
+                "conversation_id": thread_id,
                 "locale": locale,
                 "escalation_required": escalate,
                 "escalation_reason": esc_reason,
+                "agent_role": agent_role,
+                "handoff": handoff,
+                "response_judge": response_judge,
+                "next_actions": self._default_next_actions(
+                    agent_role=agent_role,
+                    handoff=handoff,
+                    escalation_required=escalate,
+                ),
+                "ticket_id": ticket_id,
                 "_hits": [],
                 "_history": [],
+                "_personalization_context": (personalization or {}).get("prompt_context", ""),
             }
 
         sources = list({h.get("source", "") for h in hits if h.get("source")})
@@ -959,6 +2123,44 @@ class ChatModel:
 
         # Escalation check (same as sync path)
         escalate, esc_reason = self._output_guard.should_escalate(None, hits)
+        response_judge = self._evaluate_response_judge(
+            message=message,
+            reply=reply,
+            hits=hits,
+            citations=citations,
+            faithfulness_score=None,
+            escalation_required=escalate,
+            escalation_reason=esc_reason,
+        )
+        if response_judge["decision"] == "revise" and response_judge.get("revised_reply"):
+            reply = response_judge["revised_reply"]
+            response_judge["applied_revision"] = True
+            response_judge["final_decision"] = "approve"
+        else:
+            response_judge["final_decision"] = response_judge["decision"]
+        if response_judge["final_decision"] == "escalate":
+            escalate = True
+            if not esc_reason:
+                esc_reason = "; ".join(response_judge.get("reasons") or [])
+        response_judge.pop("revised_reply", None)
+        handoff = None
+        if flags.is_enabled("handoff_summaries") and escalate:
+            handoff = self._build_handoff_packet(
+                message=message,
+                reason=esc_reason,
+                conversation_history=conversation_history or None,
+                hits=hits,
+            )
+        ticket_id = self._maybe_create_ticket(
+            reason=esc_reason,
+            user_query=message,
+            bot_reply=reply,
+            session_id=session_id,
+            conversation_id=thread_id,
+            priority=(handoff or {}).get("priority", "normal"),
+            handoff=handoff,
+            response_judge=response_judge,
+        )
 
         return {
             "reply": reply,
@@ -967,13 +2169,23 @@ class ChatModel:
             "faithfulness_score": None,
             "retrieval_mode": retrieval_mode,
             "model": self.name,
-            "conversation_id": conversation_id,
+            "conversation_id": thread_id,
             "locale": locale,
             "escalation_required": escalate,
             "escalation_reason": esc_reason,
+            "agent_role": agent_role,
+            "handoff": handoff,
+            "response_judge": response_judge,
+            "next_actions": self._default_next_actions(
+                agent_role=agent_role,
+                handoff=handoff,
+                escalation_required=escalate,
+            ),
+            "ticket_id": ticket_id,
             "_hits": hits,
             "_history": conversation_history,
             "_rewritten": rewritten,
+            "_personalization_context": (personalization or {}).get("prompt_context", ""),
         }
 
     @staticmethod

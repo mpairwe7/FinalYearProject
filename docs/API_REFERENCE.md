@@ -1,10 +1,12 @@
 # API Reference Documentation
 
+> **API Version**: 1.4.0
+
 ## Overview
 
 The URA Chatbot provides a FastAPI-based REST API for tax-related question classification and answering.
 
-**Base URL**: `http://localhost:8000` (local) or `https://api.ura-chatbot.com` (production)
+**Base URL**: `http://localhost:8887` (local) or `https://api.ura-chatbot.com` (production)
 
 ## Authentication
 
@@ -104,7 +106,7 @@ POST /classify
 
 **cURL Example**
 ```bash
-curl -X POST http://localhost:8000/classify \
+curl -X POST http://localhost:8887/classify \
   -H "Content-Type: application/json" \
   -d '{"text": "How do I register for TIN?", "top_k": 3}'
 ```
@@ -181,7 +183,7 @@ POST /v1/chat
 
 **cURL Example**
 ```bash
-curl -X POST http://localhost:8000/v1/chat \
+curl -X POST http://localhost:8887/v1/chat \
   -H "Content-Type: application/json" \
   -H "X-Session-ID: my-session-123" \
   -d '{"message": "What is VAT rate in Uganda?", "locale": "en"}'
@@ -211,7 +213,7 @@ POST /v1/chat/stream
 
 **cURL Example**
 ```bash
-curl -N -X POST http://localhost:8000/v1/chat/stream \
+curl -N -X POST http://localhost:8887/v1/chat/stream \
   -H "Content-Type: application/json" \
   -H "X-Session-ID: my-session-123" \
   -d '{"message": "What is VAT rate in Uganda?", "locale": "en"}'
@@ -276,7 +278,7 @@ POST /v1/index
 
 **cURL Example**
 ```bash
-curl -X POST http://localhost:8000/v1/index \
+curl -X POST http://localhost:8887/v1/index \
   -H "Authorization: Bearer my-secret-key"
 ```
 
@@ -765,6 +767,477 @@ latency histograms and error counters.
 
 ---
 
+### Streaming Voice Chat (Phase 23 — WebSocket)
+
+```
+WebSocket /v1/voice/chat/stream
+```
+
+Real-time duplex voice chat with VAD (Voice Activity Detection) and
+barge-in support. Gated by `FLAG_VOICE_STREAMING=true`.
+
+**Protocol:**
+
+1. Client opens WebSocket, sends a JSON config frame:
+```json
+{
+  "type": "session_start",
+  "language": "en",
+  "voice": null,
+  "conversation_id": null,
+  "sample_rate": 16000,
+  "vad_sensitivity": "medium",
+  "tts_enabled": true,
+  "top_k": 4
+}
+```
+2. Server responds with `{"type": "session_ready", "session_id": "..."}`.
+3. Client streams binary PCM16 LE mono audio frames (recommended 20ms = 640 bytes at 16kHz).
+4. Server runs energy-based VAD with hysteresis — emits `vad_state` on transitions.
+5. On utterance end: ASR → [MT lg→en] → LLM (RAG) → [MT en→lg] → sentence-chunked TTS.
+6. Server streams back: `transcript_final`, `reply_text` (per sentence), binary TTS audio chunks, `reply_meta`, `latency_report`.
+7. Client can send `{"type": "barge_in"}` at any time to interrupt TTS playback.
+8. Clean close via `{"type": "session_end"}`.
+
+**Server → Client events:**
+
+| Event | Format | Description |
+|-------|--------|-------------|
+| `session_ready` | JSON | Session ID assigned |
+| `vad_state` | JSON | `{speaking: bool}` — VAD state changes |
+| `transcript_final` | JSON | Final ASR transcript with language, latency, backend |
+| `audio_start` | JSON | `{sample_rate: int}` — precedes TTS binary frames |
+| *(binary)* | Binary | TTS audio chunks (PCM16 LE or WAV) |
+| `audio_end` | JSON | TTS playback complete |
+| `reply_text` | JSON | Text of each TTS sentence with chunk_index |
+| `reply_meta` | JSON | Sources, citations, faithfulness_score, conversation_id |
+| `latency_report` | JSON | Per-stage timing: asr_ms, mt_ms, llm_ms, tts_first_chunk_ms, total_ms |
+| `error` | JSON | `{detail, recoverable}` — recoverable errors keep connection open |
+
+**Latency targets:** < 800ms p95 for simple queries, < 1.2s p95 for full RAG.
+
+**Metrics tracked:** `voice_ws_connections_total`, `voice_ws_active_connections` (gauge),
+`voice_ws_session_duration_seconds`, `voice_stream_asr_latency_seconds`,
+`voice_stream_tts_first_chunk_seconds`, `voice_stream_total_latency_seconds`,
+`voice_barge_in_total`, `voice_vad_utterances_total`.
+
+---
+
+### Voice Audit Log (Phase 23 — Admin)
+
+```http
+GET /v1/admin/voice_audit?days=30&limit=100
+```
+
+Voice-specific audit trail for regulatory compliance (NDPA 2019).
+Requires admin auth.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `user_id` | string | No | Filter by user |
+| `session_id` | string | No | Filter by voice session |
+| `days` | int | No | Look-back period (default 30) |
+| `limit` | int | No | Max entries (default 100, max 500) |
+
+**Response**
+```json
+{
+  "entries": [
+    {
+      "id": "uuid",
+      "user_id": "user123",
+      "session_id": "ws-session-uuid",
+      "event_type": "recording_end",
+      "metadata": {"duration_s": 3.2, "language": "en"},
+      "audio_hash": "sha256...",
+      "tenant_id": "default",
+      "created_at": 1714300000.0
+    }
+  ],
+  "stats": {
+    "period_days": 30,
+    "total_events": 142,
+    "unique_sessions": 38,
+    "unique_users": 12,
+    "events_by_type": {"session_start": 38, "recording_end": 38, ...}
+  }
+}
+```
+
+**Event types:** `recording_start`, `recording_end`, `transcript_stored`,
+`audio_deleted`, `consent_checked`, `consent_denied`, `retention_cleanup`,
+`session_start`, `session_end`, `barge_in`.
+
+---
+
+### Admin Ticket Queue (Phase 14-D)
+
+CRUD endpoints for the escalation ticket queue. All admin endpoints require operator-level auth.
+
+---
+
+#### List Escalation Tickets
+
+```http
+GET /v1/admin/tickets?status=open&limit=20&offset=0
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | string | No | Filter by status (`open`, `in_progress`, `resolved`, `closed`) |
+| `limit` | integer | No | Page size (default 20) |
+| `offset` | integer | No | Pagination offset (default 0) |
+
+**Response**
+```json
+{
+  "tickets": [],
+  "total": 0,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+---
+
+#### Aggregate Ticket Statistics
+
+```http
+GET /v1/admin/tickets/stats?days=30
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `days` | integer | No | Period in days (default 30) |
+
+**Response**
+```json
+{
+  "total": 0,
+  "by_status": {},
+  "by_priority": {},
+  "avg_resolution_hours": 0.0
+}
+```
+
+---
+
+#### Fetch Single Ticket
+
+```http
+GET /v1/admin/tickets/{ticket_id}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ticket_id` | string | Yes | Ticket identifier |
+
+**Response**: Full ticket object with conversation context, assignee, status, priority, and staff notes.
+
+---
+
+#### Update Ticket
+
+```http
+PATCH /v1/admin/tickets/{ticket_id}
+```
+
+**Request Body**
+```json
+{
+  "status": "in_progress",
+  "assignee": "staff@ura.go.ug",
+  "staff_note": "Investigating TIN mismatch.",
+  "priority": "high"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `status` | string | No | New status (`open`, `in_progress`, `resolved`, `closed`) |
+| `assignee` | string | No | Staff email or identifier |
+| `staff_note` | string | No | Internal note (max 2000 chars) |
+| `priority` | string | No | `low`, `medium`, `high`, `critical` |
+
+**Response**: Updated ticket object.
+
+---
+
+### Identity & Profile (Phase 14)
+
+User identity, profile preferences, and UDPA 2019 data-subject rights. All endpoints under `/v1/me` require JWT authentication unless otherwise noted.
+
+---
+
+#### Get Auth Context
+
+```http
+GET /v1/me
+```
+
+Returns the current authentication context. Works for both anonymous and authenticated users.
+
+**Response**
+```json
+{
+  "authenticated": false,
+  "sub": null,
+  "roles": ["anonymous"]
+}
+```
+
+---
+
+#### Get User Profile
+
+```http
+GET /v1/me/profile
+```
+
+**Requires auth.** Returns the user's profile preferences.
+
+**Response**
+```json
+{
+  "sub": "user-123",
+  "taxpayer_type": "individual",
+  "industry": "retail",
+  "primary_language": "en",
+  "detail_level": "standard"
+}
+```
+
+---
+
+#### Update User Profile
+
+```http
+PUT /v1/me/profile
+```
+
+**Request Body**
+```json
+{
+  "taxpayer_type": "business",
+  "industry": "agriculture",
+  "primary_language": "lg",
+  "detail_level": "detailed"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `taxpayer_type` | string | No | `individual`, `business`, `ngo` |
+| `industry` | string | No | Industry sector |
+| `primary_language` | string | No | ISO 639-1 locale |
+| `detail_level` | string | No | `brief`, `standard`, `detailed` |
+
+**Response**: Updated profile object.
+
+---
+
+#### List Consent Receipts
+
+```http
+GET /v1/me/consents
+```
+
+**Requires auth.** Returns active consent receipts.
+
+**Response**
+```json
+{
+  "consents": [
+    {
+      "purpose": "personalization",
+      "legal_basis": "consent",
+      "granted_at": "2026-04-01T10:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+#### Grant Consent
+
+```http
+POST /v1/me/consents/grant
+```
+
+**Request Body**
+```json
+{
+  "purposes": ["personalization", "analytics"],
+  "legal_basis": "consent"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `purposes` | string[] | Yes | List of purposes to consent to |
+| `legal_basis` | string | Yes | Legal basis (`consent`, `legitimate_interest`, `contract`) |
+
+**Response**: Created consent receipt(s).
+
+---
+
+#### Withdraw Consent
+
+```http
+POST /v1/me/consents/withdraw
+```
+
+**Request Body**
+```json
+{
+  "purposes": ["personalization"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `purposes` | string[] | Yes | List of purposes to withdraw consent for |
+
+**Response**: Confirmation with updated consent state.
+
+---
+
+#### Data Portability Export
+
+```http
+GET /v1/me/export
+```
+
+**Requires auth.** UDPA 2019 data-portability export. Returns a ZIP archive containing the user's conversations, feedback, profile, and consent records.
+
+**Response**: `application/zip` binary stream.
+
+---
+
+#### Right to Erasure
+
+```http
+DELETE /v1/me
+```
+
+**Requires auth.** UDPA 2019 right-to-erasure. Permanently deletes the user's profile, conversations, feedback, and consent records.
+
+**Response**
+```json
+{
+  "status": "erased",
+  "sub": "user-123"
+}
+```
+
+---
+
+### Export (Phase 14)
+
+Document export endpoints for generating branded PDF and image artifacts.
+
+---
+
+#### Export Conversation as PDF
+
+```http
+POST /v1/export/conversation
+```
+
+**Request Body**
+```json
+{
+  "conversation_id": "conv_123"
+}
+```
+
+**Response**: `application/pdf` binary stream (branded URA PDF).
+
+---
+
+#### Export Tax Summary as PDF
+
+```http
+POST /v1/export/tax-summary
+```
+
+**Request Body**
+```json
+{
+  "conversation_id": "conv_123"
+}
+```
+
+**Response**: `application/pdf` binary stream (branded tax calculation summary).
+
+---
+
+#### Export Artifacts (IEEE-standard Figures/Tables)
+
+```http
+POST /v1/export/artifacts
+```
+
+Generates IEEE-standard PNG figures and tables for project reports.
+
+**Response**: `application/zip` binary stream containing PNG artifacts.
+
+---
+
+### Evaluation
+
+RAG quality evaluation endpoints. The evaluate endpoint is operator-only.
+
+---
+
+#### Run RAG Evaluation
+
+```http
+POST /v1/evaluate
+```
+
+Run the RAG evaluation harness against the current knowledge base. Requires `Authorization: Bearer <INDEX_API_KEY>`.
+
+**Headers**
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Authorization` | Yes | `Bearer <INDEX_API_KEY>` |
+
+**Response**
+```json
+{
+  "status": "complete",
+  "metrics": {
+    "faithfulness": 0.0,
+    "answer_relevancy": 0.0,
+    "context_precision": 0.0,
+    "context_recall": 0.0
+  }
+}
+```
+
+---
+
+#### Get Evaluation Results
+
+```http
+GET /v1/evaluation/results
+```
+
+Serve pre-computed evaluation metrics from the most recent evaluation run.
+
+**Response**
+```json
+{
+  "timestamp": "2026-04-28T12:00:00Z",
+  "metrics": {},
+  "quality_gates": {}
+}
+```
+
+---
+
 ## Error Responses
 
 All errors follow this format:
@@ -998,7 +1471,7 @@ class SpeechHealthResponse(BaseModel):
 ```python
 import requests
 
-API_URL = "http://localhost:8000"
+API_URL = "http://localhost:8887"
 
 def chat(message: str, locale: str = "en") -> dict:
     response = requests.post(
@@ -1026,7 +1499,7 @@ result = chat("What is the VAT rate in Uganda?")
 
 ### JavaScript / TypeScript
 ```typescript
-const API_URL = "http://localhost:8000";
+const API_URL = "http://localhost:8887";
 
 interface Citation {
   ref: string; source: string; page?: string; section?: string; passage?: string;
@@ -1062,7 +1535,7 @@ data.citations.forEach(c => console.log(`${c.ref} ${c.source} ${c.section ?? ""}
 ```python
 import requests
 
-API_URL = "http://localhost:8000"
+API_URL = "http://localhost:8887"
 
 def voice_chat(audio_path: str, language: str = "en") -> dict:
     """Send a WAV file through the compound voice pipeline."""
@@ -1093,7 +1566,7 @@ result = voice_chat("question.wav", language="lg")
 
 ### JavaScript — TTS Playback
 ```typescript
-const API_URL = "http://localhost:8000";
+const API_URL = "http://localhost:8887";
 
 async function speakReply(text: string, language = "en"): Promise<void> {
   const res = await fetch(`${API_URL}/v1/tts`, {
@@ -1125,9 +1598,9 @@ await speakReply("The VAT rate is 18 percent.", "en");
 ## OpenAPI/Swagger
 
 Interactive API documentation is available at:
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
-- **OpenAPI JSON**: `http://localhost:8000/openapi.json`
+- **Swagger UI**: `http://localhost:8887/docs`
+- **ReDoc**: `http://localhost:8887/redoc`
+- **OpenAPI JSON**: `http://localhost:8887/openapi.json`
 
 ---
 
@@ -1135,23 +1608,15 @@ Interactive API documentation is available at:
 
 ### Docker
 ```bash
-docker run -p 8000:8000 landwind/ura-chatbot-api:latest
+docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 ```
 
 ### Environment Variables
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PORT` | Server port | `8000` |
+| `PORT` | Server port | `8887` |
 | `WORKERS` | Uvicorn workers | `2` |
 | `LOG_LEVEL` | Logging level | `info` |
-| `SPEECH_ENABLED` | Enable speech pipeline (ASR/TTS/MT) | `true` |
-| `SPEECH_ASR_BACKEND` | ASR backend selection | `auto` |
-| `SPEECH_TTS_BACKEND` | TTS backend selection | `auto` |
-| `SPEECH_MT_BACKEND` | MT backend selection | `auto` |
-| `SPEECH_DEADLINE_S` | Max wall-clock time per speech inference | `20` |
-| `SPEECH_MAX_CONCURRENCY` | Thread pool workers for speech | `2` |
-| `SPEECH_EN_VOICE` | Default English TTS voice | `en_US-lessac-medium` |
-| `SPEECH_LG_VOICE` | Default Luganda TTS voice | `luganda-vits-v1` |
 | `HF_MODEL_REPO` | Model repository | `mpairweLandwind/ura-chatbot` |
 | `CORS_ORIGINS` | Comma-separated allowed origins | `http://localhost:3000` |
 | `DATA_DIR` | Path to FAQ CSV directory | `Data/dataset` |
@@ -1159,11 +1624,11 @@ docker run -p 8000:8000 landwind/ura-chatbot-api:latest
 | **Qdrant (Hybrid Retrieval)** | | |
 | `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` |
 | `QDRANT_COLLECTION` | Collection name | `ura_knowledge_base` |
-| `DENSE_MODEL` | Embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
-| `RERANKER_MODEL` | Cross-encoder reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| `DENSE_MODEL` | Embedding model | `BAAI/bge-m3` |
+| `RERANKER_MODEL` | Cross-encoder reranker | `mixedbread-ai/mxbai-rerank-base-v2` |
 | `RERANK_ENABLED` | Enable cross-encoder reranking | `true` |
-| **LLM Generation (Qwen2.5-3B-Instruct)** | | |
-| `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen2.5-3B-Instruct` |
+| **LLM Generation (Qwen3-8B)** | | |
+| `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen3-8B` |
 | `LLM_ENABLED` | Enable LLM generation (`false` = FAQ lookup fallback) | `true` |
 | `LLM_DEVICE` | Device for inference (`auto`, `cpu`, `cuda`) | `auto` |
 | `LLM_TORCH_DTYPE` | Tensor dtype (`float16`, `bfloat16`, `float32`, `auto`) | `auto` |
@@ -1193,6 +1658,40 @@ docker run -p 8000:8000 landwind/ura-chatbot-api:latest
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |
 | `OTEL_SERVICE_NAME` | OTel service name | `ura-chatbot-api` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector endpoint | `http://localhost:4317` |
+| **Authentication** | | |
+| `AUTH_ALG` | JWT signing algorithm | `HS256` |
+| `AUTH_DEV_SECRET` | HMAC secret for dev/test JWTs | |
+| `OIDC_ISSUER` | OIDC token issuer URL | |
+| `OIDC_AUDIENCE` | Expected JWT audience claim | `ura-chatbot` |
+| `OIDC_JWKS_URL` | JWKS endpoint for RS256 key rotation | |
+| **Speech Pipeline** | | |
+| `SPEECH_ENABLED` | Enable speech pipeline (ASR/TTS/MT) | `true` |
+| `SPEECH_ASR_BACKEND` | ASR backend selection | `auto` |
+| `SPEECH_TTS_BACKEND` | TTS backend selection | `auto` |
+| `SPEECH_MT_BACKEND` | MT backend selection | `prompted` |
+| `SPEECH_DEADLINE_S` | Max wall-clock time per speech inference | `20` |
+| `SPEECH_MAX_CONCURRENCY` | Thread pool workers for speech | `2` |
+| `SPEECH_EN_VOICE` | Default English TTS voice | `en_US-lessac-medium` |
+| `SPEECH_LG_VOICE` | Default Luganda TTS voice | `luganda-vits-v1` |
+| **Sunbird AI** | | |
+| `SUNBIRD_API_URL` | Sunbird AI cloud API base URL | `https://api.sunbird.ai` |
+| `SUNBIRD_API_TOKEN` | Bearer token for Sunbird AI services | |
+| **Feature Flags** | | |
+| `FLAG_TOOL_USE` | Enable LLM tool-calling loop | `false` |
+| `FLAG_AGENTIC_MODE` | Enable agentic supervisor routing | `false` |
+| `FLAG_WORKFLOWS` | Enable YAML-driven guided workflows | `true` |
+| `FLAG_AUTH_REQUIRED` | Require JWT authentication on protected endpoints | `false` |
+| `FLAG_AUDIT_LEDGER` | Enable hash-chained audit ledger | `false` |
+| `FLAG_MEMORY_ENABLED` | Enable consent-gated personalization memory | `false` |
+| `FLAG_VOICE_ENABLED` | Enable voice chat endpoints | `false` |
+| `FLAG_VOICE_STREAMING` | Enable WebSocket streaming voice chat with VAD + barge-in | `false` |
+| `FLAG_VOICE_CONSENT` | Enforce voice-specific consent checks before audio processing | `false` |
+| **Analytics DB** | | |
+| `ANALYTICS_BACKEND` | Analytics storage backend (`sqlite` or `postgres`) | `sqlite` |
+| `POSTGRES_DSN` | PostgreSQL connection string for analytics | |
+| **vLLM** | | |
+| `LLM_BACKEND` | LLM dispatch backend (`local` or `vllm`) | `local` |
+| `VLLM_BASE_URL` | vLLM OpenAI-compatible API base URL | `http://vllm:8001/v1` |
 
 ---
 
@@ -1213,8 +1712,22 @@ All responses include hardened security headers (OWASP, NIST SSDF):
 
 ## Changelog
 
+### v1.3.0 (2026-04-28) — Agentic RAG + Speech + Identity
+- **Agentic Routing**: Supervisor classifier routes to RAG, TOOLS, SPECIALIST, CLARIFY, or ESCALATE
+- **Tool-Calling**: Bounded LLM tool-calling loop with 6 tool modules (calculators, rates, calendar, KB search, escalation)
+- **Guided Workflows**: YAML-driven slot-filling workflows (TIN registration, filing, payment, customs, objection)
+- **Speech Pipeline**: ASR (Whisper + LoRA), TTS (Piper), MT (prompted/ONNX), Sunbird AI cloud fallback
+- **Identity & Auth**: JWT (HS256/RS256 OIDC), RBAC (5 roles), consent management (UDPA 2019)
+- **Admin Tickets**: CRUD endpoints for escalation ticket queue with priority/status/assignee
+- **Data Export**: Branded PDF export for conversations and tax summaries
+- **Feature Flags**: 18 env-backed flags for progressive rollout
+- **PostgreSQL**: Optional analytics backend (drop-in for SQLite)
+- **Audit Ledger**: Hash-chained immutable event log with Merkle tree proofs
+- **Memory**: Consent-gated personalization (semantic facts, episodic summaries, working state)
+- **vLLM Backend**: OpenAI-compatible HTTP dispatch for high-throughput serving
+
 ### v1.2.0 (2026-03-10) — Advanced RAG (6-Phase)
-- **LLM Generation**: Qwen2.5-3B-Instruct local inference replacing FAQ lookup (sync + SSE streaming)
+- **LLM Generation**: Qwen3-8B local inference replacing FAQ lookup (sync + SSE streaming)
 - **SSE Streaming**: `POST /v1/chat/stream` with `metadata`, `token`, `grounding`, `done`, `error` event types
 - **Query Rewriting**: Abbreviation expansion (15+ URA terms), spell correction, coreference resolution from history
 - **Semantic Cache**: Cosine similarity matching with configurable threshold/TTL/max-size
@@ -1225,6 +1738,45 @@ All responses include hardened security headers (OWASP, NIST SSDF):
 - **Rate Limiting**: `slowapi` with configurable per-IP limits on chat endpoints
 - **OutputGuard on SSE**: PII redaction and XSS sanitization applied to streaming tokens
 - **Per-stage Tracing**: OpenTelemetry spans with automatic timing for each RAG stage
+
+### v1.4.0 (2026-04-29) — Quantization, Offline RAG & Voice-First Mobile
+
+**New Endpoints:**
+- `GET /v1/models/quantized` — List available quantized model variants (GGUF, AWQ, GPTQ, ONNX) with sizes, checksums, and faithfulness scores. Feature-flagged: `FLAG_QUANTIZATION`.
+- `GET /v1/offline/status` — Offline bundle availability, version, sync status. Feature-flagged: `FLAG_OFFLINE_RAG`.
+- `POST /v1/offline/sync` — Hash-based delta sync. Client sends chunk hashes, server returns only changed chunks. Target: < 12s on 3G. Feature-flagged: `FLAG_OFFLINE_SYNC`.
+- `GET /v1/offline/bundle` — Download compressed offline RAG bundle (< 150 MB). SHA-256 verified. Feature-flagged: `FLAG_OFFLINE_BUNDLE_API`.
+- `POST /v1/voice/vision/chat` — Voice + camera compound endpoint. Accepts multipart audio + image. Performs ASR + OCR + LLM + TTS in parallel. Feature-flagged: `FLAG_VOICE_VISION`.
+- `GET /v1/admin/offline_stats` — Admin dashboard for offline usage: bundle downloads, sync completions, active offline devices, avg sync duration.
+
+**New Feature Flags (11 total):**
+- Phase 24: `quantization`, `speculative_decoding`, `prefix_caching`
+- Phase 25: `offline_rag`, `offline_sync`, `offline_bundle_api`
+- Phase 26: `mobile_bundle_check`, `on_device_search`
+- Phase 27: `voice_first_mobile`, `voice_vision`, `offline_voice`
+
+**New Backend Modules:**
+- `offline_rag.py` — Production rewrite with versioned bundles, SHA-256 integrity, chunk hashes, ONNX embedder optimization
+- `offline_sync.py` — Delta sync engine with hash-based chunk diffing, sync event logging
+- `offline_bundle.py` — Bundle builder (FAISS + passages + embedder + manifest) + bundle manager for serving
+
+**New Scripts:**
+- `scripts/quantize_models.py` — Automated GGUF/AWQ/GPTQ/ONNX quantization pipeline
+- `scripts/quantization_quality_gate.py` — CI quality gate: faithfulness ≤ 4% drop, WER ≤ 3% increase, bundle size limits
+- `scripts/export_mobile_bundle.py` — Mobile bundle assembler with 800 MB hard limit enforcement
+
+**New CI Workflow:**
+- `.github/workflows/quantization.yml` — 5-job pipeline: validate → quantize (GGUF + AWQ parallel) → quality gate → publish
+
+**Frontend Components:**
+- `VoiceFirstChat.tsx` — Full-screen voice-first interface with animated orb, waveform, barge-in, offline indicators
+- `VoiceVisionMode.tsx` — Voice + camera document scanning mode
+- Zustand stores updated with offline mode, sync state, voice-first preferences
+
+**Infrastructure:**
+- `docker-compose.yml` — New `vllm-quantized` service (AWQ, prefix caching, continuous batching)
+- `Dockerfile` — Added offline/quantized artifact directories
+- Offline + quantized volume mounts on API service
 
 ### v1.1.0 (2026-03-08)
 - Hybrid retrieval: Qdrant dense + BM25 sparse + RRF fusion + cross-encoder reranking

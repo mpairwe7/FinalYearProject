@@ -10,31 +10,30 @@ App/
 ├── classifier.py       # Legacy classifier interface
 ├── requirements.txt    # Python dependencies
 ├── README.md          # This file
-├── README_HF.md       # Hugging Face Spaces README
 ├── backend/           # FastAPI backend API
 │   ├── app/
-│   │   ├── main.py          # API routes + SSE streaming + speech endpoints
-│   │   ├── models.py        # Pydantic v2 request/response models (chat + speech)
-│   │   ├── speech_service.py # SpeechModel singleton (ASR + MT + TTS orchestration)
-│   │   ├── service.py       # ChatModel (6-phase RAG orchestrator)
-│   │   ├── llm.py           # Qwen2.5-3B-Instruct local generation
-│   │   ├── query.py         # Query rewriting pipeline
-│   │   ├── cache.py         # Semantic response cache
-│   │   ├── corrective_rag.py # Corrective re-retrieval + clarification
-│   │   ├── guardrails.py    # OWASP LLM Top 10 guards
-│   │   ├── retriever.py     # Hybrid retriever + circuit breaker
-│   │   ├── indexer.py       # PDF/CSV → Qdrant indexing
-│   │   ├── resilience.py    # Circuit breaker (used by speech + retriever)
-│   │   ├── tracing.py       # OpenTelemetry GenAI spans
-│   │   ├── analytics.py     # Prometheus metrics middleware
-│   │   └── database.py      # SQLite WAL store
+│   │   ├── main.py          # API routes + SSE streaming + speech + eval endpoints
+│   │   ├── models.py        # Pydantic v2 request/response models
+│   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
+│   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
+│   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
+│   │   ├── flags.py         # Feature flag registry (18 flags)
+│   │   ├── agents/          # Supervisor router + agent graph runtime
+│   │   ├── tools/           # 11 tools (calculators, rates, calendar, RAG, escalate)
+│   │   ├── workflows/       # YAML-driven slot-filling engine + TIN registration
+│   │   ├── memory/          # Episodic + semantic + working memory
+│   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention
+│   │   ├── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
+│   │   └── ...              # cache, query, indexer, resilience, tracing, analytics, database
 │   └── requirements.txt
-└── frontend/          # Next.js 16 web frontend
+└── frontend/          # Next.js 16 PWA frontend
     ├── src/
-    │   ├── app/             # Next.js pages (SSE streaming + voice UI)
-    │   ├── components/      # Reusable components (FeedbackButtons)
-    │   ├── services/        # voiceService.ts (audio capture + playback + API)
-    │   └── store/           # Zustand 5 state management + analytics
+    │   ├── app/             # Pages: chat, 404, error, analytics, evaluation
+    │   ├── components/      # 23 components (10 charts + 13 UI: Chat, Voice, Markdown, etc.)
+    │   ├── services/        # voiceService.ts (AudioRecorder + playback + API)
+    │   ├── hooks/           # useSpeech.ts (React Query hooks)
+    │   └── store/           # Zustand 5 + analytics (consent-gated)
+    ├── public/            # PWA: manifest, SW, icons, robots.txt
     └── package.json
 ```
 
@@ -60,7 +59,9 @@ python app.py
 
 ### 2. Backend API (`backend/`)
 
-FastAPI v0.111 REST API with 6-phase advanced RAG pipeline and local LLM inference.
+FastAPI REST API with a production-hardened agentic RAG pipeline, durable
+conversation threading, guided workflows, human handoff, and Qwen3-backed
+generation over either local Transformers or vLLM.
 
 **Core Endpoints:**
 - `GET /health` — Liveness probe
@@ -78,67 +79,688 @@ FastAPI v0.111 REST API with 6-phase advanced RAG pipeline and local LLM inferen
 
 **Speech Endpoints (2026):**
 - `POST /v1/voice/chat` — Compound voice pipeline: audio -> ASR -> MT -> LLM -> MT -> TTS -> audio+text
-- `POST /v1/asr` — Server-side ASR (raw PCM audio -> transcript)
-- `POST /v1/tts` — Text-to-speech synthesis (text -> base64 WAV)
+- `POST /v1/asr` — Server-side ASR (Whisper via transformers, raw PCM -> transcript)
+- `POST /v1/tts` — Text-to-speech synthesis (Edge Neural TTS, text -> base64 WAV)
 - `POST /v1/translate` — Machine translation (English <-> Luganda)
 - `GET /v1/speech/health` — Speech pipeline readiness check
 
-**RAG Pipeline (6 Phases):**
-1. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker
-2. **LLM Generation** — Qwen2.5-3B-Instruct local inference (sync + streaming)
-3. **SSE Streaming** — `TextIteratorStreamer` with per-token OutputGuard sanitization
-4. **Query Intelligence** — Rewriting (abbreviations, spelling, coreference), semantic cache, multi-turn memory
-5. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard
-6. **Safety** — OWASP LLM Top 10 guardrails, corrective RAG, calibrated abstention, human escalation
+**Anonymous usage policy (May 2026):**
 
-**Run locally:**
+The public assistant is intentionally usable without logging in. Public routes
+use `optional_user()`: a valid bearer token personalizes/scopes the request, but
+missing auth becomes `role=public`, `tenant_id=default`. Invalid bearer tokens
+still return `401`.
+
+| Surface | Anonymous? | Auth/consent behavior |
+|---------|------------|-----------------------|
+| `POST /v1/chat`, `POST /v1/chat/stream` | Yes | Optional bearer token; anonymous turns still get RAG/workflows and citations |
+| `GET /v1/speech/health`, `POST /v1/tts`, `POST /v1/translate` | Yes | Optional bearer token |
+| `POST /v1/asr`, `POST /v1/voice/chat`, voice WebSocket, `POST /v1/voice/vision/chat` | Yes | Requires explicit voice consent: `X-Voice-Consent: true` for HTTP or `voice_consent_accepted=true` in the WebSocket `session_start` frame |
+| `/v1/me/*`, feedback writes/summaries, analytics dashboards, metrics, evaluation exports, offline bundle APIs | No | Require a verified user or staff/admin role depending on route |
+| `ura_account_profile`, `ura_action_proposal` MCP tools | No | Require verified taxpayer/staff role, consent, confirmation/idempotency for actions, and configured URA API credentials |
+
+The frontend stores a bearer token under `NEXT_PUBLIC_AUTH_TOKEN_STORAGE_KEY`
+(default `ura_auth_token`) when a login flow is added, but no token is required
+for normal chat usage.
+
+**Evaluation Endpoints (2026):**
+- `GET /v1/evaluation/results` — Pre-computed IEEE metrics (RAG, safety, calibration, benchmark, tokenizer)
+
+**Current request pipeline:**
+1. **Auth + request context** — fail-closed private/admin guards, optional RS256/JWKS OIDC verification, durable `conversation_id` thread handling
+2. **Supervisor routing** — routes turns into standard RAG, guided workflows, clarification, or human escalation
+3. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker
+4. **LLM Generation** — `Qwen/Qwen3-8B` via local Transformers or vLLM HTTP
+5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
+6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
+7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge`, structured `handoff`, calibrated escalation
+8. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
+
+### Backend Architecture & Request Flows
+
+#### RAG Pipeline Flow (10-stage)
+
+Source: `service.py::generate()` (lines 992-1677). Every `/v1/chat` and
+`/v1/chat/stream` request traverses this pipeline:
+
+```
+                          +------------------+
+                          |  User Message    |
+                          +--------+---------+
+                                   |
+                    +--------------v--------------+
+                    |  0. Conversation History     |
+                    |  (db.get_recent_turns, n=5)  |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  0b. Query Rewrite           |
+                    |  (spelling, abbreviations,   |
+                    |   coreference resolution)    |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  0c. Language Detection       |
+                    |  (lg/sw/nyn/ach heuristics)  |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  1. InputGuard (OWASP LLM01) |
+                    |  - injection patterns        |
+                    |  - illegal intent detection  |
+                    |  - length validation          |
+                    +---+----------+-----------+---+
+                        |          |           |
+                    BLOCKED    HARMLESS    FLAGGED
+                    (403)          |        (log+continue)
+                                   |
+                    +--------------v--------------+
+                    |  1b. Workflow Router          |
+                    |  WorkflowRegistry.match()    |
+                    +---+---------+----------------+
+                        |         |
+                    MATCHED    NO MATCH
+                    (guided)       |
+                        |          |
+                    +--------------v--------------+
+                    |  1c. Semantic Cache Lookup    |
+                    |  (cosine >= 0.92 threshold)  |
+                    +---+---------+----------------+
+                        |         |
+                    HIT        MISS
+                    (return)       |
+                                   |
+                    +--------------v--------------+
+                    |  1d. Supervisor Router        |
+                    |  (rule-based, < 1ms)         |
+                    +--+---+---+---+---+-----------+
+                       |   |   |   |   |
+                     RAG TOOLS SPEC CLARIFY ESCALATE
+                       |   |   |   |       |
+                       |   +---+   |    (ticket)
+                       |   |       |
+                       v   v       v
+                    +--------------v--------------+
+                    |  2. Hybrid Retrieval          |
+                    |  Qdrant dense (bge-m3 1024d)  |
+                    |  + BM25 sparse + RRF fusion   |
+                    |  + cross-encoder reranking    |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  3. Corrective RAG            |
+                    |  + FAQ keyword blend (top 2)  |
+                    |  + clarification check        |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  4. Abstention Check          |
+                    |  (no hits or confidence low)  |
+                    +---+---------+----------------+
+                        |         |
+                    ABSTAIN    PROCEED
+                    (refuse)       |
+                                   |
+                    +--------------v--------------+
+                    |  5. LLM Generation            |
+                    |  Qwen3-8B (local or vLLM)     |
+                    |  - agentic path (tools) OR    |
+                    |  - standard RAG synthesis     |
+                    |  - 45s deadline + breaker     |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  6. OutputGuard               |
+                    |  - PII redaction              |
+                    |  - XSS sanitization           |
+                    |  - prompt leakage detection   |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  7. Grounding Verification    |
+                    |  - faithfulness scoring       |
+                    |  - self-reflection (optional) |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  8. Response Judge             |
+                    |  (approve / revise / escalate)|
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    |  9. Escalation (if needed)    |
+                    |  - handoff packet             |
+                    |  - ticket creation            |
+                    +--------------+--------------+
+                                   |
+                    +--------------v--------------+
+                    | 10. Post-processing            |
+                    |  - semantic cache store       |
+                    |  - memory persist (consented) |
+                    |  - audit ledger append        |
+                    +--------------+--------------+
+                                   |
+                          +--------v---------+
+                          |  ChatResponse    |
+                          +------------------+
+```
+
+#### Agentic Tool-Calling Flow
+
+When the supervisor routes a query to `TOOLS`, `TAX_SPECIALIST`, or
+`CUSTOMS_SPECIALIST`, the agentic path activates:
+
+```
+Supervisor.classify(query)
+  --> AgentRoute.TOOLS / TAX_SPECIALIST / CUSTOMS_SPECIALIST
+  --> force_agentic=True, force_tool_whitelist from supervisor
+
+_call_llm_agentic(max_iterations=3, deadline=90s)
+  --> llm_module.generate_with_tools(messages, tool_schemas)
+      Loop (bounded):
+        LLM proposes tool_call(name, args)
+        --> ToolRegistry.call(name, args)   # validated I/O
+        --> result appended to conversation
+        --> next iteration
+      Exit: no more tool_calls OR max_iterations hit
+  --> circuit breaker wraps entire loop
+  --> returns {text, tool_calls, iterations, truncated}
+```
+
+**Tool inventory** (11 tools in `backend/app/tools/`):
+
+| Tool | Module | Description |
+|------|--------|-------------|
+| `calculate_vat` | `calculators.py` | VAT computation (FY2025-26 rates) |
+| `calculate_paye` | `calculators.py` | PAYE income tax brackets |
+| `calculate_corporation_tax` | `calculators.py` | Corporate income tax |
+| `calculate_capital_gains` | `calculators.py` | Capital gains tax |
+| `calculate_customs_duty` | `calculators.py` | Customs duty by tariff |
+| `lookup_rate` | `rates.py` | Tax rate lookup (VAT, income, excise) |
+| `list_available_rates` | `rates.py` | List all available rate tables |
+| `get_current_date` | `calendar.py` | Current date for deadline logic |
+| `get_next_deadlines` | `calendar.py` | Upcoming tax filing deadlines |
+| `search_ura_knowledge_base` | `rag_tool.py` | Semantic search (wraps hybrid retriever) |
+| `escalate_to_human` | `escalate.py` | Create escalation ticket from tool loop |
+
+#### Guided Workflow Engine Flow
+
+YAML-driven durable workflows in `backend/app/workflows/`. Triggered by
+natural-language phrases, they guide users through multi-step processes:
+
+```
+User message
+  --> WorkflowRegistry.match_trigger(message)
+      (checks trigger_phrases in all registered workflows)
+  --> MATCHED? --> create_session(workflow_id)
+  --> advance(session, user_input)
+      FOR each step:
+        Display step.question to user
+        Receive user input
+        Validate via slots.py (enum, regex, boolean, text)
+        Store value in session.slots
+        IF step has when condition --> evaluate (skip if false)
+        IF step has tool_call --> ToolRegistry.call inline
+      Return WorkflowTurn(question, is_complete, slot_name)
+  --> db.upsert_workflow_session (durable persistence across turns)
+  --> ON completion: generate summary from collected slots
+```
+
+**Registered workflows** (5 YAML flows in `workflows/flows/`):
+
+| Workflow | Trigger Examples | Slots Collected |
+|----------|-----------------|-----------------|
+| `tin_registration` | "register for a TIN", "get a TIN" | taxpayer_type, legal_name, NIN/company_reg, phone, email |
+| `return_filing` | "file a return", "tax return" | tax_type, filing_period, required_docs |
+| `payment_assistance` | "how to pay", "payment" | payment_method, amount, account_details |
+| `customs_clearance` | "customs", "import", "export" | shipment_type, declaration_number, goods, CIF value |
+| `objection_or_dispute` | "objection", "dispute", "appeal" | assessment_ref, grounds, supporting_docs |
+
+#### Speech Pipeline Flow (Local-First Architecture)
+
+Full compound voice pipeline (`POST /v1/voice/chat`).
+
+**Design principle:** Local models are the primary inference path for
+offline capability and lower latency. Sunbird cloud API is the final
+fallback when all local backends are unavailable.
+
+```
+Audio Input (PCM16, 16 kHz)
+  |
+  v
+ASR Fallback Chain (local-first):
+  [1] Whisper + LoRA adapter (fine-tuned per-language: lg, sw, nyn)
+      Base: openai/whisper-small | Adapter: artifacts/speech/asr/whisper_lg/final
+      LoRA config: r=16, alpha=32, targets: q/k/v/out/fc1/fc2 projections
+  [2] Local Sherpa ASR (ONNX, if model available)
+  [3] faster-whisper CTranslate2 int8 (offline, auto-downloads ~150MB)
+  [4] Sunbird cloud API (fallback, native Luganda STT)
+  |
+  v
+Language Detection --> detected_lang
+  |
+  v
+IF detected_lang != "en":
+  MT (source --> en):
+    [1] Qwen3-8B prompted translation (uses already-loaded LLM, no extra model)
+    [2] Local MADLAD-400-3b + LoRA (artifacts/mt/madlad_ura_lgen/final)
+    [3] Sunbird cloud (NLLB translation API, fallback)
+  |
+  v
+ChatModel.generate(en_query) --> RAG Pipeline (Qwen3-8B) --> en_reply
+  |
+  v
+IF target_lang != "en":
+  MT (en --> target):
+    [1] Qwen3-8B prompted translation (repetition_penalty=1.3, max_tokens=256)
+    [2] Local MADLAD-400-3b + LoRA
+    [3] Sunbird cloud (fallback)
+  |
+  v
+TTS Fallback Chain (local-first):
+  [1] Local Sherpa/Piper TTS (offline, if model available)
+  [2] edge-tts Microsoft neural voices (free, needs internet)
+  [3] Sunbird cloud TTS (native Luganda speaker voices, fallback)
+  |
+  v
+Audio Output (WAV base64) + Text Reply
+```
+
+Each subsystem (ASR, TTS, MT) has its own `CircuitBreaker` (3-failure
+threshold, 15s reset, 120s max) and bounded `ThreadPoolExecutor`
+(`SPEECH_MAX_CONCURRENCY=4`). Hard deadline: `SPEECH_DEADLINE_S=120`.
+Failures in speech never block the text API (503 graceful degradation).
+
+**Model artifacts used in production:**
+
+| Component | Base Model | LoRA Adapter | Config |
+|-----------|-----------|-------------|--------|
+| ASR | `openai/whisper-small` (MIT) | `artifacts/speech/asr/whisper_lg/final` | r=16, alpha=32, PEFT |
+| MT | `google/madlad400-3b-mt` (Apache-2.0) | `artifacts/mt/madlad_ura_lgen/final` | r=8, alpha=16, SEQ_2_SEQ_LM |
+| LLM | `Qwen/Qwen3-8B` (Apache-2.0) | `luganda-lora`, `sw-lora`, `nyn-lora`, `ach-lora` | BitsAndBytes NF4 4-bit when `LLM_LOAD_IN_4BIT=true`; multi-adapter PEFT routing |
+| TTS | edge-tts / Sherpa Piper | N/A | en_US-lessac / luganda-vits-v1 |
+
+#### Streaming Voice Chat Flow (Phase 23)
+
+Real-time duplex voice via WebSocket (`WS /v1/voice/chat/stream`):
+
+```
+Client (PCM16 chunks, ~20ms)
+  |
+  v
+WebSocket Handler (voice_ws.py)
+  |
+  v
+VoiceSession (voice_stream.py):
+  |
+  ├─ Energy-based VAD (hysteresis, configurable thresholds)
+  |    └─ Emits vad_state events on speech/silence transitions
+  |
+  ├─ Utterance complete? ──▶ ASR (existing fallback chain)
+  |                           └─▶ transcript_final event
+  |
+  ├─ Accent Detection (accent_detector.py, < 50ms)
+  |    └─ Routes to accent-specific Whisper LoRA adapter
+  |
+  ├─ [MT lg→en] ──▶ LLM RAG ──▶ [MT en→lg]
+  |
+  ├─ Sentence-Chunked TTS:
+  |    ├─ Split reply on sentence boundaries
+  |    ├─ Synthesize each via existing TTS fallback chain
+  |    ├─ Yield audio_start + binary audio chunks + audio_end
+  |    └─ Check _cancelled between sentences (barge-in support)
+  |
+  └─ Barge-in: client sends {"type":"barge_in"}
+       └─ Sets _cancelled event, aborts TTS, clears audio buffer
+```
+
+**New modules:**
+
+| Module | File | Purpose |
+|--------|------|---------|
+| `voice_stream.py` | `backend/app/` | VADConfig, VoiceSession, sentence splitting |
+| `voice_ws.py` | `backend/app/` | WebSocket handler, Prometheus metrics |
+| `voice_consent.py` | `backend/app/` | Voice consent, audit log, retention policy |
+| `offline_rag.py` | `backend/app/` | FAISS offline retrieval fallback |
+| `accent_detector.py` | `backend/app/` | Prosodic accent classifier |
+
+**New frontend:**
+
+| Module | File | Purpose |
+|--------|------|---------|
+| `VoiceChat.tsx` | `frontend/src/components/` | Full-screen voice-first mobile interface |
+| `voiceWebSocket.ts` | `frontend/src/services/` | WebSocket client (auto-reconnect, binary frames) |
+| `useVoiceStore.ts` | `frontend/src/store/` | Zustand store for voice state |
+| `useVoiceWebSocket.ts` | `frontend/src/hooks/` | React hook wiring WS events to store |
+| `CameraCapture.tsx` | `frontend/src/components/` | Document scanning for voice+vision mode |
+| `audio-worklet-processor.js` | `frontend/public/` | AudioWorklet for streaming PCM16 capture |
+
+**Feature flags:** `FLAG_VOICE_STREAMING`, `FLAG_VOICE_CONSENT`
+
+**Latency targets:** < 800ms p95 simple queries, < 1.2s p95 full RAG.
+
+**Privacy:** Raw audio never stored by default (SHA-256 hash only). Configurable retention via `VOICE_RAW_AUDIO_TTL_H`.
+
+#### Escalation and Handoff Flow
+
+Escalation triggers when any of these conditions are met:
+
+```
+1. faithfulness_score < GROUNDING_THRESHOLD (0.3)
+2. Supervisor.classify() --> AgentRoute.ESCALATE
+3. response_judge.decision == "escalate"
+4. escalate_to_human tool called from agentic loop
+
+  --> _build_handoff_packet():
+      - topic: classified from query content
+      - priority: normal / high (based on signals)
+      - required_details: context-specific info needed
+      - contact_channels: phone, WhatsApp, web portal
+      - conversation_context: PII-redacted recent turns
+      - source_list: retrieved passages with metadata
+
+  --> _maybe_create_ticket() (if FLAG_TICKET_QUEUE=true):
+      - db.create_ticket(reason, handoff_packet, response_judge)
+      - ticket_id[:8] surfaced in ChatResponse
+
+Admin endpoints for ticket management:
+  GET  /v1/admin/tickets?status=open&limit=50
+  GET  /v1/admin/tickets/stats?days=30
+  GET  /v1/admin/tickets/{id}
+  PATCH /v1/admin/tickets/{id}  (status/assignee/note/priority)
+```
+
+#### Authentication Flow
+
+```
+Request with Authorization: Bearer <token>
+  |
+  v
+Dev mode (APP_ENV=development, AUTH_ALG=HS256):
+  Verify with AUTH_DEV_SECRET (shared secret)
+
+Production mode (APP_ENV=production, AUTH_ALG=RS256):
+  Fetch JWKS from OIDC_JWKS_URL (cached OIDC_JWKS_CACHE_TTL_S=3600)
+  Lookup key by kid claim (re-fetch on miss)
+  Verify signature + exp/nbf temporal claims
+  Verify OIDC_ISSUER + OIDC_AUDIENCE (if set)
+  |
+  v
+AuthContext(user_id, tenant_id, roles, consents, claims)
+  |
+  +-- optional_user()   --> public assistant routes; anonymous if no token
+  +-- current_user()    --> auth-required aware; 401 if FLAG_AUTH_REQUIRED=true and missing token
+  +-- require_user()    --> mandatory (401 if missing, used on /v1/me/*)
+  +-- require_role(*)   --> role-gated (403 if wrong role, used on /v1/admin/*)
+```
+
+When `FLAG_AUTH_REQUIRED=true`, routes using `current_user()`,
+`require_user()`, or `require_role()` require authentication. Public assistant
+routes use `optional_user()` so anonymous chat remains available in production.
+When `FLAG_MULTI_TENANT=true`, authenticated rows are scoped by `tenant_id`;
+anonymous public turns use the default public tenant context and cannot access
+URA account/action tools.
+
+#### Memory System Flow
+
+Consent-gated personalization (Phase 16, `FLAG_MEMORY_ENABLED`):
+
+```
+generate() --> _load_personalization_state(user_id)
+  |
+  v
+Check UDPA consent: user.has_purpose("personalization")?
+  NO  --> skip memory entirely
+  YES --> get_memory_service().read_all(user_id)
+          |
+          +-- Working Memory  (30 min TTL):
+          |     last_topic, last_agent_role, last_conversation_id
+          |
+          +-- Episodic Memory (90 day TTL):
+          |     conversation summaries (2 most recent)
+          |
+          +-- Semantic Memory (indefinite):
+                extracted user facts (taxpayer_type, industry, language)
+  |
+  v
+Inject into LLM prompt as personalization_context
+Prefill workflow slots (e.g., taxpayer_type from memory)
+  |
+  v
+After generate():
+  absorb_conversation() --> extractor + decay
+  |
+  v
+DELETE /v1/me --> cascades erasure across all 3 memory tiers
+```
+
+#### Audit Ledger Flow
+
+Hash-chained compliance logging (Phase 21, `FLAG_AUDIT_LEDGER`):
+
+```
+Every generate() return site --> _audit_turn()
+  |
+  v
+Payload construction (no raw PII):
+  query_sha256, reply_sha256, retrieval_mode, num_sources,
+  faithfulness_score, escalation_required, model, locale,
+  input_tokens, output_tokens, tool_calls, agent_route, ticket_id
+  |
+  v
+AuditLedger.append(event_type, payload, tenant_id, user_id):
+  seq = monotonic counter
+  payload_hash = sha256(sorted-json(payload))
+  prev_hash = last row's row_hash (or GENESIS_HASH = "0"*64)
+  row_hash = sha256(prev_hash + payload_hash)
+  INSERT INTO audit_events
+  |
+  v
+Merkle Anchoring (batch):
+  compute_merkle_root(batch of payload_hashes)
+  Bitcoin-style: pairs of sha256, odd-level duplicates last
+  INSERT INTO audit_anchors(merkle_root, first_seq, last_seq)
+
+Verification:
+  verify_chain(tenant_id) --> rewalk all rows, recompute hashes
+  --> VerificationReport {valid, rows_checked, breaks[]}
+```
+
+**Run locally (with full speech pipeline):**
 ```bash
 cd App/backend
 uv pip install -r requirements.txt
-uvicorn app.main:app --reload
+
+# Full production startup with local LoRA adapters and speech:
+WHISPER_ADAPTER_LG="../../artifacts/speech/asr/whisper_lg/final" \
+WHISPER_ADAPTER_SW="../../fine-tuning/adapters/whisper-sw" \
+WHISPER_ADAPTER_NYN="../../fine-tuning/adapters/whisper-nyn" \
+WHISPER_DEVICE=cpu \
+SPEECH_ENABLED=true \
+SPEECH_MT_BACKEND=prompted \
+SPEECH_MAX_CONCURRENCY=4 \
+SPEECH_DEADLINE_S=120 \
+LLM_MODEL="Qwen/Qwen3-8B" \
+LLM_BACKEND=local \
+LLM_DEVICE=auto \
+LLM_LOAD_IN_4BIT=true \
+LLM_TORCH_DTYPE=bfloat16 \
+LORA_ADAPTER_LG="../../fine-tuning/adapters/luganda-lora" \
+LORA_ADAPTER_SW="../../fine-tuning/adapters/sw-lora" \
+LORA_ADAPTER_NYN="../../fine-tuning/adapters/nyn-lora" \
+LORA_ADAPTER_ACH="../../fine-tuning/adapters/ach-lora" \
+SUNBIRD_API_TOKEN="<your-sunbird-jwt>" \
+CORS_ORIGINS="http://localhost:3300" \
+.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8887 --reload
 ```
+
+**Minimal startup (text-only, no speech):**
+```bash
+SPEECH_ENABLED=false uvicorn app.main:app --reload --port 8887
+```
+
+**Key environment variables for speech/voice/translation:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SPEECH_ENABLED` | `true` | Master toggle for entire speech pipeline |
+| `SPEECH_ASR_BACKEND` | `auto` | `auto\|sherpa\|transformers\|mock` |
+| `SPEECH_TTS_BACKEND` | `auto` | `auto\|sherpa\|piper\|mock` |
+| `SPEECH_MT_BACKEND` | `prompted` | `prompted` (Qwen3) / `auto` (MADLAD+LoRA) / `mock` |
+| `SPEECH_MAX_CONCURRENCY` | `4` | Speech executor thread pool size |
+| `SPEECH_DEADLINE_S` | `120` | Hard wall-clock timeout per speech inference |
+| `FLAG_VOICE_CONSENT` | `false` (`true` in production defaults) | Enforce explicit voice consent before ASR/voice processing |
+| `WHISPER_ADAPTER_LG` | (empty) | Path to Luganda Whisper LoRA adapter |
+| `WHISPER_ADAPTER_SW` | (empty) | Path to Swahili Whisper LoRA adapter |
+| `WHISPER_ADAPTER_NYN` | (empty) | Path to Runyankole Whisper LoRA adapter |
+| `SUNBIRD_API_TOKEN` | (empty) | JWT token for Sunbird cloud API fallback |
+| `LLM_MODEL` | `Qwen/Qwen3-8B` | HuggingFace model ID for LLM |
+| `LLM_TORCH_DTYPE` | `auto` | `bfloat16` / `float16` / `float32` |
+| `LLM_LOAD_IN_4BIT` | `false` | Enable BitsAndBytes NF4 4-bit Qwen loading to reduce GPU memory use |
 
 ### 3. Frontend (`frontend/`)
 
-Next.js 16 + React 19 web application with SSE streaming and full bilingual voice support.
+Next.js 16 + React 19 PWA with SSE streaming, voice modal, and IEEE evaluation dashboards.
 
 **Features:**
-- SSE streaming with `ReadableStream` reader + sync fallback
-- `requestAnimationFrame` batched token rendering
-- Glassmorphism dark design system (Grok-inspired)
-- Zustand 5 state management with `updateLastTurn()` for streaming
-- ARIA-accessible locale selection (English / Luganda)
+- SSE streaming with `ReadableStream` + `requestAnimationFrame` batched rendering
+- Same-origin `/api/*` proxy via `INTERNAL_API_URL` (default `http://127.0.0.1:8887`)
+- Markdown rendering (bold, lists, code, citations, links) + Mermaid diagram support
+- Grok-inspired glassmorphism dark design (2,283 lines CSS)
+- Copy button + timestamps on every message
+- Installable PWA (manifest, service worker, offline caching)
+- GDPR consent banner (gates analytics tracking)
+- Branded 404 page + analytics error boundary
+- Zustand 5 state management with durable multi-conversation persistence
+- Staff analytics panel with escalation queue / ticket visibility
 
 **Voice capabilities (2026):**
-- Listen button on every assistant reply (per-language TTS via `/v1/tts`)
-- Voice mode toggle (MediaRecorder -> `/v1/voice/chat` compound endpoint)
-- Auto-narrate toggle (automatically plays TTS for every reply)
-- Speech health indicator (checks `/v1/speech/health` on mount)
-- Browser Speech Recognition API with server-side ASR fallback
-- Full Luganda <-> English translation in voice pipeline
-- AudioContext playback with barge-in (stop current audio on new input)
-- WCAG AA accessible: focus-visible, contrast ratios, reduced-motion support
+- Full-screen voice modal (Grok-style pulse rings + waveform + transcript)
+- Voice persona selection (5 voices: 3 English + 1 default + 1 Luganda)
+- Real TTS via edge-tts Microsoft neural / Sunbird native voices (fallback)
+- ASR via Whisper+LoRA (fine-tuned Luganda, local-first) + Sunbird cloud fallback
+- Translation via Qwen3-8B prompted MT (local) + Sunbird NLLB (fallback)
+- Listen button on every reply + auto-narrate toggle
+- Complete voice chat compound pipeline (ASR -> MT -> LLM -> MT -> TTS)
+- AudioWorklet-based streaming with ScriptProcessorNode fallback
+
+**Evaluation dashboards (IEEE-standard):**
+- RAG quality radar chart (10 metrics)
+- Calibration reliability curve + coverage-accuracy plot
+- Safety refusal rates by attack category
+- Benchmark throughput by prompt class
+- Tokenizer fertility comparison (EN vs LG)
+- Confusion matrix heatmap
+- Quality gates pass/fail table
+
+**Accessibility (WCAG 2.1 AA):**
+- Skip-to-content link, ARIA labels, keyboard navigation
+- 44px minimum touch targets on mobile
+- `@prefers-reduced-motion` disables all animations
+- Focus-visible rings, semantic HTML, aria-live regions
 
 **Key files:**
-- `src/services/voiceService.ts` — AudioRecorder, playback, all speech API wrappers
-- `src/app/page.tsx` — Chat UI with voice controls
-- `src/app/globals.css` — Design system with voice styles
-- `src/store/useChatStore.ts` — Zustand state
-- `src/store/useAnalyticsStore.ts` — Analytics with offline queue
+- `src/components/VoiceModal.tsx` — Voice recording UI (pulse rings + waveform)
+- `src/components/Markdown.tsx` — Zero-dep markdown renderer with citation pills
+- `src/components/MermaidDiagram.tsx` — Lazy Mermaid diagram renderer
+- `src/components/ConsentBanner.tsx` — GDPR consent banner
+- `src/app/analytics/evaluation/page.tsx` — IEEE evaluation dashboard
+- `src/services/voiceService.ts` — AudioRecorder, playback, speech API wrappers
+- `src/store/useChatStore.ts` — Multi-conversation Zustand state
 
 **Run locally:**
 ```bash
 cd App/frontend
 bun install
-bun dev
+INTERNAL_API_URL=http://127.0.0.1:8887 bun run dev --port 3300
+```
+
+**Frontend configuration for voice/speech:**
+
+The frontend uses a same-origin `/api/*` proxy (`next.config.mjs`) to forward
+all API calls to the backend. The browser never talks directly to the backend.
+
+| Config | Location | Value |
+|--------|----------|-------|
+| API proxy target | `.env.local` `INTERNAL_API_URL` | `http://127.0.0.1:8887` |
+| CSP `connect-src` | `next.config.mjs` | `'self'` (+ `ws:` in dev) |
+| Permissions-Policy | `next.config.mjs` | `microphone=(self)` allows mic |
+| Audio capture | `voiceService.ts` | PCM16 LE @ 16 kHz, MediaRecorder |
+| Fetch timeout | `voiceService.ts` | 30s (60s for compound voice chat) |
+| Allowed dev origins | `next.config.mjs` | `127.0.0.1`, `localhost`, LAN IP |
+
+## Live Smoke Checks
+
+Repeatable live verification for the backend and frontend proxy layer:
+
+```bash
+cd App
+chmod +x scripts/live_smoke.sh
+BACKEND_URL=http://127.0.0.1:8887 \
+FRONTEND_URL=http://127.0.0.1:13000 \
+./scripts/live_smoke.sh
+```
+
+Or from the frontend package:
+
+```bash
+cd App/frontend
+bun run smoke:live
+```
+
+What it checks:
+- `GET /health`
+- `GET /ready`
+- `POST /v1/chat`
+- `POST /v1/chat/stream`
+- `GET /`
+- `GET /api/v1/speech/health`
+- `POST /api/v1/chat`
+- `POST /api/v1/chat/stream`
+
+Optional env vars:
+- `BACKEND_URL` — backend base URL, default `http://127.0.0.1:8887`
+- `FRONTEND_URL` — frontend base URL, default `http://127.0.0.1:13000`
+- `SMOKE_TIMEOUT_SECONDS` — per-request timeout, default `60`
+- `SMOKE_RUN_ID` — override the generated conversation/test run suffix
+
+## Deploy Preflight
+
+Use the deploy preflight wrapper when you need the stack to block on
+readiness plus a full live smoke gate:
+
+```bash
+cd App
+chmod +x scripts/deploy_preflight.sh
+BACKEND_URL=http://127.0.0.1:8887 \
+FRONTEND_URL=http://127.0.0.1:13000 \
+./scripts/deploy_preflight.sh
+```
+
+What it does:
+- waits for backend `GET /health`
+- waits for backend `GET /ready`
+- waits for frontend `GET /`
+- waits for frontend `GET /api/v1/speech/health`
+- runs the full `scripts/live_smoke.sh` suite only after those URLs are reachable
+
+Useful env vars:
+- `PREFLIGHT_WAIT_TIMEOUT_SECONDS` — total readiness wait budget, default `180`
+- `PREFLIGHT_POLL_INTERVAL_SECONDS` — polling cadence, default `2`
+
+Convenience command from the frontend package:
+
+```bash
+cd App/frontend
+bun run preflight:deploy
 ```
 
 ## Deployment
 
 ### Hugging Face Spaces
 
-1. Copy `app.py`, `requirements.txt`, and `README_HF.md` to your Space
-2. Rename `README_HF.md` to `README.md`
+1. Copy `app.py` and `requirements.txt` to your Space
+2. Create a Space `README.md` from the relevant App runtime notes
 3. Ensure model files are in the HF Model repository
 
 ### Docker
@@ -161,15 +783,16 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 |----------|-------------|---------|
 | `HF_MODEL_REPO` | Hugging Face model repository | `mpairweLandwind/ura-chatbot` |
 | `HF_TOKEN` | Hugging Face API token | - |
-| `API_URL` | Backend API URL | `http://localhost:8000` |
+| `API_URL` | Backend API URL | `http://localhost:8887` |
 | **LLM Generation** | | |
-| `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen2.5-3B-Instruct` |
+| `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen3-8B` |
 | `LLM_MODEL_REVISION` | Pin to a specific HF commit SHA (SLSA provenance) | _unset_ |
 | `LLM_TRUST_REMOTE_CODE` | Allow model-defined Python (OWASP LLM03 off by default) | `false` |
-| `LLM_CONTEXT_WINDOW` | Hard cap on prompt tokens (tokenizer-aware trimming) | `6144` |
+| `LLM_CONTEXT_WINDOW` | Hard cap on prompt tokens (tokenizer-aware trimming) | `8192` |
 | `LLM_ENABLED` | Enable LLM generation | `true` |
 | `LLM_DEVICE` | Inference device (`auto`/`cpu`/`cuda`) | `auto` |
 | `LLM_TORCH_DTYPE` | Tensor dtype | `auto` |
+| `LLM_LOAD_IN_4BIT` | Enable BitsAndBytes NF4 4-bit loading for local Qwen | `false` |
 | `LLM_TEMPERATURE` | Generation temperature | `0.2` |
 | `LLM_MAX_TOKENS` | Max new tokens | `512` |
 | `LLM_DEADLINE_SECONDS` | Hard wall-clock deadline per LLM call | `45` |
@@ -190,7 +813,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `SLOWAPI_STORAGE_URI` | Set to `redis://host:6379` for multi-replica rate limits | _in-process_ |
 | **Retrieval** | | |
 | `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` |
-| `DENSE_MODEL` | Embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
+| `DENSE_MODEL` | Embedding model | `BAAI/bge-m3` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
@@ -218,14 +841,113 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_SEMANTIC_CACHE` | Semantic query cache | `true` |
 | `FLAG_QUERY_REWRITE` | Spell / abbrev / coreference | `true` |
 | `FLAG_RERANKER` | Cross-encoder reranking | `true` |
-| **Agentic flags (Phase 14 A-D)** | | |
-| `FLAG_TOOL_USE` | Qwen2.5 native tool-calling loop | `false` |
-| `FLAG_AGENTIC_MODE` | Supervisor classifier routes every request | `false` |
+| **Agentic flags (Phase 14–18)** | | |
+| `FLAG_TOOL_USE` | Allow registered tools through the bounded agentic loop | `false` |
+| `FLAG_AGENTIC_MODE` | Enable supervisor routing for tools / specialists | `false` |
 | `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
+| `FLAG_AUTH_REQUIRED` | Reject unauthenticated private `/v1/*` routes | `false` |
+| `FLAG_WORKFLOWS` | YAML-driven durable multi-step workflow guides | `true` |
+| `FLAG_HANDOFF_SUMMARIES` | Structured human handoff packets + escalation metadata | `true` |
+| `FLAG_MEMORY_ENABLED` | Inject consented personal memory facts into prompts | `false` |
+| **Voice-first flags (Phase 23)** | | |
+| `FLAG_VOICE_STREAMING` | Enable WebSocket streaming voice chat (VAD + barge-in) | `false` |
+| `FLAG_VOICE_CONSENT` | Enforce voice-specific consent checks before audio processing | `false` |
+| **Voice-first config (Phase 23)** | | |
+| `VOICE_VAD_ENERGY_THRESHOLD` | RMS energy threshold for VAD speech detection | `0.015` |
+| `VOICE_VAD_SILENCE_MS` | Silence duration (ms) before utterance end | `600` |
+| `VOICE_VAD_MIN_SPEECH_MS` | Minimum speech duration (ms) to process | `250` |
+| `VOICE_VAD_MAX_UTTERANCE_S` | Maximum utterance duration (seconds) | `30.0` |
+| `VOICE_RAW_AUDIO_TTL_H` | Raw audio retention (hours), 0 = never store | `24` |
+| `VOICE_TRANSCRIPT_TTL_DAYS` | Transcript retention (days) | `90` |
+| `VOICE_STORE_RAW_AUDIO` | Store raw audio to disk (for debugging) | `false` |
+| `ACCENT_CONFIDENCE_THRESHOLD` | Min confidence for accent-specific adapter | `0.7` |
+| `WHISPER_ADAPTER_EN_UG_CENTRAL` | Path to Ugandan Central English LoRA adapter | _unset_ |
+| `WHISPER_ADAPTER_EN_UG_EASTERN` | Path to Ugandan Eastern English LoRA adapter | _unset_ |
+| `WHISPER_ADAPTER_CODE_SWITCH` | Path to code-switching LoRA adapter | _unset_ |
+| `NEXT_PUBLIC_WS_URL` | WebSocket URL for voice streaming (prod) | _derived from host_ |
 | **Host / HuggingFace** | | |
 | `HF_HOME` | Writable HF cache location | `~/.cache/huggingface` |
-| `INTERNAL_API_URL` | Next.js rewrite target (server-side) | `http://127.0.0.1:18000` |
+| `INTERNAL_API_URL` | Next.js rewrite target (server-side) | `http://127.0.0.1:8887` |
 | `NEXT_PUBLIC_API_URL` | Browser-side API URL (bake-time) | `/api` |
+| **Authentication (OIDC)** | | |
+| `AUTH_ALG` | JWT algorithm (`HS256` dev / `RS256` production) | `HS256` |
+| `AUTH_DEV_SECRET` | Dev shared secret (MUST change for production) | `dev-insecure-change-me` |
+| `OIDC_ISSUER` | Token issuer URL (checked if set) | _unset_ |
+| `OIDC_AUDIENCE` | Token audience | `ura-chatbot` |
+| `OIDC_JWKS_URL` | JWKS endpoint (required for RS256) | _unset_ |
+| `OIDC_JWKS_CACHE_TTL_S` | JWKS cache TTL in seconds | `3600` |
+| `OIDC_JWKS_TIMEOUT_S` | JWKS fetch timeout | `5` |
+| `APP_ENV` | `development` or `production` (gates startup validation) | `development` |
+| **LoRA Adapters** | | |
+| `LORA_ADAPTER_PATH` | Single-language LoRA adapter path (backward-compat) | _unset_ |
+| `LORA_ADAPTER_LG` | Luganda LoRA adapter path | _unset_ |
+| `LORA_ADAPTER_SW` | Swahili LoRA adapter path | _unset_ |
+| `LORA_ADAPTER_NYN` | Runyankole LoRA adapter path | _unset_ |
+| `LORA_ADAPTER_ACH` | Acholi LoRA adapter path | _unset_ |
+| **Speech Pipeline (local-first)** | | |
+| `SPEECH_ENABLED` | Enable speech subsystem on startup | `true` |
+| `SPEECH_ASR_BACKEND` | ASR backend (`auto`/`sherpa`/`transformers`/`mock`) | `auto` |
+| `SPEECH_TTS_BACKEND` | TTS backend (`auto`/`sherpa`/`piper`/`mock`) | `auto` |
+| `SPEECH_MT_BACKEND` | MT backend: `prompted` (Qwen3) / `auto` (MADLAD) / `mock` | `prompted` |
+| `SPEECH_DEADLINE_S` | Hard deadline per speech call (seconds) | `120` |
+| `SPEECH_MAX_CONCURRENCY` | Bounded speech thread-pool size | `4` |
+| `SPEECH_EN_VOICE` | English TTS voice name | `en_US-lessac-medium` |
+| `SPEECH_LG_VOICE` | Luganda TTS voice name | `luganda-vits-v1` |
+| `WHISPER_ADAPTER_PATH` | Whisper LoRA adapter for Luganda ASR (legacy) | _unset_ |
+| `WHISPER_ADAPTER_LG` | Whisper+LoRA adapter (Luganda) — primary ASR backend | `artifacts/speech/asr/whisper_lg/final` |
+| `WHISPER_ADAPTER_SW` | Whisper+LoRA adapter (Swahili) | _unset_ |
+| `WHISPER_ADAPTER_NYN` | Whisper+LoRA adapter (Runyankole) | _unset_ |
+| `WHISPER_DEVICE` | Whisper device: `cpu`, `auto`, or `cuda[:index]`; production compose pins CPU | `cpu` |
+| `SUNBIRD_API_TOKEN` | Sunbird AI cloud API JWT (cloud fallback for ASR/TTS/MT) | _unset_ |
+| **Audit Ledger (Phase 21)** | | |
+| `FLAG_AUDIT_LEDGER` | Enable hash-chained audit event logging | `false` |
+| `FLAG_VOICE_ENABLED` | Gate mobile on-device voice UI and scoped analytics | `false` |
+
+### Production Configuration Summary (2026)
+
+**Fallback chain architecture (local-first):**
+
+All speech subsystems prioritize local inference models over cloud APIs.
+Sunbird AI cloud is the final fallback when local backends are unavailable.
+
+```
+ASR: Whisper+LoRA (local) -> Sherpa (local) -> faster-whisper (local) -> Sunbird (cloud)
+TTS: Sherpa/Piper (local) -> edge-tts (internet) -> Sunbird (cloud)
+MT:  Qwen3-8B prompted (local) -> MADLAD+LoRA (local) -> Sunbird (cloud)
+LLM: Qwen3-8B (local) — always local, no cloud fallback
+```
+
+**Security headers (production):**
+
+| Header | Backend (`main.py`) | Frontend (`next.config.mjs`) |
+|--------|--------------------|-----------------------------|
+| `Permissions-Policy` | `microphone=(self)` | `microphone=(self)` |
+| `Content-Security-Policy` | N/A (API only) | `connect-src 'self'` |
+| `X-Frame-Options` | `DENY` | `DENY` |
+| `HSTS` | `max-age=63072000` | `max-age=63072000` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | `strict-origin-when-cross-origin` |
+
+**Port allocation:**
+
+| Service | Port | Required |
+|---------|------|----------|
+| Backend (FastAPI) | 8887 | yes |
+| Frontend (Next.js) | 3300 | yes |
+| Qdrant | 6333 | yes |
+| Redis | 6379 | optional (rate limiting) |
+
+**Tested endpoints (2026-04-29):**
+
+| Endpoint | Backend | Latency | Status |
+|----------|---------|---------|--------|
+| `GET /health` | FastAPI | <10ms | working |
+| `GET /v1/speech/health` | SpeechModel | <10ms | ready |
+| `POST /v1/asr` | `whisper_peft` (Whisper+LoRA) | ~14s | working |
+| `POST /v1/tts` | `mock` / `edge_tts` | <1s | working |
+| `POST /v1/translate` (en->lg) | `prompted_qwen3` | ~6s | working |
+| `POST /v1/translate` (lg->en) | `prompted_qwen3` | ~17s | working |
+| `POST /v1/chat` | Qwen3-8B RAG | ~20s | working |
+| Frontend `/api/*` proxy | Next.js rewrite | +<5ms overhead | working |
 
 ### 2026 production upgrade notes
 
@@ -413,7 +1135,7 @@ into the client JS bundle at build time (Next.js inlines
 Fix applied in `frontend/next.config.mjs`:
 
 - New `rewrites()` block proxies `/api/:path*` →
-  `${INTERNAL_API_URL}/:path*` (default `http://127.0.0.1:18000`).
+  `${INTERNAL_API_URL}/:path*` (default `http://127.0.0.1:8887`).
 - CSP `connect-src` simplified to `'self'` — the browser never
   crosses origins, so no CORS and no baked host:port.
 - Frontend rebuilt with `NEXT_PUBLIC_API_URL=/api` (relative).
@@ -528,33 +1250,47 @@ QDRANT_URL=http://127.0.0.1:6333 \
 # 5. Run the FastAPI backend
 LLM_ENABLED=false QDRANT_URL=http://127.0.0.1:6333 REDIS_URL=redis://127.0.0.1:6379/0 \
   CACHE_BACKEND=redis SLOWAPI_STORAGE_URI=redis://127.0.0.1:6379/1 \
-  .venv/bin/python -m uvicorn App.backend.app.main:app --port 18000
+  .venv/bin/python -m uvicorn App.backend.app.main:app --port 8887
 
 # 6. In another terminal, run the frontend
 cd App/frontend
-NEXT_PUBLIC_API_URL=/api INTERNAL_API_URL=http://127.0.0.1:18000 bun run build
-NEXT_PUBLIC_API_URL=/api INTERNAL_API_URL=http://127.0.0.1:18000 bun run next start -p 13000
+NEXT_PUBLIC_API_URL=/api INTERNAL_API_URL=http://127.0.0.1:8887 bun run build
+INTERNAL_API_URL=http://127.0.0.1:8887 PORT=13000 HOSTNAME=0.0.0.0 node .next/standalone/server.js
+
+# 7. Optional: block on readiness + full live smoke verification
+cd ..
+./scripts/deploy_preflight.sh
 ```
 
 Open http://localhost:13000 in a browser.  Feedback, citations, and
 SSE streaming are all proxied through the `/api` rewrite so no ports
 need to be exposed beyond 13000.
 
-**Option B — enable real LLM inference on a specific GPU:**
+**Option B — vLLM inference (Qwen3-8B) with full voice pipeline:**
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 \
-  HF_HOME=~/hf-cache \
-  LLM_ENABLED=true LLM_DEVICE=cuda LLM_TORCH_DTYPE=bfloat16 \
-  QDRANT_URL=http://127.0.0.1:6333 \
-  REDIS_URL=redis://127.0.0.1:6379/0 \
-  CACHE_BACKEND=redis SLOWAPI_STORAGE_URI=redis://127.0.0.1:6379/1 \
-  .venv/bin/python -m uvicorn App.backend.app.main:app --port 18000
+# 1. Start vLLM on a free GPU
+docker run -d --name ura-vllm --gpus '"device=7"' --ipc=host \
+  -p 8011:8001 -v ~/.cache/huggingface:/root/.cache/huggingface \
+  vllm/vllm-openai:v0.8.5 \
+  --model Qwen/Qwen3-8B --port 8001 --max-model-len 8192 \
+  --enable-auto-tool-choice --tool-call-parser hermes
+
+# 2. Start the backend (embeddings on GPU 4, LLM via vLLM HTTP)
+cd App/backend
+CUDA_VISIBLE_DEVICES=4 LLM_BACKEND=vllm VLLM_BASE_URL=http://localhost:8011/v1 \
+  FLAG_TOOL_USE=true FLAG_AGENTIC_MODE=true \
+  PYTHONPATH=/path/to/FinalYearProject:/path/to/FinalYearProject/App/backend \
+  .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8009
+
+# 3. Start the frontend (in another terminal)
+cd App/frontend
+INTERNAL_API_URL=http://127.0.0.1:8009 bun run dev --port 8010
 ```
 
-Qwen2.5-3B downloads to `~/hf-cache` on first boot (~6 GB, one-time).
-After that, every chat hits hybrid retrieval + LLM synthesis on the
-pinned GPU.
+Open http://localhost:8010. All chat, voice (ASR + TTS), agentic
+tool-calling, and IEEE evaluation dashboard are proxied through
+the Next.js `/api` rewrite.
 
 **Option C — full production stack with Postgres + vLLM + Caddy TLS:**
 
@@ -595,7 +1331,7 @@ an operator flips a flag.
   (wraps the existing hybrid retriever), `escalate_to_human`
 - Auto-registration via `__init__.py` import hook
 
-**Phase B — Qwen2.5 tool-calling loop** (`App/backend/app/llm.py`)
+**Phase B — Qwen3 tool-calling loop** (`App/backend/app/llm.py`)
 - `generate_with_tools()` — bounded (`max_iterations=3`) tool-call
   loop using Qwen's native `apply_chat_template(tools=...)` format
 - `_parse_tool_calls()` handles parallel calls, string-encoded
@@ -638,6 +1374,199 @@ tool — see:
 
 - [`docs/AGENT_ARCHITECTURE.md`](../docs/AGENT_ARCHITECTURE.md)
 
+## Phase 15–20 — Production hardening + UI redesign (April 2026)
+
+**Phase 15 — Qwen3-8B fine-tuning config + vLLM backend**
+
+- `ml/scripts/fine_tune_gemma.py` — Added `web_qwen3_8b` and `web_qwen3_4b`
+  presets to `MODEL_CONFIGS`, plus `_messages_to_qwen_text()` (ChatML template)
+  and `format_for_qwen()` for Qwen3-specific training data formatting.
+  Model type detection recognises "qwen" and routes to the correct template.
+- `App/backend/app/service.py` — Model name derived dynamically from
+  `LLM_MODEL` env var instead of hardcoded `"ura-qwen2.5-3b-instruct"`.
+- `.env.example` — Added `LLM_BACKEND`, `VLLM_BASE_URL`, `VLLM_API_KEY`,
+  `VLLM_HTTP_TIMEOUT`, and all `FLAG_*` env vars.
+
+**Phase 16 — Agentic mode activation + vLLM tool-calling**
+
+- `App/backend/app/llm.py` — New `_vllm_generate_with_tools()` function
+  implements the full OpenAI-compatible tool-calling loop over vLLM HTTP.
+  Dispatches tool calls via `ToolRegistry.call()`, feeds results back,
+  bounded by `max_iterations`. Added `_strip_thinking()` to remove
+  Qwen3's `<think>` reasoning blocks from all output paths.
+- `App/backend/app/flags.py` — `tool_use` and `agentic_mode` remain
+  feature-flagged off by default. Agentic tool-calling only activates
+  when the supervisor explicitly routes to TOOLS/SPECIALIST or when the
+  deployment enables those flags for a controlled rollout.
+- `App/backend/app/service.py` — Fixed `use_agentic` logic: now only
+  `force_agentic` (supervisor decision), not `FLAG_TOOL_USE` alone,
+  triggers the tool-calling path. This prevents double-search degradation
+  on simple factual queries.
+
+**Phase 17 — YAML workflow engine (guided task flows)**
+
+- `App/backend/app/workflows/` — New package with 4 modules:
+  - `slots.py` — Slot validators (enum, regex, boolean, text)
+  - `loader.py` — YAML → `WorkflowDefinition` dataclass parser
+  - `registry.py` — `WorkflowRegistry` + `WorkflowSession` runtime with
+    conditional step evaluation and trigger phrase matching
+  - Workflow flows now include `tin_registration`, `return_filing`,
+    `objection_or_dispute`, `payment_assistance`, and
+    `customs_clearance`
+- `App/backend/app/flags.py` — `FLAG_WORKFLOWS` now defaults to `true`
+  so high-intent task queries can be routed into guided flows by default
+
+**Phase 18 — UI redesign (Grok-inspired, production-grade)**
+
+*New components:*
+- `VoiceModal.tsx` (202 lines) — Full-screen Grok-inspired voice recording
+  modal with animated pulse rings (3-layer CSS animation), real-time
+  waveform visualisation (Web Audio AnalyserNode → canvas), live transcript
+  display, and Cancel (red) / Send (green) action buttons.
+- `VoiceSettings.tsx` (148 lines) — Voice persona selection modal with
+  5 voice options (3 English + 1 default + 1 Luganda), preview play
+  buttons via TTS API, and "Active" badge on selected voice.
+- `Markdown.tsx` (288 lines) — Zero-dependency markdown renderer
+  supporting bold, italic, inline code, headings (h2-h4), lists, ordered
+  lists, blockquotes, code blocks, horizontal rules, links (XSS-safe:
+  only `https?://` allowed), and `[1]` citation reference pills
+  (rendered as violet superscript badges).
+- `MermaidDiagram.tsx` (140 lines) — Lazy-loaded (`React.lazy` + `Suspense`)
+  Mermaid 11 diagram renderer with dark theme matching design tokens.
+  SVG output sanitised (strips `<script>`, `on*` handlers, `<foreignObject>`).
+- `ConsentBanner.tsx` (57 lines) — GDPR/UDPA analytics consent banner
+  with Accept/Decline buttons, persists to localStorage.
+
+*Enhanced components:*
+- `ChatMessage.tsx` — Added `CopyButton` (clipboard copy with "Copied"
+  checkmark feedback), `MessageTime` timestamps on every message, split
+  action bar into left (copy + listen) and right (feedback + time).
+  Assistant messages now render through `<Markdown />` instead of plain text.
+- `Icons.tsx` — Added `GearIcon`, `CopyIcon`, `CheckIcon` (17 total).
+- `ConversationRail.tsx` — `RelativeTime` component defers to client-only
+  rendering via `useEffect` to prevent SSR hydration mismatch.
+
+*New pages:*
+- `not-found.tsx` — Branded 404 page with gradient heading + back link.
+- `analytics/error.tsx` — Segment-level error boundary for analytics routes.
+- `analytics/evaluation/page.tsx` — IEEE-standard evaluation dashboard
+  with 5 sections: RAG quality radar, calibration reliability/coverage
+  curves, safety refusal bar chart, benchmark throughput chart, tokenizer
+  fertility comparison, confusion matrix heatmap, quality gates table.
+
+*CSS additions (650+ lines):*
+- Voice modal: pulse rings, waveform canvas, transcript panel, action buttons
+- Voice settings: voice option cards, preview play, active badge
+- Markdown typography: headings, lists, code blocks, blockquotes, citation pills
+- Mermaid diagram container: dark panel, responsive SVG, loading/error states
+- Consent banner: fixed bottom, responsive (stacks on mobile)
+- Message enhancements: copy button, timestamps, split action bar
+- Mobile: composer fixed dock, 44px touch targets (WCAG 2.1 AA)
+- `@prefers-reduced-motion` disables all animations
+
+**Phase 19 — Voice pipeline fix (ASR + TTS end-to-end)**
+
+- **Root cause:** `PYTHONPATH` excluded the project root, so
+  `from ml.scripts.asr.infer_asr import AsrTranscriber` raised
+  `ModuleNotFoundError`. All speech services (ASR, TTS, MT, lang-ID)
+  failed silently on startup.
+- **ASR fix:** `ml/scripts/asr/infer_asr.py` — Transformers backend
+  now falls back to `openai/whisper-small` from HuggingFace when the
+  local model path doesn't exist (instead of returning `None`).
+- **TTS fix:** `ml/scripts/tts/infer_tts.py` — New `_synth_edge()`
+  backend using Microsoft Edge Neural TTS (0.4s latency, neural voice
+  quality). Added `edge` to backend priority chain: sherpa → edge →
+  piper → mock. Uses `imageio-ffmpeg` for MP3→WAV decode.
+- **Speech service:** `App/backend/app/speech_service.py` — Simplified
+  `_do_synthesize()` with clean priority chain instead of double-call pattern.
+- **Dependencies:** Installed `edge-tts@7.2.8`, `imageio-ffmpeg@0.6.0`.
+- **LLM prompt:** Added rule 12 to SYSTEM_PROMPT instructing Qwen3-8B
+  to include mermaid diagrams for multi-step processes.
+
+**Phase 20 — Security hardening + gap closure**
+
+- **SSE robustness:** `main.py` — Added `request.is_disconnected()` check
+  in SSE token loop + 15-second keepalive ping to prevent proxy timeouts.
+- **XSS prevention:** Markdown links block `javascript:`, `data:`,
+  `vbscript:` protocols. Mermaid SVG output sanitised before `innerHTML`.
+- **GDPR compliance:** Analytics `trackEvent()` respects consent stored
+  in `ura_analytics_consent` localStorage key.
+- **Backend evaluation API:** New `GET /v1/evaluation/results` endpoint
+  serves all pre-computed Results/ JSON files as a consolidated bundle
+  for the IEEE evaluation dashboard.
+- **PWA:** `manifest.json`, service worker (cache-first assets,
+  network-first pages), app icons (SVG), `robots.txt`, Apple Web App
+  metadata, service worker registration in layout.
+
+**Phase 21 — Audit ledger + hash-chained compliance log**
+
+- **Audit ledger:** Hash-chained append-only `audit_events` table with
+  tamper-evident integrity. Every `generate()` outcome (blocked, cached,
+  clarified, escalated, abstained, happy-path) appends an event via
+  `_audit_turn()` in `service.py`. Payloads store SHA-256 hashes of
+  queries and replies (no raw PII), plus metadata: retrieval_mode,
+  num_sources, faithfulness_score, escalation_required, model, locale,
+  input_tokens, output_tokens, tool_calls, agent_route, ticket_id.
+- **Hash chain:** Each row stores `row_hash = sha256(prev_hash +
+  payload_hash)`. The first row uses `GENESIS_HASH = "0" * 64`.
+  Tampering with any row breaks the chain for all subsequent rows.
+- **Merkle anchoring:** `compute_merkle_root()` in `audit/merkle.py`
+  computes Bitcoin-style Merkle roots over batches of payload hashes.
+  Roots stored in `audit_anchors` table for batch integrity proofs.
+- **Verification:** `verify_chain(tenant_id)` in `audit/verifier.py`
+  rewalks all rows and recomputes every hash. Returns a
+  `VerificationReport` with `valid`, `rows_checked`, `breaks[]`.
+- **Schema:** `audit_events` (event_id TEXT PK, event_type, tenant_id,
+  user_id, payload JSON, ts REAL, seq INTEGER, prev_hash, payload_hash,
+  row_hash). `audit_anchors` (anchor_id TEXT PK, tenant_id, first_seq,
+  last_seq, merkle_root, created_at).
+- **Feature flag:** `FLAG_AUDIT_LEDGER` (default false) gates all writes.
+  Failures are swallowed — a broken audit DB never blocks a user response.
+- **UDPA erasure:** Right-to-erasure writes a tombstone event so the
+  hash chain remains verifiable while PII is removed.
+
+## Current Runtime State (May 2026)
+
+- **Model default:** `Qwen/Qwen3-8B` is the default model in code, API responses, and tracing metadata.
+- **4-bit Qwen runtime:** local Transformers loads Qwen with BitsAndBytes NF4 when `LLM_LOAD_IN_4BIT=true`, while vLLM remains available through `LLM_BACKEND=vllm`.
+- **Locale LoRA routing:** production compose mounts `../fine-tuning/adapters:/app/adapters:ro` and exposes `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH`; multi-adapter mode uses PEFT `set_adapter()` instead of merging.
+- **Whisper GPU isolation:** Whisper adapters for `lg`, `sw`, and `nyn` are mounted from `/app/adapters`, with `WHISPER_DEVICE=cpu` so ASR does not compete with Qwen on GPU 0.
+- **Anonymous public assistant:** `/v1/chat`, `/v1/chat/stream`, speech health, TTS, translation, and consented voice processing work without login. Anonymous requests use `role=public` and cannot access account/action tools.
+- **Private/admin auth:** `/v1/me/*`, admin/ticket, feedback governance, analytics dashboards, metrics, evaluation exports, offline bundles, and URA account/action surfaces fail closed behind verified bearer tokens and/or staff roles.
+- **Voice consent:** anonymous voice/ASR requests must send `X-Voice-Consent: true`; streaming voice sends `voice_consent_accepted=true` in `session_start`.
+- **Durable thread identity:** `conversation_id` is a stable thread key across turns; it is no longer regenerated per reply.
+- **Guided workflows:** the backend ships five guided flows out of the box: `tin_registration`, `return_filing`, `objection_or_dispute`, `payment_assistance`, and `customs_clearance`.
+- **Response governance:** `ChatResponse` now carries `agent_role`, `workflow`, `handoff`, `response_judge`, `next_actions`, and `ticket_id` where applicable.
+- **Streaming behavior:** `/v1/chat/stream` and `/api/v1/chat/stream` stream progressively, sanitize chunked output before emission, and support a `revision` event when the `response_judge` replaces a provisional answer.
+- **Consent + personalization:** frontend analytics are consent-gated, and memory-backed personalization only activates when the deployment enables it and the user has granted consent.
+- **Operational verification:** `scripts/live_smoke.sh` provides repeatable live endpoint verification, and `scripts/deploy_preflight.sh` gates deployments on readiness plus the full smoke suite.
+- **Mobile chat UX:** the frontend keeps the input composer docked at the bottom with safe-area/keyboard offsets, auto-scrolls new assistant turns when the user is near the latest message, preserves manual scroll position when reviewing earlier messages, and shows a scroll-to-latest button.
+
+**Verified ngrok anonymous smoke flow:**
+
+```bash
+curl -sS https://struttingly-nongeological-briella.ngrok-free.dev/api/health
+
+curl -sS -X POST https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "X-Session-ID: anonymous-smoke" \
+  -d '{"message":"How do I register for a TIN?","locale":"en"}'
+
+curl -sS https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/speech/health
+
+# Should remain protected:
+curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/tickets/stats
+```
+
+**Reference local stack (smoke / preflight defaults):**
+
+| Service | Port | GPU | Description |
+|---------|------|-----|-------------|
+| Backend (FastAPI) | 8887 | optional | RAG + workflows + auth + speech |
+| Frontend (Next.js 16) | 13000 | — | PWA + `/api` proxy + consent + analytics queue |
+| vLLM | 8011 | GPU 7 | Qwen/Qwen3-8B + tool-calling |
+| Qdrant | 6333 | CPU | dense + sparse retrieval index |
+
 ## Roadmap: from FAQ chatbot to personalized tax assistant
 
 Phases 1–13 above + Phase 14 A-D ship a hardened RAG chatbot with
@@ -673,24 +1602,230 @@ print(f"Tag: {result['tag']}")
 print(f"Confidence: {result['confidence']:.2%}")
 ```
 
-## Project Structure
+## Legacy HF Spaces Surface
 
-```
+For the lightweight Hugging Face Spaces deployment path, the legacy entry
+surface remains:
+
+```text
 App/
-├── classifier.py      # Main Gradio application
-├── README.md          # This file (HF Space metadata)
-└── requirements.txt   # Python dependencies
+├── app.py
+├── classifier.py
+└── requirements.txt
 ```
 
-## Training
+## ML Training Pipeline
 
-The model is trained on URA FAQ datasets. To retrain:
+The project includes a comprehensive MLOps pipeline for data preparation,
+model training, evaluation, and deployment. Configuration lives in
+`ml/configs/training_config.yaml`; orchestration runs via GitHub Actions
+(`.github/workflows/ci-ml-pipeline.yml`).
+
+### Data Sources
+
+| Source | Location | Description |
+|--------|----------|-------------|
+| CSV FAQs | `Data/dataset/ura_*_faqs.csv` | 41 structured Q&A files covering all URA tax categories |
+| PDF Handbooks | `Data/pdfs/` | 45+ URA guidance documents (VAT, TIN, customs, EFRIS, sector guides) |
+| Web Crawl | `Data/crawl/` | Daily crawled content from ura.go.ug (HTML pages + discovered PDFs) |
+| Luganda Parallel | `Data/TTT/` | Luganda-English sentence pairs for translation training |
+| Teacher QA | `Data/teacher_qa/` | LLM-generated QA from domain expert prompts |
+| Online Corpora | `Data/online_corpora/` | OPUS, JW300 for translation model training |
+| Audio | `Data/lgaudio/`, `Data/speech/` | Luganda speech clips for ASR/TTS training |
+| Evaluation | `Data/eval/` | `rag_eval.jsonl` (EN), `rag_eval_lg.jsonl` (LG), `redteam_corpus.jsonl` |
+
+### Data Augmentation Pipeline (4-stage)
+
+Orchestrated by `ml/scripts/data_augmentation.py`:
+
+```
+Stage 1 — Ingest
+  Load every enabled source as validated TrainingExamples (Pydantic schema).
+  Sources: CSV_FAQ, PDF_CORPUS, PDF_QA, TEACHER_QA, LUGANDA_PARALLEL,
+           LUGANDA_QA, REFUSAL, RETRIEVAL, WEB_CRAWL, ONLINE_CORPUS.
+
+Stage 2 — Normalize
+  Unicode NFKC + ftfy text repair + PII redaction (emails, phones, TINs).
+  Applied inside each source loader before validation.
+
+Stage 3 — Quality
+  Token-aware length filtering (8-2048 tokens), near-duplicate removal
+  (cosine threshold 0.85), per-source caps (e.g. luganda_parallel=5000,
+  pdf_corpus=2000), and FineWeb-Edu style quality classification.
+
+Stage 4 — Format
+  Stratified split (train/val/test) → output:
+    train.messages.jsonl   (TRL-ready OpenAI ChatML format)
+    val.messages.jsonl
+    test.messages.jsonl
+    train.parquet / val.parquet / test.parquet
+    manifest.json          (provenance: git SHA + content hashes + stats)
+    DATA_CARD.md           (human-readable metadata)
+```
 
 ```bash
-python ml/pipelines/train.py --config ml/configs/training_config.yaml
+# Run the full augmentation pipeline
+uv run python -m ml.scripts.data_augmentation \
+  --output-dir artifacts/training_data \
+  --quality-threshold 0.45 \
+  --near-dup-threshold 0.85
 ```
 
-## Links
+### Web Crawler Pipeline
+
+Automated via `ml/scripts/data_aug/crawler.py` and scheduled daily at
+04:00 UTC (`.github/workflows/scheduled-crawl.yml`):
+
+```
+1. CDX Discovery     — query Wayback Machine CDX API for all archived ura.go.ug URLs
+2. Direct Fetch      — live HTTP requests to ura.go.ug pages
+3. Wayback Fetch     — exact-timestamp snapshots (fallback if direct fails)
+4. Content Extract   — BeautifulSoup parsing + table extraction (structured + markdown)
+5. Deduplication     — content-hash dedup to skip already-crawled pages
+6. Deep-Link BFS     — follow PDFs and internal links discovered in page content
+7. PDF Download      — new PDFs saved to Data/pdfs/
+8. State Persist     — crawl_state.json updated and committed (max 200 pages/run)
+```
+
+### Model Fine-Tuning
+
+**Qwen3-8B QLoRA (Luganda):**
+
+| Parameter | Value |
+|-----------|-------|
+| Base model | Qwen/Qwen3-8B |
+| Method | QLoRA via Unsloth/PEFT |
+| LoRA rank (r) | 32 |
+| LoRA alpha | 64 |
+| Target modules | 7 (q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj) |
+| Training data | 3,800 Luganda ChatML pairs |
+| Epochs | 3 |
+| Trainer | SFTTrainer (TRL) |
+| Output | safetensors adapter (~349 MB), merged at inference via `LORA_ADAPTER_PATH` |
+
+**Whisper-small LoRA (Luganda ASR):**
+
+| Parameter | Value |
+|-----------|-------|
+| Base model | openai/whisper-small |
+| Method | LoRA via PEFT |
+| LoRA rank (r) | 16 |
+| LoRA alpha | 32 |
+| Target modules | q_proj, v_proj |
+| Training data | 2,478 FLEURS Luganda speech clips |
+| Epochs | 3 |
+| Trainer | Seq2SeqTrainer |
+| Output | safetensors adapter (~7 MB), merged at inference via `WHISPER_ADAPTER_LG` |
+
+**Additional presets** in `ml/scripts/fine_tune_gemma.py`:
+
+| Preset | Model | LoRA r | Epochs | Use Case |
+|--------|-------|--------|--------|----------|
+| `web_high_accuracy` | Gemma-2-2B-it | 16 | 3 | High-accuracy web deployment |
+| `mobile_gemma_2b` | Gemma-2-2B-it | 8 | 5 | Mobile on-device (GGUF) |
+| `mobile_offline` | Llama-3.2-1B | 8 | 5 | Lightweight offline mobile |
+| `background_t5` | flan-t5-small | 8 | 10 | Background classification |
+
+```bash
+# Fine-tune Qwen3-8B with QLoRA
+uv run python -m ml.scripts.fine_tune_gemma \
+  --preset web_qwen3_8b \
+  --data artifacts/training_data/train.messages.jsonl
+
+# Fine-tune Whisper for Luganda ASR
+uv run python -m fine-tuning.scripts.04_finetune_whisper_luganda
+```
+
+### Evaluation Pipeline
+
+The evaluation system runs across 5 dimensions via dedicated scripts in
+`ml/pipelines/`:
+
+| Script | Metrics | Thresholds |
+|--------|---------|------------|
+| `evaluate.py` | Accuracy, F1 (macro/weighted), precision, recall, latency (p50/p95/p99) | accuracy >= 0.85, F1 >= 0.75 |
+| `evaluate_rag.py` | Faithfulness, answer relevancy, context precision/recall, groundedness, citation accuracy | faithfulness >= 0.6, answer_relevancy >= 0.65 |
+| `evaluate_speech.py` | WER, CER, RTF by language (EN/LG/SW/NYN/ACH) | WER_en <= 0.15, WER_lg <= 0.25 |
+| `evaluate_mt.py` | BLEU, chrF, length ratio, hallucination rate by direction | BLEU_en_lg >= 15.0, hallucination <= 0.05 |
+| `evaluate_safety.py` | Red-team refusal rate, CoT leak detection | refusal >= 0.90, CoT_leak <= 0.05 |
+| `evaluate_tts.py` | Roundtrip intelligibility, RTF, speaker consistency | intelligibility >= 0.80 |
+| `calibrate.py` | Expected Calibration Error (ECE), Brier score | ECE <= 0.25 |
+| `audit_tokenizer.py` | Luganda fertility (tokens/word), vocabulary coverage | lg_over_en_fertility <= 1.8 |
+
+### Production Quality Gates
+
+Latest results from `Results/rag_quality_gates.json` (9/9 passed, score 1.0):
+
+| Gate | Actual | Target | Status |
+|------|--------|--------|--------|
+| Answer Rate (%) | 100.0 | 80 | PASS |
+| Avg Faithfulness | 0.93 | 0.70 | PASS |
+| CoT Leak Rate (%) | 0.0 | 5 | PASS |
+| Red Team Block Rate (%) | 80.0 | 80 | PASS |
+| P50 Latency (s) | 2.415 | 30 | PASS |
+| P90 Latency (s) | 46.233 | 60 | PASS |
+| TTS Available | 1.0 | 1.0 | PASS |
+| ASR Available | 1.0 | 1.0 | PASS |
+| MT Available | 1.0 | 1.0 | PASS |
+
+### CI/CD Pipeline (8-stage GitHub Actions)
+
+Defined in `.github/workflows/ci-ml-pipeline.yml`:
+
+| Stage | Job | Description |
+|-------|-----|-------------|
+| 1 | `lint-and-test` | Ruff lint + format check + pytest (current coverage ratchet >= 35%) |
+| 1a | `reproducibility` | `uv pip compile` → requirements.lock with hashes |
+| 1b | `governance-check` | NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10 compliance |
+| 1c | `data-aug-smoke` | Schema validation, PII redaction tests, pipeline dry-run (< 2 min) |
+| 2 | `data-validation` | Great Expectations patterns for CSV quality (missing ratios, duplicates) |
+| 3 | `prepare-training-data` | Full data augmentation pipeline (ingest → normalize → quality → format) |
+| 4 | `train` | Model training dry-run on CI (full GPU training via Kaggle) |
+| 5 | `evaluate` | Classifier metrics |
+| 5b | `evaluate-rag` | RAGAS faithfulness, relevancy, precision, recall |
+| 5c | `mobile-export` | GGUF Q4_K_M quantization validation |
+| 5d | `production-gates` | Tokenizer audit, safety eval, calibration, synthetic benchmark, model card |
+| 5e | `adapter-eval` | Multilingual LoRA quality gates (ROUGE-L, BLEU-1 per language) |
+| 6 | `push-model` | Push to Hugging Face Hub (`mpairweLandwind/ura-chatbot`) |
+| 7 | `build-push-docker` | Docker build + Trivy security scan + push |
+| 8 | `deploy-backend` | Backend deployment |
+
+Additional scheduled workflows:
+- `scheduled-crawl.yml` — daily 04:00 UTC crawl of ura.go.ug
+- `scheduled-retrain.yml` — triggered on `Data/` changes
+- `kaggle-training.yml` — GPU/TPU training on Kaggle (multi-stage)
+
+### Mobile Export
+
+| Parameter | Value |
+|-----------|-------|
+| Base model | google/gemma-3n-E2B-it |
+| Quantization | Q4_K_M (GGUF) |
+| Inference engine | MediaPipe LLM Inference API |
+| Max bundle size | 1,800 MB |
+| Min Android SDK | 24 |
+| Min iOS version | 16.0 |
+
+```bash
+# Export mobile model
+uv run python -m ml.scripts.export_mobile \
+  --config ml/configs/training_config.yaml
+```
+
+### Document Indexing (RAG Knowledge Base)
+
+```bash
+# Full reindex (PDFs + CSVs → Qdrant)
+uv run python -m App.backend.app.indexer --recreate
+
+# FAQ CSVs only
+uv run python -m App.backend.app.indexer --csvs-only
+
+# PDFs only
+uv run python -m App.backend.app.indexer --pdfs-only
+```
+
+## Additional Links
 
 - **Repository**: [github.com/mpairweLandwind/FinalYearProject](https://github.com/mpairweLandwind/FinalYearProject)
 - **Documentation**: [MLOps Pipeline Guide](../docs/MLOPS_PIPELINE.md)

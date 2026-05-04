@@ -15,9 +15,9 @@ Complete documentation for the URA Chatbot MLOps project.
 | [MLOps Workflows](mlops-workflows.md) | Comprehensive CI/CD pipeline documentation |
 | [MLOps Pipeline](MLOPS_PIPELINE.md) | Pipeline architecture and implementation details |
 | **Application** |
-| [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) and usage |
-| [RAG Architecture](RAG_ARCHITECTURE.md) | 6-phase advanced RAG pipeline design (2026) |
-| [Gradio App](GRADIO_APP.md) | Gradio web interface documentation |
+| [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming + WebSocket voice) and usage |
+| [RAG Architecture](RAG_ARCHITECTURE.md) | 12-stage production RAG pipeline + streaming voice engine (2026) |
+| [App Runtime](../App/README.md) | FastAPI, Next.js PWA, anonymous chat policy, Qwen/Whisper adapter runtime, and ngrok smoke flow |
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
 | **Operations & Deployment** |
@@ -131,6 +131,13 @@ Data Validation → Training → Classifier Eval → RAG Eval (8 metrics) → Qu
 Main Branch → Governance Check → Docker Build → HF Push → Production Deploy → Feedback Loop
 ```
 
+### 4. Current PR Security Workflow
+```
+Pull Request → App/backend tests + frontend tests/build + governance → secret/SAST/SCA/IaC/threat-model gates → artifact uploads
+```
+
+PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Trivy/Checkov GitHub Security SARIF publication. The scans still run where safe and keep artifacts on the workflow run; protected branch events publish SARIF to the Security tab.
+
 ## Environment Setup
 
 ### Required Tools
@@ -159,6 +166,16 @@ Main Branch → Governance Check → Docker Build → HF Push → Production Dep
 | `monitoring/prometheus.yml` | Prometheus scrape targets |
 | `monitoring/alerting-rules.yml` | 5 SLO alerting rules |
 | `.zap-rules.tsv` | OWASP ZAP DAST rule configuration |
+
+### Current runtime toggles
+
+| Variable | Purpose |
+|----------|---------|
+| `LLM_LOAD_IN_4BIT=true` | Load local Qwen3-8B with BitsAndBytes NF4 quantization |
+| `LORA_ADAPTER_LG/SW/NYN/ACH` | Mount and select Qwen LoRA adapters per locale |
+| `WHISPER_DEVICE=cpu` | Keep Whisper ASR off the Qwen GPU |
+| `WHISPER_ADAPTER_LG/SW/NYN` | Mount Whisper LoRA adapters for supported speech locales |
+| `FLAG_AUTH_REQUIRED` | Keep private routes fail-closed while public chat remains available via optional auth |
 
 ## Support
 

@@ -19,6 +19,7 @@ import sqlite3
 import threading
 import time
 import uuid
+import json
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 ANALYTICS_BACKEND = os.getenv("ANALYTICS_BACKEND", "sqlite").lower()
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from ._root import PROJECT_ROOT as _PROJECT_ROOT
 _DB_DIR = Path(os.getenv("ANALYTICS_DB_DIR", str(_PROJECT_ROOT / "data_store")))
 _DB_PATH = _DB_DIR / "analytics.db"
 
@@ -60,6 +61,25 @@ def _get_connection() -> sqlite3.Connection:
                 conn.execute("PRAGMA busy_timeout=5000")
                 _local.conn = conn
     return conn
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    ddl: str,
+) -> None:
+    """Add *column* to *table* if it is missing.
+
+    SQLite only gained ``ADD COLUMN IF NOT EXISTS`` recently, so we do
+    the compatibility check ourselves to support older runtimes.
+    """
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()  # noqa: S608 - fixed table name
+    names = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in rows}
+    if column in names:
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")  # noqa: S608 - fixed identifiers
+    logger.info("Added missing column %s.%s", table, column)
 
 
 def init_db() -> None:
@@ -98,6 +118,7 @@ def init_db() -> None:
 
         CREATE TABLE IF NOT EXISTS conversations (
             id              TEXT PRIMARY KEY,
+            conversation_id TEXT,
             session_id      TEXT,
             user_message    TEXT NOT NULL,
             bot_reply       TEXT NOT NULL,
@@ -106,6 +127,19 @@ def init_db() -> None:
             confidence      REAL DEFAULT 0,
             topic_tag       TEXT DEFAULT '',
             created_at      REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_sessions (
+            conversation_id TEXT PRIMARY KEY,
+            workflow_id     TEXT NOT NULL,
+            status          TEXT NOT NULL
+                            CHECK(status IN ('active','completed','cancelled'))
+                            DEFAULT 'active',
+            current_step_idx INTEGER NOT NULL DEFAULT 0,
+            slots_json      TEXT DEFAULT '{}',
+            last_prompt     TEXT DEFAULT '',
+            created_at      REAL NOT NULL,
+            updated_at      REAL NOT NULL
         );
 
         -- Phase 14 (2026) — identity, tenancy, and consent.
@@ -156,7 +190,7 @@ def init_db() -> None:
             user_id       TEXT NOT NULL
                           REFERENCES users(id) ON DELETE CASCADE,
             purpose       TEXT NOT NULL
-                          CHECK(purpose IN ('personalization','analytics','ticket_escalation','long_term_storage','ura_account_access')),
+                          CHECK(purpose IN ('personalization','analytics','ticket_escalation','long_term_storage','ura_account_access','ura_actions','voice_recording','voice_analytics')),
             version       TEXT NOT NULL,
             granted_at    REAL NOT NULL,
             withdrawn_at  REAL,
@@ -181,6 +215,8 @@ def init_db() -> None:
             reason         TEXT DEFAULT '',
             user_query     TEXT DEFAULT '',
             bot_reply      TEXT DEFAULT '',
+            handoff_json   TEXT DEFAULT '{}',
+            response_judge_json TEXT DEFAULT '{}',
             assignee       TEXT DEFAULT '',
             staff_note     TEXT DEFAULT '',
             created_at     REAL NOT NULL,
@@ -195,6 +231,8 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(last_active_at);
         CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
         CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at);
+        CREATE INDEX IF NOT EXISTS idx_workflow_status ON workflow_sessions(status);
+        CREATE INDEX IF NOT EXISTS idx_workflow_updated ON workflow_sessions(updated_at);
         CREATE INDEX IF NOT EXISTS idx_tickets_status    ON tickets(status);
         CREATE INDEX IF NOT EXISTS idx_tickets_priority  ON tickets(priority);
         CREATE INDEX IF NOT EXISTS idx_tickets_created   ON tickets(created_at);
@@ -203,6 +241,15 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_consent_user      ON consent_receipts(user_id);
         CREATE INDEX IF NOT EXISTS idx_consent_active    ON consent_receipts(user_id, purpose, withdrawn_at);
     """)
+
+    # Forward-compatible schema migrations for existing DBs.
+    _ensure_column(conn, "conversations", "conversation_id", "TEXT")
+    conn.execute(
+        "UPDATE conversations SET conversation_id = id WHERE conversation_id IS NULL OR conversation_id = ''"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(conversation_id)")
+    _ensure_column(conn, "tickets", "handoff_json", "TEXT DEFAULT '{}'")
+    _ensure_column(conn, "tickets", "response_judge_json", "TEXT DEFAULT '{}'")
 
     # Seed the default tenant if missing
     conn.execute(
@@ -230,12 +277,14 @@ def cleanup_expired_data() -> dict[str, int]:
         ("analytics_events", _ANALYTICS_TTL_DAYS),
         ("feedback", _FEEDBACK_TTL_DAYS),
         ("sessions", _SESSION_TTL_DAYS),
+        ("workflow_sessions", _CONVERSATION_TTL_DAYS),
     ]
     ts_col = {
         "conversations": "created_at",
         "analytics_events": "created_at",
         "feedback": "created_at",
         "sessions": "last_active_at",
+        "workflow_sessions": "updated_at",
     }
 
     for table, ttl_days in ttls:
@@ -431,6 +480,7 @@ def get_session_stats(days: int = 30) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 def log_conversation(
     session_id: str | None,
+    conversation_id: str | None,
     user_message: str,
     bot_reply: str,
     sources: str = "[]",
@@ -438,17 +488,19 @@ def log_conversation(
     confidence: float = 0,
     topic_tag: str = "",
 ) -> str:
-    """Log a conversation turn and return its ID."""
+    """Log a conversation turn and return the stable thread id."""
     conn = _get_connection()
-    conv_id = str(uuid.uuid4())
+    row_id = str(uuid.uuid4())
+    thread_id = conversation_id or row_id
     try:
         conn.execute(
             """INSERT INTO conversations
-               (id, session_id, user_message, bot_reply, sources, response_time_ms,
-                confidence, topic_tag, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, conversation_id, session_id, user_message, bot_reply, sources,
+                response_time_ms, confidence, topic_tag, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                conv_id,
+                row_id,
+                thread_id,
                 session_id,
                 user_message,
                 bot_reply,
@@ -464,11 +516,12 @@ def log_conversation(
         logger.exception("Failed to log conversation")
         conn.rollback()
         raise
-    return conv_id
+    return thread_id
 
 
 def get_recent_turns(
-    session_id: str,
+    session_id: str | None = None,
+    conversation_id: str | None = None,
     limit: int = 5,
 ) -> list[dict[str, str]]:
     """Retrieve the most recent conversation turns for a session (multi-turn memory).
@@ -476,17 +529,128 @@ def get_recent_turns(
     Returns a list of dicts with ``user_message`` and ``bot_reply`` keys,
     ordered oldest-first (chronological) for prompt injection.
     """
+    if conversation_id:
+        sql = """SELECT user_message, bot_reply FROM conversations
+                 WHERE conversation_id = ?
+                 ORDER BY created_at DESC LIMIT ?"""
+        args: tuple[str, int] = (conversation_id, limit)
+    elif session_id:
+        sql = """SELECT user_message, bot_reply FROM conversations
+                 WHERE session_id = ?
+                 ORDER BY created_at DESC LIMIT ?"""
+        args = (session_id, limit)
+    else:
+        return []
+
     conn = _get_connection()
-    rows = conn.execute(
-        """SELECT user_message, bot_reply FROM conversations
-           WHERE session_id = ?
-           ORDER BY created_at DESC LIMIT ?""",
-        (session_id, limit),
-    ).fetchall()
+    rows = conn.execute(sql, args).fetchall()
     # Reverse to chronological order
     return [
         {"user_message": r["user_message"], "bot_reply": r["bot_reply"]} for r in reversed(rows)
     ]
+
+
+def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
+    """Return the persisted workflow session for a conversation, if any."""
+    if not conversation_id:
+        return None
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT conversation_id, workflow_id, status, current_step_idx,
+                  slots_json, last_prompt, created_at, updated_at
+           FROM workflow_sessions WHERE conversation_id = ?""",
+        (conversation_id,),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        slots = json.loads(row["slots_json"] or "{}")
+        if not isinstance(slots, dict):
+            slots = {}
+    except Exception:
+        slots = {}
+    return {
+        "conversation_id": row["conversation_id"],
+        "workflow_id": row["workflow_id"],
+        "status": row["status"],
+        "current_step_idx": int(row["current_step_idx"] or 0),
+        "slots": slots,
+        "last_prompt": row["last_prompt"] or "",
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def upsert_workflow_session(
+    conversation_id: str,
+    workflow_id: str,
+    current_step_idx: int,
+    slots: dict[str, Any] | None = None,
+    *,
+    status: str = "active",
+    last_prompt: str = "",
+) -> None:
+    """Create or update a durable workflow session."""
+    if not conversation_id or not workflow_id:
+        return
+    if status not in {"active", "completed", "cancelled"}:
+        status = "active"
+    conn = _get_connection()
+    now = time.time()
+    slots_json = json.dumps(slots or {}, ensure_ascii=True)
+    try:
+        conn.execute(
+            """INSERT INTO workflow_sessions
+               (conversation_id, workflow_id, status, current_step_idx,
+                slots_json, last_prompt, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(conversation_id) DO UPDATE SET
+                 workflow_id = excluded.workflow_id,
+                 status = excluded.status,
+                 current_step_idx = excluded.current_step_idx,
+                 slots_json = excluded.slots_json,
+                 last_prompt = excluded.last_prompt,
+                 updated_at = excluded.updated_at""",
+            (
+                conversation_id,
+                workflow_id,
+                status,
+                max(0, int(current_step_idx)),
+                slots_json,
+                last_prompt[:2000],
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+    except Exception:
+        logger.exception("Failed to upsert workflow session")
+        conn.rollback()
+        raise
+
+
+def complete_workflow_session(
+    conversation_id: str,
+    *,
+    status: str = "completed",
+) -> bool:
+    """Mark a workflow session as completed or cancelled."""
+    if not conversation_id:
+        return False
+    if status not in {"completed", "cancelled"}:
+        status = "completed"
+    conn = _get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE workflow_sessions SET status = ?, updated_at = ? WHERE conversation_id = ?",
+            (status, time.time(), conversation_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception:
+        logger.exception("Failed to complete workflow session")
+        conn.rollback()
+        return False
 
 
 def get_conversation_stats(days: int = 30) -> dict[str, Any]:
@@ -555,6 +719,29 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Ticket queue (Phase 14-D)
 # ---------------------------------------------------------------------------
+def _json_dumps(value: Any, default: str) -> str:
+    try:
+        return json.dumps(value if value is not None else json.loads(default))
+    except Exception:
+        return default
+
+
+def _json_loads(value: Any, default: Any) -> Any:
+    if value in ("", None):
+        return default
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
+def _hydrate_ticket(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    ticket = dict(row)
+    ticket["handoff"] = _json_loads(ticket.pop("handoff_json", "{}"), {})
+    ticket["response_judge"] = _json_loads(ticket.pop("response_judge_json", "{}"), {})
+    return ticket
+
+
 def create_ticket(
     reason: str,
     user_query: str = "",
@@ -562,6 +749,8 @@ def create_ticket(
     session_id: str | None = None,
     conversation_id: str | None = None,
     priority: str = "normal",
+    handoff: dict[str, Any] | None = None,
+    response_judge: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a new escalation ticket and return it.
 
@@ -580,8 +769,9 @@ def create_ticket(
         conn.execute(
             """INSERT INTO tickets (id, conversation_id, session_id, status, priority,
                                     reason, user_query, bot_reply,
+                                    handoff_json, response_judge_json,
                                     assignee, staff_note, created_at, updated_at)
-               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, '', '', ?, ?)""",
+               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, '', '', ?, ?)""",
             (
                 ticket_id,
                 conversation_id,
@@ -590,6 +780,8 @@ def create_ticket(
                 reason,
                 user_query,
                 bot_reply,
+                _json_dumps(handoff, "{}"),
+                _json_dumps(response_judge, "{}"),
                 now,
                 now,
             ),
@@ -605,6 +797,8 @@ def create_ticket(
         "status": "open",
         "priority": priority,
         "reason": reason,
+        "handoff": handoff or {},
+        "response_judge": response_judge or {},
         "created_at": now,
     }
 
@@ -624,7 +818,8 @@ def list_tickets(
     offset = max(0, int(offset))
     sql = (
         "SELECT id, conversation_id, session_id, status, priority, reason, "
-        "       user_query, bot_reply, assignee, staff_note, created_at, updated_at "
+        "       user_query, bot_reply, handoff_json, response_judge_json, "
+        "       assignee, staff_note, created_at, updated_at "
         "FROM tickets"
     )
     params: list[Any] = []
@@ -634,7 +829,7 @@ def list_tickets(
     sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     rows = conn.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    return [_hydrate_ticket(r) for r in rows]
 
 
 def get_ticket(ticket_id: str) -> dict[str, Any] | None:
@@ -643,7 +838,7 @@ def get_ticket(ticket_id: str) -> dict[str, Any] | None:
         "SELECT * FROM tickets WHERE id = ?",
         (ticket_id,),
     ).fetchone()
-    return dict(row) if row else None
+    return _hydrate_ticket(row) if row else None
 
 
 def update_ticket(

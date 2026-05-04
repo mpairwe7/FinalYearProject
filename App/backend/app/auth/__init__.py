@@ -25,13 +25,15 @@ Design goals (2026 standard, see docs/URA_Chatbot_Roadmap_2026_Enhanced.md):
 
 Feature flags:
     FLAG_AUTH_REQUIRED  — if true, /v1/* endpoints reject unauthenticated
-                          requests (403). Default false during rollout.
-    FLAG_MULTI_TENANT   — if true, rows are scoped by tenant_id. Default false.
+                          requests. Default false in dev, forced on by
+                          production validation/defaults.
+    FLAG_MULTI_TENANT   — if true, rows are scoped by tenant_id. Default false
+                          in dev, forced on in production.
 """
 
 from __future__ import annotations
 
-from .dependencies import AuthContext, current_user, require_role, require_user
+from .dependencies import AuthContext, current_user, optional_user, require_role, require_user
 from .jwt_auth import JWTAuthError, JWTVerifier, make_dev_token
 from .models import AuthUser, ConsentReceipt, UserProfile
 
@@ -44,6 +46,7 @@ __all__ = [
     "UserProfile",
     "current_user",
     "make_dev_token",
+    "optional_user",
     "require_role",
     "require_user",
 ]

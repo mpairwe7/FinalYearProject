@@ -5,6 +5,7 @@ ISO/IEC 42001:2023 security controls.  Includes analytics, feedback,
 and Prometheus-compatible metrics (2026 observability standards).
 """
 
+import datetime
 import json
 import logging
 import os
@@ -12,10 +13,12 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from starlette.websockets import WebSocket
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -23,6 +26,9 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import database as db
 from .analytics import AnalyticsMiddleware, metrics
+from .authority import authority_required, get_authority_status
+from .auth import AuthContext, current_user, optional_user, require_role, require_user
+from .auth.models import ConsentGrantRequest, ConsentWithdrawRequest, ProfileUpdateRequest
 from .models import (
     AnalyticsDashboard,
     AnalyticsEvent,
@@ -41,6 +47,11 @@ from .models import (
     FeedbackResponse,
     FeedbackSummary,
     HealthResponse,
+    OfflineAdminStats,
+    OfflineStatusResponse,
+    OfflineSyncRequest,
+    OfflineSyncResponse,
+    QuantizedModelsResponse,
     SpeechHealthResponse,
     SynthesizeRequest,
     SynthesizeResponse,
@@ -49,6 +60,7 @@ from .models import (
     TranslateRequest,
     TranslateResponse,
     VoiceChatResponse,
+    VoiceVisionChatResponse,
 )
 from .service import ChatModel
 from .speech_service import (
@@ -60,11 +72,33 @@ from .speech_service import (
 )
 
 logger = logging.getLogger(__name__)
+_APP_LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+_APP_LOGGER = logging.getLogger("app")
+_APP_LOGGER.setLevel(_APP_LOG_LEVEL)
+if not _APP_LOGGER.handlers:
+    _APP_HANDLER = logging.StreamHandler()
+    _APP_HANDLER.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    _APP_LOGGER.addHandler(_APP_HANDLER)
+_APP_LOGGER.propagate = False
 
 # ---------------------------------------------------------------------------
 # Production environment validation (NIST SSDF PO.1.1)
 # ---------------------------------------------------------------------------
 _INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105
+
+
+def _truthy_env(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).lower() in ("1", "true", "yes", "on")
+
+
+def _production_flag_enabled(name: str) -> bool:
+    env_name = f"FLAG_{name.upper()}"
+    val = os.getenv(env_name)
+    if val is None:
+        return True
+    return val.lower() in ("1", "true", "yes", "on")
 
 
 def _validate_production_env() -> None:
@@ -87,11 +121,26 @@ def _validate_production_env() -> None:
             "Set a strong, unique secret for production."
         )
 
+    auth_alg = os.getenv("AUTH_ALG", "HS256").upper()
+    if auth_alg != "RS256":
+        errors.append("AUTH_ALG must be RS256 in production; HS256 is dev-only.")
+    for name in ("OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL"):
+        if not os.getenv(name):
+            errors.append(f"{name} must be set for production OIDC/JWT verification.")
+
+    for flag_name in ("auth_required", "multi_tenant", "audit_ledger"):
+        if not _production_flag_enabled(flag_name):
+            errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
+
     # CORS must not be localhost in production
     cors = os.getenv("CORS_ORIGINS", "")
-    if "localhost" in cors or "127.0.0.1" in cors:
+    if not cors:
+        errors.append("CORS_ORIGINS must list explicit production origins.")
+    if "*" in {origin.strip() for origin in cors.split(",")}:
+        errors.append("CORS_ORIGINS must not contain wildcard origins in production.")
+    if "localhost" in cors or "127.0.0.1" in cors or "ngrok" in cors:
         errors.append(
-            "CORS_ORIGINS contains localhost. "
+            "CORS_ORIGINS contains a development tunnel/local origin. "
             "Set explicit production origins (e.g. https://chat.ura.go.ug)."
         )
 
@@ -113,10 +162,15 @@ def _validate_production_env() -> None:
 
     # Model revision should be pinned for reproducibility (SLSA v1.2)
     if not os.getenv("LLM_MODEL_REVISION"):
-        logger.warning(
-            "LLM_MODEL_REVISION not set — model downloads are not reproducible. "
-            "Pin a commit SHA for SLSA v1.2 compliance."
+        errors.append(
+            "LLM_MODEL_REVISION is not set. Pin a model commit SHA for reproducible deploys."
         )
+
+    if os.getenv("LLM_BACKEND", "local").lower() == "local":
+        if not _truthy_env("LLM_SERIALIZE_LOCAL_GENERATION", "true"):
+            errors.append(
+                "LLM_SERIALIZE_LOCAL_GENERATION=false is unsafe with local mutable model state."
+            )
 
     # STORE_RAW_PROMPTS must be off in production (NDPA §19 data minimisation)
     if os.getenv("STORE_RAW_PROMPTS", "false").lower() in ("1", "true", "yes"):
@@ -124,6 +178,32 @@ def _validate_production_env() -> None:
             "STORE_RAW_PROMPTS=true in production violates NDPA §19 data minimisation. "
             "Set STORE_RAW_PROMPTS=false."
         )
+
+    if os.getenv("ANALYTICS_BACKEND", "sqlite").lower() != "postgres":
+        errors.append("ANALYTICS_BACKEND must be postgres in production.")
+    if not os.getenv("POSTGRES_DSN"):
+        errors.append("POSTGRES_DSN must be set in production.")
+
+    index_key = os.getenv("INDEX_API_KEY", "")
+    if index_key in ("", "dev-index-key"):
+        errors.append("INDEX_API_KEY must be a strong non-dev operator token in production.")
+
+    if os.getenv("QDRANT_URL") and not os.getenv("QDRANT_API_KEY"):
+        errors.append("QDRANT_API_KEY must be set when QDRANT_URL is configured in production.")
+
+    for redis_env in ("REDIS_URL", "SLOWAPI_STORAGE_URI"):
+        redis_url = os.getenv(redis_env, "")
+        if redis_url.startswith(("redis://", "rediss://")) and "@" not in redis_url:
+            errors.append(f"{redis_env} must include Redis credentials in production.")
+
+    if _truthy_env("SPEECH_ENABLED", "true") and not _production_flag_enabled("voice_consent"):
+        errors.append("FLAG_VOICE_CONSENT must not be disabled when speech is enabled.")
+
+    if authority_required():
+        authority = get_authority_status()
+        if not authority.get("ok"):
+            detail = "; ".join(authority.get("errors") or ["authority manifest not ok"])
+            errors.append(f"Fresh authority manifest required: {detail}.")
 
     if errors:
         msg = "PRODUCTION SAFETY CHECK FAILED — refusing to start.\n" + "\n".join(
@@ -140,6 +220,29 @@ def _validate_production_env() -> None:
 # ---------------------------------------------------------------------------
 _TAG_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9\-]{1,128}$")
+
+
+def _request_truthy_header(request: Request, name: str) -> bool:
+    return request.headers.get(name, "").lower() in ("1", "true", "yes", "on")
+
+
+def _require_voice_processing_consent(request: Request, ctx: AuthContext) -> None:
+    """Enforce voice consent for both authenticated and anonymous users."""
+    from .flags import flags
+
+    if not flags.is_enabled("voice_consent"):
+        return
+
+    if ctx.user_id:
+        from .voice_consent import require_voice_consent
+
+        if require_voice_consent(ctx.user_id):
+            return
+        raise HTTPException(status_code=403, detail="voice recording consent required")
+
+    if _request_truthy_header(request, "X-Voice-Consent"):
+        return
+    raise HTTPException(status_code=403, detail="anonymous voice consent header required")
 
 
 @asynccontextmanager
@@ -175,6 +278,9 @@ async def lifespan(app: FastAPI):
     if SPEECH_ENABLED:
         try:
             app.state.speech = SpeechModel()
+            # Give speech service access to the already-loaded LLM for
+            # prompted translation (avoids loading a separate MT model).
+            app.state.speech._chat_model = app.state.model
             logger.info(
                 "SpeechModel ready (asr=%s tts=%s mt=%s)",
                 SPEECH_ASR_BACKEND,
@@ -187,6 +293,36 @@ async def lifespan(app: FastAPI):
     else:
         app.state.speech = None
         logger.info("Speech pipeline disabled via SPEECH_ENABLED=false")
+
+    # Voice consent schema (Phase 23) — creates voice_audit_log table.
+    try:
+        from .voice_consent import init_voice_consent_schema
+
+        init_voice_consent_schema()
+    except Exception:
+        logger.debug("Voice consent schema init skipped", exc_info=True)
+
+    # Offline RAG pipeline (Phase 25) — loads FAISS + ONNX bundle if present.
+    from .flags import flags as _flags
+
+    if _flags.is_enabled("offline_rag"):
+        try:
+            from .offline_rag import OfflineRAGPipeline
+
+            app.state.offline_rag = OfflineRAGPipeline()
+            if app.state.offline_rag.initialize():
+                logger.info(
+                    "Offline RAG ready: v%s, %d passages",
+                    app.state.offline_rag.bundle_version,
+                    app.state.offline_rag.passage_count,
+                )
+            else:
+                logger.info("Offline RAG bundle not found — offline mode unavailable")
+        except Exception:
+            logger.warning("Offline RAG init failed", exc_info=True)
+            app.state.offline_rag = None
+    else:
+        app.state.offline_rag = None
 
     yield
     app.state.model = None
@@ -252,7 +388,7 @@ def get_speech_model(request: Request) -> SpeechModel:
 # CORS – hardened (no wildcard, no credentials, explicit methods)
 # ---------------------------------------------------------------------------
 _allowed_origins: list[str] = [
-    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
+    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3300").split(",") if o.strip()
 ]
 
 app.add_middleware(
@@ -289,7 +425,7 @@ async def security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     response.headers["X-Request-ID"] = request_id
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
     return response
 
 
@@ -322,13 +458,24 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     )
 
 
+@app.get("/v1/authority/status", tags=["admin"])
+def authority_status(
+    _: AuthContext = Depends(require_role("ura_staff", "ura_admin", "ura_auditor")),
+) -> dict[str, Any]:
+    """Return authority-manifest validation status for release/ops checks."""
+    return get_authority_status()
+
+
 # ---------------------------------------------------------------------------
 # Chat endpoint (with conversation logging)
 # ---------------------------------------------------------------------------
 @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
 @limiter.limit(_RATE_LIMIT)
 def chat(
-    body: ChatRequest, request: Request, model: ChatModel = Depends(get_model)
+    body: ChatRequest,
+    request: Request,
+    model: ChatModel = Depends(get_model),
+    ctx: AuthContext = Depends(optional_user),
 ) -> ChatResponse:
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
@@ -341,6 +488,10 @@ def chat(
         locale=body.locale,
         session_id=session_id or None,
         request_id=request_id,
+        user_id=ctx.user_id or None,
+        tenant_id=ctx.tenant_id,
+        user_role=ctx.role,
+        granted_purposes=ctx.user.granted_purposes if ctx.user else [],
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -361,8 +512,9 @@ def chat(
     try:
         from .service import ChatModel as _CM
 
-        conv_id = db.log_conversation(
+        db.log_conversation(
             session_id=session_id or None,
+            conversation_id=result.get("conversation_id"),
             user_message=_CM.redact_for_storage(body.message),
             bot_reply=_CM.redact_for_storage(result["reply"]),
             sources=json.dumps(result.get("sources", [])),
@@ -370,8 +522,6 @@ def chat(
             confidence=confidence,
             topic_tag=topic_tag,
         )
-        if not result.get("conversation_id"):
-            result["conversation_id"] = conv_id
     except Exception:
         logger.warning("Conversation logging failed", exc_info=True)
 
@@ -400,7 +550,12 @@ def chat(
 # ---------------------------------------------------------------------------
 @app.post("/v1/chat/stream", tags=["chat"])
 @limiter.limit(_RATE_LIMIT)
-async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = Depends(get_model)):
+async def chat_stream(
+    body: ChatRequest,
+    request: Request,
+    model: ChatModel = Depends(get_model),
+    ctx: AuthContext = Depends(optional_user),
+):
     """Server-Sent Events streaming chat — tokens arrive progressively."""
     from . import llm as llm_module
     from . import service as service_module
@@ -410,6 +565,7 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
 
     async def event_generator():
         import asyncio
+        import threading
 
         from .guardrails import OutputGuard
         from .retriever import HybridRetriever
@@ -429,10 +585,18 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                 locale=body.locale,
                 session_id=session_id or None,
                 request_id=request_id,
+                user_id=ctx.user_id or None,
+                tenant_id=ctx.tenant_id,
             )
 
-            # If blocked/abstained/clarification, send single event
-            if result.get("retrieval_mode") in ("blocked", "abstained", "clarification"):
+            # If the turn resolved before LLM streaming, send a single payload.
+            if result.get("retrieval_mode") in (
+                "blocked",
+                "abstained",
+                "clarification",
+                "workflow",
+                "escalated",
+            ):
                 yield {
                     "event": "metadata",
                     "data": json.dumps(
@@ -446,6 +610,12 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                             "locale": result.get("locale"),
                             "escalation_required": result.get("escalation_required", False),
                             "escalation_reason": result.get("escalation_reason", ""),
+                            "agent_role": result.get("agent_role", "rag_answerer"),
+                            "workflow": result.get("workflow"),
+                            "handoff": result.get("handoff"),
+                            "response_judge": result.get("response_judge"),
+                            "next_actions": result.get("next_actions", []),
+                            "ticket_id": result.get("ticket_id", ""),
                         }
                     ),
                 }
@@ -464,6 +634,10 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                         "model": result.get("model"),
                         "conversation_id": result.get("conversation_id"),
                         "locale": result.get("locale"),
+                        "agent_role": result.get("agent_role", "rag_answerer"),
+                        "response_judge": result.get("response_judge"),
+                        "next_actions": result.get("next_actions", []),
+                        "ticket_id": result.get("ticket_id", ""),
                     }
                 ),
             }
@@ -472,30 +646,74 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
             hits = result.get("_hits", [])
             conversation_history = result.get("_history", [])
             rewritten_query = result.get("_rewritten", body.message)
+            personalization_context = result.get("_personalization_context", "")
             if llm_module.is_available() and hits:
-                # Run blocking LLM stream in thread pool, routed through the
-                # shared circuit breaker (Gap #16 fix — prevents the stream
-                # path from bypassing breaker/timeout guarantees).
-                def _stream_tokens():
-                    return service_module.stream_llm_tokens(
-                        query=rewritten_query,
-                        passages=hits,
-                        conversation_history=conversation_history or None,
-                        locale=body.locale,
-                    )
+                loop = asyncio.get_running_loop()
+                token_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
 
-                tokens = await asyncio.to_thread(_stream_tokens)
+                def _pump_tokens() -> None:
+                    try:
+                        for token in service_module.stream_llm_tokens(
+                            query=rewritten_query,
+                            passages=hits,
+                            conversation_history=conversation_history or None,
+                            locale=body.locale,
+                            personalization_context=str(personalization_context or ""),
+                        ):
+                            loop.call_soon_threadsafe(token_queue.put_nowait, ("token", token))
+                    finally:
+                        loop.call_soon_threadsafe(token_queue.put_nowait, ("done", None))
+
+                threading.Thread(target=_pump_tokens, daemon=True).start()
+
+                saw_streamed_token = False
+                pending_stream_chunk = ""
+
+                def _flush_stream_chunk(*, force: bool = False) -> str:
+                    nonlocal pending_stream_chunk, full_reply, saw_streamed_token
+                    if not pending_stream_chunk:
+                        return ""
+                    if not force and not re.search(r"(?:\n\s*\n|[.!?](?:\s|$))", pending_stream_chunk):
+                        return ""
+                    sanitized = _output_guard.sanitize(pending_stream_chunk)
+                    pending_stream_chunk = ""
+                    if not sanitized:
+                        return ""
+                    saw_streamed_token = True
+                    full_reply += sanitized
+                    return sanitized
+
+                while True:
+                    if await request.is_disconnected():
+                        logger.info("SSE client disconnected mid-stream")
+                        return
+                    try:
+                        event_type, payload = await asyncio.wait_for(token_queue.get(), timeout=15)
+                    except asyncio.TimeoutError:
+                        yield {
+                            "comment": f"ping - {datetime.datetime.now(datetime.timezone.utc).isoformat()}"
+                        }
+                        continue
+
+                    if event_type == "done":
+                        final_chunk = _flush_stream_chunk(force=True)
+                        if final_chunk:
+                            yield {"event": "token", "data": final_chunk}
+                        break
+
+                    pending_stream_chunk += payload or ""
+                    sanitized = _flush_stream_chunk()
+                    if not sanitized:
+                        continue
+                    yield {"event": "token", "data": sanitized}
+
                 # Breaker OPEN / empty stream → fall through to single-event
                 # fallback below (same branch as "llm not available")
-                if not tokens:
+                if not saw_streamed_token:
+                    full_reply = result.get("reply", "")
                     yield {"event": "token", "data": result.get("reply", "")}
                     yield {"event": "done", "data": ""}
                     return
-                for token in tokens:
-                    # Sanitize each token chunk (OWASP LLM05)
-                    sanitized = _output_guard.sanitize(token)
-                    full_reply += sanitized
-                    yield {"event": "token", "data": sanitized}
 
                 # Apply PII redaction to full accumulated reply
                 full_reply = _output_guard.redact_pii(full_reply)
@@ -504,6 +722,56 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                 contexts = [h.get("text") or h.get("answer", "") for h in hits]
                 faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
                 escalate, esc_reason = _output_guard.should_escalate(faith, hits)
+                response_judge = model._evaluate_response_judge(
+                    message=body.message,
+                    reply=full_reply,
+                    hits=hits,
+                    citations=result.get("citations", []),
+                    faithfulness_score=faith,
+                    escalation_required=escalate,
+                    escalation_reason=esc_reason,
+                )
+                if response_judge.get("decision") == "revise" and response_judge.get("revised_reply"):
+                    full_reply = _output_guard.sanitize(
+                        _output_guard.redact_pii(response_judge["revised_reply"])
+                    )
+                    faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
+                    escalate, esc_reason = _output_guard.should_escalate(faith, hits)
+                    response_judge["applied_revision"] = True
+                    response_judge["final_decision"] = "escalate" if escalate else "approve"
+                    yield {"event": "revision", "data": full_reply}
+                else:
+                    response_judge["final_decision"] = response_judge.get("decision", "approve")
+                if response_judge.get("final_decision") == "escalate":
+                    escalate = True
+                    if not esc_reason:
+                        esc_reason = "; ".join(response_judge.get("reasons") or [])
+                response_judge.pop("revised_reply", None)
+
+                handoff = result.get("handoff")
+                if escalate and not handoff:
+                    handoff = model._build_handoff_packet(
+                        message=body.message,
+                        reason=esc_reason,
+                        conversation_history=conversation_history or None,
+                        hits=hits,
+                        faithfulness_score=faith,
+                    )
+                ticket_id = result.get("ticket_id", "")
+                if escalate and not ticket_id:
+                    ticket_id = model._maybe_create_ticket(
+                        reason=esc_reason,
+                        user_query=body.message,
+                        bot_reply=full_reply,
+                        session_id=session_id or None,
+                        conversation_id=result.get("conversation_id") or body.conversation_id or "",
+                        priority=(handoff or {}).get("priority", "normal"),
+                        handoff=handoff,
+                        response_judge=response_judge,
+                    )
+                result["handoff"] = handoff
+                result["response_judge"] = response_judge
+                result["ticket_id"] = ticket_id
                 yield {
                     "event": "grounding",
                     "data": json.dumps(
@@ -511,6 +779,11 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                             "faithfulness_score": faith,
                             "escalation_required": escalate,
                             "escalation_reason": esc_reason,
+                            "agent_role": result.get("agent_role", "rag_answerer"),
+                            "handoff": handoff,
+                            "response_judge": response_judge,
+                            "next_actions": result.get("next_actions", []),
+                            "ticket_id": ticket_id,
                         }
                     ),
                 }
@@ -530,6 +803,11 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
                             "locale": result.get("locale"),
                             "escalation_required": escalate,
                             "escalation_reason": esc_reason,
+                            "agent_role": result.get("agent_role", "rag_answerer"),
+                            "handoff": handoff,
+                            "response_judge": response_judge,
+                            "next_actions": result.get("next_actions", []),
+                            "ticket_id": ticket_id,
                         },
                     )
                 except Exception:
@@ -553,6 +831,7 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
 
                 db.log_conversation(
                     session_id=session_id or None,
+                    conversation_id=result.get("conversation_id"),
                     user_message=_CM.redact_for_storage(body.message),
                     bot_reply=_CM.redact_for_storage(full_reply),
                     sources=json.dumps(result.get("sources", []) if result else []),
@@ -575,6 +854,7 @@ async def chat_stream(body: ChatRequest, request: Request, model: ChatModel = De
 async def transcribe_audio(
     request: Request,
     speech: SpeechModel = Depends(get_speech_model),
+    ctx: AuthContext = Depends(optional_user),
 ) -> TranscribeResponse:
     """Transcribe raw PCM audio posted as the request body.
 
@@ -599,6 +879,15 @@ async def transcribe_audio(
     MAX_BYTES = 16 * 1024 * 1024
     if len(audio_bytes) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="audio exceeds 16 MiB limit")
+    _require_voice_processing_consent(request, ctx)
+
+    # Audio format auto-detected: WAV, WebM/Opus, OGG, MP3, or raw PCM.
+    # Content-Type header is advisory; the decoder sniffs the magic bytes.
+    content_type = request.headers.get("content-type", "application/octet-stream")
+    logger.debug(
+        "ASR: %d bytes, content-type=%s, sample_rate=%d, language=%s",
+        len(audio_bytes), content_type, sample_rate, language or "auto",
+    )
 
     result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language)
     metrics.inc("speech_asr_total")
@@ -623,6 +912,7 @@ async def synthesize_audio(
     request: Request,
     body: SynthesizeRequest,
     speech: SpeechModel = Depends(get_speech_model),
+    _ctx: AuthContext = Depends(optional_user),
 ) -> SynthesizeResponse:
     """Synthesize text to WAV audio. Returns base64-encoded WAV bytes."""
     import base64
@@ -651,6 +941,7 @@ async def translate_text(
     request: Request,
     body: TranslateRequest,
     speech: SpeechModel = Depends(get_speech_model),
+    _ctx: AuthContext = Depends(optional_user),
 ) -> TranslateResponse:
     """Machine-translate text between English and Luganda."""
     if body.source_lang == body.target_lang:
@@ -687,7 +978,10 @@ async def translate_text(
 
 
 @app.post("/v1/export/conversation", tags=["export"])
-def export_conversation(body: ExportConversationRequest) -> Response:
+def export_conversation(
+    body: ExportConversationRequest,
+    _ctx: AuthContext = Depends(optional_user),
+) -> Response:
     """Export a conversation as a branded PDF."""
     from .pdf_export import generate_conversation_pdf
 
@@ -706,7 +1000,10 @@ def export_conversation(body: ExportConversationRequest) -> Response:
 
 
 @app.post("/v1/export/tax-summary", tags=["export"])
-def export_tax_summary(body: ExportTaxSummaryRequest) -> Response:
+def export_tax_summary(
+    body: ExportTaxSummaryRequest,
+    _ctx: AuthContext = Depends(current_user),
+) -> Response:
     """Export a tax calculation summary as a branded PDF."""
     from .pdf_export import generate_tax_summary_pdf
 
@@ -724,7 +1021,10 @@ def export_tax_summary(body: ExportTaxSummaryRequest) -> Response:
 
 
 @app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])
-def speech_health(request: Request) -> SpeechHealthResponse:
+def speech_health(
+    request: Request,
+    _ctx: AuthContext = Depends(optional_user),
+) -> SpeechHealthResponse:
     """Report whether the speech pipeline is ready to serve requests."""
     speech = getattr(request.app.state, "speech", None)
     enabled = SPEECH_ENABLED and speech is not None and speech.is_ready()
@@ -743,6 +1043,7 @@ async def voice_chat(
     request: Request,
     speech: SpeechModel = Depends(get_speech_model),
     model: ChatModel = Depends(get_model),
+    ctx: AuthContext = Depends(optional_user),
 ) -> VoiceChatResponse:
     """Compound voice pipeline: audio -> ASR -> [MT] -> LLM -> [MT] -> TTS -> audio.
 
@@ -791,6 +1092,7 @@ async def voice_chat(
         raise HTTPException(status_code=400, detail="empty audio body")
     if len(audio_bytes) > 16 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="audio exceeds 16 MiB limit")
+    _require_voice_processing_consent(request, ctx)
 
     # Collect per-stage errors so they surface in the response
     stage_errors: list[str] = []
@@ -853,6 +1155,8 @@ async def voice_chat(
         locale="en",
         session_id=session_id,
         request_id=getattr(request.state, "request_id", None),
+        user_id=ctx.user_id or None,
+        tenant_id=ctx.tenant_id,
     )
     llm_latency = time.perf_counter() - t_llm
     reply_text = chat_result.get("reply", "")
@@ -911,6 +1215,7 @@ async def voice_chat(
 
         db.log_conversation(
             session_id=session_id,
+            conversation_id=chat_result.get("conversation_id") or conversation_id,
             user_message=_CM.redact_for_storage(transcript),
             bot_reply=_CM.redact_for_storage(reply_text),
             sources=json.dumps(chat_result.get("sources", [])),
@@ -922,6 +1227,7 @@ async def voice_chat(
     return VoiceChatResponse(
         transcript=transcript,
         transcript_language=detected_lang,
+        conversation_id=chat_result.get("conversation_id") or conversation_id,
         reply=reply_text,
         reply_audio_base64=audio_b64,
         sample_rate=tts_sample_rate,
@@ -940,6 +1246,23 @@ async def voice_chat(
         mt_backend=mt_backend,
         error="; ".join(stage_errors) if stage_errors else None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Streaming voice chat (Phase 23 — WebSocket)
+# ---------------------------------------------------------------------------
+
+
+@app.websocket("/v1/voice/chat/stream")
+async def voice_chat_stream_ws(websocket: WebSocket) -> None:
+    """WebSocket endpoint for streaming voice chat with VAD + barge-in.
+
+    Gated by the ``voice_streaming`` feature flag.  See ``voice_ws.py``
+    for the full protocol specification.
+    """
+    from .voice_ws import voice_stream_ws
+
+    await voice_stream_ws(websocket, app)
 
 
 # ---------------------------------------------------------------------------
@@ -982,13 +1305,48 @@ def get_faq(
 _INDEX_API_KEY = os.getenv("INDEX_API_KEY", "")
 
 
-def _verify_index_auth(request: Request) -> None:
-    """Require a bearer token for the indexing endpoint (OWASP LLM10)."""
+def _has_valid_ops_key(request: Request) -> bool:
+    """Return True when the request presents the configured ops API key."""
     if not _INDEX_API_KEY:
-        return  # auth disabled when key is not configured
+        return False
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {_INDEX_API_KEY}":
+    return auth == f"Bearer {_INDEX_API_KEY}"
+
+
+def _require_ops_key(request: Request) -> None:
+    """Require the configured bearer token for operator-only endpoints."""
+    if not _INDEX_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="INDEX_API_KEY not configured for operator endpoint",
+        )
+    if not _has_valid_ops_key(request):
         raise HTTPException(status_code=403, detail="Invalid or missing INDEX_API_KEY")
+
+
+def require_admin_access(
+    request: Request,
+) -> AuthContext:
+    """Require an authenticated staff user or a valid operator API key.
+
+    Ticket triage endpoints should not be public. During OIDC rollout we
+    still allow the existing operator key as a break-glass path, but only
+    when it is explicitly configured.
+    """
+    if _has_valid_ops_key(request):
+        return AuthContext()
+
+    ctx = current_user(request, request.headers.get("Authorization"))
+    if not ctx.is_authenticated:
+        if _INDEX_API_KEY:
+            raise HTTPException(status_code=401, detail="authentication required")
+        raise HTTPException(
+            status_code=503,
+            detail="admin endpoint unavailable: configure OIDC staff auth or INDEX_API_KEY",
+        )
+    if ctx.user and ctx.user.is_staff:
+        return ctx
+    raise HTTPException(status_code=403, detail="staff role required")
 
 
 @app.post("/v1/index", tags=["knowledge"])
@@ -1002,7 +1360,7 @@ def trigger_indexing(
     Ingests all PDFs and FAQ CSVs, rebuilds the collection, and
     re-initialises the hybrid retriever.
     """
-    _verify_index_auth(request)
+    _require_ops_key(request)
 
     from .indexer import DATA_DIR, PDF_DIR, build_index, ingest_csvs, ingest_pdfs
 
@@ -1026,7 +1384,10 @@ def trigger_indexing(
 # Feedback endpoints
 # ---------------------------------------------------------------------------
 @app.post("/v1/feedback", response_model=FeedbackResponse, tags=["feedback"])
-def submit_feedback(body: FeedbackRequest) -> FeedbackResponse:
+def submit_feedback(
+    body: FeedbackRequest,
+    _ctx: AuthContext = Depends(current_user),
+) -> FeedbackResponse:
     """Submit thumbs-up/down feedback on a chatbot response."""
     from .service import ChatModel as _CM
 
@@ -1046,6 +1407,7 @@ def submit_feedback(body: FeedbackRequest) -> FeedbackResponse:
 def update_feedback_comment(
     message_id: str,
     body: FeedbackCommentRequest,
+    _ctx: AuthContext = Depends(current_user),
 ) -> dict:
     """Add a follow-up comment to existing feedback (avoids duplicate entries)."""
     from .service import ChatModel as _CM
@@ -1059,7 +1421,10 @@ def update_feedback_comment(
 
 
 @app.get("/v1/feedback/summary", response_model=FeedbackSummary, tags=["feedback"])
-def feedback_summary(days: int = 30) -> FeedbackSummary:
+def feedback_summary(
+    days: int = 30,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> FeedbackSummary:
     """Aggregated feedback statistics for the specified period."""
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be between 1 and 365")
@@ -1070,7 +1435,10 @@ def feedback_summary(days: int = 30) -> FeedbackSummary:
 # Analytics & metrics endpoints
 # ---------------------------------------------------------------------------
 @app.post("/v1/analytics/event", tags=["analytics"])
-def track_analytics_event(body: AnalyticsEvent) -> dict:
+def track_analytics_event(
+    body: AnalyticsEvent,
+    _ctx: AuthContext = Depends(current_user),
+) -> dict:
     """Track a client-side analytics event."""
     db.track_event(
         event_type=body.event_type,
@@ -1081,7 +1449,10 @@ def track_analytics_event(body: AnalyticsEvent) -> dict:
 
 
 @app.get("/v1/analytics/dashboard", response_model=AnalyticsDashboard, tags=["analytics"])
-def analytics_dashboard(days: int = 30) -> AnalyticsDashboard:
+def analytics_dashboard(
+    days: int = 30,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> AnalyticsDashboard:
     """Comprehensive analytics dashboard data."""
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be between 1 and 365")
@@ -1104,7 +1475,12 @@ def analytics_dashboard(days: int = 30) -> AnalyticsDashboard:
 
 @app.get("/v1/analytics/comparison", tags=["analytics"])
 @limiter.limit(_RATE_LIMIT)
-def analytics_comparison(request: Request, days: int = 30, dimension: str = "topic") -> dict:
+def analytics_comparison(
+    request: Request,
+    days: int = 30,
+    dimension: str = "topic",
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
     """Quality comparison by segment dimension (topic, locale, taxpayer_type).
 
     Returns per-segment average confidence and response time for visualization
@@ -1132,7 +1508,10 @@ def analytics_comparison(request: Request, days: int = 30, dimension: str = "top
 
 @app.get("/metrics", tags=["system"])
 @limiter.limit("30/minute")
-def prometheus_metrics(request: Request) -> PlainTextResponse:
+def prometheus_metrics(
+    request: Request,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> PlainTextResponse:
     """Prometheus-compatible metrics endpoint."""
     return PlainTextResponse(
         content=metrics.to_prometheus(),
@@ -1153,7 +1532,7 @@ def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
     Grafana can chart ``ura_eval_metric{name=...}`` alongside
     request metrics.
     """
-    _verify_index_auth(request)
+    _require_ops_key(request)
     if sample_size < 1 or sample_size > 500:
         raise HTTPException(status_code=400, detail="sample_size must be 1..500")
     if days < 1 or days > 365:
@@ -1180,14 +1559,14 @@ def list_tickets_endpoint(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """List escalation tickets for URA staff triage.
 
-    Gated by the same ``Authorization: Bearer <INDEX_API_KEY>`` header
-    as ``/v1/index`` and ``/v1/evaluate``.  Filter by status via the
+    Requires an authenticated staff/admin user, or the configured
+    operator key as a break-glass fallback. Filter by status via the
     query string: ``?status=open``.
     """
-    _verify_index_auth(request)
     if limit < 1 or limit > 500:
         raise HTTPException(status_code=400, detail="limit must be 1..500")
     if offset < 0 or offset > 100_000:
@@ -1202,13 +1581,17 @@ def list_tickets_endpoint(
         "limit": limit,
         "offset": offset,
         "tickets": rows,
+        "auth_mode": "user" if ctx.is_authenticated else "ops_key",
     }
 
 
 @app.get("/v1/admin/tickets/stats", tags=["admin"])
-def ticket_stats_endpoint(request: Request, days: int = 30) -> dict:
+def ticket_stats_endpoint(
+    request: Request,
+    days: int = 30,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
     """Aggregate ticket statistics for the admin dashboard."""
-    _verify_index_auth(request)
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be 1..365")
     return db.ticket_stats(days=days)
@@ -1218,9 +1601,9 @@ def ticket_stats_endpoint(request: Request, days: int = 30) -> dict:
 def get_ticket_endpoint(
     request: Request,
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
+    _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Fetch a single ticket by id."""
-    _verify_index_auth(request)
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
@@ -1235,9 +1618,9 @@ def update_ticket_endpoint(
     assignee: str | None = None,
     staff_note: str | None = None,
     priority: str | None = None,
+    _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Update a ticket's status/assignee/note/priority."""
-    _verify_index_auth(request)
     ok = db.update_ticket(
         ticket_id,
         status=status,
@@ -1250,15 +1633,29 @@ def update_ticket_endpoint(
     return {"status": "ok", "ticket_id": ticket_id}
 
 
-# ---------------------------------------------------------------------------
-# Phase 14 (2026) — /v1/me/* identity, profile, consent, subject rights
-# ---------------------------------------------------------------------------
-from .auth import AuthContext, current_user, require_user  # noqa: E402
-from .auth.models import (  # noqa: E402
-    ConsentGrantRequest,
-    ConsentWithdrawRequest,
-    ProfileUpdateRequest,
-)
+@app.get("/v1/admin/voice_audit", tags=["admin"])
+def voice_audit_endpoint(
+    request: Request,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    days: int = 30,
+    limit: int = 100,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """Voice audit log for regulatory compliance and admin review."""
+    from .voice_consent import get_voice_audit_log, voice_audit_stats
+
+    import time as _time
+
+    since = _time.time() - (days * 86400) if days > 0 else None
+    entries = get_voice_audit_log(
+        user_id=user_id,
+        session_id=session_id,
+        since=since,
+        limit=min(limit, 500),
+    )
+    stats = voice_audit_stats(days=days)
+    return {"entries": entries, "stats": stats}
 
 
 @app.get("/v1/me", tags=["me"])
@@ -1383,3 +1780,472 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
     )
     counts = db.delete_user_cascade(row["id"])
     return {"deleted": counts, "external_id": ctx.user.user_id}
+
+
+# ---------------------------------------------------------------------------
+# Evaluation results — serves pre-computed Results/ JSON for the dashboard
+# ---------------------------------------------------------------------------
+@app.get("/v1/evaluation/results", tags=["evaluation"])
+def evaluation_results(_ctx: AuthContext = Depends(require_admin_access)) -> dict:
+    """Serve all pre-computed evaluation metrics for the IEEE-standard dashboard.
+
+    Reads JSON files from the ``Results/`` directory relative to the
+    project root and returns a consolidated bundle.
+    """
+    import json as _json
+    from pathlib import Path
+
+    from ._root import PROJECT_ROOT as _pr2
+
+    results_dir = _pr2 / "Results"
+    metrics_dir = results_dir / "metrics"
+
+    def _load(path: Path) -> dict | list | None:
+        try:
+            return _json.loads(path.read_text()) if path.exists() else None
+        except Exception:
+            return None
+
+    return {
+        "rag_evaluation": _load(results_dir / "rag_evaluation_results.json"),
+        "rag_quality_gates": _load(results_dir / "rag_quality_gates.json"),
+        "safety_evaluation": _load(results_dir / "safety_evaluation_results.json"),
+        "red_team_report": _load(results_dir / "red_team_report.json"),
+        "calibration": _load(metrics_dir / "calibration_report.json"),
+        "reliability_curve": _load(metrics_dir / "reliability_curve.json"),
+        "coverage_accuracy": _load(metrics_dir / "coverage_accuracy.json"),
+        "benchmark": _load(metrics_dir / "benchmark.json"),
+        "tokenizer_audit": _load(metrics_dir / "tokenizer_audit.json"),
+        "speech_metrics": _load(metrics_dir / "speech_metrics.json"),
+        "mt_metrics": _load(metrics_dir / "mt_metrics.json"),
+        "tts_metrics": _load(metrics_dir / "tts_metrics.json"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# IEEE artifact export — generates figures/tables as PNG images
+# ---------------------------------------------------------------------------
+@app.post("/v1/export/artifacts", tags=["evaluation"])
+def export_artifacts(request: Request) -> dict:
+    """Generate IEEE-standard figures and tables as PNG images.
+
+    Reads all pre-computed Results/ JSON files and renders publication-
+    quality charts, graphs, and metric tables into the Artifacts/ folder
+    for inclusion in the final year project report.
+
+    Requires the same ``Authorization: Bearer <INDEX_API_KEY>`` header
+    as ``/v1/index`` and ``/v1/evaluate``.
+    """
+    _require_ops_key(request)
+
+    from .artifact_export import export_all
+
+    files = export_all()
+    return {
+        "status": "ok",
+        "count": len(files),
+        "files": files,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Quantized Models (Phase 24)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/v1/models/quantized", response_model=QuantizedModelsResponse, tags=["models"])
+@limiter.limit("60/minute")
+def list_quantized_models(
+    request: Request,
+    _ctx: AuthContext = Depends(current_user),
+) -> QuantizedModelsResponse:
+    """List available quantized model versions and their metadata.
+
+    Feature-flagged behind ``FLAG_QUANTIZATION``.
+    """
+    from .flags import flags
+    from .models import QuantizedModelInfo
+
+    if not flags.is_enabled("quantization"):
+        return QuantizedModelsResponse(models=[], total=0)
+
+    models: list[QuantizedModelInfo] = []
+
+    # Scan artifacts/quantized for manifest files
+    from ._root import PROJECT_ROOT as _pr
+
+    quantized_dir = _pr / "artifacts" / "quantized"
+    if quantized_dir.exists():
+        for manifest_path in quantized_dir.rglob("manifest.json"):
+            try:
+                with open(manifest_path, encoding="utf-8") as f:
+                    manifest = json.load(f)
+                for result in manifest.get("results", []):
+                    if result.get("status") != "success":
+                        continue
+                    models.append(QuantizedModelInfo(
+                        name=f"{result.get('model', 'unknown').split('/')[-1]}-{result.get('quant_type', '')}",
+                        format=result.get("format", "unknown"),
+                        quant_type=result.get("quant_type", "unknown"),
+                        size_mb=result.get("size_mb", 0),
+                        sha256=result.get("sha256", ""),
+                        created_at=result.get("created_at", ""),
+                        status="available",
+                    ))
+            except Exception:
+                logger.debug("Failed to read quantized manifest: %s", manifest_path, exc_info=True)
+
+    return QuantizedModelsResponse(
+        models=models,
+        total=len(models),
+        baseline_faithfulness=0.93,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Offline RAG (Phase 25)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/v1/offline/status", response_model=OfflineStatusResponse, tags=["offline"])
+@limiter.limit("60/minute")
+def offline_status(
+    request: Request,
+    _ctx: AuthContext = Depends(current_user),
+) -> OfflineStatusResponse:
+    """Get offline bundle availability and sync status.
+
+    Feature-flagged behind ``FLAG_OFFLINE_RAG``.
+    """
+    from .flags import flags
+    from .models import OfflineBundleInfo
+
+    if not flags.is_enabled("offline_rag"):
+        return OfflineStatusResponse(available=False)
+
+    from .offline_bundle import BundleManager
+
+    manager = BundleManager()
+    info = manager.get_info()
+
+    bundle_info = None
+    if info.available:
+        bundle_info = OfflineBundleInfo(
+            version=info.version,
+            size_bytes=info.size_bytes,
+            size_mb=info.size_mb,
+            passage_count=info.passage_count,
+            index_dim=info.index_dim,
+            sha256=info.sha256,
+            created_at=info.created_at,
+            min_app_version=info.min_app_version,
+        )
+
+    return OfflineStatusResponse(
+        available=info.available,
+        bundle=bundle_info,
+        sync_enabled=flags.is_enabled("offline_sync"),
+    )
+
+
+@app.post("/v1/offline/sync", response_model=OfflineSyncResponse, tags=["offline"])
+@limiter.limit("10/minute")
+def offline_sync(
+    body: OfflineSyncRequest,
+    request: Request,
+    _ctx: AuthContext = Depends(current_user),
+) -> OfflineSyncResponse:
+    """Compute delta sync for a client's offline bundle.
+
+    Client sends its current version + chunk hashes; server returns
+    only the changed chunks.  Feature-flagged behind ``FLAG_OFFLINE_SYNC``.
+    """
+    from .flags import flags
+
+    if not flags.is_enabled("offline_sync"):
+        raise HTTPException(
+            status_code=404,
+            detail="Offline sync is disabled (FLAG_OFFLINE_SYNC=false)",
+        )
+
+    from .offline_sync import OfflineSyncEngine, SyncEvent
+
+    engine = OfflineSyncEngine()
+    if not engine.initialize():
+        raise HTTPException(status_code=503, detail="Sync engine not available")
+
+    t0 = time.perf_counter()
+    delta = engine.compute_delta(
+        client_version=body.client_version,
+        client_chunk_hashes=body.client_chunk_hashes,
+        max_download_bytes=body.max_download_bytes,
+    )
+    duration = time.perf_counter() - t0
+
+    # Record sync event
+    engine.record_sync(SyncEvent(
+        device_id=body.device_id,
+        client_version=body.client_version,
+        server_version=delta.server_version,
+        sync_type="full" if delta.needs_full_sync else "delta",
+        chunks_sent=len(delta.changed_chunks),
+        bytes_sent=delta.total_download_bytes,
+        duration_s=round(duration, 3),
+        timestamp=time.time(),
+    ))
+
+    return OfflineSyncResponse(
+        server_version=delta.server_version,
+        needs_full_sync=delta.needs_full_sync,
+        changed_chunks=delta.changed_chunks,
+        deleted_chunk_ids=delta.deleted_chunk_ids,
+        total_download_bytes=delta.total_download_bytes,
+        estimated_sync_seconds=delta.estimated_sync_seconds,
+    )
+
+
+@app.get("/v1/offline/bundle", tags=["offline"])
+@limiter.limit("5/minute")
+def download_offline_bundle(
+    request: Request,
+    _ctx: AuthContext = Depends(current_user),
+):
+    """Download the latest offline RAG bundle.
+
+    Returns the compressed bundle archive for offline use.
+    Feature-flagged behind ``FLAG_OFFLINE_BUNDLE_API``.
+    """
+    from .flags import flags
+
+    if not flags.is_enabled("offline_bundle_api"):
+        raise HTTPException(
+            status_code=404,
+            detail="Offline bundle API is disabled (FLAG_OFFLINE_BUNDLE_API=false)",
+        )
+
+    from .offline_bundle import BundleManager
+
+    manager = BundleManager()
+    bundle_path = manager.get_bundle_path()
+
+    if bundle_path is None or not bundle_path.exists():
+        raise HTTPException(status_code=404, detail="No offline bundle available")
+
+    from fastapi.responses import FileResponse
+
+    size = bundle_path.stat().st_size
+    manager.record_download(size)
+    metrics.inc("offline_bundle_downloads_total")
+
+    return FileResponse(
+        path=str(bundle_path),
+        media_type="application/gzip",
+        filename=bundle_path.name,
+        headers={
+            "Content-Length": str(size),
+            "X-Bundle-Version": manager.get_info().version,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Voice + Vision (Phase 27)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/v1/voice/vision/chat", response_model=VoiceVisionChatResponse, tags=["voice"])
+@limiter.limit(_RATE_LIMIT)
+async def voice_vision_chat(
+    request: Request,
+    model: ChatModel = Depends(get_model),
+    speech: SpeechModel = Depends(get_speech_model),
+    ctx: AuthContext = Depends(optional_user),
+) -> VoiceVisionChatResponse:
+    """Compound voice + vision chat: audio + image -> ASR -> OCR -> LLM -> TTS.
+
+    Accepts multipart/form-data with:
+    - ``audio``: Raw PCM16 audio bytes
+    - ``image``: JPEG/PNG image bytes (optional)
+    - ``language``, ``voice``, ``top_k``, ``conversation_id``
+
+    Feature-flagged behind ``FLAG_VOICE_VISION``.
+    """
+    from .flags import flags
+
+    if not flags.is_enabled("voice_vision"):
+        raise HTTPException(
+            status_code=404,
+            detail="Voice vision mode is disabled (FLAG_VOICE_VISION=false)",
+        )
+    _require_voice_processing_consent(request, ctx)
+
+    import asyncio
+
+    t0 = time.perf_counter()
+    body = await request.form()
+
+    language = str(body.get("language", "en"))
+    voice = body.get("voice")
+    top_k = int(body.get("top_k", "4"))
+    conversation_id = body.get("conversation_id")
+    tts_enabled = str(body.get("tts_enabled", "true")).lower() == "true"
+    ocr_enabled = str(body.get("ocr_enabled", "true")).lower() == "true"
+
+    # Extract audio (hard cap: 16 MiB — same as /v1/asr)
+    audio_file = body.get("audio")
+    audio_bytes = await audio_file.read() if audio_file else b""
+    if len(audio_bytes) > 16 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Audio exceeds 16 MiB limit")
+
+    # Extract image (hard cap: 10 MiB)
+    image_file = body.get("image")
+    image_bytes = await image_file.read() if image_file else b""
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image exceeds 10 MiB limit")
+
+    transcript = ""
+    ocr_text = ""
+    asr_latency = 0.0
+    ocr_latency = 0.0
+
+    # Step 1: ASR (parallel with OCR)
+    async def do_asr():
+        nonlocal transcript, asr_latency
+        if audio_bytes:
+            t_asr = time.perf_counter()
+            result = await asyncio.to_thread(
+                speech.transcribe, audio_bytes, language=language,
+            )
+            asr_latency = time.perf_counter() - t_asr
+            transcript = result.text if result else ""
+
+    async def do_ocr():
+        nonlocal ocr_text, ocr_latency
+        if image_bytes and ocr_enabled:
+            t_ocr = time.perf_counter()
+
+            def _run_ocr() -> str:
+                try:
+                    import io as _io
+
+                    from PIL import Image
+
+                    img = Image.open(_io.BytesIO(image_bytes))
+                    import pytesseract
+
+                    return pytesseract.image_to_string(img, lang="eng")
+                except ImportError:
+                    return "[OCR unavailable — install pytesseract]"
+                except Exception as e:
+                    return f"[OCR error: {e}]"
+
+            ocr_text = await asyncio.to_thread(_run_ocr)
+            ocr_latency = time.perf_counter() - t_ocr
+
+    await asyncio.gather(do_asr(), do_ocr())
+
+    # Step 2: Combine transcript + OCR text for LLM
+    combined_query = transcript
+    if ocr_text:
+        combined_query += f"\n\n[Document text]: {ocr_text[:2000]}"
+
+    if not combined_query.strip():
+        return VoiceVisionChatResponse(
+            error="No audio transcript or document text detected",
+            total_latency_s=round(time.perf_counter() - t0, 3),
+        )
+
+    # Step 3: LLM generation
+    t_llm = time.perf_counter()
+    result = await asyncio.to_thread(
+        model.generate,
+        message=combined_query,
+        conversation_id=conversation_id or None,
+        top_k=top_k,
+        locale=language,
+        user_id=ctx.user_id or None,
+        tenant_id=ctx.tenant_id,
+    )
+    llm_latency = time.perf_counter() - t_llm
+
+    reply = result.get("reply", "")
+
+    # Step 4: TTS
+    tts_latency = 0.0
+    reply_audio = ""
+    sample_rate = 0
+    duration_s = 0.0
+
+    if tts_enabled and reply:
+        t_tts = time.perf_counter()
+        tts_result = await asyncio.to_thread(
+            speech.synthesize, reply, language=language, voice=str(voice) if voice else None,
+        )
+        tts_latency = time.perf_counter() - t_tts
+        if tts_result and tts_result.audio and not tts_result.error:
+            import base64 as _b64
+
+            reply_audio = _b64.b64encode(tts_result.audio).decode("ascii")
+            sample_rate = tts_result.sample_rate
+            duration_s = tts_result.duration_s
+
+    total_latency = time.perf_counter() - t0
+
+    return VoiceVisionChatResponse(
+        transcript=transcript,
+        ocr_text=ocr_text[:500],
+        reply=reply,
+        reply_audio_base64=reply_audio,
+        sample_rate=sample_rate,
+        duration_s=duration_s,
+        sources=result.get("sources", []),
+        citations=[
+            Citation(**c) if isinstance(c, dict) else c
+            for c in result.get("citations", [])
+        ],
+        faithfulness_score=result.get("faithfulness_score"),
+        retrieval_mode=result.get("retrieval_mode", "keyword"),
+        conversation_id=result.get("conversation_id"),
+        asr_latency_s=round(asr_latency, 3),
+        ocr_latency_s=round(ocr_latency, 3),
+        llm_latency_s=round(llm_latency, 3),
+        tts_latency_s=round(tts_latency, 3),
+        total_latency_s=round(total_latency, 3),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Admin: Offline Statistics (Phase 25)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/v1/admin/offline_stats", response_model=OfflineAdminStats, tags=["admin"])
+def admin_offline_stats(
+    request: Request,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> OfflineAdminStats:
+    """Aggregate offline usage statistics for the admin dashboard.
+
+    Combines bundle manager stats + sync engine stats.
+    """
+    from .offline_bundle import BundleManager
+    from .offline_sync import OfflineSyncEngine
+
+    bundle_mgr = BundleManager()
+    bundle_stats = bundle_mgr.get_stats()
+
+    sync_engine = OfflineSyncEngine()
+    sync_engine.initialize()
+    sync_stats = sync_engine.get_stats()
+
+    return OfflineAdminStats(
+        total_bundles_served=bundle_stats.get("total_bundles_served", 0),
+        total_syncs_completed=sync_stats.get("total_syncs", 0),
+        total_sync_bytes=sync_stats.get("total_bytes_sent", 0),
+        active_offline_devices=sync_stats.get("unique_devices", 0),
+        avg_sync_duration_s=sync_stats.get("avg_duration_s", 0.0),
+        bundle_version=bundle_stats.get("bundle_version", ""),
+        bundle_size_mb=bundle_stats.get("bundle_size_mb", 0.0),
+        passage_count=bundle_stats.get("passage_count", 0),
+        last_bundle_built_at=bundle_stats.get("last_built_at", ""),
+    )

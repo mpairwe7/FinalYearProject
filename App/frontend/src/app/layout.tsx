@@ -1,21 +1,9 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
 import React from 'react';
+import ConsentBanner from '../components/ConsentBanner';
 import Providers from '../components/Providers';
-
-// 2026 default Next.js font — modern variable sans (Vercel/Geist).
-// The CSS variables let us reference the font from globals.css fallbacks.
-const geistSans = Geist({
-  subsets: ['latin'],
-  variable: '--font-geist-sans',
-  display: 'swap',
-});
-const geistMono = Geist_Mono({
-  subsets: ['latin'],
-  variable: '--font-geist-mono',
-  display: 'swap',
-});
+import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
 
 export const metadata: Metadata = {
   title: 'URA Chatbot — AI Tax Assistant',
@@ -23,6 +11,16 @@ export const metadata: Metadata = {
     'Ask anything about Uganda Revenue Authority services, tax policy, and procedures. Grounded answers with live citations, powered by hybrid retrieval and on-device LLM synthesis.',
   applicationName: 'URA Chatbot',
   authors: [{ name: 'mpairweLandwind' }],
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'URA Chat',
+  },
+  icons: {
+    icon: '/favicon.svg',
+    apple: '/apple-touch-icon.svg',
+  },
   openGraph: {
     title: 'URA Chatbot — AI Tax Assistant',
     description:
@@ -32,17 +30,21 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#050509',
+  themeColor: '#0A0A12',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <Providers>{children}</Providers>
+      <body>
+        <ServiceWorkerRegistrar />
+        <Providers>
+          <ConsentBanner />
+          {children}
+        </Providers>
       </body>
     </html>
   );

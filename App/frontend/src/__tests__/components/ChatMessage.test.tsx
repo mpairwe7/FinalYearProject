@@ -60,6 +60,32 @@ describe("ChatMessage", () => {
     expect(screen.getByText("URA FAQ")).toBeInTheDocument();
   });
 
+  it("rerenders when streaming metadata adds citations without changing content", () => {
+    const withoutMetadata: ChatTurn = {
+      ...assistantTurn,
+      citations: [],
+      faithfulnessScore: null,
+    };
+    const { rerender } = renderMsg(withoutMetadata);
+
+    expect(screen.queryByText(/Sources \(1\)/)).not.toBeInTheDocument();
+
+    rerender(
+      <ChatMessage
+        turn={assistantTurn}
+        userQuery="What is VAT?"
+        locale="en"
+        playingTurnId={null}
+        ttsLoading={null}
+        isTransitioning={false}
+        onListen={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Sources \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Well grounded/)).toBeInTheDocument();
+  });
+
   it("shows 'Well grounded' badge for high faithfulness", () => {
     renderMsg(assistantTurn);
     expect(screen.getByText(/Well grounded/)).toBeInTheDocument();

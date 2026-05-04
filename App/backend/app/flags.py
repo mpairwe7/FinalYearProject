@@ -24,6 +24,12 @@ import os
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+_PRODUCTION_ON_FLAGS = {
+    "auth_required",
+    "multi_tenant",
+    "audit_ledger",
+    "voice_consent",
+}
 
 
 @dataclass(frozen=True)
@@ -54,6 +60,17 @@ _REGISTRY: dict[str, Flag] = {
         # Phase 14 (2026) — identity & consent
         Flag("auth_required", False, "Reject unauthenticated /v1/* requests"),
         Flag("multi_tenant", False, "Enforce tenant_id isolation via RLS"),
+        # Phase 15 (2026) — guided workflows + richer human handoff
+        Flag(
+            "workflows",
+            True,
+            "Route high-intent task queries into durable multi-step workflow guides",
+        ),
+        Flag(
+            "handoff_summaries",
+            True,
+            "Attach structured human-triage packets to escalations and low-confidence replies",
+        ),
         # Phase 15 (2026) — MCP + Tool RAG + LangGraph orchestration
         Flag("tool_rag", False, "Use Tool RAG selection instead of pasting all tool schemas"),
         Flag("langgraph", False, "Route agentic requests through the graph orchestrator"),
@@ -72,6 +89,94 @@ _REGISTRY: dict[str, Flag] = {
             "Enable mobile on-device voice features (ASR/TTS). Server handles "
             "no audio — the flag only gates the mobile UI and scoped analytics "
             "events. Per-user consent is still required on the device.",
+        ),
+        # Phase 23 (2026) — streaming voice-first infrastructure
+        Flag(
+            "voice_streaming",
+            False,
+            "Enable the WebSocket streaming voice chat endpoint "
+            "(/v1/voice/chat/stream). Requires SPEECH_ENABLED=true. "
+            "Gates the real-time ASR/TTS pipeline with VAD and barge-in.",
+        ),
+        Flag(
+            "voice_consent",
+            False,
+            "Enforce voice-specific consent checks (voice_recording, "
+            "voice_analytics) before processing audio. When false, voice "
+            "endpoints skip consent gates.",
+        ),
+        # Phase 24 (2026) — quantization & server optimization
+        Flag(
+            "quantization",
+            False,
+            "Serve quantized model variants (GGUF/AWQ/GPTQ). When enabled, "
+            "the /v1/models/quantized endpoint lists available quantized versions "
+            "and the server prefers quantized inference paths.",
+        ),
+        Flag(
+            "speculative_decoding",
+            False,
+            "Enable speculative decoding with a smaller draft model for 1.5-2x "
+            "throughput improvement. Requires a compatible draft model in artifacts/.",
+        ),
+        Flag(
+            "prefix_caching",
+            False,
+            "Enable KV-cache prefix sharing across requests with identical system "
+            "prompts. Reduces TTFT by 30-50% for repeated prompt prefixes.",
+        ),
+        # Phase 25 (2026) — production offline RAG
+        Flag(
+            "offline_rag",
+            False,
+            "Enable production offline RAG pipeline with FAISS + ONNX embedder. "
+            "When enabled, the server can serve offline bundle downloads and "
+            "provides /v1/offline/* endpoints for sync and status.",
+        ),
+        Flag(
+            "offline_sync",
+            False,
+            "Enable background delta sync engine. Only changed chunks are "
+            "transmitted (hash-based diffing). Requires offline_rag=true.",
+        ),
+        Flag(
+            "offline_bundle_api",
+            False,
+            "Enable offline bundle download endpoints (/v1/offline/bundle). "
+            "Serves versioned, SHA-256-verified bundles for mobile/edge clients.",
+        ),
+        # Phase 26 (2026) — mobile bundle optimization
+        Flag(
+            "mobile_bundle_check",
+            False,
+            "Enforce mobile bundle size limits (≤ 800 MB) in CI. "
+            "Any build exceeding the limit is automatically rejected.",
+        ),
+        Flag(
+            "on_device_search",
+            False,
+            "Enable on-device vector search via ONNX Runtime or ExecuTorch + "
+            "FAISS Mobile. Target: < 180ms p95 on mid-range Android (4GB RAM).",
+        ),
+        # Phase 27 (2026) — voice-first mobile experience
+        Flag(
+            "voice_first_mobile",
+            False,
+            "Make voice the primary mobile interface. Default launch mode = "
+            "Voice Chat (full-screen, animated orb). Text input remains available "
+            "as secondary. Optimized for low-literacy rural users.",
+        ),
+        Flag(
+            "voice_vision",
+            False,
+            "Enable voice + vision mode: speak while camera is active for "
+            "document/receipt scanning. POST /v1/voice/vision/chat endpoint.",
+        ),
+        Flag(
+            "offline_voice",
+            False,
+            "Enable fully offline ASR + TTS (Whisper-tiny + Piper/Sherpa). "
+            "No network required for speech I/O. Target WER ≤ 18% on Ugandan English.",
         ),
     ]
 }
@@ -97,6 +202,9 @@ class FeatureFlags:
         env_val = os.getenv(f"FLAG_{name.upper()}")
         if env_val is not None:
             return env_val.lower() in ("1", "true", "yes", "on")
+        if os.getenv("APP_ENV", "development").lower() == "production":
+            if name in _PRODUCTION_ON_FLAGS:
+                return True
         return flag.default
 
     def set(self, name: str, enabled: bool) -> None:

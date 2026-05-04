@@ -28,7 +28,7 @@ This repository describes a CI/CD pipeline for developing and training a custome
 
 ```
 FinalYearProject/
-├── .github/workflows/     # CI/CD pipeline (3 workflows)
+├── .github/workflows/     # CI/CD, security, frontend, mobile, and MLOps workflows
 ├── App/                   # Application code
 │   ├── app.py            # Gradio HF Spaces app
 │   ├── backend/          # FastAPI backend
@@ -36,7 +36,7 @@ FinalYearProject/
 │   │       ├── main.py        # FastAPI app + endpoints (sync + SSE streaming)
 │   │       ├── models.py      # Pydantic v2 request/response models
 │   │       ├── service.py     # ChatModel (6-phase RAG + classification)
-│   │       ├── llm.py         # Qwen2.5-3B-Instruct local LLM generation
+│   │       ├── llm.py         # Qwen3-8B local/vLLM generation, 4-bit BnB, LoRA routing
 │   │       ├── query.py       # Query rewriting (abbreviations, spelling, coreference)
 │   │       ├── cache.py       # Semantic cache (cosine similarity)
 │   │       ├── corrective_rag.py # Corrective re-retrieval + clarification
@@ -46,7 +46,7 @@ FinalYearProject/
 │   │       ├── tracing.py     # OpenTelemetry GenAI tracing (per-stage spans)
 │   │       ├── analytics.py   # Prometheus-compatible metrics middleware
 │   │       └── database.py    # SQLite WAL analytics/feedback/session/conversation store
-│   └── frontend/         # Next.js 15 + React 19 + Zustand 5 frontend
+│   └── frontend/         # Next.js 16 + React 19 + Zustand 5 frontend
 ├── MobileApp/             # Flutter mobile application
 │   └── ura_chatbot/       # Flutter 3.41 + Riverpod + Material 3
 │       ├── lib/
@@ -77,7 +77,7 @@ FinalYearProject/
 │   ├── DataIngestion_Augmentation.ipynb   # Data ingestion & augmentation pipeline
 │   └── fine_tune_gemma.ipynb              # Gemma/LLM fine-tuning pipeline
 ├── tests/                 # Test suite
-├── docker-compose.yml     # Service orchestration (API + Qdrant)
+├── docker-compose.yml     # Service orchestration (API + frontend + Qdrant + Redis)
 └── docs/                  # Documentation
 ```
 
@@ -112,7 +112,7 @@ User Query
   → Hybrid Retrieval (dense + BM25 RRF → cross-encoder rerank)
   → Corrective RAG (re-retrieve if avg score < threshold)
   → Clarification / Abstention check
-  → LLM Synthesis (Qwen2.5-3B-Instruct, local inference)
+  → LLM Synthesis (Qwen3-8B, local 4-bit Transformers or vLLM)
   → OutputGuard (PII redaction, XSS sanitization, grounding check)
   → Escalation evaluation → SSE stream or sync response
 ```
@@ -127,7 +127,8 @@ User Query
 | **Query Rewriting** | `query.py` | Abbreviation expansion (15+ URA terms), spell correction, coreference resolution |
 | **Semantic Cache** | `cache.py` | Cosine similarity matching, configurable TTL/threshold/max-size |
 | **Corrective RAG** | `corrective_rag.py` | Re-retrieve with expanded query when initial quality is low |
-| **Generation** | `Qwen/Qwen2.5-3B-Instruct` (local) | HuggingFace transformers, sync + SSE streaming via `TextIteratorStreamer` |
+| **Generation** | `Qwen/Qwen3-8B` | Local Transformers with optional BitsAndBytes NF4 4-bit quantization, or vLLM HTTP |
+| **LoRA Routing** | Qwen3 adapters for `lg`, `sw`, `nyn`, `ach` | Per-locale PEFT adapters loaded from `fine-tuning/adapters/` and selected with `set_adapter()` |
 | **Multi-turn Memory** | `database.py` | 5-turn sliding window from SQLite conversation history |
 | **Safety** | OWASP LLM Top 10 guardrails | Injection detection, PII redaction, XSS sanitization, grounding verification |
 | **Escalation** | `guardrails.py` | Auto-flag for human review on low faithfulness or no results |
@@ -135,6 +136,20 @@ User Query
 | **Evaluation** | Hit@K, MRR, NDCG, faithfulness | 8-metric quality gates block deployment below thresholds |
 
 - Data model, ingestion flow, and evaluation rubric are documented in [docs/data-schema-and-eval.md](docs/data-schema-and-eval.md).
+
+## Current App Runtime Baseline (May 2026)
+
+The App deployment is designed for public anonymous chat while keeping private/account surfaces fail-closed:
+
+| Area | Current baseline |
+|------|------------------|
+| Public chat | `/v1/chat`, `/v1/chat/stream`, frontend `/api/v1/chat`, speech health, TTS, translation, and consented voice processing work without login |
+| Private routes | `/v1/me/*`, admin tickets, metrics, analytics dashboards, evaluation exports, offline bundle APIs, and URA account/action tools require bearer auth and/or staff roles |
+| LLM memory footprint | `LLM_LOAD_IN_4BIT=true` enables BitsAndBytes NF4 4-bit loading for Qwen3-8B, keeping GPU headroom for the agentic stack |
+| Language adapters | `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH` mount from `fine-tuning/adapters` into `/app/adapters` |
+| Speech | Whisper LoRA adapters for Luganda, Swahili, and Runyankole are mounted from the same adapter volume; `WHISPER_DEVICE=cpu` keeps ASR off GPU 0 |
+| Mobile chat UX | The Next.js PWA keeps the composer docked above the safe area/keyboard, auto-scrolls while the user is near the latest turn, renders markdown/citations, and exposes a scroll-to-latest affordance when the user scrolls away |
+| Live smoke | `scripts/live_smoke.sh` and `scripts/deploy_preflight.sh` verify health, anonymous TIN workflow responses, speech health, protected admin denial, and ngrok proxy routing |
 
 ## Data Ingestion & Augmentation Pipeline
 
@@ -187,6 +202,17 @@ Teacher QA ──▶ Fail-Fast ──▶ RAG-Aware Format ──▶ SFT (rsLoRA)
 
 Ten workflows under `.github/workflows/`:
 
+**Current PR behavior (May 2026):**
+
+| Area | PR behavior |
+|------|-------------|
+| App backend | Ruff syntax/undefined-name gate, pytest with isolated Qdrant/speech-disabled test env, governance check, data/speech smoke jobs |
+| Frontend | ESLint, TypeScript, Vitest unit/component tests, accessibility/Lighthouse, and production build |
+| Security | Secret scanning, CodeQL, Semgrep, Bandit, pip-audit, Checkov, Trivy filesystem/IaC/license/image scans, and threat-registry validation |
+| SARIF uploads | Semgrep uploads SARIF on PRs; Trivy and Checkov upload PR artifacts and reserve GitHub Security SARIF upload for non-PR events to avoid external code-scanning app check failures |
+| Container publishing | API/frontend publish on protected branch pushes; ML image publishing is skipped on PRs while dedicated Trivy image jobs still validate build outputs |
+| Intentional PR skips | OWASP ZAP baseline and OSSF Scorecard skip on PR because they need live/default-branch repository context |
+
 ### 1. `ci-ml-pipeline.yml` - Main ML Pipeline
 **Triggers**: Push to `main`/`develop`/`feat/*`, PRs, manual dispatch
 
@@ -203,13 +229,15 @@ Ten workflows under `.github/workflows/`:
 | Build Docker | Multi-stage build, Trivy scan, push to DockerHub |
 | Deploy Backend | Production API deployment |
 
+The PR Python coverage gate is currently set to a ratcheting baseline of 35% while focused agentic/backend coverage is expanded. Coverage XML is still uploaded for review on every run.
+
 ### 2. `frontend-deploy.yml` - Frontend CI/CD
 **Triggers**: Push to `main`/`develop` (frontend changes), PRs
 
 | Stage | Description |
 |-------|-------------|
 | Lint | ESLint + TypeScript checking |
-| Unit & Component Tests | Vitest + React Testing Library (coverage thresholds enforced) |
+| Unit & Component Tests | Vitest + React Testing Library; coverage artifact is uploaded while the blocking gate focuses on correctness |
 | Accessibility Audit | axe-core WCAG 2.1 AA + Lighthouse CI (accessibility >= 90) |
 | Build | Next.js production build |
 | Build Docker | Build & push frontend Docker image + Trivy scan |
@@ -350,7 +378,7 @@ Run locally: `python governance/compliance_check.py`
 
 ## ML Training Pipeline
 
-The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemma/Llama models for both web API inference (Qwen2.5-3B) and on-device mobile inference (Gemma-2-2B).
+The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemma/Llama/Qwen adapters for both web API inference (Qwen3-8B with PEFT adapters) and on-device mobile inference (Gemma-2-2B).
 
 ### Scripts
 
@@ -371,7 +399,7 @@ The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemm
 | `mobile_offline` | Llama-3.2-1B | Lightweight mobile | GGUF Q4_K_M (~0.8 GB) |
 | `background_t5` | Flan-T5-Small | Background tasks | HF safetensors |
 
-**Web API inference** uses Qwen2.5-3B-Instruct (see `App/backend/app/llm.py`).
+**Web API inference** uses Qwen3-8B with optional 4-bit local loading and locale-specific LoRA adapters (see `App/backend/app/llm.py`).
 
 ### Quick Start
 
@@ -400,7 +428,7 @@ See [ml/README.md](ml/README.md) for detailed documentation.
 - Frontend (App/frontend/): install with `bun install`; run `bun run dev` for local preview or `bun run lint/test/build` matching CI.
 - Keep Kaggle notebook entrypoint versioned; ensure data paths/configs are reproducible.
 - API: build and run locally with `docker compose up --build` (expects `app.main:app`). Qdrant runs as a first-class service via docker-compose with healthcheck.
-- LLM: Qwen2.5-3B-Instruct downloads automatically on first request (~6 GB). Set `LLM_DEVICE=cpu` for CPU-only inference or `LLM_DEVICE=auto` for GPU auto-detection. Disable with `LLM_ENABLED=false` to fall back to FAQ lookup.
+- LLM: Qwen3-8B downloads automatically on first request unless the Hugging Face cache is mounted offline. Set `LLM_LOAD_IN_4BIT=true` for NF4 4-bit loading, `LLM_DEVICE=cpu` for CPU-only inference, or `LLM_DEVICE=auto` for GPU auto-detection. Disable with `LLM_ENABLED=false` to fall back to FAQ lookup.
 
 ## Container Baseline
 - API image (`Dockerfile`) uses multi-stage build, non-root runtime user, exec-style entrypoint, and Python-based healthcheck (no runtime `curl` dependency).

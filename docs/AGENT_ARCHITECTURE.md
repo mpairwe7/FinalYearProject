@@ -276,6 +276,14 @@ Other flags (`self_reflect`, `structured_output`, `corrective_rag`,
 `semantic_cache`, `query_rewrite`, `reranker`, `eval_auto_run`)
 remain independent — they compose with the agentic flags above.
 
+**Phase 23 voice flags** also compose independently:
+
+| `VOICE_STREAMING` | `VOICE_CONSENT` | Behaviour |
+|---|---|---|
+| ❌ | ❌ | **Default.** Batch-only voice via `POST /v1/voice/chat`. No WebSocket endpoint. |
+| ✅ | ❌ | **Streaming, no consent gate.** WebSocket `/v1/voice/chat/stream` active. Voice audit logged but consent not enforced (suitable for internal testing). |
+| ✅ | ✅ | **Full production voice.** WebSocket active + `voice_recording` consent required before processing audio. Audit trail chained into AuditLedger. NDPA 2019 compliant. |
+
 Per-request override via `flags.set(name, value)` is available for
 A/B tests and notebook experiments.
 
@@ -360,8 +368,8 @@ Ticket IDs are UUIDs — the path regex is `^[a-f0-9-]{1,64}$`.
     ```bash
     QDRANT_URL=http://localhost:16333      # Docker maps 16333→6333
     REDIS_URL=redis://localhost:16379/0    # Docker maps 16379→6379
-    DENSE_MODEL=sentence-transformers/all-MiniLM-L6-v2
-    DENSE_DIM=384                          # Must match the indexed collection
+    DENSE_MODEL=BAAI/bge-m3
+    DENSE_DIM=1024                         # Must match the indexed collection
     HF_HOME=/home/developer/hf-cache       # Writable cache dir
     CUDA_VISIBLE_DEVICES=0                 # Pin to a specific GPU
     ```

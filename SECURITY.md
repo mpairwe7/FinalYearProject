@@ -96,10 +96,25 @@ Custom Semgrep rules (`.semgrep/ura-chatbot-rules.yaml`) include:
 - Python anti-patterns (pickle, yaml.load, subprocess shell, SQL injection)
 - Uganda PII detection (TIN, NIN patterns in source code)
 
+### Pull Request Security Gate Semantics
+
+The May 2026 CI update keeps PRs blocking on actionable security findings while preventing unsafe publication side effects:
+
+| Control | Pull request behavior |
+|---------|-----------------------|
+| Trivy | Filesystem, IaC, license, and container scans run; scan/SBOM artifacts are uploaded; GitHub Security SARIF upload is reserved for non-PR events |
+| Checkov | IaC scan runs and uploads artifacts; SARIF upload is reserved for non-PR events |
+| Semgrep | SAST runs and uploads SARIF when available |
+| pip-audit | Root and `App/backend` Python dependency audits run |
+| Threat model | `threat-model/validate_threats.py` remains a blocking PR gate |
+| OWASP ZAP | Skips on PR; runs on push, schedule, or manual dispatch against a live API target |
+| OSSF Scorecard | Skips on PR; runs on non-PR events with default-branch repository context |
+| ML image publishing | Skips on PR; dedicated Trivy image jobs still validate buildable images |
+
 ### AI/ML-Specific Security (OWASP LLM Top 10 2025)
 - **LLM01 – Prompt Injection**: `InputGuard` with 11 regex patterns; system-prompt isolation via Qwen chat template; passage delimiters (`<passage>` tags) to reduce indirect injection surface
 - **LLM02 – Sensitive Information Disclosure**: `OutputGuard.redact_pii()` on all responses and before database storage; Uganda-specific PII patterns (TIN, NID, phone, passport); `STORE_RAW_PROMPTS=false` default; conversation history sanitized before feeding to LLM
-- **LLM03 – Supply Chain Vulnerabilities**: Pinned dependency versions; Trivy container scanning; SBOM generation; SHA-256 data integrity checks
+- **LLM03 – Supply Chain Vulnerabilities**: Pinned dependency versions; Trivy container scanning; SBOM generation; SHA-256 data integrity checks; `LLM_TRUST_REMOTE_CODE=false` by default; production can pin `LLM_MODEL_REVISION`
 - **LLM04 – Data and Model Poisoning**: Data provenance tracking; CODEOWNERS review gates; quality gates; local inference (no external API calls)
 - **LLM05 – Improper Output Handling**: `OutputGuard.sanitize()` strips `<script>`, HTML tags, suspicious markdown image links; applied per-token in SSE streaming path; CSP headers
 - **LLM09 – Misinformation**: Runtime faithfulness scoring via `compute_faithfulness()`; grounding disclaimer appended when score < threshold; calibrated abstention when confidence too low; human escalation flagging

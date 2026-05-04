@@ -12,7 +12,10 @@
  * - Timeout on all fetch calls (10s) to prevent UI freezes
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { hasAnalyticsConsent } from "../lib/analyticsConsent";
+import { authHeaders } from "../lib/authSession";
+
+const API_URL = '/api';
 const QUEUE_KEY = 'ura_analytics_queue';
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -47,6 +50,7 @@ function enqueueEvent(payload: Record<string, unknown>): void {
 }
 
 function flushQueue(): void {
+  if (!hasAnalyticsConsent()) return;
   try {
     const raw = localStorage.getItem(QUEUE_KEY);
     if (!raw) return;
@@ -55,12 +59,20 @@ function flushQueue(): void {
     for (const payload of queue) {
       fetchWithTimeout(`${API_URL}/v1/analytics/event`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       }).catch(() => {});
     }
   } catch {
     // Ignore flush errors
+  }
+}
+
+export function clearAnalyticsQueue(): void {
+  try {
+    localStorage.removeItem(QUEUE_KEY);
+  } catch {
+    // localStorage unavailable — ignore
   }
 }
 
@@ -82,6 +94,7 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<globalT
  * Falls back to localStorage queue on network failure.
  */
 export function trackEvent(eventType: string, data: Record<string, unknown> = {}): void {
+  if (!hasAnalyticsConsent()) return;
   const sessionId = getSessionId();
   if (!sessionId) return;
 
@@ -98,7 +111,7 @@ export function trackEvent(eventType: string, data: Record<string, unknown> = {}
 
   fetchWithTimeout(`${API_URL}/v1/analytics/event`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Session-ID': sessionId },
+    headers: authHeaders({ 'Content-Type': 'application/json', 'X-Session-ID': sessionId }),
     body: JSON.stringify(payload),
   }).catch(() => {
     enqueueEvent(payload);
@@ -115,11 +128,12 @@ export async function submitFeedback(
   userQuery: string = '',
   botReply: string = '',
 ): Promise<{ id: string } | null> {
+  if (!hasAnalyticsConsent()) return null;
   const sessionId = getSessionId();
   try {
     const res = await fetchWithTimeout(`${API_URL}/v1/feedback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Session-ID': sessionId },
+      headers: authHeaders({ 'Content-Type': 'application/json', 'X-Session-ID': sessionId }),
       body: JSON.stringify({
         message_id: messageId,
         rating,
@@ -143,10 +157,11 @@ export async function updateFeedbackComment(
   messageId: string,
   comment: string,
 ): Promise<boolean> {
+  if (!hasAnalyticsConsent()) return false;
   try {
     const res = await fetchWithTimeout(`${API_URL}/v1/feedback/${encodeURIComponent(messageId)}/comment`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Session-ID': getSessionId() },
+      headers: authHeaders({ 'Content-Type': 'application/json', 'X-Session-ID': getSessionId() }),
       body: JSON.stringify({ comment }),
     });
     return res.ok;
@@ -171,6 +186,7 @@ let _analyticsInitialised = false;
  * Safe to call multiple times (idempotent).
  */
 export function initAnalytics(): void {
+  if (!hasAnalyticsConsent()) return;
   if (_analyticsInitialised) return;
   _analyticsInitialised = true;
 

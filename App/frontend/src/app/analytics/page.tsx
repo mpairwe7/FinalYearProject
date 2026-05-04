@@ -14,7 +14,12 @@
  * EU AI Act Art. 13 (Transparency), ISO 42001 §9.1 (Monitoring)
  */
 import React, { useState } from "react";
-import { useDashboard, useFeedbackSummary, useTicketStats } from "../../hooks/useAnalyticsDashboard";
+import {
+  useDashboard,
+  useFeedbackSummary,
+  useTicketQueue,
+  useTicketStats,
+} from "../../hooks/useAnalyticsDashboard";
 import SloGaugeCard from "../../components/charts/SloGaugeCard";
 import TopicBarChart from "../../components/charts/TopicBarChart";
 import FeedbackPieChart from "../../components/charts/FeedbackPieChart";
@@ -35,6 +40,7 @@ export default function AnalyticsDashboard() {
   const { data: dash, isLoading, error } = useDashboard(days);
   const { data: feedback } = useFeedbackSummary(days);
   const { data: tickets } = useTicketStats(days);
+  const { data: ticketQueue } = useTicketQueue("open", 8);
 
   return (
     <main className="analytics-page">
@@ -162,6 +168,47 @@ export default function AnalyticsDashboard() {
             </section>
           )}
 
+          {ticketQueue && ticketQueue.tickets.length > 0 && (
+            <section className="ticket-queue-panel">
+              <h3 className="chart-title">Open Escalation Queue</h3>
+              <div className="ticket-queue-list">
+                {ticketQueue.tickets.map((ticket) => (
+                  <article key={ticket.id} className="ticket-queue-card">
+                    <div className="ticket-queue-head">
+                      <div>
+                        <div className="ticket-queue-id">{ticket.id.slice(0, 8)}</div>
+                        <div className="ticket-queue-topic">
+                          {ticket.handoff?.topic?.replaceAll("_", " ") || "general support"}
+                        </div>
+                      </div>
+                      <div className={`priority-pill priority-${ticket.priority}`}>
+                        {ticket.priority}
+                      </div>
+                    </div>
+                    <p className="ticket-queue-summary">
+                      {ticket.handoff?.summary || ticket.reason || ticket.user_query}
+                    </p>
+                    {ticket.handoff?.required_details && ticket.handoff.required_details.length > 0 && (
+                      <div className="ticket-queue-meta">
+                        Need: {ticket.handoff.required_details.slice(0, 3).join(" • ")}
+                      </div>
+                    )}
+                    {ticket.response_judge?.reasons && ticket.response_judge.reasons.length > 0 && (
+                      <div className="ticket-queue-meta">
+                        Judge: {ticket.response_judge.final_decision || ticket.response_judge.decision} •{" "}
+                        {ticket.response_judge.reasons[0]}
+                      </div>
+                    )}
+                    <div className="ticket-queue-footer">
+                      <span>{new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(ticket.updated_at * 1000)}</span>
+                      <span>{ticket.status}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Row 6: Recent feedback */}
           {feedback && feedback.recent && feedback.recent.length > 0 && (
             <section className="recent-feedback">
@@ -187,7 +234,7 @@ export default function AnalyticsDashboard() {
                         <td className="query-cell">{f.user_query?.slice(0, 80)}</td>
                         <td className="comment-cell">{f.comment || "—"}</td>
                         <td className="time-cell">
-                          {new Date(f.created_at * 1000).toLocaleDateString()}
+                          {new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' }).format(f.created_at * 1000)}
                         </td>
                       </tr>
                     ))}

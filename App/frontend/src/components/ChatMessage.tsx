@@ -1,7 +1,9 @@
-import React, { memo } from 'react';
+import React, { lazy, memo, Suspense } from 'react';
 import { ChatTurn, Citation } from '../store/useChatStore';
 import FeedbackButtons from './FeedbackButtons';
 import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots } from './Icons';
+
+const Markdown = lazy(() => import('./Markdown'));
 
 interface ChatMessageProps {
   turn: ChatTurn;
@@ -26,13 +28,19 @@ function ChatMessageInner({
   const isGreeting = turn.id === 'greeting-0';
 
   return (
-    <article className="message-row">
+    <article className={`message-row message-row-${turn.role}`}>
       <div className={`avatar ${turn.role}`} aria-hidden="true">
         {turn.role === 'user' ? <UserIcon /> : <BotIcon />}
       </div>
       <div className={`bubble ${turn.role}`}>
         <span className="bubble-role">{turn.role}</span>
-        <div className="msg-content">{turn.content}</div>
+        <div className="msg-content">
+          {isAssistant ? (
+            <Suspense fallback={turn.content}><Markdown content={turn.content} /></Suspense>
+          ) : (
+            turn.content
+          )}
+        </div>
 
         {isAssistant && !isGreeting && turn.escalationRequired && (
           <div className="escalation-banner" role="alert">
@@ -91,10 +99,22 @@ function ChatMessageInner({
   );
 }
 
+function citationSignature(citations: Citation[] | undefined): string {
+  return (citations ?? [])
+    .map((c) => [c.ref, c.source, c.page ?? '', c.section ?? '', c.passage ?? ''].join('\u001f'))
+    .join('\u001e');
+}
+
 const ChatMessage = memo(ChatMessageInner, (prev, next) => {
   return (
     prev.turn.id === next.turn.id &&
     prev.turn.content === next.turn.content &&
+    prev.turn.faithfulnessScore === next.turn.faithfulnessScore &&
+    prev.turn.retrievalMode === next.turn.retrievalMode &&
+    prev.turn.escalationRequired === next.turn.escalationRequired &&
+    prev.turn.escalationReason === next.turn.escalationReason &&
+    citationSignature(prev.turn.citations) === citationSignature(next.turn.citations) &&
+    prev.userQuery === next.userQuery &&
     prev.playingTurnId === next.playingTurnId &&
     prev.ttsLoading === next.ttsLoading &&
     prev.locale === next.locale &&

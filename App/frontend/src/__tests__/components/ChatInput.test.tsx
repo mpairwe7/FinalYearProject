@@ -76,8 +76,9 @@ describe("ChatInput", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows recording label when isRecording", () => {
+  it("shows recording controls when isRecording", () => {
     render(<ChatInput {...defaults} isRecording />);
-    expect(screen.getByLabelText("Stop recording")).toBeInTheDocument();
+    expect(screen.getByLabelText("Cancel recording")).toBeInTheDocument();
+    expect(screen.getByLabelText("Send recording")).toBeInTheDocument();
   });
 });

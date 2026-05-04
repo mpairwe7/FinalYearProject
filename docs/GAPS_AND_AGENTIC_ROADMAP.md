@@ -1,11 +1,11 @@
 # URA Chatbot — Production Gap Analysis & Agentic AI Roadmap
 
-> Companion to `App/README.md` (which documents Phases 1–13) and
-> `docs/AGENT_ARCHITECTURE.md` (which documents the Phase 14 A-D
-> agent runtime that now ships on `feat/agentic-workflows`).
+> Companion to `App/README.md` (which documents Phases 1–16) and
+> `docs/AGENT_ARCHITECTURE.md` (which documents the agent runtime).
 >
 > This document tracks the **remaining gaps** — things that are
 > not yet in the codebase and what it would take to close them.
+> Gaps closed during Phases 14 A-D, 15, and 16 are marked **SHIPPED**.
 >
 > Audience: engineers planning the next release cycle + URA
 > stakeholders evaluating what a full production deployment looks
@@ -14,16 +14,20 @@
 > **Status legend:**
 > - ⚪ — identified, not yet started
 > - 🟡 — partially delivered (see notes on each row)
-> - 🟢 — **shipped** (on `feat/agentic-workflows`)
+> - 🟢 — **shipped**
 
 ---
 
 ## 1. Current state (baseline)
 
-Phases 1–13 give us a hardened, generic RAG chatbot with:
+Phases 1–16 are now implemented. Phases 1–13 delivered a hardened,
+generic RAG chatbot. Phases 14 A-D, 15, and 16 added identity,
+tool-calling, agentic routing, workflows, memory, audit, and speech.
+
+The chatbot now ships with:
 
 - **Hybrid retrieval** (Qdrant dense + BM25 RRF + cross-encoder rerank)
-- **Grounded generation** (Qwen2.5-3B-Instruct, spotlight markers,
+- **Grounded generation** (Qwen3-8B, spotlight markers,
 token-aware trimming, structured-output option)
 - **OWASP LLM Top 10 (2025) coverage** — prompt-injection guards,
 PII redaction, system-prompt leakage detection, grounding checks
@@ -32,21 +36,39 @@ circuit breakers around Qdrant and LLM, hard deadlines
 - **Continuous evaluation** — Ragas-compatible harness, SLO alert rules
 - **Next.js 16.2.3 + React 19.2 frontend** with glassmorphism UI,
 SSE streaming, optimistic feedback, same-origin `/api` proxy
-- **Full test pyramid** — backend pytest (>= 80% cov), frontend Vitest +
-Playwright E2E, Flutter mobile CI, k6 load tests
+- **Full test pyramid** — backend pytest with a current 35% CI coverage
+ratchet, frontend Vitest + Playwright E2E, Flutter mobile CI, k6 load tests
 - **Production observability** — Prometheus + Grafana + Jaeger (docker-compose
 `--profile monitoring`), 5 SLO alerting rules, pre-built dashboards
 - **Security-as-code** — cosign container signing, SLSA v1.2 provenance,
 OWASP ZAP DAST, AI red teaming (50 NIST AI 600-1 prompts)
 - **Compliance artefacts** — Model Card (EU AI Act Art. 53), PIA (NDPA §28),
 bias audit, carbon tracking, incident response simulation
+- **Auth system** — JWT (HS256/RS256), RBAC with 5 roles, consent
+management (UDPA 2019), user profiles (`auth/` directory)
+- **Tool-calling framework** — 6 tool modules, ToolRegistry,
+generate_with_tools loop (`tools/` directory)
+- **Supervisor routing** — 7 routes with per-specialist tool
+whitelists (`agents/` directory)
+- **Guided workflows** — 5 YAML-declared workflows with slot filling
+(`workflows/` directory)
+- **Ticket queue** — CRUD admin endpoints, escalation tool
+- **Speech pipeline** — ASR (Whisper), TTS (Piper), MT, Sunbird AI
+cloud fallback
+- **Memory system** — semantic facts, episodic summaries, working
+memory (`memory/` directory)
+- **Audit ledger** — hash-chained, Merkle tree proofs (`audit/`
+directory)
+- **Feature flags** — 18 flags via `flags.py`
+- **PostgreSQL backend** option alongside SQLite
 
-**What this is good at:** answering *stateless, factual* questions
-about URA policy from a static knowledge base.
+**What this is good at:** answering factual questions about URA
+policy, performing tax calculations, routing to specialists,
+walking users through guided workflows, and escalating to staff.
 
-**What this is not good at yet:** anything that depends on knowing
-*who* the user is, *what they've been working on*, or *doing
-something* beyond returning text.
+**What this is not good at yet:** deep multi-step planning (ReAct),
+live URA account integration, document ingestion at query time,
+proactive notifications, or multi-tenant deployment.
 
 ---
 
@@ -61,29 +83,29 @@ surface that would need to change. Effort estimates are rough:
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G1 | **No user authentication.** Every session is anonymous (random UUID in `sessionStorage`). | Can't tailor answers to taxpayer type, can't enforce permissions, can't reference user's TIN. | `useAnalyticsStore.ts` generates an anon session id; `X-Session-ID` header only. | OIDC via URA SSO or a lightweight OAuth2 provider (Keycloak / Auth0). Add `X-Auth-Token` (JWT) header; backend verifies and maps to `user_id`. | New `backend/app/auth.py`, middleware in `main.py`, session schema changes in `database.py` | L |
-| G2 | **No user profile.** No concept of `taxpayer_type` (individual / company / NGO / non-resident), preferred locale, TIN, industry, tax obligations. | Bot can't personalize — a sole trader and an accounting firm director get the same generic answer. | Frontend stores no profile; backend has no table. | New `users` + `user_profiles` tables; `GET/PUT /v1/me/profile` endpoints; frontend profile panel. | `database.py`, `postgres.py`, new `profiles.py`, `models.py`, `page.tsx` | L |
-| G3 | **No consent / data-processing flow.** Uganda Data Protection Act 2019 + GDPR-adjacent frameworks require explicit consent for PII processing. | Hard blocker for any government deployment. | Only a retention TTL (`CONVERSATION_TTL_DAYS=7`). | Add consent banner, `consents` table with version, purpose, timestamp, withdrawal support. Integrate with `OutputGuard.redact_pii` so consented users can opt into richer personalization. | New `consent.py`, `database.py` schema, `ConsentBanner.tsx` | M |
-| G4 | **No role-based access.** Staff, admins, and taxpayers need different views. | Can't ship the same app to both consumer and internal URA users. | No RBAC. | Add `role` column, `@requires_role` FastAPI dependency, feature-gate the UI. | `auth.py`, `main.py`, route decorators | M |
+| G1 🟢 | **~~No user authentication.~~** **SHIPPED Phase 14** — `auth/` directory with JWT (HS256/RS256), `jwt_auth.py` middleware, `dependencies.py` for FastAPI dependency injection. Bearer token auth on protected endpoints. | — | Done. | `backend/app/auth/jwt_auth.py`, `backend/app/auth/dependencies.py` | Done |
+| G2 🟢 | **~~No user profile.~~** **SHIPPED Phase 14** — `user_profiles` table with taxpayer_type, locale, TIN, industry fields. `GET/PUT /v1/me/profile` endpoints. | — | Done. | `backend/app/database.py`, `backend/app/postgres.py`, `backend/app/models.py` | Done |
+| G3 🟢 | **~~No consent / data-processing flow.~~** **SHIPPED Phase 14** — `consent_receipts` table with version, purpose, timestamp, withdrawal support. `GET/POST /v1/me/consents` endpoints. Compliant with Uganda Data Protection Act 2019. | — | Done. | `backend/app/database.py`, `backend/app/postgres.py`, `backend/app/models.py` | Done |
+| G4 🟢 | **~~No role-based access.~~** **SHIPPED Phase 14** — 5 roles (`public`, `verified_taxpayer`, `ura_staff`, `ura_admin`, `ura_auditor`). `@requires_role` FastAPI dependency. Admin endpoints gated by role. | — | Done. | `backend/app/auth/dependencies.py`, `backend/app/main.py` | Done |
 
 ### 2.2 Memory & context
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G5 | **No long-term memory** across sessions. Multi-turn memory exists (`db.get_recent_turns`) but only within the 7-day retention window. | User who asks about VAT registration on Monday and returns Friday is treated as a stranger. | `conversations` table with 7-day TTL; no summarization, no facts extraction. | Add a **memory agent** that reads ended conversations and extracts facts into a `user_facts` table (k/v with provenance). Inject relevant facts into the system prompt at next turn. | New `backend/app/memory.py` (batch worker), `user_facts` table, `service.py` prompt builder | L |
+| G5 🟢 | **~~No long-term memory~~ across sessions.** **SHIPPED Phase 16** — `memory/` directory with three tiers: semantic facts, episodic summaries, working memory. Facts extracted with provenance and confidence scores; injected into system prompt at chat time. | — | Done. | `backend/app/memory/` directory | Done |
 | G6 | **No topic persistence.** If a user is working on "importing a car", every reply is standalone — no awareness that they're in the middle of a workflow. | Fragmented UX for multi-step tasks. | Conversation history is fetched, but there's no "current workflow" concept. | Add `conversation_topics` table + a lightweight topic classifier; surface `current_topic` to the LLM. | `service.py`, new `topics.py` module | M |
 | G7 🟢 | **No temporal grounding.** ~~The model doesn't know today's date, the current fiscal year…~~ **SHIPPED Phase 14-A** — `get_current_date` and `get_next_deadlines` tools return today's date, day-of-week, fiscal year (`FY2025-26`), days-into-FY, days-remaining, and the next N deadlines.  The LLM calls them explicitly whenever a query mentions "today"/"now"/"this year"/"deadline", per the supervisor's temporal patterns and the `TOOL_USE_PROMPT_SUFFIX` rules. | — | Done. | `backend/app/tools/calendar.py` | Done (S actual) |
-| G8 | **Conversation store is not an audit log.** TTL deletes data; no append-only, tamper-evident trail for regulatory disputes. | Can't answer "what did your bot tell this user on date X?" in a legal context. | SQLite / Postgres with `DELETE` on TTL. | Add an immutable `audit_events` table with hash-chained entries (each row hashes the previous); separate TTL from audit retention. | `database.py`, `postgres.py`, new `audit.py` | M |
+| G8 🟢 | **~~Conversation store is not an audit log.~~** **SHIPPED Phase 16** — `audit/` directory with hash-chained, append-only audit ledger and Merkle tree proofs for tamper evidence. Separate from conversation TTL. | — | Done. | `backend/app/audit/` directory | Done |
 
 ### 2.3 Capabilities & actions
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen2.5's native function-calling format; `ToolRegistry` dispatches via `.call()`; 11 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
+| G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen chat-template tool formatting; `ToolRegistry` dispatches via `.call()`; 11 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
 | G10 🟢 | **No calculators.** ~~PAYE, VAT, CGT, customs, income tax, effective rate.~~ **SHIPPED Phase 14-A** — 5 deterministic calculators (`calculate_vat`, `calculate_paye` with progressive bands, `calculate_corporation_tax`, `calculate_capital_gains`, `calculate_customs_duty`) all backed by FY2025-26 rate tables, unit-tested (29 pytest assertions covering arithmetic + edge cases + error paths). | — | Done. | `backend/app/tools/calculators.py` | Done (S actual) |
-| G11 | **No structured form flows.** Can't walk a user through "register for a TIN in 5 steps". | Support-centre call volume stays high. | Freeform chat only. | Add a **workflow engine** (simple finite-state-machine per flow) with slot filling. Each flow is a YAML file declaring steps, questions, validators, submission target. | New `backend/app/workflows/`, `models.py`, `page.tsx` | L |
+| G11 🟢 | **~~No structured form flows.~~** **SHIPPED Phase 15** — `workflows/` directory with 5 YAML-declared workflows loaded at startup via `loader.py`. Slot-filling state machine (`slots.py`), workflow registry (`registry.py`), keyed on `conversation_id`. | — | Done. | `backend/app/workflows/` directory | Done |
 | G12 | **No URA account actions.** Can't fetch filing status, balance, registered tax types, next due dates — even for the authenticated user. | Bot only talks *about* URA; doesn't help users actually interact with it. | No integration. | New `mcp_ura_account` server talking to URA's internal API (behind auth); exposes `get_tin_status`, `get_filing_status`, `list_returns_due`, etc. Scoped to the authenticated user. | New `backend/app/tools/ura_account.py`, `auth.py`, secrets mgmt | XL |
-| G13 | **No document ingestion.** User can't upload a receipt, invoice, or tax cert to ask "is this correct?" | High-value use case for businesses is blocked. | Index-time PDF parsing exists (`indexer.ingest_pdfs`) but not query-time. | Add `POST /v1/upload` (size-limited, virus-scanned, PII-redacted), an OCR + table-extract pipeline, and a `mcp_document_parser` tool. Vision support via Qwen2.5-VL. | New `backend/app/uploads.py`, new `DocumentUpload.tsx`, `llm.py` multimodal branch | L |
+| G13 | **No document ingestion.** User can't upload a receipt, invoice, or tax cert to ask "is this correct?" | High-value use case for businesses is blocked. | Index-time PDF parsing exists (`indexer.ingest_pdfs`) but not query-time. | Add `POST /v1/upload` (size-limited, virus-scanned, PII-redacted), an OCR + table-extract pipeline, and a `mcp_document_parser` tool. Vision support should use a pinned vision-capable model. | New `backend/app/uploads.py`, new `DocumentUpload.tsx`, `llm.py` multimodal branch | L |
 | G14 | **No scheduled notifications.** Nothing reminds the user "your quarterly VAT return is due in 3 days". | Missed opportunity for value-add engagement. | No scheduler. | Add an APScheduler / Temporal worker that reads user deadlines and dispatches via email / SMS / in-app. | New `backend/app/scheduler.py`, notification channels | L |
 | G15 | **No URA live data.** FAQ CSVs were indexed once; new circulars, rate changes, and press releases never reach the bot. | Staleness within weeks of deployment. | Manual re-index via `POST /v1/index`. | Add a nightly ingestion worker: scrape `ura.go.ug/news`, diff against last run, re-embed, upsert to Qdrant. | New `backend/app/workers/news_ingest.py` | M |
 
@@ -100,7 +122,7 @@ surface that would need to change. Effort estimates are rough:
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G20 🟡 | **No planning loop.** ~~The pipeline is strictly one-shot~~ **PARTIAL Phase 14-C** — the supervisor now classifies every request into 7 routes and a tool-call loop iterates up to 3 times per request.  That's not yet a full planner-executor (no JSON plan, no tree of thought), but it does break complex queries into tool-call subtasks. Flagged by `FLAG_AGENTIC_MODE`. | Full planner-executor remains future work. | Partial — upgrade to an LLM-based supervisor classifier in Phase 15 to fix the known regex soft-misses. | `backend/app/agents/supervisor.py` | Done (partial) |
+| G20 🟢 | **~~No planning loop.~~** **SHIPPED Phase 15** — `agents/supervisor.py` with 7 routes, per-specialist tool whitelists, and a bounded tool-call loop (up to 3 iterations per request). Flagged by `FLAG_AGENTIC_MODE`. Full planner-executor (JSON plan, tree of thought) remains future work for Phase 17+. | — | Done. | `backend/app/agents/supervisor.py` | Done |
 | G21 | **No ReAct / self-correction.** Self-reflection exists (`SELF_REFLECT_ENABLED`) but only fires on low faithfulness, not on reasoning mistakes. | The bot happily confabulates when retrieval is insufficient instead of refining. | Single self-reflect pass. | Add a ReAct loop: `Thought → Action → Observation → Thought → …`, bounded by a max step count, with explicit "abort and ask user" action. | `service.py`, new `react.py` | L |
 | G22 🟡 | **No per-specialty sub-agents.** ~~A tax question should route to a tax-specialist prompt…~~ **PARTIAL Phase 14-C** — the supervisor now routes customs vocabulary to `CUSTOMS_SPECIALIST` with a narrowed tool whitelist (`calculate_customs_duty`, `search_ura_knowledge_base`, `get_current_date`).  `TAX_SPECIALIST` is reserved but uses the base prompt today. | Per-specialist system prompts not yet written. | Partial — next step: add `agents/prompts/` with per-route system prompts. | `backend/app/agents/supervisor.py` | Done (partial) |
 | G23 | **No delegation between agents.** When the planner calls a specialist, the specialist can't call back to the planner for more context. | Limits the depth of reasoning chains. | N/A. | Use LangGraph-style message passing with explicit state (`AgentState` typed dict). | `agent.py` | M |
@@ -122,7 +144,7 @@ surface that would need to change. Effort estimates are rough:
 |---|---|---|---|---|---|---|
 | G30 | **Single tenant.** One knowledge base, one prompt, one model for everyone. | Can't offer this to KCCA, NSSF, or private firms under the same codebase. | Implicit single-tenancy. | Add `tenant_id` everywhere (users, conversations, Qdrant collections, rate limits). | Backend-wide, DB schema changes | L |
 | G31 | **No admin UI.** Ops staff can't curate content, approve uploads, override bot answers, manage flags without SSH'ing to the server. | Non-technical staff can't operate the system. | CLI + curl only. | Small admin Next.js route with RBAC gating `/admin/*`. | New routes, `auth.py`, UI | L |
-| G32 🟡 | **No human-in-the-loop queue.** ~~Escalation is detected… but there's no mechanism to route it to a live URA agent.~~ **PARTIAL Phase 14-D** — `tickets` table, `create/list/get/update/stats` CRUD, `escalate_to_human` tool, 4 admin REST endpoints (`GET/PATCH /v1/admin/tickets[/{id}][/stats]`).  Supervisor `ESCALATE` route persists tickets when `FLAG_TICKET_QUEUE=true`.  `ticket_id` surfaces in `ChatResponse`. | No staff UI yet — admin endpoints are REST-only, no Next.js `/admin/tickets` page. | Partial — next step: build the staff dashboard. | `App/backend/app/database.py`, `tools/escalate.py`, `main.py` | Done (backend) |
+| G32 🟢 | **~~No human-in-the-loop queue.~~** **SHIPPED Phase 15** — `tickets` table with CRUD, `escalate_to_human` tool, 4 admin REST endpoints (`GET/PATCH /v1/admin/tickets[/{id}][/stats]`). Supervisor `ESCALATE` route persists tickets when `FLAG_TICKET_QUEUE=true`. `ticket_id` surfaces in `ChatResponse`. | Staff UI (Next.js `/admin/tickets` page) remains future work. | Done (backend). | `backend/app/database.py`, `backend/app/tools/`, `backend/app/main.py` | Done |
 | G33 | **No SLO-driven autoscaling.** Prometheus alerts exist, but no action is taken — no HPA, no Kubernetes operator. | Manual intervention during load spikes. | Alert rules only. | Kubernetes HPA on `chat_response_time_ms` p95, plus a KEDA scaler on Redis queue depth. | Infra, new `k8s/` manifests | M |
 | G34 | **No chaos / failure drills.** We've hardened against failure modes but never exercised them end-to-end. | Unknown unknowns in prod. | Unit tests only. | Add Litmus/ChaosMesh experiments: kill Redis, spike Qdrant latency, kill LLM worker, measure recovery. | `tests/chaos/`, CI schedule | M |
 
@@ -160,7 +182,7 @@ monolithic "one LLM with tools". Reasons:
 ```
       ┌─────────────────────────────┐
       │      Supervisor Agent       │
-      │    (Qwen2.5-3B, T=0.1)      │
+      │    (Qwen3-8B, T=0.1)        │
       │   Classifies + routes       │
       └──┬──────┬──────┬──────┬─────┘
         │      │      │      │
@@ -188,8 +210,9 @@ monolithic "one LLM with tools". Reasons:
 
 Key design choices:
 
-- **Supervisor is small + cheap.** Qwen2.5-3B at T=0.1 is fast
-enough to classify in <300 ms.
+- **Supervisor is deterministic.** The current deployment uses the
+already-loaded Qwen3-8B runtime at low temperature; a smaller pinned
+router model can replace it later if latency requires it.
 - **Specialists share tools.** Tools are MCP servers, not code
 embedded in any one agent — this keeps them independently testable
 and deployable.
@@ -232,7 +255,7 @@ must click a real button in the UI (not an LLM-generated "yes").
 - Feature-flagged behind a `tier` gate — unavailable until user
 has completed identity verification.
 
-### 3.4 Memory architecture
+### 3.4 Memory architecture 🟢 (shipped in Phase 16)
 
 Three tiers, each with different retention and access patterns:
 
@@ -289,113 +312,94 @@ opt-in beta, gated on a specific user tier, for the first 90 days.
 
 ---
 
-## 4. Recommended next phases (14–20)
+## 4. Recommended next phases (17+)
 
-Each phase is scoped to be independently shippable. Dependencies
-are explicit — don't start G at phase 20 if phase 15 isn't done.
+Phases 14 through 16 are now shipped. Each remaining phase is
+scoped to be independently shippable. Dependencies are explicit.
 
-### Phase 14 — Identity & user profile (G1, G2, G3, G4, G24)
+### Phase 14 — Identity & user profile (G1, G2, G3, G4, G24) 🟢 **SHIPPED**
 
-**Goal:** Know who the user is and what they care about.
-**Deliverables:**
-- OIDC login (URA SSO if available, else Keycloak for demo)
-- `users`, `user_profiles`, `consents` tables
-- `GET/PUT /v1/me/profile` + profile UI route
-- `consent banner` with versioned consents
+**Delivered:**
+- JWT auth (HS256/RS256) with `auth/` directory (`jwt_auth.py`, `dependencies.py`)
+- `user_profiles` table + `GET/PUT /v1/me/profile` endpoints
+- `consent_receipts` table + `GET/POST /v1/me/consents` endpoints (UDPA 2019)
+- 5 roles: `public`, `verified_taxpayer`, `ura_staff`, `ura_admin`, `ura_auditor`
 - Profile-aware prompt injection in `_build_messages`
 
-**Unlocks:** Every subsequent phase depends on having a user_id.
-**Effort:** ~2 weeks.
-**Risks:** Auth integration delays; privacy review latency.
+### Phase 15 — Tool-calling, supervisor, workflows, tickets (G9, G10, G11, G20, G32) 🟢 **SHIPPED**
 
-### Phase 15 — Tool-calling foundation (G9, G10) 🟢 **LANDED (as Phase 14-A/B/C/D)**
-
-**Goal:** Let the LLM call deterministic tools for things it
-shouldn't be asked to generate (numbers, dates, lookups).
-**Delivered on `feat/agentic-workflows`:**
-- ✅ In-process tool registry with schema validation (`backend/app/tools/`).
-MCP wire-format support deferred to Phase 15+.
+**Delivered:**
+- ✅ In-process tool registry with schema validation (`backend/app/tools/`):
+6 tool modules — calculators, rates, calendar, KB search, escalation.
 - ✅ Tool-call loop in `llm.generate_with_tools()` (feature-flagged
-via `FLAG_TOOL_USE`), routed through the shared circuit breaker
-via `service._call_llm_agentic()`.
-- ✅ 11 tools: `calculate_vat`, `calculate_paye`,
-`calculate_corporation_tax`, `calculate_capital_gains`,
-`calculate_customs_duty`, `get_current_date`, `get_next_deadlines`,
-`lookup_rate`, `list_available_rates`, `search_ura_knowledge_base`,
-`escalate_to_human`.
-- ✅ Supervisor router (Phase 14-C) classifies queries and scopes
-tool whitelists per-specialist.
-- ✅ Ticket queue (Phase 14-D) closes the escalation dead-letter.
-- ✅ 153 pytest tests in `tests/agents/`, fully offline, 2.6 s total.
+via `FLAG_TOOL_USE`).
+- ✅ Supervisor router (`agents/supervisor.py`) with 7 routes and
+per-specialist tool whitelists.
+- ✅ Ticket queue with CRUD admin endpoints, `escalate_to_human` tool.
+- ✅ 5 YAML-declared workflows via `workflows/` directory (loader,
+registry, slot-filling state machine).
 - ✅ Feature flags default OFF — shipping is a no-op on the existing
 request path.
 
-See `docs/AGENT_ARCHITECTURE.md` for the full Phase 14 A-D design.
+See `docs/AGENT_ARCHITECTURE.md` for the full design.
 
-**Still remaining for Phase 15:**
+**Remaining for future phases:**
 - MCP wire format (tools currently in-process, not as separate
-MCP servers).  Needed once we add `mcp_ura_account` +
+MCP servers). Needed once we add `mcp_ura_account` +
 `mcp_ura_actions` which must run in URA's DMZ.
-- LLM-based supervisor classifier (the rule-based one has known
-soft misses — see `AGENT_ARCHITECTURE.md` §4).
 - Per-specialist system prompts (currently all specialists use the
 base `SYSTEM_PROMPT`).
 
-### Phase 16 — Workflow engine + document ingestion (G11, G13)
+### Phase 16 — Memory, audit, speech (G5, G8) 🟢 **SHIPPED**
 
-**Goal:** Multi-step flows ("register for TIN") and uploads.
+**Delivered:**
+- ✅ Memory system (`memory/` directory) — semantic facts, episodic
+summaries, working memory with provenance and confidence scores.
+- ✅ Audit ledger (`audit/` directory) — hash-chained, append-only,
+Merkle tree proofs for tamper evidence.
+- ✅ Speech pipeline — ASR (Whisper), TTS (Piper), MT, Sunbird AI
+cloud fallback (`speech_service.py`, `sunbird.py`).
+- ✅ 18 feature flags via `flags.py`.
+- ✅ PostgreSQL backend option.
+
+### Phase 17 — Document ingestion + topic persistence (G6, G13, G25)
+
+**Goal:** Query-time document uploads and topic-aware conversations.
 **Deliverables:**
-- YAML-declared workflows loaded at startup
-- Slot-filling state machine keyed on `conversation_id`
 - `POST /v1/upload` with size/virus scanning
-- `mcp_document_parser` tool (Qwen2.5-VL for vision)
+- `mcp_document_parser` tool (pinned vision model, OCR + table extract)
+- `conversation_topics` table + lightweight topic classifier
+- Per-segment quality metrics in `evaluation.py`
 - UI: upload button, step progress indicator
 
 **Dependencies:** Phase 14 (auth), Phase 15 (tool framework).
 **Effort:** ~2-3 weeks.
-**Risks:** Workflow engine complexity; document parser quality.
+**Risks:** Document parser quality; topic classifier accuracy.
 
-### Phase 17 — Long-term memory agent (G5, G6, G24, G25)
+### Phase 18 — Staff dashboard + ticket UI (G32 follow-up, G31)
 
-**Goal:** Remember the user across sessions.
+**Goal:** Give URA staff a UI for the ticket queue (backend shipped in Phase 15).
 **Deliverables:**
-- `user_facts` + `conversation_summaries` tables
-- Offline memory worker (APScheduler or Celery)
-- Fact-extraction JSON-mode prompt
-- `mcp_memory` tool
-- Per-segment metrics in `evaluation.py`
-
-**Dependencies:** Phase 14 (user_id), Phase 15 (tools).
-**Effort:** ~2 weeks.
-**Risks:** Fact extraction hallucinations (mitigated by
-provenance + confidence score); privacy concerns (mitigated by
-consent and user-facing "memory" controls).
-
-### Phase 18 — Human-in-the-loop queue (G32)
-
-**Goal:** Actually route escalated conversations to URA staff.
-**Deliverables:**
-- `tickets` table with status, assignee, priority
-- Staff dashboard route in `/admin/tickets`
+- Staff dashboard route in `/admin/tickets` (Next.js)
 - Real-time push via WebSocket when tickets arrive
 - Reply-back mechanism surfaces in the user's chat
 - SLA tracking (time to first response, time to resolution)
+- Admin UI for flag management, content curation
 
-**Dependencies:** Phase 14 (auth, RBAC).
+**Dependencies:** Phase 14 (auth, RBAC) — already shipped.
 **Effort:** ~2 weeks.
 
-### Phase 19 — Agentic supervisor + specialists (G20, G21, G22, G23)
+### Phase 19 — Deep planning + ReAct (G21, G22, G23)
 
-**Goal:** Move from linear RAG to supervised planning.
+**Goal:** Extend the shipped supervisor into a full planner-executor.
 **Deliverables:**
-- Supervisor agent in `backend/app/agents/supervisor.py`
-- Specialist agents: tax, customs, account, forms
-- LangGraph-style state machine
-- ReAct loop with max-step bound
-- Per-agent prompts + eval suites
-- `FLAG_AGENTIC_MODE` feature flag, off by default
+- ReAct loop with max-step bound (`Thought -> Action -> Observation`)
+- Per-specialist system prompts in `agents/prompts/`
+- LangGraph-style state machine with delegation between agents
+- LLM-based supervisor classifier (replace rule-based soft-misses)
+- Per-agent eval suites
 
-**Dependencies:** Phases 14, 15, 17.
+**Dependencies:** Phases 14-16 (all shipped).
 **Effort:** ~3-4 weeks.
 **Risks:** Latency (each agent hop adds 300-800 ms); reasoning
 chain brittleness; cost if hosted.
@@ -414,21 +418,53 @@ Africa's Talking, in-app)
 **Dependencies:** Phases 14, 17.
 **Effort:** ~2 weeks.
 
+### Phase 23 — Voice-first streaming infrastructure 🟢 **SHIPPED**
+
+**Goal:** Transform batch voice into a streaming, voice-first interface for rural, low-literacy users on 2G/3G.
+
+**Delivered:**
+- ✅ WebSocket streaming voice chat (`WS /v1/voice/chat/stream`) with full duplex protocol
+- ✅ Energy-based VAD with hysteresis (configurable thresholds, sensitivity presets)
+- ✅ True barge-in (user interrupts mid-TTS, server aborts between sentence chunks)
+- ✅ Sentence-chunked TTS (< 800ms time-to-first-audio for simple queries)
+- ✅ Voice-specific consent (`voice_recording`, `voice_analytics` purposes) with NDPA 2019 compliance
+- ✅ Immutable voice audit log (`voice_audit_log` table) chained into existing `AuditLedger`
+- ✅ Privacy-first: raw audio never stored (SHA-256 hash only), configurable retention TTLs
+- ✅ Offline RAG pipeline (FAISS + ONNX bge-m3 embedder) for network-unavailable fallback
+- ✅ Accent detection (5 Ugandan profiles) routing to accent-specific Whisper LoRA adapters
+- ✅ Full-screen mobile voice-first UI (`VoiceChat.tsx`) with animated orb, waveform bars, barge-in button
+- ✅ AudioWorklet streaming capture + WebSocket client with auto-reconnect
+- ✅ Camera capture component for voice+vision mode (Phase 4 stub)
+- ✅ Feature flags: `FLAG_VOICE_STREAMING`, `FLAG_VOICE_CONSENT`
+- ✅ Prometheus metrics: 10 voice-specific counters/histograms/gauges
+- ✅ OTel spans: `voice.session`, `voice.vad`, `voice.streaming_asr`, `voice.streaming_tts`
+- ✅ Training scripts: multi-accent ASR (5 configs), accent-aware TTS (3 profiles), dataset prep
+- ✅ Export script: FAISS offline bundle from Qdrant (< 100MB target)
+
+**New backend modules:** `voice_stream.py`, `voice_ws.py`, `voice_consent.py`, `offline_rag.py`, `accent_detector.py`
+**New frontend:** `VoiceChat.tsx`, `voiceWebSocket.ts`, `useVoiceStore.ts`, `useVoiceWebSocket.ts`, `CameraCapture.tsx`, `audio-worklet-processor.js`
+**Latency targets:** < 800ms p95 simple queries, < 1.2s p95 full RAG.
+
 ---
 
-## 5. Minimum viable personalized experience
+## 5. Minimum viable personalized experience 🟢 **SHIPPED**
 
-If you could only ship three things next quarter, do these in order:
+The three foundational layers for personalization are now all delivered:
 
-1. **Phase 14 — Identity & profile.** Without a `user_id`, nothing
-else personalization-related works.
-2. **Phase 15 — Tool-calling foundation.** Unlocks calculators and
-live data, which is the fastest way to move users from "asked a
-question" to "solved my problem".
-3. **Phase 17 — Long-term memory.** Turns the bot from a search box
-into an assistant that knows the user.
+1. **Phase 14 — Identity & profile.** 🟢 Shipped. JWT auth, RBAC (5 roles),
+user profiles, consent management.
+2. **Phase 15 — Tool-calling, supervisor, workflows, tickets.** 🟢 Shipped.
+6 tool modules, 7 supervisor routes, 5 YAML workflows, ticket queue.
+3. **Phase 16 — Memory, audit, speech.** 🟢 Shipped. Three-tier memory
+(semantic, episodic, working), hash-chained audit ledger, speech pipeline.
 
-Phases 16, 18, 19, 20 are high-value but stack on top of those three.
+4. **Phase 23 — Voice-first streaming.** 🟢 Shipped. WebSocket streaming
+voice chat with VAD + barge-in, sentence-chunked TTS, offline RAG (FAISS),
+accent detection (5 Ugandan profiles), voice consent & audit trail,
+full-screen mobile voice-first UI.
+
+**Next priorities:** Phases 17-20 (document ingestion, staff UI, deep
+planning, proactive engagement) stack on top of the shipped foundation.
 
 ---
 
@@ -442,6 +478,7 @@ Phases 16, 18, 19, 20 are high-value but stack on top of those three.
 | Memory | `backend/app/memory.py`, `backend/app/workers/memory_worker.py`, `backend/app/tools/memory.py` | `backend/app/service.py`, `backend/app/database.py` |
 | Tickets | `backend/app/tickets.py`, `frontend/src/app/admin/tickets/page.tsx` | `backend/app/main.py`, `backend/app/service.py` (escalation hook) |
 | Agents | `backend/app/agents/supervisor.py`, `backend/app/agents/tax_specialist.py`, `backend/app/agents/customs_specialist.py`, `backend/app/agents/account_specialist.py` | `backend/app/service.py`, `backend/app/flags.py` |
+| Voice-first (Phase 23) | `backend/app/voice_stream.py`, `backend/app/voice_ws.py`, `backend/app/voice_consent.py`, `backend/app/offline_rag.py`, `backend/app/accent_detector.py`, `frontend/src/components/VoiceChat.tsx`, `frontend/src/services/voiceWebSocket.ts`, `frontend/src/store/useVoiceStore.ts`, `frontend/src/hooks/useVoiceWebSocket.ts`, `frontend/src/components/CameraCapture.tsx`, `frontend/public/audio-worklet-processor.js` | `backend/app/speech_service.py`, `backend/app/flags.py`, `backend/app/models.py`, `backend/app/main.py`, `backend/app/database.py`, `backend/app/tracing.py`, `frontend/src/app/page.tsx`, `frontend/src/services/voiceService.ts`, `frontend/src/components/Icons.tsx`, `frontend/src/app/globals.css` |
 | Scheduler + freshness | `backend/app/scheduler.py`, `backend/app/workers/news_ingest.py`, `backend/app/workers/freshness.py`, `backend/app/tools/notify.py` | `backend/app/main.py`, `docker-compose.yml` |
 
 ---
@@ -473,21 +510,23 @@ party, disclose it in the privacy notice.
 
 ## 8. What this document deliberately does NOT do
 
-- **Does not re-specify Phases 1-13.** See `App/README.md` for the
-current production-ready flow.
+- **Does not re-specify Phases 1-16.** See `App/README.md` for the
+current production-ready flow and `docs/AGENT_ARCHITECTURE.md` for
+the agent runtime design.
 - **Does not prescribe a specific LLM vendor.** The architecture
 works with Qwen on-prem, vLLM-hosted Llama, or hosted APIs —
 pick based on compliance, cost, and latency.
 - **Does not cover frontend redesigns beyond profile / admin /
 ticket views.** The existing UI (Phase 13 glassmorphism) is
 already production-grade.
-- **Does not include infra costing.** Phase 14 adds SSO + Postgres,
-Phase 19 adds ~3x LLM calls per request (supervisor +
-specialist + tool) — costs need modeling once tool and agent
-selection is locked.
+- **Does not include infra costing.** Phases 14-16 added auth +
+Postgres + agents + memory + audit. Phase 19 would add ~3x LLM
+calls per request (deep planning) — costs need modeling once the
+full agent chain is locked.
 
 ---
 
-*Document version 1.0 — authored after Phase 1-13 shipped.*
+*Document version 2.0 — updated 2026-04-28 after Phases 14-16 shipped.*
+*Previous version (1.0) authored after Phase 1-13.*
 *For questions about a specific gap or phase, open an issue
 linked to the `roadmap/phase-XX` tag.*

@@ -14,9 +14,9 @@ name: "Security: CodeQL Analysis"
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev, develop]
   schedule:
     # Weekly deep analysis – catch new query packs / detection rules
     - cron: "30 4 * * 1"  # Monday 04:30 UTC
@@ -28,7 +28,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: codeql-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}-${{ matrix.language }}
+  group: codeql-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:

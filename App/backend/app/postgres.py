@@ -109,6 +109,7 @@ def init_db() -> None:
 
     CREATE TABLE IF NOT EXISTS conversations (
         id               TEXT PRIMARY KEY,
+        conversation_id  TEXT,
         session_id       TEXT,
         user_message     TEXT NOT NULL,
         bot_reply        TEXT NOT NULL,
@@ -126,12 +127,20 @@ def init_db() -> None:
     CREATE INDEX IF NOT EXISTS idx_events_created        ON analytics_events(created_at);
     CREATE INDEX IF NOT EXISTS idx_sessions_active       ON sessions(last_active_at);
     CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
+    CREATE INDEX IF NOT EXISTS idx_conversations_thread  ON conversations(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at);
     """
 
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(ddl)
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT")
+            cur.execute(
+                "UPDATE conversations SET conversation_id = id WHERE conversation_id IS NULL OR conversation_id = ''"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(conversation_id)"
+            )
         conn.commit()
     logger.info("Postgres analytics schema ready")
     cleanup_expired_data()
@@ -352,6 +361,7 @@ def get_session_stats(days: int = 30) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 def log_conversation(
     session_id: str | None,
+    conversation_id: str | None,
     user_message: str,
     bot_reply: str,
     sources: str = "[]",
@@ -362,15 +372,17 @@ def log_conversation(
     pool = _get_pool()
     if pool is None:
         raise RuntimeError("postgres unavailable")
-    conv_id = str(uuid.uuid4())
+    row_id = str(uuid.uuid4())
+    thread_id = conversation_id or row_id
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO conversations (id, session_id, user_message, bot_reply,
+                """INSERT INTO conversations (id, conversation_id, session_id, user_message, bot_reply,
                        sources, response_time_ms, confidence, topic_tag, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
-                    conv_id,
+                    row_id,
+                    thread_id,
                     session_id,
                     user_message,
                     bot_reply,
@@ -382,20 +394,31 @@ def log_conversation(
                 ),
             )
         conn.commit()
-    return conv_id
+    return thread_id
 
 
-def get_recent_turns(session_id: str, limit: int = 5) -> list[dict[str, str]]:
+def get_recent_turns(
+    session_id: str | None = None,
+    conversation_id: str | None = None,
+    limit: int = 5,
+) -> list[dict[str, str]]:
     pool = _get_pool()
     if pool is None:
         return []
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """SELECT user_message, bot_reply FROM conversations
+    if conversation_id:
+        sql = """SELECT user_message, bot_reply FROM conversations
+                   WHERE conversation_id = %s
+                   ORDER BY created_at DESC LIMIT %s"""
+        args: tuple[str, int] = (conversation_id, limit)
+    elif session_id:
+        sql = """SELECT user_message, bot_reply FROM conversations
                    WHERE session_id = %s
-                   ORDER BY created_at DESC LIMIT %s""",
-            (session_id, limit),
-        )
+                   ORDER BY created_at DESC LIMIT %s"""
+        args = (session_id, limit)
+    else:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, args)
         rows = cur.fetchall()
     return [{"user_message": r[0], "bot_reply": r[1]} for r in reversed(rows)]
 

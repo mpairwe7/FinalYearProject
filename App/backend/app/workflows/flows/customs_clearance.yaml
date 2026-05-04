@@ -1,0 +1,79 @@
+id: customs_clearance
+name: Customs Clearance
+version: "1"
+description: >
+  Guide an importer or exporter through the details usually needed for
+  URA customs clearance support.
+requires_auth: false
+
+trigger_phrases:
+  - "customs clearance"
+  - "clear my goods"
+  - "clear my import"
+  - "import clearance"
+  - "export clearance"
+  - "clear a consignment"
+  - "how do i clear goods"
+
+steps:
+  - id: collect_movement_type
+    question: >
+      Is this an **import** or an **export** clearance?
+    slot: movement_type
+    validator: "enum[import,export]"
+
+  - id: collect_declaration
+    question: >
+      What is the declaration, entry, or customs reference number?
+    slot: declaration_number
+    validator: text
+
+  - id: collect_goods
+    question: >
+      Briefly describe the goods or consignment.
+    slot: goods_description
+    validator: text
+
+  - id: collect_transport_ref
+    question: >
+      What is the transport or shipping reference, such as the bill of
+      lading, airway bill, or consignment note number?
+    slot: transport_reference
+    validator: text
+
+  - id: collect_valuation
+    question: >
+      Do you already have the customs value, invoice, and supporting
+      valuation details ready? (yes/no)
+    slot: valuation_ready
+    validator: boolean
+
+  - id: collect_documents
+    question: >
+      Do you have the supporting customs documents ready for review? (yes/no)
+    slot: documents_ready
+    validator: boolean
+
+  - id: valuation_warning
+    question: >
+      Before clearance, make sure the invoice, valuation evidence, and any
+      transport costs needed for customs value assessment are available.
+    when: "valuation_ready == False"
+    slot: ""
+    validator: text
+
+  - id: documents_warning
+    question: >
+      Before engaging URA or your clearing agent, gather the declaration,
+      transport document, invoice, and any permits tied to the goods.
+    when: "documents_ready == False"
+    slot: ""
+    validator: text
+
+  - id: summary
+    question: >
+      Next step: validate the declaration details, make sure valuation and
+      shipping references are complete, and proceed through the customs
+      clearance process with the supporting documentation ready for review.
+    slot: ""
+    validator: text

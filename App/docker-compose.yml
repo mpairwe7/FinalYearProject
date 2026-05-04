@@ -1,0 +1,168 @@
+# =============================================================================
+# URA Chatbot App — Docker Compose (backend + frontend + deps)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7.4-alpine
+    container_name: ura-app-redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Qdrant Vector Store
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:v1.17.1
+    container_name: ura-app-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333 && printf 'GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q 'passed' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Backend API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: ura-app-api
+    ports:
+      - "8885:8000"
+    environment:
+      - APP_ENV=development
+      - PORT=8000
+      - WORKERS=1
+      - LOG_LEVEL=info
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/0
+      - SLOWAPI_STORAGE_URI=redis://redis:6379/1
+      - CACHE_BACKEND=redis
+      - CORS_ORIGINS=http://localhost:3032,https://struttingly-nongeological-briella.ngrok-free.dev
+      - LLM_DEVICE=cuda:0
+      - LLM_LOAD_IN_4BIT=true
+      # --- Qwen3-8B LoRA adapters ---
+      - LORA_ADAPTER_LG=/app/adapters/luganda-lora
+      - LORA_ADAPTER_SW=/app/adapters/sw-lora
+      - LORA_ADAPTER_NYN=/app/adapters/nyn-lora
+      - LORA_ADAPTER_ACH=/app/adapters/ach-lora
+      - NVIDIA_VISIBLE_DEVICES=0
+      - PROJECT_ROOT=/app
+      - HF_HOME=/app/hf_cache
+      - HF_HUB_OFFLINE=1
+      - INDEX_API_KEY=dev-index-key
+      # --- Fine-tuned Whisper LoRA adapters ---
+      - WHISPER_ADAPTER_LG=/app/adapters/whisper-lg
+      - WHISPER_ADAPTER_SW=/app/adapters/whisper-sw
+      - WHISPER_ADAPTER_NYN=/app/adapters/whisper-nyn
+      - WHISPER_DEVICE=cpu
+      # --- Prompted local MT via the already-loaded Qwen backend ---
+      - SPEECH_MT_BACKEND=prompted
+      # --- Speech pipeline ---
+      - SPEECH_ENABLED=true
+      - SPEECH_ASR_BACKEND=auto
+      - SPEECH_TTS_BACKEND=auto
+    env_file:
+      - ../.env
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      - /app/cache
+    volumes:
+      - ../Data/dataset:/app/Data/dataset:ro
+      - ../Data/pdfs:/app/Data/pdfs:ro
+      - ../Model:/app/Model:ro
+      - ../artifacts:/app/artifacts:ro
+      - ../fine-tuning/adapters:/app/adapters:ro
+      - ../ml:/app/ml:ro
+      - api_logs:/app/logs
+      - ../data_store:/app/data_store
+      - /mnt/nas1/caches/huggingface_cache:/app/hf_cache:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 8m
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Frontend
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        INTERNAL_API_URL: http://api:8000
+    container_name: ura-app-frontend
+    ports:
+      - "3032:3000"
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_API_URL=http://api:8000
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  qdrant_data:
+  api_logs:

@@ -5,6 +5,8 @@
  * All endpoints proxy through Next.js /api/* rewrite (same-origin).
  */
 
+import { authHeaders } from '@/lib/authSession';
+
 export interface DashboardData {
   uptime_seconds: number;
   requests: {
@@ -69,6 +71,40 @@ export interface TicketStats {
   by_priority: Record<string, number>;
 }
 
+export interface TicketQueueItem {
+  id: string;
+  conversation_id?: string;
+  status: string;
+  priority: string;
+  reason: string;
+  user_query: string;
+  bot_reply: string;
+  created_at: number;
+  updated_at: number;
+  handoff?: {
+    summary?: string;
+    topic?: string;
+    priority?: string;
+    required_details?: string[];
+    sources_reviewed?: string[];
+  };
+  response_judge?: {
+    decision?: string;
+    final_decision?: string;
+    applied_revision?: boolean;
+    reasons?: string[];
+    confidence_band?: string;
+  };
+}
+
+export interface TicketQueueResponse {
+  count: number;
+  status_filter: string;
+  limit: number;
+  offset: number;
+  tickets: TicketQueueItem[];
+}
+
 export interface FeedbackSummary {
   total: number;
   thumbs_up: number;
@@ -86,7 +122,10 @@ export interface FeedbackSummary {
 const BASE = "/api";
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, { signal: AbortSignal.timeout(15000) });
+  const res = await fetch(`${BASE}${url}`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(15000),
+  });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
@@ -95,5 +134,9 @@ export const analyticsApi = {
   dashboard: (days = 30) => fetchJson<DashboardData>(`/v1/analytics/dashboard?days=${days}`),
   feedbackSummary: (days = 30) => fetchJson<FeedbackSummary>(`/v1/feedback/summary?days=${days}`),
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
-  metrics: () => fetch(`${BASE}/metrics`).then((r) => r.text()),
+  tickets: (status = "open", limit = 8) =>
+    fetchJson<TicketQueueResponse>(
+      `/v1/admin/tickets?status=${encodeURIComponent(status)}&limit=${limit}&offset=0`,
+    ),
+  metrics: () => fetch(`${BASE}/metrics`, { headers: authHeaders() }).then((r) => r.text()),
 };

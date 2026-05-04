@@ -1,0 +1,66 @@
+id: payment_assistance
+name: Payment Assistance
+version: "1"
+description: >
+  Guide a taxpayer through the details needed to make a URA payment or
+  generate a PRN-linked payment plan.
+requires_auth: false
+
+trigger_phrases:
+  - "make a payment"
+  - "pay my tax"
+  - "how do i pay ura"
+  - "generate a prn"
+  - "payment registration number"
+  - "pay a tax bill"
+  - "payment help"
+
+steps:
+  - id: collect_tax_type
+    question: >
+      Which tax type or liability are you paying for?
+    slot: tax_type
+    validator: text
+
+  - id: collect_reference_kind
+    question: >
+      Do you already have a **PRN**, a **return** reference, an **assessment**
+      reference, or is it **unknown**?
+    slot: reference_kind
+    validator: "enum[prn,return,assessment,unknown]"
+
+  - id: collect_amount_known
+    question: >
+      Do you already know the exact amount to pay? (yes/no)
+    slot: amount_known
+    validator: boolean
+
+  - id: collect_amount
+    question: >
+      What amount do you expect to pay? You can enter the figure in UGX.
+    slot: payment_amount
+    validator: text
+    when: "amount_known == True"
+
+  - id: collect_channel
+    question: >
+      Which payment channel do you prefer: **bank**, **mobile money**,
+      **online card**, or **other**?
+    slot: payment_channel
+    validator: "enum[bank,mobile money,online card,other]"
+
+  - id: amount_warning
+    question: >
+      If the amount is not confirmed yet, generate or review the PRN first in the
+      URA portal so the amount, tax head, and period all match before payment.
+    when: "amount_known == False"
+    slot: ""
+    validator: text
+
+  - id: summary
+    question: >
+      Next step: confirm the liability in the URA portal, generate or review the PRN,
+      pay through your chosen channel, and keep the payment confirmation so it can be
+      matched back to the tax obligation.
+    slot: ""
+    validator: text

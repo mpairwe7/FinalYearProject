@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChatStore, ChatTurn, createTurn } from '../store/useChatStore';
+import Image from 'next/image';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useChatStore, ChatTurn, createTurn, cleanResponse } from '../store/useChatStore';
 import {
   initAnalytics,
   getAnalyticsSessionId,
@@ -20,10 +21,14 @@ import {
   isPlaying,
   voiceChat,
 } from '../services/voiceService';
+import { authHeaders } from '../lib/authSession';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
-import StarterPrompts from '../components/StarterPrompts';
-import { SparklesIcon, HeadphonesIcon, MicIcon, BotIcon, LoadingDots } from '../components/Icons';
+import ConversationRail from '../components/ConversationRail';
+import { VoiceChat } from '../components/VoiceChat';
+import { VoiceFirstChat } from '../components/VoiceFirstChat';
+import { VoiceVisionMode } from '../components/VoiceVisionMode';
+import { SparklesIcon, HeadphonesIcon, BotIcon, LoadingDots, MenuIcon, PlusIcon, TrashIcon, MicIcon } from '../components/Icons';
 
 // ---------------------------------------------------------------------------
 // Browser Speech Recognition types
@@ -39,15 +44,38 @@ interface SpeechRecognitionEvent extends Event {
   results: { [i: number]: { 0: { transcript: string }; isFinal: boolean; length: number }; length: number };
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// All API calls go through the Next.js rewrite proxy at /api/*
+// so the browser stays same-origin (no CORS, CSP-safe).
+const API_URL = '/api';
 
 const LOCALE_OPTIONS = [
   { value: 'en', label: 'English', speechLang: 'en-US' },
   { value: 'lg', label: 'Luganda', speechLang: 'lg-UG' },
 ] as const;
 
-// Stable check — only computed once
-const HAS_MEDIA_RECORDER = typeof window !== 'undefined' && AudioRecorder.isSupported();
+const STARTER_PROMPTS = [
+  'What services does URA provide?',
+  'How do I register for a TIN?',
+  'What is the current VAT rate in Uganda?',
+  'How do I file my annual tax returns?',
+];
+
+const getMediaRecorderSupportSnapshot = () => AudioRecorder.isSupported();
+const getServerMediaRecorderSupportSnapshot = () => false;
+
+function subscribeMediaRecorderSupport(onStoreChange: () => void) {
+  if (typeof window === 'undefined') return () => {};
+  const id = window.setTimeout(onStoreChange, 0);
+  return () => window.clearTimeout(id);
+}
+
+function useMediaRecorderSupport() {
+  return useSyncExternalStore(
+    subscribeMediaRecorderSupport,
+    getMediaRecorderSupportSnapshot,
+    getServerMediaRecorderSupportSnapshot,
+  );
+}
 
 function findPrecedingUserQuery(chat: ChatTurn[], i: number): string {
   for (let j = i - 1; j >= 0; j--) if (chat[j].role === 'user') return chat[j].content;
@@ -58,6 +86,8 @@ function findPrecedingUserQuery(chat: ChatTurn[], i: number): string {
 // Page
 // ==========================================================================
 export default function Page() {
+  const hasMediaRecorder = useMediaRecorderSupport();
+
   // Zustand — granular selectors prevent unnecessary re-renders
   const message = useChatStore((s) => s.message);
   const setMessage = useChatStore((s) => s.setMessage);
@@ -68,17 +98,37 @@ export default function Page() {
   const setLocale = useChatStore((s) => s.setLocale);
   const addTurns = useChatStore((s) => s.addTurns);
   const updateLastTurn = useChatStore((s) => s.updateLastTurn);
+  const reset = useChatStore((s) => s.reset);
+  // Session management
+  const conversations = useChatStore((s) => s.conversations);
+  const activeConversationId = useChatStore((s) => s.activeConversationId);
+  const createNewSession = useChatStore((s) => s.createNewSession);
+  const switchSession = useChatStore((s) => s.switchSession);
+  const deleteSession = useChatStore((s) => s.deleteSession);
+  const ensureActiveConversationId = useChatStore((s) => s.ensureActiveConversationId);
+  const saveCurrentSession = useChatStore((s) => s.saveCurrentSession);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const chatDockRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
   const lastUserQueryRef = useRef<string>('');
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+
+  // Sidebar state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Voice state
   const [autoNarrate, setAutoNarrate] = useState(false);
   const [playingTurnId, setPlayingTurnId] = useState<string | null>(null);
   const [ttsLoading, setTtsLoading] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState(false);
+  const [voiceChatMode, setVoiceChatMode] = useState(false);
+  const [voiceFirstMode, setVoiceFirstMode] = useState(false);
+  const [voiceVisionMode, setVoiceVisionMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -86,14 +136,96 @@ export default function Page() {
   // TanStack Query — cached speech health (auto-refreshes every 60s)
   const { data: speechHealth } = useSpeechHealth();
   const ttsMutation = useTtsMutation();
+  const hasStartedChat = chat.length > 1;
 
   // ---- Lifecycle ----
 
   useEffect(() => { initAnalytics(); }, []);
 
+  const updateScrollAffordance = useCallback(() => {
+    const list = messageListRef.current;
+    if (!list) {
+      shouldStickToBottomRef.current = true;
+      setShowScrollToLatest(false);
+      return;
+    }
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    const isNearBottom = distanceFromBottom < 140;
+    shouldStickToBottomRef.current = isNearBottom;
+    setShowScrollToLatest((prev) => {
+      const next = distanceFromBottom > 220;
+      return prev === next ? prev : next;
+    });
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const list = messageListRef.current;
+    if (!list) {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      list.scrollTo({ top: list.scrollHeight, behavior });
+      shouldStickToBottomRef.current = true;
+      setShowScrollToLatest(false);
+    });
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chat]);
+    const list = messageListRef.current;
+    if (!list) return;
+    updateScrollAffordance();
+    list.addEventListener('scroll', updateScrollAffordance, { passive: true });
+    return () => list.removeEventListener('scroll', updateScrollAffordance);
+  }, [hasStartedChat, updateScrollAffordance]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    let raf = 0;
+
+    const updateMobileViewportVars = () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      raf = window.requestAnimationFrame(() => {
+        const dockHeight = chatDockRef.current?.getBoundingClientRect().height || 88;
+        const viewport = window.visualViewport;
+        const keyboardInset = viewport
+          ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+          : 0;
+
+        root.style.setProperty('--chat-dock-height', `${Math.ceil(dockHeight)}px`);
+        root.style.setProperty('--keyboard-inset', `${Math.round(keyboardInset)}px`);
+        root.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height ?? window.innerHeight)}px`);
+        raf = 0;
+      });
+    };
+
+    updateMobileViewportVars();
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(updateMobileViewportVars)
+      : null;
+    if (chatDockRef.current) resizeObserver?.observe(chatDockRef.current);
+
+    window.addEventListener('resize', updateMobileViewportVars);
+    window.visualViewport?.addEventListener('resize', updateMobileViewportVars);
+    window.visualViewport?.addEventListener('scroll', updateMobileViewportVars);
+
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateMobileViewportVars);
+      window.visualViewport?.removeEventListener('resize', updateMobileViewportVars);
+      window.visualViewport?.removeEventListener('scroll', updateMobileViewportVars);
+    };
+  }, [hasStartedChat, isLoading, isRecording]);
+
+  useEffect(() => {
+    if (!hasStartedChat) return;
+    const last = chat[chat.length - 1];
+    if (shouldStickToBottomRef.current || last?.role === 'user' || isLoading) {
+      scrollToBottom(last?.role === 'user' ? 'smooth' : 'auto');
+    }
+  }, [chat, hasStartedChat, isLoading, scrollToBottom]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -116,7 +248,7 @@ export default function Page() {
     const win = typeof window !== 'undefined' ? window as Window & { SpeechRecognition?: new () => SpeechRecognition; webkitSpeechRecognition?: new () => SpeechRecognition } : null;
     const Impl = win && (win.SpeechRecognition || win.webkitSpeechRecognition);
     if (!Impl) {
-      if (!HAS_MEDIA_RECORDER) setSpeechState('unavailable');
+      if (!hasMediaRecorder) setSpeechState('unavailable');
       return;
     }
     const recog: SpeechRecognition = new Impl();
@@ -132,7 +264,7 @@ export default function Page() {
     };
     recognitionRef.current = recog;
     return () => { recog.abort(); };
-  }, [locale, setSpeechState, setMessage]);
+  }, [locale, hasMediaRecorder, setSpeechState, setMessage]);
 
   // Auto-narrate new assistant messages
   const lastChatLength = useRef(chat.length);
@@ -172,9 +304,12 @@ export default function Page() {
 
   // ---- Text chat (SSE) ----
 
-  const sendMessage = useCallback(async () => {
-    const text = message.trim();
+  const sendMessage = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? message).trim();
     if (!text || isLoading) return;
+    const conversationId = activeConversationId ?? ensureActiveConversationId();
+    shouldStickToBottomRef.current = true;
+    setShowScrollToLatest(false);
     addTurns([createTurn('user', text)]);
     setMessage('');
     setIsLoading(true);
@@ -182,38 +317,68 @@ export default function Page() {
     trackChatSent(text.length);
     const t0 = Date.now();
     const ac = new AbortController();
-    const timeout = setTimeout(() => ac.abort(), 60_000);
+    const timeout = setTimeout(() => ac.abort(), 120_000);
+    const requestBody = JSON.stringify({ message: text, conversation_id: conversationId, top_k: 4, locale });
+    const requestHeaders = authHeaders({
+      'Content-Type': 'application/json',
+      'X-Session-ID': getAnalyticsSessionId(),
+    });
+
+    const applySyncReply = async () => {
+      const sync = await fetch(`${API_URL}/v1/chat`, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: requestBody,
+        signal: ac.signal,
+      });
+      if (!sync.ok) throw new Error(`API ${sync.status}`);
+      const d = await sync.json();
+      if (d.conversation_id) sessionIdRef.current = d.conversation_id;
+      const content = cleanResponse(d.reply ?? '');
+      const meta = {
+        citations: d.citations ?? [],
+        faithfulnessScore: d.faithfulness_score ?? null,
+        retrievalMode: d.retrieval_mode ?? 'keyword',
+        escalationRequired: d.escalation_required ?? false,
+        escalationReason: d.escalation_reason ?? '',
+      };
+      const cur = useChatStore.getState().chat;
+      const last = cur[cur.length - 1];
+      if (last?.role === 'assistant') {
+        updateLastTurn((t) => ({ ...t, content, ...meta }));
+      } else {
+        addTurns([createTurn('assistant', content, meta)]);
+      }
+      trackChatReceived(Date.now() - t0, (d.sources?.length ?? 0) > 0);
+    };
 
     try {
       const res = await fetch(`${API_URL}/v1/chat/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Session-ID': getAnalyticsSessionId() },
-        body: JSON.stringify({ message: text, top_k: 4, locale }),
+        headers: requestHeaders,
+        body: requestBody,
         signal: ac.signal,
       });
       if (!res.ok) {
-        const sync = await fetch(`${API_URL}/v1/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Session-ID': getAnalyticsSessionId() },
-          body: JSON.stringify({ message: text, top_k: 4, locale }),
-          signal: ac.signal,
-        });
-        if (!sync.ok) throw new Error(`API ${sync.status}`);
-        const d = await sync.json();
-        addTurns([createTurn('assistant', d.reply, {
-          citations: d.citations ?? [], faithfulnessScore: d.faithfulness_score ?? null,
-          retrievalMode: d.retrieval_mode ?? 'keyword',
-          escalationRequired: d.escalation_required ?? false, escalationReason: d.escalation_reason ?? '',
-        })]);
-        trackChatReceived(Date.now() - t0, (d.sources?.length ?? 0) > 0);
+        await applySyncReply();
         return;
       }
       addTurns([createTurn('assistant', '', {})]);
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No body');
       const dec = new TextDecoder();
-      let buf = '', streamed = '', meta: Record<string, unknown> = {}, evt = 'token';
+      let buf = '', streamed = '', pending = '', meta: Record<string, unknown> = {}, evt = 'token';
       let raf: number | null = null;
+      const flushPending = () => {
+        if (!pending) {
+          raf = null;
+          return;
+        }
+        streamed += pending;
+        pending = '';
+        updateLastTurn((t) => ({ ...t, content: streamed }));
+        raf = null;
+      };
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -226,22 +391,66 @@ export default function Page() {
             if (!ln.startsWith('data: ')) continue;
             const data = ln.slice(6);
             if (evt === 'error') { updateLastTurn((t) => ({ ...t, content: 'Sorry, an error occurred. Please try again.' })); evt = 'token'; continue; }
-            if (evt === 'done') { evt = 'token'; continue; }
+            if (evt === 'done') {
+              const trimmed = data.trim();
+              if (trimmed) {
+                try {
+                  const p = JSON.parse(trimmed);
+                  meta = { ...meta, ...p };
+                  if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+                  if (typeof p.reply === 'string' && p.reply.trim()) {
+                    streamed = cleanResponse(p.reply);
+                    pending = '';
+                    updateLastTurn((t) => ({ ...t, content: streamed }));
+                  }
+                  updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason }));
+                } catch {
+                  pending += data;
+                  if (raf === null) {
+                    raf = requestAnimationFrame(flushPending);
+                  }
+                }
+              }
+              evt = 'token';
+              continue;
+            }
+            if (evt === 'revision') {
+              const revised = cleanResponse(data);
+              streamed = revised;
+              pending = '';
+              updateLastTurn((t) => ({ ...t, content: revised }));
+              evt = 'token';
+              continue;
+            }
             if (evt === 'metadata' || evt === 'grounding') {
-              try { const p = JSON.parse(data); meta = { ...meta, ...p }; updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason })); } catch {}
+              try { const p = JSON.parse(data); meta = { ...meta, ...p }; if (p.conversation_id) sessionIdRef.current = p.conversation_id; updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason })); } catch {}
               evt = 'token'; continue;
             }
-            if (data) {
-              streamed += data;
-              if (raf === null) { const c = streamed; raf = requestAnimationFrame(() => { updateLastTurn((t) => ({ ...t, content: c })); raf = null; }); }
+            if (data || evt === 'token') {
+              pending += data || '\n';
+              if (raf === null) {
+                raf = requestAnimationFrame(flushPending);
+              }
             }
             evt = 'token';
           }
         }
         dec.decode();
-        if (raf !== null) cancelAnimationFrame(raf);
-        updateLastTurn((t) => ({ ...t, content: streamed }));
+        if (raf !== null) {
+          cancelAnimationFrame(raf);
+          flushPending();
+        } else if (pending) {
+          flushPending();
+        }
+        const cleaned = cleanResponse(streamed);
+        if (cleaned !== streamed) {
+          updateLastTurn((t) => ({ ...t, content: cleaned }));
+        }
       } finally { reader.releaseLock(); }
+      if (!useChatStore.getState().chat.at(-1)?.content.trim()) {
+        await applySyncReply();
+        return;
+      }
       trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
     } catch {
       const cur = useChatStore.getState().chat;
@@ -255,14 +464,15 @@ export default function Page() {
     } finally {
       clearTimeout(timeout);
       setIsLoading(false);
+      saveCurrentSession();
     }
-  }, [message, isLoading, locale, addTurns, setMessage, updateLastTurn]);
+  }, [message, isLoading, locale, activeConversationId, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
 
   // ---- Voice input ----
 
   const handleMicClick = useCallback(async () => {
     if (isTransitioning) return;
-    if (voiceMode && HAS_MEDIA_RECORDER) {
+    if (voiceMode && hasMediaRecorder) {
       setIsTransitioning(true);
       try {
         if (isRecording) {
@@ -276,9 +486,15 @@ export default function Page() {
           if (pcm16.byteLength === 0) return;
           setIsLoading(true);
           const t0 = Date.now();
+          const conversationId = activeConversationId ?? ensureActiveConversationId();
           trackChatSent(0);
           try {
-            const r = await voiceChat(pcm16, { language: locale, ttsEnabled: autoNarrate, sessionId: getAnalyticsSessionId() });
+            const r = await voiceChat(pcm16, {
+              language: locale,
+              conversationId,
+              ttsEnabled: autoNarrate,
+              sessionId: getAnalyticsSessionId(),
+            });
             if (r.error && !r.transcript) { addTurns([createTurn('assistant', `Voice error: ${r.error}`)]); trackErrorOccurred('voice_chat_failed'); return; }
             if (r.transcript) { addTurns([createTurn('user', r.transcript)]); lastUserQueryRef.current = r.transcript; }
             if (r.reply) {
@@ -289,7 +505,7 @@ export default function Page() {
                 if (tid) { setPlayingTurnId(tid); try { await playAudioBase64(r.reply_audio_base64); } finally { setPlayingTurnId((p) => p === tid ? null : p); } }
               }
             }
-          } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); }
+          } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); saveCurrentSession(); }
         } else {
           // Start recording
           try {
@@ -309,22 +525,24 @@ export default function Page() {
     if (speechState === 'listening') { recognitionRef.current.stop(); return; }
     trackVoiceUsed();
     recognitionRef.current.start();
-  }, [isTransitioning, voiceMode, isRecording, locale, autoNarrate, speechState, addTurns, setSpeechState]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState]);
+
+  const handleCancelRecording = useCallback(() => {
+    if (recorderRef.current) {
+      recorderRef.current.cancel();
+      recorderRef.current = null;
+    }
+    setIsRecording(false);
+    setSpeechState('idle');
+    setIsTransitioning(false);
+  }, [setSpeechState]);
 
   const handleStarterPrompt = useCallback((prompt: string) => {
-    setMessage(prompt);
     trackStarterPromptUsed(prompt);
-  }, [setMessage]);
+    sendMessage(prompt);
+  }, [sendMessage]);
 
   // ---- Derived state ----
-
-  const speechStatusLabel = useMemo(() => {
-    if (isRecording) return 'Recording...';
-    if (speechState === 'listening') return 'Listening...';
-    if (speechState === 'unavailable') return 'Speech unavailable';
-    if (speechState === 'error') return 'Speech error';
-    return voiceMode ? 'Tap mic to record' : 'Tap mic to speak';
-  }, [speechState, voiceMode, isRecording]);
 
   const healthLabel = useMemo(() => {
     if (!speechHealth) return 'Checking...';
@@ -332,7 +550,6 @@ export default function Page() {
   }, [speechHealth]);
 
   const serverReady = speechHealth?.status === 'ready';
-
   // Memoize user query lookup per turn for ChatMessage
   const userQueries = useMemo(() => {
     const map: Record<string, string> = {};
@@ -344,95 +561,208 @@ export default function Page() {
     return map;
   }, [chat]);
 
+  // ---- Shared composer props ----
+  const composerProps = {
+    message,
+    isLoading,
+    isRecording,
+    isTransitioning,
+    speechUnavailable: speechState === 'unavailable' && !hasMediaRecorder,
+    speechState,
+    voiceMode,
+    onMessageChange: setMessage,
+    onSend: sendMessage,
+    onMicClick: handleMicClick,
+    onCancelRecording: handleCancelRecording,
+    onFocus: () => {
+      shouldStickToBottomRef.current = true;
+      window.setTimeout(() => scrollToBottom('smooth'), 80);
+    },
+  };
+
   // ---- Render ----
 
   return (
-    <main>
-      <section className="hero">
-        <div>
-          <div className="badge"><SparklesIcon /> Live assistant</div>
-          <h1 className="hero-title">URA Chatbot</h1>
-          <p className="hero-sub">
-            Natural chat with speech and text. Ask about URA services, tax
-            policy, or process workflows — every answer is grounded in the
-            URA knowledge base with live citations.
-          </p>
+    <div className="app-shell">
+      {/* ── Conversation sidebar ── */}
+      <ConversationRail
+        open={sidebarOpen}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onClose={() => setSidebarOpen(false)}
+        onNewConversation={() => { createNewSession(); setSidebarOpen(false); }}
+        onSelectConversation={(id) => { switchSession(id); setSidebarOpen(false); }}
+        onDeleteConversation={deleteSession}
+      />
+
+      {/* ── Main column (top bar + content) ── */}
+      <div className="app-main-col">
+      <header className="top-bar">
+        <div className="top-bar-left">
+          <button className="top-bar-icon-btn sidebar-toggle-btn" onClick={() => setSidebarOpen(true)} aria-label="Open conversation history">
+            <MenuIcon />
+          </button>
+          <div className="top-bar-brand">
+            <Image
+              src="/ura-assistant-logo.svg"
+              alt="URA Assistant"
+              className="top-bar-logo-img"
+              width={28}
+              height={28}
+              priority
+            />
+            <span className="top-bar-title">URA Tax Assistant</span>
+          </div>
+        </div>
+        <div className="top-bar-right">
+          {hasStartedChat && (
+            <>
+              <button className="top-bar-icon-btn" onClick={() => createNewSession()} aria-label="New conversation" title="New chat">
+                <PlusIcon />
+              </button>
+              <button className="top-bar-icon-btn top-bar-icon-btn-danger" onClick={() => { reset(); }} aria-label="Clear conversation" title="Clear chat">
+                <TrashIcon />
+              </button>
+            </>
+          )}
           <div role="radiogroup" aria-label="Language selection" className="locale-switch">
             {LOCALE_OPTIONS.map((opt) => (
               <button key={opt.value} role="radio" aria-checked={locale === opt.value}
-                onClick={() => setLocale(opt.value)} className="locale-btn">{opt.label}</button>
+                onClick={() => setLocale(opt.value)} className="locale-btn" data-short={opt.value.toUpperCase()}>{opt.label}</button>
             ))}
           </div>
-        </div>
-        <div className="hero-controls">
-          <div className={`pill ${speechHealth?.status === 'ready' ? 'pill-ok' : 'pill-warn'}`} aria-live="polite">
-            <HeadphonesIcon /> {healthLabel}
-          </div>
-          <label className="voice-toggle" title="Voice mode uses server-side ASR + TTS for full bilingual speech">
-            <input type="checkbox" checked={voiceMode} onChange={(e) => setVoiceMode(e.target.checked)} disabled={!serverReady && !HAS_MEDIA_RECORDER} />
-            <span className="voice-toggle-label">Voice mode</span>
+          <label className="voice-toggle" title="Voice mode: server-side ASR + TTS">
+            <input type="checkbox" checked={voiceMode} onChange={(e) => setVoiceMode(e.target.checked)} disabled={!serverReady && !hasMediaRecorder} />
+            <span className="voice-toggle-label">Voice</span>
           </label>
-          <label className="voice-toggle" title="Automatically read assistant replies aloud">
+          <label className="voice-toggle" title="Auto-read replies aloud">
             <input type="checkbox" checked={autoNarrate} onChange={(e) => setAutoNarrate(e.target.checked)} />
-            <span className="voice-toggle-label">Auto-narrate</span>
+            <span className="voice-toggle-label">Narrate</span>
           </label>
-        </div>
-      </section>
-
-      <div className="grid grid-2">
-        <section className="card chat-shell" aria-label="Chat conversation">
-          <header className="section-title">
-            <div>
-              <h2>Conversation</h2>
-              <div className="small">Context-aware, grounded responses{voiceMode && ' + voice'}</div>
-            </div>
-            <div className={`status ${isRecording ? 'status-recording' : ''}`}>
-              <MicIcon /> {speechStatusLabel}
-            </div>
-          </header>
-
-          <div className="message-list" aria-live="polite">
-            {chat.map((turn) => (
-              <ChatMessage
-                key={turn.id}
-                turn={turn}
-                userQuery={userQueries[turn.id] || ''}
-                locale={locale}
-                playingTurnId={playingTurnId}
-                ttsLoading={ttsLoading}
-                isTransitioning={isTransitioning}
-                onListen={handleListenToReply}
-              />
-            ))}
-            {isLoading && (() => {
-              const last = chat[chat.length - 1];
-              if (last?.role === 'assistant' && last.content !== '') return null;
-              return (
-                <article className="message-row">
-                  <div className="avatar assistant" aria-hidden="true"><BotIcon /></div>
-                  <div className="bubble assistant"><span className="bubble-role">assistant</span><LoadingDots /></div>
-                </article>
-              );
-            })()}
-            <div ref={messagesEndRef} />
+          <button
+            className="top-bar-icon-btn"
+            onClick={() => setVoiceChatMode((v) => !v)}
+            aria-label={voiceChatMode ? 'Close voice chat' : 'Open voice chat'}
+            title="Voice-first mode"
+            style={voiceChatMode ? { color: 'var(--ura-teal, #00a88f)' } : undefined}
+          >
+            <MicIcon />
+          </button>
+          <div className={`pill-sm ${speechHealth?.status === 'ready' ? 'pill-ok' : 'pill-warn'}`} aria-live="polite">
+            <HeadphonesIcon /> <span className="pill-sm-label">{healthLabel}</span>
           </div>
+        </div>
+      </header>
 
-          <ChatInput
-            message={message}
-            isLoading={isLoading}
-            isRecording={isRecording}
-            isTransitioning={isTransitioning}
-            speechUnavailable={speechState === 'unavailable' && !HAS_MEDIA_RECORDER}
-            speechState={speechState}
-            voiceMode={voiceMode}
-            onMessageChange={setMessage}
-            onSend={sendMessage}
-            onMicClick={handleMicClick}
-          />
-        </section>
+      <main className="app-content">
+        {!hasStartedChat ? (
+          /* ── Landing state — Grok-inspired centered layout ── */
+          <div className="landing">
+            <div className="landing-brand">
+              <Image
+                src="/ura-assistant-logo.svg"
+                alt="URA Tax Assistant"
+                className="landing-hero-logo"
+                width={140}
+                height={140}
+                priority
+              />
+              <h1 className="landing-title">URA Tax Assistant</h1>
+              <p className="landing-sub">
+                Official AI-powered assistant for Uganda Revenue Authority
+              </p>
+            </div>
 
-        <StarterPrompts onSelect={handleStarterPrompt} />
-      </div>
-    </main>
+            <div className="landing-composer">
+              <ChatInput {...composerProps} />
+            </div>
+
+            <div className="landing-prompts" role="group" aria-label="Suggested questions">
+              {STARTER_PROMPTS.map((p) => (
+                <button key={p} className="landing-chip" onClick={() => handleStarterPrompt(p)}>
+                  <SparklesIcon /> {p}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          /* ── Chat state — full-width messages ── */
+          <div className="chat-area" aria-label="Chat conversation">
+            <div ref={messageListRef} className="message-list" aria-live="polite">
+              {chat.map((turn) => (
+                <ChatMessage
+                  key={turn.id}
+                  turn={turn}
+                  userQuery={userQueries[turn.id] || ''}
+                  locale={locale}
+                  playingTurnId={playingTurnId}
+                  ttsLoading={ttsLoading}
+                  isTransitioning={isTransitioning}
+                  onListen={handleListenToReply}
+                />
+              ))}
+              {isLoading && (() => {
+                const last = chat[chat.length - 1];
+                if (last?.role === 'assistant' && last.content !== '') return null;
+                return (
+                  <article className="message-row message-row-assistant">
+                    <div className="avatar assistant" aria-hidden="true"><BotIcon /></div>
+                    <div className="bubble assistant"><span className="bubble-role">assistant</span><LoadingDots /></div>
+                  </article>
+                );
+              })()}
+              <div ref={messagesEndRef} className="messages-end-spacer" />
+            </div>
+
+            {showScrollToLatest && (
+              <button
+                type="button"
+                className="scroll-to-latest"
+                onClick={() => {
+                  shouldStickToBottomRef.current = true;
+                  scrollToBottom('smooth');
+                }}
+                aria-label="Scroll to latest response"
+              >
+                Latest
+              </button>
+            )}
+
+            <div ref={chatDockRef} className="chat-dock">
+              <ChatInput {...composerProps} />
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Voice-first overlay (Phase 23) */}
+      <VoiceChat
+        open={voiceChatMode}
+        locale={locale}
+        conversationId={activeConversationId ?? undefined}
+        onClose={() => setVoiceChatMode(false)}
+      />
+
+      {/* Voice-first primary interface (Phase 27) */}
+      {voiceFirstMode && (
+        <VoiceFirstChat
+          locale={locale}
+          onClose={() => setVoiceFirstMode(false)}
+          onOpenVision={() => {
+            setVoiceFirstMode(false);
+            setVoiceVisionMode(true);
+          }}
+        />
+      )}
+
+      {/* Voice + Vision mode (Phase 27) */}
+      {voiceVisionMode && (
+        <VoiceVisionMode
+          locale={locale}
+          onClose={() => setVoiceVisionMode(false)}
+        />
+      )}
+      </div>{/* end .app-main-col */}
+    </div>
   );
 }

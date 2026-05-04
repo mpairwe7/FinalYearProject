@@ -20,6 +20,52 @@
 - **eval_results**: Metrics per sample and aggregate.
   - id (uuid), eval_sample_id (fk eval_samples), answer, score_context_precision, score_context_recall, answer_quality, factuality, hallucination_flag, grounding_score, latencies_ms (json), created_at.
 
+## Runtime Database Schema (SQLite / PostgreSQL)
+
+The backend maintains 11 tables in SQLite (default, WAL mode) or PostgreSQL (opt-in via `ANALYTICS_BACKEND=postgres`). Forward-compatible migrations are applied on startup.
+
+- **feedback**: User thumbs-up/down on chatbot responses.
+  - id (PK), message_id, session_id, rating (up|down), comment, user_query, bot_reply, created_at.
+  - Indexes: message_id, created_at. Retention: `FEEDBACK_TTL_DAYS` (default: 90).
+
+- **analytics_events**: Client-side analytics events.
+  - id (PK), session_id, event_type, event_data (JSON), created_at.
+  - Indexes: event_type, session_id, created_at. Retention: `ANALYTICS_TTL_DAYS` (default: 365).
+
+- **sessions**: User sessions.
+  - id (PK), started_at, last_active_at, message_count, user_agent, platform.
+  - Indexes: last_active_at. Retention: `SESSION_TTL_DAYS` (default: 30).
+
+- **conversations**: Chat turns (multi-turn history).
+  - id (PK), conversation_id, session_id, user_message, bot_reply, sources (JSON), response_time_ms, confidence, topic_tag, created_at.
+  - Indexes: session_id, conversation_id, created_at. Retention: `CONVERSATION_TTL_DAYS` (default: 7).
+
+- **workflow_sessions**: Guided workflow state (Phase 15).
+  - conversation_id (PK), workflow_id, status (active|completed|cancelled), current_step_idx, slots_json, last_prompt, created_at, updated_at.
+  - Indexes: status, updated_at.
+
+- **tenants**: Multi-tenant isolation (Phase 14).
+  - id (PK), display_name, created_at.
+
+- **users**: Authenticated users (Phase 14).
+  - id (PK), tenant_id, external_id (from OIDC), email, role (public|verified_taxpayer|ura_staff|ura_admin|ura_auditor), created_at, last_seen_at.
+  - Unique: (tenant_id, external_id). Indexes: tenant_id, last_seen_at.
+
+- **user_profiles**: User metadata for personalization (Phase 14).
+  - user_id (PK, FK → users.id), taxpayer_type, industry, primary_language, detail_level, registered_tax_types (JSON), fiscal_year, display_name, updated_at.
+
+- **consent_receipts**: Append-only consent log (Phase 14, UDPA 2019).
+  - receipt_id (PK), user_id (FK → users.id), purpose (personalization|analytics|ticket_escalation|long_term_storage|ura_account_access), version, granted_at, withdrawn_at, legal_basis (consent|public_task|legal_obligation).
+  - Indexes: user_id, (user_id, purpose, withdrawn_at).
+
+- **tickets**: Escalation queue (Phase 14-D).
+  - id (PK), conversation_id, session_id, status (open|assigned|resolved|wontfix), priority (low|normal|high|urgent), reason, user_query, bot_reply, handoff_json, response_judge_json, assignee, staff_note, created_at, updated_at.
+  - Indexes: status, priority, created_at.
+
+- **audit_events**: Hash-chained immutable audit ledger (Phase 21, UDPA compliance).
+  - event_id (PK), tenant_id, user_id, event_type, payload (JSON), query_sha256, reply_sha256, previous_hash, hash, created_at.
+  - Chain integrity: each row's `hash` = SHA-256(event_id + payload + previous_hash). Verified via `audit/verifier.py`.
+
 ## PDF Ingestion Flow
 1) Upload PDF → store metadata row in `documents` (status=pending).
 2) Extract text + metadata:
@@ -47,33 +93,43 @@
 
 ```
 User Query
-  → InputGuard (OWASP LLM01: 11 prompt injection patterns + length validation)
+  → Query Rewriting (15+ abbreviations, 20+ spelling corrections, coreference resolution)
+  → Language Detection (en, lg, sw, nyn, ach)
+  → InputGuard (OWASP LLM01: 11 prompt injection patterns + harmful intent + length)
+  → Workflow Check [FLAG_WORKFLOWS] — trigger guided slot-filling if matched
+  → Semantic Cache Lookup (cosine ≥ 0.92 → instant return)
+  → Supervisor Routing [FLAG_AGENTIC_MODE] — RAG | TOOLS | SPECIALIST | CLARIFY | ESCALATE
   → HybridRetriever.search()
-      ├─ Dense: sentence-transformers/all-MiniLM-L6-v2 (384-dim HNSW)
+      ├─ Dense: BAAI/bge-m3 (1024-dim, multilingual, MTEB 63.0)
       ├─ Sparse: BM25-weighted token vectors (inverted index)
       ├─ Fusion: Reciprocal Rank Fusion (RRF) via Qdrant query API
-      └─ Reranking: cross-encoder/ms-marco-MiniLM-L-6-v2
-  → Fallback: keyword overlap search (when Qdrant unavailable)
+      └─ Reranking: mxbai-rerank-base-v2 (500M, BEIR 55.6)
+  → Keyword Fallback (when Qdrant unavailable)
+  → Corrective RAG [FLAG_CORRECTIVE_RAG] — re-retrieve if avg score < threshold
+  → Language Boosting — boost hits matching detected locale
+  → FAQ Blending — merge top keyword hits for coverage
   → Calibrated Abstention (refuse if best_score < ABSTENTION_THRESHOLD)
-  → Citation Assembly: [1]...[n] with source, page, section, passage
+  → LLM Generation (standard | agentic tool-calling | vLLM)
   → OutputGuard
       ├─ redact_pii() — 7 Uganda-specific PII patterns (LLM02)
-      ├─ sanitize() — HTML/script/external link stripping (LLM05)
-      └─ check_grounding() — faithfulness scoring + disclaimer (LLM09)
-  → Escalation Check (flag for human review if needed)
-  → ChatResponse with citations + faithfulness_score + escalation info
+      ├─ sanitize() — <think>/script/HTML stripping, reasoning prefix removal (LLM05)
+      ├─ check_prompt_leakage() — system prompt signature detection (LLM07)
+      └─ check_grounding() — faithfulness via NLI entailment + disclaimer (LLM09)
+  → Escalation Check + Ticket creation [FLAG_TICKET_QUEUE]
+  → Audit Ledger append [FLAG_AUDIT_LEDGER]
+  → Cache Store + ChatResponse
 ```
 
 ### Retrieval Components
 
 | Component | Implementation | Details |
 |-----------|---------------|---------|
-| **Dense encoder** | `sentence-transformers/all-MiniLM-L6-v2` | 384-dim, cosine similarity, HNSW index |
+| **Dense encoder** | `BAAI/bge-m3` | 1024-dim, multilingual (100+ languages), MTEB 63.0 |
 | **Sparse encoder** | `BM25SparseEncoder` (custom) | Okapi BM25 weights, JSON-serializable vocabulary |
 | **Fusion** | Qdrant RRF | Prefetch dense + sparse → Reciprocal Rank Fusion |
-| **Reranker** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Optional (toggle via `RERANK_ENABLED`) |
-| **Metadata filtering** | Qdrant payload filters | Filter by `doc_type`, `tag`, `section`, etc. |
-| **Graceful degradation** | Keyword fallback | Automatic when Qdrant connection fails |
+| **Reranker** | `mixedbread-ai/mxbai-rerank-base-v2` | 500M params, BEIR 55.6, Apache-2.0 (toggle via `RERANK_ENABLED`) |
+| **Metadata filtering** | Qdrant payload filters | Filter by `doc_type`, `tag`, `section`, `language` |
+| **Graceful degradation** | Keyword fallback | Automatic when Qdrant connection fails (circuit breaker) |
 
 ### Payload Filter Examples
 ```python

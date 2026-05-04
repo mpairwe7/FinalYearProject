@@ -1,14 +1,8 @@
-"""Multi-step workflow engine (Phase 18 — scaffolded).
+"""Multi-step workflow engine (Phase 18 — active runtime).
 
-See ``README.md`` in this directory for the target design.
-This package is currently a stub — the runtime, YAML loader,
-and concrete flow files all land in Phase 18 after the Phase 15
-full LangGraph runtime and Phase 17 URA DMZ MCP servers are
-available.
-
-The package exists now so Phase 15-Lite's `state.py` import of
-``workflows.registry`` (currently optional) won't fail when
-Phase 18 lands.
+The registry + YAML loader are now wired into the main chat service for
+durable guided task flows. Concrete workflows still land incrementally,
+but the runtime is no longer a placeholder.
 """
 
 from __future__ import annotations

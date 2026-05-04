@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..authority import authority_required, get_authority_status
 from . import Tool, ToolRegistry, ToolSchema
 from .calculators import _RATE_TABLES, _get_rates  # noqa: F401
 
@@ -26,6 +27,13 @@ _DISPLAY_NAMES: dict[str, str] = {
     "withholding_dividend": "WHT on dividends",
     "customs_duty_common": "Customs duty (common finished goods)",
 }
+
+
+def _authority_payload() -> tuple[bool, dict[str, Any]]:
+    status = get_authority_status()
+    if authority_required() and not status.get("ok"):
+        return False, status
+    return True, status
 
 
 class LookupRateTool(Tool):
@@ -69,6 +77,13 @@ class LookupRateTool(Tool):
         tax_type: str,
         fiscal_year: str = "FY2025-26",
     ) -> dict[str, Any]:
+        authority_ok, authority = _authority_payload()
+        if not authority_ok:
+            return {
+                "ok": False,
+                "error": "fresh authority manifest required before returning tax rates",
+                "authority": authority,
+            }
         rates = _get_rates(fiscal_year)
         if tax_type not in rates:
             return {
@@ -91,6 +106,7 @@ class LookupRateTool(Tool):
             "rate": float(rate),
             "rate_pct": round(float(rate) * 100, 2),
             "fiscal_year": fiscal_year,
+            "authority": authority,
         }
 
 
@@ -120,6 +136,13 @@ class ListAvailableRatesTool(Tool):
         )
 
     def execute(self, fiscal_year: str = "FY2025-26") -> dict[str, Any]:
+        authority_ok, authority = _authority_payload()
+        if not authority_ok:
+            return {
+                "ok": False,
+                "error": "fresh authority manifest required before returning tax rates",
+                "authority": authority,
+            }
         rates = _get_rates(fiscal_year)
         rows: list[dict[str, Any]] = []
         for key, display in _DISPLAY_NAMES.items():
@@ -138,6 +161,7 @@ class ListAvailableRatesTool(Tool):
             "fiscal_year": fiscal_year,
             "count": len(rows),
             "rates": rows,
+            "authority": authority,
         }
 
 
