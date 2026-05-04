@@ -12,8 +12,8 @@ pandas>=1.5,<4.0
 numpy==1.26.4
 sentence-transformers==3.4.1
 langchain==1.2.15
-langchain-community==0.3.31
-langchain-core==0.3.81
+langchain-community==0.4.1
+langchain-core>=1.2.0,<2.0.0
 langchain-text-splitters==0.3.11
 langchain-qdrant==0.2.0
 qdrant-client==1.13.3
