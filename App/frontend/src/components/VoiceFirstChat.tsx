@@ -378,6 +378,11 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
           params.set("conversation_id", activeConversationId);
         }
 
+        const audioBody = audio.buffer.slice(
+          audio.byteOffset,
+          audio.byteOffset + audio.byteLength,
+        ) as ArrayBuffer;
+
         const res = await fetch(`${API_BASE}/v1/voice/chat?${params}`, {
           method: "POST",
           headers: authHeaders({
@@ -385,7 +390,7 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
             "X-Session-ID": activeConversationId ?? "",
             "X-Voice-Consent": "true",
           }),
-          body: audio,
+          body: audioBody,
         });
 
         if (!res.ok) throw new Error(`Voice chat failed: ${res.status}`);
