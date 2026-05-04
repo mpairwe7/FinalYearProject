@@ -29,7 +29,7 @@ permissions:
   actions: read             # Required for SARIF upload
 
 concurrency:
-  group: trivy-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  group: trivy-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -39,6 +39,72 @@ env:
   FRONTEND_IMAGE: "landwind/ura-chatbot-frontend:trivy-scan"
 
 jobs:
+  # ============================================
+  # 0. PR Image Scan Scope
+  # ============================================
+  image-change-filter:
+    name: "Image Scan Scope"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      ml: ${{ steps.filter.outputs.ml }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Determine changed image paths
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          api=true
+          ml=true
+          frontend=true
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            api=false
+            ml=false
+            frontend=false
+
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            changed_paths="$(git diff --name-only "origin/${{ github.base_ref }}" HEAD)"
+
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              case "$path" in
+                Dockerfile|.dockerignore|trivy.yaml|App/backend/*|App/docker-compose.yml)
+                  api=true
+                  ;;
+              esac
+              case "$path" in
+                Dockerfile.ml|.dockerignore|trivy.yaml|requirements.txt|ml/*|Data/dataset/*)
+                  ml=true
+                  ;;
+              esac
+              case "$path" in
+                trivy.yaml|App/frontend/*)
+                  frontend=true
+                  ;;
+              esac
+            done <<< "$changed_paths"
+          fi
+
+          {
+            echo "api=$api"
+            echo "ml=$ml"
+            echo "frontend=$frontend"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "## Trivy Image Scan Scope" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | Scan? |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| API | $api |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ML trainer | $ml |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Frontend | $frontend |" >> "$GITHUB_STEP_SUMMARY"
+
   # ============================================
   # 1. Filesystem Dependency & Secret Scan
   # ============================================
@@ -208,6 +274,8 @@ jobs:
     name: "Container: API Image"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: image-change-filter
+    if: needs.image-change-filter.outputs.api == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -278,6 +346,8 @@ jobs:
     name: "Container: ML Trainer Image"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: image-change-filter
+    if: needs.image-change-filter.outputs.ml == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -336,6 +406,8 @@ jobs:
     name: "Container: Frontend Image"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: image-change-filter
+    if: needs.image-change-filter.outputs.frontend == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

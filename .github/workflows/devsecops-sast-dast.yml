@@ -30,7 +30,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: devsecops-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  group: devsecops-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -335,25 +335,42 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Build and start API for scanning
+        env:
+          API_PORT: "8087"
+          APP_ENV: "development"
+          SPEECH_ENABLED: "false"
+          LLM_ENABLED: "false"
+          WORKERS: "1"
         run: |
-          docker compose up -d qdrant api
+          touch .env
+          docker compose up -d qdrant api || {
+            docker compose ps
+            docker compose logs --no-color --tail=200 qdrant api
+            exit 1
+          }
+
           echo "Waiting for API to be healthy..."
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+            if curl -sf http://localhost:8087/health > /dev/null 2>&1; then
               echo "API is healthy"
-              break
+              exit 0
             fi
             sleep 5
           done
 
+          echo "::error::API did not become healthy on port 8087"
+          docker compose ps
+          docker compose logs --no-color --tail=200 qdrant api
+          exit 1
+
       - name: OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@7cea08522cd5bb23c16213e2e10ebc41d5527c37 # v0.14.0
+        uses: zaproxy/action-baseline@2b5fc7f98d837319798ab7f128ea50b7d40563b6 # v0.14.0
         with:
-          target: "http://localhost:8000"
+          target: "http://localhost:8087"
           rules_file_name: ".zap-rules.tsv"
           cmd_options: >-
-            -J zap-report.json
-            -w zap-report.md
+            -J report_json.json
+            -w report_md.md
             -z "-config scanner.threadPerHost=2"
           allow_issue_writing: false
 
@@ -363,23 +380,26 @@ jobs:
         with:
           name: zap-results
           path: |
-            zap-report.json
-            zap-report.md
+            report_json.json
+            report_md.md
           retention-days: 30
 
       - name: ZAP step summary
         if: always()
         run: |
           echo "## OWASP ZAP DAST Baseline Results" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f zap-report.md ]; then
-            head -50 zap-report.md >> "$GITHUB_STEP_SUMMARY"
+          echo "- Target: \`http://localhost:8087\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f report_md.md ]; then
+            head -50 report_md.md >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- ZAP scan did not produce results (API may not have started)" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Tear down services
         if: always()
-        run: docker compose down -v
+        env:
+          API_PORT: "8087"
+        run: docker compose down -v || true
 
   # ============================================
   # 6. OSSF Scorecard – Supply Chain Security
@@ -389,7 +409,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Only on default branch (Scorecard needs repo context)
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/dev')
     permissions:
       contents: read
       security-events: write
@@ -409,14 +429,14 @@ jobs:
           publish_results: false
 
       - name: Upload Scorecard SARIF
-        if: always()
+        if: always() && hashFiles('scorecard-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
         with:
           sarif_file: scorecard-results.sarif
           category: ossf-scorecard
 
       - name: Upload Scorecard artifact
-        if: always()
+        if: always() && hashFiles('scorecard-results.sarif') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorecard-results
