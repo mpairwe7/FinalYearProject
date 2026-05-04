@@ -38,7 +38,7 @@ pymupdf>=1.25.3
 transformers>=4.46.0
 torch==2.10.0+cu128
 accelerate>=1.2.0
-peft>=0.13.0
+peft>=0.19.1
 bitsandbytes>=0.45.0
 lingua-language-detector>=2.0.0
 cryptography>=44.0.0
