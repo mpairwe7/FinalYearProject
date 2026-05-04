@@ -6,7 +6,7 @@
 name = "ura-chatbot"
 version = "1.1.0"
 description = "AI-powered customer service assistant for Uganda Revenue Authority"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 license = "Apache-2.0"
 
 [build-system]

@@ -28,7 +28,7 @@ concurrency:
 
 env:
   NODE_VERSION: '20'
-  BUN_VERSION: '1.1.45'
+  BUN_VERSION: '1.3.12'
   DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE_FRONTEND || 'landwind/ura-chatbot-frontend' }}
 
 jobs:

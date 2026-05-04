@@ -882,7 +882,7 @@ class SpeechModel:
         return arr
 
     @staticmethod
-    def _resample(audio: "np.ndarray", orig_sr: int, target_sr: int) -> "np.ndarray":
+    def _resample(audio, orig_sr: int, target_sr: int):
         """Simple linear resampling (no dependency on librosa)."""
         import numpy as np
 
