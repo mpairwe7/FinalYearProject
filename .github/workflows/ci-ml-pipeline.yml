@@ -1403,7 +1403,7 @@ jobs:
 
       - name: Upload Trivy SARIF to GitHub Security
         if: always() && github.event_name != 'pull_request' && hashFiles('trivy-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@820e3160e279568db735cee8ed8f8e77a6da7818 # v3.32.6
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
         with:
           sarif_file: trivy-results.sarif
           category: trivy-ml-pipeline
