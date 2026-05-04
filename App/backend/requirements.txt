@@ -14,7 +14,7 @@ limits[redis]>=3.13
 # Distributed semantic cache + analytics backends (opt-in)
 redis>=5.0.0
 psycopg[binary]>=3.2.0
-psycopg-pool>=3.2.0
+psycopg-pool>=3.3.1
 
 # Continuous evaluation — the harness in App/backend/app/evaluation.py
 # uses these when installed and falls back to heuristic metrics otherwise.
