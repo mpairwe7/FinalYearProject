@@ -10,7 +10,7 @@ name: ML Pipeline CI/CD
 
 on:
   push:
-    branches: [main, dev, develop, feat/*, fix/*]
+    branches: [main, dev, develop]
     paths:
       - 'ml/**'
       - 'App/backend/**'
