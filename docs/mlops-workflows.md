@@ -59,7 +59,7 @@ Pull requests validate the App flows without publishing production artifacts:
 | Backend tests | `tests/test_api.py`, agent endpoint tests, and integration smoke run with isolated analytics DBs, `QDRANT_ENABLED=false`, and `SPEECH_ENABLED=false` for deterministic CI |
 | Coverage | `pytest --cov` enforces the current ratcheting baseline of 35%; coverage XML is uploaded on every run |
 | Docker publish | `build-docker` is skipped on PRs to avoid registry writes from untrusted pull-request contexts |
-| PR image validation | Dedicated Trivy image jobs still build and scan API, ML trainer, and frontend images using deterministic CI tags |
+| PR image validation | Dedicated Trivy image jobs build and scan API, ML trainer, and frontend images only when relevant image/app paths change; protected branch, schedule, and manual runs scan all images |
 | SARIF upload | Trivy SARIF from this workflow uploads to GitHub Security on non-PR events; PRs retain scan artifacts |
 
 #### Stage Details
@@ -217,12 +217,13 @@ Security scanning is intentionally split between blocking PR validation and prot
 | Workflow | PR behavior | Non-PR behavior |
 |----------|-------------|-----------------|
 | `secret-scanning.yml` | TruffleHog, Gitleaks, detect-secrets run; ggshield runs only when GitGuardian is enabled/configured | Same, plus scheduled full-history coverage |
-| `security-trivy.yml` | Filesystem, IaC, license, and container scans run; SARIF/JSON/SBOM artifacts are uploaded | Same scans, plus SARIF upload to GitHub Security |
+| `security-trivy.yml` | Filesystem, IaC, and license scans run; API, ML trainer, and frontend image scans run only when relevant image/app paths change; SARIF/JSON/SBOM artifacts are uploaded | Full image scan set, plus SARIF upload to GitHub Security |
 | `devsecops-sast-dast.yml` | Semgrep, Bandit, pip-audit, Checkov, and threat-model validation run; Checkov SARIF is kept as artifact | Same scans, plus Checkov SARIF upload to GitHub Security |
-| OWASP ZAP | Skipped on PR because it needs a live target | Runs on push, schedule, or manual dispatch |
-| OSSF Scorecard | Skipped on PR because it needs default-branch repository context | Runs on non-PR events |
+| OWASP ZAP | Skipped on PR because it needs a live target | Runs on push, schedule, or manual dispatch against the CI API target on port `8087` |
+| OSSF Scorecard | Skipped on PR because it needs default-branch repository context | Runs only when default-branch repository context is available |
 
 This keeps PRs fail-closed for actionable issues while avoiding external code-scanning app checks that cannot complete safely in pull-request contexts.
+Security workflow concurrency is event-scoped, so manual branch re-runs do not cancel active PR security checks.
 
 ---
 

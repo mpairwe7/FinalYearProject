@@ -208,10 +208,10 @@ Ten workflows under `.github/workflows/`:
 |------|-------------|
 | App backend | Ruff syntax/undefined-name gate, pytest with isolated Qdrant/speech-disabled test env, governance check, data/speech smoke jobs |
 | Frontend | ESLint, TypeScript, Vitest unit/component tests, accessibility/Lighthouse, and production build |
-| Security | Secret scanning, CodeQL, Semgrep, Bandit, pip-audit, Checkov, Trivy filesystem/IaC/license/image scans, and threat-registry validation |
+| Security | Secret scanning, CodeQL, Semgrep, Bandit, pip-audit, Checkov, Trivy filesystem/IaC/license scans, path-scoped Trivy image scans, and threat-registry validation |
 | SARIF uploads | Semgrep uploads SARIF on PRs; Trivy and Checkov upload PR artifacts and reserve GitHub Security SARIF upload for non-PR events to avoid external code-scanning app check failures |
-| Container publishing | API/frontend publish on protected branch pushes; ML image publishing is skipped on PRs while dedicated Trivy image jobs still validate build outputs |
-| Intentional PR skips | OWASP ZAP baseline and OSSF Scorecard skip on PR because they need live/default-branch repository context |
+| Container publishing | API/frontend publish on protected branch pushes; ML image publishing is skipped on PRs; Trivy image validation is path-scoped on PRs and full on protected branch, manual, and scheduled runs |
+| Intentional PR skips | OWASP ZAP baseline and OSSF Scorecard skip on PR; ZAP runs against the CI API target on port `8087`, and Scorecard runs only with default-branch repository context |
 
 ### 1. `ci-ml-pipeline.yml` - Main ML Pipeline
 **Triggers**: Push to `main`/`develop`/`feat/*`, PRs, manual dispatch
@@ -275,6 +275,7 @@ The PR Python coverage gate is currently set to a ratcheting baseline of 35% whi
 | IaC | Dockerfile + docker-compose misconfiguration |
 | License | Block copyleft (AGPL, GPL, SSPL) in production |
 | Container Images | API, ML trainer, Frontend (3 images) |
+| PR Image Scope | API, ML trainer, and frontend image scans run only when relevant image/app paths change on PRs; push, schedule, and manual runs scan all three images |
 | SBOM | CycloneDX generation for each image |
 | Security Gate | Aggregated pass/fail across all scans |
 
@@ -295,8 +296,8 @@ The PR Python coverage gate is currently set to a ratcheting baseline of 35% whi
 | Bandit | Python AST security analysis |
 | pip-audit | Python dependency audit (OSV/PyPI) |
 | Checkov | IaC compliance (CIS, NIST benchmarks) |
-| OWASP ZAP | DAST baseline scan against API |
-| OSSF Scorecard | Supply chain security scoring |
+| OWASP ZAP | DAST baseline scan against the CI API target on port `8087` |
+| OSSF Scorecard | Supply chain security scoring with default-branch guard |
 
 ### 8. `flutter-ci.yml` - Flutter Mobile CI
 **Triggers**: Push to `main`/`develop`/`feat/*` (MobileApp changes), PRs

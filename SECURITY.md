@@ -88,7 +88,7 @@ Static and dynamic analysis runs via `.github/workflows/devsecops-sast-dast.yml`
 | **Semgrep** | SAST | Python, TypeScript, React | CI + pre-commit (custom + community OWASP rules) |
 | **Bandit** | SAST | Python | CI + pre-commit (AST-based security linting) |
 | **Checkov** | IaC Security | Dockerfiles, GitHub Actions, docker-compose | CI (CIS/NIST benchmarks) |
-| **OWASP ZAP** | DAST | Live API endpoints | CI baseline scan on main/develop |
+| **OWASP ZAP** | DAST | Live API endpoints | CI baseline scan on main/dev/develop using the CI API target |
 
 Custom Semgrep rules (`.semgrep/ura-chatbot-rules.yaml`) include:
 - LLM-specific rules (prompt injection detection, PII in logs, unsafe output handling)
@@ -102,14 +102,16 @@ The May 2026 CI update keeps PRs blocking on actionable security findings while 
 
 | Control | Pull request behavior |
 |---------|-----------------------|
-| Trivy | Filesystem, IaC, license, and container scans run; scan/SBOM artifacts are uploaded; GitHub Security SARIF upload is reserved for non-PR events |
+| Trivy | Filesystem, IaC, and license scans run on every PR; API, ML trainer, and frontend image scans run only when relevant image/app paths change; scan/SBOM artifacts are uploaded; GitHub Security SARIF upload is reserved for non-PR events |
 | Checkov | IaC scan runs and uploads artifacts; SARIF upload is reserved for non-PR events |
 | Semgrep | SAST runs and uploads SARIF when available |
 | pip-audit | Root and `App/backend` Python dependency audits run |
 | Threat model | `threat-model/validate_threats.py` remains a blocking PR gate |
-| OWASP ZAP | Skips on PR; runs on push, schedule, or manual dispatch against a live API target |
-| OSSF Scorecard | Skips on PR; runs on non-PR events with default-branch repository context |
-| ML image publishing | Skips on PR; dedicated Trivy image jobs still validate buildable images |
+| OWASP ZAP | Skips on PR; runs on push, schedule, or manual dispatch against the CI API target on port `8087` with speech and LLM disabled for deterministic DAST startup |
+| OSSF Scorecard | Skips on PR; runs only when default-branch repository context is available, preventing branch manual-dispatch failures |
+| ML image publishing | Skips on PR; Trivy image validation is path-scoped on PRs and full on protected branch, schedule, and manual runs |
+
+Manual `workflow_dispatch` runs use event-scoped concurrency groups, so branch-level security re-runs do not cancel active pull-request checks.
 
 ### AI/ML-Specific Security (OWASP LLM Top 10 2025)
 - **LLM01 – Prompt Injection**: `InputGuard` with 11 regex patterns; system-prompt isolation via Qwen chat template; passage delimiters (`<passage>` tags) to reduce indirect injection surface
