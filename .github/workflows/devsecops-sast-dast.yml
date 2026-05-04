@@ -337,18 +337,31 @@ jobs:
       - name: Build and start API for scanning
         env:
           API_PORT: "8087"
+          APP_ENV: "development"
+          SPEECH_ENABLED: "false"
+          LLM_ENABLED: "false"
+          WORKERS: "1"
         run: |
-          docker compose up -d qdrant api
+          touch .env
+          docker compose up -d qdrant api || {
+            docker compose ps
+            docker compose logs --no-color --tail=200 qdrant api
+            exit 1
+          }
+
           echo "Waiting for API to be healthy..."
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8087/health > /dev/null 2>&1; then
               echo "API is healthy"
-              break
+              exit 0
             fi
             sleep 5
           done
 
-          curl -sf http://localhost:8087/health
+          echo "::error::API did not become healthy on port 8087"
+          docker compose ps
+          docker compose logs --no-color --tail=200 qdrant api
+          exit 1
 
       - name: OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@2b5fc7f98d837319798ab7f128ea50b7d40563b6 # v0.14.0
@@ -386,7 +399,7 @@ jobs:
         if: always()
         env:
           API_PORT: "8087"
-        run: docker compose down -v
+        run: docker compose down -v || true
 
   # ============================================
   # 6. OSSF Scorecard – Supply Chain Security
