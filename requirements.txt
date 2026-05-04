@@ -15,7 +15,7 @@ langchain==1.2.15
 langchain-community==0.4.1
 langchain-core>=1.2.0,<2.0.0
 langchain-text-splitters==0.3.11
-langchain-qdrant==0.2.0
+langchain-qdrant==1.1.0
 qdrant-client==1.13.3
 datasets==3.3.2
 evaluate==0.4.6
