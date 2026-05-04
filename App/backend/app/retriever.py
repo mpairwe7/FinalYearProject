@@ -38,6 +38,7 @@ __all__ = ["CircuitBreaker", "CircuitState", "BM25SparseEncoder", "HybridRetriev
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
+QDRANT_ENABLED = os.getenv("QDRANT_ENABLED", "true").lower() not in ("0", "false", "no", "off")
 # 2026 default embedding: BAAI/bge-m3 — multilingual (100+ langs incl.
 # Bantu-family languages relevant to Luganda), 1024-dim, current MTEB
 # state-of-art for free models.  Set DENSE_MODEL=sentence-transformers/
@@ -167,6 +168,9 @@ class HybridRetriever:
 
     def initialize(self) -> bool:
         """Connect to Qdrant and load models.  Returns ``True`` if ready."""
+        if not QDRANT_ENABLED:
+            logger.info("HybridRetriever disabled by QDRANT_ENABLED=false; keyword fallback active")
+            return False
         try:
             from qdrant_client import QdrantClient
 

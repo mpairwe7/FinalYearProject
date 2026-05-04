@@ -46,6 +46,9 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.setdefault("CACHE_BACKEND", "memory")
     os.environ.setdefault("ANALYTICS_BACKEND", "sqlite")
     os.environ.setdefault("OTEL_ENABLED", "false")
+    os.environ.setdefault("QDRANT_URL", "http://127.0.0.1:1")
+    os.environ.setdefault("QDRANT_ENABLED", "false")
+    os.environ.setdefault("SPEECH_ENABLED", "false")
     os.environ.setdefault("CORS_ORIGINS", "http://localhost:13000")
     # Flags default OFF — individual tests flip them on as needed.
     for f in ("TOOL_USE", "AGENTIC_MODE", "TICKET_QUEUE", "SELF_REFLECT",

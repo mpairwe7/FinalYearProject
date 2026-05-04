@@ -9,31 +9,99 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
+from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
+from pydantic import ValidationError
+from starlette.requests import Request
 
-from app.auth.dependencies import reset_verifier
+from app.auth.dependencies import current_user, require_user, reset_verifier
 from app.auth.jwt_auth import make_dev_token
+from app.auth.models import ConsentGrantRequest, ConsentWithdrawRequest, ProfileUpdateRequest
+
+
+@dataclass
+class _Response:
+    status_code: int
+    body: dict[str, Any]
+
+    def json(self) -> dict[str, Any]:
+        return self.body
+
+
+class _DirectMeClient:
+    """Small handler-level client for /v1/me tests.
+
+    It preserves JWT verification, `require_user`, Pydantic validation, and
+    the real SQLite persistence layer while avoiding full ASGI lifespan
+    startup in unit CI.
+    """
+
+    def _request(self, method: str, path: str, *, headers=None, json=None) -> _Response:
+        from app import main
+
+        headers = headers or {}
+        auth = headers.get("Authorization")
+        request = Request(
+            {
+                "type": "http",
+                "method": method,
+                "path": path,
+                "headers": [],
+                "client": ("testclient", 50000),
+                "server": ("testserver", 80),
+                "scheme": "http",
+                "query_string": b"",
+            }
+        )
+
+        try:
+            ctx = current_user(request, auth)
+            if path == "/v1/me" and method == "GET":
+                return _Response(200, main.me_whoami(ctx))
+
+            ctx = require_user(ctx)
+            if path == "/v1/me/profile" and method == "GET":
+                return _Response(200, main.me_get_profile(ctx))
+            if path == "/v1/me/profile" and method == "PUT":
+                return _Response(200, main.me_update_profile(ProfileUpdateRequest(**(json or {})), ctx))
+            if path == "/v1/me/consents" and method == "GET":
+                return _Response(200, main.me_list_consents(ctx))
+            if path == "/v1/me/consents/grant" and method == "POST":
+                return _Response(200, main.me_grant_consent(ConsentGrantRequest(**(json or {})), ctx))
+            if path == "/v1/me/consents/withdraw" and method == "POST":
+                return _Response(200, main.me_withdraw_consent(ConsentWithdrawRequest(**(json or {})), ctx))
+            if path == "/v1/me/export" and method == "GET":
+                return _Response(200, main.me_export(ctx))
+            if path == "/v1/me" and method == "DELETE":
+                return _Response(200, main.me_forget(ctx))
+        except HTTPException as exc:
+            return _Response(exc.status_code, {"detail": exc.detail})
+        except ValidationError as exc:
+            return _Response(422, {"detail": exc.errors()})
+
+        return _Response(404, {"detail": "not found"})
+
+    def get(self, path: str, *, headers=None) -> _Response:
+        return self._request("GET", path, headers=headers)
+
+    def put(self, path: str, *, headers=None, json=None) -> _Response:
+        return self._request("PUT", path, headers=headers, json=json)
+
+    def post(self, path: str, *, headers=None, json=None) -> _Response:
+        return self._request("POST", path, headers=headers, json=json)
+
+    def delete(self, path: str, *, headers=None) -> _Response:
+        return self._request("DELETE", path, headers=headers)
 
 
 @pytest.fixture
 def client(tmp_db, monkeypatch):
-    """Fresh FastAPI TestClient bound to the tmp in-memory DB.
-
-    The dependency on ``tmp_db`` ensures the database module is
-    monkey-patched before ``app.main`` boots, so the lifespan
-    context's ``db.init_db()`` writes to our in-memory SQLite.
-
-    We use the default HS256 secret / audience because the
-    JWTVerifier class captures these at class-definition time
-    via default parameter binding — patching env after import
-    has no effect.
-    """
+    """Fresh handler-level client bound to the tmp in-memory DB."""
     reset_verifier()
-    from app.main import app
-    with TestClient(app) as tc:
-        yield tc
+    return _DirectMeClient()
 
 
 def _mint_token(user_id: str, role: str = "verified_taxpayer", granted=None):
