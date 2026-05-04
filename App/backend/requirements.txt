@@ -1,7 +1,7 @@
 # Core API backend (2026 production stable)
 fastapi>=0.136.1,<0.137
 uvicorn[standard]>=0.32.0,<0.35
-pydantic>=2.10.0,<2.12
+pydantic>=2.13.3,<2.14
 
 # Rate limiting — slowapi's in-process buckets are per-worker; for
 # multi-replica deploys set `SLOWAPI_STORAGE_URI=redis://...` (see
