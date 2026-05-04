@@ -335,21 +335,25 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Build and start API for scanning
+        env:
+          API_PORT: "8087"
         run: |
           docker compose up -d qdrant api
           echo "Waiting for API to be healthy..."
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+            if curl -sf http://localhost:8087/health > /dev/null 2>&1; then
               echo "API is healthy"
               break
             fi
             sleep 5
           done
 
+          curl -sf http://localhost:8087/health
+
       - name: OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@7cea08522cd5bb23c16213e2e10ebc41d5527c37 # v0.14.0
+        uses: zaproxy/action-baseline@2b5fc7f98d837319798ab7f128ea50b7d40563b6 # v0.14.0
         with:
-          target: "http://localhost:8000"
+          target: "http://localhost:8087"
           rules_file_name: ".zap-rules.tsv"
           cmd_options: >-
             -J zap-report.json
@@ -371,6 +375,7 @@ jobs:
         if: always()
         run: |
           echo "## OWASP ZAP DAST Baseline Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Target: \`http://localhost:8087\`" >> "$GITHUB_STEP_SUMMARY"
           if [ -f zap-report.md ]; then
             head -50 zap-report.md >> "$GITHUB_STEP_SUMMARY"
           else
@@ -379,6 +384,8 @@ jobs:
 
       - name: Tear down services
         if: always()
+        env:
+          API_PORT: "8087"
         run: docker compose down -v
 
   # ============================================
