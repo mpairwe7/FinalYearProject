@@ -36,8 +36,8 @@ circuit breakers around Qdrant and LLM, hard deadlines
 - **Continuous evaluation** — Ragas-compatible harness, SLO alert rules
 - **Next.js 16.2.3 + React 19.2 frontend** with glassmorphism UI,
 SSE streaming, optimistic feedback, same-origin `/api` proxy
-- **Full test pyramid** — backend pytest (>= 80% cov), frontend Vitest +
-Playwright E2E, Flutter mobile CI, k6 load tests
+- **Full test pyramid** — backend pytest with a current 35% CI coverage
+ratchet, frontend Vitest + Playwright E2E, Flutter mobile CI, k6 load tests
 - **Production observability** — Prometheus + Grafana + Jaeger (docker-compose
 `--profile monitoring`), 5 SLO alerting rules, pre-built dashboards
 - **Security-as-code** — cosign container signing, SLSA v1.2 provenance,
@@ -101,11 +101,11 @@ surface that would need to change. Effort estimates are rough:
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen2.5's native function-calling format; `ToolRegistry` dispatches via `.call()`; 11 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
+| G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen chat-template tool formatting; `ToolRegistry` dispatches via `.call()`; 11 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
 | G10 🟢 | **No calculators.** ~~PAYE, VAT, CGT, customs, income tax, effective rate.~~ **SHIPPED Phase 14-A** — 5 deterministic calculators (`calculate_vat`, `calculate_paye` with progressive bands, `calculate_corporation_tax`, `calculate_capital_gains`, `calculate_customs_duty`) all backed by FY2025-26 rate tables, unit-tested (29 pytest assertions covering arithmetic + edge cases + error paths). | — | Done. | `backend/app/tools/calculators.py` | Done (S actual) |
 | G11 🟢 | **~~No structured form flows.~~** **SHIPPED Phase 15** — `workflows/` directory with 5 YAML-declared workflows loaded at startup via `loader.py`. Slot-filling state machine (`slots.py`), workflow registry (`registry.py`), keyed on `conversation_id`. | — | Done. | `backend/app/workflows/` directory | Done |
 | G12 | **No URA account actions.** Can't fetch filing status, balance, registered tax types, next due dates — even for the authenticated user. | Bot only talks *about* URA; doesn't help users actually interact with it. | No integration. | New `mcp_ura_account` server talking to URA's internal API (behind auth); exposes `get_tin_status`, `get_filing_status`, `list_returns_due`, etc. Scoped to the authenticated user. | New `backend/app/tools/ura_account.py`, `auth.py`, secrets mgmt | XL |
-| G13 | **No document ingestion.** User can't upload a receipt, invoice, or tax cert to ask "is this correct?" | High-value use case for businesses is blocked. | Index-time PDF parsing exists (`indexer.ingest_pdfs`) but not query-time. | Add `POST /v1/upload` (size-limited, virus-scanned, PII-redacted), an OCR + table-extract pipeline, and a `mcp_document_parser` tool. Vision support via Qwen2.5-VL. | New `backend/app/uploads.py`, new `DocumentUpload.tsx`, `llm.py` multimodal branch | L |
+| G13 | **No document ingestion.** User can't upload a receipt, invoice, or tax cert to ask "is this correct?" | High-value use case for businesses is blocked. | Index-time PDF parsing exists (`indexer.ingest_pdfs`) but not query-time. | Add `POST /v1/upload` (size-limited, virus-scanned, PII-redacted), an OCR + table-extract pipeline, and a `mcp_document_parser` tool. Vision support should use a pinned vision-capable model. | New `backend/app/uploads.py`, new `DocumentUpload.tsx`, `llm.py` multimodal branch | L |
 | G14 | **No scheduled notifications.** Nothing reminds the user "your quarterly VAT return is due in 3 days". | Missed opportunity for value-add engagement. | No scheduler. | Add an APScheduler / Temporal worker that reads user deadlines and dispatches via email / SMS / in-app. | New `backend/app/scheduler.py`, notification channels | L |
 | G15 | **No URA live data.** FAQ CSVs were indexed once; new circulars, rate changes, and press releases never reach the bot. | Staleness within weeks of deployment. | Manual re-index via `POST /v1/index`. | Add a nightly ingestion worker: scrape `ura.go.ug/news`, diff against last run, re-embed, upsert to Qdrant. | New `backend/app/workers/news_ingest.py` | M |
 
@@ -182,7 +182,7 @@ monolithic "one LLM with tools". Reasons:
 ```
       ┌─────────────────────────────┐
       │      Supervisor Agent       │
-      │    (Qwen2.5-3B, T=0.1)      │
+      │    (Qwen3-8B, T=0.1)        │
       │   Classifies + routes       │
       └──┬──────┬──────┬──────┬─────┘
         │      │      │      │
@@ -210,8 +210,9 @@ monolithic "one LLM with tools". Reasons:
 
 Key design choices:
 
-- **Supervisor is small + cheap.** Qwen2.5-3B at T=0.1 is fast
-enough to classify in <300 ms.
+- **Supervisor is deterministic.** The current deployment uses the
+already-loaded Qwen3-8B runtime at low temperature; a smaller pinned
+router model can replace it later if latency requires it.
 - **Specialists share tools.** Tools are MCP servers, not code
 embedded in any one agent — this keeps them independently testable
 and deployable.
@@ -366,7 +367,7 @@ cloud fallback (`speech_service.py`, `sunbird.py`).
 **Goal:** Query-time document uploads and topic-aware conversations.
 **Deliverables:**
 - `POST /v1/upload` with size/virus scanning
-- `mcp_document_parser` tool (Qwen2.5-VL for vision, OCR + table extract)
+- `mcp_document_parser` tool (pinned vision model, OCR + table extract)
 - `conversation_topics` table + lightweight topic classifier
 - Per-segment quality metrics in `evaluation.py`
 - UI: upload button, step progress indicator

@@ -39,4 +39,17 @@ Status: applied as fail-closed interfaces; live URA integration still needs real
 Status: partially applied; external infra drills remain.
 
 - Production compose overlay now requires authority freshness and exposes URA API configuration points.
+- Qwen3-8B now supports BitsAndBytes NF4 4-bit local loading so the agentic LLM no longer monopolizes GPU memory.
+- Compose mounts Qwen and Whisper LoRA adapters from `fine-tuning/adapters` read-only and pins Whisper to CPU for GPU isolation.
+- Live smoke and deploy preflight scripts cover anonymous chat, TIN guided workflow behavior, speech health, and protected admin denial.
 - Remaining work: Postgres migration tooling, Redis/Qdrant TLS verification, load/canary tests, disaster-recovery drills, and real-device mobile PWA test matrix.
+
+## CI / Security Workflow Stabilization
+
+Status: applied for PR validation.
+
+- Frontend PR gates now run ESLint, TypeScript, Vitest, Lighthouse accessibility, and Next.js build without a blocking coverage threshold in the unit-test step.
+- Backend PR tests run with deterministic local isolation for analytics, Qdrant, and speech.
+- The ML pipeline keeps a 35% Python coverage ratchet while focused backend/agentic coverage is expanded.
+- Trivy and Checkov still scan on PRs and upload artifacts; GitHub Security SARIF upload is limited to non-PR events.
+- OWASP ZAP and OSSF Scorecard intentionally skip on PRs and run on push/schedule/manual contexts.

@@ -50,6 +50,18 @@ This project implements a comprehensive MLOps CI/CD pipeline following DataCamp 
 | 7 | `build-docker` | Build and push Docker image | lint-and-test |
 | 8 | `deploy-backend` | Deploy API to production | build-docker, push-to-huggingface |
 
+#### Current PR Gate Behavior (May 2026)
+
+Pull requests validate the App flows without publishing production artifacts:
+
+| Area | Behavior |
+|------|----------|
+| Backend tests | `tests/test_api.py`, agent endpoint tests, and integration smoke run with isolated analytics DBs, `QDRANT_ENABLED=false`, and `SPEECH_ENABLED=false` for deterministic CI |
+| Coverage | `pytest --cov` enforces the current ratcheting baseline of 35%; coverage XML is uploaded on every run |
+| Docker publish | `build-docker` is skipped on PRs to avoid registry writes from untrusted pull-request contexts |
+| PR image validation | Dedicated Trivy image jobs still build and scan API, ML trainer, and frontend images using deterministic CI tags |
+| SARIF upload | Trivy SARIF from this workflow uploads to GitHub Security on non-PR events; PRs retain scan artifacts |
+
 #### Stage Details
 
 ##### Stage 1a: Lint & Test
@@ -194,6 +206,23 @@ Features:
 - **Bun**: Fast JavaScript runtime and package manager
 - **Docker**: Frontend containerised and pushed to Docker Hub
 - **Production Gates**: Only `main` branch deploys to production
+- **PR Quality Gates**: ESLint, TypeScript, Vitest unit/component tests, Lighthouse accessibility, and Next.js build all run on PRs; coverage is uploaded as an artifact but no longer blocks the PR test job.
+
+---
+
+### 2b. Security and DevSecOps PR Semantics
+
+Security scanning is intentionally split between blocking PR validation and protected-branch publication:
+
+| Workflow | PR behavior | Non-PR behavior |
+|----------|-------------|-----------------|
+| `secret-scanning.yml` | TruffleHog, Gitleaks, detect-secrets run; ggshield runs only when GitGuardian is enabled/configured | Same, plus scheduled full-history coverage |
+| `security-trivy.yml` | Filesystem, IaC, license, and container scans run; SARIF/JSON/SBOM artifacts are uploaded | Same scans, plus SARIF upload to GitHub Security |
+| `devsecops-sast-dast.yml` | Semgrep, Bandit, pip-audit, Checkov, and threat-model validation run; Checkov SARIF is kept as artifact | Same scans, plus Checkov SARIF upload to GitHub Security |
+| OWASP ZAP | Skipped on PR because it needs a live target | Runs on push, schedule, or manual dispatch |
+| OSSF Scorecard | Skipped on PR because it needs default-branch repository context | Runs on non-PR events |
+
+This keeps PRs fail-closed for actionable issues while avoiding external code-scanning app checks that cannot complete safely in pull-request contexts.
 
 ---
 

@@ -133,9 +133,35 @@ CONVERSATION_TTL_DAYS=7
 # --- Models ---
 HF_TOKEN=hf_...
 HF_MODEL_REPO=mpairweLandwind/ura-chatbot
+LLM_MODEL=Qwen/Qwen3-8B
+LLM_LOAD_IN_4BIT=true
+LORA_ADAPTER_LG=/app/adapters/luganda-lora
+LORA_ADAPTER_SW=/app/adapters/sw-lora
+LORA_ADAPTER_NYN=/app/adapters/nyn-lora
+LORA_ADAPTER_ACH=/app/adapters/ach-lora
+
+# --- Speech ---
+SPEECH_ENABLED=true
+WHISPER_DEVICE=cpu
+WHISPER_ADAPTER_LG=/app/adapters/whisper-lg
+WHISPER_ADAPTER_SW=/app/adapters/whisper-sw
+WHISPER_ADAPTER_NYN=/app/adapters/whisper-nyn
 ```
 
 > Never commit `.env` to version control. The repo `.gitignore` already excludes it.
+
+### Model and adapter mounts
+
+The App compose stack mounts LoRA artifacts read-only from the repository:
+
+```yaml
+services:
+  api:
+    volumes:
+      - ../fine-tuning/adapters:/app/adapters:ro
+```
+
+For GPU-constrained hosts, keep `LLM_LOAD_IN_4BIT=true`. The local Transformers path loads Qwen3-8B with BitsAndBytes NF4 quantization and then attaches the per-locale PEFT adapters for `lg`, `sw`, `nyn`, and `ach`. Whisper ASR should remain on CPU with `WHISPER_DEVICE=cpu` unless the deployment has a separate GPU budget for ASR.
 
 ### Shared-host port remapping
 
@@ -268,6 +294,25 @@ Example external check:
 ```bash
 curl -sf https://ura-chatbot.example.com/api/ready | jq .status
 ```
+
+### Anonymous public smoke
+
+The public assistant is intentionally usable without login. Verify both public access and protected-route denial after every deploy:
+
+```bash
+curl -sS https://ura-chatbot.example.com/api/health
+
+curl -sS -X POST https://ura-chatbot.example.com/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "X-Session-ID: anonymous-smoke" \
+  -d '{"message":"How do I register for a TIN?","locale":"en"}'
+
+curl -sS https://ura-chatbot.example.com/api/v1/speech/health
+
+curl -i https://ura-chatbot.example.com/api/v1/admin/tickets/stats
+```
+
+The admin/ticket request should return an auth failure, while chat and speech health should succeed anonymously.
 
 ---
 
@@ -556,6 +601,9 @@ Run through every item before go-live:
 - [ ] `AUTH_DEV_SECRET` rotated from default value
 - [ ] `LLM_TRUST_REMOTE_CODE=false` (OWASP LLM03 supply chain)
 - [ ] `LLM_MODEL_REVISION` pinned to a specific commit SHA (SLSA v1.2)
+- [ ] `LLM_LOAD_IN_4BIT=true` when running Qwen3-8B local Transformers on shared GPUs
+- [ ] Qwen LoRA adapters mounted read-only at `/app/adapters`
+- [ ] `WHISPER_DEVICE=cpu` unless a separate ASR GPU is intentionally allocated
 - [ ] Container images signed with cosign (`cosign verify` passes)
 - [ ] SLSA provenance attestation generated via `container-sign-provenance.yml`
 - [ ] Frontend Vitest tests pass (`cd App/frontend && bun run test`)

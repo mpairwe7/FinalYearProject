@@ -10,7 +10,6 @@ App/
 ├── classifier.py       # Legacy classifier interface
 ├── requirements.txt    # Python dependencies
 ├── README.md          # This file
-├── README_HF.md       # Hugging Face Spaces README
 ├── backend/           # FastAPI backend API
 │   ├── app/
 │   │   ├── main.py          # API routes + SSE streaming + speech + eval endpoints
@@ -378,7 +377,7 @@ Failures in speech never block the text API (503 graceful degradation).
 |-----------|-----------|-------------|--------|
 | ASR | `openai/whisper-small` (MIT) | `artifacts/speech/asr/whisper_lg/final` | r=16, alpha=32, PEFT |
 | MT | `google/madlad400-3b-mt` (Apache-2.0) | `artifacts/mt/madlad_ura_lgen/final` | r=8, alpha=16, SEQ_2_SEQ_LM |
-| LLM | `Qwen/Qwen3-8B` (Apache-2.0) | None (base model, 8B params) | bfloat16, device_map=auto |
+| LLM | `Qwen/Qwen3-8B` (Apache-2.0) | `luganda-lora`, `sw-lora`, `nyn-lora`, `ach-lora` | BitsAndBytes NF4 4-bit when `LLM_LOAD_IN_4BIT=true`; multi-adapter PEFT routing |
 | TTS | edge-tts / Sherpa Piper | N/A | en_US-lessac / luganda-vits-v1 |
 
 #### Streaming Voice Chat Flow (Phase 23)
@@ -574,6 +573,9 @@ uv pip install -r requirements.txt
 
 # Full production startup with local LoRA adapters and speech:
 WHISPER_ADAPTER_LG="../../artifacts/speech/asr/whisper_lg/final" \
+WHISPER_ADAPTER_SW="../../fine-tuning/adapters/whisper-sw" \
+WHISPER_ADAPTER_NYN="../../fine-tuning/adapters/whisper-nyn" \
+WHISPER_DEVICE=cpu \
 SPEECH_ENABLED=true \
 SPEECH_MT_BACKEND=prompted \
 SPEECH_MAX_CONCURRENCY=4 \
@@ -581,7 +583,12 @@ SPEECH_DEADLINE_S=120 \
 LLM_MODEL="Qwen/Qwen3-8B" \
 LLM_BACKEND=local \
 LLM_DEVICE=auto \
+LLM_LOAD_IN_4BIT=true \
 LLM_TORCH_DTYPE=bfloat16 \
+LORA_ADAPTER_LG="../../fine-tuning/adapters/luganda-lora" \
+LORA_ADAPTER_SW="../../fine-tuning/adapters/sw-lora" \
+LORA_ADAPTER_NYN="../../fine-tuning/adapters/nyn-lora" \
+LORA_ADAPTER_ACH="../../fine-tuning/adapters/ach-lora" \
 SUNBIRD_API_TOKEN="<your-sunbird-jwt>" \
 CORS_ORIGINS="http://localhost:3300" \
 .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8887 --reload
@@ -609,6 +616,7 @@ SPEECH_ENABLED=false uvicorn app.main:app --reload --port 8887
 | `SUNBIRD_API_TOKEN` | (empty) | JWT token for Sunbird cloud API fallback |
 | `LLM_MODEL` | `Qwen/Qwen3-8B` | HuggingFace model ID for LLM |
 | `LLM_TORCH_DTYPE` | `auto` | `bfloat16` / `float16` / `float32` |
+| `LLM_LOAD_IN_4BIT` | `false` | Enable BitsAndBytes NF4 4-bit Qwen loading to reduce GPU memory use |
 
 ### 3. Frontend (`frontend/`)
 
@@ -751,8 +759,8 @@ bun run preflight:deploy
 
 ### Hugging Face Spaces
 
-1. Copy `app.py`, `requirements.txt`, and `README_HF.md` to your Space
-2. Rename `README_HF.md` to `README.md`
+1. Copy `app.py` and `requirements.txt` to your Space
+2. Create a Space `README.md` from the relevant App runtime notes
 3. Ensure model files are in the HF Model repository
 
 ### Docker
@@ -784,6 +792,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `LLM_ENABLED` | Enable LLM generation | `true` |
 | `LLM_DEVICE` | Inference device (`auto`/`cpu`/`cuda`) | `auto` |
 | `LLM_TORCH_DTYPE` | Tensor dtype | `auto` |
+| `LLM_LOAD_IN_4BIT` | Enable BitsAndBytes NF4 4-bit loading for local Qwen | `false` |
 | `LLM_TEMPERATURE` | Generation temperature | `0.2` |
 | `LLM_MAX_TOKENS` | Max new tokens | `512` |
 | `LLM_DEADLINE_SECONDS` | Hard wall-clock deadline per LLM call | `45` |
@@ -888,6 +897,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `WHISPER_ADAPTER_LG` | Whisper+LoRA adapter (Luganda) — primary ASR backend | `artifacts/speech/asr/whisper_lg/final` |
 | `WHISPER_ADAPTER_SW` | Whisper+LoRA adapter (Swahili) | _unset_ |
 | `WHISPER_ADAPTER_NYN` | Whisper+LoRA adapter (Runyankole) | _unset_ |
+| `WHISPER_DEVICE` | Whisper device: `cpu`, `auto`, or `cuda[:index]`; production compose pins CPU | `cpu` |
 | `SUNBIRD_API_TOKEN` | Sunbird AI cloud API JWT (cloud fallback for ASR/TTS/MT) | _unset_ |
 | **Audit Ledger (Phase 21)** | | |
 | `FLAG_AUDIT_LEDGER` | Enable hash-chained audit event logging | `false` |
@@ -1518,6 +1528,9 @@ tool — see:
 ## Current Runtime State (May 2026)
 
 - **Model default:** `Qwen/Qwen3-8B` is the default model in code, API responses, and tracing metadata.
+- **4-bit Qwen runtime:** local Transformers loads Qwen with BitsAndBytes NF4 when `LLM_LOAD_IN_4BIT=true`, while vLLM remains available through `LLM_BACKEND=vllm`.
+- **Locale LoRA routing:** production compose mounts `../fine-tuning/adapters:/app/adapters:ro` and exposes `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH`; multi-adapter mode uses PEFT `set_adapter()` instead of merging.
+- **Whisper GPU isolation:** Whisper adapters for `lg`, `sw`, and `nyn` are mounted from `/app/adapters`, with `WHISPER_DEVICE=cpu` so ASR does not compete with Qwen on GPU 0.
 - **Anonymous public assistant:** `/v1/chat`, `/v1/chat/stream`, speech health, TTS, translation, and consented voice processing work without login. Anonymous requests use `role=public` and cannot access account/action tools.
 - **Private/admin auth:** `/v1/me/*`, admin/ticket, feedback governance, analytics dashboards, metrics, evaluation exports, offline bundles, and URA account/action surfaces fail closed behind verified bearer tokens and/or staff roles.
 - **Voice consent:** anonymous voice/ASR requests must send `X-Voice-Consent: true`; streaming voice sends `voice_consent_accepted=true` in `session_start`.
@@ -1527,6 +1540,7 @@ tool — see:
 - **Streaming behavior:** `/v1/chat/stream` and `/api/v1/chat/stream` stream progressively, sanitize chunked output before emission, and support a `revision` event when the `response_judge` replaces a provisional answer.
 - **Consent + personalization:** frontend analytics are consent-gated, and memory-backed personalization only activates when the deployment enables it and the user has granted consent.
 - **Operational verification:** `scripts/live_smoke.sh` provides repeatable live endpoint verification, and `scripts/deploy_preflight.sh` gates deployments on readiness plus the full smoke suite.
+- **Mobile chat UX:** the frontend keeps the input composer docked at the bottom with safe-area/keyboard offsets, auto-scrolls new assistant turns when the user is near the latest message, preserves manual scroll position when reviewing earlier messages, and shows a scroll-to-latest button.
 
 **Verified ngrok anonymous smoke flow:**
 
@@ -1597,7 +1611,6 @@ surface remains:
 App/
 ├── app.py
 ├── classifier.py
-├── README_HF.md
 └── requirements.txt
 ```
 
@@ -1761,7 +1774,7 @@ Defined in `.github/workflows/ci-ml-pipeline.yml`:
 
 | Stage | Job | Description |
 |-------|-----|-------------|
-| 1 | `lint-and-test` | Ruff lint + format check + pytest (coverage >= 65%) |
+| 1 | `lint-and-test` | Ruff lint + format check + pytest (current coverage ratchet >= 35%) |
 | 1a | `reproducibility` | `uv pip compile` → requirements.lock with hashes |
 | 1b | `governance-check` | NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10 compliance |
 | 1c | `data-aug-smoke` | Schema validation, PII redaction tests, pipeline dry-run (< 2 min) |
