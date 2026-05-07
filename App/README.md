@@ -17,13 +17,17 @@ App/
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
 │   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── flags.py         # Feature flag registry (18 flags)
+│   │   ├── flags.py         # Feature flag registry (31 flags)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 11 tools (calculators, rates, calendar, RAG, escalate)
 │   │   ├── workflows/       # YAML-driven slot-filling engine + TIN registration
 │   │   ├── memory/          # Episodic + semantic + working memory
 │   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention
 │   │   ├── retriever.py     # Hybrid retriever (Qdrant + BM25 + reranking)
+│   │   ├── native_voice/    # Phase 28: streaming ASR/TTS, speculative prefetch, query planner
+│   │   ├── vision/          # Phase 28: Qwen2-VL encoder, OCR, document classifier
+│   │   ├── voice_stream_v2.py # V2 voice session (dual-path + vision)
+│   │   ├── voice_ws_v2.py   # V2 WebSocket handler (/v2/voice/chat/stream)
 │   │   └── ...              # cache, query, indexer, resilience, tracing, analytics, database
 │   └── requirements.txt
 └── frontend/          # Next.js 16 PWA frontend
@@ -79,6 +83,8 @@ generation over either local Transformers or vLLM.
 
 **Speech Endpoints (2026):**
 - `POST /v1/voice/chat` — Compound voice pipeline: audio -> ASR -> MT -> LLM -> MT -> TTS -> audio+text
+- `WS /v1/voice/chat/stream` — V1 streaming voice (sentence-chunked TTS, VAD, barge-in)
+- `WS /v2/voice/chat/stream` — V2 native voice-to-voice (token-level TTS, speculative prefetch, vision)
 - `POST /v1/asr` — Server-side ASR (Whisper via transformers, raw PCM -> transcript)
 - `POST /v1/tts` — Text-to-speech synthesis (Edge Neural TTS, text -> base64 WAV)
 - `POST /v1/translate` — Machine translation (English <-> Luganda)
@@ -108,12 +114,12 @@ for normal chat usage.
 
 **Current request pipeline:**
 1. **Auth + request context** — fail-closed private/admin guards, optional RS256/JWKS OIDC verification, durable `conversation_id` thread handling
-2. **Supervisor routing** — routes turns into standard RAG, guided workflows, clarification, or human escalation
+2. **Supervisor routing** — routes turns into greetings, standard RAG, guided workflows, clarification, or human escalation
 3. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker
 4. **LLM Generation** — `Qwen/Qwen3-8B` via local Transformers or vLLM HTTP
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
-7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge`, structured `handoff`, calibrated escalation
+7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification, structured `handoff`, calibrated escalation
 8. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
@@ -171,6 +177,15 @@ Source: `service.py::generate()` (lines 992-1677). Every `/v1/chat` and
                     (return)       |
                                    |
                     +--------------v--------------+
+                    |  1a2. Greeting Detection      |
+                    |  (≤3 words, always active)    |
+                    +---+---------+----------------+
+                        |         |
+                    GREETING   NOT GREETING
+                    (warm       |
+                     reply)     |
+                                |
+                    +-----------v------------------+
                     |  1d. Supervisor Router        |
                     |  (rule-based, < 1ms)         |
                     +--+---+---+---+---+-----------+
@@ -441,6 +456,83 @@ VoiceSession (voice_stream.py):
 
 **Privacy:** Raw audio never stored by default (SHA-256 hash only). Configurable retention via `VOICE_RAW_AUDIO_TTL_H`.
 
+#### Native Voice-to-Voice + Voice+Vision (Phase 28)
+
+V2 streaming engine at `WS /v2/voice/chat/stream` with dual-path routing,
+token-level TTS, speculative retrieval, and parallel vision encoding.
+Target: **p95 < 600ms** end-to-end (fast path) and **< 800ms** (grounded path).
+
+```
+Client (PCM16 chunks + optional JPEG camera frames)
+  |
+  v
+V2 WebSocket Handler (voice_ws_v2.py)
+  |
+  v
+VoiceSessionV2 (voice_stream_v2.py):
+  |
+  +-- Energy VAD (same as V1)
+  |     +-- Emits vad_state events
+  |
+  +-- Streaming ASR (streaming_asr.py):
+  |     +-- Sliding-window partial hypotheses
+  |     +-- Token stability tracking
+  |     +-- Emits partial_transcript events
+  |
+  +-- Speculative Prefetch (speculative_prefetch.py):
+  |     +-- Starts RAG retrieval on stable ASR prefix (>= 4 tokens)
+  |     +-- If final query matches prefix, reuse cached hits (100-300ms saved)
+  |
+  +-- [Parallel] Vision Encoder (vision/encoder.py):
+  |     +-- Qwen2-VL-2B document understanding
+  |     +-- EasyOCR text extraction
+  |     +-- URA document classification
+  |     +-- Emits vision_result event
+  |
+  +-- Query Planner (query_planner.py):
+  |     +-- FAST path: greeting / cache hit / acknowledgement (< 400ms)
+  |     +-- GROUNDED path: full RAG pipeline (< 800ms)
+  |     +-- VISION path: image context + RAG
+  |     +-- ESCALATE path: human handoff
+  |
+  +-- LLM Generation (existing service.py 21-phase pipeline)
+  |
+  +-- Token-Level Streaming TTS (streaming_tts.py):
+        +-- CosyVoice2-0.5B flow-matching codec (primary)
+        +-- First audio in 150-250ms (vs 400-800ms sentence-chunked)
+        +-- WAXAL Luganda speaker embeddings for voice cloning
+        +-- Falls back to Piper/edge-tts/Sunbird when unavailable
+```
+
+**New V2 modules (Phase 28):**
+
+| Module | File | Purpose |
+|--------|------|---------|
+| `native_voice/streaming_tts.py` | `backend/app/` | CosyVoice2 token-level TTS with Piper fallback |
+| `native_voice/streaming_asr.py` | `backend/app/` | Sliding-window partial ASR hypotheses |
+| `native_voice/speculative_prefetch.py` | `backend/app/` | Background RAG retrieval on partial ASR prefix |
+| `native_voice/query_planner.py` | `backend/app/` | Fast/grounded/vision/escalate path routing |
+| `native_voice/voice_codec.py` | `backend/app/` | PCM/WAV/Opus conversion + audio utilities |
+| `vision/encoder.py` | `backend/app/` | Qwen2-VL-2B document understanding + OCR |
+| `vision/ocr.py` | `backend/app/` | EasyOCR wrapper + URA field extraction (TIN, UGX, dates) |
+| `vision/document_classifier.py` | `backend/app/` | Rule-based URA document type classifier |
+| `voice_stream_v2.py` | `backend/app/` | V2 session with dual-path routing + vision |
+| `voice_ws_v2.py` | `backend/app/` | V2 WebSocket handler + 8 Prometheus metrics |
+
+**V2 WebSocket protocol extensions (additive over V1):**
+
+| Direction | Message | New in V2 |
+|-----------|---------|-----------|
+| Client -> Server | `{type: "image_frame"}` + binary JPEG | Yes |
+| Server -> Client | `{type: "partial_transcript", text, stable_prefix}` | Yes |
+| Server -> Client | `{type: "vision_result", ocr_text, doc_type, summary}` | Yes |
+| Server -> Client | `{type: "session_ready", capabilities: {...}}` | Extended |
+| Server -> Client | `{type: "latency_report", voice_path, speculative_prefetch_used}` | Extended |
+
+**Feature flags:** `FLAG_NATIVE_VOICE`, `FLAG_STREAMING_TTS_V2`, `FLAG_VOICE_VISION_V2`, `FLAG_SPECULATIVE_PREFETCH`
+
+**Backward compatibility:** V1 WebSocket at `/v1/voice/chat/stream` is unchanged. V2 falls back to V1 behaviour when native models are unavailable or flags are off.
+
 #### Escalation and Handoff Flow
 
 Escalation triggers when any of these conditions are met:
@@ -617,6 +709,14 @@ SPEECH_ENABLED=false uvicorn app.main:app --reload --port 8887
 | `LLM_MODEL` | `Qwen/Qwen3-8B` | HuggingFace model ID for LLM |
 | `LLM_TORCH_DTYPE` | `auto` | `bfloat16` / `float16` / `float32` |
 | `LLM_LOAD_IN_4BIT` | `false` | Enable BitsAndBytes NF4 4-bit Qwen loading to reduce GPU memory use |
+| `FLAG_NATIVE_VOICE` | `false` | Enable Phase 28 native voice-to-voice engine (V2 WebSocket) |
+| `FLAG_STREAMING_TTS_V2` | `false` | Token-level streaming TTS via CosyVoice2 (falls back to Piper) |
+| `FLAG_VOICE_VISION_V2` | `false` | V2 voice+vision: parallel ASR + Qwen2-VL document understanding |
+| `FLAG_SPECULATIVE_PREFETCH` | `false` | Start RAG retrieval on partial ASR stable prefix |
+| `COSYVOICE_MODEL` | `CosyVoice2-0.5B` | CosyVoice2 model identifier for streaming TTS |
+| `COSYVOICE_DEVICE` | `cuda:0` | Device for CosyVoice2 inference |
+| `VISION_MODEL` | `Qwen/Qwen2-VL-2B-Instruct` | Vision-language model for document understanding |
+| `VISION_DEVICE` | `cuda:0` | Device for vision model inference |
 
 ### 3. Frontend (`frontend/`)
 
@@ -794,7 +894,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `LLM_TORCH_DTYPE` | Tensor dtype | `auto` |
 | `LLM_LOAD_IN_4BIT` | Enable BitsAndBytes NF4 4-bit loading for local Qwen | `false` |
 | `LLM_TEMPERATURE` | Generation temperature | `0.2` |
-| `LLM_MAX_TOKENS` | Max new tokens | `512` |
+| `LLM_MAX_TOKENS` | Max new tokens; compose uses `512` for complete procedural answers | `512` |
 | `LLM_DEADLINE_SECONDS` | Hard wall-clock deadline per LLM call | `45` |
 | `LLM_MAX_CONCURRENCY` | Bounded LLM thread-pool size | `2` |
 | `LLM_STRUCTURED_OUTPUT` | Emit JSON `{answer, citations, abstain}` | `false` |
@@ -1276,9 +1376,10 @@ docker run -d --name ura-vllm --gpus '"device=7"' --ipc=host \
   --model Qwen/Qwen3-8B --port 8001 --max-model-len 8192 \
   --enable-auto-tool-choice --tool-call-parser hermes
 
-# 2. Start the backend (embeddings on GPU 4, LLM via vLLM HTTP)
+# 2. Start the backend (embeddings on the mapped CUDA device, LLM via vLLM HTTP)
 cd App/backend
 CUDA_VISIBLE_DEVICES=4 LLM_BACKEND=vllm VLLM_BASE_URL=http://localhost:8011/v1 \
+  RETRIEVER_DENSE_DEVICE=cuda:0 RERANKER_DEVICE=cpu \
   FLAG_TOOL_USE=true FLAG_AGENTIC_MODE=true \
   PYTHONPATH=/path/to/FinalYearProject:/path/to/FinalYearProject/App/backend \
   .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8009
@@ -1528,14 +1629,21 @@ tool — see:
 ## Current Runtime State (May 2026)
 
 - **Model default:** `Qwen/Qwen3-8B` is the default model in code, API responses, and tracing metadata.
-- **4-bit Qwen runtime:** local Transformers loads Qwen with BitsAndBytes NF4 when `LLM_LOAD_IN_4BIT=true`, while vLLM remains available through `LLM_BACKEND=vllm`.
+- **Fast Qwen runtime:** local/ngrok compose routes generation through the host `ura-vllm` service at `http://host.docker.internal:8011/v1` (`LLM_BACKEND=vllm`) instead of the slower serialized Transformers path.
+- **Response budget:** compose sets `LLM_MAX_TOKENS=512` for vLLM chat calls to allow complete procedural answers. Qwen3 thinking mode is suppressed via `/no_think` system prompt tag and `chat_template_kwargs: {"enable_thinking": False}` in vLLM requests, so the full token budget goes to answer content.
+- **4-bit Qwen fallback:** local Transformers can still load Qwen with BitsAndBytes NF4 when `LLM_BACKEND=local` and `LLM_LOAD_IN_4BIT=true`.
+- **GPU split:** compose maps the API container to host GPU 2 (`NVIDIA_VISIBLE_DEVICES=2`) so `RETRIEVER_DENSE_DEVICE=cuda:0` uses that free mapped GPU; reranking runs on CPU (`RERANKER_DEVICE=cpu`) to avoid GPU 0 startup stalls; vLLM serves Qwen on GPU 7; Whisper remains on CPU.
 - **Locale LoRA routing:** production compose mounts `../fine-tuning/adapters:/app/adapters:ro` and exposes `LORA_ADAPTER_LG`, `LORA_ADAPTER_SW`, `LORA_ADAPTER_NYN`, and `LORA_ADAPTER_ACH`; multi-adapter mode uses PEFT `set_adapter()` instead of merging.
-- **Whisper GPU isolation:** Whisper adapters for `lg`, `sw`, and `nyn` are mounted from `/app/adapters`, with `WHISPER_DEVICE=cpu` so ASR does not compete with Qwen on GPU 0.
+- **Whisper GPU isolation:** Whisper adapters for `lg`, `sw`, and `nyn` are mounted from `/app/adapters`, with `WHISPER_DEVICE=cpu` so ASR does not compete with Qwen or retrieval GPU workloads.
+- **Redis cache:** compose runs `redis:7.4-alpine`; the API uses `CACHE_BACKEND=redis`, `REDIS_URL=redis://redis:6379/0`, and `SLOWAPI_STORAGE_URI=redis://redis:6379/1`.
 - **Anonymous public assistant:** `/v1/chat`, `/v1/chat/stream`, speech health, TTS, translation, and consented voice processing work without login. Anonymous requests use `role=public` and cannot access account/action tools.
 - **Private/admin auth:** `/v1/me/*`, admin/ticket, feedback governance, analytics dashboards, metrics, evaluation exports, offline bundles, and URA account/action surfaces fail closed behind verified bearer tokens and/or staff roles.
 - **Voice consent:** anonymous voice/ASR requests must send `X-Voice-Consent: true`; streaming voice sends `voice_consent_accepted=true` in `session_start`.
 - **Durable thread identity:** `conversation_id` is a stable thread key across turns; it is no longer regenerated per reply.
 - **Guided workflows:** the backend ships five guided flows out of the box: `tin_registration`, `return_filing`, `objection_or_dispute`, `payment_assistance`, and `customs_clearance`.
+- **Workflow routing:** generic informational questions such as “How do I register for a TIN?” stay in RAG and return a direct answer; guided workflows start only when the user explicitly asks to start/proceed/continue or already has an active workflow.
+- **Response cleanup:** generated and cached replies pass through the same output guard, so stale Redis entries cannot leak passage-by-passage model reasoning into the UI.
+- **Procedure answer quality:** common TIN registration and return-filing how-to prompts bypass free-form LLM synthesis and return vetted FAQ-backed procedural answers, with high-priority FAQ hits and query-ranked deterministic revisions as fallback.
 - **Response governance:** `ChatResponse` now carries `agent_role`, `workflow`, `handoff`, `response_judge`, `next_actions`, and `ticket_id` where applicable.
 - **Streaming behavior:** `/v1/chat/stream` and `/api/v1/chat/stream` stream progressively, sanitize chunked output before emission, and support a `revision` event when the `response_judge` replaces a provisional answer.
 - **Consent + personalization:** frontend analytics are consent-gated, and memory-backed personalization only activates when the deployment enables it and the user has granted consent.
@@ -1562,10 +1670,19 @@ curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/ti
 
 | Service | Port | GPU | Description |
 |---------|------|-----|-------------|
-| Backend (FastAPI) | 8887 | optional | RAG + workflows + auth + speech |
+| Backend (FastAPI) | 8083 container / 8887 local dev | host GPU 2 mapped as `cuda:0` + CPU reranker | RAG retrieval, workflows, auth, speech orchestration |
 | Frontend (Next.js 16) | 13000 | — | PWA + `/api` proxy + consent + analytics queue |
-| vLLM | 8011 | GPU 7 | Qwen/Qwen3-8B + tool-calling |
+| vLLM | 8011 | GPU 7 | Qwen/Qwen3-8B + tool-calling via OpenAI-compatible API |
 | Qdrant | 6333 | CPU | dense + sparse retrieval index |
+| Redis | internal 6379 | CPU | semantic cache and distributed rate-limit storage |
+| ngrok | public HTTPS -> 3032 | — | silent background tunnel to the frontend; no GPU is used by ngrok |
+
+Current latency note: if `LLM_BACKEND=local`, generation runs through the
+single-process HF Transformers path and is serialized for LoRA adapter safety.
+For responsive local demos, keep `ura-vllm` running on a free GPU and use
+`LLM_BACKEND=vllm`. If a direct factual response approaches 30 seconds through
+the frontend/ngrok path, check the API stage timings first; the usual cause is
+`llm_generate`, not Redis.
 
 ## Roadmap: from FAQ chatbot to personalized tax assistant
 

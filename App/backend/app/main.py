@@ -1265,6 +1265,19 @@ async def voice_chat_stream_ws(websocket: WebSocket) -> None:
     await voice_stream_ws(websocket, app)
 
 
+@app.websocket("/v2/voice/chat/stream")
+async def voice_chat_stream_ws_v2(websocket: WebSocket) -> None:
+    """V2 WebSocket — native voice-to-voice with streaming TTS + vision.
+
+    Gated by the ``native_voice`` feature flag.  Extends the V1 protocol
+    with partial transcripts, speculative prefetch, token-level TTS
+    (CosyVoice2), and parallel vision encoding.  See ``voice_ws_v2.py``.
+    """
+    from .voice_ws_v2 import voice_stream_ws_v2
+
+    await voice_stream_ws_v2(websocket, app)
+
+
 # ---------------------------------------------------------------------------
 # Classification endpoints
 # ---------------------------------------------------------------------------
