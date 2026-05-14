@@ -1,9 +1,9 @@
 {
-  "url": "https://ura.go.ug/en/choose-agents/?agent_type=income_wht",
+  "url": "https://ura.go.ug/en/choose-agents/",
   "title": "Choose a Tax Agent - Uganda Revenue Authority",
   "text": "\n| No. | TIN | TAX PAYER NAME | DESIGNATION PERIOD |\n| --- | --- | --- | --- |\n| No. | TIN | TAX PAYER NAME | DESIGNATION PERIOD |\n\n| Serial Number | Tax Office | Agent Name | TIN | License Number | License Issue Date | License Expiry Date | Approval Date | Application Date | Registration Status | Deactivation Date |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| Serial Number | Tax Office | Agent Name | TIN | License Number | License Issue Date | License Expiry Date | Approval Date | Application Date | Registration Status | Deactivation Date |\n",
   "content_hash": "e49c6eef0d2e6241",
-  "timestamp": "2026-05-12T06:44:21Z",
+  "timestamp": "2026-05-14T07:04:31Z",
   "discovered_pdfs": [],
   "tables": [
     {
