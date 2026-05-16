@@ -1,0 +1,30 @@
+{
+  "url": "https://ura.go.ug/en/community/recent/",
+  "title": "Recent Posts – Uganda Revenue Authority Forum",
+  "text": "\n| Apr | MAY | Jun |\n| --- | --- | --- |\n|  | 09 |  |\n| 2023 | 2024 | 2025 |\n",
+  "content_hash": "4b0042aa581aef4f",
+  "timestamp": "2026-05-16T06:34:46Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Apr",
+        "MAY",
+        "Jun"
+      ],
+      "rows": [
+        [
+          "",
+          "09",
+          ""
+        ],
+        [
+          "2023",
+          "2024",
+          "2025"
+        ]
+      ],
+      "row_count": 2
+    }
+  ]
+}
