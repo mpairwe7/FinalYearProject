@@ -3,7 +3,7 @@
   "title": "Choose a Tax Agent - Uganda Revenue Authority",
   "text": "\n| No. | TIN | TAX PAYER NAME | DESIGNATION PERIOD |\n| --- | --- | --- | --- |\n| No. | TIN | TAX PAYER NAME | DESIGNATION PERIOD |\n\n| Serial Number | Tax Office | Agent Name | TIN | License Number | License Issue Date | License Expiry Date | Approval Date | Application Date | Registration Status | Deactivation Date |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| Serial Number | Tax Office | Agent Name | TIN | License Number | License Issue Date | License Expiry Date | Approval Date | Application Date | Registration Status | Deactivation Date |\n",
   "content_hash": "e49c6eef0d2e6241",
-  "timestamp": "2026-05-18T08:18:25Z",
+  "timestamp": "2026-05-20T07:53:59Z",
   "discovered_pdfs": [],
   "tables": [
     {
