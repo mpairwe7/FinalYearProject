@@ -26,12 +26,14 @@ from __future__ import annotations
 
 import concurrent.futures
 import csv
+import json
 import logging
 import os
 import re
 import threading
 import time
 import uuid
+from collections import Counter
 from collections.abc import AsyncIterator, Generator
 from pathlib import Path
 from typing import Any, Callable
@@ -913,37 +915,131 @@ _STOP_WORDS = frozenset(
     "where why all each every any some".split()
 )
 
+# --- BM25 keyword scoring ----------------------------------------------------
+# Lazy module-level encoder loaded from Model/bm25_state.json (vocab + IDF +
+# avg_dl + k1/b).  Used by _simple_search to score the keyword fallback
+# properly — rare URA-domain terms (vat, paye, presumptive, …) get high
+# weight, common words get near-zero weight.  Without the state file we
+# transparently fall back to plain content-word overlap counting.
+_BM25_ENCODER: Any = None
+_BM25_LOAD_ATTEMPTED = False
+
+
+def _get_bm25_encoder() -> Any:
+    global _BM25_ENCODER, _BM25_LOAD_ATTEMPTED
+    if _BM25_ENCODER is not None:
+        return _BM25_ENCODER
+    if _BM25_LOAD_ATTEMPTED:
+        return None
+    _BM25_LOAD_ATTEMPTED = True
+    try:
+        from .retriever import BM25SparseEncoder, BM25_STATE_PATH
+        if not BM25_STATE_PATH.exists():
+            logger.info("BM25 state %s not found; _simple_search will use overlap counting", BM25_STATE_PATH)
+            return None
+        with open(BM25_STATE_PATH) as f:
+            state = json.load(f)
+        _BM25_ENCODER = BM25SparseEncoder.from_dict(state)
+        logger.info("BM25 keyword scoring active (vocab=%d, avg_dl=%.1f)",
+                    len(_BM25_ENCODER._vocab), _BM25_ENCODER._avg_dl)
+        return _BM25_ENCODER
+    except Exception:
+        logger.warning("Failed to load BM25 encoder; falling back to overlap counting", exc_info=True)
+        return None
+
+
+def _faq_bm25_score(query_tokens: list[str], entry: dict, encoder: Any) -> float:
+    """BM25 score of an FAQ entry against pre-tokenized query tokens.
+
+    Caches per-entry document statistics (TF + length) directly on the
+    entry dict so subsequent calls are cheap — entries are loaded once
+    at ChatModel init and reused for every request.
+    """
+    if "_bm25_tf" not in entry:
+        doc_tokens = encoder._tokenize(f"{entry['question']} {entry['answer']}")
+        entry["_bm25_tf"] = dict(Counter(doc_tokens))
+        entry["_bm25_dl"] = len(doc_tokens)
+    tf, dl = entry["_bm25_tf"], entry["_bm25_dl"]
+    k1, b = encoder._k1, encoder._b
+    avg_dl = max(encoder._avg_dl, 1.0)
+    norm = 1 - b + b * dl / avg_dl
+    score = 0.0
+    seen: set[str] = set()
+    for q_term in query_tokens:
+        if q_term in seen:
+            continue
+        seen.add(q_term)
+        tid = encoder._vocab.get(q_term)
+        if tid is None:
+            continue
+        idf = encoder._idf.get(tid, 0.0)
+        if idf <= 0.0:
+            continue
+        f_t = tf.get(q_term, 0)
+        if f_t == 0:
+            continue
+        score += idf * f_t * (k1 + 1) / (f_t + k1 * norm)
+    return score
+
 
 def _simple_search(
     query: str,
     faq_index: dict[str, list[dict[str, str]]],
     top_k: int = 4,
 ) -> list[dict[str, str]]:
-    """Keyword-based retrieval fallback: score each FAQ by content-word overlap.
+    """Keyword retrieval over the in-memory FAQ index.
 
-    Stop words are excluded so that domain terms (TIN, VAT, register, etc.)
-    dominate the scoring.  Each returned dict includes a ``_overlap`` key.
+    Prefers proper BM25 scoring (using the committed Model/bm25_state.json
+    vocab+IDF+avg_dl) so rare domain terms like vat, paye, presumptive
+    dominate ranking; falls back to plain content-word overlap counting
+    when the BM25 state isn't present.  Each returned dict includes an
+    ``_overlap`` key carrying the score (BM25 or overlap, depending on
+    which path was taken) — kept under the same name to preserve the
+    score_rrf wiring in _faq_hits_to_retrieval_hits.
     """
-    query_tokens = set(query.lower().split()) - _STOP_WORDS
-    if not query_tokens:
-        query_tokens = set(query.lower().split())  # fallback: keep all
-    scored: list[tuple[float, dict[str, str]]] = []
+    encoder = _get_bm25_encoder()
 
+    if encoder is not None:
+        query_tokens = encoder._tokenize(query)
+        if not query_tokens:
+            return []
+        scored: list[tuple[float, dict[str, str]]] = []
+        for entries in faq_index.values():
+            for entry in entries:
+                s = _faq_bm25_score(query_tokens, entry, encoder)
+                if s > 0:
+                    scored.append((s, entry))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = []
+        for score, item in scored[:top_k]:
+            out = dict(item)
+            # Strip per-entry caches before returning so they don't pollute
+            # the downstream hit payload / JSON serialisation.
+            out.pop("_bm25_tf", None)
+            out.pop("_bm25_dl", None)
+            out["_overlap"] = score
+            results.append(out)
+        return results
+
+    # Fallback: plain content-word overlap (pre-BM25 behaviour).
+    query_tokens_set = set(query.lower().split()) - _STOP_WORDS
+    if not query_tokens_set:
+        query_tokens_set = set(query.lower().split())
+    scored_fallback: list[tuple[float, dict[str, str]]] = []
     for entries in faq_index.values():
         for entry in entries:
             q_tokens = set(entry["question"].lower().split()) - _STOP_WORDS
             a_tokens = set(entry["answer"].lower().split()) - _STOP_WORDS
-            overlap = len(query_tokens & (q_tokens | a_tokens))
+            overlap = len(query_tokens_set & (q_tokens | a_tokens))
             if overlap > 0:
-                scored.append((overlap, entry))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    results = []
-    for overlap, item in scored[:top_k]:
+                scored_fallback.append((float(overlap), entry))
+    scored_fallback.sort(key=lambda x: x[0], reverse=True)
+    results_fb: list[dict[str, str]] = []
+    for overlap, item in scored_fallback[:top_k]:
         out = dict(item)
         out["_overlap"] = overlap
-        results.append(out)
-    return results
+        results_fb.append(out)
+    return results_fb
 
 
 def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
