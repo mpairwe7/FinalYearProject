@@ -1,0 +1,47 @@
+# Crane Cloud requirements — slim CPU profile.
+#
+# Crane Cloud RENU pods are CPU-only with ~4-8 GB RAM, so the heavy
+# torch / transformers / sentence-transformers / bitsandbytes stack from
+# requirements.txt is intentionally OMITTED.  The app's import sites for
+# those packages are all `try/except ImportError`-guarded — the runtime
+# degrades to BM25 keyword retrieval and the LLM dispatches through a
+# remote backend (`LLM_BACKEND=vllm` against an external endpoint).
+#
+# To run the local-GPU stack instead, use App/backend/requirements.txt.
+
+# Core API
+fastapi>=0.115.0,<0.116
+uvicorn[standard]>=0.32.0,<0.35
+pydantic>=2.10.0,<2.12
+
+# Rate limiting + cache (Redis optional, falls back to in-process)
+slowapi>=0.1.9
+limits[redis]>=3.13
+redis>=5.0.0
+psycopg[binary]>=3.2.0
+psycopg-pool>=3.2.0
+
+# Data loading
+pandas>=2.2
+numpy>=1.26,<3
+
+# SSE streaming
+sse-starlette>=2.0.0
+
+# Qdrant client kept so QDRANT_ENABLED=true is a future-flag toggle.
+# Without QDRANT_URL set, HybridRetriever falls back to keyword search.
+qdrant-client>=1.13,<2
+
+# Misc utilities used outside the LLM path
+cryptography>=44.0.0
+lingua-language-detector>=2.0.0
+
+# OpenTelemetry (opt-in)
+opentelemetry-api>=1.29.0
+opentelemetry-sdk>=1.29.0
+opentelemetry-exporter-otlp-proto-grpc>=1.29.0
+
+# Phase 29 — WebSocket text-chat tests need this on the server side too
+# for the test runtime (the runtime endpoint itself uses Starlette's
+# native WebSocket which has no separate dependency).
+websockets>=12.0
