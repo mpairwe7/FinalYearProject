@@ -1,0 +1,181 @@
+# =============================================================================
+# URA Chatbot — Crane Cloud deploy (2026)
+#
+# Triggers:
+#   * workflow_dispatch     — manual rollout (env + image_tag)
+#   * dispatched by build   — ura-chatbot-build-push.yml fires this on
+#                             successful dev push or v* tag
+#
+# Uses the cranecloud Python CLI in non-interactive mode.  The CLI
+# normally stores credentials in the OS keyring; on a GitHub-hosted
+# Ubuntu runner there is no D-Bus / SecretService, so we install
+# `keyrings.alt` and force the file-backed PlaintextKeyring.  This
+# matches the local fix landed on the operator workstation per
+# docs/CRANE_CLOUD_DEPLOYMENT.md §12.  We never silently no-op on
+# failure — the job FAILS LOUDLY and posts a fallback instruction to
+# the run summary.
+#
+# Required secrets (per-environment under repo Settings → Environments):
+#   * CRANECLOUD_EMAIL                 — operator login email
+#   * CRANECLOUD_PASSWORD              — operator login password (PAT-equivalent)
+#   * CRANECLOUD_BACKEND_APP_ID        — UUID of the URA Chatbot app on
+#                                        Crane Cloud (create the app once
+#                                        via the dashboard, then paste the
+#                                        UUID here per environment).
+# =============================================================================
+name: "URA Chatbot — Deploy to Crane Cloud"
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Target environment"
+        type: choice
+        options: [staging, pilot, production]
+        default: staging
+        required: true
+      image_tag:
+        description: "Image tag to roll out (e.g. sha-abc1234 or v0.1.0)"
+        type: string
+        required: true
+
+concurrency:
+  group: ura-chatbot-deploy-${{ inputs.env }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: cranecloud apps update (${{ inputs.env }})
+    runs-on: ubuntu-latest
+    environment:
+      name: ura-chatbot-cranecloud-${{ inputs.env }}
+    env:
+      PYTHON_KEYRING_BACKEND: keyrings.alt.file.PlaintextKeyring
+
+    steps:
+      - name: Checkout (used for fallback instructions only)
+        uses: actions/checkout@v4
+
+      - name: Validate required environment-scoped secrets
+        run: |
+          set -euo pipefail
+          : "${CRANECLOUD_EMAIL:?CRANECLOUD_EMAIL environment secret is missing}"
+          : "${CRANECLOUD_PASSWORD:?CRANECLOUD_PASSWORD environment secret is missing}"
+          : "${CRANECLOUD_BACKEND_APP_ID:?CRANECLOUD_BACKEND_APP_ID environment secret is missing (create the Crane Cloud app first, then paste its UUID)}"
+        env:
+          CRANECLOUD_EMAIL: ${{ secrets.CRANECLOUD_EMAIL }}
+          CRANECLOUD_PASSWORD: ${{ secrets.CRANECLOUD_PASSWORD }}
+          CRANECLOUD_BACKEND_APP_ID: ${{ secrets.CRANECLOUD_BACKEND_APP_ID }}
+
+      - name: Set up Python (cranecloud CLI is pip-installable)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cranecloud CLI and file-keyring backend
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # keyrings.alt avoids D-Bus / SecretService on the runner.
+          pip install --quiet keyrings.alt cranecloud
+          cranecloud --help | head -5
+
+      - name: Authenticate to Crane Cloud (login persists token to keyring)
+        env:
+          CRANECLOUD_EMAIL: ${{ secrets.CRANECLOUD_EMAIL }}
+          CRANECLOUD_PASSWORD: ${{ secrets.CRANECLOUD_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # The CLI prompts for email + password.  Feed both via stdin so
+          # neither lands in the process argv / ps / shell history.  Three
+          # prompt lines: email, password, repeat-for-confirmation.
+          printf '%s\n%s\n%s\n' "$CRANECLOUD_EMAIL" "$CRANECLOUD_PASSWORD" "$CRANECLOUD_PASSWORD" \
+            | cranecloud auth login >/tmp/login.log 2>&1 \
+            || { echo "::error::cranecloud auth login failed"; tail -20 /tmp/login.log; exit 1; }
+          if ! cranecloud auth user >/tmp/user.log 2>&1; then
+            echo "::error::cranecloud auth user failed after login"; tail -20 /tmp/user.log; exit 1
+          fi
+
+      - name: Roll out new image
+        id: deploy
+        env:
+          CRANECLOUD_BACKEND_APP_ID: ${{ secrets.CRANECLOUD_BACKEND_APP_ID }}
+          IMAGE: docker.io/landwind/ura-chatbot:${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          echo "→ Updating $CRANECLOUD_BACKEND_APP_ID to image: $IMAGE"
+          cranecloud apps update "$CRANECLOUD_BACKEND_APP_ID" --image "$IMAGE" \
+            | tee /tmp/update.log
+          # Crane Cloud's CLI prints the new revision; capture it for the summary.
+          if grep -qiE "error|failed|denied" /tmp/update.log; then
+            echo "::error::cranecloud apps update reported an error"
+            exit 1
+          fi
+
+      - name: Verify deployed app is healthy
+        env:
+          CRANECLOUD_BACKEND_APP_ID: ${{ secrets.CRANECLOUD_BACKEND_APP_ID }}
+        run: |
+          set -euo pipefail
+          # `apps info` returns the public URL the cluster assigned.  We
+          # poll /health for up to 5 min — cold-start budget on Crane
+          # Cloud is generous because supervisord brings up nginx +
+          # uvicorn + node in sequence.
+          INFO_JSON=$(cranecloud apps info "$CRANECLOUD_BACKEND_APP_ID" 2>&1 || true)
+          URL=$(printf '%s' "$INFO_JSON" | grep -oE 'https://[a-zA-Z0-9.-]+\.cranecloud\.io' | head -1 || true)
+          if [[ -z "$URL" ]]; then
+            echo "::warning::could not extract public URL from apps info; skipping live probe"
+            exit 0
+          fi
+          echo "Probing $URL/health for readiness…"
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$URL/health" || echo "000")
+            echo "  attempt $i → HTTP $code"
+            if [[ "$code" == "200" ]]; then
+              echo "::notice::URA Chatbot deployed and healthy at $URL"
+              echo "DEPLOY_URL=$URL" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Deployed app did not return /health 200 within 5 min."
+          exit 1
+
+      - name: Post-deploy summary
+        if: always()
+        run: |
+          {
+            echo "### URA Chatbot — Crane Cloud deploy"
+            echo
+            echo "| Field      | Value |"
+            echo "| ---------- | ----- |"
+            echo "| env        | \`${{ inputs.env }}\` |"
+            echo "| image_tag  | \`${{ inputs.image_tag }}\` |"
+            echo "| image      | \`docker.io/landwind/ura-chatbot:${{ inputs.image_tag }}\` |"
+            echo "| status     | \`${{ job.status }}\` |"
+            if [[ -n "${DEPLOY_URL:-}" ]]; then
+              echo "| public URL | ${DEPLOY_URL} |"
+            fi
+            echo
+            if [[ "${{ job.status }}" != "success" ]]; then
+              echo "**Deploy did not complete.** Fallback (run on an operator workstation):"
+              echo
+              echo '```bash'
+              echo "export PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring"
+              echo "pip install --quiet keyrings.alt cranecloud"
+              echo "cranecloud auth login"
+              echo "cranecloud apps update <APP_ID> --image docker.io/landwind/ura-chatbot:${{ inputs.image_tag }}"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup credentials (best-effort)
+        if: always()
+        run: |
+          # Remove the file-keyring on the ephemeral runner — defence in
+          # depth even though the runner is destroyed after the job.
+          rm -rf ~/.local/share/python_keyring 2>/dev/null || true
+          rm -rf ~/.cranecloud 2>/dev/null || true
