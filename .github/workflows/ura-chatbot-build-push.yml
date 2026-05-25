@@ -151,39 +151,28 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Auto-trigger Crane Cloud deploy after a successful push on dev / v* tag.
-  # Production deploys (main) are operator-gated via the manual deploy
-  # workflow.  This mirrors HSU's pattern from .github/workflows/build-push.yml.
+  # Production deploys (main) are operator-gated via manual workflow_dispatch
+  # on the deploy workflow.  Mirrors MLOPS_V1's deploy-on-build pattern in
+  # docker-publish.yml (Stage 3: deploy-crane-cloud, gated on needs.build).
   # ---------------------------------------------------------------------------
   dispatch-deploy:
     needs: build
     if: github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve target environment
-        id: env
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "env=pilot"    >> "$GITHUB_OUTPUT"
-          else
-            echo "env=staging"  >> "$GITHUB_OUTPUT"
-          fi
-          echo "tag=${{ needs.build.outputs.tag }}" >> "$GITHUB_OUTPUT"
-
       - name: Dispatch Crane Cloud deploy
         uses: actions/github-script@v7
         with:
           script: |
-            const env = '${{ steps.env.outputs.env }}';
-            const tag = '${{ steps.env.outputs.tag }}';
+            const tag = '${{ needs.build.outputs.tag }}';
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo:  context.repo.repo,
               workflow_id: 'ura-chatbot-deploy-cranecloud.yml',
               ref: context.ref,
               inputs: {
-                env: env,
                 image_tag: tag,
+                deploy_only: true,
               },
             });
-            core.notice(`Dispatched ura-chatbot-deploy-cranecloud (env=${env}, tag=${tag})`);
+            core.notice(`Dispatched ura-chatbot-deploy-cranecloud (tag=${tag})`);

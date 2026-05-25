@@ -23,13 +23,19 @@ under `supervisord` and falls back to BM25 keyword retrieval (no Qdrant).
 
 ## 1. Production summary
 
+> **Last verified:** 2026-05-25 (initial WS smoke against live URL — all
+> Phase 0–6 frames assert green, TTLB 557 ms)
+
 | Field | Value |
 |---|---|
-| Public URL | `https://ura-chatbot-<hash>.renu-01.cranecloud.io` (assigned at create time) |
-| Image | `landwind/ura-chatbot:latest` |
+| Public URL | `https://ura-chatbot-6318a1b5.renu-01.cranecloud.io` |
+| WS endpoint | `wss://ura-chatbot-6318a1b5.renu-01.cranecloud.io/v2/chat/stream` |
+| Crane Cloud project | URA Chatbot (`10c4afe6-8083-422e-bf96-339991891de8`) |
+| Crane Cloud app ID | `b01219c6-9555-41e2-84c3-f15d764fb938` |
+| Image (verified) | `landwind/ura-chatbot:cranecloud-test` (public, 675 MB) |
 | Container port | `8080` (nginx) → internal `8081` (uvicorn) + `3000` (Next.js standalone) |
 | Cluster | RENU (`9e81a70e-8460-4e5d-b0a8-17abcac30f68`) |
-| Source | `App/` subtree of `github.com/mpairweLandwind/FinalYearProject` |
+| Source | `App/` subtree of `github.com/mpairwe7/FinalYearProject` |
 | LLM backend | `vllm` (external) or `groq` fallback (free tier) |
 | Retrieval | BM25 keyword (Qdrant unavailable on Crane Cloud) |
 
@@ -450,11 +456,86 @@ wscat -c "wss://ura-chatbot-<hash>.renu-01.cranecloud.io/v2/chat/stream" \
 
 ---
 
-## 13. Related docs
+## 13. Automated CI/CD pipeline (ported from MLOPS_V1)
+
+The repo ships two GitHub Actions workflows that mirror the polished
+direct-curl pattern from `mpairwe7/MLOPS_V1/.github/workflows/`:
+
+| Workflow | File | Triggers | What it does |
+|---|---|---|---|
+| Build & push | `.github/workflows/ura-chatbot-build-push.yml` | push to dev/main, `v*` tag, manual dispatch | Builds `Dockerfile.cranecloud`, pushes to `landwind/ura-chatbot:<tag>` on Docker Hub, then dispatches the deploy workflow (dev / `v*` only). |
+| Crane Cloud deploy | `.github/workflows/ura-chatbot-deploy-cranecloud.yml` | dispatched by build, or manual | `POST /users/login` → `PATCH /apps/<id>` → poll `/health` for 5 min. Direct REST API — no `cranecloud` CLI, no Python keyring shim. |
+
+### Crane Cloud REST API contract used by the deploy workflow
+
+See MLOPS_V1/`docs/22-crane-cloud-deployment.md` for the canonical table.
+URA Chatbot uses just two endpoints:
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/users/login` | `POST` | `{email, password}` → `{data: {access_token, id}}` |
+| `/apps/{id}` | `PATCH` | `Authorization: Bearer <token>`, body `{image: "landwind/ura-chatbot:<tag>"}` |
+
+> **Crane Cloud diffs by image *string*, not Docker manifest digest.**
+> PATCHing a moving tag like `:latest` is a no-op for pod rollover. The
+> build workflow always tags `sha-<short>` so the deploy step PATCHes a
+> string that changes on every push — same trick MLOPS_V1 uses.
+
+### Required GitHub secrets
+
+Matches the `CRANE_CLOUD_*` convention already used in `mpairwe7/OptiscanAI`
+and `MLOPS_V1`, so values can be copied across repos verbatim:
+
+| Secret | Source / format | Notes |
+|---|---|---|
+| `DOCKERHUB_USERNAME` | `landwind` | Public namespace, OK to set directly. |
+| `DOCKERHUB_TOKEN` | Docker Hub PAT, `dckr_pat_…` | Must have `repo:write` scope on `landwind/ura-chatbot`. |
+| `CRANE_CLOUD_EMAIL` | lowercase operator email | Same value used in OptiscanAI / MLOPS_V1. |
+| `CRANE_CLOUD_PASSWORD` | operator password | Same value used in OptiscanAI / MLOPS_V1. |
+| `CRANE_CLOUD_URA_APP_ID` | `b01219c6-9555-41e2-84c3-f15d764fb938` | UUID of the URA Chatbot app provisioned 2026-05-25. |
+
+### Setting secrets safely (no-leak pattern)
+
+Use `--body` omitted so `gh` reads from stdin; pipe via `!` so the value
+stays in your terminal and never enters the assistant transcript:
+
+```bash
+! gh secret set CRANE_CLOUD_EMAIL       -R mpairwe7/FinalYearProject
+! gh secret set CRANE_CLOUD_PASSWORD    -R mpairwe7/FinalYearProject
+! gh secret set CRANE_CLOUD_URA_APP_ID  -R mpairwe7/FinalYearProject
+! gh secret set DOCKERHUB_TOKEN         -R mpairwe7/FinalYearProject
+# paste value, then Ctrl-D for each
+```
+
+### Manual one-off redeploy (bypassing CI)
+
+If you need to roll a freshly-pushed image without waiting for CI, the
+exact same flow runs from a workstation:
+
+```bash
+export CRANE_CLOUD_API=https://api.cranecloud.io
+export CRANE_EMAIL='…'        # lowercase email
+export CRANE_PASSWORD='…'
+export APP_ID=b01219c6-9555-41e2-84c3-f15d764fb938
+
+TOKEN=$(curl -sf -X POST "$CRANE_CLOUD_API/users/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$CRANE_EMAIL\",\"password\":\"$CRANE_PASSWORD\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])")
+
+curl -sf -X PATCH "$CRANE_CLOUD_API/apps/$APP_ID" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"image":"landwind/ura-chatbot:sha-abc1234"}'
+```
+
+---
+
+## 14. Related docs
 
 - `docs/DEPLOYMENT.md` — full Docker Compose production deployment (the local/server path)
 - `docs/LOCAL_DEVELOPMENT.md` — local dev setup for App
 - `docs/APP_FLOWS.md` — request lifecycle: browser → Next.js → FastAPI → LLM
+- `MLOPS_V1/docs/22-crane-cloud-deployment.md` — canonical reference for the Crane Cloud REST API and the direct-curl deploy pattern this workflow mirrors
 - Sibling references: `Musawo/docs/crane-cloud-deployment.md`,
   `HustleCoach/docs/crane-cloud-deployment.md`,
   `Magezi/docs/crane-cloud-deployment.md` — same RENU cluster, simpler stacks
