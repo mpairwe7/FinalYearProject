@@ -199,6 +199,22 @@ def _validate_production_env() -> None:
     if _truthy_env("SPEECH_ENABLED", "true") and not _production_flag_enabled("voice_consent"):
         errors.append("FLAG_VOICE_CONSENT must not be disabled when speech is enabled.")
 
+    # Phase 6 of the agentic-WS rollout: the new WebSocket endpoint must
+    # never serve anonymous traffic in production.
+    if _production_flag_enabled("ws_chat") and not _production_flag_enabled("auth_required"):
+        errors.append(
+            "FLAG_WS_CHAT=true requires FLAG_AUTH_REQUIRED=true in production "
+            "(anonymous WebSocket chat is not allowed)."
+        )
+    # The confirmation HMAC secret must come from real config in prod;
+    # leaving the env unset would fall back to a per-process random key
+    # and break any cross-replica confirmation flow.
+    if _production_flag_enabled("ws_chat") and not os.getenv("WS_CONFIRM_HMAC_SECRET"):
+        errors.append(
+            "WS_CONFIRM_HMAC_SECRET must be set in production when FLAG_WS_CHAT=true "
+            "(per-process random fallback is not safe across replicas)."
+        )
+
     if authority_required():
         authority = get_authority_status()
         if not authority.get("ok"):
@@ -556,291 +572,89 @@ async def chat_stream(
     model: ChatModel = Depends(get_model),
     ctx: AuthContext = Depends(optional_user),
 ):
-    """Server-Sent Events streaming chat — tokens arrive progressively."""
-    from . import llm as llm_module
+    """Server-Sent Events streaming chat — tokens arrive progressively.
+
+    Thin adapter around :func:`service.run_chat_turn`.  Maps the
+    transport-agnostic ``(event_type, payload)`` tuples into SSE frames.
+    """
     from . import service as service_module
 
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
 
     async def event_generator():
-        import asyncio
-        import threading
-
-        from .guardrails import OutputGuard
-        from .retriever import HybridRetriever
-
-        _output_guard = OutputGuard()
-        t0 = time.perf_counter()
-        full_reply = ""  # FIX BUG: initialise before branches
-        result: dict = {}  # Sentinel: safe default for finally block
-
-        try:
-            # FIX LOGIC: run blocking retrieval in thread pool
-            result = await asyncio.to_thread(
-                model.generate_retrieval_only,
-                message=body.message,
-                conversation_id=body.conversation_id,
-                top_k=body.top_k,
-                locale=body.locale,
-                session_id=session_id or None,
-                request_id=request_id,
-                user_id=ctx.user_id or None,
-                tenant_id=ctx.tenant_id,
-            )
-
-            # If the turn resolved before LLM streaming, send a single payload.
-            if result.get("retrieval_mode") in (
-                "blocked",
-                "abstained",
-                "clarification",
-                "workflow",
-                "escalated",
-            ):
+        # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
+        # summary emitted just before ``grounding``.  Live tool-call frames
+        # are exclusive to the WS path.
+        agent_trace: list[dict[str, Any]] = []
+        async for event_type, payload in service_module.run_chat_turn(
+            model,
+            message=body.message,
+            conversation_id=body.conversation_id,
+            top_k=body.top_k,
+            locale=body.locale,
+            session_id=session_id or None,
+            request_id=request_id,
+            user_id=ctx.user_id or None,
+            tenant_id=ctx.tenant_id,
+            should_continue=lambda: _sse_not_disconnected(request),
+            sentence_batching=True,  # SSE keeps historical behaviour
+            user_role=getattr(ctx, "role", "public"),
+            granted_purposes=getattr(ctx, "granted_purposes", []) or [],
+        ):
+            if event_type == "_keepalive":
                 yield {
-                    "event": "metadata",
-                    "data": json.dumps(
-                        {
-                            "sources": result.get("sources", []),
-                            "citations": result.get("citations", []),
-                            "faithfulness_score": result.get("faithfulness_score"),
-                            "retrieval_mode": result.get("retrieval_mode"),
-                            "model": result.get("model"),
-                            "conversation_id": result.get("conversation_id"),
-                            "locale": result.get("locale"),
-                            "escalation_required": result.get("escalation_required", False),
-                            "escalation_reason": result.get("escalation_reason", ""),
-                            "agent_role": result.get("agent_role", "rag_answerer"),
-                            "workflow": result.get("workflow"),
-                            "handoff": result.get("handoff"),
-                            "response_judge": result.get("response_judge"),
-                            "next_actions": result.get("next_actions", []),
-                            "ticket_id": result.get("ticket_id", ""),
-                        }
-                    ),
+                    "comment": f"ping - {datetime.datetime.now(datetime.timezone.utc).isoformat()}"
                 }
-                yield {"event": "token", "data": result.get("reply", "")}
-                yield {"event": "done", "data": ""}
-                return
+                continue
+            if event_type == "_log":
+                _log_stream_conversation(body, session_id, payload)
+                continue
+            if event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
+                # Buffer for the agent_trace summary; do not forward live.
+                event_dict = payload if isinstance(payload, dict) else {"value": payload}
+                agent_trace.append({"type": event_type, **{k: v for k, v in event_dict.items() if k != "type"}})
+                continue
+            if event_type == "grounding" and agent_trace:
+                yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
+                agent_trace = []
+            if event_type == "metadata" or event_type == "grounding":
+                yield {"event": event_type, "data": json.dumps(payload)}
+            elif event_type == "error":
+                yield {"event": "error", "data": payload.get("message", "Internal server error")}
+            else:  # token / revision / done
+                yield {"event": event_type, "data": payload if isinstance(payload, str) else ""}
 
-            # Send metadata first
-            yield {
-                "event": "metadata",
-                "data": json.dumps(
-                    {
-                        "sources": result.get("sources", []),
-                        "citations": result.get("citations", []),
-                        "retrieval_mode": result.get("retrieval_mode"),
-                        "model": result.get("model"),
-                        "conversation_id": result.get("conversation_id"),
-                        "locale": result.get("locale"),
-                        "agent_role": result.get("agent_role", "rag_answerer"),
-                        "response_judge": result.get("response_judge"),
-                        "next_actions": result.get("next_actions", []),
-                        "ticket_id": result.get("ticket_id", ""),
-                    }
-                ),
-            }
-
-            # Stream LLM tokens
-            hits = result.get("_hits", [])
-            conversation_history = result.get("_history", [])
-            rewritten_query = result.get("_rewritten", body.message)
-            personalization_context = result.get("_personalization_context", "")
-            if llm_module.is_available() and hits:
-                loop = asyncio.get_running_loop()
-                token_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
-
-                def _pump_tokens() -> None:
-                    try:
-                        for token in service_module.stream_llm_tokens(
-                            query=rewritten_query,
-                            passages=hits,
-                            conversation_history=conversation_history or None,
-                            locale=body.locale,
-                            personalization_context=str(personalization_context or ""),
-                        ):
-                            loop.call_soon_threadsafe(token_queue.put_nowait, ("token", token))
-                    finally:
-                        loop.call_soon_threadsafe(token_queue.put_nowait, ("done", None))
-
-                threading.Thread(target=_pump_tokens, daemon=True).start()
-
-                saw_streamed_token = False
-                pending_stream_chunk = ""
-
-                def _flush_stream_chunk(*, force: bool = False) -> str:
-                    nonlocal pending_stream_chunk, full_reply, saw_streamed_token
-                    if not pending_stream_chunk:
-                        return ""
-                    if not force and not re.search(r"(?:\n\s*\n|[.!?](?:\s|$))", pending_stream_chunk):
-                        return ""
-                    sanitized = _output_guard.sanitize(pending_stream_chunk)
-                    pending_stream_chunk = ""
-                    if not sanitized:
-                        return ""
-                    saw_streamed_token = True
-                    full_reply += sanitized
-                    return sanitized
-
-                while True:
-                    if await request.is_disconnected():
-                        logger.info("SSE client disconnected mid-stream")
-                        return
-                    try:
-                        event_type, payload = await asyncio.wait_for(token_queue.get(), timeout=15)
-                    except asyncio.TimeoutError:
-                        yield {
-                            "comment": f"ping - {datetime.datetime.now(datetime.timezone.utc).isoformat()}"
-                        }
-                        continue
-
-                    if event_type == "done":
-                        final_chunk = _flush_stream_chunk(force=True)
-                        if final_chunk:
-                            yield {"event": "token", "data": final_chunk}
-                        break
-
-                    pending_stream_chunk += payload or ""
-                    sanitized = _flush_stream_chunk()
-                    if not sanitized:
-                        continue
-                    yield {"event": "token", "data": sanitized}
-
-                # Breaker OPEN / empty stream → fall through to single-event
-                # fallback below (same branch as "llm not available")
-                if not saw_streamed_token:
-                    full_reply = result.get("reply", "")
-                    yield {"event": "token", "data": result.get("reply", "")}
-                    yield {"event": "done", "data": ""}
-                    return
-
-                # Apply PII redaction to full accumulated reply
-                full_reply = _output_guard.redact_pii(full_reply)
-
-                # Compute faithfulness + grounding on full reply
-                contexts = [h.get("text") or h.get("answer", "") for h in hits]
-                faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
-                escalate, esc_reason = _output_guard.should_escalate(faith, hits)
-                response_judge = model._evaluate_response_judge(
-                    message=body.message,
-                    reply=full_reply,
-                    hits=hits,
-                    citations=result.get("citations", []),
-                    faithfulness_score=faith,
-                    escalation_required=escalate,
-                    escalation_reason=esc_reason,
-                )
-                if response_judge.get("decision") == "revise" and response_judge.get("revised_reply"):
-                    full_reply = _output_guard.sanitize(
-                        _output_guard.redact_pii(response_judge["revised_reply"])
-                    )
-                    faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
-                    escalate, esc_reason = _output_guard.should_escalate(faith, hits)
-                    response_judge["applied_revision"] = True
-                    response_judge["final_decision"] = "escalate" if escalate else "approve"
-                    yield {"event": "revision", "data": full_reply}
-                else:
-                    response_judge["final_decision"] = response_judge.get("decision", "approve")
-                if response_judge.get("final_decision") == "escalate":
-                    escalate = True
-                    if not esc_reason:
-                        esc_reason = "; ".join(response_judge.get("reasons") or [])
-                response_judge.pop("revised_reply", None)
-
-                handoff = result.get("handoff")
-                if escalate and not handoff:
-                    handoff = model._build_handoff_packet(
-                        message=body.message,
-                        reason=esc_reason,
-                        conversation_history=conversation_history or None,
-                        hits=hits,
-                        faithfulness_score=faith,
-                    )
-                ticket_id = result.get("ticket_id", "")
-                if escalate and not ticket_id:
-                    ticket_id = model._maybe_create_ticket(
-                        reason=esc_reason,
-                        user_query=body.message,
-                        bot_reply=full_reply,
-                        session_id=session_id or None,
-                        conversation_id=result.get("conversation_id") or body.conversation_id or "",
-                        priority=(handoff or {}).get("priority", "normal"),
-                        handoff=handoff,
-                        response_judge=response_judge,
-                    )
-                result["handoff"] = handoff
-                result["response_judge"] = response_judge
-                result["ticket_id"] = ticket_id
-                yield {
-                    "event": "grounding",
-                    "data": json.dumps(
-                        {
-                            "faithfulness_score": faith,
-                            "escalation_required": escalate,
-                            "escalation_reason": esc_reason,
-                            "agent_role": result.get("agent_role", "rag_answerer"),
-                            "handoff": handoff,
-                            "response_judge": response_judge,
-                            "next_actions": result.get("next_actions", []),
-                            "ticket_id": ticket_id,
-                        }
-                    ),
-                }
-
-                # Cache the completed streaming response
-                try:
-                    model._cache.put(
-                        rewritten_query,
-                        {
-                            "reply": full_reply,
-                            "sources": result.get("sources", []),
-                            "citations": result.get("citations", []),
-                            "faithfulness_score": faith,
-                            "retrieval_mode": result.get("retrieval_mode"),
-                            "model": result.get("model"),
-                            "conversation_id": result.get("conversation_id"),
-                            "locale": result.get("locale"),
-                            "escalation_required": escalate,
-                            "escalation_reason": esc_reason,
-                            "agent_role": result.get("agent_role", "rag_answerer"),
-                            "handoff": handoff,
-                            "response_judge": response_judge,
-                            "next_actions": result.get("next_actions", []),
-                            "ticket_id": ticket_id,
-                        },
-                    )
-                except Exception:
-                    logger.debug("Stream cache store failed", exc_info=True)
-            else:
-                # Fallback: send best-hit answer as single token
-                full_reply = result.get("reply", "")
-                yield {"event": "token", "data": full_reply}
-
-            yield {"event": "done", "data": ""}
-
-        except Exception:
-            logger.exception("SSE stream error")
-            yield {"event": "error", "data": "Internal server error"}
-            yield {"event": "done", "data": ""}
-        finally:
-            # FIX LOGIC: log conversation in finally block (runs even on disconnect)
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            try:
-                from .service import ChatModel as _CM
-
-                db.log_conversation(
-                    session_id=session_id or None,
-                    conversation_id=result.get("conversation_id"),
-                    user_message=_CM.redact_for_storage(body.message),
-                    bot_reply=_CM.redact_for_storage(full_reply),
-                    sources=json.dumps(result.get("sources", []) if result else []),
-                    response_time_ms=round(elapsed_ms, 2),
-                )
-            except Exception:
-                logger.warning("Stream conversation logging failed", exc_info=True)
+        # Flush trailing trace (e.g. if grounding was skipped).
+        if agent_trace:
+            yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
 
     return EventSourceResponse(event_generator())
+
+
+async def _sse_not_disconnected(request: Request) -> bool:
+    """Adapter for ``run_chat_turn.should_continue`` over Starlette HTTP."""
+    return not (await request.is_disconnected())
+
+
+def _log_stream_conversation(body: ChatRequest, session_id: str, log_payload: dict[str, Any]) -> None:
+    """Mirror the old SSE ``finally`` block — log to analytics DB."""
+    from .service import ChatModel as _CM
+
+    result = log_payload.get("result") or {}
+    full_reply = log_payload.get("full_reply", "")
+    elapsed_ms = log_payload.get("elapsed_ms", 0.0)
+    try:
+        db.log_conversation(
+            session_id=session_id or None,
+            conversation_id=result.get("conversation_id"),
+            user_message=_CM.redact_for_storage(body.message),
+            bot_reply=_CM.redact_for_storage(full_reply),
+            sources=json.dumps(result.get("sources", []) if result else []),
+            response_time_ms=round(elapsed_ms, 2),
+        )
+    except Exception:
+        logger.warning("Stream conversation logging failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1276,6 +1090,20 @@ async def voice_chat_stream_ws_v2(websocket: WebSocket) -> None:
     from .voice_ws_v2 import voice_stream_ws_v2
 
     await voice_stream_ws_v2(websocket, app)
+
+
+@app.websocket("/v2/chat/stream")
+async def chat_stream_ws_v2(websocket: WebSocket) -> None:
+    """V2 WebSocket — persistent text chat with agentic event surface.
+
+    Gated by the ``ws_chat`` feature flag.  See ``chat_ws_v2.py`` and
+    ``docs/ws_chat_protocol.md``.  Phase 0 ships lifecycle + protocol
+    negotiation only; ``response.create`` returns a ``not_implemented``
+    error until Phase 1 wires the existing chat pipeline through.
+    """
+    from .chat_ws_v2 import chat_stream_ws
+
+    await chat_stream_ws(websocket, app)
 
 
 # ---------------------------------------------------------------------------

@@ -205,6 +205,15 @@ _REGISTRY: dict[str, Flag] = {
             "Start RAG retrieval on partial ASR hypotheses (stable prefix). "
             "Saves 100-300ms when the final query matches the prefetched prefix.",
         ),
+        # Phase 29 (2026) — WebSocket-native agentic chat transport
+        Flag(
+            "ws_chat",
+            False,
+            "Enable the WebSocket text-chat endpoint at /v2/chat/stream. "
+            "Persistent duplex transport that mirrors the SSE protocol shape "
+            "and adds an agentic event surface (tool_call.*, retrieval.*, "
+            "response.cancel). SSE endpoint /v1/chat/stream stays unchanged.",
+        ),
     ]
 }
 
