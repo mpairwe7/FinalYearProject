@@ -183,11 +183,17 @@ _CLARIFY_STOP_WORDS = {
     "who",
     "why",
     "help",
-    "hi",
-    "hello",
-    "hey",
     "tell",
     "info",
+}
+
+# Greeting triggers — warm welcome without retrieval.
+_GREETING_WORDS = {"hi", "hello", "hey", "howdy", "greetings", "yo"}
+_GREETING_PHRASES = {
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "good day",
 }
 
 
@@ -232,6 +238,19 @@ class Supervisor:
                     reason=reason,
                     confidence=0.95,
                 )
+
+        # 1b. Greetings — respond warmly without retrieval.
+        q_lower = q.lower().strip("!.?,")
+        if len(words) <= 3 and (
+            q_lower in _GREETING_WORDS
+            or q_lower in _GREETING_PHRASES
+            or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in words)
+        ):
+            return RouteDecision(
+                route=AgentRoute.GREET,
+                reason="greeting",
+                confidence=1.0,
+            )
 
         # 2. Clarify very short / stop-word-only queries when there's
         #    no conversation history to disambiguate them.

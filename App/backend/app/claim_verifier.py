@@ -51,6 +51,14 @@ _NON_CLAIM_HINTS = (
     "please try",
     "i don't have enough",
     "ask a new",
+    "you might also want to know",
+    "you may also want to",
+    "would you also like to know",
+    "for more details, visit",
+    "for more information, visit",
+    "contact the ura contact centre",
+    "visit https://ura",
+    "call ura toll-free",
 )
 
 

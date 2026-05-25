@@ -128,8 +128,6 @@ def needs_clarification(query: str, hits: list[dict[str, Any]]) -> str | None:
         "when",
         "who",
         "help",
-        "hi",
-        "hello",
     }:
         return (
             "Could you please provide more details about your question? "
