@@ -133,10 +133,18 @@ jobs:
             printf '%s\n' "$PATCH" | head -200
             exit 1
           fi
+          # The PATCH response sometimes omits the URL; GET /apps/<id>
+          # reliably returns it under data.apps.url (plural key, singular
+          # dict — Crane Cloud quirk).  Try PATCH response first, then GET.
           URL=$(printf '%s' "$PATCH" \
-            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['app'].get('url',''))" 2>/dev/null || true)
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('apps',{}).get('url') or d.get('data',{}).get('app',{}).get('url') or '')" 2>/dev/null || true)
+          if [[ -z "$URL" ]]; then
+            GET=$(curl -sS "$CRANE_CLOUD_API/apps/$CRANE_APP_ID" -H "Authorization: Bearer $TOKEN")
+            URL=$(printf '%s' "$GET" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('apps',{}).get('url',''))" 2>/dev/null || true)
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-          echo "✓ Patched app to image: $IMAGE → $URL"
+          echo "✓ Patched app to image: $IMAGE → ${URL:-(URL still empty)}"
 
       - name: Wait for healthy /health
         env:
