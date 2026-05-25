@@ -47,6 +47,8 @@ DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL", "mixedbread-ai/mxbai-rerank-base-v2")
 DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
+RETRIEVER_DENSE_DEVICE = os.getenv("RETRIEVER_DENSE_DEVICE", "cpu")
+RERANKER_DEVICE = os.getenv("RERANKER_DEVICE", RETRIEVER_DENSE_DEVICE)
 from ._root import PROJECT_ROOT as _PROJECT_ROOT
 BM25_STATE_PATH = Path(
     os.getenv("BM25_STATE_PATH", str(_PROJECT_ROOT / "Model" / "bm25_state.json"))
@@ -188,16 +190,38 @@ class HybridRetriever:
 
             from sentence_transformers import CrossEncoder, SentenceTransformer
 
-            self._dense_model = SentenceTransformer(DENSE_MODEL_NAME, device="cpu")
+            try:
+                self._dense_model = SentenceTransformer(DENSE_MODEL_NAME, device=RETRIEVER_DENSE_DEVICE)
+            except Exception:
+                if RETRIEVER_DENSE_DEVICE == "cpu":
+                    raise
+                logger.warning(
+                    "Dense retriever device %s unavailable; falling back to CPU",
+                    RETRIEVER_DENSE_DEVICE,
+                    exc_info=True,
+                )
+                self._dense_model = SentenceTransformer(DENSE_MODEL_NAME, device="cpu")
             if RERANK_ENABLED:
-                self._reranker = CrossEncoder(RERANKER_MODEL_NAME, device="cpu")
+                try:
+                    self._reranker = CrossEncoder(RERANKER_MODEL_NAME, device=RERANKER_DEVICE)
+                except Exception:
+                    if RERANKER_DEVICE == "cpu":
+                        raise
+                    logger.warning(
+                        "Reranker device %s unavailable; falling back to CPU",
+                        RERANKER_DEVICE,
+                        exc_info=True,
+                    )
+                    self._reranker = CrossEncoder(RERANKER_MODEL_NAME, device="cpu")
 
             self._ready = True
             logger.info(
-                "HybridRetriever ready (url=%s collection=%s rerank=%s)",
+                "HybridRetriever ready (url=%s collection=%s dense_device=%s rerank=%s reranker_device=%s)",
                 QDRANT_URL,
                 QDRANT_COLLECTION,
+                RETRIEVER_DENSE_DEVICE,
                 RERANK_ENABLED,
+                RERANKER_DEVICE if RERANK_ENABLED else "disabled",
             )
             return True
         except Exception:

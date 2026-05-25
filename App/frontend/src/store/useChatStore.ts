@@ -270,7 +270,7 @@ const THINKING_SIGNALS = [
   /passage \[?\d/i,
   /^so,? (the|i |none|based|from)/i,
   /^since (the|none|it|this|there)/i,
-  /^(therefore|however|also|additionally),? (note|the|i )/i,
+  /^(therefore|however|also|additionally),? (note that|i think|i should|the user|the passage|looking)/i,
   // Self-narration about what to do
   /^(the (main|key|relevant) point|the answer|my response|i.ll |let.s )/i,
   /^(this|that) (means|is|doesn|seem|suggest|passage)/i,
