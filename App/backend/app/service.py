@@ -2161,24 +2161,15 @@ class ChatModel:
                 # Update readiness if retriever was disconnected during search
                 self._retriever_ready = self._retriever._ready
 
-            # 3. Fallback to keyword search if Qdrant returned nothing
+            # 3. Fallback to keyword search if Qdrant returned nothing.
+            # Use _faq_hits_to_retrieval_hits so the per-hit _overlap count
+            # carries into score_rrf (was hardcoded 0.0 here, which guaranteed
+            # OutputGuard.should_abstain rejected every keyword-only hit on
+            # the BM25-only Crane Cloud profile).
             if not hits:
                 with trace_stage("keyword_search_fallback", timings=timings):
                     kw_hits = _simple_search(rewritten, self._faq_index, top_k=top_k)
-                    hits = [
-                        {
-                            "text": f"Question: {h['question']}\nAnswer: {h['answer']}",
-                            "answer": h["answer"],
-                            "question": h["question"],
-                            "source": h["source"],
-                            "chunk_id": "",
-                            "page": "",
-                            "section": h.get("tag", ""),
-                            "doc_type": "csv",
-                            "score_rrf": 0.0,
-                        }
-                        for h in kw_hits
-                    ]
+                    hits = _faq_hits_to_retrieval_hits(kw_hits)
 
             # 3b. Corrective RAG — re-retrieve if quality is low (Phase 6)
             if hits and self._retriever_ready:
@@ -2964,19 +2955,12 @@ class ChatModel:
                 retrieval_mode = "hybrid"
             self._retriever_ready = self._retriever._ready
 
+        # Mirror the REST path's keyword fallback — _faq_hits_to_retrieval_hits
+        # carries _overlap into score_rrf so the abstention guard sees a real
+        # signal (previously hardcoded 0.0 here, same bug as line 2167).
         if not hits:
             kw_hits = _simple_search(rewritten, self._faq_index, top_k=top_k)
-            hits = [
-                {
-                    "text": f"Question: {h['question']}\nAnswer: {h['answer']}",
-                    "answer": h["answer"],
-                    "question": h["question"],
-                    "source": h["source"],
-                    "chunk_id": "", "page": "", "section": h.get("tag", ""),
-                    "doc_type": "csv", "score_rrf": 0.0,
-                }
-                for h in kw_hits
-            ]
+            hits = _faq_hits_to_retrieval_hits(kw_hits)
 
         # Corrective RAG (Phase 6)
         if hits and self._retriever_ready:
