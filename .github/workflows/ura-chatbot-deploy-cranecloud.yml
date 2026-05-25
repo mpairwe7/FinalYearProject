@@ -1,0 +1,185 @@
+# =============================================================================
+# URA Chatbot — Crane Cloud deploy (2026)
+#
+# Direct-curl pattern ported from mpairwe7/MLOPS_V1/.github/workflows/
+# docker-publish.yml (deploy-crane-cloud job).  Bypasses the cranecloud
+# Python CLI entirely — no Python install, no keyring shim, no headless
+# D-Bus workaround.  See MLOPS_V1/docs/22-crane-cloud-deployment.md
+# §"Crane Cloud API Reference" and App/docs/CRANE_CLOUD_DEPLOYMENT.md §12
+# for the full API contract.
+#
+# Triggers:
+#   * workflow_dispatch     — manual rollout (image_tag + optional deploy_only)
+#   * dispatched by build   — ura-chatbot-build-push.yml fires this on
+#                             successful dev push or v* tag
+#
+# Required repo-level secrets (matching mpairwe7/OptiscanAI + MLOPS_V1):
+#   * CRANE_CLOUD_EMAIL      — operator login email (lowercase!)
+#   * CRANE_CLOUD_PASSWORD   — operator login password
+#   * CRANE_CLOUD_URA_APP_ID — UUID of the URA Chatbot app on Crane Cloud
+# =============================================================================
+name: "URA Chatbot — Deploy to Crane Cloud"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to roll out (e.g. sha-abc1234 or cranecloud-test)"
+        type: string
+        required: true
+        default: "cranecloud-test"
+      deploy_only:
+        description: "Skip build (assume image already on Docker Hub)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ura-chatbot-deploy-cranecloud
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CRANE_CLOUD_API: https://api.cranecloud.io
+  IMAGE_BASE: landwind/ura-chatbot
+
+jobs:
+  deploy:
+    name: PATCH /apps/<id>
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate required repo-level secrets
+        env:
+          CRANE_CLOUD_EMAIL: ${{ secrets.CRANE_CLOUD_EMAIL }}
+          CRANE_CLOUD_PASSWORD: ${{ secrets.CRANE_CLOUD_PASSWORD }}
+          CRANE_CLOUD_URA_APP_ID: ${{ secrets.CRANE_CLOUD_URA_APP_ID }}
+        run: |
+          set -euo pipefail
+          : "${CRANE_CLOUD_EMAIL:?CRANE_CLOUD_EMAIL repo secret is missing}"
+          : "${CRANE_CLOUD_PASSWORD:?CRANE_CLOUD_PASSWORD repo secret is missing}"
+          : "${CRANE_CLOUD_URA_APP_ID:?CRANE_CLOUD_URA_APP_ID repo secret is missing}"
+
+      - name: Resolve image reference
+        id: img
+        run: |
+          set -euo pipefail
+          # Crane Cloud diffs by image *string*, not Docker manifest digest, so
+          # PATCHing a moving tag is a no-op for pod rollover.  MLOPS_V1's
+          # docker-publish.yml works around this by pinning to a SHA-suffixed
+          # tag on every push (e.g. cpu-abc1234).  When the build workflow
+          # dispatches us with a `sha-<short>` tag we use that directly.
+          TAG="${{ inputs.image_tag }}"
+          IMAGE="${IMAGE_BASE}:${TAG}"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "→ Will PATCH app to image: ${IMAGE}"
+
+      - name: Verify image is reachable on Docker Hub
+        env:
+          IMAGE: ${{ steps.img.outputs.image }}
+        run: |
+          set -euo pipefail
+          # Bail out before Crane Cloud rejects the deploy if the image is
+          # missing — Docker Hub's v2 registry returns 200 for an existing
+          # public manifest, 404 otherwise.  Saves debugging time.
+          REPO="${IMAGE%:*}"; TAG="${IMAGE##*:}"
+          TOKEN=$(curl -sS "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${REPO}:pull" \
+                  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+                 -H "Authorization: Bearer $TOKEN" \
+                 -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                 "https://registry-1.docker.io/v2/${REPO}/manifests/${TAG}")
+          if [[ "$CODE" != "200" ]]; then
+            echo "::error::Docker Hub returned $CODE for ${IMAGE} — push the image before deploying."
+            exit 1
+          fi
+          echo "✓ ${IMAGE} is reachable on Docker Hub."
+
+      - name: Login to Crane Cloud and PATCH /apps/<id>
+        id: patch
+        env:
+          CRANE_EMAIL: ${{ secrets.CRANE_CLOUD_EMAIL }}
+          CRANE_PASSWORD: ${{ secrets.CRANE_CLOUD_PASSWORD }}
+          CRANE_APP_ID: ${{ secrets.CRANE_CLOUD_URA_APP_ID }}
+          IMAGE: ${{ steps.img.outputs.image }}
+        run: |
+          set -euo pipefail
+
+          # 1. Login — body built via python -c so the password is read from
+          #    env, never expanded into a shell argv.  Token is masked so it
+          #    doesn't leak via subsequent log lines.
+          LOGIN_BODY=$(python3 -c "import json,os; print(json.dumps({'email': os.environ['CRANE_EMAIL'], 'password': os.environ['CRANE_PASSWORD']}))")
+          LOGIN=$(curl -sS -X POST "$CRANE_CLOUD_API/users/login" \
+            -H 'Content-Type: application/json' \
+            -d "$LOGIN_BODY")
+          TOKEN=$(printf '%s' "$LOGIN" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])")
+          echo "::add-mask::$TOKEN"
+          [[ -n "$TOKEN" ]] || { echo "::error::Crane Cloud login returned no access_token"; exit 1; }
+          echo "✓ Logged in to Crane Cloud"
+
+          # 2. PATCH the app to the new image string
+          PATCH_BODY=$(python3 -c "import json,os; print(json.dumps({'image': os.environ['IMAGE']}))")
+          PATCH=$(curl -sS -X PATCH "$CRANE_CLOUD_API/apps/$CRANE_APP_ID" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d "$PATCH_BODY")
+          OK=$(printf '%s' "$PATCH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "parse_err")
+          if [[ "$OK" != "success" ]]; then
+            echo "::error::PATCH /apps/$CRANE_APP_ID failed: $OK"
+            printf '%s\n' "$PATCH" | head -200
+            exit 1
+          fi
+          URL=$(printf '%s' "$PATCH" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['app'].get('url',''))" 2>/dev/null || true)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "✓ Patched app to image: $IMAGE → $URL"
+
+      - name: Wait for healthy /health
+        env:
+          URL: ${{ steps.patch.outputs.url }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$URL" ]]; then
+            echo "::warning::PATCH returned no URL — skipping health probe."
+            exit 0
+          fi
+          # Cold start: nginx + uvicorn + node in sequence, plus Crane Cloud's
+          # image pull from Docker Hub.  Empirically ~90 s on RENU for the
+          # 675 MB image.  Poll every 10 s for up to 5 min.
+          echo "Probing $URL/health…"
+          for i in $(seq 1 30); do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$URL/health" || echo "000")
+            echo "  [$i] /health → $CODE"
+            if [[ "$CODE" == "200" ]]; then
+              echo "::notice::URA Chatbot healthy at $URL"
+              curl -sS --max-time 5 "$URL/health" | python3 -m json.tool || true
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::App did not return /health 200 within 5 min."
+          exit 1
+
+      - name: Post-deploy summary
+        if: always()
+        env:
+          URL: ${{ steps.patch.outputs.url }}
+          IMAGE: ${{ steps.img.outputs.image }}
+        run: |
+          {
+            echo "### URA Chatbot — Crane Cloud deploy"
+            echo
+            echo "| Field      | Value |"
+            echo "| ---------- | ----- |"
+            echo "| image_tag  | \`${{ inputs.image_tag }}\` |"
+            echo "| image      | \`${IMAGE}\` |"
+            echo "| status     | \`${{ job.status }}\` |"
+            if [[ -n "${URL:-}" ]]; then
+              echo "| public URL | ${URL} |"
+              echo "| WS URL     | \`${URL/https/wss}/v2/chat/stream\` |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
