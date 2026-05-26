@@ -3,7 +3,7 @@
   "title": "EFRIS Brochure - Uganda Revenue Authority",
   "text": "\n| System | Costs involved |\n| --- | --- |\n| System to system | Power, computer, active e-tax portal account, internet connectivity, VPN connectivity, offline mode support, software development to integrate the taxpayer system with URA, E-Receipt/invoice validation |\n| EFD | Power, computer, active tax portal account, internet connectivity, offline mode, cost of purchasing an EFD machine, support and E-Receipt/invoice validation |\n| Client App | Power, computer, active tax portal account, internet connectivity, offline mode support and E-Receipt/invoice validation |\n| USSD Quick code | Power, E-Receipt/invoice validation |\n| Portal | Power, computer, active tax portal account, internet connectivity, E-Receipt/ invoice validation |\n",
   "content_hash": "2701e4fae8215966",
-  "timestamp": "2026-05-25T08:35:35Z",
+  "timestamp": "2026-05-26T07:59:57Z",
   "discovered_pdfs": [],
   "tables": [
     {
