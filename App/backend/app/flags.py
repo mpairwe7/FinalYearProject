@@ -50,6 +50,11 @@ _REGISTRY: dict[str, Flag] = {
         Flag("semantic_cache", True, "Cache semantically similar queries"),
         Flag("query_rewrite", True, "Spelling / abbreviation / coreference"),
         Flag("reranker", True, "Cross-encoder reranking"),
+        Flag(
+            "cloudflare_fallback",
+            False,
+            "Route to Cloudflare Workers AI / Vectorize / R2 + Gemini when primaries are down/over-budget",
+        ),
         Flag("eval_auto_run", False, "Run evaluation harness on every Nth request"),
         # Phase 14 — agentic workflows (feature-flagged off by default)
         Flag(

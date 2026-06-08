@@ -45,3 +45,11 @@ opentelemetry-exporter-otlp-proto-grpc>=1.29.0
 # for the test runtime (the runtime endpoint itself uses Starlette's
 # native WebSocket which has no separate dependency).
 websockets>=12.0
+
+# Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK).
+# Restore hybrid retrieval (Workers AI bge-m3 + Vectorize), LLM/STT/translation
+# resilience, and R2 durability on this CPU-only tier. httpx is already present
+# (via fastapi / qdrant-client); only these two are new. boto3 is used only by
+# the R2 client (lazy-imported), so it does not bloat cold-start.
+pydantic-settings>=2.5.0
+boto3>=1.34.0
