@@ -24,6 +24,7 @@ References:
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import csv
 import json
@@ -339,6 +340,119 @@ def _resolve_turn_deadline() -> float:
 _STREAM_QUEUE_MAX = 256
 
 
+def _apply_output_guards(
+    model: Any,
+    *,
+    message: str,
+    reply: str,
+    hits: list[dict[str, Any]],
+    citations: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    session_id: str | None,
+    conversation_id: str,
+    output_guard: Any,
+    existing_handoff: dict[str, Any] | None = None,
+    existing_ticket_id: str = "",
+) -> dict[str, Any]:
+    """Run the full post-generation guard pipeline for a streamed turn.
+
+    Faithfulness → claim verification → response judge → grounded revision →
+    escalation → handoff → ticket.  This is called by BOTH the token-streaming
+    branch and the agentic (tool-use) branch of :func:`run_chat_turn` so the
+    two paths enforce an identical safety bar — previously the agentic branch
+    only computed faithfulness and skipped the judge, revision, claim
+    verification, and escalation/handoff/ticket steps (P0-3).
+
+    ``reply`` is assumed already PII-redacted + sanitized by the caller.  The
+    returned ``reply`` may differ (a grounded revision was substituted); when
+    ``revised`` is True the caller should emit a ``("revision", reply)`` event.
+    """
+    contexts = [h.get("text") or h.get("answer", "") for h in hits]
+    faith = HybridRetriever.compute_faithfulness(reply, contexts)
+    escalate, esc_reason = output_guard.should_escalate(faith, hits)
+
+    claim_report: dict[str, Any] | None = None
+    if reply and hits and citations:
+        try:
+            claim_report = verify_claims(reply, citations, hits)
+        except Exception:
+            logger.debug("claim verification failed", exc_info=True)
+            claim_report = None
+
+    response_judge = model._evaluate_response_judge(
+        message=message,
+        reply=reply,
+        hits=hits,
+        citations=citations,
+        faithfulness_score=faith,
+        escalation_required=escalate,
+        escalation_reason=esc_reason,
+        claim_report=claim_report,
+    )
+
+    revised = False
+    if response_judge.get("decision") == "revise" and response_judge.get("revised_reply"):
+        reply = output_guard.sanitize(output_guard.redact_pii(response_judge["revised_reply"]))
+        faith = HybridRetriever.compute_faithfulness(reply, contexts)
+        escalate, esc_reason = output_guard.should_escalate(faith, hits)
+        response_judge["applied_revision"] = True
+        response_judge["final_decision"] = "escalate" if escalate else "approve"
+        revised = True
+        # Re-verify the substituted text so a revision can't smuggle in
+        # unsupported claims.
+        if citations:
+            try:
+                claim_report = verify_claims(reply, citations, hits)
+                if claim_report.get("decision") == "escalate":
+                    response_judge["final_decision"] = "escalate"
+            except Exception:
+                logger.debug("post-revision claim verification failed", exc_info=True)
+    else:
+        response_judge["final_decision"] = response_judge.get("decision", "approve")
+
+    if response_judge.get("final_decision") == "escalate":
+        escalate = True
+        if not esc_reason:
+            esc_reason = "; ".join(response_judge.get("reasons") or [])
+    if claim_report is not None:
+        response_judge["claim_verification"] = claim_report
+    response_judge.pop("revised_reply", None)
+
+    handoff = existing_handoff
+    if escalate and not handoff:
+        handoff = model._build_handoff_packet(
+            message=message,
+            reason=esc_reason,
+            conversation_history=conversation_history or None,
+            hits=hits,
+            faithfulness_score=faith,
+        )
+    ticket_id = existing_ticket_id
+    if escalate and not ticket_id:
+        ticket_id = model._maybe_create_ticket(
+            reason=esc_reason,
+            user_query=message,
+            bot_reply=reply,
+            session_id=session_id or None,
+            conversation_id=conversation_id or "",
+            priority=(handoff or {}).get("priority", "normal"),
+            handoff=handoff,
+            response_judge=response_judge,
+        )
+
+    return {
+        "reply": reply,
+        "faithfulness": faith,
+        "escalate": escalate,
+        "escalation_reason": esc_reason,
+        "response_judge": response_judge,
+        "handoff": handoff,
+        "ticket_id": ticket_id,
+        "revised": revised,
+        "claim_report": claim_report,
+    }
+
+
 async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE generator one-to-one
     model: Any,
     *,
@@ -393,11 +507,9 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
     event_callback:
         Phase 2 hook; ignored in Phase 1.
     """
-    import asyncio
     import inspect
 
     from .guardrails import OutputGuard
-    from .retriever import HybridRetriever
 
     _output_guard = OutputGuard()
     t0 = time.perf_counter()
@@ -502,20 +614,40 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 yield event
 
             if full_reply:
-                contexts = [h.get("text") or h.get("answer", "") for h in hits]
-                faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
-                escalate, esc_reason = _output_guard.should_escalate(faith, hits)
+                # P0-3: run the SAME post-generation guard pipeline the
+                # token-streaming branch uses (judge + claim verification +
+                # grounded revision + escalation/handoff/ticket), not just a
+                # bare faithfulness score.
+                guard = _apply_output_guards(
+                    model,
+                    message=message,
+                    reply=full_reply,
+                    hits=hits,
+                    citations=result.get("citations", []),
+                    conversation_history=conversation_history,
+                    session_id=session_id,
+                    conversation_id=result.get("conversation_id") or conversation_id or "",
+                    output_guard=_output_guard,
+                    existing_handoff=result.get("handoff"),
+                    existing_ticket_id=result.get("ticket_id", ""),
+                )
+                full_reply = guard["reply"]
+                if guard["revised"]:
+                    yield ("revision", full_reply)
+                result["handoff"] = guard["handoff"]
+                result["response_judge"] = guard["response_judge"]
+                result["ticket_id"] = guard["ticket_id"]
                 yield (
                     "grounding",
                     {
-                        "faithfulness_score": faith,
-                        "escalation_required": escalate,
-                        "escalation_reason": esc_reason,
+                        "faithfulness_score": guard["faithfulness"],
+                        "escalation_required": guard["escalate"],
+                        "escalation_reason": guard["escalation_reason"],
                         "agent_role": result.get("agent_role", "rag_answerer"),
-                        "handoff": result.get("handoff"),
-                        "response_judge": result.get("response_judge"),
+                        "handoff": guard["handoff"],
+                        "response_judge": guard["response_judge"],
                         "next_actions": result.get("next_actions", []),
-                        "ticket_id": result.get("ticket_id", ""),
+                        "ticket_id": guard["ticket_id"],
                     },
                 )
                 yield ("done", "")
@@ -628,61 +760,29 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
 
             full_reply = _output_guard.redact_pii(full_reply)
 
-            contexts = [h.get("text") or h.get("answer", "") for h in hits]
-            faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
-            escalate, esc_reason = _output_guard.should_escalate(faith, hits)
-            response_judge = model._evaluate_response_judge(
+            guard = _apply_output_guards(
+                model,
                 message=message,
                 reply=full_reply,
                 hits=hits,
                 citations=result.get("citations", []),
-                faithfulness_score=faith,
-                escalation_required=escalate,
-                escalation_reason=esc_reason,
+                conversation_history=conversation_history,
+                session_id=session_id,
+                conversation_id=result.get("conversation_id") or conversation_id or "",
+                output_guard=_output_guard,
+                existing_handoff=result.get("handoff"),
+                existing_ticket_id=result.get("ticket_id", ""),
             )
-            if (
-                response_judge.get("decision") == "revise"
-                and response_judge.get("revised_reply")
-            ):
-                full_reply = _output_guard.sanitize(
-                    _output_guard.redact_pii(response_judge["revised_reply"])
-                )
-                faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
-                escalate, esc_reason = _output_guard.should_escalate(faith, hits)
-                response_judge["applied_revision"] = True
-                response_judge["final_decision"] = "escalate" if escalate else "approve"
+            full_reply = guard["reply"]
+            faith = guard["faithfulness"]
+            escalate = guard["escalate"]
+            esc_reason = guard["escalation_reason"]
+            response_judge = guard["response_judge"]
+            handoff = guard["handoff"]
+            ticket_id = guard["ticket_id"]
+            if guard["revised"]:
                 yield ("revision", full_reply)
-            else:
-                response_judge["final_decision"] = response_judge.get("decision", "approve")
-            if response_judge.get("final_decision") == "escalate":
-                escalate = True
-                if not esc_reason:
-                    esc_reason = "; ".join(response_judge.get("reasons") or [])
-            response_judge.pop("revised_reply", None)
 
-            handoff = result.get("handoff")
-            if escalate and not handoff:
-                handoff = model._build_handoff_packet(
-                    message=message,
-                    reason=esc_reason,
-                    conversation_history=conversation_history or None,
-                    hits=hits,
-                    faithfulness_score=faith,
-                )
-            ticket_id = result.get("ticket_id", "")
-            if escalate and not ticket_id:
-                ticket_id = model._maybe_create_ticket(
-                    reason=esc_reason,
-                    user_query=message,
-                    bot_reply=full_reply,
-                    session_id=session_id or None,
-                    conversation_id=result.get("conversation_id")
-                    or conversation_id
-                    or "",
-                    priority=(handoff or {}).get("priority", "normal"),
-                    handoff=handoff,
-                    response_judge=response_judge,
-                )
             result["handoff"] = handoff
             result["response_judge"] = response_judge
             result["ticket_id"] = ticket_id
@@ -772,8 +872,6 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     * ``("_full_reply", str)`` — internal: full text for the caller
                                  to pass to the grounding stage.
     """
-    import asyncio
-
     loop = asyncio.get_running_loop()
     event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=512)
 

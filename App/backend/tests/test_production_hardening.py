@@ -36,11 +36,13 @@ SECURE_PROD_ENV = {
     "INDEX_API_KEY": "prod-index-key",
     "QDRANT_URL": "http://qdrant:6333",
     "QDRANT_API_KEY": "qdrant-secret",
+    "ANALYTICS_DB_DIR": "/data/ura",
     "SPEECH_ENABLED": "true",
     "FLAG_AUTH_REQUIRED": "true",
     "FLAG_MULTI_TENANT": "true",
     "FLAG_AUDIT_LEDGER": "true",
     "FLAG_VOICE_CONSENT": "true",
+    "WS_CONFIRM_HMAC_SECRET": "prod-confirm-hmac-secret-with-entropy",
     "REQUIRE_FRESH_AUTHORITY": "true",
 }
 
@@ -95,6 +97,50 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_production_validation_accepts_secure_baseline(self) -> None:
         with patch.dict(os.environ, self.secure_env, clear=True):
             _validate_production_env()
+
+    def test_external_qdrant_required_in_prod(self) -> None:
+        # P0-4: an in-container / localhost Qdrant is not durable.
+        env = {**self.secure_env, "QDRANT_URL": "http://localhost:6333"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        self.assertIn("QDRANT_URL must not be localhost", str(raised.exception))
+
+    def test_missing_qdrant_url_rejected_in_prod(self) -> None:
+        env = {k: v for k, v in self.secure_env.items() if k != "QDRANT_URL"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        self.assertIn("QDRANT_URL must point at an external/managed Qdrant", str(raised.exception))
+
+    def test_persistent_data_dir_required_in_prod(self) -> None:
+        # P0-4: SQLite-backed audit ledger + memory need a durable volume.
+        env = {k: v for k, v in self.secure_env.items() if k != "ANALYTICS_DB_DIR"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        self.assertIn("ANALYTICS_DB_DIR must be set", str(raised.exception))
+
+    def test_ephemeral_data_dir_rejected_in_prod(self) -> None:
+        env = {**self.secure_env, "ANALYTICS_DB_DIR": "/tmp/ura"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        self.assertIn("ANALYTICS_DB_DIR must be an absolute path on a persistent volume", str(raised.exception))
+
+    def test_native_voice_requires_auth_required_in_prod(self) -> None:
+        # P1-9: enabling a voice socket without auth in prod must fail closed.
+        env = {
+            **self.secure_env,
+            "FLAG_NATIVE_VOICE": "true",
+            "FLAG_AUTH_REQUIRED": "false",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        self.assertIn(
+            "FLAG_NATIVE_VOICE=true requires FLAG_AUTH_REQUIRED", str(raised.exception)
+        )
 
     def test_auth_required_rejects_missing_bearer_token(self) -> None:
         request = Request({"type": "http", "headers": []})

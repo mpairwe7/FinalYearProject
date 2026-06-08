@@ -188,8 +188,36 @@ def _validate_production_env() -> None:
     if index_key in ("", "dev-index-key"):
         errors.append("INDEX_API_KEY must be a strong non-dev operator token in production.")
 
-    if os.getenv("QDRANT_URL") and not os.getenv("QDRANT_API_KEY"):
+    # P0-4: vectors must live in an external/managed Qdrant, not the ephemeral
+    # in-container default that is wiped on restart.
+    qdrant_url = os.getenv("QDRANT_URL", "")
+    if not qdrant_url:
+        errors.append(
+            "QDRANT_URL must point at an external/managed Qdrant in production "
+            "(the in-container default is not durable)."
+        )
+    elif any(h in qdrant_url for h in ("localhost", "127.0.0.1", "[::1]")):
+        errors.append(
+            "QDRANT_URL must not be localhost in production — use an external/managed Qdrant."
+        )
+    if qdrant_url and not os.getenv("QDRANT_API_KEY"):
         errors.append("QDRANT_API_KEY must be set when QDRANT_URL is configured in production.")
+
+    # P0-4: the audit ledger and conversation memory are SQLite-backed via
+    # ANALYTICS_DB_DIR even when analytics use Postgres, so that directory MUST
+    # be a mounted persistent volume — otherwise the tamper-evident audit trail
+    # and user memory are wiped on every container restart.
+    data_dir = os.getenv("ANALYTICS_DB_DIR", "")
+    if not data_dir:
+        errors.append(
+            "ANALYTICS_DB_DIR must be set to a mounted persistent volume in production "
+            "(the SQLite-backed audit ledger and memory are otherwise lost on restart)."
+        )
+    elif not os.path.isabs(data_dir) or data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):  # nosec B108 ephemeral-dir denylist, not temp-file creation  # noqa: S108
+        errors.append(
+            "ANALYTICS_DB_DIR must be an absolute path on a persistent volume in production "
+            f"(got {data_dir!r}; ephemeral or relative paths are not durable)."
+        )
 
     for redis_env in ("REDIS_URL", "SLOWAPI_STORAGE_URI"):
         redis_url = os.getenv(redis_env, "")
@@ -214,6 +242,14 @@ def _validate_production_env() -> None:
             "WS_CONFIRM_HMAC_SECRET must be set in production when FLAG_WS_CHAT=true "
             "(per-process random fallback is not safe across replicas)."
         )
+    # P1-9: voice sockets spin up ASR/TTS/LLM work per connection and must
+    # likewise never serve anonymous traffic in production.
+    for _voice_flag in ("native_voice", "voice_streaming"):
+        if _production_flag_enabled(_voice_flag) and not _production_flag_enabled("auth_required"):
+            errors.append(
+                f"FLAG_{_voice_flag.upper()}=true requires FLAG_AUTH_REQUIRED=true in production "
+                "(anonymous voice WebSocket is not allowed)."
+            )
 
     if authority_required():
         authority = get_authority_status()
