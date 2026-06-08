@@ -34,6 +34,10 @@ export default defineConfig({
             "--disable-setuid-sandbox",
             "--disable-gpu",
             "--disable-software-rasterizer",
+            "--disable-dev-shm-usage",
+            // Some locked-down containers can't spawn Chromium's zygote/renderer
+            // even with --no-sandbox; opt into single-process there via env.
+            ...(process.env.PW_SINGLE_PROCESS ? ["--single-process", "--no-zygote"] : []),
           ],
     },
   },
