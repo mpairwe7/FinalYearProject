@@ -28,11 +28,28 @@ try:
 except ValueError:
     CORRECTIVE_THRESHOLD = 0.3
 
+# P1-5: corrective threshold on the normalized [0,1] reranker scale.
+try:
+    CORRECTIVE_THRESHOLD_NORM = float(os.getenv("CORRECTIVE_RAG_THRESHOLD_NORM", "0.50"))
+except ValueError:
+    CORRECTIVE_THRESHOLD_NORM = 0.50
+
 
 def _avg_score(hits: list[dict[str, Any]]) -> float:
-    """Average reranker score of retrieved hits."""
+    """Average raw reranker/RRF score (used for improvement-delta + logging)."""
     scores = [h.get("score_rerank", h.get("score_rrf", 0.0)) for h in hits]
     return sum(scores) / max(len(scores), 1)
+
+
+def _avg_relevance(hits: list[dict[str, Any]]) -> float | None:
+    """Average calibrated [0,1] relevance, or ``None`` when no reranker signal
+    is available (RRF-only / keyword fallback) — see :func:`retriever.hit_relevance`."""
+    from .retriever import hit_relevance
+
+    scores = [r for h in hits if (r := hit_relevance(h)) is not None]
+    if not scores:
+        return None
+    return sum(scores) / len(scores)
 
 
 def _expand_query(query: str) -> str:
@@ -47,12 +64,20 @@ def _expand_query(query: str) -> str:
 
 
 def should_correct(hits: list[dict[str, Any]]) -> bool:
-    """Determine if corrective re-retrieval is needed."""
+    """Determine if corrective re-retrieval is needed (P1-5).
+
+    Gates on the normalized [0,1] relevance.  When no reranker signal is
+    available the relevance is incomparable, so we do not trigger correction on
+    a raw RRF score (which would spuriously fire on nearly every query).
+    """
     if not CORRECTIVE_ENABLED:
         return False
     if not hits:
         return True
-    return _avg_score(hits) < CORRECTIVE_THRESHOLD
+    avg = _avg_relevance(hits)
+    if avg is None:
+        return False
+    return avg < CORRECTIVE_THRESHOLD_NORM
 
 
 def corrective_retrieve(

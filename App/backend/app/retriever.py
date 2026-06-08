@@ -17,11 +17,13 @@ References:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
 import os
 import re
+import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -54,6 +56,86 @@ BM25_STATE_PATH = Path(
     os.getenv("BM25_STATE_PATH", str(_PROJECT_ROOT / "Model" / "bm25_state.json"))
 )
 
+# Fixed namespace so re-indexing identical content yields identical point ids
+# (idempotent upserts) and a stable per-collection binding sentinel.
+_POINT_ID_NAMESPACE = uuid.UUID("a3f1c2b4-1e2d-4f5a-8b6c-9d0e1f2a3b4c")
+
+
+def compute_corpus_hash(texts: list[str]) -> str:
+    """Order-sensitive content hash of the corpus used to fit BM25.
+
+    The BM25 token ids are assigned by first-seen order, so the sparse vectors
+    stored in Qdrant are only consistent with a ``bm25_state.json`` produced by
+    the *same* fit.  Stamping both artifacts with this hash lets the retriever
+    detect a stale state file paired with a freshly-rebuilt collection instead
+    of silently querying a desynced inverted index (P1-6).
+    """
+    h = hashlib.sha256()
+    for t in texts:
+        chunk = t or ""
+        h.update(str(len(chunk)).encode())
+        h.update(b"\x00")
+        h.update(chunk.encode("utf-8", "replace"))
+        h.update(b"\x01")
+    return h.hexdigest()
+
+
+def deterministic_point_id(doc: dict[str, Any]) -> str:
+    """Content-derived, stable Qdrant point id for idempotent reindexing.
+
+    Re-indexing the same chunk produces the same id, so a non-``--recreate``
+    rebuild overwrites rather than appending a duplicate row.
+    """
+    text = doc.get("text") or doc.get("answer") or ""
+    key = (
+        "::".join(str(doc.get(k, "")) for k in ("source", "page", "section", "chunk_id"))
+        + "::"
+        + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+    )
+    return str(uuid.uuid5(_POINT_ID_NAMESPACE, key))
+
+
+def bm25_binding_sentinel_id(collection: str) -> str:
+    """Deterministic id of the per-collection sentinel point holding the corpus
+    hash, used to verify the loaded bm25_state matches the live vectors."""
+    return str(uuid.uuid5(_POINT_ID_NAMESPACE, f"{collection}::__bm25_binding__"))
+
+
+def normalize_rerank_score(logit: float) -> float:
+    """Squash an unbounded cross-encoder rerank logit to a [0,1] relevance (P1-5).
+
+    Abstention/corrective thresholds previously compared raw reranker logits
+    (unbounded, often negative) against the same numbers as RRF scores
+    (~1/(k+rank) ≈ 0.016) — incomparable scales. A logistic squash gives one
+    calibrated scale to threshold against.
+    """
+    x = max(-30.0, min(30.0, float(logit)))
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def hit_relevance(hit: dict[str, Any]) -> float | None:
+    """Best-effort calibrated [0,1] relevance for a hit, or ``None`` (P1-5).
+
+    Prefers the normalized reranker score (``score_norm``), then squashes a raw
+    ``score_rerank``. Returns ``None`` when only an RRF score is available
+    (reranker absent/disabled): RRF magnitudes are not comparable to the
+    reranker scale, so callers treat ``None`` as a *degraded* signal and avoid
+    score-based gating instead of abstaining on an incomparable number.
+    """
+    norm = hit.get("score_norm")
+    if norm is not None:
+        try:
+            return float(norm)
+        except (TypeError, ValueError):
+            return None
+    rr = hit.get("score_rerank")
+    if rr is not None:
+        try:
+            return normalize_rerank_score(float(rr))
+        except (TypeError, ValueError):
+            return None
+    return None
+
 
 # ---------------------------------------------------------------------------
 # BM25 sparse encoder
@@ -72,6 +154,7 @@ class BM25SparseEncoder:
         self._k1: float = 1.2
         self._b: float = 0.75
         self._avg_dl: float = 0.0
+        self._corpus_hash: str = ""
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
@@ -100,7 +183,13 @@ class BM25SparseEncoder:
         for tid, df in doc_freq.items():
             self._idf[tid] = math.log((n_docs - df + 0.5) / (df + 0.5) + 1.0)
 
-        logger.info("BM25 encoder fit: vocab=%d docs=%d", len(self._vocab), n_docs)
+        self._corpus_hash = compute_corpus_hash(documents)
+        logger.info(
+            "BM25 encoder fit: vocab=%d docs=%d corpus=%s",
+            len(self._vocab),
+            n_docs,
+            self._corpus_hash[:12],
+        )
         return self
 
     def encode(self, text: str) -> tuple[list[int], list[float]]:
@@ -126,6 +215,10 @@ class BM25SparseEncoder:
 
         return indices, values
 
+    @property
+    def corpus_hash(self) -> str:
+        return self._corpus_hash
+
     # -- Serialisation -------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -133,6 +226,7 @@ class BM25SparseEncoder:
             "idf": {str(k): v for k, v in self._idf.items()},
             "avg_dl": self._avg_dl,
             "next_id": self._next_id,
+            "corpus_hash": self._corpus_hash,
         }
 
     @classmethod
@@ -142,6 +236,7 @@ class BM25SparseEncoder:
         enc._idf = {int(k): v for k, v in data["idf"].items()}
         enc._avg_dl = data.get("avg_dl", 0.0)
         enc._next_id = data.get("next_id", 0)
+        enc._corpus_hash = data.get("corpus_hash", "")
         return enc
 
 
@@ -161,6 +256,9 @@ class HybridRetriever:
         self._reranker: Any = None
         self._sparse_encoder = BM25SparseEncoder()
         self._ready = False
+        # Disabled at init time if the loaded bm25_state is out of sync with
+        # the live Qdrant vectors (P1-6) — search then runs dense-only.
+        self._sparse_ok = True
         self._circuit = CircuitBreaker(
             name="qdrant",
             failure_threshold=3,
@@ -187,6 +285,7 @@ class HybridRetriever:
                 with open(BM25_STATE_PATH) as f:
                     self._sparse_encoder = BM25SparseEncoder.from_dict(json.load(f))
                 logger.info("Loaded BM25 state from %s", BM25_STATE_PATH)
+            self._verify_bm25_binding()
 
             from sentence_transformers import CrossEncoder, SentenceTransformer
 
@@ -228,6 +327,43 @@ class HybridRetriever:
             logger.warning("HybridRetriever init failed; keyword fallback active", exc_info=True)
             self._ready = False
             return False
+
+    def _verify_bm25_binding(self) -> None:
+        """Disable sparse retrieval if the loaded bm25_state's corpus hash does
+        not match the one stamped into Qdrant at index time (P1-6).
+
+        A mismatch means the inverted index and the BM25 vocab/idf came from
+        different index runs, so the sparse half would return garbage.  A
+        missing sentinel (pre-P1-6 collection) is treated as "can't verify" and
+        leaves sparse enabled for backward compatibility.
+        """
+        local = self._sparse_encoder.corpus_hash
+        if not local:
+            return  # old state file without a hash — nothing to compare
+        try:
+            points = self._client.retrieve(
+                collection_name=QDRANT_COLLECTION,
+                ids=[bm25_binding_sentinel_id(QDRANT_COLLECTION)],
+                with_payload=True,
+                with_vectors=False,
+            )
+            remote = str((points[0].payload or {}).get("corpus_hash", "")) if points else ""
+            if not remote:
+                logger.warning(
+                    "BM25 binding sentinel missing in Qdrant; cannot verify "
+                    "sparse/state consistency — reindex to write it."
+                )
+                return
+            if remote != local:
+                self._sparse_ok = False
+                logger.error(
+                    "BM25 state/Qdrant corpus hash MISMATCH (state=%s qdrant=%s) — "
+                    "disabling sparse retrieval to avoid desynced results; reindex.",
+                    local[:12],
+                    remote[:12],
+                )
+        except Exception:
+            logger.warning("BM25 binding verification failed; leaving sparse enabled", exc_info=True)
 
     @property
     def is_ready(self) -> bool:
@@ -280,7 +416,7 @@ class HybridRetriever:
             prefetch = [
                 models.Prefetch(query=dense_vec, using="dense", limit=prefetch_limit),
             ]
-            if sparse_idx:
+            if sparse_idx and self._sparse_ok:
                 prefetch.append(
                     models.Prefetch(
                         query=models.SparseVector(indices=sparse_idx, values=sparse_val),
@@ -304,6 +440,8 @@ class HybridRetriever:
             candidates: list[dict[str, Any]] = []
             for pt in results.points:
                 p = pt.payload or {}
+                if p.get("_meta") == "bm25_binding":
+                    continue  # internal corpus-hash sentinel, not a document
                 candidates.append(
                     {
                         "id": str(pt.id),
@@ -328,6 +466,7 @@ class HybridRetriever:
                 scores = self._reranker.predict(pairs)
                 for i, s in enumerate(scores):
                     candidates[i]["score_rerank"] = float(s)
+                    candidates[i]["score_norm"] = normalize_rerank_score(float(s))
                 candidates.sort(key=lambda x: x.get("score_rerank", 0.0), reverse=True)
 
             self._circuit.record_success()

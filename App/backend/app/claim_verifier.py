@@ -12,6 +12,8 @@ import os
 import re
 from typing import Any
 
+from .entailment import is_contradicted
+
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
 _SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|$)")
 _WORD_RE = re.compile(r"[a-zA-Z0-9]+")
@@ -123,6 +125,7 @@ def verify_claims(
         "supported_claim_count": 0,
         "uncited_claims": [],
         "unsupported_claims": [],
+        "contradicted_claims": [],
         "backend": "deterministic_overlap_v1",
     }
     if not claims:
@@ -152,6 +155,13 @@ def verify_claims(
         if claim_numbers and not claim_numbers <= context_numbers:
             overlap = min(overlap, 0.25)
 
+        # P1-8: a claim whose percentage conflicts with the cited context is a
+        # hard contradiction (e.g. answer "20%" vs source "18%") — force it
+        # unsupported so the response judge escalates rather than disclaiming.
+        contradicted = is_contradicted(clean_claim, contexts)
+        if contradicted:
+            overlap = 0.0
+
         item = {
             "text": clean_claim.strip()[:220],
             "refs": [f"[{ref}]" for ref in refs],
@@ -163,11 +173,15 @@ def verify_claims(
             supported += 1
         else:
             report["unsupported_claims"].append(item)
+            if contradicted:
+                report["contradicted_claims"].append(item)
 
     report["supported_claim_count"] = supported
     report["score"] = round(supported / len(claims), 4)
 
-    if report["unsupported_claims"]:
+    if report["contradicted_claims"]:
+        report["decision"] = "escalate"
+    elif report["unsupported_claims"]:
         report["decision"] = "escalate" if report["score"] < 0.5 else "revise"
     elif report["uncited_claims"]:
         report["decision"] = "revise"

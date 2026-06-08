@@ -3351,6 +3351,22 @@ class ChatModel:
             return text
         return redact_pii_text(text)
 
+    @staticmethod
+    def contexts_json(result: dict[str, Any] | None, limit: int = 8) -> str:
+        """Serialise the top-k retrieved passage texts for this turn (P0-2).
+
+        Persisted alongside the conversation so the eval harness can score
+        faithfulness against the ACTUAL retrieved context instead of the
+        answer itself. Returns ``"[]"`` when no hits are available. Passages
+        are knowledge-base text (not user PII), so they are stored verbatim.
+        """
+        hits = (result or {}).get("_hits") or []
+        texts = [str(h.get("text") or h.get("answer") or "").strip() for h in hits[:limit]]
+        try:
+            return json.dumps([t for t in texts if t])
+        except Exception:
+            return "[]"
+
     # -- Classification -----------------------------------------------------
     def classify(self, text: str, top_k: int = 1) -> dict[str, Any]:
         """Classify *text* against known FAQ tags by keyword overlap."""

@@ -570,6 +570,7 @@ def chat(
             user_message=_CM.redact_for_storage(body.message),
             bot_reply=_CM.redact_for_storage(result["reply"]),
             sources=json.dumps(result.get("sources", [])),
+            contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             confidence=confidence,
             topic_tag=topic_tag,
@@ -687,6 +688,7 @@ def _log_stream_conversation(body: ChatRequest, session_id: str, log_payload: di
             user_message=_CM.redact_for_storage(body.message),
             bot_reply=_CM.redact_for_storage(full_reply),
             sources=json.dumps(result.get("sources", []) if result else []),
+            contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
         )
     except Exception:
@@ -1069,6 +1071,7 @@ async def voice_chat(
             user_message=_CM.redact_for_storage(transcript),
             bot_reply=_CM.redact_for_storage(reply_text),
             sources=json.dumps(chat_result.get("sources", [])),
+            contexts=_CM.contexts_json(chat_result),
             response_time_ms=round(total_latency * 1000, 2),
         )
     except Exception:
