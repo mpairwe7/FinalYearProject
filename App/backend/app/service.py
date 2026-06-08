@@ -24,6 +24,7 @@ References:
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import csv
 import logging
@@ -364,8 +365,6 @@ def _apply_output_guards(
     returned ``reply`` may differ (a grounded revision was substituted); when
     ``revised`` is True the caller should emit a ``("revision", reply)`` event.
     """
-    from .retriever import HybridRetriever
-
     contexts = [h.get("text") or h.get("answer", "") for h in hits]
     faith = HybridRetriever.compute_faithfulness(reply, contexts)
     escalate, esc_reason = output_guard.should_escalate(faith, hits)
@@ -506,11 +505,9 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
     event_callback:
         Phase 2 hook; ignored in Phase 1.
     """
-    import asyncio
     import inspect
 
     from .guardrails import OutputGuard
-    from .retriever import HybridRetriever
 
     _output_guard = OutputGuard()
     t0 = time.perf_counter()
@@ -873,8 +870,6 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     * ``("_full_reply", str)`` — internal: full text for the caller
                                  to pass to the grounding stage.
     """
-    import asyncio
-
     loop = asyncio.get_running_loop()
     event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=512)
 

@@ -44,8 +44,8 @@ def _parse_ts(value: object) -> _dt.datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=_dt.timezone.utc)
-    return parsed.astimezone(_dt.timezone.utc)
+        parsed = parsed.replace(tzinfo=_dt.UTC)
+    return parsed.astimezone(_dt.UTC)
 
 
 def _sha256_file(path: Path) -> str:
@@ -99,7 +99,7 @@ def get_authority_status() -> dict[str, Any]:
     if generated_at is None:
         status["errors"].append("authority manifest missing generated_at timestamp")
     else:
-        age_days = max(0.0, (_dt.datetime.now(_dt.timezone.utc) - generated_at).total_seconds() / 86400)
+        age_days = max(0.0, (_dt.datetime.now(_dt.UTC) - generated_at).total_seconds() / 86400)
         status["age_days"] = round(age_days, 3)
         if age_days <= max_age_days:
             status["fresh"] = True

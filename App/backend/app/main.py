@@ -213,7 +213,7 @@ def _validate_production_env() -> None:
             "ANALYTICS_DB_DIR must be set to a mounted persistent volume in production "
             "(the SQLite-backed audit ledger and memory are otherwise lost on restart)."
         )
-    elif not os.path.isabs(data_dir) or data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):
+    elif not os.path.isabs(data_dir) or data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):  # nosec B108 ephemeral-dir denylist, not temp-file creation  # noqa: S108
         errors.append(
             "ANALYTICS_DB_DIR must be an absolute path on a persistent volume in production "
             f"(got {data_dir!r}; ephemeral or relative paths are not durable)."

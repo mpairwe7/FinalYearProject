@@ -24,7 +24,7 @@ class AuthorityManifestTests(unittest.TestCase):
             json.dumps(
                 {
                     "version": "test",
-                    "generated_at": (generated_at or dt.datetime.now(dt.timezone.utc)).isoformat(),
+                    "generated_at": (generated_at or dt.datetime.now(dt.UTC)).isoformat(),
                     "max_age_days": 30,
                     "sources": [
                         {
@@ -50,7 +50,7 @@ class AuthorityManifestTests(unittest.TestCase):
         self.assertEqual(status["sources_checked"], 1)
 
     def test_stale_manifest_fails_required_rate_lookup(self) -> None:
-        tmp, manifest = self._manifest(generated_at=dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=90))
+        tmp, manifest = self._manifest(generated_at=dt.datetime.now(dt.UTC) - dt.timedelta(days=90))
         try:
             env = {
                 "APP_ENV": "production",
