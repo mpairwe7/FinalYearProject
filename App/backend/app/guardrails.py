@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", "2000"))
 STORE_RAW_PROMPTS = os.getenv("STORE_RAW_PROMPTS", "false").lower() == "true"
 ABSTENTION_THRESHOLD = float(os.getenv("ABSTENTION_THRESHOLD", "0.15"))
+# P1-5: abstention threshold on the normalized [0,1] reranker scale.
+ABSTENTION_THRESHOLD_NORM = float(os.getenv("ABSTENTION_THRESHOLD_NORM", "0.30"))
 ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 
 # System prompt phrases that must never appear verbatim in a model response
@@ -380,12 +382,22 @@ class OutputGuard:
         return GuardResult(allowed=True, sanitized_text=answer)
 
     @staticmethod
-    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD) -> bool:
-        """Return True if the best retrieval score is too low to answer."""
+    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD_NORM) -> bool:
+        """Return True if the best calibrated retrieval relevance is too low.
+
+        Uses the normalized [0,1] reranker score (P1-5). When no reranker
+        signal is available (RRF-only / keyword fallback), relevance is unknown
+        — we do NOT abstain on an incomparable raw score; the presence of hits
+        plus downstream grounding/claim checks govern.
+        """
         if not hits:
             return True
-        best_score = max(h.get("score_rerank", h.get("score_rrf", 0.0)) for h in hits)
-        return best_score < threshold
+        from .retriever import hit_relevance
+
+        scores = [r for h in hits if (r := hit_relevance(h)) is not None]
+        if not scores:
+            return False  # degraded mode — cannot assess relevance by score
+        return max(scores) < threshold
 
     @staticmethod
     def should_escalate(

@@ -101,6 +101,42 @@ def bm25_binding_sentinel_id(collection: str) -> str:
     return str(uuid.uuid5(_POINT_ID_NAMESPACE, f"{collection}::__bm25_binding__"))
 
 
+def normalize_rerank_score(logit: float) -> float:
+    """Squash an unbounded cross-encoder rerank logit to a [0,1] relevance (P1-5).
+
+    Abstention/corrective thresholds previously compared raw reranker logits
+    (unbounded, often negative) against the same numbers as RRF scores
+    (~1/(k+rank) ≈ 0.016) — incomparable scales. A logistic squash gives one
+    calibrated scale to threshold against.
+    """
+    x = max(-30.0, min(30.0, float(logit)))
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def hit_relevance(hit: dict[str, Any]) -> float | None:
+    """Best-effort calibrated [0,1] relevance for a hit, or ``None`` (P1-5).
+
+    Prefers the normalized reranker score (``score_norm``), then squashes a raw
+    ``score_rerank``. Returns ``None`` when only an RRF score is available
+    (reranker absent/disabled): RRF magnitudes are not comparable to the
+    reranker scale, so callers treat ``None`` as a *degraded* signal and avoid
+    score-based gating instead of abstaining on an incomparable number.
+    """
+    norm = hit.get("score_norm")
+    if norm is not None:
+        try:
+            return float(norm)
+        except (TypeError, ValueError):
+            return None
+    rr = hit.get("score_rerank")
+    if rr is not None:
+        try:
+            return normalize_rerank_score(float(rr))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 # ---------------------------------------------------------------------------
 # BM25 sparse encoder
 # ---------------------------------------------------------------------------
@@ -430,6 +466,7 @@ class HybridRetriever:
                 scores = self._reranker.predict(pairs)
                 for i, s in enumerate(scores):
                     candidates[i]["score_rerank"] = float(s)
+                    candidates[i]["score_norm"] = normalize_rerank_score(float(s))
                 candidates.sort(key=lambda x: x.get("score_rerank", 0.0), reverse=True)
 
             self._circuit.record_success()
