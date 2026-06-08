@@ -126,6 +126,104 @@ _LLM_CIRCUIT = CircuitBreaker(
 )
 
 
+def _build_fallback_prompt(
+    query: str, passages: list[dict[str, Any]], locale: str
+) -> tuple[str, str]:
+    """RAG system+user prompt for a cloud LLM fallback (Gemini / Workers AI)."""
+    ctx = "\n\n".join(
+        f"[{i + 1}] {(p.get('text') or p.get('answer') or p.get('question') or '')[:800]}"
+        for i, p in enumerate(passages[:6])
+    )
+    system = (
+        "You are the URA (Uganda Revenue Authority) tax assistant. Answer ONLY "
+        "from the context below and cite passages like [1]. If the context does "
+        "not contain the answer, say you don't have enough information."
+    )
+    if locale and locale != "en":
+        system += f" Respond in the user's language (locale={locale})."
+    return system, f"Context:\n{ctx}\n\nQuestion: {query}"
+
+
+def _llm_cloud_fallback(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str = "",
+) -> str:
+    """Generate via Cloudflare Gemini / Workers AI when the primary LLM is down.
+
+    Gated by ``cloudflare_fallback`` + ``LLM_FALLBACK_BACKEND`` and each provider's
+    circuit breaker + free-tier budget, so it fires only when the primary is
+    unavailable and the cloud path is configured/under budget. Returns "" to let
+    the caller fall back to the best-hit FAQ answer.
+    """
+    if not flags.is_enabled("cloudflare_fallback"):
+        return ""
+    backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
+    if backend not in ("gemini", "workers_ai"):
+        return ""
+    try:
+        from .providers import breakers, budget
+        from .providers import config as cfg
+        from .providers import gateway as gw
+    except Exception:  # providers optional / deps missing
+        return ""
+
+    system, user = _build_fallback_prompt(query, passages, locale)
+
+    if (
+        backend == "gemini"
+        and cfg.is_gemini_configured()
+        and breakers.GEMINI_BREAKER.allow_request()
+        and budget.try_consume_gemini_call()
+    ):
+        try:
+            text = gw.gemini_generate(user, system=system, max_tokens=512, temperature=0.2)
+            breakers.GEMINI_BREAKER.record_success()
+            logger.info("LLM fallback via Gemini succeeded")
+            return text
+        except Exception:
+            breakers.GEMINI_BREAKER.record_failure()
+            logger.warning("LLM Gemini fallback failed", exc_info=True)
+
+    if (
+        cfg.is_cloudflare_configured()
+        and breakers.CF_LLM_BREAKER.allow_request()
+        and budget.try_consume_neurons(5)
+    ):
+        try:
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+            text = gw.workers_ai_chat(messages, max_tokens=512, temperature=0.2)
+            breakers.CF_LLM_BREAKER.record_success()
+            logger.info("LLM fallback via Workers AI succeeded")
+            return text
+        except Exception:
+            breakers.CF_LLM_BREAKER.record_failure()
+            logger.warning("LLM Workers AI fallback failed", exc_info=True)
+    return ""
+
+
+def _stream_cloud_fallback(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str = "",
+) -> Generator[str, None, None]:
+    """Yield the cloud-fallback answer in word chunks for the SSE/WS stream path."""
+    text = _llm_cloud_fallback(
+        query, passages, conversation_history, locale, personalization_context
+    )
+    if not text:
+        return
+    for chunk in re.findall(r"\S+\s*", text):
+        yield chunk
+
+
 def _call_llm_with_deadline(
     query: str,
     passages: list[dict[str, Any]],
@@ -141,8 +239,10 @@ def _call_llm_with_deadline(
     return an empty string so the caller falls back to FAQ lookup.
     """
     if not _LLM_CIRCUIT.allow_request():
-        logger.warning("LLM circuit breaker OPEN — skipping generation")
-        return ""
+        logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
+        return _llm_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context
+        )
 
     future = _LLM_EXECUTOR.submit(
         llm_module.generate,
@@ -160,11 +260,15 @@ def _call_llm_with_deadline(
         future.cancel()  # best-effort; transformers generate may ignore
         _LLM_CIRCUIT.record_failure()
         logger.warning("LLM deadline %.1fs exceeded", deadline_s)
-        return ""
+        return _llm_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context
+        )
     except Exception:
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM generation raised")
-        return ""
+        return _llm_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context
+        )
 
 
 def stream_llm_tokens(
@@ -189,9 +293,15 @@ def stream_llm_tokens(
     token is the cancellation latency floor.
     """
     if not llm_module.is_available():
+        yield from _stream_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context
+        )
         return
     if not _LLM_CIRCUIT.allow_request():
-        logger.warning("LLM circuit breaker OPEN — skipping stream")
+        logger.warning("LLM circuit breaker OPEN — streaming via cloud fallback")
+        yield from _stream_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context
+        )
         return
 
     saw_tokens = False
@@ -217,9 +327,15 @@ def stream_llm_tokens(
             # Empty stream counts as a soft failure — the breaker tracks
             # it so a continually empty worker eventually trips.
             _LLM_CIRCUIT.record_failure()
+            yield from _stream_cloud_fallback(
+                query, passages, conversation_history, locale, personalization_context
+            )
     except Exception:
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM streaming raised")
+        yield from _stream_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context
+        )
         return
 
 

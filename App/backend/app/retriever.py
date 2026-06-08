@@ -41,6 +41,10 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
 QDRANT_ENABLED = os.getenv("QDRANT_ENABLED", "true").lower() not in ("0", "false", "no", "off")
+# When Qdrant is unavailable (e.g. CPU-only Crane Cloud), restore dense
+# retrieval via Cloudflare Workers AI bge-m3 + Vectorize instead of degrading
+# to keyword-only.  "" disables; "workers_ai" enables the cloud dense fallback.
+DENSE_FALLBACK_BACKEND = os.getenv("DENSE_FALLBACK_BACKEND", "").strip().lower()
 # 2026 default embedding: BAAI/bge-m3 — multilingual (100+ langs incl.
 # Bantu-family languages relevant to Luganda), 1024-dim, current MTEB
 # state-of-art for free models.  Set DENSE_MODEL=sentence-transformers/
@@ -259,6 +263,9 @@ class HybridRetriever:
         # Disabled at init time if the loaded bm25_state is out of sync with
         # the live Qdrant vectors (P1-6) — search then runs dense-only.
         self._sparse_ok = True
+        # Set when Qdrant is off but the Workers AI + Vectorize dense fallback
+        # is configured — search() then routes to _search_vectorize().
+        self._vectorize_mode = False
         self._circuit = CircuitBreaker(
             name="qdrant",
             failure_threshold=3,
@@ -269,6 +276,8 @@ class HybridRetriever:
     def initialize(self) -> bool:
         """Connect to Qdrant and load models.  Returns ``True`` if ready."""
         if not QDRANT_ENABLED:
+            if self._init_vectorize_mode():
+                return True
             logger.info("HybridRetriever disabled by QDRANT_ENABLED=false; keyword fallback active")
             return False
         try:
@@ -328,6 +337,104 @@ class HybridRetriever:
             self._ready = False
             return False
 
+    def _init_vectorize_mode(self) -> bool:
+        """Restore dense retrieval via Workers AI bge-m3 + Vectorize when Qdrant
+        is off (no GPU/torch needed). Returns True if the fallback is active."""
+        if DENSE_FALLBACK_BACKEND != "workers_ai":
+            return False
+        try:
+            from .providers import config as _cfg
+
+            if not _cfg.is_vectorize_configured():
+                logger.info(
+                    "DENSE_FALLBACK_BACKEND=workers_ai but Vectorize/Cloudflare not configured"
+                )
+                return False
+            self._vectorize_mode = True
+            self._ready = True
+            logger.info(
+                "HybridRetriever ready in Vectorize fallback mode "
+                "(Cloudflare Workers AI bge-m3 + Vectorize, no GPU)"
+            )
+            return True
+        except Exception:
+            logger.warning("Vectorize fallback init failed", exc_info=True)
+            return False
+
+    def _search_vectorize(
+        self,
+        query: str,
+        top_k: int,
+        prefetch_limit: int,
+        filters: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Dense retrieval via Workers AI bge-m3 -> Vectorize, fused client-side
+        with a lexical (BM25-lite) re-score via RRF.  CPU-only hybrid."""
+        from .providers import breakers, budget
+        from .providers import gateway as _gw
+        from .providers import vectorize as _vz
+
+        if not breakers.VECTORIZE_BREAKER.allow_request():
+            logger.warning("Vectorize circuit OPEN — skipping dense fallback")
+            return []
+        if not budget.try_consume_neurons(1):
+            logger.info("Workers AI neuron budget exhausted — skipping dense fallback")
+            return []
+        try:
+            dense_vec = _gw.workers_ai_embed([query])[0]
+            vfilter = None
+            if filters:
+                eqs = {k: {"$eq": v} for k, v in filters.items() if not isinstance(v, list)}
+                vfilter = eqs or None
+            hits = _vz.vectorize_query(dense_vec, top_k=prefetch_limit, vector_filter=vfilter)
+            breakers.VECTORIZE_BREAKER.record_success()
+        except Exception:
+            breakers.VECTORIZE_BREAKER.record_failure()
+            logger.exception("Vectorize dense fallback failed")
+            return []
+
+        if not hits:
+            return []
+
+        # Client-side RRF: dense rank (Vectorize order) + lexical rank (query-term
+        # overlap), restoring a hybrid signal without Qdrant/torch.
+        q_terms = set(re.findall(r"\w+", query.lower()))
+
+        def _lexical(text: str) -> float:
+            toks = re.findall(r"\w+", (text or "").lower())
+            if not toks:
+                return 0.0
+            return sum(1 for t in toks if t in q_terms) / math.sqrt(len(toks))
+
+        lex_order = sorted(
+            range(len(hits)), key=lambda i: _lexical(hits[i].get("text", "")), reverse=True
+        )
+        k = 60
+        rrf = [0.0] * len(hits)
+        for dense_rank in range(len(hits)):  # Vectorize returns best-first
+            rrf[dense_rank] += 1.0 / (k + dense_rank)
+        for lex_rank, i in enumerate(lex_order):
+            rrf[i] += 1.0 / (k + lex_rank)
+
+        order = sorted(range(len(hits)), key=lambda i: rrf[i], reverse=True)
+        candidates = [
+            {
+                "id": str(hits[i].get("id", "")),
+                "text": hits[i].get("text", ""),
+                "question": "",
+                "answer": "",
+                "source": hits[i].get("source", ""),
+                "chunk_id": str(hits[i].get("id", "")),
+                "page": hits[i].get("page", ""),
+                "section": hits[i].get("section", ""),
+                "doc_type": "",
+                "score_rrf": float(rrf[i]),
+            }
+            for i in order
+        ]
+        self._ready = True
+        return candidates[:top_k]
+
     def _verify_bm25_binding(self) -> None:
         """Disable sparse retrieval if the loaded bm25_state's corpus hash does
         not match the one stamped into Qdrant at index time (P1-6).
@@ -369,7 +476,7 @@ class HybridRetriever:
     def is_ready(self) -> bool:
         """Check if retriever was initialised. Does NOT do a live call —
         the circuit breaker in ``search()`` handles transient failures."""
-        return self._ready and self._client is not None
+        return self._ready and (self._client is not None or self._vectorize_mode)
 
     def search(
         self,
@@ -383,6 +490,9 @@ class HybridRetriever:
         *filters* accepts Qdrant payload filter keys, e.g.
         ``{"doc_type": "pdf", "tag": "vat"}``.
         """
+        if self._vectorize_mode:
+            return self._search_vectorize(query, top_k, prefetch_limit, filters)
+
         if not self._ready or self._client is None or self._dense_model is None:
             return []
 

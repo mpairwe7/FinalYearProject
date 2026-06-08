@@ -403,10 +403,61 @@ class SpeechModel:
         except Exception:
             logger.debug("Sunbird STT fallback also failed")
 
+        # ⑤ Cloudflare Workers AI Whisper (final cloud net; flag/budget-gated)
+        cf_text = self._cf_whisper_transcribe(audio_bytes, sample_rate, language)
+        if cf_text:
+            return TranscribeResult(
+                text=cf_text, language=language or "en", backend="cf_workers_ai"
+            )
+
         return TranscribeResult(
             text="", backend="unavailable",
-            error="All ASR backends failed (local Whisper+LoRA, Sherpa, faster-whisper, Sunbird)",
+            error="All ASR backends failed (Whisper+LoRA, Sherpa, faster-whisper, Sunbird, Workers AI)",
         )
+
+    def _cf_whisper_transcribe(
+        self, audio_bytes: bytes, sample_rate: int, language: str | None
+    ) -> str:
+        """Cloud STT via Cloudflare Workers AI Whisper (flag/budget/breaker-gated)."""
+        from .flags import flags
+
+        if not flags.is_enabled("cloudflare_fallback"):
+            return ""
+        if os.getenv("STT_FALLBACK_BACKEND", "").strip().lower() != "workers_ai":
+            return ""
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+        except Exception:
+            return ""
+        if not (
+            cfg.is_cloudflare_configured()
+            and breakers.CF_STT_BREAKER.allow_request()
+            and budget.try_consume_neurons(5)
+        ):
+            return ""
+        try:
+            import io as _io
+            import wave as _wave
+
+            import numpy as np
+
+            samples = self._decode_audio_bytes(audio_bytes, target_sr=sample_rate)
+            pcm16 = (samples * 32768).clip(-32768, 32767).astype("int16")
+            buf = _io.BytesIO()
+            with _wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sample_rate)
+                w.writeframes(pcm16.tobytes())
+            res = gw.workers_ai_stt(buf.getvalue())
+            breakers.CF_STT_BREAKER.record_success()
+            return (res.get("text") or "").strip()
+        except Exception:
+            breakers.CF_STT_BREAKER.record_failure()
+            logger.warning("Workers AI Whisper STT failed", exc_info=True)
+            return ""
 
     def _transcribe_whisper_peft(
         self,
@@ -1020,6 +1071,17 @@ class SpeechModel:
             except Exception:
                 logger.debug("Local MT failed, trying Sunbird cloud fallback")
 
+        # 2.5 Gemini 2.5 Flash cloud translation (strong on Luganda; flag/budget-gated)
+        gemini_out = self._gemini_translate(text, source_lang, target_lang)
+        if gemini_out:
+            return TranslateResult(
+                text=gemini_out,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                latency_s=round(time.perf_counter() - t0, 3),
+                backend="gemini_flash",
+            )
+
         # 3. Sunbird cloud (fallback — NLLB translation API)
         try:
             from . import sunbird
@@ -1046,6 +1108,54 @@ class SpeechModel:
             backend="error",
             error="No translation backend available (Qwen3, local MT, and Sunbird all failed)",
         )
+
+    @staticmethod
+    def _gemini_translate(text: str, source_lang: str, target_lang: str) -> str:
+        """Translate via Gemini 2.5 Flash through the AI Gateway (Luganda-strong).
+
+        Flag/budget/breaker-gated; returns "" when disabled or unavailable so the
+        Sunbird tier still runs.
+        """
+        from .flags import flags
+
+        if not flags.is_enabled("cloudflare_fallback"):
+            return ""
+        if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() != "gemini":
+            return ""
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+        except Exception:
+            return ""
+        if not (
+            cfg.is_gemini_configured()
+            and breakers.GEMINI_BREAKER.allow_request()
+            and budget.try_consume_gemini_call()
+        ):
+            return ""
+        names = {
+            "lg": "Luganda", "en": "English", "nyn": "Runyankole",
+            "ach": "Acholi", "sw": "Swahili",
+        }
+        src, tgt = names.get(source_lang, source_lang), names.get(target_lang, target_lang)
+        try:
+            out = gw.gemini_generate(
+                text,
+                system=(
+                    f"You are a professional translator. Translate the user's text "
+                    f"from {src} to {tgt}. Output ONLY the translation — no notes, "
+                    f"quotes, or transliteration."
+                ),
+                max_tokens=512,
+                temperature=0.1,
+            )
+            breakers.GEMINI_BREAKER.record_success()
+            return out.strip()
+        except Exception:
+            breakers.GEMINI_BREAKER.record_failure()
+            logger.warning("Gemini translation failed", exc_info=True)
+            return ""
 
     # ------------------------------------------------------------------
     # Lifecycle
