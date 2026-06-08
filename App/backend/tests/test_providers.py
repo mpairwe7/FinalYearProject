@@ -270,6 +270,29 @@ class LLMFallbackTest(unittest.TestCase):
                 service._llm_cloud_fallback("vat?", [{"text": "x"}], None, "en"), ""
             )
 
+    def test_empty_primary_reply_triggers_cloud_fallback(self):
+        """A swallowed-error empty reply from the primary backend must route to
+        the cloud fallback, not return "" (regression: vLLM HTTP failure →
+        _vllm_generate returns "" → _call_llm_with_deadline recorded success)."""
+        from app import service
+
+        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(service.llm_module, "generate", return_value=""), \
+             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD ANSWER") as cf:
+            out = service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+        self.assertEqual(out, "CLOUD ANSWER")
+        cf.assert_called_once()
+
+    def test_nonempty_primary_reply_skips_fallback(self):
+        from app import service
+
+        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(service.llm_module, "generate", return_value="real answer [1]"), \
+             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cf:
+            out = service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+        self.assertEqual(out, "real answer [1]")
+        cf.assert_not_called()
+
     def test_fallback_disabled_without_backend_env(self):
         from app import service
 
