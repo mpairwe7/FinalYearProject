@@ -132,6 +132,37 @@ def _validate_production_env() -> None:
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
 
+    # Cloudflare/Gemini fallbacks: if the flag is explicitly on, the credentials
+    # it needs must be present (otherwise the fallback silently no-ops in prod).
+    # NB: use an explicit-on check (not _production_flag_enabled, which treats
+    # "unset" as on — that semantics is only for must-be-on security flags).
+    if os.getenv("FLAG_CLOUDFLARE_FALLBACK", "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from .providers import config as _cloud_cfg
+
+            if not _cloud_cfg.is_cloudflare_configured():
+                errors.append(
+                    "FLAG_CLOUDFLARE_FALLBACK=true but Cloudflare is not fully configured "
+                    "(need CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_AIG_GATEWAY, CF_AIG_TOKEN)."
+                )
+            if (
+                os.getenv("DENSE_FALLBACK_BACKEND", "").strip().lower() == "workers_ai"
+                and not _cloud_cfg.is_vectorize_configured()
+            ):
+                errors.append("DENSE_FALLBACK_BACKEND=workers_ai requires VECTORIZE_INDEX.")
+            gemini_used = (
+                os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower() == "gemini"
+                or os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() == "gemini"
+            )
+            if gemini_used and not _cloud_cfg.is_gemini_configured():
+                errors.append(
+                    "A *_FALLBACK_BACKEND=gemini is set but GEMINI_API_KEY (+ AI Gateway) is missing."
+                )
+        except Exception:
+            errors.append(
+                "FLAG_CLOUDFLARE_FALLBACK=true but the providers package failed to import."
+            )
+
     # CORS must not be localhost in production
     cors = os.getenv("CORS_ORIGINS", "")
     if not cors:

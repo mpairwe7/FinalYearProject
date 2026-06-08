@@ -55,12 +55,32 @@ STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
 ## Status
 
 - **Phase 1 — restore hybrid retrieval: DONE.** `providers/` package + `retriever`
-  Vectorize fallback (`_init_vectorize_mode` / `_search_vectorize`), unit-tested.
-  Once Vectorize is populated + the env is set, `/ready` flips to `hybrid`.
-- **Phase 2** — LLM fallback (Gemini/Workers AI) in `service._call_llm_with_deadline` / `stream_llm_tokens`: pending.
-- **Phase 3** — Gemini 2.5 Flash Luganda translation in `speech_service._do_translate` / `llm.translate_text`: pending.
-- **Phase 4** — Workers AI Whisper STT + R2 TTS cache in `speech_service`: pending.
-- **Phase 5** — R2 `bm25_state.json` durability, prod-validation block, Vectorize re-index CLI, offline bundles in R2, `/ready` breaker/budget surfacing: pending.
+  Vectorize fallback (`_init_vectorize_mode` / `_search_vectorize`). Once Vectorize
+  is populated + the env is set, `/ready` flips `keyword` → `hybrid`.
+- **Phase 2 — LLM fallback: DONE.** `service._llm_cloud_fallback` /
+  `_stream_cloud_fallback` wired into `_call_llm_with_deadline` + `stream_llm_tokens`,
+  keyed off `_LLM_CIRCUIT` (Gemini → Workers AI).
+- **Phase 3 — Gemini 2.5 Flash Luganda translation: DONE.** `SpeechModel._gemini_translate`
+  inserted as a tier in `_do_translate` (between local MT and Sunbird).
+- **Phase 4 — STT: DONE** (`SpeechModel._cf_whisper_transcribe`, Workers AI Whisper
+  tier ⑤ after Sunbird). **TTS R2 cache: deferred** (perf optimization; speech is off
+  on the live profile).
+- **Phase 5 — prod-validation guard: DONE** (`_validate_production_env` requires the
+  CF/Gemini creds when `FLAG_CLOUDFLARE_FALLBACK=true` in prod). **Deferred provisioning
+  bits:** Vectorize re-index CLI, R2 `bm25_state.json` durability, offline bundles in R2,
+  `/ready` breaker/budget surfacing.
+
+All flag-gated (`FLAG_CLOUDFLARE_FALLBACK`, default off). 17 provider/retriever/LLM/
+translation unit tests; full `App/backend` suite green; blocking ruff clean.
+
+### Deferred (follow-up, mostly provisioning-time)
+1. **Vectorize re-index CLI** — needed to populate the index before the dense
+   fallback returns anything (embeds via `gateway.workers_ai_embed`, no local torch).
+   Until then, `wrangler vectorize insert` with vectors from Workers AI + metadata.
+2. **R2 `bm25_state.json` durability** — only matters for a *Qdrant* deployment that
+   loses its volume; the Crane Cloud target uses Vectorize mode (lexical re-score, no
+   bm25_state needed), so this is niche.
+3. **TTS R2 audio cache** + **offline bundles in R2** — optimizations.
 
 ## Verification
 
