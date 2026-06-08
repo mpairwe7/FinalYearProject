@@ -89,3 +89,58 @@ Status: applied and verified with 72 new tests (0 regressions to existing 122 te
 - **Backward compatibility**: V1 WebSocket (`/v1/voice/chat/stream`) and all REST speech endpoints unchanged. V2 session degrades gracefully to V1 sentence-chunked TTS when CosyVoice2 is unavailable. All V2 components lazy-load behind feature flags (default OFF).
 - **Safety**: Vision OCR text passes through existing `InputGuard` / `scan_retrieved_text()` for indirect injection defense. Images validated (max 2MB, JPEG). Consent enforcement identical to V1. Audit ledger records vision events.
 - **Tests**: 72 new tests covering StreamingTTS (7), SpeculativePrefetcher (9), StreamingASR (4), QueryPlanner (8), VoiceCodec (8), VoiceSessionV2 (8), Phase28FeatureFlags (5), DocumentClassifier (12), OCR (6), VisionEncoder (3), VisionIntegration (2). Zero regressions in existing 122 tests.
+
+## Phase 0 - Architecture Review Remediation (Stop-the-bleeding)
+
+Status: applied with regression tests.
+
+Addresses the four highest-blast-radius findings from the principal-level
+architecture review (`~/.claude/plans/serialized-tinkering-engelbart.md`).
+
+- **P0-1 — Confirmation authz bypass closed.** The WebSocket `tool_call.confirm`
+  approve path (`chat_ws_v2.py`) now re-authorizes the submit through
+  `MCPClient.call_tool(..., confirmed=True, user_role=..., granted_purposes=...)`
+  instead of calling `ToolRegistry.call()` directly. The authenticated principal
+  (role + consents) is resolved from the verified JWT at `session_start` and
+  carried on the session — never taken from a client frame — and is also passed
+  into `run_chat_turn` so the agentic tool loop authorizes correctly. A
+  policy-denied submit now fails closed with `confirm_failed`. Regression tests
+  assert a critical tool is denied for a public principal and allowed for an
+  authorized one.
+- **P0-3 — Unified output-guard pipeline.** Extracted `_apply_output_guards()`
+  in `service.py`; both the token-streaming and the agentic (`tool_use`) branches
+  of `run_chat_turn` now run the identical post-generation pipeline (faithfulness
+  → claim verification → response judge → grounded revision → escalation/handoff/
+  ticket). Previously the agentic branch only computed a faithfulness score, so
+  enabling `FLAG_TOOL_USE` silently weakened grounding. `run_chat_turn` now also
+  runs claim verification on both paths.
+- **P1-9 — Voice WebSockets hardened.** `/v1` and `/v2` voice sockets now (a)
+  require auth when `FLAG_AUTH_REQUIRED` is on, (b) enforce per-user + global
+  concurrency caps via the new `ws_concurrency` module, and (c) bound both total
+  session duration and idle time. Production startup now refuses to boot when
+  `FLAG_NATIVE_VOICE`/`FLAG_VOICE_STREAMING` are enabled without
+  `FLAG_AUTH_REQUIRED`.
+- **P0-4 (config half) — Durable infra required in production.** Production
+  startup (`_validate_production_env`) now fails closed unless durable backing
+  services are configured. Postgres was already required; added:
+  - `QDRANT_URL` must be set and **non-localhost** (vectors must live in an
+    external/managed Qdrant, not the ephemeral in-container default), and
+    `QDRANT_API_KEY` must accompany it.
+  - `ANALYTICS_DB_DIR` must be set to an **absolute, non-ephemeral path** (not
+    `/tmp`, `/var/tmp`, `/dev/shm`, not relative). The audit ledger and
+    conversation memory are SQLite-backed via this directory **even when
+    `ANALYTICS_BACKEND=postgres`**, so it must point at a mounted persistent
+    volume or the tamper-evident audit trail and user memory are wiped on every
+    container restart.
+
+  **Operator action required:** a non-demo deployment must provide a managed
+  Postgres (`ANALYTICS_BACKEND=postgres` + `POSTGRES_DSN`), an external Qdrant
+  (`QDRANT_URL` + `QDRANT_API_KEY`), credentialed Redis (`REDIS_URL` /
+  `SLOWAPI_STORAGE_URI`), and a persistent-volume mount for `ANALYTICS_DB_DIR`.
+  New env knobs: `VOICE_WS_MAX_PER_USER` (3), `VOICE_WS_MAX_GLOBAL` (64),
+  `VOICE_WS_MAX_DURATION_S` (1800), `VOICE_WS_IDLE_TIMEOUT_S` (120).
+
+- **Deferred to a later phase (durability half of P0-4):** periodic Merkle-root
+  export + external anchoring and an auth-gated `verify_chain` endpoint.
+- **Incidental:** made `app/authority.py` timezone handling portable
+  (`datetime.timezone.utc` instead of the 3.11-only `datetime.UTC`).
