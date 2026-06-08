@@ -254,8 +254,19 @@ def _call_llm_with_deadline(
     )
     try:
         reply = future.result(timeout=deadline_s)
-        _LLM_CIRCUIT.record_success()
-        return reply or ""
+        if reply and reply.strip():
+            _LLM_CIRCUIT.record_success()
+            return reply
+        # Empty reply — llm_module.generate logs+swallows its own errors and
+        # returns "" (e.g. _vllm_generate on HTTP failure), so an empty string
+        # is our only failure signal here. Mirror the streaming path: record a
+        # failure and try the cloud fallback before the caller drops to the
+        # extractive best-hit answer.
+        _LLM_CIRCUIT.record_failure()
+        logger.warning("LLM returned empty — trying cloud fallback")
+        return _llm_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context
+        )
     except concurrent.futures.TimeoutError:
         future.cancel()  # best-effort; transformers generate may ignore
         _LLM_CIRCUIT.record_failure()
