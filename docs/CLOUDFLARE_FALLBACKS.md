@@ -44,7 +44,7 @@ Gemini uses `x-goog-api-key`. **No key is ever placed in a URL query string.**
 Set values in the gitignored `.env` (template: `.env.example`) for local dev, or
 as Crane Cloud deployment env. To activate on Crane Cloud:
 
-```
+```bash
 FLAG_CLOUDFLARE_FALLBACK=true
 DENSE_FALLBACK_BACKEND=workers_ai        # restores hybrid retrieval
 LLM_FALLBACK_BACKEND=gemini              # (Phase 2)

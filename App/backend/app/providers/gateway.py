@@ -41,6 +41,7 @@ def _get_client() -> httpx.Client:
 
 
 def _gateway_url(provider: str) -> str:
+    """Build the AI Gateway base URL for *provider* (e.g. 'workers-ai')."""
     s = get_cloud_settings()
     return f"{_GATEWAY_BASE}/{s.cloudflare_account_id}/{s.cf_aig_gateway}/{provider}"
 
@@ -48,6 +49,7 @@ def _gateway_url(provider: str) -> str:
 # ── header builders (the ONLY place secrets are read) ────────────────────────
 
 def _workers_ai_headers() -> dict[str, str]:
+    """CF token + AI Gateway token (two separate headers) for Workers AI calls."""
     s = get_cloud_settings()
     return {
         "Authorization": f"Bearer {s.cloudflare_api_token.get_secret_value()}",
@@ -57,6 +59,7 @@ def _workers_ai_headers() -> dict[str, str]:
 
 
 def _gemini_headers() -> dict[str, str]:
+    """Google key (x-goog-api-key) + AI Gateway token for Gemini calls."""
     s = get_cloud_settings()
     return {
         "x-goog-api-key": s.gemini_api_key.get_secret_value(),
@@ -75,6 +78,7 @@ def cf_api_headers() -> dict[str, str]:
 
 
 def _post_json(url: str, headers: dict[str, str], payload: dict) -> dict[str, Any]:
+    """POST JSON and return the parsed response (raises on non-2xx)."""
     # Log shape only — never headers or bodies (they carry secrets / PII).
     logger.debug("gateway POST %s (payload keys=%s)", url.rsplit("/", 1)[-1], list(payload))
     resp = _get_client().post(url, headers=headers, json=payload)
@@ -101,6 +105,7 @@ def workers_ai_chat(
     max_tokens: int = 512,
     temperature: float = 0.2,
 ) -> str:
+    """Chat-completion via a Workers AI text model; returns the reply string."""
     data = _post_json(
         f"{_gateway_url('workers-ai')}/{model}",
         _workers_ai_headers(),
@@ -128,6 +133,7 @@ def gemini_generate(
     max_tokens: int = 512,
     temperature: float = 0.2,
 ) -> str:
+    """Generate text via Gemini through the AI Gateway; returns the answer string."""
     s = get_cloud_settings()
     model = model or s.gemini_model
     url = f"{_gateway_url('google-ai-studio')}/v1beta/models/{model}:generateContent"

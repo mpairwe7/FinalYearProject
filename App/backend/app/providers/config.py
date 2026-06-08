@@ -58,6 +58,7 @@ def get_cloud_settings() -> CloudSettings:
 
 
 def _has(secret: SecretStr) -> bool:
+    """True when the secret holds a non-empty value."""
     return bool(secret.get_secret_value().strip())
 
 

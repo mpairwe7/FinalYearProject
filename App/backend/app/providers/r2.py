@@ -31,6 +31,7 @@ def _client():
 
 
 def get_object(key: str) -> bytes | None:
+    """Fetch an R2 object's bytes, or None if absent / R2 unconfigured."""
     if not is_r2_configured():
         return None
     try:
@@ -42,6 +43,7 @@ def get_object(key: str) -> bytes | None:
 
 
 def put_object(key: str, data: bytes, content_type: str = "application/octet-stream") -> bool:
+    """Upload bytes to R2; return True on success, False if unconfigured/failed."""
     if not is_r2_configured():
         return False
     try:
@@ -54,6 +56,7 @@ def put_object(key: str, data: bytes, content_type: str = "application/octet-str
 
 
 def object_exists(key: str) -> bool:
+    """Return True if the R2 object exists (False if absent/unconfigured)."""
     if not is_r2_configured():
         return False
     try:

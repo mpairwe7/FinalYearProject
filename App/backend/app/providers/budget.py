@@ -28,6 +28,7 @@ _local_gemini: list[float] = []
 
 
 def _get_redis():
+    """Lazily connect to the app's Redis (None if unavailable → in-process counters)."""
     global _redis, _redis_tried
     if _redis_tried:
         return _redis
