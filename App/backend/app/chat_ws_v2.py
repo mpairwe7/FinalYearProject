@@ -646,6 +646,7 @@ def _log_ws_turn(
             user_message=_CM.redact_for_storage(user_message),
             bot_reply=_CM.redact_for_storage(full_reply),
             sources=json.dumps(result.get("sources", []) if result else []),
+            contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
         )
     except Exception:

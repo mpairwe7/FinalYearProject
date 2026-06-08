@@ -218,28 +218,40 @@ def collect_samples(
     Uses the existing feedback export plus last-n conversations.  Falls
     back to an empty list if no data is available.
     """
+    import json as _json
+
     samples: list[dict[str, Any]] = []
 
     try:
-        review = db.export_review_feedback(days=days)
+        rows = db.export_eval_samples(days=days, limit=max(sample_size * 4, sample_size))
     except Exception:
-        review = []
+        rows = []
 
-    for row in review[:sample_size]:
+    for row in rows:
         question = str(row.get("user_query", "")).strip()
         answer = str(row.get("bot_reply", "")).strip()
         if not question or not answer:
             continue
-        # No per-row retrieved contexts persisted — use answer as a proxy
-        # context so the harness is runnable.  Production deployments should
-        # extend the DB schema to store the top-k contexts per conversation.
+        # P0-2: score faithfulness against the ACTUAL persisted retrieved
+        # contexts.  Rows without contexts are skipped rather than falling back
+        # to the answer-as-its-own-context proxy, which made the gate vacuous
+        # (faithfulness ~1.0 regardless of correctness).
+        try:
+            contexts = _json.loads(row.get("contexts") or "[]")
+        except (ValueError, TypeError):
+            contexts = []
+        contexts = [str(c) for c in contexts if str(c).strip()]
+        if not contexts:
+            continue
         samples.append(
             {
                 "question": question,
                 "answer": answer,
-                "contexts": [answer],
+                "contexts": contexts,
             }
         )
+        if len(samples) >= sample_size:
+            break
 
     return samples[:sample_size]
 

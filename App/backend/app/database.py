@@ -250,6 +250,9 @@ def init_db() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(conversation_id)")
     _ensure_column(conn, "tickets", "handoff_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "tickets", "response_judge_json", "TEXT DEFAULT '{}'")
+    # P0-2: persist the top-k retrieved passage texts per turn so the eval
+    # harness scores faithfulness against the real context, not the answer.
+    _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
 
     # Seed the default tenant if missing
     conn.execute(
@@ -484,6 +487,7 @@ def log_conversation(
     user_message: str,
     bot_reply: str,
     sources: str = "[]",
+    contexts: str = "[]",
     response_time_ms: float = 0,
     confidence: float = 0,
     topic_tag: str = "",
@@ -496,8 +500,8 @@ def log_conversation(
         conn.execute(
             """INSERT INTO conversations
                (id, conversation_id, session_id, user_message, bot_reply, sources,
-                response_time_ms, confidence, topic_tag, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                contexts, response_time_ms, confidence, topic_tag, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row_id,
                 thread_id,
@@ -505,6 +509,7 @@ def log_conversation(
                 user_message,
                 bot_reply,
                 sources,
+                contexts,
                 response_time_ms,
                 confidence,
                 topic_tag,
@@ -714,6 +719,27 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
     ).fetchall()
 
     return [dict(r) for r in down_rows] + [dict(r) for r in low_conf_rows]
+
+
+def export_eval_samples(days: int = 30, limit: int = 200) -> list[dict[str, Any]]:
+    """Export recent turns that persisted their retrieved contexts (P0-2).
+
+    Unlike :func:`export_review_feedback` (review/tuning, no contexts), these
+    rows carry the actual top-k retrieved passages, letting the eval harness
+    score faithfulness against real context instead of the answer itself.
+    """
+    conn = _get_connection()
+    cutoff = time.time() - (days * 86400)
+    rows = conn.execute(
+        """SELECT user_message AS user_query, bot_reply, contexts, created_at
+           FROM conversations
+           WHERE created_at >= ?
+             AND contexts IS NOT NULL
+             AND contexts NOT IN ('', '[]')
+           ORDER BY created_at DESC LIMIT ?""",
+        (cutoff, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
