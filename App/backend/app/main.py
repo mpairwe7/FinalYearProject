@@ -331,6 +331,18 @@ def _require_voice_processing_consent(request: Request, ctx: AuthContext) -> Non
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down the ChatModel singleton."""
+    # DNS-over-HTTPS workaround — must run BEFORE any outbound HTTPS (model
+    # init, retriever, Cloudflare fallback, vLLM). On Crane Cloud / RENU the pod
+    # has no working upstream DNS; this routes external hostname resolution
+    # through 1.1.1.1 over TCP/443. No-op unless USE_DOH=true (doh_resolver.py).
+    try:
+        from . import doh_resolver
+
+        if doh_resolver.is_enabled():
+            doh_resolver.activate()
+    except Exception:
+        logger.warning("DoH resolver activation skipped", exc_info=True)
+
     # Production safety gate — blocks startup on insecure config
     _validate_production_env()
 
