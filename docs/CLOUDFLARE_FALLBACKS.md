@@ -93,3 +93,57 @@ translation unit tests; full `App/backend` suite green; blocking ruff clean.
   translation; a Workers AI chat — confirm AI Gateway analytics shows cache hits on repeats.
 - Live Crane Cloud re-test: redeploy with the flag on; assert `/ready` →
   `retrieval_mode: hybrid` and `/v1/chat` still answers when the primary LLM is forced down.
+
+## Operations runbook & audit
+
+### API-token scopes (and the gotcha we hit)
+The single `CLOUDFLARE_API_TOKEN` must carry **all** of these account permissions:
+**Workers AI → Read**, **Vectorize → Edit**, **AI Gateway → Read**, and **R2 → Edit**
+(R2 only if the R2 features are used). `CLOUDFLARE_ACCOUNT_ID` must match the token's account.
+
+> **Audit gotcha (2026-06-09):** Workers AI and Vectorize are *separate* scopes on the
+> token. A token can succeed at embeddings (Workers AI) yet be **rejected for Vectorize
+> with HTTP 403 / Cloudflare error `10000`**. If Vectorize 403s, the fix is to add
+> **Vectorize → Edit to the *same* token that is in `.env`** (a common mistake is editing
+> a different token, or not saving) — not to regenerate it. Token permission changes can
+> take a minute or two to propagate; if it's still 403 after ~3–4 minutes it's the wrong
+> token, not propagation.
+
+### Audit-time verification (loads creds without printing them)
+```bash
+set -a; . .env; set +a                                   # load creds; values never printed
+cd App/backend
+# 1) providers see config (booleans only)
+PYTHONPATH=. python -c "from app.providers import config as c; \
+print('cf', c.is_cloudflare_configured(), 'vec', c.is_vectorize_configured(), 'gem', c.is_gemini_configured())"
+# 2) wrangler identity (account, not the token)
+wrangler whoami
+# 3) Workers AI scope — expect a 1024-dim vector
+PYTHONPATH=. python -c "from app.providers import gateway as g; print('embed dim', len(g.workers_ai_embed(['probe'])[0]))"
+# 4) Vectorize scope — expect HTTP 200 / success:true (403 + 10000 ⇒ missing Vectorize Edit)
+PYTHONPATH=. python -c "import httpx; from app.providers import gateway as g, config as c; \
+s=c.get_cloud_settings(); \
+r=httpx.get(f'https://api.cloudflare.com/client/v4/accounts/{s.cloudflare_account_id}/vectorize/v2/indexes', headers=g.cf_api_headers(), timeout=15); \
+print(r.status_code, r.json().get('success'))"
+# 5) populate + smoke
+PYTHONPATH=. python scripts/reindex_vectorize.py --create
+PYTHONPATH=. python scripts/reindex_vectorize.py --verify "What is the VAT rate in Uganda?"
+```
+
+### Activation state (current, for the audit trail)
+- **Code:** merged to `dev` (PR #95, 2026-06-08) — providers package + Phases 1–5 + re-index CLI. Flag default **off**.
+- **Provisioning:** keys present in `.env`; Workers AI + AI Gateway verified working; **Vectorize index not yet populated** — the re-index is blocked on the token's Vectorize scope (see gotcha above). Until the index is populated, `DENSE_FALLBACK_BACKEND=workers_ai` returns no hits, so the deployment stays `retrieval_mode: keyword`.
+- **Free-tier envelope** (guards in `providers/budget.py`, silent degrade on exhaustion):
+  Workers AI ~10k neurons/day (re-index ≈ 729 + per-query embeds), Gemini `GEMINI_RPM`
+  (default 10), Vectorize (729 vectors), R2 (10 GB). All usage flows through one AI
+  Gateway, so its cache further cuts neuron/RPM spend.
+
+### Security review points
+- Every key is a pydantic `SecretStr`; the value is read only inside the `gateway._*_headers`
+  builders and is never logged. `.env` is gitignored; `.env.example` documents the vars with no values.
+- AI Gateway uses two **separate** headers (`Authorization` + `cf-aig-authorization`); Gemini uses
+  `x-goog-api-key`. **No credential is ever placed in a URL query string** — asserted in
+  `tests/test_providers.py::GatewayTest`.
+- Every fallback is gated by `FLAG_CLOUDFLARE_FALLBACK` + a per-channel `CircuitBreaker` +
+  budget guard, so an outage or over-budget condition degrades to the existing tier rather
+  than erroring.
