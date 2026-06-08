@@ -74,9 +74,12 @@ All flag-gated (`FLAG_CLOUDFLARE_FALLBACK`, default off). 17 provider/retriever/
 translation unit tests; full `App/backend` suite green; blocking ruff clean.
 
 ### Deferred (follow-up, mostly provisioning-time)
-1. **Vectorize re-index CLI** — needed to populate the index before the dense
-   fallback returns anything (embeds via `gateway.workers_ai_embed`, no local torch).
-   Until then, `wrangler vectorize insert` with vectors from Workers AI + metadata.
+1. **Vectorize re-index CLI — DONE** (`App/backend/scripts/reindex_vectorize.py`).
+   Reuses the indexer's chunk loaders + `deterministic_point_id`, embeds the 729
+   chunks via Workers AI bge-m3 (no torch), and upserts with `wrangler vectorize
+   insert`. Run once authenticated:
+   `set -a; . .env; set +a; python scripts/reindex_vectorize.py --create`
+   then `… --verify "What is the VAT rate?"`.
 2. **R2 `bm25_state.json` durability** — only matters for a *Qdrant* deployment that
    loses its volume; the Crane Cloud target uses Vectorize mode (lexical re-score, no
    bm25_state needed), so this is niche.
