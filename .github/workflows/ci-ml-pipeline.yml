@@ -37,6 +37,7 @@ permissions:
   contents: read
   packages: write
   security-events: write
+  actions: read             # Required for SARIF upload (matches security-trivy.yml)
 
 concurrency:
   group: ml-pipeline-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
