@@ -63,7 +63,7 @@ artifact, not an app bug — CI and real browsers run batched normally. See §5.
 | `main._validate_production_env` Cloudflare branch | Misconfigured prod could boot with a silently no-op fallback | 4 tests in `test_production_hardening.py` |
 | `retriever._search_vectorize` error paths (breaker OPEN / budget exhausted / gateway error) | Dense-fallback failures must degrade to BM25, not crash or spend | 3 tests in `RetrieverVectorizeModeTest` |
 
-### P2 — known, deliberate follow-ups (not in this branch)
+### P2 — known, deliberate follow-ups *(closed same-day — see Addendum)*
 
 - **`providers/r2.py` has zero tests** (`get_object`/`put_object`/`object_exists`) — becomes
   load-bearing when BM25-state durability / TTS cache land.
@@ -105,3 +105,41 @@ artifact, not an app bug — CI and real browsers run batched normally. See §5.
   `playwright test <file>:<line> --project=<chromium|mobile-chrome|a11y> --workers=1`.
 - **CI parity**: the GitHub Actions unit-test step runs the **repo-root** `tests/` tree;
   the blocking lint step is `ruff check ml/ App/backend/ --select=E9,F63,F7,F82`.
+
+---
+
+## Addendum (2026-06-10, same branch): P2/P3 closure + CI coverage incident
+
+**CI incident.** The first push of this branch failed the ML Pipeline workflow — all
+470 CI tests passed, but the coverage gate tripped: `total of 34 is less than
+fail-under=35`. Root cause is structural: CI measures `--cov=App/backend` while running
+only the repo-root suite (the 295-test backend suite never runs in CI), and
+`service.py` is one of the few backend runtime modules **not** in the coverage omit
+list — so the 17 new (backend-suite-covered) fix lines tipped the rounding. Resolved by
+the new root-level integration tests below, which lift the measured total to **≈38%**
+(`service.py` 52%) — and which were owed anyway as the P2 endpoint-level gap.
+
+**P2 gaps — all closed:**
+
+| Gap | Closure |
+|---|---|
+| Endpoint-level fallback integration | `tests/test_fallback_integration.py` (repo root, **runs in CI**): `/v1/chat` with empty primary reply → cloud answer over HTTP; `/v1/chat/stream` with empty stream → cloud tokens over SSE; unconfigured fallback still degrades to best-hit; LLM-unavailable case below |
+| `providers/r2.py` zero tests | `R2Test` (7): unconfigured no-op (client never built), get/put/head argv + body round-trip, error paths → None/False |
+| `reindex_vectorize.py` untested | `tests/test_reindex_vectorize.py` (6): NDJSON row shape + deterministic ids + 2000-char metadata truncation, strict-zip length mismatch raises, embed batching honours `INDEX_BATCH_SIZE`, fixed wrangler argv with `check=True`, unconfigured `sys.exit` guard, `--verify` round-trip |
+| Budget guard edges | `BudgetTest` +3: UTC-midnight window reset, broken-Redis degradation to in-process counters, 32-thread burst grants exactly the budget |
+| DoH untested paths | +4: malformed DNS payload → `socket.gaierror` → system-resolver fallback, valid-wire-no-A-record → gaierror, cache re-resolves after the 60s TTL |
+
+**P3-1 — fixed (was "decide whether policy or bug": bug).** New
+`service._cloud_llm_ready()` widens the availability gates in `ChatModel.generate` and
+`stream_chat_turn`: when the local LLM is entirely unavailable but the flag-gated cloud
+tier is configured, generation now routes to Cloudflare/Gemini instead of silently
+degrading to FAQ extracts. The agentic branch still requires the local model (tool
+calling is local-only). Covered by `CloudLlmReadyTest` (5), a `ChatModel.generate`
+chain test, and the endpoint-level `test_llm_unavailable_still_serves_cloud_answer`
+(mutation-checked: fails with the gate fix reverted). P3-2 (post-agentic primary retry
+latency) stands as documented behaviour; P3-3 resolved by updating
+`docs/CLOUDFLARE_FALLBACKS.md` to the real test counts.
+
+**Updated totals:** backend suite **321 passed** (+26 over the morning run); repo-root
+suite **465 passed / 13 skipped** (+4); CI coverage gate restored with ~3-point
+headroom.
