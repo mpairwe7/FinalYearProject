@@ -142,6 +142,51 @@ class ProductionHardeningTests(unittest.TestCase):
             "FLAG_NATIVE_VOICE=true requires FLAG_AUTH_REQUIRED", str(raised.exception)
         )
 
+    # ── Cloudflare/Gemini fallback validation (explicit-on flag) ──────────
+    _CF_ENV = {
+        "FLAG_CLOUDFLARE_FALLBACK": "true",
+        "CLOUDFLARE_ACCOUNT_ID": "acct-prod",
+        "CLOUDFLARE_API_TOKEN": "cf-prod-token",
+        "CF_AIG_GATEWAY": "ura-gw",
+        "CF_AIG_TOKEN": "aig-prod-token",
+    }
+
+    def _validate_with(self, env: dict[str, str]) -> None:
+        """Run _validate_production_env with the providers settings cache
+        scoped to ``env`` (CloudSettings is an lru_cache singleton)."""
+        from app.providers import config as cloud_config
+
+        self.addCleanup(cloud_config.get_cloud_settings.cache_clear)
+        with patch.dict(os.environ, env, clear=True):
+            cloud_config.get_cloud_settings.cache_clear()
+            _validate_production_env()
+
+    def test_cloudflare_flag_requires_credentials_in_prod(self) -> None:
+        env = {**self.secure_env, "FLAG_CLOUDFLARE_FALLBACK": "true"}
+        with self.assertRaises(SystemExit) as raised:
+            self._validate_with(env)
+        self.assertIn("Cloudflare is not fully configured", str(raised.exception))
+
+    def test_cloudflare_flag_with_credentials_accepted(self) -> None:
+        self._validate_with({**self.secure_env, **self._CF_ENV})
+
+    def test_dense_fallback_requires_vectorize_index(self) -> None:
+        env = {
+            **self.secure_env,
+            **self._CF_ENV,
+            "DENSE_FALLBACK_BACKEND": "workers_ai",
+            "VECTORIZE_INDEX": " ",  # blank out the non-empty default
+        }
+        with self.assertRaises(SystemExit) as raised:
+            self._validate_with(env)
+        self.assertIn("requires VECTORIZE_INDEX", str(raised.exception))
+
+    def test_gemini_fallback_requires_gemini_key(self) -> None:
+        env = {**self.secure_env, **self._CF_ENV, "LLM_FALLBACK_BACKEND": "gemini"}
+        with self.assertRaises(SystemExit) as raised:
+            self._validate_with(env)
+        self.assertIn("GEMINI_API_KEY", str(raised.exception))
+
     def test_auth_required_rejects_missing_bearer_token(self) -> None:
         request = Request({"type": "http", "headers": []})
         with patch.dict(os.environ, {"FLAG_AUTH_REQUIRED": "true"}, clear=False):
