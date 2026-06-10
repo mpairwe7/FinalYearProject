@@ -2724,6 +2724,23 @@ class ChatModel:
                                 tc.get("name") for tc in agentic["tool_calls"]
                             ]
                             trace_ctx["tool_iterations"] = agentic.get("iterations", 0)
+                        if not reply:
+                            # Agentic produced no text (breaker OPEN, deadline,
+                            # or empty completion).  Run the plain RAG chain —
+                            # _call_llm_with_deadline carries the cloud
+                            # fallback — before dropping to the extractive
+                            # best-hit answer, mirroring stream_chat_turn's
+                            # fall-through to stream_llm_tokens.
+                            with trace_stage("llm_generate", timings=timings):
+                                reply = _call_llm_with_deadline(
+                                    query=rewritten,
+                                    passages=hits,
+                                    conversation_history=conversation_history or None,
+                                    locale=locale,
+                                    personalization_context=(
+                                        (personalization or {}).get("prompt_context", "")
+                                    ),
+                                )
                     else:
                         with trace_stage("llm_generate", timings=timings):
                             reply = _call_llm_with_deadline(
