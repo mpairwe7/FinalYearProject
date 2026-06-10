@@ -224,6 +224,30 @@ def _stream_cloud_fallback(
         yield chunk
 
 
+def _cloud_llm_ready() -> bool:
+    """True when the flag-gated cloud LLM fallback is configured to serve a
+    reply on its own.
+
+    Used by the chat entrypoints to keep RAG generation alive when the local
+    LLM is entirely unavailable (``llm_module.is_available()`` False — e.g. an
+    LLM-less deployment profile), not merely failing per-request.  Without
+    this, the availability gates skip the generation step and the configured
+    Cloudflare/Gemini tier never gets a chance.
+    """
+    if not flags.is_enabled("cloudflare_fallback"):
+        return False
+    backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
+    if backend not in ("gemini", "workers_ai"):
+        return False
+    try:
+        from .providers import config as cfg
+    except Exception:  # providers optional / deps missing
+        return False
+    if backend == "gemini" and cfg.is_gemini_configured():
+        return True
+    return cfg.is_cloudflare_configured()
+
+
 def _call_llm_with_deadline(
     query: str,
     passages: list[dict[str, Any]],
@@ -788,7 +812,9 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 )
                 return
 
-        if llm_module.is_available() and hits:
+        # The cloud fallback alone keeps token streaming on when no local LLM
+        # is configured — stream_llm_tokens routes straight to it in that case.
+        if hits and (llm_module.is_available() or _cloud_llm_ready()):
             loop = asyncio.get_running_loop()
             token_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue(
                 maxsize=_STREAM_QUEUE_MAX
@@ -2694,14 +2720,21 @@ class ChatModel:
                 citations = HybridRetriever.build_citations(hits)
                 contexts = [h.get("text") or h.get("answer", "") for h in hits]
 
-                # Phase 2: LLM synthesis from top-k passages (true RAG)
-                if self._llm_available:
+                # Phase 2: LLM synthesis from top-k passages (true RAG).
+                # The cloud fallback alone is enough to keep generation on
+                # when no local LLM is configured (_call_llm_with_deadline
+                # routes there via the breaker/empty-reply handling).
+                if self._llm_available or _cloud_llm_ready():
                     # Phase 14-B/C: agentic path is active when either
                     # FLAG_TOOL_USE is on (tool calling for everyone), or
                     # the supervisor routed this specific request to it
                     # (force_agentic).  The supervisor can also narrow
-                    # the tool whitelist (force_tool_whitelist).
-                    use_agentic = force_agentic or flags.is_enabled("tool_use")
+                    # the tool whitelist (force_tool_whitelist).  Tool
+                    # calling runs on the local model only, so the agentic
+                    # branch additionally requires local availability.
+                    use_agentic = (
+                        force_agentic or flags.is_enabled("tool_use")
+                    ) and self._llm_available
                     if use_agentic:
                         with trace_stage("llm_agentic", timings=timings):
                             agentic = _call_llm_agentic(
