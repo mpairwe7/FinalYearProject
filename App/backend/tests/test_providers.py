@@ -185,6 +185,135 @@ class BudgetTest(unittest.TestCase):
         self.assertFalse(budget.try_consume_gemini_call(now=t))  # 3rd in the minute
         self.assertTrue(budget.try_consume_gemini_call(now=t + 61))  # next minute
 
+    def test_neuron_budget_resets_at_utc_midnight(self):
+        import calendar
+
+        before = calendar.timegm((2026, 6, 10, 23, 59, 59, 0, 0, 0))
+        self.assertTrue(budget.try_consume_neurons(3, now=before))
+        self.assertFalse(budget.try_consume_neurons(1, now=before))  # exhausted
+        after = before + 2  # 2026-06-11 00:00:01 UTC — fresh daily window
+        self.assertTrue(budget.try_consume_neurons(3, now=after))
+
+    def test_redis_error_falls_back_to_local_counters(self):
+        class _BrokenRedis:
+            def incrby(self, *a, **k):
+                raise ConnectionError("redis gone")
+
+            def incr(self, *a, **k):
+                raise ConnectionError("redis gone")
+
+        budget._redis = _BrokenRedis()
+        try:
+            # Both guards must degrade to the in-process counters, not raise.
+            self.assertTrue(budget.try_consume_neurons(2))
+            self.assertFalse(budget.try_consume_neurons(2))  # 4 > 3 locally
+            self.assertTrue(budget.try_consume_gemini_call(now=1000.0))
+        finally:
+            budget._redis = None
+
+    def test_neuron_budget_is_thread_safe(self):
+        import threading
+
+        os.environ["CF_NEURON_DAILY_BUDGET"] = "16"
+        config.get_cloud_settings.cache_clear()
+        results: list[bool] = []
+        lock = threading.Lock()
+
+        def worker():
+            ok = budget.try_consume_neurons(1, now=2000.0)
+            with lock:
+                results.append(ok)
+
+        threads = [threading.Thread(target=worker) for _ in range(32)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sum(results), 16)  # exactly the budget, no over-grant
+
+
+class R2Test(unittest.TestCase):
+    """providers.r2 — S3-compatible object storage used for bm25_state.json
+    durability / offline bundles / TTS cache. Must be a safe no-op when
+    unconfigured and swallow client errors into None/False."""
+
+    _R2_KEYS = {
+        "R2_ACCOUNT_ID": "r2acct",
+        "R2_ACCESS_KEY_ID": "r2-access-key",
+        "R2_SECRET_ACCESS_KEY": "r2-secret-key",
+        "R2_BUCKET": "ura-chatbot-test",
+    }
+
+    def setUp(self):
+        from app.providers import r2
+
+        self.r2 = r2
+
+    def tearDown(self):
+        for k in self._R2_KEYS:
+            os.environ.pop(k, None)
+        config.get_cloud_settings.cache_clear()
+        self.r2._client.cache_clear()
+
+    def _configure(self):
+        os.environ.update(self._R2_KEYS)
+        config.get_cloud_settings.cache_clear()
+
+    def test_unconfigured_is_a_safe_noop(self):
+        config.get_cloud_settings.cache_clear()
+        with mock.patch.object(self.r2, "_client") as client:
+            self.assertIsNone(self.r2.get_object("bm25_state.json"))
+            self.assertFalse(self.r2.put_object("bm25_state.json", b"x"))
+            self.assertFalse(self.r2.object_exists("bm25_state.json"))
+        client.assert_not_called()
+
+    def test_get_object_reads_body(self):
+        self._configure()
+        body = mock.Mock()
+        body.read.return_value = b"bm25-bytes"
+        fake = mock.Mock()
+        fake.get_object.return_value = {"Body": body}
+        with mock.patch.object(self.r2, "_client", return_value=fake):
+            self.assertEqual(self.r2.get_object("bm25_state.json"), b"bm25-bytes")
+        fake.get_object.assert_called_once_with(Bucket="ura-chatbot-test", Key="bm25_state.json")
+
+    def test_get_object_error_returns_none(self):
+        self._configure()
+        fake = mock.Mock()
+        fake.get_object.side_effect = RuntimeError("NoSuchKey")
+        with mock.patch.object(self.r2, "_client", return_value=fake):
+            self.assertIsNone(self.r2.get_object("missing.json"))
+
+    def test_put_object_uploads_with_content_type(self):
+        self._configure()
+        fake = mock.Mock()
+        with mock.patch.object(self.r2, "_client", return_value=fake):
+            self.assertTrue(self.r2.put_object("tts/abc.mp3", b"audio", content_type="audio/mpeg"))
+        fake.put_object.assert_called_once_with(
+            Bucket="ura-chatbot-test", Key="tts/abc.mp3", Body=b"audio", ContentType="audio/mpeg"
+        )
+
+    def test_put_object_error_returns_false(self):
+        self._configure()
+        fake = mock.Mock()
+        fake.put_object.side_effect = RuntimeError("AccessDenied")
+        with mock.patch.object(self.r2, "_client", return_value=fake):
+            self.assertFalse(self.r2.put_object("k", b"x"))
+
+    def test_object_exists_via_head(self):
+        self._configure()
+        fake = mock.Mock()
+        with mock.patch.object(self.r2, "_client", return_value=fake):
+            self.assertTrue(self.r2.object_exists("bundle.zip"))
+        fake.head_object.assert_called_once_with(Bucket="ura-chatbot-test", Key="bundle.zip")
+
+    def test_object_exists_false_on_404(self):
+        self._configure()
+        fake = mock.Mock()
+        fake.head_object.side_effect = RuntimeError("404")
+        with mock.patch.object(self.r2, "_client", return_value=fake):
+            self.assertFalse(self.r2.object_exists("nope.zip"))
+
 
 class RetrieverVectorizeModeTest(unittest.TestCase):
     """The retriever restores dense search via Workers AI + Vectorize when
@@ -526,6 +655,72 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
         ag.assert_called_once()
         fb.assert_not_called()
         self.assertIn("Agentic answer", out["reply"])
+
+    def test_llm_unavailable_with_cloud_ready_still_generates(self):
+        """P3-1: with no local LLM at all, a configured cloud fallback must
+        keep the generation step alive instead of degrading to FAQ extracts.
+        The agentic branch stays off (tool calling is local-only)."""
+        from app import service
+
+        self.model._llm_available = False
+        self.addCleanup(setattr, self.model, "_llm_available", True)
+        with mock.patch.object(service, "_cloud_llm_ready", return_value=True):
+            out, ag, fb = self._generate(
+                "What withholding tax applies to imports in Uganda?",
+                {"text": "", "tool_calls": [], "iterations": 0, "truncated": False},
+            )
+        ag.assert_not_called()  # agentic requires the local model
+        fb.assert_called_once()
+        self.assertIn("Cloud answer", out["reply"])
+
+
+class CloudLlmReadyTest(unittest.TestCase):
+    """service._cloud_llm_ready — the availability-gate widener: True only
+    when the flag-gated cloud LLM tier could serve a reply on its own."""
+
+    def tearDown(self):
+        _clear_keys()
+        os.environ.pop("LLM_FALLBACK_BACKEND", None)
+
+    def test_false_when_flag_off(self):
+        from app import service
+
+        _with_keys()
+        os.environ["LLM_FALLBACK_BACKEND"] = "gemini"
+        with mock.patch.object(service.flags, "is_enabled", return_value=False):
+            self.assertFalse(service._cloud_llm_ready())
+
+    def test_false_without_backend_env(self):
+        from app import service
+
+        _with_keys()
+        os.environ.pop("LLM_FALLBACK_BACKEND", None)
+        with mock.patch.object(service.flags, "is_enabled", return_value=True):
+            self.assertFalse(service._cloud_llm_ready())
+
+    def test_false_when_unconfigured(self):
+        from app import service
+
+        _clear_keys()
+        os.environ["LLM_FALLBACK_BACKEND"] = "gemini"
+        with mock.patch.object(service.flags, "is_enabled", return_value=True):
+            self.assertFalse(service._cloud_llm_ready())
+
+    def test_true_for_configured_gemini(self):
+        from app import service
+
+        _with_keys()
+        os.environ["LLM_FALLBACK_BACKEND"] = "gemini"
+        with mock.patch.object(service.flags, "is_enabled", return_value=True):
+            self.assertTrue(service._cloud_llm_ready())
+
+    def test_true_for_configured_workers_ai(self):
+        from app import service
+
+        _with_keys()
+        os.environ["LLM_FALLBACK_BACKEND"] = "workers_ai"
+        with mock.patch.object(service.flags, "is_enabled", return_value=True):
+            self.assertTrue(service._cloud_llm_ready())
 
 
 class CfWhisperSTTTest(unittest.TestCase):
