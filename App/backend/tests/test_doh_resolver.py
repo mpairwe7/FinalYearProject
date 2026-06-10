@@ -96,6 +96,52 @@ class ResolveTest(unittest.TestCase):
         d.activate()
         self.assertTrue(any(t[4][0] == "127.0.0.1" for t in socket.getaddrinfo("127.0.0.1", 0)))
 
+    def test_malformed_dns_payload_raises_gaierror(self):
+        # Garbage bytes from the DoH endpoint must surface as the same
+        # exception shape as the system resolver (socket.gaierror) …
+        with mock.patch("httpx.Client", return_value=_FakeClient(b"\x00\x01not-dns")):
+            d._cache.clear()
+            with self.assertRaises(socket.gaierror):
+                d._resolve_doh("garbage.test")
+
+    def test_malformed_payload_falls_back_to_system_resolver(self):
+        # … so the patched getaddrinfo degrades to the original resolver.
+        sentinel = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("4.3.2.1", 443))]
+        with mock.patch("httpx.Client", return_value=_FakeClient(b"\xff\xfe")), \
+             mock.patch.object(d, "_original_getaddrinfo", return_value=sentinel) as orig:
+            d._cache.clear()
+            res = d._doh_getaddrinfo("garbage.test", 443)
+        self.assertEqual(res, sentinel)
+        orig.assert_called_once()
+
+    def test_no_a_record_raises_gaierror(self):
+        import dns.message
+        import dns.rdatatype
+
+        q = dns.message.make_query("empty.test.", dns.rdatatype.A)
+        empty = dns.message.make_response(q).to_wire()  # valid wire, no answers
+        with mock.patch("httpx.Client", return_value=_FakeClient(empty)):
+            d._cache.clear()
+            with self.assertRaises(socket.gaierror):
+                d._resolve_doh("empty.test")
+
+    def test_cache_expires_after_ttl(self):
+        import types
+
+        clock = types.SimpleNamespace(t=10_000.0)
+        fake_time = types.SimpleNamespace(time=lambda: clock.t)
+        client = _FakeClient(_wire_response("ttl.test", "2.4.6.8"))
+        with mock.patch("httpx.Client", return_value=client) as mk, \
+             mock.patch.object(d, "time", fake_time):
+            d._cache.clear()
+            self.assertEqual(d._resolve_doh("ttl.test"), "2.4.6.8")
+            clock.t += d._CACHE_TTL_S - 1
+            d._resolve_doh("ttl.test")  # still cached
+            self.assertEqual(mk.call_count, 1)
+            clock.t += 2  # past the TTL
+            self.assertEqual(d._resolve_doh("ttl.test"), "2.4.6.8")
+            self.assertEqual(mk.call_count, 2)  # re-resolved
+
 
 if __name__ == "__main__":
     unittest.main()

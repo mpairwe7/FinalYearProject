@@ -42,11 +42,12 @@
   --border-2:    rgba(255, 255, 255, 0.16);
   --border-glow: rgba(249, 199, 79, 0.45);
 
-  /* Text hierarchy (WCAG AAA on --bg-0) */
+  /* Text hierarchy (WCAG AA+ on --bg-0/--bg-1; #6B7280 measured 3.9–4.1:1
+     as body text on the dark surfaces — below the 4.5:1 AA minimum) */
   --text-0:      #F8F9FA;
   --text-1:      #E4E5E9;
   --text-2:      #9CA3AF;
-  --text-3:      #6B7280;
+  --text-3:      #848D9C;
 
   /* ── URA Official Palette ── */
   --ura-blue:         #003087;

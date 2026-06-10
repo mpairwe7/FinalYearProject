@@ -70,8 +70,15 @@ STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
   bits:** Vectorize re-index CLI, R2 `bm25_state.json` durability, offline bundles in R2,
   `/ready` breaker/budget surfacing.
 
-All flag-gated (`FLAG_CLOUDFLARE_FALLBACK`, default off). 17 provider/retriever/LLM/
-translation unit tests; full `App/backend` suite green; blocking ruff clean.
+All flag-gated (`FLAG_CLOUDFLARE_FALLBACK`, default off). As of 2026-06-10 the layer
+carries 60+ provider/retriever/LLM/STT/translation/breaker unit tests
+(`tests/test_providers.py`, `tests/test_resilience.py`, `tests/test_doh_resolver.py`,
+`tests/test_reindex_vectorize.py`) plus four endpoint-level integration tests at the
+repo root (`tests/test_fallback_integration.py`, run by CI) that assert the cloud
+answer reaches the `/v1/chat` + `/v1/chat/stream` surfaces when the primary LLM is
+down — see `docs/TEST_REPORT_2026-06-10.md`. Full `App/backend` suite green; blocking
+ruff clean. NB: the local LLM being *unavailable* (not just failing) now also routes
+to the cloud tier (`service._cloud_llm_ready` widens the availability gates).
 
 ### Deferred (follow-up, mostly provisioning-time)
 1. **Vectorize re-index CLI — DONE** (`App/backend/scripts/reindex_vectorize.py`).
