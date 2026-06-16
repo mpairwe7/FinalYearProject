@@ -81,8 +81,11 @@ jobs:
             sleep 1
           done
 
-      - name: Run Tier A voice specs
+      - name: Run Tier A voice specs (desktop)
         run: bunx playwright test e2e/voice.spec.ts --project=chromium
+
+      - name: Run Tier A voice specs (mobile)
+        run: bunx playwright test e2e/voice.mobile.spec.ts --project=mobile-chrome
 
       - name: Upload Playwright report
         if: failure()

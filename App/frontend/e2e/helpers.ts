@@ -192,6 +192,31 @@ export async function mockBackend(
   );
 }
 
+/**
+ * Stub the voice WebSocket (`/v1/voice/chat/stream`) used by the mobile
+ * voice-first dialog. On the first binary (audio) frame the client sends, emit
+ * the canned transcript → reply → audio_end sequence the dialog renders. No
+ * real backend is contacted (Playwright handles the socket in mock mode).
+ */
+export async function mockVoiceWebSocket(
+  page: Page,
+  opts: { reply?: string; transcript?: string } = {},
+) {
+  const reply = opts.reply ?? "The standard VAT rate in Uganda is 18%.";
+  const transcript = opts.transcript ?? "what is the standard VAT rate in Uganda";
+  await page.routeWebSocket(/\/api\/v1\/voice\/chat\/stream/, (ws) => {
+    ws.send(JSON.stringify({ type: "session_ready", session_id: "ws-e2e" }));
+    ws.onMessage((message) => {
+      // A binary frame is an audio utterance → reply; ignore text config frames.
+      if (typeof message !== "string") {
+        ws.send(JSON.stringify({ type: "transcript_final", text: transcript }));
+        ws.send(JSON.stringify({ type: "reply_text", text: reply }));
+        ws.send(JSON.stringify({ type: "audio_end" }));
+      }
+    });
+  });
+}
+
 /** Type a message into the composer and send it. */
 export async function sendMessage(page: Page, text: string) {
   await page.getByLabel("Type your message").fill(text);
