@@ -10,10 +10,18 @@
  *
  * Requires the config-level `--use-fake-{ui,device}-for-media-stream` flags,
  * `permissions: ['microphone']`, and `--autoplay-policy=no-user-gesture-required`.
+ *
+ * Runs on both `chromium` and `mobile-chrome`. Three tests drive the desktop
+ * header voice controls (the "Voice" toggle + health pill), which are CSS-hidden
+ * below 720px — those skip on mobile-chrome, where the equivalent flow is the
+ * voice-first dialog (see voice.mobile.spec.ts).
  */
 import { expect, test } from "@playwright/test";
 
 import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
+
+// Desktop-only: header voice toggle + health pill are hidden <720px.
+const HEADER_ONLY = "header voice controls are hidden on the mobile layout (<720px)";
 
 test.describe("Voice STT/TTS (mocked)", () => {
   test.beforeEach(async ({ page }) => {
@@ -21,14 +29,16 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await clearChatStore(page);
   });
 
-  test("speech-health pill reports the pipeline ready", async ({ page }) => {
+  test("speech-health pill reports the pipeline ready", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "mobile-chrome", HEADER_ONLY);
     await mockBackend(page);
     await page.goto("/");
     // Validates the /v1/speech/health stub shape (status:'ready') the UI keys on.
     await expect(page.getByText("Voice ready")).toBeVisible({ timeout: 15_000 });
   });
 
-  test("voice-mode toggle is enabled when speech is ready", async ({ page }) => {
+  test("voice-mode toggle is enabled when speech is ready", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "mobile-chrome", HEADER_ONLY);
     await mockBackend(page);
     await page.goto("/");
     const voiceToggle = page.getByRole("checkbox", { name: "Voice" });
@@ -41,7 +51,8 @@ test.describe("Voice STT/TTS (mocked)", () => {
 
   test("recording a turn POSTs raw audio + consent to /v1/voice/chat and renders transcript + reply", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name === "mobile-chrome", HEADER_ONLY);
     test.slow(); // real MediaRecorder capture needs a recording window
     await mockBackend(page);
     await page.goto("/");
