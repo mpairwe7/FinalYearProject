@@ -58,6 +58,8 @@
   --ura-teal:         #00A88F;
   --ura-teal-light:   #2EC4A8;
   --accent:           var(--ura-gold);
+  /* Data/analytics accent — bright on dark, deep blue on light (overridden below). */
+  --accent-data:      var(--ura-blue-bright);
 
   /* Gradients */
   --grad-primary:      linear-gradient(135deg, #003087 0%, #005BA0 50%, #00A88F 100%);
@@ -136,6 +138,9 @@
   --text-1:      #28303B;
   --text-2:      #55606E;
   --text-3:      #6B7480;
+
+  /* Deep blue accent for data UIs reads better than the bright on white. */
+  --accent-data: var(--ura-blue);
 
   /* User bubble: a touch more gold so it reads on white. */
   --grad-user:   linear-gradient(135deg, rgba(249, 199, 79, 0.34), rgba(249, 199, 79, 0.16));
