@@ -45,13 +45,14 @@ describe("ChatMessage", () => {
   it("renders user message with user icon", () => {
     renderMsg(userTurn);
     expect(screen.getByText("What is VAT?")).toBeInTheDocument();
-    expect(screen.getByText("user")).toBeInTheDocument();
+    // Role is announced to screen readers (visually hidden), not shown as a label.
+    expect(screen.getByText("You said")).toBeInTheDocument();
   });
 
   it("renders assistant message with bot icon", () => {
     renderMsg(assistantTurn);
     expect(screen.getByText("VAT is 18% in Uganda.")).toBeInTheDocument();
-    expect(screen.getByText("assistant")).toBeInTheDocument();
+    expect(screen.getByText("Assistant replied")).toBeInTheDocument();
   });
 
   it("shows citations with source details", () => {
