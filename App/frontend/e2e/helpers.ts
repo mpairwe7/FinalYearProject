@@ -8,6 +8,8 @@
  */
 import type { Page } from "@playwright/test";
 
+import { TINY_WAV_B64 } from "./fixtures";
+
 /** Seed an analytics-consent decision so the banner never renders. */
 export async function seedConsent(page: Page, value: "granted" | "denied" = "denied") {
   await page.addInitScript((v) => {
@@ -58,7 +60,7 @@ function sseReply(text: string, opts: { escalate?: boolean } = {}): string {
  */
 export async function mockBackend(
   page: Page,
-  opts: { reply?: string; escalate?: boolean } = {},
+  opts: { reply?: string; escalate?: boolean; transcript?: string; ttsEnabled?: boolean } = {},
 ) {
   const reply = opts.reply ?? "The standard VAT rate in Uganda is 18%.";
 
@@ -66,7 +68,84 @@ export async function mockBackend(
   await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
 
   await page.route("**/api/v1/speech/health", (route) =>
-    route.fulfill({ json: { status: "available", backend: "stub" } }),
+    route.fulfill({
+      json: {
+        status: "ready",
+        enabled: true,
+        asr_backend: "stub",
+        tts_backend: "stub",
+        mt_backend: "stub",
+      },
+    }),
+  );
+  // --- Voice/speech endpoints (STT/TTS/MT) ------------------------------------
+  // The real client posts raw audio to /v1/voice/chat and /v1/asr, and JSON to
+  // /v1/tts and /v1/translate. TTS payloads must be a *decodable* WAV (the client
+  // runs AudioContext.decodeAudioData), hence TINY_WAV_B64.
+  await page.route("**/api/v1/voice/chat**", (route) =>
+    route.fulfill({
+      json: {
+        transcript: opts.transcript ?? "what is the standard VAT rate in Uganda",
+        transcript_language: "en",
+        conversation_id: "c-e2e",
+        reply,
+        reply_audio_base64: opts.ttsEnabled === false ? "" : TINY_WAV_B64,
+        sample_rate: 22050,
+        duration_s: 0.05,
+        sources: ["vat.pdf"],
+        citations: [],
+        faithfulness_score: 0.9,
+        retrieval_mode: "hybrid",
+        asr_latency_s: 0.1,
+        mt_latency_s: 0.0,
+        llm_latency_s: 0.2,
+        tts_latency_s: 0.1,
+        total_latency_s: 0.4,
+        asr_backend: "stub",
+        tts_backend: "stub",
+        mt_backend: "stub",
+        error: null,
+      },
+    }),
+  );
+  await page.route("**/api/v1/tts", (route) =>
+    route.fulfill({
+      json: {
+        sample_rate: 22050,
+        num_samples: 1102,
+        duration_s: 0.05,
+        latency_s: 0.1,
+        backend: "stub",
+        voice: "en_US-stub",
+        audio_base64: TINY_WAV_B64,
+        error: null,
+      },
+    }),
+  );
+  await page.route("**/api/v1/asr**", (route) =>
+    route.fulfill({
+      json: {
+        text: opts.transcript ?? "what is the standard VAT rate in Uganda",
+        language: "en",
+        duration_s: 0.05,
+        latency_s: 0.1,
+        rtf: 2.0,
+        backend: "stub",
+        error: null,
+      },
+    }),
+  );
+  await page.route("**/api/v1/translate", (route) =>
+    route.fulfill({
+      json: {
+        text: "VAT mu Uganda eri ku 18%.",
+        source_lang: "en",
+        target_lang: "lg",
+        latency_s: 0.1,
+        backend: "stub",
+        error: null,
+      },
+    }),
   );
   await page.route("**/api/v1/chat/stream", (route) =>
     route.fulfill({
