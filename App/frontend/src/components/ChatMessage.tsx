@@ -33,7 +33,7 @@ function ChatMessageInner({
         {turn.role === 'user' ? <UserIcon /> : <BotIcon />}
       </div>
       <div className={`bubble ${turn.role}`}>
-        <span className="bubble-role">{turn.role}</span>
+        <span className="sr-only">{turn.role === 'user' ? 'You said' : 'Assistant replied'}</span>
         <div className="msg-content">
           {isAssistant ? (
             <Suspense fallback={turn.content}><Markdown content={turn.content} /></Suspense>

@@ -395,7 +395,7 @@ main.legacy-layout {
   scroll-padding-bottom: calc(var(--chat-dock-height, 92px) + 1rem);
   display: flex;
   flex-direction: column;
-  gap: clamp(0.65rem, 2vw, 1rem);
+  gap: clamp(1rem, 2.5vw, 1.6rem);
   padding: 0.25rem 0.5rem 0.25rem 0.25rem;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
@@ -404,6 +404,20 @@ main.legacy-layout {
 .messages-end-spacer {
   height: 1px;
   flex: 0 0 auto;
+}
+
+/* Screen-reader-only (visually hidden but announced) — used for per-message
+   role labels now that they're no longer shown visually. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .msg-content {
@@ -485,20 +499,19 @@ main.legacy-layout {
   background: var(--grad-user);
   border-color: rgba(249, 199, 79, 0.22);
   color: var(--text-0);
+  /* Subtle "tail" toward the avatar — modern asymmetric speech-bubble. */
+  border-bottom-right-radius: var(--radius-xs);
 }
+/* Assistant replies are bubble-less (2026 chat-app convention): full-width
+   text flowing beside the avatar, no box/border/shadow — cleaner and easier to
+   read for long, markdown-rich answers. */
 .bubble.assistant {
-  background: rgba(0, 48, 135, 0.06);
-  border-color: rgba(0, 48, 135, 0.18);
-}
-
-.bubble-role {
-  display: block;
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  margin-bottom: 0.35rem;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  padding: 0.1rem 0 0.05rem;
+  font-size: 0.97rem;
+  line-height: 1.72;
 }
 
 /* -----------------------------------------------------------------------------
@@ -638,13 +651,23 @@ main.legacy-layout {
    Bubble actions (listen + feedback row)
    -------------------------------------------------------------------------- */
 .bubble-actions {
-  margin-top: 0.65rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--border-0);
+  margin-top: 0.55rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  /* Quiet until the message is hovered/focused (revealed below) — keeps the
+     transcript clean. Always shown on touch + when a reply is playing. */
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.message-row:hover .bubble-actions,
+.message-row:focus-within .bubble-actions,
+.bubble-actions:has(.listen-btn-active) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .bubble-actions { opacity: 1; }
 }
 .bubble-actions .feedback-container {
   margin-top: 0;
@@ -2581,14 +2604,11 @@ summary {
   }
   .message-row-assistant .bubble,
   .bubble.assistant {
-    max-width: min(100%, 640px);
-    border-bottom-left-radius: 6px;
-    background: rgba(255, 255, 255, 0.035);
-    border-color: rgba(255, 255, 255, 0.055);
+    max-width: 100%;
+    background: transparent;
+    border-color: transparent;
     box-shadow: none;
-  }
-  .bubble-role {
-    display: none;
+    padding: 0.1rem 0;
   }
   .md-body {
     font-size: 0.94rem;
