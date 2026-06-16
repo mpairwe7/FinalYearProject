@@ -10,11 +10,13 @@ import type { Page } from "@playwright/test";
 
 import { TINY_WAV_B64 } from "./fixtures";
 
-/** Seed an analytics-consent decision so the banner never renders. */
+/** Seed an analytics-consent decision so the banner never renders.
+ * The store reads "true"/"false" (see lib/analyticsConsent); anything else is
+ * treated as undecided, so the banner would still show. */
 export async function seedConsent(page: Page, value: "granted" | "denied" = "denied") {
   await page.addInitScript((v) => {
     try {
-      window.localStorage.setItem("ura_analytics_consent", v as string);
+      window.localStorage.setItem("ura_analytics_consent", v === "granted" ? "true" : "false");
     } catch {
       /* ignore */
     }

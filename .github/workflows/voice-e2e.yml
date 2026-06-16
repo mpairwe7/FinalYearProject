@@ -23,8 +23,14 @@ on:
       - "App/frontend/playwright.config.ts"
       - "App/frontend/src/components/Voice*.tsx"
       - "App/frontend/src/components/ChatInput.tsx"
+      - "App/frontend/src/components/ChatMessage.tsx"
+      - "App/frontend/src/components/ThemeToggle.tsx"
       - "App/frontend/src/services/voice*.ts"
       - "App/frontend/src/hooks/useSpeech.ts"
+      - "App/frontend/src/hooks/useTheme.ts"
+      - "App/frontend/src/lib/theme.ts"
+      - "App/frontend/src/app/layout.tsx"
+      - "App/frontend/src/app/globals.css"
       - "App/backend/app/speech_service.py"
       - ".github/workflows/voice-e2e.yml"
   pull_request:
@@ -86,6 +92,9 @@ jobs:
 
       - name: Run voice.mobile.spec.ts (mobile-chrome)
         run: bunx playwright test e2e/voice.mobile.spec.ts --project=mobile-chrome
+
+      - name: Run ui-theme.spec.ts (copy + theme — chromium + mobile-chrome)
+        run: bunx playwright test e2e/ui-theme.spec.ts --project=chromium --project=mobile-chrome
 
       - name: Upload Playwright report
         if: failure()

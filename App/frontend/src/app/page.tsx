@@ -28,6 +28,7 @@ import ConversationRail from '../components/ConversationRail';
 import { VoiceChat } from '../components/VoiceChat';
 import { VoiceFirstChat } from '../components/VoiceFirstChat';
 import { VoiceVisionMode } from '../components/VoiceVisionMode';
+import ThemeToggle from '../components/ThemeToggle';
 import { SparklesIcon, HeadphonesIcon, BotIcon, LoadingDots, MenuIcon, PlusIcon, TrashIcon, MicIcon } from '../components/Icons';
 
 // ---------------------------------------------------------------------------
@@ -648,6 +649,7 @@ export default function Page() {
           >
             <MicIcon />
           </button>
+          <ThemeToggle />
           <div className={`pill-sm ${speechHealth?.status === 'ready' ? 'pill-ok' : 'pill-warn'}`} aria-live="polite">
             <HeadphonesIcon /> <span className="pill-sm-label">{healthLabel}</span>
           </div>
