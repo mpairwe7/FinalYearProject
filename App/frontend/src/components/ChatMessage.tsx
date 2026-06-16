@@ -1,9 +1,33 @@
-import React, { lazy, memo, Suspense } from 'react';
+import React, { lazy, memo, Suspense, useCallback, useState } from 'react';
 import { ChatTurn, Citation } from '../store/useChatStore';
 import FeedbackButtons from './FeedbackButtons';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots } from './Icons';
+import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon } from './Icons';
 
 const Markdown = lazy(() => import('./Markdown'));
+
+/** Copy an assistant reply to the clipboard with a brief confirmation. */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* clipboard unavailable (insecure context / denied) — no-op */
+    }
+  }, [text]);
+  return (
+    <button
+      type="button"
+      className={`copy-btn ${copied ? 'copied' : ''}`}
+      onClick={onCopy}
+      aria-label={copied ? 'Reply copied' : 'Copy reply'}
+    >
+      {copied ? <><CheckIcon /> Copied</> : <><CopyIcon /> Copy</>}
+    </button>
+  );
+}
 
 interface ChatMessageProps {
   turn: ChatTurn;
@@ -86,6 +110,7 @@ function ChatMessageInner({
             >
               {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
             </button>
+            <CopyButton text={turn.content} />
             <FeedbackButtons messageId={turn.id} userQuery={userQuery} botReply={turn.content} />
           </div>
         )}

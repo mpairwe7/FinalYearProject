@@ -5,7 +5,7 @@
  * grounding badge, WCAG roles/labels.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import ChatMessage from "../../components/ChatMessage";
 import type { ChatTurn } from "../../store/useChatStore";
 
@@ -53,6 +53,15 @@ describe("ChatMessage", () => {
     renderMsg(assistantTurn);
     expect(screen.getByText("VAT is 18% in Uganda.")).toBeInTheDocument();
     expect(screen.getByText("Assistant replied")).toBeInTheDocument();
+  });
+
+  it("copies the assistant reply to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderMsg(assistantTurn);
+    fireEvent.click(screen.getByRole("button", { name: "Copy reply" }));
+    expect(writeText).toHaveBeenCalledWith("VAT is 18% in Uganda.");
+    expect(await screen.findByRole("button", { name: "Reply copied" })).toBeInTheDocument();
   });
 
   it("shows citations with source details", () => {

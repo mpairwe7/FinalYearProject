@@ -110,6 +110,59 @@
 }
 
 /* -----------------------------------------------------------------------------
+   Light theme — system-adaptive (follows the OS via prefers-color-scheme).
+   Overrides the dark tokens above; the URA blue/gold/teal brand is kept.
+   -------------------------------------------------------------------------- */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --bg-0:        #F5F7FA;
+    --bg-1:        #FFFFFF;
+    --bg-2:        #FFFFFF;
+
+    /* Glass surfaces become translucent ink over the light canvas. */
+    --surface-1:   rgba(15, 23, 42, 0.025);
+    --surface-2:   rgba(15, 23, 42, 0.045);
+    --surface-3:   rgba(15, 23, 42, 0.07);
+    --surface-4:   rgba(15, 23, 42, 0.11);
+    --surface-ink: rgba(255, 255, 255, 0.82);
+
+    --border-0:    rgba(15, 23, 42, 0.08);
+    --border-1:    rgba(15, 23, 42, 0.12);
+    --border-2:    rgba(15, 23, 42, 0.18);
+
+    --text-0:      #0B1220;
+    --text-1:      #28303B;
+    --text-2:      #55606E;
+    --text-3:      #6B7480;
+
+    /* User bubble: a touch more gold so it reads on white. */
+    --grad-user:   linear-gradient(135deg, rgba(249, 199, 79, 0.34), rgba(249, 199, 79, 0.16));
+
+    /* Lighter, tighter shadows; hairline insets go dark. */
+    --shadow-sm:   0 1px 2px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.06);
+    --shadow-md:   0 6px 20px rgba(15, 23, 42, 0.10), 0 0 0 1px rgba(15, 23, 42, 0.05);
+    --shadow-lg:   0 16px 44px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.06);
+    --shadow-glow: 0 0 26px rgba(0, 48, 135, 0.14);
+  }
+
+  /* Softer, lighter gradient mesh on the light canvas. */
+  body::before {
+    background:
+      radial-gradient(ellipse 60% 50% at 20% 10%, rgba(0, 48, 135, 0.08), transparent 60%),
+      radial-gradient(ellipse 50% 45% at 80% 30%, rgba(0, 168, 143, 0.07), transparent 55%),
+      radial-gradient(ellipse 55% 40% at 50% 95%, rgba(249, 199, 79, 0.06), transparent 60%),
+      linear-gradient(180deg, var(--bg-0) 0%, #EEF2F7 50%, var(--bg-0) 100%);
+  }
+  /* The overlay-blend noise reads as grime on a light canvas — drop it. */
+  body::after { opacity: 0; }
+
+  a { color: var(--ura-blue); }
+  a:hover { color: var(--ura-teal); }
+}
+
+/* -----------------------------------------------------------------------------
    Reset + base
    -------------------------------------------------------------------------- */
 *,
@@ -675,7 +728,8 @@ main.legacy-layout {
   border-top: 0;
 }
 
-.listen-btn {
+.listen-btn,
+.copy-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -694,13 +748,15 @@ main.legacy-layout {
   transition: all 180ms ease;
   white-space: nowrap;
 }
-.listen-btn:hover:not(:disabled) {
+.listen-btn:hover:not(:disabled),
+.copy-btn:hover:not(:disabled) {
   background: var(--surface-3);
   border-color: var(--border-2);
   color: var(--text-0);
   transform: translateY(-1px);
 }
-.listen-btn:active:not(:disabled) {
+.listen-btn:active:not(:disabled),
+.copy-btn:active:not(:disabled) {
   background: var(--surface-4);
   transform: scale(0.97);
 }
@@ -708,6 +764,16 @@ main.legacy-layout {
   opacity: 0.45;
   cursor: default;
   transform: none;
+}
+/* Copy: brief success state (green check). */
+.copy-btn.copied {
+  background: rgba(52, 211, 153, 0.14);
+  border-color: rgba(52, 211, 153, 0.45);
+  color: var(--success);
+}
+.copy-btn.copied:hover {
+  background: rgba(52, 211, 153, 0.20);
+  color: var(--success);
 }
 
 .listen-btn-active {
@@ -1580,7 +1646,10 @@ main.legacy-layout {
    -------------------------------------------------------------------------- */
 .consent-banner {
   position: fixed;
-  bottom: 1.5rem;
+  /* Anchored just below the header so it never covers the composer (chat) or
+     the suggested prompts (landing), which both sit toward the bottom. */
+  top: calc(env(safe-area-inset-top, 0px) + 4.5rem);
+  bottom: auto;
   left: 50%;
   transform: translateX(-50%);
   z-index: 800;
@@ -2420,7 +2489,7 @@ main.legacy-layout {
   to   { opacity: 1; }
 }
 @keyframes consent-enter {
-  from { opacity: 0; transform: translate(-50%, 10px); }
+  from { opacity: 0; transform: translate(-50%, -10px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
