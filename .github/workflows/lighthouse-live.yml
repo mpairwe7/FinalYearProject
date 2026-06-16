@@ -60,6 +60,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -68,15 +70,22 @@ jobs:
 
       - name: Resolve target URL
         id: target
+        env:
+          # Pass expressions through env — never interpolate ${{ }} into the
+          # script body. The workflow_dispatch URL input is attacker-controllable,
+          # so inlining it would be a template/shell-injection vector.
+          INPUT_URL: ${{ github.event.inputs.url }}
+          VAR_URL: ${{ vars.LIGHTHOUSE_URL }}
         run: |
-          URL="${{ github.event.inputs.url || vars.LIGHTHOUSE_URL || env.DEFAULT_URL }}"
+          URL="${INPUT_URL:-${VAR_URL:-$DEFAULT_URL}}"
           URL="${URL%/}"   # strip trailing slash
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Auditing: $URL"
 
       - name: Wait for deploy to be healthy
+        env:
+          URL: ${{ steps.target.outputs.url }}
         run: |
-          URL="${{ steps.target.outputs.url }}"
           echo "Probing $URL/health …"
           for i in $(seq 1 30); do
             CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "$URL/health" || echo "000")
@@ -89,7 +98,7 @@ jobs:
 
       - name: Run Lighthouse CI
         id: lhci
-        uses: treosh/lighthouse-ci-action@v12
+        uses: treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18 # v12
         with:
           urls: ${{ steps.target.outputs.url }}
           configPath: ${{ matrix.config }}
@@ -98,20 +107,28 @@ jobs:
       - name: Publish scores to job summary
         if: always()
         env:
-          MANIFEST: ${{ steps.lhci.outputs.manifest }}
+          # `manifest` is NOT a declared output of treosh/lighthouse-ci-action
+          # (only resultsPath / links / assertionResults are). Read the manifest
+          # LHCI writes into the results folder instead of a non-existent output.
+          RESULTS_PATH: ${{ steps.lhci.outputs.resultsPath }}
           LINKS: ${{ steps.lhci.outputs.links }}
           FORM: ${{ matrix.form_factor }}
           URL: ${{ steps.target.outputs.url }}
         run: |
           python3 - <<'PY'
           import json, os
-          man = json.loads(os.environ.get("MANIFEST") or "[]")
+          rp = os.environ.get("RESULTS_PATH") or ""
+          mf = os.path.join(rp, "manifest.json") if rp else ""
+          man = []
+          if mf and os.path.exists(mf):
+              with open(mf) as f:
+                  man = json.load(f)
           links = json.loads(os.environ.get("LINKS") or "{}")
           form, url = os.environ.get("FORM"), os.environ.get("URL")
           out = [f"## Lighthouse — {form} — {url}", ""]
           rep = [m for m in man if m.get("isRepresentativeRun")] or man
           if not rep:
-              out.append("_No Lighthouse manifest was produced (collection failed — see logs)._")
+              out.append("_No Lighthouse manifest found (collection failed — see logs)._")
           else:
               s = rep[0].get("summary", {})
               cats = ["performance", "accessibility", "best-practices", "seo"]
