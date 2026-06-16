@@ -1,39 +1,24 @@
 /**
- * Voice E2E — Tier A, mobile (mocked backend).
+ * Voice E2E — Tier A, mobile-dialog-specific (mocked backend).
  *
  * On the mobile layout (≤720px) the header voice toggles + health pill are
  * hidden by CSS; the voice surface is the full-screen voice-first DIALOG
  * (VoiceChat.tsx), which drives ASR/TTS over the /v1/voice/chat/stream
- * WebSocket. These tests open that dialog, exercise the real on-device capture
- * (getUserMedia → MediaRecorder against Chromium's fake device), and assert the
- * orb state machine + the transcript/reply rendered from a stubbed WS sequence.
+ * WebSocket. These tests cover the parts unique to that dialog — the orb state
+ * machine and the WS round-trip. The viewport-agnostic flows (opening the
+ * dialog, message-level TTS narration) are covered by voice.spec.ts, which also
+ * runs on mobile-chrome.
  *
  * Run on the mobile-chrome project (Pixel 7). See voice-e2e.yml.
  */
 import { expect, test } from "@playwright/test";
 
-import {
-  clearChatStore,
-  mockBackend,
-  mockVoiceWebSocket,
-  seedConsent,
-  sendMessage,
-} from "./helpers";
+import { clearChatStore, mockBackend, mockVoiceWebSocket, seedConsent } from "./helpers";
 
 test.describe("Voice STT/TTS — mobile dialog (mocked)", () => {
   test.beforeEach(async ({ page }) => {
     await seedConsent(page);
     await clearChatStore(page);
-  });
-
-  test("voice-first dialog opens with the idle orb", async ({ page }) => {
-    await mockBackend(page);
-    await mockVoiceWebSocket(page);
-    await page.goto("/");
-    await page.getByRole("button", { name: "Open voice chat" }).click();
-    const dialog = page.getByRole("dialog", { name: "Voice chat" });
-    await expect(dialog).toBeVisible();
-    await expect(page.getByRole("button", { name: "Tap to speak" })).toBeVisible();
   });
 
   test("tapping the orb starts on-device capture (idle → listening)", async ({ page }) => {
@@ -42,6 +27,8 @@ test.describe("Voice STT/TTS — mobile dialog (mocked)", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Open voice chat" }).click();
 
+    // Dialog opens at the idle orb, then the tap kicks off real capture.
+    await expect(page.getByRole("dialog", { name: "Voice chat" })).toBeVisible();
     await page.getByRole("button", { name: "Tap to speak" }).click();
     // getUserMedia + MediaRecorder.start succeeded → orb reflects the listening phase.
     await expect(page.getByRole("button", { name: "Listening..." })).toBeVisible({
@@ -69,20 +56,5 @@ test.describe("Voice STT/TTS — mobile dialog (mocked)", () => {
     await expect(page.locator(".voice-transcript-text")).toContainText(/VAT/i, {
       timeout: 15_000,
     });
-  });
-
-  test("narrating a typed reply calls /v1/tts on mobile", async ({ page }) => {
-    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
-    await page.goto("/");
-    await sendMessage(page, "What is the VAT rate?");
-    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
-      timeout: 15_000,
-    });
-
-    const ttsReq = page.waitForRequest("**/api/v1/tts");
-    await page.getByRole("button", { name: /Listen in English/ }).last().click();
-    const req = await ttsReq;
-    expect(req.method()).toBe("POST");
-    expect(typeof req.postDataJSON().text).toBe("string");
   });
 });
