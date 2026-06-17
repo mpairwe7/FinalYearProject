@@ -171,14 +171,13 @@ def _llm_cloud_fallback(
     except Exception:  # providers optional / deps missing
         return ""
 
-    system, user = _build_fallback_prompt(query, passages, locale)
-
     if (
         backend == "gemini"
         and cfg.is_gemini_configured()
         and breakers.GEMINI_BREAKER.allow_request()
         and budget.try_consume_gemini_call()
     ):
+        system, user = _build_fallback_prompt(query, passages, locale)
         try:
             text = gw.gemini_generate(user, system=system, max_tokens=512, temperature=0.2)
             breakers.GEMINI_BREAKER.record_success()
@@ -189,13 +188,32 @@ def _llm_cloud_fallback(
             breakers.GEMINI_BREAKER.record_failure()
             logger.warning("LLM Gemini fallback failed", exc_info=True)
 
-    # Cloudflare Workers AI: most-capable model first (Llama 3.3 70B), then a
-    # deeper reasoning fallback (QwQ-32B). Both share CF_LLM_BREAKER + budget.
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
-    for model in (routing.CF_LLM_MODEL, routing.CF_LLM_FALLBACK_MODEL):
+    # Cloudflare Workers AI — the cloud-PRIMARY generator when
+    # LLM_PRIMARY_BACKEND=workers_ai, otherwise the cloud fallback.  Reuse the
+    # canonical message builder so cloud answers carry the FULL governed prompt
+    # (formatting, citation, refusal, multilingual rules) + the LLM01 passage
+    # scrub, matching local quality.  Chain: Llama 3.3 70B → Mistral Small 3.1
+    # → Llama 4 Scout, all sharing CF_LLM_BREAKER + the neuron budget.
+    messages = llm_module._build_messages(
+        query=query,
+        passages=passages,
+        conversation_history=conversation_history,
+        locale=locale,
+        tokenizer=None,  # CF models have ≥24k context; skip local-tokenizer trim
+        structured=llm_module.LLM_STRUCTURED_OUTPUT,
+        personalization_context=personalization_context,
+    )
+    # Strip the Qwen-only /no_think directive — a no-op token for Llama/Mistral.
+    if messages and messages[0].get("role") == "system":
+        sys_content = messages[0]["content"]
+        if sys_content.startswith("/no_think"):
+            messages[0]["content"] = sys_content.split("\n", 1)[-1]
+    cf_chain = (
+        routing.CF_LLM_MODEL,
+        routing.CF_LLM_FALLBACK_MODEL,
+        routing.CF_LLM_FALLBACK_MODEL_2,
+    )
+    for model in cf_chain:
         if not (
             cfg.is_cloudflare_configured()
             and breakers.CF_LLM_BREAKER.allow_request()
@@ -205,13 +223,12 @@ def _llm_cloud_fallback(
         try:
             text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2)
             breakers.CF_LLM_BREAKER.record_success()
-            routing.log_fallback("llm", "gemini_flash", "cf_workers_ai", "gemini_unavailable")
             routing.log_model_use("llm", model)
-            logger.info("LLM fallback via Workers AI (%s) succeeded", model)
+            logger.info("LLM via Workers AI (%s) succeeded", model)
             return text
         except Exception:
             breakers.CF_LLM_BREAKER.record_failure()
-            logger.warning("LLM Workers AI fallback failed (model=%s)", model, exc_info=True)
+            logger.warning("LLM Workers AI failed (model=%s)", model, exc_info=True)
     return ""
 
 
@@ -256,6 +273,39 @@ def _cloud_llm_ready() -> bool:
     return cfg.is_cloudflare_configured()
 
 
+# Locales kept on the local Qwen3-8B (+ per-language LoRA adapters): the cloud
+# models document no Luganda/Runyankole/Acholi support, so a blanket cloud flip
+# would regress them.  Override with LOCAL_PRIMARY_LOCALES (comma-separated).
+LOCAL_PRIMARY_LOCALES = frozenset(
+    s.strip().lower()
+    for s in os.getenv("LOCAL_PRIMARY_LOCALES", "lg,nyn,ach").split(",")
+    if s.strip()
+)
+
+
+def _prefer_cloud_primary(locale: str) -> bool:
+    """Hybrid model routing: should the cloud chain run BEFORE the local LLM?
+
+    Opt-in via ``LLM_PRIMARY_BACKEND`` (``workers_ai``/``cloudflare``/``cloud``)
+    so the default stays the resilient local-first behaviour.  Cloud leads for
+    high-resource locales (English, Swahili, …) where the CF chain (Llama 3.3
+    70B → Mistral Small 3.1 → Llama 4 Scout) beats the local 8B; the Ugandan
+    languages in :data:`LOCAL_PRIMARY_LOCALES` stay local-primary, and local is
+    the universal fallback for everyone.  Returns ``False`` whenever the cloud
+    tier is not actually configured/ready, so misconfiguration degrades safely
+    to local-first.
+    """
+    if os.getenv("LLM_PRIMARY_BACKEND", "local").strip().lower() not in (
+        "workers_ai",
+        "cloudflare",
+        "cloud",
+    ):
+        return False
+    if (locale or "en").strip().lower() in LOCAL_PRIMARY_LOCALES:
+        return False
+    return _cloud_llm_ready()
+
+
 def _call_llm_with_deadline(
     query: str,
     passages: list[dict[str, Any]],
@@ -264,17 +314,67 @@ def _call_llm_with_deadline(
     personalization_context: str = "",
     deadline_s: float = LLM_DEADLINE_SECONDS,
 ) -> str:
+    """Generate a reply, honouring the hybrid cloud/local routing policy.
+
+    For cloud-primary locales (see :func:`_prefer_cloud_primary`) the CF chain
+    runs first with the local Qwen3-8B as the fallback; otherwise the resilient
+    local-first path runs with the cloud chain as its fallback.
+    """
+    if _prefer_cloud_primary(locale):
+        text = _llm_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context
+        )
+        if text and text.strip():
+            return text
+        logger.warning("Cloud-primary LLM unavailable/empty — falling back to local Qwen3-8B")
+        return _local_llm_then_cloud(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            deadline_s,
+            allow_cloud_fallback=False,  # cloud already attempted above
+        )
+    return _local_llm_then_cloud(
+        query,
+        passages,
+        conversation_history,
+        locale,
+        personalization_context,
+        deadline_s,
+        allow_cloud_fallback=True,
+    )
+
+
+def _local_llm_then_cloud(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str = "",
+    deadline_s: float = LLM_DEADLINE_SECONDS,
+    *,
+    allow_cloud_fallback: bool = True,
+) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
 
     The generation runs on a bounded executor, guarded by a dedicated
-    circuit breaker.  On timeout, breaker failure, or exception we
-    return an empty string so the caller falls back to FAQ lookup.
+    circuit breaker.  On timeout, breaker failure, or empty/exception we route
+    to the cloud chain (when ``allow_cloud_fallback``) and otherwise return an
+    empty string so the caller falls back to FAQ lookup.
     """
-    if not _LLM_CIRCUIT.allow_request():
-        logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
+
+    def _cloud() -> str:
+        if not allow_cloud_fallback:
+            return ""
         return _llm_cloud_fallback(
             query, passages, conversation_history, locale, personalization_context
         )
+
+    if not _LLM_CIRCUIT.allow_request():
+        logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
+        return _cloud()
 
     future = _LLM_EXECUTOR.submit(
         llm_module.generate,
@@ -296,22 +396,16 @@ def _call_llm_with_deadline(
         # extractive best-hit answer.
         _LLM_CIRCUIT.record_failure()
         logger.warning("LLM returned empty — trying cloud fallback")
-        return _llm_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context
-        )
+        return _cloud()
     except concurrent.futures.TimeoutError:
         future.cancel()  # best-effort; transformers generate may ignore
         _LLM_CIRCUIT.record_failure()
         logger.warning("LLM deadline %.1fs exceeded", deadline_s)
-        return _llm_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context
-        )
+        return _cloud()
     except Exception:
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM generation raised")
-        return _llm_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context
-        )
+        return _cloud()
 
 
 def stream_llm_tokens(
@@ -334,17 +428,73 @@ def stream_llm_tokens(
     disconnects or a WS client emits ``response.cancel``).  The
     underlying transformer thread cannot be killed; the next decoded
     token is the cancellation latency floor.
+
+    Honours the hybrid routing policy: cloud-primary locales stream the CF
+    answer first (chunked) with the local model as fallback; everyone else
+    streams locally with the cloud chain as fallback.
     """
-    if not llm_module.is_available():
-        yield from _stream_cloud_fallback(
+    if _prefer_cloud_primary(locale):
+        saw_cloud = False
+        for chunk in _stream_cloud_fallback(
             query, passages, conversation_history, locale, personalization_context
+        ):
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            saw_cloud = True
+            yield chunk
+        if saw_cloud:
+            return
+        logger.warning("Cloud-primary stream unavailable — falling back to local Qwen3-8B")
+        yield from _stream_local_then_cloud(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            cancel_event,
+            allow_cloud_fallback=False,  # cloud already attempted above
         )
+        return
+    yield from _stream_local_then_cloud(
+        query,
+        passages,
+        conversation_history,
+        locale,
+        personalization_context,
+        cancel_event,
+        allow_cloud_fallback=True,
+    )
+
+
+def _stream_local_then_cloud(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str = "",
+    cancel_event: threading.Event | None = None,
+    *,
+    allow_cloud_fallback: bool = True,
+) -> Generator[str, None, None]:
+    """Stream from the local model; route to the cloud chain on failure.
+
+    Yields nothing when the breaker is OPEN, the generator raises, or no tokens
+    are produced AND ``allow_cloud_fallback`` is False — the caller then falls
+    back to returning the best-hit answer as a single event.
+    """
+
+    def _cloud_stream() -> Generator[str, None, None]:
+        if allow_cloud_fallback:
+            yield from _stream_cloud_fallback(
+                query, passages, conversation_history, locale, personalization_context
+            )
+
+    if not llm_module.is_available():
+        yield from _cloud_stream()
         return
     if not _LLM_CIRCUIT.allow_request():
         logger.warning("LLM circuit breaker OPEN — streaming via cloud fallback")
-        yield from _stream_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context
-        )
+        yield from _cloud_stream()
         return
 
     saw_tokens = False
@@ -370,15 +520,11 @@ def stream_llm_tokens(
             # Empty stream counts as a soft failure — the breaker tracks
             # it so a continually empty worker eventually trips.
             _LLM_CIRCUIT.record_failure()
-            yield from _stream_cloud_fallback(
-                query, passages, conversation_history, locale, personalization_context
-            )
+            yield from _cloud_stream()
     except Exception:
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM streaming raised")
-        yield from _stream_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context
-        )
+        yield from _cloud_stream()
         return
 
 

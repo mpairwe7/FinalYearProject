@@ -22,10 +22,23 @@ import os
 from ..analytics import metrics
 
 # ── Cloudflare Workers AI text models (env-overridable) ──────────────────────
-# Reasoning / RAG / summarization primary CF model (best available; not 405B).
+# Ordered best-quality → cheaper/faster; all GA on Workers AI as of 2026-06.
+# When LLM_PRIMARY_BACKEND=workers_ai this chain is the PRIMARY generator for
+# high-resource locales (English, Swahili, …); the local Qwen3-8B stays primary
+# for Ugandan languages and is the universal fallback (see
+# service._prefer_cloud_primary).  Reasoning models (QwQ-32B, DeepSeek-R1) are
+# deliberately excluded — their <think> traces add latency/cost a citation-
+# grounded chatbot does not want.
+# 1) Llama 3.3 70B — best instruction-following / citation discipline (~92 IFEval).
 CF_LLM_MODEL = os.getenv("CF_LLM_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-# Deeper reasoning fallback (no Command R+ / Qwen2.5-72B in catalog).
-CF_LLM_FALLBACK_MODEL = os.getenv("CF_LLM_FALLBACK_MODEL", "@cf/qwen/qwq-32b")
+# 2) Mistral Small 3.1 24B — ~70B-class quality, ~4× cheaper output, lower latency.
+CF_LLM_FALLBACK_MODEL = os.getenv(
+    "CF_LLM_FALLBACK_MODEL", "@cf/mistralai/mistral-small-3.1-24b-instruct"
+)
+# 3) Llama 4 Scout 17B (16-expert MoE) — cheap, 131k context, fast; final cloud hop.
+CF_LLM_FALLBACK_MODEL_2 = os.getenv(
+    "CF_LLM_FALLBACK_MODEL_2", "@cf/meta/llama-4-scout-17b-16e-instruct"
+)
 # Fast / high-volume / classification model.
 CF_LLM_FAST_MODEL = os.getenv("CF_LLM_FAST_MODEL", "@cf/meta/llama-3.1-8b-instruct-fp8")
 # (STT/TTS/MT model IDs live in speech_service.py: STT_FALLBACK_MODEL, etc.)

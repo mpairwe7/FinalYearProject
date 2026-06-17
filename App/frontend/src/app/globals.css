@@ -631,6 +631,17 @@ main.legacy-layout {
   opacity: 0.85;
 }
 
+/* Clickable citation source → official URA portal */
+.cite-source-link {
+  color: var(--ura-gold-muted);
+  text-decoration: underline;
+  text-decoration-color: rgba(249, 199, 79, 0.3);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 150ms ease;
+}
+.cite-source-link:hover { text-decoration-color: var(--ura-gold); }
+.cite-source-link strong { color: inherit; font-weight: 600; }
+
 /* -----------------------------------------------------------------------------
    Voice controls (hero area)
    -------------------------------------------------------------------------- */
@@ -812,8 +823,19 @@ main.legacy-layout {
   color: rgba(253, 224, 71, 0.95);
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.45rem;
 }
+
+/* Tappable URA contact line shown when human review is recommended */
+.escalation-contacts {
+  flex-basis: 100%;
+  margin-top: 0.3rem;
+  font-size: 0.82em;
+  line-height: 1.7;
+  color: rgba(253, 224, 71, 0.88);
+}
+.escalation-contacts .md-link { white-space: nowrap; }
 
 /* -----------------------------------------------------------------------------
    Composer (floating input)

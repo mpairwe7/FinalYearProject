@@ -1,5 +1,6 @@
 import React, { lazy, memo, Suspense, useCallback, useState } from 'react';
 import { ChatTurn, Citation } from '../store/useChatStore';
+import { URA_CONTACTS, sourceUrl, telDigits } from '../lib/uraContacts';
 import FeedbackButtons from './FeedbackButtons';
 import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon } from './Icons';
 
@@ -70,6 +71,23 @@ function ChatMessageInner({
           <div className="escalation-banner" role="alert">
             <span aria-hidden="true">!</span> Human review recommended
             {turn.escalationReason ? ` — ${turn.escalationReason}` : ''}
+            <div className="escalation-contacts">
+              Contact URA:{' '}
+              {URA_CONTACTS.tollFree.map((n, idx) => (
+                <React.Fragment key={n}>
+                  {idx > 0 && ' / '}
+                  <a className="md-link" href={`tel:${telDigits(n)}`}>{n}</a>
+                </React.Fragment>
+              ))}
+              {' · WhatsApp '}
+              <a className="md-link" href={`tel:${telDigits(URA_CONTACTS.whatsapp)}`}>
+                {URA_CONTACTS.whatsapp}
+              </a>
+              {' · '}
+              <a className="md-link" href={URA_CONTACTS.website} target="_blank" rel="noopener noreferrer">
+                ura.go.ug
+              </a>
+            </div>
           </div>
         )}
 
@@ -84,18 +102,33 @@ function ChatMessageInner({
               )}
             </summary>
             <ol>
-              {turn.citations.map((c: Citation) => (
-                <li key={c.ref}>
-                  <strong>{c.source}</strong>
-                  {c.page ? ` p.${c.page}` : ''}
-                  {c.section ? ` ${c.section}` : ''}
-                  {c.passage && (
-                    <div className="cite-passage">
-                      {c.passage.slice(0, 180)}{c.passage.length > 180 ? '...' : ''}
-                    </div>
-                  )}
-                </li>
-              ))}
+              {turn.citations.map((c: Citation) => {
+                const href = sourceUrl(c.source);
+                return (
+                  <li key={c.ref}>
+                    {href ? (
+                      <a
+                        className="cite-source-link"
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer nofollow"
+                        title="Find official URA documents at ura.go.ug"
+                      >
+                        <strong>{c.source}</strong>
+                      </a>
+                    ) : (
+                      <strong>{c.source}</strong>
+                    )}
+                    {c.page ? ` p.${c.page}` : ''}
+                    {c.section ? ` ${c.section}` : ''}
+                    {c.passage && (
+                      <div className="cite-passage">
+                        {c.passage.slice(0, 180)}{c.passage.length > 180 ? '...' : ''}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ol>
           </details>
         )}

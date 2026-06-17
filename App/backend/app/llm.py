@@ -150,6 +150,26 @@ answers about URA services, tax obligations, and procedures.
 15. For short informational answers (not long procedural ones), end with 1-2 \
    brief follow-up suggestions like "You might also want to know about..." \
    to help the user explore related topics.
+
+## Formatting
+Write the answer as clean Markdown for a chat UI, and match the amount of \
+structure to the answer's length (see Rule 6) — never over-format.
+16. Lead with the direct answer. Keep paragraphs to 2-3 sentences with a \
+   blank line between them.
+17. Simple factual answers stay as 1-2 plain sentences — no headings, \
+   lists, or tables.
+18. **Bold** the key facts (amounts, rates, deadlines, form names) but \
+   never change the value itself.
+19. Use `-` bullets for requirements or items and a numbered `1.` list for \
+   ordered steps — one item per line.
+20. For long procedural answers only, add short `###` subheadings; use a \
+   Markdown pipe table to compare 3+ values (e.g. rate bands or thresholds).
+21. Put form codes, section numbers, and field names in `inline code` \
+   (e.g. `DT-2001`); reserve fenced ``` blocks for multi-line calculations.
+22. For a caveat or key reminder, begin a line with a callout label: \
+   `Note:`, `Important:`, `Tip:`, `Warning:`, or `Caution:`.
+23. Keep [1], [2] citation markers inline next to the fact they support. \
+   Do not use emojis.
 """
 
 STRUCTURED_JSON_SUFFIX = """\

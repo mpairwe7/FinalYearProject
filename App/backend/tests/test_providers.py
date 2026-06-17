@@ -1008,7 +1008,12 @@ class ModelRoutingPolicyTest(unittest.TestCase):
     def test_default_model_ids(self):
         from app.providers import routing
         self.assertEqual(routing.CF_LLM_MODEL, "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-        self.assertEqual(routing.CF_LLM_FALLBACK_MODEL, "@cf/qwen/qwq-32b")
+        self.assertEqual(
+            routing.CF_LLM_FALLBACK_MODEL, "@cf/mistralai/mistral-small-3.1-24b-instruct"
+        )
+        self.assertEqual(
+            routing.CF_LLM_FALLBACK_MODEL_2, "@cf/meta/llama-4-scout-17b-16e-instruct"
+        )
         self.assertEqual(routing.CF_LLM_FAST_MODEL, "@cf/meta/llama-3.1-8b-instruct-fp8")
 
     def test_log_helpers_increment_metrics(self):
@@ -1029,7 +1034,7 @@ class ModelRoutingPolicyTest(unittest.TestCase):
 
 
 class LLMRoutingOrderTest(unittest.TestCase):
-    """service._llm_cloud_fallback — Gemini -> CF Llama-3.3-70B -> QwQ-32B."""
+    """service._llm_cloud_fallback — Gemini -> CF Llama-3.3-70B -> Mistral Small 3.1."""
 
     def setUp(self):
         _with_keys()
@@ -1057,7 +1062,7 @@ class LLMRoutingOrderTest(unittest.TestCase):
         gg.assert_called_once()
         wc.assert_not_called()  # Gemini served; CF not reached
 
-    def test_cf_llama_70b_then_qwq_fallback(self):
+    def test_cf_llama_70b_then_mistral_fallback(self):
         from app import service
         from app.providers import routing
         calls = []
@@ -1066,14 +1071,80 @@ class LLMRoutingOrderTest(unittest.TestCase):
             calls.append(model)
             if model == routing.CF_LLM_MODEL:
                 raise RuntimeError("HTTP 500")
-            return "ans via qwq [1]"
+            return "ans via mistral [1]"
 
         with mock.patch.object(service.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "workers_ai"}), \
              mock.patch.object(gateway, "workers_ai_chat", side_effect=chat):
             out = service._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
-        self.assertEqual(out, "ans via qwq [1]")
+        self.assertEqual(out, "ans via mistral [1]")
         self.assertEqual(calls, [routing.CF_LLM_MODEL, routing.CF_LLM_FALLBACK_MODEL])
+
+
+class HybridCloudPrimaryRoutingTest(unittest.TestCase):
+    """service._prefer_cloud_primary + cloud-primary dispatch in _call_llm_with_deadline.
+
+    Cloud-primary is opt-in (LLM_PRIMARY_BACKEND=workers_ai); Ugandan locales stay
+    local; the local model is the universal fallback.
+    """
+
+    def test_prefer_cloud_primary_opt_in_and_locale(self):
+        from app import service
+
+        with mock.patch.dict(os.environ), \
+             mock.patch.object(service, "_cloud_llm_ready", return_value=True):
+            # Default (opt-out) → local-first regardless of cloud readiness.
+            os.environ.pop("LLM_PRIMARY_BACKEND", None)
+            self.assertFalse(service._prefer_cloud_primary("en"))
+            # Opt-in → cloud-primary for high-resource locales...
+            os.environ["LLM_PRIMARY_BACKEND"] = "workers_ai"
+            self.assertTrue(service._prefer_cloud_primary("en"))
+            self.assertTrue(service._prefer_cloud_primary("sw"))
+            # ...but Ugandan languages stay on the local LoRA-adapted model.
+            for lg in ("lg", "nyn", "ach"):
+                self.assertFalse(service._prefer_cloud_primary(lg))
+        # Opt-in but cloud not ready → safe degrade to local-first.
+        with mock.patch.dict(os.environ, {"LLM_PRIMARY_BACKEND": "workers_ai"}), \
+             mock.patch.object(service, "_cloud_llm_ready", return_value=False):
+            self.assertFalse(service._prefer_cloud_primary("en"))
+
+    def test_cloud_primary_serves_before_local(self):
+        from app import service
+
+        with mock.patch.dict(os.environ, {"LLM_PRIMARY_BACKEND": "workers_ai"}), \
+             mock.patch.object(service, "_cloud_llm_ready", return_value=True), \
+             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD [1]") as cf, \
+             mock.patch.object(service.llm_module, "generate", return_value="LOCAL") as gen:
+            out = service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+        self.assertEqual(out, "CLOUD [1]")
+        cf.assert_called_once()
+        gen.assert_not_called()  # local never invoked when cloud-primary succeeds
+
+    def test_cloud_primary_falls_back_to_local_when_cloud_empty(self):
+        from app import service
+
+        with mock.patch.dict(os.environ, {"LLM_PRIMARY_BACKEND": "workers_ai"}), \
+             mock.patch.object(service, "_cloud_llm_ready", return_value=True), \
+             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(service, "_llm_cloud_fallback", return_value="") as cf, \
+             mock.patch.object(service.llm_module, "generate", return_value="LOCAL [1]") as gen:
+            out = service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+        self.assertEqual(out, "LOCAL [1]")
+        cf.assert_called_once()  # cloud attempted once as primary...
+        gen.assert_called_once()  # ...then local served as the fallback
+
+    def test_ugandan_locale_stays_local_primary(self):
+        from app import service
+
+        with mock.patch.dict(os.environ, {"LLM_PRIMARY_BACKEND": "workers_ai"}), \
+             mock.patch.object(service, "_cloud_llm_ready", return_value=True), \
+             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cf, \
+             mock.patch.object(service.llm_module, "generate", return_value="LOCAL LG [1]") as gen:
+            out = service._call_llm_with_deadline("q", [{"text": "x"}], None, "lg")
+        self.assertEqual(out, "LOCAL LG [1]")
+        gen.assert_called_once()
+        cf.assert_not_called()  # cloud is only the fallback for Ugandan locales
 
 
 class TranslateRoutingOrderTest(unittest.TestCase):
