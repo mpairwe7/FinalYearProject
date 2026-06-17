@@ -372,6 +372,7 @@ class HybridRetriever:
         with a lexical (BM25-lite) re-score via RRF.  CPU-only hybrid."""
         from .providers import breakers, budget
         from .providers import gateway as _gw
+        from .providers import routing
         from .providers import vectorize as _vz
 
         if not breakers.VECTORIZE_BREAKER.allow_request():
@@ -388,6 +389,7 @@ class HybridRetriever:
                 vfilter = eqs or None
             hits = _vz.vectorize_query(dense_vec, top_k=prefetch_limit, vector_filter=vfilter)
             breakers.VECTORIZE_BREAKER.record_success()
+            routing.log_model_use("embed", "bge-m3")  # index is bge-m3 space; keyword is the resilience fallback
         except Exception:
             breakers.VECTORIZE_BREAKER.record_failure()
             logger.exception("Vectorize dense fallback failed")

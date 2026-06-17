@@ -1002,6 +1002,123 @@ class CfLiveTest(unittest.TestCase):
         self.assertTrue((stt.get("text") or "").strip(), "live STT returned empty transcript")
 
 
+class ModelRoutingPolicyTest(unittest.TestCase):
+    """providers.routing — policy constants + usage/fallback logging."""
+
+    def test_default_model_ids(self):
+        from app.providers import routing
+        self.assertEqual(routing.CF_LLM_MODEL, "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+        self.assertEqual(routing.CF_LLM_FALLBACK_MODEL, "@cf/qwen/qwq-32b")
+        self.assertEqual(routing.CF_LLM_FAST_MODEL, "@cf/meta/llama-3.1-8b-instruct-fp8")
+
+    def test_log_helpers_increment_metrics(self):
+        from app.providers import routing
+        with mock.patch.object(routing.metrics, "inc") as inc:
+            routing.log_model_use("llm", "gemini_flash")
+            routing.log_fallback("translate", "gemini_flash", "cf_workers_ai", "gemini_unavailable")
+        self.assertEqual(
+            inc.call_args_list[0],
+            mock.call("model_usage_total", labels={"task": "llm", "model": "gemini_flash"}),
+        )
+        self.assertEqual(
+            inc.call_args_list[1],
+            mock.call("model_fallback_total", labels={
+                "task": "translate", "from": "gemini_flash", "to": "cf_workers_ai",
+                "reason": "gemini_unavailable"}),
+        )
+
+
+class LLMRoutingOrderTest(unittest.TestCase):
+    """service._llm_cloud_fallback — Gemini -> CF Llama-3.3-70B -> QwQ-32B."""
+
+    def setUp(self):
+        _with_keys()
+        budget._redis = None
+        budget._redis_tried = True
+        budget._local_gemini.clear()
+        budget._local_neurons.clear()
+        from app.providers import breakers
+        breakers.GEMINI_BREAKER.record_success()
+        breakers.CF_LLM_BREAKER.record_success()
+
+    def tearDown(self):
+        _clear_keys()
+        budget._redis_tried = False
+        gateway._client = None
+
+    def test_gemini_is_primary(self):
+        from app import service
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
+             mock.patch.object(gateway, "gemini_generate", return_value="ans [1]") as gg, \
+             mock.patch.object(gateway, "workers_ai_chat") as wc:
+            out = service._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
+        self.assertEqual(out, "ans [1]")
+        gg.assert_called_once()
+        wc.assert_not_called()  # Gemini served; CF not reached
+
+    def test_cf_llama_70b_then_qwq_fallback(self):
+        from app import service
+        from app.providers import routing
+        calls = []
+
+        def chat(messages, model=None, **kw):
+            calls.append(model)
+            if model == routing.CF_LLM_MODEL:
+                raise RuntimeError("HTTP 500")
+            return "ans via qwq [1]"
+
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "workers_ai"}), \
+             mock.patch.object(gateway, "workers_ai_chat", side_effect=chat):
+            out = service._llm_cloud_fallback("q", [{"text": "ctx"}], None, "en")
+        self.assertEqual(out, "ans via qwq [1]")
+        self.assertEqual(calls, [routing.CF_LLM_MODEL, routing.CF_LLM_FALLBACK_MODEL])
+
+
+class TranslateRoutingOrderTest(unittest.TestCase):
+    """speech_service._do_translate — Gemini -> CF Llama -> Sunbird."""
+
+    @staticmethod
+    def _sm():
+        from app.speech_service import SpeechModel
+        sm = SpeechModel.__new__(SpeechModel)
+        sm._chat_model = None
+        sm._mt = None
+        return sm
+
+    def test_gemini_first(self):
+        from app.speech_service import SpeechModel
+        sm = self._sm()
+        with mock.patch.object(SpeechModel, "_gemini_translate", return_value="Omusolo"), \
+             mock.patch.object(SpeechModel, "_cf_llama_translate") as cf:
+            res = sm._do_translate("VAT?", "en", "lg")
+        self.assertEqual(res.backend, "gemini_flash")
+        self.assertEqual(res.text, "Omusolo")
+        cf.assert_not_called()
+
+    def test_cf_llama_when_gemini_empty(self):
+        from app.speech_service import SpeechModel
+        sm = self._sm()
+        with mock.patch.object(SpeechModel, "_gemini_translate", return_value=""), \
+             mock.patch.object(SpeechModel, "_cf_llama_translate", return_value="Omusolo via CF"):
+            res = sm._do_translate("VAT?", "en", "lg")
+        self.assertEqual(res.backend, "cf_workers_ai")
+        self.assertEqual(res.text, "Omusolo via CF")
+
+    def test_sunbird_when_both_cloud_llms_empty(self):
+        from app import sunbird as real_sunbird
+        from app.speech_service import SpeechModel
+        sm = self._sm()
+        with mock.patch.object(SpeechModel, "_gemini_translate", return_value=""), \
+             mock.patch.object(SpeechModel, "_cf_llama_translate", return_value=""), \
+             mock.patch.object(real_sunbird, "is_available", return_value=True), \
+             mock.patch.object(real_sunbird, "translate", return_value="Omusolo via Sunbird"):
+            res = sm._do_translate("VAT?", "en", "lg")
+        self.assertEqual(res.backend, "sunbird_cloud")
+        self.assertEqual(res.text, "Omusolo via Sunbird")
+
+
 class TranslationFallbackTest(unittest.TestCase):
     """SpeechModel._gemini_translate uses Gemini 2.5 Flash for Luganda."""
 
