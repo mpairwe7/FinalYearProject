@@ -389,8 +389,10 @@ Sunbird cloud mode but are similarly network-bound.
 
 Route **English** speech to Cloudflare Workers AI (Luganda stays on Sunbird —
 the CF audio models are English-strong). Models are **env-configurable**, so you
-can swap them (e.g. to Deepgram) without code changes. For English, CF is tried
-before edge-tts → Sunbird; on CF failure it degrades to those.
+can swap them (e.g. to Deepgram) without code changes. For English the TTS chain
+is **Aura-2-en → MeloTTS → edge_tts → Sunbird** and STT is **whisper-large-v3-turbo
+→ Sunbird** — every tier is retained for resilience (circuit-breaker + budget
+gated), degrading down the chain on failure.
 
 | Env | Default | Notes |
 |---|---|---|
@@ -398,8 +400,8 @@ before edge-tts → Sunbird; on CF failure it degrades to those.
 | `STT_FALLBACK_BACKEND` | `workers_ai` | enables CF STT for English |
 | `STT_FALLBACK_MODEL` | `@cf/openai/whisper-large-v3-turbo` | or `@cf/deepgram/nova-3`, `@cf/deepgram/flux` |
 | `TTS_FALLBACK_BACKEND` | `workers_ai` | enables CF TTS for English |
-| `TTS_FALLBACK_MODEL` | `@cf/myshell-ai/melotts` | primary English TTS (returns WAV) |
-| `TTS_FALLBACK_MODEL_2` | `@cf/deepgram/aura-2-en` | resilience fallback (returns MP3) |
+| `TTS_FALLBACK_MODEL` | `@cf/deepgram/aura-2-en` | **primary** English TTS — Deepgram Aura-2, context-aware/natural (returns MP3) |
+| `TTS_FALLBACK_MODEL_2` | `@cf/myshell-ai/melotts` | resilience fallback — MeloTTS (returns WAV) |
 
 Request/response shapes differ by model family and are handled in
 `app/providers/gateway.py` (`workers_ai_stt`/`workers_ai_tts`): original
@@ -682,10 +684,21 @@ validation is failing, §7.2). Definition lives in `App/deploy/hf-space/`.
 prebuilt Docker Hub image, so there is **no separate build** — bump the `FROM`
 tag in `App/deploy/hf-space/Dockerfile` to roll the Space.
 
-**Secrets:** runtime config mirrors the Crane Cloud app's env, set as **Space
-secrets** (Settings → Secrets, or run `App/deploy/hf-space/replicate_secrets.py`,
-which copies the live Crane Cloud env). Overrides vs Crane Cloud: `USE_DOH=false`
-(HF has native DNS) and `CORS_ORIGINS` = the Space URL.
+**Secrets & config:** runtime config mirrors the Crane Cloud app's env, set as
+**Space secrets/variables** (Settings, or run `App/deploy/hf-space/replicate_secrets.py`
+to copy the live Crane Cloud env, and `App/deploy/hf-space/set_fallback_secret.py`
+to set the Sunbird fallback token). Overrides vs Crane Cloud: `USE_DOH=false` (HF
+has native DNS) and `CORS_ORIGINS` = the Space URL. Model-routing IDs (`CF_LLM_*`,
+`STT_/TTS_FALLBACK_*`) are set as non-secret Space **variables**. Both helpers are
+stdlib-only and print key names only, never values.
+
+**Frame-embedding fix (§7.4 note):** the frontend originally sent
+`X-Frame-Options: DENY`, which blanked the HF Space *page* (it embeds the app in an
+iframe; the direct `*.hf.space` URL always rendered). `next.config.mjs` now drops
+`X-Frame-Options` and uses CSP `frame-ancestors 'self' https://huggingface.co
+https://*.hf.space` (env `FRAME_ANCESTORS`; `"'none'"` restores strict no-embed).
+Headers are baked at Next.js build time, so this required a rebuild — not a runtime
+env change.
 
 **Verify** exactly as for Crane Cloud:
 
@@ -694,10 +707,12 @@ BACKEND_URL=https://landwind22-ura-chatbot.hf.space \
   bash App/scripts/live_speech_smoke.sh
 ```
 
-Verified 2026-06-17: TTS en → `edge_tts` (`en-US-AriaNeural`, MP3), TTS lg →
+Verified 2026-06-17 (live image `sha-c2722c4`): TTS en → `cf_workers_ai`
+(`@cf/deepgram/aura-2-en`, MP3; MeloTTS/edge_tts/Sunbird as fallbacks), TTS lg →
 `sunbird_cloud` (speaker 248), STT en/lg → `sunbird_cloud`, translate →
 `gemini_flash`, voice/chat (en+lg) full pipeline. Sunbird modal cold starts make
-the first call of each kind slow (voice/chat ~30–45 s).
+the first call of each kind slow (voice/chat ~30–45 s; the compound English call
+can exceed HF's proxy timeout → 504 — real clients should use streaming).
 
 ---
 
@@ -712,7 +727,7 @@ on `/metrics` as `model_usage_total{task,model}` + `model_fallback_total{task,fr
 | Reasoning / RAG / summarization (LLM) | Gemini 2.5 Flash → CF `llama-3.3-70b-instruct-fp8-fast` → CF `qwq-32b` (local/vLLM stays primary when present) |
 | Translation (en↔lg) | Gemini 2.5 Flash → CF Llama (prompted) → Sunbird NLLB → local MT → Qwen3 |
 | Luganda STT | Sunbird → CF `whisper-large-v3-turbo` (Gemini-audio deferred) |
-| English STT / TTS | CF `whisper-large-v3-turbo` / `melotts` (→ `aura-2-en`) — see §7.4 |
+| English STT / TTS | STT `whisper-large-v3-turbo`; TTS `aura-2-en` → `melotts` → edge_tts → Sunbird — see §7.4 |
 | Embedding | CF `bge-m3` (the index's vector space) → degrade to BM25 keyword |
 
 Env knobs (defaults apply if unset): `CF_LLM_MODEL`, `CF_LLM_FALLBACK_MODEL`,
@@ -727,3 +742,36 @@ Llama 405B / Command R+ / Qwen2.5-72B → `@cf/qwen/qwq-32b`; "Gemini 3.5 Flash"
 Gemini 2.5 Flash; "Sunbird 2" → the existing Sunbird API. **Embedding caveat:** a
 Vectorize index is bound to ONE embedding model's vector space, so a *different*
 embed model is not a valid fallback — resilience is retry `bge-m3` → BM25 keyword.
+
+**Grok voice (evaluated 2026-06, not adopted):** xAI's Grok STT/TTS APIs exist and
+Cloudflare AI Gateway added a `grok` provider, but the gateway routes Grok **chat
+completions only** — voice (STT/TTS/`/v1/realtime`) needs **direct `api.x.ai`** calls
+(paid: ~$0.10–0.20/hr STT, $4.20/1M-char TTS), a separate `XAI_API_KEY`, and has no
+Luganda. The gateway-native, free-tier-friendly premium English voice
+(`@cf/deepgram/aura-2-en`) was chosen instead.
+
+---
+
+## 17. Deployment state & change log (audit — 2026-06-17)
+
+Snapshot after this session's changes.
+
+| Pipeline | Image | Status |
+|---|---|---|
+| HF Space `landwind22/ura-chatbot` | `sha-c2722c4` | **Live** — model routing + CF speech + Aura-2 English TTS + iframe fix |
+| Crane Cloud app `b01219c6-…` | `sha-0d7cd2f` (older) | Speech enabled; routing/CF-TTS env **staged**, applies when its image deploy recovers (Docker-Hub validation outage, §7.2) |
+
+**Per-task models (live)** — see §16:
+- English: STT `@cf/openai/whisper-large-v3-turbo`; TTS `@cf/deepgram/aura-2-en` → MeloTTS → edge_tts → Sunbird.
+- Luganda: STT/TTS Sunbird (TTS speaker 248); CF whisper-turbo as the STT net.
+- Translation en↔lg: Gemini 2.5 Flash → CF Llama-3.3-70B → Sunbird NLLB → local MT → Qwen3.
+- LLM reasoning: Gemini → CF Llama-3.3-70B → QwQ-32B (local/vLLM primary when present).
+- Embedding: bge-m3 → BM25 keyword.
+
+**Resilience:** Sunbird primary + fallback account (`SUNBIRD_API_TOKEN` / `SUNBIRD_FALLBACK_API_TOKEN`, `sunbird._post`); per-channel circuit breakers + free-tier budget guards; cloud tiers self-skip when unconfigured.
+
+**Observability:** `model_usage_total{task,model}` + `model_fallback_total{task,from,to,reason}` on `/metrics` (admin-gated).
+
+**Change log / PRs (this session):** #116 speech enable + edge-tts English · #117 HF Docker Space pipeline · #118 CF English STT/TTS · #119 Sunbird fallback account · #120 `set_fallback_secret.py` helper · #121 model-routing policy + observability · #122 HF iframe `frame-ancestors` fix · (Aura-2-en TTS primary + `CF_LLM_*` env = config-only, no PR).
+
+**Ops gotchas:** (1) change CC env during the Docker-Hub outage via an **env-only PATCH** — omit the `image` field (§7.2); (2) **build-push is path-filtered** — docs/`hf-space/`-only merges don't build a new image; (3) HF/security headers are **baked at build** (the frame fix needed a rebuild, not an env change); (4) Grok voice not gateway-routable (see above).
