@@ -300,7 +300,8 @@ models, so every speech call is delegated to cloud providers. Two modes:
 | Key | Value | Why |
 |---|---|---|
 | `SPEECH_ENABLED` | `true` | Builds the `SpeechModel` at startup; without it every speech route 503s. |
-| `SUNBIRD_API_TOKEN` | `<token>` | Cloud ASR/TTS/MT for Ugandan languages. `is_available()` is just `bool(token)`. `SUNBIRD_API_URL` defaults to `https://api.sunbird.ai`. |
+| `SUNBIRD_API_TOKEN` | `<token>` | Primary Sunbird account — cloud ASR/TTS/MT for Ugandan languages. `SUNBIRD_API_URL` defaults to `https://api.sunbird.ai`. |
+| `SUNBIRD_FALLBACK_API_TOKEN` | `<token>` | Optional second Sunbird account for resilience — a request that fails on the primary token is automatically retried on this one (`sunbird._post`). `is_available()` is true if **either** token is set. |
 | `FLAG_VOICE_CONSENT` | `true` | NDPA consent gate. **Hard-required when `SPEECH_ENABLED=true` AND `APP_ENV=production`** (`_validate_production_env`, `main.py:258`) — the app refuses to boot otherwise. With it on, anonymous `/v1/asr` & `/v1/voice/chat` calls must send header `X-Voice-Consent: true` (`main.py:312`). |
 | `USE_DOH` | `true` | RENU pods have no upstream DNS; the DoH resolver (1.1.1.1) is what lets the pod resolve `api.sunbird.ai`. Already set for the LLM egress path. |
 
