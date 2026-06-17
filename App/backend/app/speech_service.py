@@ -67,6 +67,13 @@ SPEECH_MAX_CONCURRENCY = int(os.getenv("SPEECH_MAX_CONCURRENCY", "2"))
 DEFAULT_EN_VOICE = os.getenv("SPEECH_EN_VOICE", "en_US-lessac-medium")
 DEFAULT_LG_VOICE = os.getenv("SPEECH_LG_VOICE", "luganda-vits-v1")
 
+# edge-tts neural voices — used when the local Piper stack is absent (e.g. the
+# slim Crane Cloud image). Override per deployment via env. en-US-AriaNeural is
+# a natural English neural voice; Sunbird has no native English voice, so this
+# is what keeps English TTS off the poor Sunbird-English fallback.
+SPEECH_EN_EDGE_VOICE = os.getenv("SPEECH_EN_EDGE_VOICE", "en-US-AriaNeural")
+SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-UG-MaleNeural")
+
 # Whisper LoRA adapters — per-language fine-tuned for multilingual ASR.
 # Set WHISPER_ADAPTER_PATH for single-language (backward-compat), or
 # set WHISPER_ADAPTER_{LG,SW,NYN} for per-language routing.
@@ -685,10 +692,10 @@ class SpeechModel:
             return None
 
         voice_map = {
-            "lg": "en-UG-MaleNeural",
-            "en": "en-US-JennyNeural",
+            "lg": SPEECH_LG_EDGE_VOICE,
+            "en": SPEECH_EN_EDGE_VOICE,
         }
-        voice_id = voice_map.get(language, "en-US-JennyNeural")
+        voice_id = voice_map.get(language, SPEECH_EN_EDGE_VOICE)
         t0 = time.perf_counter()
 
         def _generate_sync() -> bytes:

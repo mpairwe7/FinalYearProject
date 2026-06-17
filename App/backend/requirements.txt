@@ -56,3 +56,7 @@ pydantic-settings>=2.5.0
 boto3>=1.34.0
 # DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
 dnspython>=2.6.0
+
+# Cloud neural TTS fallback (edge-tts) — used when local Piper is unavailable;
+# English voice configurable via SPEECH_EN_EDGE_VOICE (default en-US-AriaNeural)
+edge-tts>=7.0,<8
