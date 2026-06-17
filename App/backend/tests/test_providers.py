@@ -804,6 +804,204 @@ class CfWhisperSTTTest(unittest.TestCase):
         rf.assert_called_once()
 
 
+class CfWorkersTtsTest(unittest.TestCase):
+    """SpeechModel._cf_workers_ai_tts — Workers AI TTS for English
+    (flag/backend/config/breaker/budget-gated, with a resilience fallback model)."""
+
+    def setUp(self):
+        _with_keys()
+        budget._redis = None
+        budget._redis_tried = True
+        budget._local_neurons.clear()
+        from app.providers import breakers
+
+        breakers.CF_TTS_BREAKER.record_success()  # force CLOSED for isolation
+
+    def tearDown(self):
+        _clear_keys()
+        budget._redis_tried = False
+        gateway._client = None
+
+    @staticmethod
+    def _speech_model():
+        from app.speech_service import SpeechModel
+
+        return SpeechModel.__new__(SpeechModel)  # skip heavy __init__
+
+    def test_synthesizes_when_configured(self):
+        sm = self._speech_model()
+        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"TTS_FALLBACK_BACKEND": "workers_ai"}), \
+             mock.patch.object(gateway, "workers_ai_tts",
+                               return_value={"audio": b"ID3audio", "fmt": "mp3", "sample_rate": 24000}) as tts:
+            out = sm._cf_workers_ai_tts("hello world", None, "en")
+        self.assertIsNotNone(out)
+        self.assertEqual(out.backend, "cf_workers_ai")
+        self.assertEqual(out.audio, b"ID3audio")
+        tts.assert_called_once()
+        self.assertEqual(tts.call_args.kwargs.get("model"), "@cf/myshell-ai/melotts")  # default primary
+
+    def test_disabled_when_flag_off(self):
+        sm = self._speech_model()
+        with mock.patch("app.flags.flags.is_enabled", return_value=False), \
+             mock.patch.object(gateway, "workers_ai_tts") as tts:
+            self.assertIsNone(sm._cf_workers_ai_tts("hi", None, "en"))
+        tts.assert_not_called()
+
+    def test_disabled_without_backend_env(self):
+        sm = self._speech_model()
+        os.environ.pop("TTS_FALLBACK_BACKEND", None)
+        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+             mock.patch.object(gateway, "workers_ai_tts") as tts:
+            self.assertIsNone(sm._cf_workers_ai_tts("hi", None, "en"))
+        tts.assert_not_called()
+
+    def test_budget_exhausted_returns_none(self):
+        sm = self._speech_model()
+        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"TTS_FALLBACK_BACKEND": "workers_ai"}), \
+             mock.patch("app.providers.budget.try_consume_neurons", return_value=False), \
+             mock.patch.object(gateway, "workers_ai_tts") as tts:
+            self.assertIsNone(sm._cf_workers_ai_tts("hi", None, "en"))
+        tts.assert_not_called()
+
+    def test_resilience_fallback_to_second_model(self):
+        sm = self._speech_model()
+        calls = []
+
+        def fake_tts(text, model=None, lang="en"):
+            calls.append(model)
+            if model == "@cf/myshell-ai/melotts":
+                raise RuntimeError("HTTP 500")
+            return {"audio": b"ID3second", "fmt": "mp3", "sample_rate": 24000}
+
+        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"TTS_FALLBACK_BACKEND": "workers_ai"}), \
+             mock.patch.object(gateway, "workers_ai_tts", side_effect=fake_tts):
+            out = sm._cf_workers_ai_tts("hi", None, "en")
+        self.assertIsNotNone(out)
+        self.assertEqual(out.audio, b"ID3second")
+        self.assertEqual(out.voice, "@cf/deepgram/aura-2-en")  # TTS_FALLBACK_MODEL_2
+        self.assertEqual(calls, ["@cf/myshell-ai/melotts", "@cf/deepgram/aura-2-en"])
+
+    def test_all_models_fail_records_breaker_failure(self):
+        from app.providers import breakers
+
+        sm = self._speech_model()
+        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"TTS_FALLBACK_BACKEND": "workers_ai"}), \
+             mock.patch.object(breakers.CF_TTS_BREAKER, "record_failure") as rf, \
+             mock.patch.object(gateway, "workers_ai_tts", side_effect=RuntimeError("HTTP 429")):
+            self.assertIsNone(sm._cf_workers_ai_tts("hi", None, "en"))
+        self.assertEqual(rf.call_count, 2)  # both configured models tried + failed
+
+
+class CfGatewayDispatchTest(unittest.TestCase):
+    """gateway.workers_ai_stt / workers_ai_tts request+response shaping per model."""
+
+    def setUp(self):
+        _with_keys()
+
+    def tearDown(self):
+        _clear_keys()
+        gateway._client = None
+
+    def test_stt_turbo_uses_base64_json(self):
+        import base64 as _b64
+
+        fake = _FakeClient({"result": {"text": "hi", "transcription_info": {"language": "en"}}})
+        with mock.patch.object(gateway, "_get_client", return_value=fake):
+            out = gateway.workers_ai_stt(b"RAWAUDIO", model="@cf/openai/whisper-large-v3-turbo")
+        self.assertEqual(out["text"], "hi")
+        self.assertEqual(out["language"], "en")  # pulled from transcription_info
+        self.assertIsNone(fake.calls[-1]["content"])
+        self.assertEqual(fake.calls[-1]["json"], {"audio": _b64.b64encode(b"RAWAUDIO").decode("ascii")})
+
+    def test_stt_original_whisper_uses_raw_bytes(self):
+        fake = _FakeClient({"result": {"text": "hi"}})
+        with mock.patch.object(gateway, "_get_client", return_value=fake):
+            out = gateway.workers_ai_stt(b"RAWAUDIO", model="@cf/openai/whisper")
+        self.assertEqual(out["text"], "hi")
+        self.assertEqual(fake.calls[-1]["content"], b"RAWAUDIO")  # raw bytes body
+        self.assertIsNone(fake.calls[-1]["json"])
+
+    def test_tts_melotts_returns_wav(self):
+        import base64 as _b64
+
+        wav = b"RIFF" + b"\x00" * 40
+        fake = _FakeClient({"result": {"audio": _b64.b64encode(wav).decode("ascii")}})
+        with mock.patch.object(gateway, "_get_client", return_value=fake):
+            out = gateway.workers_ai_tts("hello", model="@cf/myshell-ai/melotts", lang="en")
+        self.assertEqual(out["audio"], wav)
+        self.assertEqual(out["fmt"], "wav")
+        self.assertEqual(fake.calls[-1]["json"], {"prompt": "hello", "lang": "en"})
+
+    def test_tts_aura_returns_binary(self):
+        class _BinResp:
+            content = b"ID3binary-mp3-bytes"
+
+            def raise_for_status(self):
+                pass
+
+        class _BinClient:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, headers=None, json=None, content=None):
+                self.calls.append({"json": json})
+                return _BinResp()
+
+        fake = _BinClient()
+        with mock.patch.object(gateway, "_get_client", return_value=fake):
+            out = gateway.workers_ai_tts("hello", model="@cf/deepgram/aura-2-en")
+        self.assertEqual(out["audio"], b"ID3binary-mp3-bytes")
+        self.assertEqual(out["fmt"], "mp3")
+        self.assertEqual(fake.calls[-1]["json"], {"text": "hello"})
+
+    def test_cf_whisper_transcribe_passes_configured_model(self):
+        import numpy as np
+
+        import app.speech_service as ss
+        from app.providers import breakers
+        from app.speech_service import SpeechModel
+
+        budget._redis = None
+        budget._redis_tried = True
+        budget._local_neurons.clear()
+        breakers.CF_STT_BREAKER.record_success()
+        sm = SpeechModel.__new__(SpeechModel)
+        with mock.patch("app.flags.flags.is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"STT_FALLBACK_BACKEND": "workers_ai"}), \
+             mock.patch.object(ss, "STT_FALLBACK_MODEL", "@cf/openai/whisper-large-v3-turbo"), \
+             mock.patch.object(SpeechModel, "_decode_audio_bytes",
+                               return_value=np.zeros(1600, dtype="float32")), \
+             mock.patch.object(gateway, "workers_ai_stt", return_value={"text": "x"}) as stt:
+            sm._cf_whisper_transcribe(b"\x00" * 320, 16000, "en")
+        self.assertEqual(stt.call_args.kwargs.get("model"), "@cf/openai/whisper-large-v3-turbo")
+        budget._redis_tried = False
+
+
+@unittest.skipUnless(os.getenv("CF_LIVE_TEST") == "1", "set CF_LIVE_TEST=1 + real CF keys to run")
+class CfLiveTest(unittest.TestCase):
+    """Live Cloudflare Workers AI STT+TTS round-trip via the real AI Gateway.
+
+    Requires the real CLOUDFLARE_*/CF_AIG_* env vars (e.g. load .env). Run:
+        CF_LIVE_TEST=1 python -m pytest backend/tests/test_providers.py -k CfLive -v
+    """
+
+    def test_tts_then_stt_roundtrip(self):
+        gateway._client = None
+        tts_model = os.getenv("TTS_FALLBACK_MODEL", "@cf/myshell-ai/melotts")
+        stt_model = os.getenv("STT_FALLBACK_MODEL", "@cf/openai/whisper-large-v3-turbo")
+        out = gateway.workers_ai_tts(
+            "The standard VAT rate in Uganda is eighteen percent.", model=tts_model, lang="en"
+        )
+        self.assertTrue(out["audio"])
+        self.assertIn(out["fmt"], ("wav", "mp3"))
+        stt = gateway.workers_ai_stt(out["audio"], model=stt_model)
+        self.assertTrue((stt.get("text") or "").strip(), "live STT returned empty transcript")
+
+
 class TranslationFallbackTest(unittest.TestCase):
     """SpeechModel._gemini_translate uses Gemini 2.5 Flash for Luganda."""
 
