@@ -27,6 +27,11 @@ logger = logging.getLogger("ura.sunbird")
 
 SUNBIRD_API_URL = os.getenv("SUNBIRD_API_URL", "https://api.sunbird.ai")
 SUNBIRD_API_TOKEN = os.getenv("SUNBIRD_API_TOKEN", "")
+# Fallback account — used for resilience when the primary token fails (auth,
+# rate-limit, transient errors). Set via "# Sunbird fall back account" in .env
+# (SUNBIRD_FALLBACK_API_TOKEN). A request is retried on this account if the
+# primary one fails.
+SUNBIRD_FALLBACK_API_TOKEN = os.getenv("SUNBIRD_FALLBACK_API_TOKEN", "")
 SUNBIRD_TIMEOUT = int(os.getenv("SUNBIRD_TIMEOUT", "30"))
 
 # URA locale → Sunbird language code
@@ -57,25 +62,63 @@ _SUNBIRD_TO_LOCALE: dict[str, str] = {
 
 # ── Client ────────────────────────────────────────────────────────────────
 
-_client: httpx.Client | None = None
+# One client per account token (lazily built, reused). A call that fails on the
+# primary account is retried on the fallback account for resilience.
+_clients: dict[str, httpx.Client] = {}
 
 
-def _get_client() -> httpx.Client:
-    global _client
-    if _client is None:
-        if not SUNBIRD_API_TOKEN:
-            raise RuntimeError("SUNBIRD_API_TOKEN not set")
-        _client = httpx.Client(
+def _account_tokens() -> list[str]:
+    """Configured account tokens in priority order (primary, then fallback)."""
+    return [t for t in (SUNBIRD_API_TOKEN, SUNBIRD_FALLBACK_API_TOKEN) if t]
+
+
+def _client_for(token: str) -> httpx.Client:
+    client = _clients.get(token)
+    if client is None:
+        client = httpx.Client(
             base_url=SUNBIRD_API_URL,
-            headers={"Authorization": f"Bearer {SUNBIRD_API_TOKEN}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=SUNBIRD_TIMEOUT,
         )
-    return _client
+        _clients[token] = client
+    return client
 
 
 def is_available() -> bool:
-    """Check if Sunbird API is configured."""
-    return bool(SUNBIRD_API_TOKEN)
+    """True if at least one Sunbird account (primary or fallback) is configured."""
+    return bool(_account_tokens())
+
+
+def _post(path: str, **kwargs: Any) -> httpx.Response:
+    """POST to Sunbird, trying the primary account then the fallback account.
+
+    Retries on the next account for ANY failure (auth, rate-limit, transient
+    5xx, network). Raises the last error if every configured account fails.
+    """
+    tokens = _account_tokens()
+    if not tokens:
+        raise RuntimeError("no Sunbird token configured")
+    last_exc: Exception | None = None
+    for idx, token in enumerate(tokens):
+        try:
+            resp = _client_for(token).post(path, **kwargs)
+            resp.raise_for_status()
+            if idx > 0:
+                logger.info("Sunbird fallback account served %s", path)
+            return resp
+        except Exception as e:  # noqa: BLE001 — try the next account, re-raise if last
+            last_exc = e
+            if idx + 1 < len(tokens):
+                logger.warning("Sunbird account #%d failed for %s (%s); trying fallback", idx + 1, path, e)
+    raise last_exc  # type: ignore[misc]
+
+
+def _get_client() -> httpx.Client:
+    """Back-compat shim — the primary account client (prefer ``_post``)."""
+    tokens = _account_tokens()
+    if not tokens:
+        raise RuntimeError("SUNBIRD_API_TOKEN not set")
+    return _client_for(tokens[0])
 
 
 # ── Translation ───────────────────────────────────────────────────────────
@@ -86,13 +129,11 @@ def translate(text: str, source_lang: str, target_lang: str) -> str | None:
         logger.warning("Translation not supported: %s → %s", source_lang, target_lang)
         return None
     try:
-        client = _get_client()
-        resp = client.post("/tasks/translate", json={
+        resp = _post("/tasks/translate", json={
             "source_language": source_lang,
             "target_language": target_lang,
             "text": text,
         })
-        resp.raise_for_status()
         data = resp.json()
         result = data.get("output", {}).get("translated_text") or data.get("translated_text")
         if result:
@@ -133,13 +174,11 @@ def speech_to_text(
     if not is_available():
         return None
     try:
-        client = _get_client()
         files = {"audio": (filename, io.BytesIO(audio_bytes))}
         data: dict[str, Any] = {}
         if language:
             data["language"] = language
-        resp = client.post("/tasks/modal/stt", files=files, data=data)
-        resp.raise_for_status()
+        resp = _post("/tasks/modal/stt", files=files, data=data)
         result = resp.json()
         transcription = (
             result.get("output", {}).get("audio_transcription")
@@ -163,13 +202,11 @@ def text_to_speech(
     if not is_available() or not speaker_id:
         return None
     try:
-        client = _get_client()
-        resp = client.post("/tasks/modal/tts", json={
+        resp = _post("/tasks/modal/tts", json={
             "text": text[:10000],
             "speaker_id": speaker_id,
             "response_mode": "url",
         })
-        resp.raise_for_status()
         data = resp.json()
         audio_url = data.get("output", {}).get("audio_url") or data.get("audio_url")
         logger.info("Sunbird TTS (%s, speaker %d): url=%s", locale, speaker_id,
@@ -191,9 +228,7 @@ def detect_language(text: str) -> dict[str, Any] | None:
     if len(text.strip()) < 3:
         return None
     try:
-        client = _get_client()
-        resp = client.post("/tasks/language_id", json={"text": text[:200]})
-        resp.raise_for_status()
+        resp = _post("/tasks/language_id", json={"text": text[:200]})
         data = resp.json()
         lang_code = (
             data.get("output", {}).get("language")
