@@ -634,3 +634,39 @@ curl -sf -X PATCH "$CRANE_CLOUD_API/apps/$APP_ID" \
 - Sibling references: `Musawo/docs/crane-cloud-deployment.md`,
   `HustleCoach/docs/crane-cloud-deployment.md`,
   `Magezi/docs/crane-cloud-deployment.md` — same RENU cluster, simpler stacks
+
+---
+
+## 15. Alternate pipeline — Hugging Face Docker Space
+
+A second, Crane-Cloud-independent deployment of the **same image** — useful when
+the Crane Cloud control plane is unavailable (e.g. its Docker Hub image
+validation is failing, §7.2). Definition lives in `App/deploy/hf-space/`.
+
+| Field | Value |
+|---|---|
+| Space | `landwind22/ura-chatbot` (HF account `landwind22`) |
+| App URL | `https://landwind22-ura-chatbot.hf.space` |
+| SDK | `docker` — `Dockerfile` is `FROM landwind/ura-chatbot:<sha>`; HF pulls and runs it (no rebuild) |
+| Port | `app_port: 8080` in `README.md` (the image's nginx) |
+
+**How it works:** HF Docker Spaces build any Dockerfile; ours just references the
+prebuilt Docker Hub image, so there is **no separate build** — bump the `FROM`
+tag in `App/deploy/hf-space/Dockerfile` to roll the Space.
+
+**Secrets:** runtime config mirrors the Crane Cloud app's env, set as **Space
+secrets** (Settings → Secrets, or run `App/deploy/hf-space/replicate_secrets.py`,
+which copies the live Crane Cloud env). Overrides vs Crane Cloud: `USE_DOH=false`
+(HF has native DNS) and `CORS_ORIGINS` = the Space URL.
+
+**Verify** exactly as for Crane Cloud:
+
+```bash
+BACKEND_URL=https://landwind22-ura-chatbot.hf.space \
+  bash App/scripts/live_speech_smoke.sh
+```
+
+Verified 2026-06-17: TTS en → `edge_tts` (`en-US-AriaNeural`, MP3), TTS lg →
+`sunbird_cloud` (speaker 248), STT en/lg → `sunbird_cloud`, translate →
+`gemini_flash`, voice/chat (en+lg) full pipeline. Sunbird modal cold starts make
+the first call of each kind slow (voice/chat ~30–45 s).

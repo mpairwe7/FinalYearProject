@@ -48,10 +48,16 @@ def req(method, path, *, body=None, raw=None, query="", headers=None):
     except Exception as e:
         return None, {"_err": f"{type(e).__name__}: {e}"}, time.perf_counter() - t0
 
-def wav_facts(b64):
+def audio_facts(b64):
+    """Return (raw_bytes, fmt, sample_rate, duration_s). Handles WAV (Sunbird/
+    Piper) and MP3 (edge_tts neural voices). Raises on anything unrecognized."""
     raw = base64.b64decode(b64)
-    w = wave.open(io.BytesIO(raw), "rb")
-    return w.getframerate(), w.getnframes(), w.getnframes() / max(1, w.getframerate())
+    if raw[:4] == b"RIFF":
+        w = wave.open(io.BytesIO(raw), "rb")
+        return raw, "wav", w.getframerate(), w.getnframes() / max(1, w.getframerate())
+    if raw[:3] == b"ID3" or raw[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return raw, "mp3", None, None       # edge_tts MP3; sample_rate comes from the response
+    raise ValueError("unrecognized audio (not WAV or MP3)")
 
 # 1) speech health
 s, d, _ = req("GET", "/v1/speech/health")
@@ -66,25 +72,25 @@ consent = {"X-Voice-Consent": "true"}
 en_wav = lg_wav = None
 en_sr = lg_sr = 16000
 
-# 2) TTS English
+# 2) TTS English (edge_tts → MP3; Sunbird → WAV)
 s, d, dt = req("POST", "/v1/tts", body={"text": EN_TEXT, "language": "en"})
 if s == 200 and not d.get("error") and d.get("audio_base64"):
     try:
-        sr, n, dur = wav_facts(d["audio_base64"]); en_wav = base64.b64decode(d["audio_base64"]); en_sr = sr
-        ok("tts:en", f"backend={d.get('backend')} {sr}Hz {dur:.2f}s {dt:.1f}s")
+        en_wav, fmt, sr, dur = audio_facts(d["audio_base64"]); en_sr = sr or d.get("sample_rate") or 24000
+        ok("tts:en", f"backend={d.get('backend')} fmt={fmt} {en_sr}Hz {(f'{dur:.2f}s' if dur else '')} {dt:.1f}s")
     except Exception as e:
-        bad("tts:en", f"audio not WAV-decodable: {e}")
+        bad("tts:en", f"audio undecodable: {e}")
 else:
     bad("tts:en", f"HTTP {s} backend={d.get('backend')} error={d.get('error')}")
 
-# 3) TTS Luganda
+# 3) TTS Luganda (Sunbird native speaker 248 → WAV)
 s, d, dt = req("POST", "/v1/tts", body={"text": LG_TEXT, "language": "lg"})
 if s == 200 and not d.get("error") and d.get("audio_base64"):
     try:
-        sr, n, dur = wav_facts(d["audio_base64"]); lg_wav = base64.b64decode(d["audio_base64"]); lg_sr = sr
-        ok("tts:lg", f"backend={d.get('backend')} {sr}Hz {dur:.2f}s {dt:.1f}s")
+        lg_wav, fmt, sr, dur = audio_facts(d["audio_base64"]); lg_sr = sr or d.get("sample_rate") or 16000
+        ok("tts:lg", f"backend={d.get('backend')} fmt={fmt} {lg_sr}Hz {(f'{dur:.2f}s' if dur else '')} {dt:.1f}s")
     except Exception as e:
-        bad("tts:lg", f"audio not WAV-decodable: {e}")
+        bad("tts:lg", f"audio undecodable: {e}")
 else:
     bad("tts:lg", f"HTTP {s} backend={d.get('backend')} error={d.get('error')}")
 
