@@ -167,6 +167,7 @@ def _llm_cloud_fallback(
         from .providers import breakers, budget
         from .providers import config as cfg
         from .providers import gateway as gw
+        from .providers import routing
     except Exception:  # providers optional / deps missing
         return ""
 
@@ -181,29 +182,36 @@ def _llm_cloud_fallback(
         try:
             text = gw.gemini_generate(user, system=system, max_tokens=512, temperature=0.2)
             breakers.GEMINI_BREAKER.record_success()
+            routing.log_model_use("llm", "gemini_flash")
             logger.info("LLM fallback via Gemini succeeded")
             return text
         except Exception:
             breakers.GEMINI_BREAKER.record_failure()
             logger.warning("LLM Gemini fallback failed", exc_info=True)
 
-    if (
-        cfg.is_cloudflare_configured()
-        and breakers.CF_LLM_BREAKER.allow_request()
-        and budget.try_consume_neurons(5)
-    ):
+    # Cloudflare Workers AI: most-capable model first (Llama 3.3 70B), then a
+    # deeper reasoning fallback (QwQ-32B). Both share CF_LLM_BREAKER + budget.
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    for model in (routing.CF_LLM_MODEL, routing.CF_LLM_FALLBACK_MODEL):
+        if not (
+            cfg.is_cloudflare_configured()
+            and breakers.CF_LLM_BREAKER.allow_request()
+            and budget.try_consume_neurons(5)
+        ):
+            break
         try:
-            messages = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ]
-            text = gw.workers_ai_chat(messages, max_tokens=512, temperature=0.2)
+            text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2)
             breakers.CF_LLM_BREAKER.record_success()
-            logger.info("LLM fallback via Workers AI succeeded")
+            routing.log_fallback("llm", "gemini_flash", "cf_workers_ai", "gemini_unavailable")
+            routing.log_model_use("llm", model)
+            logger.info("LLM fallback via Workers AI (%s) succeeded", model)
             return text
         except Exception:
             breakers.CF_LLM_BREAKER.record_failure()
-            logger.warning("LLM Workers AI fallback failed", exc_info=True)
+            logger.warning("LLM Workers AI fallback failed (model=%s)", model, exc_info=True)
     return ""
 
 

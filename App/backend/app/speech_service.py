@@ -1121,54 +1121,34 @@ class SpeechModel:
         )
 
     def _do_translate(self, text: str, source_lang: str, target_lang: str) -> TranslateResult:
+        """Translate via the model-routing policy: Gemini (primary) -> Cloudflare
+        Llama -> Sunbird NLLB -> local MT -> prompted Qwen3. The cloud tiers
+        self-skip when their flags/keys are absent, so a local/GPU deploy still
+        falls through to the offline tiers."""
+        from .providers import routing
+
         t0 = time.perf_counter()
 
-        # 1. LLM-prompted translation (uses already-loaded Qwen3 — no extra model)
-        if self._chat_model is not None:
-            try:
-                from . import llm as llm_module
-
-                reply = llm_module.translate_text(
-                    text, source_lang=source_lang, target_lang=target_lang,
-                )
-                if reply and reply.strip():
-                    return TranslateResult(
-                        text=reply.strip(),
-                        source_lang=source_lang,
-                        target_lang=target_lang,
-                        latency_s=round(time.perf_counter() - t0, 3),
-                        backend="prompted_qwen3",
-                    )
-            except Exception:
-                logger.debug("Prompted MT via Qwen3 failed", exc_info=True)
-
-        # 2. Local MT module (ONNX/teacher MADLAD+LoRA — heavier, offline)
-        if self._mt is not None:
-            try:
-                result = self._mt.translate(text, source_lang=source_lang, target_lang=target_lang)
-                if result and result.text:
-                    return TranslateResult(
-                        text=result.text,
-                        source_lang=result.source_lang,
-                        target_lang=result.target_lang,
-                        latency_s=round(time.perf_counter() - t0, 3),
-                        backend=result.backend,
-                    )
-            except Exception:
-                logger.debug("Local MT failed, trying Sunbird cloud fallback")
-
-        # 2.5 Gemini 2.5 Flash cloud translation (strong on Luganda; flag/budget-gated)
-        gemini_out = self._gemini_translate(text, source_lang, target_lang)
-        if gemini_out:
+        def _res(out: str, backend: str) -> TranslateResult:
             return TranslateResult(
-                text=gemini_out,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                latency_s=round(time.perf_counter() - t0, 3),
-                backend="gemini_flash",
+                text=out, source_lang=source_lang, target_lang=target_lang,
+                latency_s=round(time.perf_counter() - t0, 3), backend=backend,
             )
 
-        # 3. Sunbird cloud (fallback — NLLB translation API)
+        # 1. Gemini 2.5 Flash — primary cloud translator (Luganda-strong; gated).
+        gemini_out = self._gemini_translate(text, source_lang, target_lang)
+        if gemini_out:
+            routing.log_model_use("translate", "gemini_flash")
+            return _res(gemini_out, "gemini_flash")
+
+        # 2. Cloudflare Workers AI Llama — prompted translation fallback.
+        cf_out = self._cf_llama_translate(text, source_lang, target_lang)
+        if cf_out:
+            routing.log_fallback("translate", "gemini_flash", "cf_workers_ai", "gemini_unavailable")
+            routing.log_model_use("translate", "cf_workers_ai")
+            return _res(cf_out, "cf_workers_ai")
+
+        # 3. Sunbird NLLB — Luganda-native cloud MT.
         try:
             from . import sunbird
             if sunbird.is_available():
@@ -1176,23 +1156,37 @@ class SpeechModel:
                 tgt_code = {"en": "eng", "lg": "lug"}.get(target_lang, target_lang)
                 result = sunbird.translate(text, src_code, tgt_code)
                 if result:
-                    return TranslateResult(
-                        text=result,
-                        source_lang=source_lang,
-                        target_lang=target_lang,
-                        latency_s=round(time.perf_counter() - t0, 3),
-                        backend="sunbird_cloud",
-                    )
+                    routing.log_fallback("translate", "cf_workers_ai", "sunbird_cloud", "cf_unavailable")
+                    routing.log_model_use("translate", "sunbird_cloud")
+                    return _res(result, "sunbird_cloud")
         except Exception:
-            logger.debug("Sunbird translate fallback also failed")
+            logger.debug("Sunbird translate fallback failed")
+
+        # 4. Local MT module (ONNX/teacher MADLAD+LoRA — offline).
+        if self._mt is not None:
+            try:
+                result = self._mt.translate(text, source_lang=source_lang, target_lang=target_lang)
+                if result and result.text:
+                    routing.log_model_use("translate", result.backend or "local_mt")
+                    return _res(result.text, result.backend or "local_mt")
+            except Exception:
+                logger.debug("Local MT failed", exc_info=True)
+
+        # 5. Prompted Qwen3 (offline LLM — last resort).
+        if self._chat_model is not None:
+            try:
+                from . import llm as llm_module
+                reply = llm_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
+                if reply and reply.strip():
+                    routing.log_model_use("translate", "prompted_qwen3")
+                    return _res(reply.strip(), "prompted_qwen3")
+            except Exception:
+                logger.debug("Prompted MT via Qwen3 failed", exc_info=True)
 
         return TranslateResult(
-            text="",
-            source_lang=source_lang,
-            target_lang=target_lang,
-            latency_s=round(time.perf_counter() - t0, 3),
-            backend="error",
-            error="No translation backend available (Qwen3, local MT, and Sunbird all failed)",
+            text="", source_lang=source_lang, target_lang=target_lang,
+            latency_s=round(time.perf_counter() - t0, 3), backend="error",
+            error="No translation backend available (Gemini, CF Llama, Sunbird, local MT, Qwen3 all failed)",
         )
 
     @staticmethod
@@ -1241,6 +1235,56 @@ class SpeechModel:
         except Exception:
             breakers.GEMINI_BREAKER.record_failure()
             logger.warning("Gemini translation failed", exc_info=True)
+            return ""
+
+    @staticmethod
+    def _cf_llama_translate(text: str, source_lang: str, target_lang: str) -> str:
+        """Translate via Cloudflare Workers AI Llama (prompted) — the model-routing
+        fallback after Gemini. Flag/budget/breaker-gated; returns "" when disabled
+        or unavailable so the Sunbird tier still runs."""
+        from .flags import flags
+
+        if not flags.is_enabled("cloudflare_fallback"):
+            return ""
+        if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() not in ("gemini", "workers_ai"):
+            return ""
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+            from .providers import routing
+        except Exception:
+            return ""
+        if not (
+            cfg.is_cloudflare_configured()
+            and breakers.CF_LLM_BREAKER.allow_request()
+            and budget.try_consume_neurons(5)
+        ):
+            return ""
+        names = {
+            "lg": "Luganda", "en": "English", "nyn": "Runyankole",
+            "ach": "Acholi", "sw": "Swahili",
+        }
+        src, tgt = names.get(source_lang, source_lang), names.get(target_lang, target_lang)
+        try:
+            out = gw.workers_ai_chat(
+                [
+                    {"role": "system", "content": (
+                        f"You are a professional translator. Translate the user's text "
+                        f"from {src} to {tgt}. Output ONLY the translation — no notes, "
+                        f"quotes, or transliteration."
+                    )},
+                    {"role": "user", "content": text},
+                ],
+                model=routing.CF_LLM_MODEL,
+                max_tokens=512,
+                temperature=0.1,
+            )
+            breakers.CF_LLM_BREAKER.record_success()
+            return (out or "").strip()
+        except Exception:
+            breakers.CF_LLM_BREAKER.record_failure()
+            logger.warning("CF Llama translation failed", exc_info=True)
             return ""
 
     # ------------------------------------------------------------------

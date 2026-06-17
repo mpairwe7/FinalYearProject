@@ -698,3 +698,32 @@ Verified 2026-06-17: TTS en → `edge_tts` (`en-US-AriaNeural`, MP3), TTS lg →
 `sunbird_cloud` (speaker 248), STT en/lg → `sunbird_cloud`, translate →
 `gemini_flash`, voice/chat (en+lg) full pipeline. Sunbird modal cold starts make
 the first call of each kind slow (voice/chat ~30–45 s).
+
+---
+
+## 16. Model routing strategy
+
+Per-task model selection follows **Best capability → cost → resilience**, declared
+in `App/backend/app/providers/routing.py` (env-overridable model IDs) and recorded
+on `/metrics` as `model_usage_total{task,model}` + `model_fallback_total{task,from,to,reason}`.
+
+| Task | Primary → fallbacks |
+|---|---|
+| Reasoning / RAG / summarization (LLM) | Gemini 2.5 Flash → CF `llama-3.3-70b-instruct-fp8-fast` → CF `qwq-32b` (local/vLLM stays primary when present) |
+| Translation (en↔lg) | Gemini 2.5 Flash → CF Llama (prompted) → Sunbird NLLB → local MT → Qwen3 |
+| Luganda STT | Sunbird → CF `whisper-large-v3-turbo` (Gemini-audio deferred) |
+| English STT / TTS | CF `whisper-large-v3-turbo` / `melotts` (→ `aura-2-en`) — see §7.4 |
+| Embedding | CF `bge-m3` (the index's vector space) → degrade to BM25 keyword |
+
+Env knobs (defaults apply if unset): `CF_LLM_MODEL`, `CF_LLM_FALLBACK_MODEL`,
+`CF_LLM_FAST_MODEL`, plus the existing `LLM_FALLBACK_BACKEND=gemini`,
+`TRANSLATE_FALLBACK_BACKEND=gemini`, `FLAG_CLOUDFLARE_FALLBACK=true`, and the speech
+model envs (§7.4). Cloud tiers **self-skip** when their flag/keys are absent, so
+local/GPU deploys fall through to offline tiers; breakers + budget + keyword
+degradation keep it resilient when a cloud tier is down.
+
+**Catalog substitutions** (spec models absent from this account's Workers AI catalog):
+Llama 405B / Command R+ / Qwen2.5-72B → `@cf/qwen/qwq-32b`; "Gemini 3.5 Flash" →
+Gemini 2.5 Flash; "Sunbird 2" → the existing Sunbird API. **Embedding caveat:** a
+Vectorize index is bound to ONE embedding model's vector space, so a *different*
+embed model is not a valid fallback — resilience is retry `bge-m3` → BM25 keyword.
