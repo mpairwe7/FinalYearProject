@@ -91,9 +91,13 @@ test.describe("URA Chatbot Smoke", () => {
     const response = await page.goto("/");
     const headers = response!.headers();
     expect(headers["x-content-type-options"]).toBe("nosniff");
-    expect(headers["x-frame-options"]).toBe("DENY");
     expect(headers["strict-transport-security"]).toContain("max-age=63072000");
     expect(headers["content-security-policy"]).toContain("default-src 'self'");
+    // Embedding is controlled via CSP frame-ancestors (allows self + Hugging Face
+    // so the HF Space iframe renders); X-Frame-Options is omitted unless the
+    // strict no-embed build (FRAME_ANCESTORS="'none'") is used.
+    expect(headers["content-security-policy"]).toContain("frame-ancestors");
+    expect(headers["content-security-policy"]).toContain("huggingface.co");
     expect(headers["permissions-policy"]).toContain("camera=()");
   });
 });
