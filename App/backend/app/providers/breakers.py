@@ -21,6 +21,9 @@ CF_EMBED_BREAKER = CircuitBreaker(
 CF_STT_BREAKER = CircuitBreaker(
     name="cf_workers_ai_stt", failure_threshold=3, reset_timeout=15, max_timeout=120
 )
+CF_TTS_BREAKER = CircuitBreaker(
+    name="cf_workers_ai_tts", failure_threshold=3, reset_timeout=15, max_timeout=120
+)
 GEMINI_BREAKER = CircuitBreaker(
     name="gemini_flash", failure_threshold=3, reset_timeout=15, max_timeout=300
 )

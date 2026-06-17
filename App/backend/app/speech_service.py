@@ -74,6 +74,15 @@ DEFAULT_LG_VOICE = os.getenv("SPEECH_LG_VOICE", "luganda-vits-v1")
 SPEECH_EN_EDGE_VOICE = os.getenv("SPEECH_EN_EDGE_VOICE", "en-US-AriaNeural")
 SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-UG-MaleNeural")
 
+# Cloudflare Workers AI models for ENGLISH STT/TTS — configurable so the model
+# can be swapped (e.g. to Deepgram nova-3/flux/aura-2) via env without code
+# changes. Defaults are the free-tier-friendly combo; TTS_FALLBACK_MODEL_2 is a
+# resilience fallback tried if the primary TTS model fails. Gated by
+# FLAG_CLOUDFLARE_FALLBACK + STT_FALLBACK_BACKEND/TTS_FALLBACK_BACKEND=workers_ai.
+STT_FALLBACK_MODEL = os.getenv("STT_FALLBACK_MODEL", "@cf/openai/whisper-large-v3-turbo")
+TTS_FALLBACK_MODEL = os.getenv("TTS_FALLBACK_MODEL", "@cf/myshell-ai/melotts")
+TTS_FALLBACK_MODEL_2 = os.getenv("TTS_FALLBACK_MODEL_2", "@cf/deepgram/aura-2-en")
+
 # Whisper LoRA adapters — per-language fine-tuned for multilingual ASR.
 # Set WHISPER_ADAPTER_PATH for single-language (backward-compat), or
 # set WHISPER_ADAPTER_{LG,SW,NYN} for per-language routing.
@@ -385,6 +394,13 @@ class SpeechModel:
         except Exception:
             logger.debug("faster-whisper failed", exc_info=True)
 
+        # ③.5 Cloudflare Workers AI — PRIMARY cloud STT for English (configurable
+        # model). Sunbird is preferred for Luganda, so this tier is English-gated.
+        if (language or "en") == "en":
+            cf_text = self._cf_whisper_transcribe(audio_bytes, sample_rate, language)
+            if cf_text:
+                return TranscribeResult(text=cf_text, language="en", backend="cf_workers_ai")
+
         # ④ Sunbird cloud (fallback when all local backends unavailable)
         try:
             from . import sunbird
@@ -458,13 +474,66 @@ class SpeechModel:
                 w.setsampwidth(2)
                 w.setframerate(sample_rate)
                 w.writeframes(pcm16.tobytes())
-            res = gw.workers_ai_stt(buf.getvalue())
+            res = gw.workers_ai_stt(buf.getvalue(), model=STT_FALLBACK_MODEL)
             breakers.CF_STT_BREAKER.record_success()
             return (res.get("text") or "").strip()
         except Exception:
             breakers.CF_STT_BREAKER.record_failure()
             logger.warning("Workers AI Whisper STT failed", exc_info=True)
             return ""
+
+    def _cf_workers_ai_tts(
+        self, text: str, voice: str | None, language: str
+    ) -> "SynthesizeResult | None":
+        """Cloud TTS via Cloudflare Workers AI (flag/backend/config/breaker/budget
+        gated). Tries TTS_FALLBACK_MODEL then TTS_FALLBACK_MODEL_2 for resilience.
+        Returns None when disabled/unavailable so the caller falls through."""
+        from .flags import flags
+
+        if not flags.is_enabled("cloudflare_fallback"):
+            return None
+        if os.getenv("TTS_FALLBACK_BACKEND", "").strip().lower() != "workers_ai":
+            return None
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+        except Exception:
+            return None
+        if not (cfg.is_cloudflare_configured() and breakers.CF_TTS_BREAKER.allow_request()):
+            return None
+        lang = "en" if (language or "en") == "en" else language
+        for model in (TTS_FALLBACK_MODEL, TTS_FALLBACK_MODEL_2):
+            if not model:
+                continue
+            if not budget.try_consume_neurons(10):
+                break
+            t0 = time.perf_counter()
+            try:
+                out = gw.workers_ai_tts(text, model=model, lang=lang)
+                audio = out.get("audio") or b""
+                if not audio:
+                    continue
+                breakers.CF_TTS_BREAKER.record_success()
+                sr = out.get("sample_rate") or 24000
+                if out.get("fmt") == "wav":
+                    try:
+                        import io as _io
+                        import wave as _wave
+                        with _wave.open(_io.BytesIO(audio), "rb") as w:
+                            sr = w.getframerate()
+                    except Exception:
+                        pass
+                return SynthesizeResult(
+                    audio=audio, sample_rate=sr, num_samples=0, duration_s=0.0,
+                    latency_s=round(time.perf_counter() - t0, 3),
+                    backend="cf_workers_ai", voice=model,
+                )
+            except Exception:
+                breakers.CF_TTS_BREAKER.record_failure()
+                logger.warning("Workers AI TTS failed (model=%s)", model, exc_info=True)
+                continue
+        return None
 
     def _transcribe_whisper_peft(
         self,
@@ -594,6 +663,16 @@ class SpeechModel:
             except (concurrent.futures.TimeoutError, Exception) as exc:
                 self._breakers["tts"].record_failure()
                 logger.debug("Local TTS failed (%s), trying edge-tts", exc)
+
+        # ①.5 Cloudflare Workers AI — PRIMARY cloud TTS for English (configurable
+        # model + resilience fallback). Sunbird stays primary for Luganda.
+        if (language or "en") == "en":
+            try:
+                result = self._cf_workers_ai_tts(text, voice, language)
+                if result and result.audio:
+                    return result
+            except Exception:
+                logger.debug("Workers AI TTS failed", exc_info=True)
 
         # ② edge-tts (Microsoft neural voices — needs internet, no API key)
         try:

@@ -384,6 +384,33 @@ Voice WebSocket endpoints (`/v1/voice/chat/stream`, `/v2/voice/chat/stream`)
 require `FLAG_VOICE_STREAMING=true` and a working `SpeechModel`; they work in
 Sunbird cloud mode but are similarly network-bound.
 
+### 7.4 English STT/TTS via Cloudflare Workers AI (optional)
+
+Route **English** speech to Cloudflare Workers AI (Luganda stays on Sunbird —
+the CF audio models are English-strong). Models are **env-configurable**, so you
+can swap them (e.g. to Deepgram) without code changes. For English, CF is tried
+before edge-tts → Sunbird; on CF failure it degrades to those.
+
+| Env | Default | Notes |
+|---|---|---|
+| `FLAG_CLOUDFLARE_FALLBACK` | `true` | master switch for all CF fallbacks |
+| `STT_FALLBACK_BACKEND` | `workers_ai` | enables CF STT for English |
+| `STT_FALLBACK_MODEL` | `@cf/openai/whisper-large-v3-turbo` | or `@cf/deepgram/nova-3`, `@cf/deepgram/flux` |
+| `TTS_FALLBACK_BACKEND` | `workers_ai` | enables CF TTS for English |
+| `TTS_FALLBACK_MODEL` | `@cf/myshell-ai/melotts` | primary English TTS (returns WAV) |
+| `TTS_FALLBACK_MODEL_2` | `@cf/deepgram/aura-2-en` | resilience fallback (returns MP3) |
+
+Request/response shapes differ by model family and are handled in
+`app/providers/gateway.py` (`workers_ai_stt`/`workers_ai_tts`): original
+`@cf/openai/whisper` takes raw bytes; `whisper-large-v3-turbo` takes JSON
+`{"audio": base64}`; MeloTTS JSON `{prompt,lang}` → base64 WAV; Deepgram Aura
+JSON `{text}` → binary MP3. ("grok-voice" is **not** a Cloudflare model.)
+
+Verify: `python -m pytest backend/tests/test_providers.py -k "CfWorkersTts or CfGatewayDispatch"`
+(mocked) and, for a real round-trip,
+`CF_LIVE_TEST=1 python -m pytest backend/tests/test_providers.py -k CfLive` —
+or the speech smoke, where the English backend then reports `cf_workers_ai`.
+
 ---
 
 ## 8. Deploy procedure

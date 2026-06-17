@@ -16,6 +16,7 @@ inference providers only); that path uses just the CF token.
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from typing import Any
@@ -115,12 +116,56 @@ def workers_ai_chat(
 
 
 def workers_ai_stt(audio: bytes, model: str = "@cf/openai/whisper") -> dict[str, Any]:
-    """Transcribe raw audio bytes via Workers AI Whisper."""
-    headers = {k: v for k, v in _workers_ai_headers().items() if k != "Content-Type"}
-    resp = _get_client().post(f"{_gateway_url('workers-ai')}/{model}", headers=headers, content=audio)
-    resp.raise_for_status()
-    result = resp.json().get("result", {})
-    return {"text": result.get("text", ""), "language": result.get("language")}
+    """Transcribe audio via Workers AI; returns ``{text, language}``.
+
+    Two request shapes by model family (confirmed against the live gateway):
+      - ``@cf/openai/whisper`` (original) takes the raw audio bytes as the body.
+      - newer models (``whisper-large-v3-turbo``, Deepgram ``nova-3``/``flux``)
+        take JSON ``{"audio": "<base64>"}`` and nest language in
+        ``result.transcription_info``.
+    """
+    url = f"{_gateway_url('workers-ai')}/{model}"
+    if model.rstrip("/").endswith("/whisper"):
+        headers = {k: v for k, v in _workers_ai_headers().items() if k != "Content-Type"}
+        resp = _get_client().post(url, headers=headers, content=audio)
+        resp.raise_for_status()
+        result = resp.json().get("result", {})
+    else:
+        payload = {"audio": base64.b64encode(audio).decode("ascii")}
+        result = _post_json(url, _workers_ai_headers(), payload).get("result", {})
+    language = result.get("language") or (result.get("transcription_info") or {}).get("language")
+    return {"text": result.get("text", ""), "language": language}
+
+
+def workers_ai_tts(text: str, model: str = "@cf/myshell-ai/melotts", *, lang: str = "en") -> dict[str, Any]:
+    """Synthesize speech via Workers AI; returns ``{audio: bytes, fmt, sample_rate}``.
+
+    Two response shapes by model family (confirmed against the live gateway):
+      - MeloTTS (``@cf/myshell-ai/melotts``) → JSON ``{result:{audio:<base64 WAV>}}``.
+      - Deepgram Aura (``@cf/deepgram/aura-*``) → raw audio bytes (``audio/mpeg``).
+    """
+    url = f"{_gateway_url('workers-ai')}/{model}"
+
+    def _fmt(b: bytes) -> str:
+        if b[:4] == b"RIFF":
+            return "wav"
+        if b[:3] == b"ID3" or b[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+            return "mp3"
+        return "bin"
+
+    if "aura" in model:  # Deepgram Aura — binary audio response
+        resp = _get_client().post(url, headers=_workers_ai_headers(), json={"text": text[:2000]})
+        resp.raise_for_status()
+        audio = resp.content
+    else:  # MeloTTS and similar — JSON {prompt, lang} -> base64 audio
+        data = _post_json(url, _workers_ai_headers(), {"prompt": text[:2000], "lang": lang})
+        b64 = (data.get("result") or {}).get("audio") or ""
+        if not b64:
+            raise RuntimeError("workers_ai_tts: empty audio response")
+        audio = base64.b64decode(b64)
+    if not audio:
+        raise RuntimeError("workers_ai_tts: empty audio")
+    return {"audio": audio, "fmt": _fmt(audio), "sample_rate": 24000}
 
 
 # ── Gemini (via the google-ai-studio provider on the Gateway) ────────────────
