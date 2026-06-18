@@ -1273,6 +1273,47 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         # And the answer must not end in a dangling digit.
         self.assertIsNone(re.search(r"\d\s*$", reply.strip()))
 
+    def _return_reply(self) -> str:
+        from app import retriever as R
+
+        hits = [
+            {
+                "source": "ura_processes_systems_faqs.csv",
+                "question": "How do I file a return?",
+                "answer": (
+                    "Login ura.go.ug with TIN/password → e-services → e-returns → select "
+                    "return type and download template; enable macros, fill without renaming "
+                    "or copy/paste; validate to generate upload file; back to e-returns upload "
+                    "file with return period and captcha; submit; e-acknowledgment is issued "
+                    "(also emailed/portal)."
+                ),
+                "text": "return filing steps",
+            },
+        ]
+        citations = R.HybridRetriever.build_citations(hits)
+        return self.model._deterministic_procedure_reply(
+            "how do I file my annual tax return", hits, citations
+        )
+
+    def test_return_filing_reply_is_stepwise(self):
+        import re
+
+        reply = self._return_reply()
+        # The ';'-delimited run-on becomes a numbered list (→ navigation stays inline).
+        self.assertIn("1. Login ura.go.ug", reply)
+        self.assertIn("5. Submit", reply)
+        self.assertNotIn("; enable macros", reply)
+        # No inline citation markers — references stay in the grounded-context panel.
+        self.assertIsNone(re.search(r"\[\d+\]", reply))
+
+    def test_format_procedure_steps_paragraph_fallback(self):
+        # Non-procedural (no ';') text is left as a single paragraph, not a list.
+        from app import service
+
+        out = service.ChatModel._format_procedure_steps("A single grounded sentence.", "Lead:")
+        self.assertEqual(out, "Lead: A single grounded sentence.")
+        self.assertNotIn("1.", out)
+
 
 if __name__ == "__main__":
     unittest.main()

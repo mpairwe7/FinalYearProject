@@ -1680,6 +1680,23 @@ class ChatModel:
             text = parts[1] if len(parts) == 2 else text
         return " ".join(text.split())
 
+    @staticmethod
+    def _format_procedure_steps(text: str, lead: str) -> str:
+        """Render a run-on procedural answer as a numbered Markdown list.
+
+        FAQ procedures separate major steps with ``;`` and use ``→`` for
+        navigation *within* a step (kept inline). Returns ``lead`` followed by a
+        numbered list when ≥2 steps are found, otherwise a single paragraph
+        ``"{lead} {text}"`` so non-procedural text is left untouched.
+        """
+        clean = " ".join((text or "").split())
+        parts = [p.strip(" .;") for p in clean.split(";")]
+        parts = [p for p in parts if p]
+        if len(parts) < 2:
+            return f"{lead} {clean}".strip()
+        steps = "\n".join(f"{i}. {p[:1].upper() + p[1:]}" for i, p in enumerate(parts, 1))
+        return f"{lead}\n\n{steps}"
+
     @classmethod
     def _build_grounded_revision(
         cls,
@@ -1864,10 +1881,13 @@ class ChatModel:
             )
             if file_hit:
                 lines = [
-                    f"To file your annual tax return: {self._extract_grounded_answer_text(file_hit)}",
+                    self._format_procedure_steps(
+                        self._extract_grounded_answer_text(file_hit),
+                        "To file your annual tax return:",
+                    )
                 ]
                 if due_hit:
-                    lines.append(f"Due date guidance: {self._extract_grounded_answer_text(due_hit)}")
+                    lines.append(f"**Due date:** {self._extract_grounded_answer_text(due_hit)}")
                 lines.append(
                     "For help, contact URA at https://ura.go.ug, toll-free 0800 117 000 / "
                     "0800 217 000, or WhatsApp 0772 140 000."
