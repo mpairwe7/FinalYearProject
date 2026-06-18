@@ -610,6 +610,7 @@ def chat(
         db.log_conversation(
             session_id=session_id or None,
             conversation_id=result.get("conversation_id"),
+            user_id=ctx.user_id or "",
             user_message=_CM.redact_for_storage(body.message),
             bot_reply=_CM.redact_for_storage(result["reply"]),
             sources=json.dumps(result.get("sources", [])),
@@ -688,7 +689,7 @@ async def chat_stream(
                 }
                 continue
             if event_type == "_log":
-                _log_stream_conversation(body, session_id, payload)
+                _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
                 continue
             if event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
                 # Buffer for the agent_trace summary; do not forward live.
@@ -717,7 +718,12 @@ async def _sse_not_disconnected(request: Request) -> bool:
     return not (await request.is_disconnected())
 
 
-def _log_stream_conversation(body: ChatRequest, session_id: str, log_payload: dict[str, Any]) -> None:
+def _log_stream_conversation(
+    body: ChatRequest,
+    session_id: str,
+    log_payload: dict[str, Any],
+    user_id: str = "",
+) -> None:
     """Mirror the old SSE ``finally`` block — log to analytics DB."""
     from .service import ChatModel as _CM
 
@@ -733,6 +739,7 @@ def _log_stream_conversation(body: ChatRequest, session_id: str, log_payload: di
             sources=json.dumps(result.get("sources", []) if result else []),
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
+            user_id=user_id,
         )
     except Exception:
         logger.warning("Stream conversation logging failed", exc_info=True)
@@ -1111,6 +1118,7 @@ async def voice_chat(
         db.log_conversation(
             session_id=session_id,
             conversation_id=chat_result.get("conversation_id") or conversation_id,
+            user_id=ctx.user_id or "",
             user_message=_CM.redact_for_storage(transcript),
             bot_reply=_CM.redact_for_storage(reply_text),
             sources=json.dumps(chat_result.get("sources", [])),
@@ -1672,19 +1680,30 @@ def me_withdraw_consent(
         role=ctx.role,
     )
     withdrawn = {p: db.withdraw_consent(row["id"], p) for p in body.purposes}
+    # UDPA: withdrawal must cease processing — purge the personalization memory
+    # built under that consent (future reads are already consent-gated).
+    if "personalization" in body.purposes:
+        from .memory.service import get_memory_service
+
+        get_memory_service().forget_user(ctx.user.user_id)
     return {"user_id": row["id"], "withdrawn": withdrawn}
 
 
 @app.get("/v1/me/export", tags=["me"])
 def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
-    """UDPA 2019 data-portability export."""
+    """UDPA 2019 data-portability export — identity, profile, consents, chat
+    history (+ escalation tickets), and personalization memory facts."""
+    from .memory.service import get_memory_service
+
     row = db.upsert_user(
         external_id=ctx.user.user_id,
         tenant_id=ctx.tenant_id,
         email=ctx.user.email,
         role=ctx.role,
     )
-    return db.export_user_data(row["id"])
+    data = db.export_user_data(row["id"], external_id=ctx.user.user_id)
+    data["facts"] = get_memory_service().export_user(ctx.user.user_id)["facts"]
+    return data
 
 
 @app.delete("/v1/me", tags=["me"])
@@ -1701,7 +1720,10 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
         email=ctx.user.email,
         role=ctx.role,
     )
-    counts = db.delete_user_cascade(row["id"])
+    from .memory.service import get_memory_service
+
+    counts = db.delete_user_cascade(row["id"], external_id=ctx.user.user_id)
+    counts["memory"] = sum(get_memory_service().forget_user(ctx.user.user_id).values())
     return {"deleted": counts, "external_id": ctx.user.user_id}
 
 

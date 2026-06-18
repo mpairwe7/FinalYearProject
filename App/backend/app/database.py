@@ -253,6 +253,10 @@ def init_db() -> None:
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
     _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
+    # Phase 14 — link chat history to the authenticated user (OIDC `sub`) so
+    # /v1/me export + erasure can reach it.  Empty string for anonymous turns.
+    _ensure_column(conn, "conversations", "user_id", "TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)")
 
     # Seed the default tenant if missing
     conn.execute(
@@ -491,8 +495,13 @@ def log_conversation(
     response_time_ms: float = 0,
     confidence: float = 0,
     topic_tag: str = "",
+    user_id: str = "",
 ) -> str:
-    """Log a conversation turn and return the stable thread id."""
+    """Log a conversation turn and return the stable thread id.
+
+    ``user_id`` is the authenticated OIDC ``sub`` (empty for anonymous turns) —
+    it links the turn to the user for /v1/me export + erasure.
+    """
     conn = _get_connection()
     row_id = str(uuid.uuid4())
     thread_id = conversation_id or row_id
@@ -500,8 +509,8 @@ def log_conversation(
         conn.execute(
             """INSERT INTO conversations
                (id, conversation_id, session_id, user_message, bot_reply, sources,
-                contexts, response_time_ms, confidence, topic_tag, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                contexts, response_time_ms, confidence, topic_tag, created_at, user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row_id,
                 thread_id,
@@ -514,6 +523,7 @@ def log_conversation(
                 confidence,
                 topic_tag,
                 time.time(),
+                user_id,
             ),
         )
         conn.commit()
@@ -1164,45 +1174,126 @@ def get_active_consents(user_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def has_active_consent(user_id: str, purpose: str) -> bool:
+def _resolve_internal_user_id(external_id: str, tenant_id: str = "default") -> str | None:
+    """Map an external OIDC ``sub`` to the internal ``users.id`` (None if unknown)."""
+    if not external_id:
+        return None
     conn = _get_connection()
     row = conn.execute(
-        """SELECT 1 FROM consent_receipts
-           WHERE user_id = ? AND purpose = ? AND withdrawn_at IS NULL LIMIT 1""",
-        (user_id, purpose),
+        "SELECT id FROM users WHERE tenant_id = ? AND external_id = ?",
+        (tenant_id, external_id),
     ).fetchone()
-    return row is not None
+    return row["id"] if row else None
 
 
-def export_user_data(user_id: str) -> dict[str, Any]:
-    """GET /v1/me/export — subject right to data portability (UDPA 2019)."""
+def has_active_consent(user_id: str, purpose: str, tenant_id: str = "default") -> bool:
+    """True when the user has an active (not-withdrawn) receipt for *purpose*.
+
+    Accepts EITHER the internal user UUID or the external OIDC ``sub``. Consent
+    receipts are keyed by the internal UUID, but the chat/voice runtime only holds
+    the ``sub`` — so when a direct match fails we resolve ``sub`` → internal id and
+    retry. This single bridge fixes the gate that otherwise left personalization
+    memory and voice consent permanently denied for authenticated users.
+    """
+    if not user_id:
+        return False
+    conn = _get_connection()
+    sql = (
+        "SELECT 1 FROM consent_receipts "
+        "WHERE user_id = ? AND purpose = ? AND withdrawn_at IS NULL LIMIT 1"
+    )
+    if conn.execute(sql, (user_id, purpose)).fetchone() is not None:
+        return True
+    internal_id = _resolve_internal_user_id(user_id, tenant_id)
+    if internal_id and internal_id != user_id:
+        return conn.execute(sql, (internal_id, purpose)).fetchone() is not None
+    return False
+
+
+def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
+    """GET /v1/me/export — subject right to data portability (UDPA 2019).
+
+    ``user_id`` is the internal UUID (users/profiles/consents); ``external_id`` is
+    the OIDC ``sub`` that chat history is keyed by. Conversations (and their
+    escalation tickets, linked by ``conversation_id``) are returned under it.
+    ``facts`` is filled by the caller from the memory service.
+    """
+    conn = _get_connection()
+    conversations: list[dict[str, Any]] = []
+    tickets: list[dict[str, Any]] = []
+    if external_id:
+        conversations = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
+                (external_id,),
+            ).fetchall()
+        ]
+        conv_ids = [c["conversation_id"] for c in conversations if c.get("conversation_id")]
+        if conv_ids:
+            ph = ",".join("?" * len(conv_ids))
+            tickets = [
+                dict(r)
+                for r in conn.execute(
+                    f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                    conv_ids,
+                ).fetchall()
+            ]
     return {
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
         "consents": get_active_consents(user_id),
-        "conversations": [],  # filled in by service.py (tenant + user filter)
-        "tickets": [],  # filled in by service.py
-        "facts": [],  # filled by Phase 16 memory module
+        "conversations": conversations,
+        "tickets": tickets,
+        "facts": [],  # filled by the caller from the memory service (export_user)
     }
 
 
-def delete_user_cascade(user_id: str) -> dict[str, int]:
+def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
     """DELETE /v1/me — right to erasure.
 
-    Cascades through every table that holds user data.  The
-    audit ledger is INTENTIONALLY not touched — erasure must be
-    cryptographically marked, not the log rewritten (per UDPA +
-    EU precedent for audit integrity).
+    Cascades through every table that holds user data.  The audit ledger is
+    INTENTIONALLY not touched — erasure must be cryptographically marked, not the
+    log rewritten (per UDPA + EU precedent for audit integrity).
+
+    ``user_id`` is the internal UUID (users/profiles/consents). ``external_id`` is
+    the OIDC ``sub`` that chat history is keyed by — conversations (and their
+    escalation tickets, linked by ``conversation_id``) are erased under it. Memory
+    facts are erased by the caller via the memory service.
     """
     conn = _get_connection()
     counts: dict[str, int] = {}
-    # (table, fk_column)
-    cascade = [
-        ("consent_receipts", "user_id"),
-        ("user_profiles", "user_id"),
-        ("users", "id"),
-    ]
-    for table, col in cascade:
+
+    # External-id-keyed: chat history + the escalation tickets linked to it.
+    if external_id:
+        conv_ids = [
+            r["conversation_id"]
+            for r in conn.execute(
+                "SELECT conversation_id FROM conversations "
+                "WHERE user_id = ? AND conversation_id IS NOT NULL",
+                (external_id,),
+            ).fetchall()
+        ]
+        if conv_ids:
+            ph = ",".join("?" * len(conv_ids))
+            try:
+                cur = conn.execute(
+                    f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                    conv_ids,
+                )
+                counts["tickets"] = cur.rowcount
+            except Exception:
+                logger.exception("delete_user_cascade: tickets")
+                counts["tickets"] = -1
+        try:
+            cur = conn.execute("DELETE FROM conversations WHERE user_id = ?", (external_id,))
+            counts["conversations"] = cur.rowcount
+        except Exception:
+            logger.exception("delete_user_cascade: conversations")
+            counts["conversations"] = -1
+
+    # Internal-UUID-keyed: identity, profile, consent receipts.
+    for table, col in (("consent_receipts", "user_id"), ("user_profiles", "user_id"), ("users", "id")):
         try:
             cursor = conn.execute(
                 f"DELETE FROM {table} WHERE {col} = ?",  # noqa: S608 — hardcoded list
