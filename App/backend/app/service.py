@@ -111,6 +111,67 @@ _REGISTRATION_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ---------------------------------------------------------------------------
+# Passage cleanup — strip PDF-extraction noise before surfacing a raw retrieved
+# chunk to a user (omitted-image blocks, page footers, TOC dot leaders,
+# letter-spaced headers, trailing page numbers).  No-op for clean FAQ answers.
+# ---------------------------------------------------------------------------
+_PIC_BLOCK_RE = re.compile(
+    r"=*>?\s*picture\s*\[?\d+\s*[xX]\s*\d+\]?\s*intentionally omitted"
+    r".*?-{2,}\s*End of picture text\s*-{2,}",
+    re.IGNORECASE | re.DOTALL,
+)
+_PIC_MARK_RE = re.compile(
+    r"-{2,}\s*(?:Start|End) of picture text\s*-{2,}"
+    r"|picture\s*\[?\d+\s*[xX]\s*\d+\]?\s*intentionally omitted"
+    r"|\bbr\s*-{2,}",
+    re.IGNORECASE,
+)
+_PDF_FOOTER_RE = re.compile(
+    r"\*+\s*A Guide to Taxation in Uganda\s*\|\s*[A-Za-z]+\s+Edition[\s\d]*", re.IGNORECASE
+)
+_PDF_EDITION_RE = re.compile(
+    r"\|\s*(?:First|Second|Third|Fourth|Fifth|Sixth|Seventh|Eighth|Ninth|Tenth)\s+Edition[\s\d]*",
+    re.IGNORECASE,
+)
+_DOT_LEADER_RE = re.compile(r"(?:\.\s*){4,}")
+_SPACED_LETTERS_RE = re.compile(r"(?:\b[A-Za-z]\b[ ]){4,}\b[A-Za-z]\b")
+
+
+def _clean_passage_text(text: str) -> str:
+    """Remove PDF-extraction artifacts from a retrieved chunk; no-op for clean text."""
+    if not text:
+        return ""
+    t = _PIC_BLOCK_RE.sub(" ", text)
+    t = _PIC_MARK_RE.sub(" ", t)
+    t = _PDF_FOOTER_RE.sub(" ", t)
+    t = _PDF_EDITION_RE.sub(" ", t)
+    t = _DOT_LEADER_RE.sub(" ", t)
+    t = _SPACED_LETTERS_RE.sub(" ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"[\s;]+\d{1,3}\s*$", "", t)  # trailing orphan page number
+    t = re.sub(r"[\s;]+\d{1,2}\.\s*$", "", t)  # trailing orphan list marker
+    return t.strip()
+
+
+def _trim_excerpt(text: str, limit: int = 700) -> str:
+    """Trim to ~``limit`` chars at a sentence/clause boundary (never mid-word)."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = max(cut.rfind(". "), cut.rfind("; "), cut.rfind("\n"))
+    if boundary > limit * 0.5:
+        return cut[: boundary + 1].rstrip()
+    return cut.rsplit(" ", 1)[0].rstrip()
+
+
+def _structure_excerpt(text: str) -> str:
+    """Put an inline numbered list (``...: 1. X; 2. Y``) onto its own lines so it
+    renders as a Markdown list instead of a run-on."""
+    t = re.sub(r":\s+(?=\d{1,2}\.\s)", ":\n\n", text, count=1)  # blank line before the list
+    t = re.sub(r"\s*;\s+(?=\d{1,2}\.\s)", "\n", t)
+    return t
+
 # Shared executor for LLM calls — bounded so one slow generation cannot
 # exhaust worker threads under load.  Size is small on purpose: Qwen runs
 # one inference at a time per process anyway (no true batching without vLLM).
@@ -1673,12 +1734,12 @@ class ChatModel:
     def _extract_grounded_answer_text(hit: dict[str, Any]) -> str:
         answer = str(hit.get("answer", "") or "").strip()
         if answer:
-            return " ".join(answer.split())
+            return _clean_passage_text(answer)
         text = str(hit.get("text", "") or "").strip()
         if text.lower().startswith("question:") and "\nanswer:" in text.lower():
             parts = re.split(r"\nanswer:\s*", text, maxsplit=1, flags=re.IGNORECASE)
             text = parts[1] if len(parts) == 2 else text
-        return " ".join(text.split())
+        return _clean_passage_text(text)
 
     @staticmethod
     def _format_procedure_steps(text: str, lead: str) -> str:
@@ -1726,24 +1787,25 @@ class ChatModel:
 
         ranked_hits = [hit for _, hit in sorted(enumerate(hits), key=rank, reverse=True)]
         for hit in ranked_hits[:2]:
-            text = cls._extract_grounded_answer_text(hit)
-            if not text:
+            text = cls._extract_grounded_answer_text(hit)  # PDF-artifact-cleaned
+            if len(text) < 40:  # skip empty / artifact-only chunks
                 continue
-            trimmed = text[:800].rsplit(" ", 1)[0] if len(text) > 800 else text
-            ref = ""
-            for c in citations:
-                if str(c.get("source", "")) == str(hit.get("source", "")):
-                    ref = str(c.get("ref", "")).strip()
-                    break
-            if ref:
-                excerpts.append(f"{trimmed} {ref}".strip())
-            else:
-                excerpts.append(trimmed)
+            excerpt = _structure_excerpt(_trim_excerpt(text, 700))
+            # This is the grounding-restoration path — keep the source citation
+            # visible (appended to the clean excerpt, not dangling on a run-on).
+            ref = next(
+                (
+                    str(c.get("ref", "")).strip()
+                    for c in citations
+                    if str(c.get("source", "")) == str(hit.get("source", ""))
+                ),
+                "",
+            )
+            excerpts.append(f"{excerpt} {ref}".strip() if ref else excerpt)
         if not excerpts:
             return ""
-        if len(excerpts) == 1:
-            return f"Based on the URA guidance I retrieved, {excerpts[0]}".strip()
-        return "Based on the URA guidance I retrieved:\n\n- " + "\n- ".join(excerpts)
+        body = "\n\n".join(excerpts)
+        return f"Based on the URA guidance I retrieved:\n\n{body}"
 
     def _finalize_reply(self, reply: str) -> str:
         """Apply response-side safety cleanup to generated, revised, and cached text."""

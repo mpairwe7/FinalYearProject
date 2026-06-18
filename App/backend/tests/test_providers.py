@@ -1314,6 +1314,33 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         self.assertEqual(out, "Lead: A single grounded sentence.")
         self.assertNotIn("1.", out)
 
+    def test_grounded_revision_cleans_pdf_artifacts(self):
+        # The "revise" fallback dumps raw retrieved chunks. PDF-extraction noise
+        # (omitted-image blocks, page footers, orphan page numbers) must be
+        # stripped, and an inline numbered list rendered as a real list.
+        from app import service
+
+        raw = (
+            "Background to Taxation ==> picture [348 x 505] intentionally omitted "
+            "CompulsoryPublicWorks(1991)----- End of picture text -----"
+            "** A Guide to Taxation in Uganda | Sixth Edition 10 1 "
+            "Taxes in Uganda are centrally assessed and collected by the Uganda Revenue "
+            "Authority (URA), headed by a Commissioner General, under: 1. Customs Tariff "
+            "Act, Cap. 337; 2. East African Customs Management Act; 3. Excise Tariff Act, "
+            "Cap. 338; 5. 2"
+        )
+        out = service.ChatModel._build_grounded_revision(
+            [{"source": "taxation_guide.pdf", "text": raw}], [], "explain taxation in uganda"
+        )
+        self.assertTrue(out.startswith("Based on the URA guidance I retrieved:"))
+        for noise in ("intentionally omitted", "End of picture text", "Sixth Edition", "picture ["):
+            self.assertNotIn(noise, out)
+        # inline numbered list is split onto its own lines (renders as a list)
+        self.assertIn("\n1. Customs Tariff Act", out)
+        self.assertIn("\n2. East African", out)
+        # the truncation/page-number artifact "5. 2" must not survive
+        self.assertNotIn("5. 2", out)
+
 
 if __name__ == "__main__":
     unittest.main()
