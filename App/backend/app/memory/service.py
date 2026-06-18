@@ -196,6 +196,23 @@ class MemoryService:
         """Set/merge short-term working state (no consent gate — ephemeral)."""
         self.working.update(user_id, **fields)
 
+    # -- Subject-access export ----------------------------------------
+    def export_user(self, user_id: str) -> dict[str, Any]:
+        """Ungated subject-access export of stored memory (UDPA data portability).
+
+        Unlike :meth:`read_facts`, this is NOT consent-gated — a data subject is
+        entitled to a copy of their stored data regardless of current consent.
+        """
+        import dataclasses
+
+        facts = self.semantic.read(user_id=user_id, limit=1000)
+        return {
+            "facts": [
+                dataclasses.asdict(f) if dataclasses.is_dataclass(f) else dict(f) for f in facts
+            ],
+            "episodic": self.episodic.list_for_user(user_id=user_id, limit=1000),
+        }
+
     # -- Erasure cascade ----------------------------------------------
     def forget_user(self, user_id: str) -> dict[str, int]:
         """Cascade delete across all three tiers (UDPA right to erasure).

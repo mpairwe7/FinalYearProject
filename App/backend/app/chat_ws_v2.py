@@ -402,6 +402,7 @@ async def _run_response_create(
                 user_message=user_input,
                 full_reply=full_reply,
                 log_payload=final_log,
+                user_id=session.user_id or "",
             )
             # Update the in-memory history cache so subsequent turns can
             # skip the DB fetch.  Also pick up the conversation_id the
@@ -633,6 +634,7 @@ def _log_ws_turn(
     user_message: str,
     full_reply: str,
     log_payload: dict[str, Any],
+    user_id: str = "",
 ) -> None:
     """Persist a chat-WS turn to the analytics DB (mirrors SSE behaviour)."""
     from .service import ChatModel as _CM
@@ -648,6 +650,7 @@ def _log_ws_turn(
             sources=json.dumps(result.get("sources", []) if result else []),
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
+            user_id=user_id,
         )
     except Exception:
         logger.warning("chat WS conversation logging failed", exc_info=True)

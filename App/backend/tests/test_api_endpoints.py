@@ -312,6 +312,95 @@ class MeEndpoints(_Base):
         self.assertEqual(c.get("/v1/me/export", headers=_bearer(tok)).status_code, 200)
         self.assertEqual(c.delete("/v1/me", headers=_bearer(tok)).status_code, 200)
 
+    # -- completeness: export/erasure must actually reach chat history + memory --
+    def test_export_includes_conversation_history(self):
+        from app import database as db
+
+        sub = "exporter1"
+        db.log_conversation(
+            session_id="s-exp",
+            conversation_id="conv-exp-1",
+            user_message="what is VAT",
+            bot_reply="VAT is 18%",
+            user_id=sub,
+        )
+        tok = make_dev_token(sub, role="verified_taxpayer")
+        r = _client().get("/v1/me/export", headers=_bearer(tok))
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIsInstance(body.get("facts"), list)  # memory wired in, not stubbed
+        conv_ids = [c.get("conversation_id") for c in body.get("conversations", [])]
+        self.assertIn("conv-exp-1", conv_ids)
+
+    def test_erasure_deletes_conversation_history(self):
+        from app import database as db
+
+        sub = "eraser1"
+        db.log_conversation(
+            session_id="s-era",
+            conversation_id="conv-era-1",
+            user_message="my income is sensitive",
+            bot_reply="ok",
+            user_id=sub,
+        )
+        tok = make_dev_token(sub, role="verified_taxpayer")
+        r = _client().delete("/v1/me", headers=_bearer(tok))
+        self.assertEqual(r.status_code, 200)
+        self.assertGreaterEqual(r.json()["deleted"].get("conversations", 0), 1)
+        # The chat history must be gone afterwards.
+        remaining = db.export_user_data("n/a", external_id=sub)["conversations"]
+        self.assertEqual(remaining, [])
+
+    def test_withdraw_personalization_purges_memory(self):
+        sub = "withdrawer1"
+        tok = make_dev_token(sub, role="verified_taxpayer")
+        c = _client()
+        c.post(
+            "/v1/me/consents/grant",
+            headers=_bearer(tok),
+            json={"purposes": ["personalization"], "version": "2026-06"},
+        )
+        with mock.patch("app.memory.service.get_memory_service") as gms:
+            r = c.post(
+                "/v1/me/consents/withdraw",
+                headers=_bearer(tok),
+                json={"purposes": ["personalization"]},
+            )
+        self.assertEqual(r.status_code, 200)
+        gms.return_value.forget_user.assert_called_once()
+
+    def test_invalid_consent_purpose_rejected_422(self):
+        tok = make_dev_token("badpurpose", role="verified_taxpayer")
+        r = _client().post(
+            "/v1/me/consents/grant",
+            headers=_bearer(tok),
+            json={"purposes": ["sell_my_data"], "version": "2026-06"},
+        )
+        self.assertEqual(r.status_code, 422)
+
+    def test_invalid_taxpayer_type_rejected_422(self):
+        tok = make_dev_token("badprofile", role="verified_taxpayer")
+        r = _client().put(
+            "/v1/me/profile",
+            headers=_bearer(tok),
+            json={"taxpayer_type": "martian"},
+        )
+        self.assertEqual(r.status_code, 422)
+
+    def test_consent_check_resolves_external_sub(self):
+        # Consent receipts are keyed by the internal UUID, but the chat/voice
+        # runtime checks consent with the external OIDC sub. The gate must bridge
+        # the two — otherwise personalization memory + voice consent stay dormant.
+        from app import database as db
+
+        sub = "zoe-ext"
+        row = db.upsert_user(external_id=sub, tenant_id="default")
+        db.grant_consent(row["id"], "personalization", "2026-06")
+        self.assertTrue(db.has_active_consent(row["id"], "personalization"))  # internal, direct
+        self.assertTrue(db.has_active_consent(sub, "personalization"))  # external sub resolves
+        # Negative control: an unknown sub is still denied.
+        self.assertFalse(db.has_active_consent("nobody-xyz", "personalization"))
+
 
 # ---------------------------------------------------------------------------
 # Offline + models (feature-flag gated)
