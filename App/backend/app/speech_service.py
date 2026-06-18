@@ -1121,10 +1121,14 @@ class SpeechModel:
         )
 
     def _do_translate(self, text: str, source_lang: str, target_lang: str) -> TranslateResult:
-        """Translate via the model-routing policy: Gemini (primary) -> Cloudflare
-        Llama -> Sunbird NLLB -> local MT -> prompted Qwen3. The cloud tiers
-        self-skip when their flags/keys are absent, so a local/GPU deploy still
-        falls through to the offline tiers."""
+        """Translate via the model-routing policy, with a language-aware order.
+
+        For **Luganda** (``lg↔en``) Sunbird's Luganda-native NLLB leads — it is the
+        most accurate for this low-resource language — with Gemini 2.5 Flash as a
+        strong fallback (then Cloudflare Llama → local MT → prompted Qwen3). For all
+        other languages Gemini leads. Every cloud tier self-skips when its
+        flags/keys are absent, so a local/GPU deploy still reaches the offline tiers.
+        """
         from .providers import routing
 
         t0 = time.perf_counter()
@@ -1135,58 +1139,76 @@ class SpeechModel:
                 latency_s=round(time.perf_counter() - t0, 3), backend=backend,
             )
 
-        # 1. Gemini 2.5 Flash — primary cloud translator (Luganda-strong; gated).
-        gemini_out = self._gemini_translate(text, source_lang, target_lang)
-        if gemini_out:
-            routing.log_model_use("translate", "gemini_flash")
-            return _res(gemini_out, "gemini_flash")
+        def _gemini():
+            out = self._gemini_translate(text, source_lang, target_lang)
+            return _res(out, "gemini_flash") if out else None
 
-        # 2. Cloudflare Workers AI Llama — prompted translation fallback.
-        cf_out = self._cf_llama_translate(text, source_lang, target_lang)
-        if cf_out:
-            routing.log_fallback("translate", "gemini_flash", "cf_workers_ai", "gemini_unavailable")
-            routing.log_model_use("translate", "cf_workers_ai")
-            return _res(cf_out, "cf_workers_ai")
+        def _cf():
+            out = self._cf_llama_translate(text, source_lang, target_lang)
+            return _res(out, "cf_workers_ai") if out else None
 
-        # 3. Sunbird NLLB — Luganda-native cloud MT.
-        try:
-            from . import sunbird
-            if sunbird.is_available():
-                src_code = {"en": "eng", "lg": "lug"}.get(source_lang, source_lang)
-                tgt_code = {"en": "eng", "lg": "lug"}.get(target_lang, target_lang)
-                result = sunbird.translate(text, src_code, tgt_code)
-                if result:
-                    routing.log_fallback("translate", "cf_workers_ai", "sunbird_cloud", "cf_unavailable")
-                    routing.log_model_use("translate", "sunbird_cloud")
-                    return _res(result, "sunbird_cloud")
-        except Exception:
-            logger.debug("Sunbird translate fallback failed")
-
-        # 4. Local MT module (ONNX/teacher MADLAD+LoRA — offline).
-        if self._mt is not None:
+        def _sunbird():
             try:
-                result = self._mt.translate(text, source_lang=source_lang, target_lang=target_lang)
-                if result and result.text:
-                    routing.log_model_use("translate", result.backend or "local_mt")
-                    return _res(result.text, result.backend or "local_mt")
+                from . import sunbird
+                if sunbird.is_available():
+                    src_code = {"en": "eng", "lg": "lug"}.get(source_lang, source_lang)
+                    tgt_code = {"en": "eng", "lg": "lug"}.get(target_lang, target_lang)
+                    result = sunbird.translate(text, src_code, tgt_code)
+                    if result:
+                        return _res(result, "sunbird_cloud")
             except Exception:
-                logger.debug("Local MT failed", exc_info=True)
+                logger.debug("Sunbird translate failed", exc_info=True)
+            return None
 
-        # 5. Prompted Qwen3 (offline LLM — last resort).
-        if self._chat_model is not None:
-            try:
-                from . import llm as llm_module
-                reply = llm_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
-                if reply and reply.strip():
-                    routing.log_model_use("translate", "prompted_qwen3")
-                    return _res(reply.strip(), "prompted_qwen3")
-            except Exception:
-                logger.debug("Prompted MT via Qwen3 failed", exc_info=True)
+        def _local():
+            if self._mt is not None:
+                try:
+                    result = self._mt.translate(text, source_lang=source_lang, target_lang=target_lang)
+                    if result and result.text:
+                        return _res(result.text, result.backend or "local_mt")
+                except Exception:
+                    logger.debug("Local MT failed", exc_info=True)
+            return None
+
+        def _prompted():
+            if self._chat_model is not None:
+                try:
+                    from . import llm as llm_module
+                    reply = llm_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
+                    if reply and reply.strip():
+                        return _res(reply.strip(), "prompted_qwen3")
+                except Exception:
+                    logger.debug("Prompted MT via Qwen3 failed", exc_info=True)
+            return None
+
+        # Luganda is low-resource → Sunbird's native NLLB leads; Gemini backs it up.
+        # All other languages → Gemini leads (Sunbird stays a fallback).
+        is_luganda = "lg" in (source_lang.lower(), target_lang.lower())
+        if is_luganda:
+            tiers = [
+                ("sunbird_cloud", _sunbird), ("gemini_flash", _gemini),
+                ("cf_workers_ai", _cf), ("local_mt", _local), ("prompted_qwen3", _prompted),
+            ]
+        else:
+            tiers = [
+                ("gemini_flash", _gemini), ("cf_workers_ai", _cf),
+                ("sunbird_cloud", _sunbird), ("local_mt", _local), ("prompted_qwen3", _prompted),
+            ]
+
+        prev: str | None = None
+        for name, tier in tiers:
+            result = tier()
+            if result is not None:
+                if prev is not None:
+                    routing.log_fallback("translate", prev, result.backend, f"{prev}_unavailable")
+                routing.log_model_use("translate", result.backend)
+                return result
+            prev = name
 
         return TranslateResult(
             text="", source_lang=source_lang, target_lang=target_lang,
             latency_s=round(time.perf_counter() - t0, 3), backend="error",
-            error="No translation backend available (Gemini, CF Llama, Sunbird, local MT, Qwen3 all failed)",
+            error="No translation backend available (Sunbird, Gemini, CF Llama, local MT, Qwen3 all failed)",
         )
 
     @staticmethod
