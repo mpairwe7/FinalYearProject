@@ -1222,5 +1222,57 @@ class TranslationFallbackTest(unittest.TestCase):
             self.assertEqual(SpeechModel._gemini_translate("x", "en", "lg"), "")
 
 
+class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
+    """The vetted procedural templates must render stepwise Markdown and must NOT
+    embed inline citation markers — references reach the UI via the result's
+    ``citations`` / ``sources`` (the grounded-context panel), not the prose.
+    Regression for a TIN answer that came back as a comma run-on ending in a
+    dangling "[2]" citation digit."""
+
+    @classmethod
+    def setUpClass(cls):
+        from app import database as db
+
+        db.init_db()
+        from app import service
+
+        cls.model = service.ChatModel()
+
+    def _tin_reply(self) -> str:
+        from app import retriever as R
+
+        hits = [
+            {
+                "source": "ura_instant_tin_application_faqs.csv",
+                "question": "How do I apply for an instant TIN?",
+                "answer": (
+                    "Go to ura.go.ug, click Get a TIN, choose Instant TIN, select "
+                    "Individual, enter your NIN, confirm you are not a robot, and submit."
+                ),
+                "text": "instant TIN application steps",
+            },
+        ]
+        citations = R.HybridRetriever.build_citations(hits)
+        return self.model._deterministic_procedure_reply(
+            "how do I register for a TIN", hits, citations
+        )
+
+    def test_tin_reply_is_stepwise_markdown(self):
+        reply = self._tin_reply()
+        # Numbered steps, one per line — not a single comma-separated run-on.
+        self.assertIn("1. Go to ura.go.ug", reply)
+        self.assertIn("7. Submit", reply)
+        self.assertNotIn("click Get a TIN, choose Instant TIN", reply)
+
+    def test_tin_reply_has_no_inline_citation_marker(self):
+        import re
+
+        reply = self._tin_reply()
+        # References live in the grounded-context panel, never inline in the prose.
+        self.assertIsNone(re.search(r"\[\d+\]", reply))
+        # And the answer must not end in a dangling digit.
+        self.assertIsNone(re.search(r"\d\s*$", reply.strip()))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1799,11 +1799,12 @@ class ChatModel:
         hits: list[dict[str, Any]],
         citations: list[dict[str, Any]],
     ) -> str:
-        """Return vetted procedural answers for common tasks without LLM synthesis."""
-        citation_by_source: dict[str, str] = {}
-        for c in citations:
-            citation_by_source.setdefault(str(c.get("source", "")), str(c.get("ref", "")).strip())
+        """Return vetted procedural answers for common tasks without LLM synthesis.
 
+        References are intentionally NOT embedded inline here — they reach the UI via the
+        result's ``citations`` / ``sources`` (the grounded-context panel), so the prose
+        stays clean, stepwise Markdown. ``citations`` is kept on the signature for callers.
+        """
         if _TIN_REGISTRATION_QUERY_RE.search(query):
             apply_hit = next(
                 (
@@ -1824,18 +1825,22 @@ class ChatModel:
                 None,
             )
             if apply_hit:
-                ref = citation_by_source.get(str(apply_hit.get("source", "")), "[1]")
                 contact = (
                     "For help, call URA toll-free 0800 117 000 / 0800 217 000, "
                     "WhatsApp 0772 140 000, or use https://ura.go.ug."
                 )
                 if help_hit:
-                    contact_ref = citation_by_source.get(str(help_hit.get("source", "")), ref)
-                    contact = f"{self._extract_grounded_answer_text(help_hit)} {contact_ref}"
+                    contact = self._extract_grounded_answer_text(help_hit)
                 return (
-                    "To register for an instant TIN, go to ura.go.ug, click Get a TIN, "
-                    "choose Instant TIN, select Individual, enter your NIN and personal details, "
-                    f"confirm you are not a robot, and submit. {ref}\n\n{contact}"
+                    "To register for an **instant TIN**:\n\n"
+                    "1. Go to ura.go.ug\n"
+                    "2. Click **Get a TIN**\n"
+                    "3. Choose **Instant TIN**\n"
+                    "4. Select **Individual**\n"
+                    "5. Enter your NIN and personal details\n"
+                    "6. Confirm you are not a robot\n"
+                    "7. Submit\n\n"
+                    f"{contact}"
                 )
 
         if _RETURN_FILING_QUERY_RE.search(query):
@@ -1858,13 +1863,11 @@ class ChatModel:
                 None,
             )
             if file_hit:
-                ref = citation_by_source.get(str(file_hit.get("source", "")), "[1]")
                 lines = [
-                    f"To file your annual tax return: {self._extract_grounded_answer_text(file_hit)} {ref}",
+                    f"To file your annual tax return: {self._extract_grounded_answer_text(file_hit)}",
                 ]
                 if due_hit:
-                    due_ref = citation_by_source.get(str(due_hit.get("source", "")), ref)
-                    lines.append(f"Due date guidance: {self._extract_grounded_answer_text(due_hit)} {due_ref}")
+                    lines.append(f"Due date guidance: {self._extract_grounded_answer_text(due_hit)}")
                 lines.append(
                     "For help, contact URA at https://ura.go.ug, toll-free 0800 117 000 / "
                     "0800 217 000, or WhatsApp 0772 140 000."
