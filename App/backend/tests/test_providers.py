@@ -1342,5 +1342,54 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         self.assertNotIn("5. 2", out)
 
 
+class LugandaTranslationRoutingTest(unittest.TestCase):
+    """Luganda (lg↔en) translation must try Sunbird's Luganda-native NLLB BEFORE
+    Gemini; other languages keep Gemini-first. Sunbird remains a fallback for all."""
+
+    def _bare_model(self):
+        # _do_translate only needs _mt / _chat_model; skip the heavy __init__.
+        from app.speech_service import SpeechModel
+
+        m = object.__new__(SpeechModel)
+        m._mt = None
+        m._chat_model = None
+        return m
+
+    def test_luganda_prefers_sunbird_over_gemini(self):
+        from app import speech_service
+
+        m = self._bare_model()
+        with mock.patch.object(speech_service.SpeechModel, "_gemini_translate", return_value="GEMINI"), \
+             mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
+             mock.patch("app.sunbird.is_available", return_value=True), \
+             mock.patch("app.sunbird.translate", return_value="SUNBIRD"):
+            for src, tgt in (("lg", "en"), ("en", "lg")):
+                res = m._do_translate("hello", src, tgt)
+                self.assertEqual(res.backend, "sunbird_cloud", f"{src}->{tgt}")
+                self.assertEqual(res.text, "SUNBIRD")
+
+    def test_non_luganda_keeps_gemini_first(self):
+        from app import speech_service
+
+        m = self._bare_model()
+        with mock.patch.object(speech_service.SpeechModel, "_gemini_translate", return_value="GEMINI"), \
+             mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
+             mock.patch("app.sunbird.is_available", return_value=True), \
+             mock.patch("app.sunbird.translate", return_value="SUNBIRD"):
+            res = m._do_translate("hello", "en", "fr")
+            self.assertEqual(res.backend, "gemini_flash")
+
+    def test_luganda_falls_back_to_gemini_when_sunbird_unavailable(self):
+        from app import speech_service
+
+        m = self._bare_model()
+        with mock.patch.object(speech_service.SpeechModel, "_gemini_translate", return_value="GEMINI"), \
+             mock.patch.object(speech_service.SpeechModel, "_cf_llama_translate", return_value=""), \
+             mock.patch("app.sunbird.is_available", return_value=False):
+            res = m._do_translate("hello", "lg", "en")
+            self.assertEqual(res.backend, "gemini_flash")
+            self.assertEqual(res.text, "GEMINI")
+
+
 if __name__ == "__main__":
     unittest.main()
