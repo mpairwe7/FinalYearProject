@@ -3,7 +3,9 @@ import { ArrowRight } from 'lucide-react';
 import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import { TeamStrip } from '@/components/team-grid';
+import { HeroChat } from '@/components/hero-chat';
 import { posts } from '@/lib/posts';
+import { siteConfig } from '@/lib/site';
 
 const stats = [
   { value: '94%', label: 'Answer accuracy' },
@@ -42,6 +44,19 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SiteHeader />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'WebSite',
+            name: siteConfig.name,
+            url: siteConfig.url,
+            description: siteConfig.description,
+            publisher: { '@type': 'Organization', name: siteConfig.author },
+          }),
+        }}
+      />
 
       {/* Hero */}
       <section className="relative overflow-hidden border-b border-border">
@@ -49,32 +64,37 @@ export default function Landing() {
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_0%,oklch(0.58_0.22_262/0.10),transparent)]"
         />
-        <div className="relative mx-auto max-w-5xl px-4 py-24 sm:px-6 sm:py-32">
-          <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-            Final-Year Project · Makerere University
-          </p>
-          <h1 className="mt-4 max-w-3xl text-balance text-4xl font-bold leading-[1.1] tracking-tight sm:text-6xl">
-            A conversational AI for Uganda Revenue Authority
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground">
-            The URA Chatbot answers tax questions 24/7 in English and Luganda — grounded in
-            official sources, accessible by text or voice, and built to enterprise security
-            standards. This blog documents how we built it.
-          </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/blog"
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-foreground px-5 py-3 text-sm font-semibold text-background no-underline transition-opacity hover:opacity-90"
-            >
-              Read the writing
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-            <Link
-              href="/blog/project-overview"
-              className="inline-flex items-center justify-center rounded-lg border border-border px-5 py-3 text-sm font-semibold text-foreground no-underline transition-colors hover:bg-secondary"
-            >
-              Project overview
-            </Link>
+        <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:px-6 sm:py-28 lg:grid-cols-2">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+              Final-Year Project · Makerere University
+            </p>
+            <h1 className="mt-4 text-balance text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl">
+              A conversational AI for Uganda Revenue Authority
+            </h1>
+            <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+              The URA Chatbot answers tax questions 24/7 in English and Luganda — grounded in
+              official sources, accessible by text or voice, and built to enterprise security
+              standards. This blog documents how we built it.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/blog"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-foreground px-5 py-3 text-sm font-semibold text-background no-underline transition-opacity hover:opacity-90"
+              >
+                Read the writing
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link
+                href="/blog/project-overview"
+                className="inline-flex items-center justify-center rounded-lg border border-border px-5 py-3 text-sm font-semibold text-foreground no-underline transition-colors hover:bg-secondary"
+              >
+                Project overview
+              </Link>
+            </div>
+          </div>
+          <div className="lg:pl-6">
+            <HeroChat />
           </div>
         </div>
       </section>

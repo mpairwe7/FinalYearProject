@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Clock } from 'lucide-react';
 import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import { posts } from '@/lib/posts';
+import { readingTimeMinutes } from '@/lib/site';
 
 // Display categories in a deliberate reading order; any other categories that
 // exist in posts.ts are appended afterwards so nothing is ever hidden.
@@ -60,8 +61,11 @@ export default function BlogIndex() {
                           <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
                             {post.excerpt}
                           </p>
-                          <span className="mt-2 inline-block text-xs text-muted-foreground">
+                          <span className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
                             {post.date}
+                            <span className="inline-flex items-center gap-1">
+                              <Clock className="h-3 w-3" /> {readingTimeMinutes(post.content)} min read
+                            </span>
                           </span>
                         </div>
                         <ArrowRight className="mt-1 h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-accent" />
