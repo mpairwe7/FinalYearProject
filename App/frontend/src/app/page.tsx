@@ -29,7 +29,7 @@ import { VoiceChat } from '../components/VoiceChat';
 import { VoiceFirstChat } from '../components/VoiceFirstChat';
 import { VoiceVisionMode } from '../components/VoiceVisionMode';
 import ThemeToggle from '../components/ThemeToggle';
-import { SparklesIcon, HeadphonesIcon, BotIcon, LoadingDots, MenuIcon, PlusIcon, TrashIcon, MicIcon } from '../components/Icons';
+import { SparklesIcon, HeadphonesIcon, BotIcon, LoadingDots, MenuIcon, PlusIcon, TrashIcon, MicIcon, BookIcon } from '../components/Icons';
 
 // ---------------------------------------------------------------------------
 // Browser Speech Recognition types
@@ -48,6 +48,11 @@ interface SpeechRecognitionEvent extends Event {
 // All API calls go through the Next.js rewrite proxy at /api/*
 // so the browser stays same-origin (no CORS, CSP-safe).
 const API_URL = '/api';
+
+// Project blog (separate Vercel deployment). Set NEXT_PUBLIC_BLOG_URL in the
+// frontend's Vercel project to the blog's real production URL; the value below
+// is a placeholder fallback used until that env var is configured.
+const BLOG_URL = process.env.NEXT_PUBLIC_BLOG_URL || 'https://blog-two-mu-45.vercel.app';
 
 const LOCALE_OPTIONS = [
   { value: 'en', label: 'English', speechLang: 'en-US' },
@@ -649,6 +654,16 @@ export default function Page() {
           >
             <MicIcon />
           </button>
+          <a
+            className="top-bar-icon-btn"
+            href={BLOG_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Project blog"
+            title="Project blog"
+          >
+            <BookIcon />
+          </a>
           <ThemeToggle />
           <div className={`pill-sm ${speechHealth?.status === 'ready' ? 'pill-ok' : 'pill-warn'}`} aria-live="polite">
             <HeadphonesIcon /> <span className="pill-sm-label">{healthLabel}</span>
@@ -686,6 +701,24 @@ export default function Page() {
                 </button>
               ))}
             </div>
+
+            <a
+              className="landing-blog-link"
+              href={BLOG_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                marginTop: '1.5rem',
+                fontSize: '0.85rem',
+                color: 'var(--muted-foreground, #888)',
+                textDecoration: 'none',
+              }}
+            >
+              <BookIcon /> Read the project blog ↗
+            </a>
           </div>
         ) : (
           /* ── Chat state — full-width messages ── */
