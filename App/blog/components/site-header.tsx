@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 // Optional link back to the live chatbot. Set NEXT_PUBLIC_APP_URL in Vercel to
@@ -15,9 +16,14 @@ export function SiteHeader() {
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
         <Link href="/" className="inline-flex items-center gap-2 no-underline">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-xs font-bold text-background">
-            U
-          </span>
+          <Image
+            src="/URA-logo.png"
+            alt="URA logo"
+            width={28}
+            height={28}
+            priority
+            className="h-7 w-7 object-contain"
+          />
           <span className="font-semibold tracking-tight text-foreground">URA Chatbot</span>
           <span className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             Blog
