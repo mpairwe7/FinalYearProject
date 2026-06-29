@@ -1,0 +1,5 @@
+Manifest-Version: 1.0
+Created-By: bazel
+Target-Label: //third_party/mediapipe/tasks/java/com/google/mediapipe/ta
+ sks/genai:tasks_genai_aar_library
+
