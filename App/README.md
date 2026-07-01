@@ -1366,7 +1366,42 @@ Open http://localhost:13000 in a browser.  Feedback, citations, and
 SSE streaming are all proxied through the `/api` rewrite so no ports
 need to be exposed beyond 13000.
 
-**Option B — vLLM inference (Qwen3-8B) with full voice pipeline:**
+**Option B — one-command Docker stack with local Qwen3-8B:**
+
+```bash
+# From App/
+docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
+```
+
+This starts Redis, Qdrant, vLLM (`Qwen/Qwen3-8B`), the FastAPI backend,
+and the Next.js frontend together.  The local override serves Qwen through
+vLLM on GPU 4 by default at `http://localhost:8011/v1`, points the backend at
+`http://vllm:8001/v1`, exposes the backend on `http://localhost:8083`,
+and exposes the frontend on `http://localhost:3032`.
+
+To use a different free GPU, set `QWEN_GPU_ID`:
+
+```bash
+QWEN_GPU_ID=7 docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
+```
+
+Useful follow-up commands:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml ps
+docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml logs -f api vllm
+docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml down
+```
+
+Smoke checks:
+
+```bash
+curl -sS http://127.0.0.1:8011/v1/models
+curl -sS http://127.0.0.1:8083/health
+curl -sS http://127.0.0.1:8083/ready
+```
+
+**Option C — manual vLLM inference (Qwen3-8B) with full voice pipeline:**
 
 ```bash
 # 1. Start vLLM on a free GPU
@@ -1670,9 +1705,9 @@ curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/ti
 
 | Service | Port | GPU | Description |
 |---------|------|-----|-------------|
-| Backend (FastAPI) | 8083 container / 8887 local dev | host GPU 2 mapped as `cuda:0` + CPU reranker | RAG retrieval, workflows, auth, speech orchestration |
-| Frontend (Next.js 16) | 13000 | — | PWA + `/api` proxy + consent + analytics queue |
-| vLLM | 8011 | GPU 7 | Qwen/Qwen3-8B + tool-calling via OpenAI-compatible API |
+| Backend (FastAPI) | 8083 container / 8887 local dev | API retrieval GPU mapping + CPU reranker | RAG retrieval, workflows, auth, speech orchestration |
+| Frontend (Next.js 16) | 3032 Compose / 13000 standalone | — | PWA + `/api` proxy + consent + analytics queue |
+| vLLM | 8011 | `QWEN_GPU_ID` via `docker-compose.local-qwen.yml` (default GPU 4) | Qwen/Qwen3-8B + tool-calling via OpenAI-compatible API |
 | Qdrant | 6333 | CPU | dense + sparse retrieval index |
 | Redis | internal 6379 | CPU | semantic cache and distributed rate-limit storage |
 | ngrok | public HTTPS -> 3032 | — | silent background tunnel to the frontend; no GPU is used by ngrok |
