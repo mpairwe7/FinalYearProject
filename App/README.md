@@ -1385,6 +1385,36 @@ To use a different free GPU, set `QWEN_GPU_ID`:
 QWEN_GPU_ID=7 docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
 ```
 
+To use another Qwen model variant by Hugging Face ID, set `QWEN_MODEL`.
+The model must be available to vLLM, either downloadable from Hugging Face
+or already present in `${HOME}/.cache/huggingface`:
+
+```bash
+QWEN_MODEL=Qwen/Qwen2.5-3B-Instruct QWEN_GPU_ID=4 \
+  docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
+```
+
+For fully offline startup with a model that is already in the Hugging Face
+cache, add `HF_HUB_OFFLINE=1`:
+
+```bash
+HF_HUB_OFFLINE=1 QWEN_MODEL=Qwen/Qwen2.5-3B-Instruct QWEN_GPU_ID=4 \
+  docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
+```
+
+To use a manually downloaded model directory on the local PC, point
+`QWEN_LOCAL_MODEL_DIR` at the host directory and set `QWEN_MODEL` to the
+container mount path `/models/local-qwen`. The host directory should contain
+the model files vLLM expects, such as `config.json`, tokenizer files, and
+the model weights (`*.safetensors`):
+
+```bash
+QWEN_LOCAL_MODEL_DIR=/home/$USER/models/Qwen2.5-3B-Instruct \
+QWEN_MODEL=/models/local-qwen \
+QWEN_GPU_ID=4 \
+  docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
+```
+
 Useful follow-up commands:
 
 ```bash

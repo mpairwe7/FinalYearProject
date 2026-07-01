@@ -4,7 +4,7 @@ services:
     container_name: ura-app-vllm
     command:
       - --model
-      - Qwen/Qwen3-8B
+      - ${QWEN_MODEL:-Qwen/Qwen3-8B}
       - --port
       - "8001"
       - --max-model-len
@@ -18,9 +18,11 @@ services:
       - "8011:8001"
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ${QWEN_LOCAL_MODEL_DIR:-${HOME}/.cache/huggingface}:/models/local-qwen:ro
     ipc: host
     environment:
       - NVIDIA_VISIBLE_DEVICES=${QWEN_GPU_ID:-4}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/v1/models', timeout=5).status == 200 else 1)"]
       interval: 30s
@@ -41,7 +43,7 @@ services:
   api:
     environment:
       - LLM_BACKEND=vllm
-      - LLM_MODEL=Qwen/Qwen3-8B
+      - LLM_MODEL=${QWEN_MODEL:-Qwen/Qwen3-8B}
       - VLLM_BASE_URL=http://vllm:8001/v1
       - VLLM_API_KEY=not-needed
       - VLLM_HTTP_TIMEOUT=120
