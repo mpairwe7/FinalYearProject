@@ -31,7 +31,7 @@ export const teamMembers: TeamMember[] = [
     photo: '/team/olowo-omondi-philly.jpeg',
     roles: ['Backend Development', 'TTS Pipeline'],
     blurb:
-      'Built the FastAPI backend and the services that power it, and engineered the text-to-speech pipeline that gives the chatbot a voice.',
+      'Built the FastAPI backend in python and the services that power it, and engineered the text-to-speech pipeline that gives the chatbot a voice.',
   },
   {
     name: 'Rwemera David',
