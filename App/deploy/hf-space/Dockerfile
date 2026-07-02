@@ -8,9 +8,11 @@
 # config (Sunbird/Gemini/Cloudflare secrets, SPEECH_ENABLED, …) is supplied as
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
-# Pin to an immutable sha tag (the edge-tts English-TTS build). Bump this line
-# to roll the Space to a newer image.
-FROM landwind/ura-chatbot:sha-a10044e
+# Pin to an immutable sha tag. Bump this line to roll the Space to a newer
+# image. sha-2e74b27 = dev merge of PR #130: courtesy-aware faithfulness
+# scoring + politeness/EI + deterministic tax calculator with guided
+# missing-info elicitation.
+FROM landwind/ura-chatbot:sha-2e74b27
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
