@@ -32,12 +32,14 @@ paths are enabled by default.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import logging
 import os
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 # Ensure the project root is on sys.path so `ml.scripts.*` imports resolve.
@@ -62,6 +64,22 @@ SPEECH_ASR_BACKEND = os.getenv("SPEECH_ASR_BACKEND", "auto")
 SPEECH_TTS_BACKEND = os.getenv("SPEECH_TTS_BACKEND", "auto")
 SPEECH_MT_BACKEND = os.getenv("SPEECH_MT_BACKEND", "prompted")
 SPEECH_DEADLINE_S = float(os.getenv("SPEECH_DEADLINE_S", "60"))
+# LRU cache for repeated short phrases (greetings, empathy openers, workflow
+# prompts). 0 disables. Keyed by (text, voice, language).
+TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "64"))
+
+# Magic bytes for the audio containers our TTS tiers legitimately produce.
+_AUDIO_MAGIC = (b"RIFF", b"ID3", b"OggS", b"fLaC")
+
+
+def _looks_like_audio(data: bytes) -> bool:
+    """Cheap container sniff so an HTML error page never reaches a client
+    as 'audio' (RIFF/WAV, MP3, Ogg, FLAC, or a bare MPEG frame)."""
+    if len(data) < 44:
+        return False
+    if data.startswith(_AUDIO_MAGIC):
+        return True
+    return data[0] == 0xFF and (data[1] & 0xE0) == 0xE0  # raw MPEG frame sync
 SPEECH_MAX_CONCURRENCY = int(os.getenv("SPEECH_MAX_CONCURRENCY", "2"))
 
 DEFAULT_EN_VOICE = os.getenv("SPEECH_EN_VOICE", "en_US-lessac-medium")
@@ -162,6 +180,8 @@ class SpeechModel:
         self.enabled = SPEECH_ENABLED
         self._lock = threading.Lock()
         self._closed = False
+        self._tts_cache: OrderedDict[tuple[str, str, str], SynthesizeResult] = OrderedDict()
+        self._tts_cache_lock = threading.Lock()
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=SPEECH_MAX_CONCURRENCY,
             thread_name_prefix="speech",
@@ -653,6 +673,36 @@ class SpeechModel:
             )
         voice = voice or (DEFAULT_LG_VOICE if language == "lg" else DEFAULT_EN_VOICE)
 
+        # ⓪ Phrase cache — repeated short prompts (greetings, empathy openers,
+        #    workflow questions) skip the whole backend chain.
+        cache_key = (
+            hashlib.sha1(text.encode("utf-8")).hexdigest(),
+            voice,
+            language,
+        )
+        if TTS_CACHE_SIZE > 0:
+            with self._tts_cache_lock:
+                cached = self._tts_cache.get(cache_key)
+                if cached is not None:
+                    self._tts_cache.move_to_end(cache_key)
+                    return replace(cached, latency_s=0.0, backend=f"{cached.backend}+cache")
+
+        result = self._synthesize_uncached(text, voice, language)
+        if TTS_CACHE_SIZE > 0 and result.audio and not result.error:
+            with self._tts_cache_lock:
+                self._tts_cache[cache_key] = result
+                self._tts_cache.move_to_end(cache_key)
+                while len(self._tts_cache) > TTS_CACHE_SIZE:
+                    self._tts_cache.popitem(last=False)
+        return result
+
+    def _synthesize_uncached(
+        self,
+        text: str,
+        voice: str,
+        language: str,
+    ) -> SynthesizeResult:
+        """The actual backend fallback chain behind :meth:`synthesize`."""
         # ① Local Sherpa/Piper TTS (primary — offline, low-latency)
         if self._breakers["tts"].allow_request():
             future = self._executor.submit(self._do_synthesize, text, voice)
@@ -690,7 +740,7 @@ class SpeechModel:
                 if tts_result and tts_result.get("audio_url"):
                     import httpx
                     audio_resp = httpx.get(tts_result["audio_url"], timeout=15)
-                    if audio_resp.status_code == 200 and len(audio_resp.content) > 100:
+                    if audio_resp.status_code == 200 and _looks_like_audio(audio_resp.content):
                         return SynthesizeResult(
                             audio=audio_resp.content,
                             sample_rate=22050,
@@ -700,6 +750,11 @@ class SpeechModel:
                             backend="sunbird_cloud",
                             voice=f"sunbird_{language}",
                         )
+                    logger.warning(
+                        "Sunbird TTS returned non-audio payload (status=%s, %d bytes)",
+                        audio_resp.status_code,
+                        len(audio_resp.content),
+                    )
         except Exception:
             logger.debug("Sunbird TTS fallback also failed")
 
