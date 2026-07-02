@@ -86,6 +86,24 @@ _CALC_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
         "Customs duty calculation intent",
         ["calculate_customs_duty", "lookup_rate"],
     ),
+    (
+        re.compile(
+            r"(?=.*\brent(?:al)?\b)"
+            r"(?=.*\b(how\s+much|calculate|compute|work\s+out|tax\s+on)\b)",
+            re.IGNORECASE,
+        ),
+        "Rental income tax calculation intent",
+        ["calculate_rental_tax", "lookup_rate"],
+    ),
+    (
+        re.compile(
+            r"(?=.*\b(withholding|wht)\b)"
+            r"(?=.*\b(how\s+much|calculate|compute|work\s+out|deduct)\b)",
+            re.IGNORECASE,
+        ),
+        "Withholding tax calculation intent",
+        ["calculate_withholding", "lookup_rate"],
+    ),
 ]
 
 # Temporal intents — anything relative to "now", "today", "this year".

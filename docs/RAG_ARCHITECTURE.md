@@ -268,7 +268,8 @@ App/backend/app/
 │
 ├── tools/               # LLM tool-calling framework (Phase 14-A/B)
 │   ├── __init__.py      #   Tool base class + ToolRegistry (auto-registration)
-│   ├── calculators.py   #   VAT, PAYE, capital gains, corporation tax, customs duty
+│   ├── calculators.py   #   VAT, PAYE, capital gains, corporation tax, customs duty,
+│   │                    #   rental income tax, withholding tax (FY-versioned rates)
 │   ├── rates.py         #   Tax rate lookups by category
 │   ├── calendar.py      #   Filing deadlines, fiscal year, current date
 │   ├── escalate.py      #   Human escalation tool
@@ -297,6 +298,17 @@ App/backend/app/
 ## Agent Runtime (Phase 14)
 
 When `FLAG_AGENTIC_MODE=true`, the supervisor classifier (`agents/supervisor.py`) routes queries before retrieval:
+
+Calculation asks are intercepted BEFORE routing by the deterministic
+calculator router (`calculator_router.py` + `ChatModel._maybe_handle_calculator`,
+REST and streaming parity): a message that already carries the figures
+("VAT on 1.5m") is answered instantly from the registered calculator tool
+(`retrieval_mode="calculator"`, no LLM), and a message missing figures
+("how much PAYE will I pay?") starts the matching `calc_*` guided workflow,
+pre-filled with everything already extracted, so the user is asked only for
+what's absent. Defaults applied (residency, VAT direction, landlord type,
+annual→monthly conversion) are stated as visible assumptions. The `TOOLS`
+route below remains the fallback for phrasings the router abstains on.
 
 | Route | Trigger | Handler |
 |-------|---------|---------|

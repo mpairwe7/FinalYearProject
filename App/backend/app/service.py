@@ -44,6 +44,7 @@ from . import llm as llm_module
 from .agents import AgentRoute, supervisor
 from .agents.supervisor import _GREETING_WORDS, _GREETING_PHRASES
 from .cache import create_cache
+from .calculator_router import NEXT_ACTIONS_BY_TOOL, format_calc_reply, plan_calculation
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
@@ -2338,6 +2339,124 @@ class ChatModel:
             turn = WorkflowRegistry.advance(session, "")
         return turn, tool_messages
 
+    def _maybe_handle_calculator(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Deterministic tax-calculator fast path (REST and streaming parity).
+
+        A calculation ask whose message already carries every figure is
+        answered instantly from the registered calculator tool — exact
+        arithmetic, no LLM. When something is missing, the matching guided
+        calculator workflow starts pre-filled with everything the message
+        did contain, so the user is asked only for what's absent.
+        """
+        plan = plan_calculation(message) or plan_calculation(rewritten)
+        if plan is None:
+            return None
+
+        if not plan.missing:
+            try:
+                from .mcp import get_client  # noqa: PLC0415
+
+                call = get_client().call_tool(plan.tool, dict(plan.params), user_role="public")
+                result = call.result
+            except Exception:
+                logger.exception("calculator tool execution failed")
+                return None
+            if not result.get("ok"):
+                logger.info("calculator rejected extracted args: %s", result.get("error", ""))
+                return None
+            reply = self._finalize_reply(
+                format_calc_reply(plan.tool, result, plan.assumptions)
+            )
+            return {
+                "reply": reply,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "calculator",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "tool_specialist",
+                "handoff": None,
+                "response_judge": {
+                    "decision": "approve",
+                    "final_decision": "approve",
+                    "applied_revision": False,
+                    "reasons": ["deterministic tax calculator"],
+                    "confidence_band": "high",
+                },
+                "next_actions": NEXT_ACTIONS_BY_TOOL.get(plan.tool, []),
+                "ticket_id": "",
+            }
+
+        # Missing details → guided elicitation via the matching workflow,
+        # sharing the durable-session machinery (and flag gate) of
+        # _maybe_handle_workflow so mid-flow answers keep working.
+        if not flags.is_enabled("workflows") or self._workflow_count <= 0:
+            return None
+        wf = WorkflowRegistry.get(plan.workflow_id)
+        if wf is None:
+            return None
+        session = WorkflowRegistry.create_session(plan.workflow_id)
+        if session is None:
+            return None
+        session.slots.update(plan.params)
+
+        turn, tool_messages = self._advance_workflow(session, "")
+        prompt = turn.question or ""
+        if tool_messages:
+            prompt = "\n\n".join(tool_messages + [prompt]).strip()
+        status = "completed" if (session.completed or turn.is_complete) else "active"
+        db.upsert_workflow_session(
+            thread_id,
+            session.workflow_id,
+            session.current_step_idx,
+            session.slots,
+            status=status,
+            last_prompt=prompt,
+        )
+        workflow = self._workflow_view(
+            session,
+            name=wf.name,
+            status=status,
+            pending_slot=turn.slot_name,
+        )
+        intro = "I can work that out for you — I just need a detail or two."
+        if plan.assumptions:
+            intro += (
+                "\n\n_I'll assume: "
+                + "; ".join(plan.assumptions)
+                + " — correct me if that's wrong._"
+            )
+        reply = f"{intro}\n\n{prompt}" if prompt else intro
+        return {
+            "reply": reply,
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "workflow",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "workflow_guide",
+            "workflow": workflow,
+            "next_actions": self._default_next_actions(
+                agent_role="workflow_guide",
+                workflow=workflow,
+            ),
+        }
+
     def _maybe_handle_workflow(
         self,
         *,
@@ -2597,6 +2716,27 @@ class ChatModel:
                         trace_ctx=trace_ctx,
                     )
                     return workflow_result
+
+            # 1a1b. Deterministic tax calculator — instant when the message
+            #       carries the figures, guided elicitation when it doesn't.
+            with trace_stage("calculator_router", timings=timings):
+                calc_result = self._maybe_handle_calculator(
+                    message=message,
+                    rewritten=rewritten,
+                    thread_id=thread_id,
+                    locale=locale,
+                )
+            if calc_result:
+                if distress and calc_result.get("reply"):
+                    calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
+                trace_ctx["agent_role"] = calc_result.get("agent_role", "tool_specialist")
+                self._audit_turn(
+                    message=message,
+                    result=calc_result,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return calc_result
 
             # 1a2. Greeting detection — always active, independent of agentic_mode
             _q_lower = message.strip().lower().strip("!.?,")
@@ -3495,6 +3635,26 @@ class ChatModel:
                 "_history": conversation_history,
                 "_rewritten": rewritten,
                 "_personalization_context": (personalization or {}).get("prompt_context", ""),
+            }
+
+        # Deterministic tax calculator (parity with generate()) — instant
+        # answer or guided elicitation, both as a single bundled payload.
+        calc_result = self._maybe_handle_calculator(
+            message=message,
+            rewritten=rewritten,
+            thread_id=thread_id,
+            locale=locale,
+        )
+        if calc_result:
+            if distress and calc_result.get("reply"):
+                calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
+            return {
+                **calc_result,
+                "_hits": [],
+                "_history": conversation_history,
+                "_rewritten": rewritten,
+                "_personalization_context": (personalization or {}).get("prompt_context", ""),
+                "_short_circuit": True,
             }
 
         # Greeting detection — always active (streaming path)
