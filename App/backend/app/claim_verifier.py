@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from .entailment import is_contradicted
+from .text_signals import is_courtesy_sentence
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
 _SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|$)")
@@ -81,6 +82,8 @@ def _split_claims(reply: str) -> list[str]:
             continue
         lowered = sentence.lower()
         if any(hint in lowered for hint in _NON_CLAIM_HINTS):
+            continue
+        if is_courtesy_sentence(sentence):
             continue
         if len(_tokens(sentence)) < 3:
             continue

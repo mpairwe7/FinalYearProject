@@ -86,7 +86,10 @@ User Query
   │     └── check_grounding() — faithfulness via NLI entailment (OWASP LLM09)
   │
   ├─► Stage 7: Grounding Verification
-  │     ├── Faithfulness score via NLI / entailment
+  │     ├── Faithfulness: content-token overlap of non-courtesy sentences
+  │     │   (retriever.compute_faithfulness + text_signals.is_courtesy_sentence —
+  │     │   politeness/empathy/contact footers never score as hallucination;
+  │     │   curated deterministic replies score 1.0 on REST *and* streaming)
   │     └── Optional self-reflection: regenerate if faithfulness weak [FLAG_SELF_REFLECT]
   │
   ├─► Stage 8: Escalation Check

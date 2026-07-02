@@ -333,6 +333,16 @@ p50/p95/p99. A drop in median faithfulness below 0.5 likely signals:
 - Embedding model drift
 - New query patterns outside training distribution
 
+Scoring semantics (2026-07): `compute_faithfulness` measures **content-token
+overlap (stopwords removed) over non-courtesy sentences** — greetings, empathy
+openers, contact footers, and follow-up suggestions are excluded from the
+ratio, so polite phrasing no longer depresses the score (`app/text_signals.py`
+holds the courtesy classifier). Deterministic curated KB answers (TIN
+registration / return filing) report **1.0 on both the REST and streaming
+paths**; non-factual turns (greeting/clarification/workflow/blocked) report
+`null` and are excluded from the summary. Expect the median to shift **up**
+after this change — re-baseline dashboards/alerts against post-deploy data.
+
 ### Escalation rate
 
 `escalation_total` fires when `OutputGuard.should_escalate()` returns `True`

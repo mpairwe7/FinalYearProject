@@ -624,7 +624,7 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
              mock.patch.object(service, "_simple_search", return_value=[dict(self._FAQ_ROW)]), \
              mock.patch.object(service, "needs_clarification", return_value=""), \
              mock.patch.object(service, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
-             mock.patch.object(service.ChatModel, "_deterministic_procedure_reply", return_value=""), \
+             mock.patch.object(service.ChatModel, "_deterministic_procedure_reply", return_value=("", False)), \
              mock.patch.object(service.ChatModel, "_priority_faq_hits", return_value=[]), \
              mock.patch.object(service.ChatModel, "_evaluate_response_judge", return_value=approve), \
              mock.patch.object(self.model._output_guard, "should_abstain", return_value=False), \
@@ -1253,9 +1253,12 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
             },
         ]
         citations = R.HybridRetriever.build_citations(hits)
-        return self.model._deterministic_procedure_reply(
+        reply, curated = self.model._deterministic_procedure_reply(
             "how do I register for a TIN", hits, citations
         )
+        # The TIN template is fully hand-vetted → faithful by construction.
+        self.assertTrue(curated)
+        return reply
 
     def test_tin_reply_is_stepwise_markdown(self):
         reply = self._tin_reply()
@@ -1291,9 +1294,12 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
             },
         ]
         citations = R.HybridRetriever.build_citations(hits)
-        return self.model._deterministic_procedure_reply(
+        reply, curated = self.model._deterministic_procedure_reply(
             "how do I file my annual tax return", hits, citations
         )
+        # Assembled from retrieved hits → scored against them, not assumed 1.0.
+        self.assertFalse(curated)
+        return reply
 
     def test_return_filing_reply_is_stepwise(self):
         import re
@@ -1332,7 +1338,9 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         out = service.ChatModel._build_grounded_revision(
             [{"source": "taxation_guide.pdf", "text": raw}], [], "explain taxation in uganda"
         )
-        self.assertTrue(out.startswith("Based on the URA guidance I retrieved:"))
+        self.assertTrue(
+            out.startswith("Here's the most relevant guidance I found in official URA sources:")
+        )
         for noise in ("intentionally omitted", "End of picture text", "Sixth Edition", "picture ["):
             self.assertNotIn(noise, out)
         # inline numbered list is split onto its own lines (renders as a list)

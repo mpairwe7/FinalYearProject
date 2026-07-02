@@ -23,6 +23,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from ..text_signals import CLARIFICATION_PROMPT
 from .state import AgentRoute, RouteDecision
 
 if TYPE_CHECKING:
@@ -264,11 +265,7 @@ class Supervisor:
                 route=AgentRoute.CLARIFY,
                 reason=f"too short ({len(words)} word(s))",
                 confidence=0.9,
-                clarification_question=(
-                    "Could you share a bit more context? "
-                    "For example, are you asking about VAT, PAYE, "
-                    "customs, registration, or a specific tax type?"
-                ),
+                clarification_question=CLARIFICATION_PROMPT,
             )
 
         # 3. Calculation intents → tool route with calculator whitelist

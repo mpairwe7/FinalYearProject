@@ -200,7 +200,11 @@ class InputGuard:
                 )
                 return GuardResult(
                     allowed=False,
-                    reason="Input rejected: potential prompt injection detected",
+                    reason=(
+                        "Sorry — I can't process that request as written. "
+                        "Please rephrase it as a plain URA support question "
+                        "and I'll be glad to help."
+                    ),
                     flags=["prompt_injection"],
                 )
 
