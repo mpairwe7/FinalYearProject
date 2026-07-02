@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useChatStore, ChatTurn, createTurn, cleanResponse } from '../store/useChatStore';
+import { useVoiceStore } from '../store/useVoiceStore';
 import {
   initAnalytics,
   getAnalyticsSessionId,
@@ -186,6 +187,12 @@ export default function Page() {
   }, [hasStartedChat, updateScrollAffordance]);
 
   useEffect(() => {
+    // Keep the document language honest for screen readers and hyphenation
+    // when the user switches to Luganda.
+    document.documentElement.lang = locale === 'lg' ? 'lg' : 'en';
+  }, [locale]);
+
+  useEffect(() => {
     const root = document.documentElement;
     let raf = 0;
 
@@ -283,13 +290,21 @@ export default function Page() {
     stopPlayback();
     setTtsLoading(turnId);
     try {
-      const result = await ttsMutation.mutateAsync({ text, language: locale });
+      const result = await ttsMutation.mutateAsync({
+        text,
+        language: locale,
+        voice: useVoiceStore.getState().voiceId || undefined,
+      });
       setTtsLoading(null);
-      if (result.error || !result.audio_base64) return;
+      if (result.error || !result.audio_base64) {
+        if (result.error) trackErrorOccurred('tts_failed');
+        return;
+      }
       setPlayingTurnId(turnId);
       await playAudioBase64(result.audio_base64);
     } catch {
-      // TTS unavailable — degrade silently
+      // TTS unavailable — degrade to text, but record it
+      trackErrorOccurred('tts_failed');
     } finally {
       setTtsLoading(null);
       setPlayingTurnId((prev) => (prev === turnId ? null : prev));
@@ -499,6 +514,7 @@ export default function Page() {
               language: locale,
               conversationId,
               ttsEnabled: autoNarrate,
+              voice: useVoiceStore.getState().voiceId || undefined,
               sessionId: getAnalyticsSessionId(),
             });
             if (r.error && !r.transcript) { addTurns([createTurn('assistant', `Voice error: ${r.error}`)]); trackErrorOccurred('voice_chat_failed'); return; }

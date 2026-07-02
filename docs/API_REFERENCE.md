@@ -810,9 +810,11 @@ barge-in support. Gated by `FLAG_VOICE_STREAMING=true`.
 | *(binary)* | Binary | TTS audio chunks (PCM16 LE or WAV) |
 | `audio_end` | JSON | TTS playback complete |
 | `reply_text` | JSON | Text of each TTS sentence with chunk_index |
-| `reply_meta` | JSON | Sources, citations, faithfulness_score, conversation_id |
+| `mt_degraded` | JSON | `{direction: "lg-en"\|"en-lg", detail}` — translation unavailable after retry; the pipeline continues honestly (inbound: original text + real locale to the LLM; outbound: English reply spoken by the English voice) |
+| `tts_degraded` | JSON | `{detail}` — every sentence failed to synthesize; the turn is text-only |
+| `reply_meta` | JSON | Sources, citations, faithfulness_score, conversation_id, reply_language, mt_degraded[] |
 | `latency_report` | JSON | Per-stage timing: asr_ms, mt_ms, llm_ms, tts_first_chunk_ms, total_ms |
-| `error` | JSON | `{detail, recoverable}` — recoverable errors keep connection open |
+| `error` | JSON | `{detail, recoverable, stage?}` — recoverable errors keep connection open; the LLM stage is bounded by `VOICE_LLM_DEADLINE_S` (default 45s) |
 
 **Latency targets:** < 800ms p95 for simple queries, < 1.2s p95 for full RAG.
 
@@ -1671,11 +1673,14 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `SPEECH_MT_BACKEND` | MT backend selection | `prompted` |
 | `SPEECH_DEADLINE_S` | Max wall-clock time per speech inference | `20` |
 | `SPEECH_MAX_CONCURRENCY` | Thread pool workers for speech | `2` |
+| `SPEECH_TTS_CACHE_SIZE` | LRU entries for repeated-phrase TTS (0 disables) | `64` |
+| `VOICE_LLM_DEADLINE_S` | Hard ceiling on the LLM stage of a voice turn | `45` |
 | `SPEECH_EN_VOICE` | Default English TTS voice | `en_US-lessac-medium` |
 | `SPEECH_LG_VOICE` | Default Luganda TTS voice | `luganda-vits-v1` |
 | **Sunbird AI** | | |
 | `SUNBIRD_API_URL` | Sunbird AI cloud API base URL | `https://api.sunbird.ai` |
 | `SUNBIRD_API_TOKEN` | Bearer token for Sunbird AI services | |
+| `SUNBIRD_RETRIES` | Attempts per Sunbird account before failover (429/5xx/timeouts only) | `2` |
 | **Feature Flags** | | |
 | `FLAG_TOOL_USE` | Enable LLM tool-calling loop | `false` |
 | `FLAG_AGENTIC_MODE` | Enable agentic supervisor routing | `false` |
