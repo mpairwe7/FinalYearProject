@@ -129,7 +129,7 @@ def deterministic_pipeline(client):
                            return_value={"decision": "approve", "score": 1.0}), \
          mock.patch.object(service_module, "_apply_output_guards", _passthrough_guard), \
          mock.patch.object(service_module.ChatModel, "_deterministic_procedure_reply",
-                           return_value=""), \
+                           return_value=("", False)), \
          mock.patch.object(service_module.ChatModel, "_priority_faq_hits", return_value=[]), \
          mock.patch.object(service_module.ChatModel, "_evaluate_response_judge",
                            return_value=dict(_APPROVE_JUDGE)), \

@@ -44,6 +44,7 @@ from . import llm as llm_module
 from .agents import AgentRoute, supervisor
 from .agents.supervisor import _GREETING_WORDS, _GREETING_PHRASES
 from .cache import create_cache
+from .calculator_router import NEXT_ACTIONS_BY_TOOL, format_calc_reply, plan_calculation
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
@@ -52,6 +53,19 @@ from .memory import get_memory_service
 from .query import detect_language, rewrite as rewrite_query
 from .resilience import CircuitBreaker
 from .retriever import HybridRetriever
+from .text_signals import (
+    ABSTENTION_REPLY,
+    CLARIFICATION_PROMPT,
+    CONTACT_FOOTER,
+    ESCALATION_REPLY_FOOTER,
+    ESCALATION_REPLY_LEAD,
+    GREETING_REPLY,
+    GROUNDED_REVISION_PREAMBLE,
+    NO_HITS_REPLY,
+    detect_user_distress,
+    empathy_ack,
+    tone_hint_for,
+)
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
 from .workflows.registry import WorkflowRegistry, WorkflowSession, auto_load_flows
 
@@ -188,7 +202,7 @@ _LLM_CIRCUIT = CircuitBreaker(
 
 
 def _build_fallback_prompt(
-    query: str, passages: list[dict[str, Any]], locale: str
+    query: str, passages: list[dict[str, Any]], locale: str, tone_hint: str = ""
 ) -> tuple[str, str]:
     """RAG system+user prompt for a cloud LLM fallback (Gemini / Workers AI)."""
     ctx = "\n\n".join(
@@ -198,8 +212,11 @@ def _build_fallback_prompt(
     system = (
         "You are the URA (Uganda Revenue Authority) tax assistant. Answer ONLY "
         "from the context below and cite passages like [1]. If the context does "
-        "not contain the answer, say you don't have enough information."
+        "not contain the answer, say you don't have enough information. Be warm "
+        "and respectful, never condescending."
     )
+    if tone_hint:
+        system += f" {tone_hint.strip()}"
     if locale and locale != "en":
         system += f" Respond in the user's language (locale={locale})."
     return system, f"Context:\n{ctx}\n\nQuestion: {query}"
@@ -211,6 +228,7 @@ def _llm_cloud_fallback(
     conversation_history: list[dict[str, str]] | None,
     locale: str,
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> str:
     """Generate via Cloudflare Gemini / Workers AI when the primary LLM is down.
 
@@ -238,7 +256,7 @@ def _llm_cloud_fallback(
         and breakers.GEMINI_BREAKER.allow_request()
         and budget.try_consume_gemini_call()
     ):
-        system, user = _build_fallback_prompt(query, passages, locale)
+        system, user = _build_fallback_prompt(query, passages, locale, tone_hint)
         try:
             text = gw.gemini_generate(user, system=system, max_tokens=512, temperature=0.2)
             breakers.GEMINI_BREAKER.record_success()
@@ -263,6 +281,7 @@ def _llm_cloud_fallback(
         tokenizer=None,  # CF models have ≥24k context; skip local-tokenizer trim
         structured=llm_module.LLM_STRUCTURED_OUTPUT,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
     # Strip the Qwen-only /no_think directive — a no-op token for Llama/Mistral.
     if messages and messages[0].get("role") == "system":
@@ -299,10 +318,11 @@ def _stream_cloud_fallback(
     conversation_history: list[dict[str, str]] | None,
     locale: str,
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> Generator[str, None, None]:
     """Yield the cloud-fallback answer in word chunks for the SSE/WS stream path."""
     text = _llm_cloud_fallback(
-        query, passages, conversation_history, locale, personalization_context
+        query, passages, conversation_history, locale, personalization_context, tone_hint
     )
     if not text:
         return
@@ -374,6 +394,7 @@ def _call_llm_with_deadline(
     locale: str,
     personalization_context: str = "",
     deadline_s: float = LLM_DEADLINE_SECONDS,
+    tone_hint: str = "",
 ) -> str:
     """Generate a reply, honouring the hybrid cloud/local routing policy.
 
@@ -383,7 +404,7 @@ def _call_llm_with_deadline(
     """
     if _prefer_cloud_primary(locale):
         text = _llm_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context
+            query, passages, conversation_history, locale, personalization_context, tone_hint
         )
         if text and text.strip():
             return text
@@ -396,6 +417,7 @@ def _call_llm_with_deadline(
             personalization_context,
             deadline_s,
             allow_cloud_fallback=False,  # cloud already attempted above
+            tone_hint=tone_hint,
         )
     return _local_llm_then_cloud(
         query,
@@ -405,6 +427,7 @@ def _call_llm_with_deadline(
         personalization_context,
         deadline_s,
         allow_cloud_fallback=True,
+        tone_hint=tone_hint,
     )
 
 
@@ -417,6 +440,7 @@ def _local_llm_then_cloud(
     deadline_s: float = LLM_DEADLINE_SECONDS,
     *,
     allow_cloud_fallback: bool = True,
+    tone_hint: str = "",
 ) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
 
@@ -430,7 +454,7 @@ def _local_llm_then_cloud(
         if not allow_cloud_fallback:
             return ""
         return _llm_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context
+            query, passages, conversation_history, locale, personalization_context, tone_hint
         )
 
     if not _LLM_CIRCUIT.allow_request():
@@ -444,6 +468,7 @@ def _local_llm_then_cloud(
         conversation_history=conversation_history,
         locale=locale,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
     try:
         reply = future.result(timeout=deadline_s)
@@ -476,6 +501,7 @@ def stream_llm_tokens(
     locale: str,
     personalization_context: str = "",
     cancel_event: threading.Event | None = None,
+    tone_hint: str = "",
 ) -> Generator[str, None, None]:
     """Stream LLM tokens through the shared circuit breaker.
 
@@ -497,7 +523,7 @@ def stream_llm_tokens(
     if _prefer_cloud_primary(locale):
         saw_cloud = False
         for chunk in _stream_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context
+            query, passages, conversation_history, locale, personalization_context, tone_hint
         ):
             if cancel_event is not None and cancel_event.is_set():
                 return
@@ -514,6 +540,7 @@ def stream_llm_tokens(
             personalization_context,
             cancel_event,
             allow_cloud_fallback=False,  # cloud already attempted above
+            tone_hint=tone_hint,
         )
         return
     yield from _stream_local_then_cloud(
@@ -524,6 +551,7 @@ def stream_llm_tokens(
         personalization_context,
         cancel_event,
         allow_cloud_fallback=True,
+        tone_hint=tone_hint,
     )
 
 
@@ -536,6 +564,7 @@ def _stream_local_then_cloud(
     cancel_event: threading.Event | None = None,
     *,
     allow_cloud_fallback: bool = True,
+    tone_hint: str = "",
 ) -> Generator[str, None, None]:
     """Stream from the local model; route to the cloud chain on failure.
 
@@ -547,7 +576,7 @@ def _stream_local_then_cloud(
     def _cloud_stream() -> Generator[str, None, None]:
         if allow_cloud_fallback:
             yield from _stream_cloud_fallback(
-                query, passages, conversation_history, locale, personalization_context
+                query, passages, conversation_history, locale, personalization_context, tone_hint
             )
 
     if not llm_module.is_available():
@@ -566,6 +595,7 @@ def _stream_local_then_cloud(
             conversation_history=conversation_history,
             locale=locale,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
         ):
             if cancel_event is not None and cancel_event.is_set():
                 logger.info("LLM stream cancelled by caller")
@@ -598,6 +628,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     tool_names: list[str] | None = None,
     max_iterations: int | None = None,
     personalization_context: str = "",
+    tone_hint: str = "",
     tenant_id: str = "default",
     user_id: str = "",
     user_role: str = "public",
@@ -633,6 +664,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         locale=locale,
         max_iterations=max_iterations,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
         tenant_id=tenant_id,
         user_id=user_id,
         user_role=user_role,
@@ -927,15 +959,16 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         )
 
         # Short-circuit branches: blocked / abstained / clarification /
-        # workflow / escalated all skip the LLM stream and return a
-        # single bundled payload.
+        # workflow / escalated — plus deterministic procedural replies
+        # (``_short_circuit``) — skip the LLM stream and return a single
+        # bundled payload.
         if result.get("retrieval_mode") in (
             "blocked",
             "abstained",
             "clarification",
             "workflow",
             "escalated",
-        ):
+        ) or result.get("_short_circuit"):
             yield ("metadata", _metadata_payload(result, include_short_circuit=True))
             full_reply = result.get("reply", "")
             yield ("token", full_reply)
@@ -952,6 +985,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         conversation_history = result.get("_history", [])
         rewritten_query = result.get("_rewritten", message)
         personalization_context = result.get("_personalization_context", "")
+        tone_hint = str(result.get("_tone_hint") or "")
 
         # ── Phase 2: optional agentic branch ─────────────────────────
         # When tool_use is enabled, run the bounded tool-calling loop
@@ -967,6 +1001,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 conversation_history=conversation_history,
                 locale=locale,
                 personalization_context=str(personalization_context or ""),
+                tone_hint=tone_hint,
                 tenant_id=tenant_id,
                 user_id=user_id or "",
                 user_role=user_role,
@@ -1044,6 +1079,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                         locale=locale,
                         personalization_context=str(personalization_context or ""),
                         cancel_event=cancel_event,
+                        tone_hint=tone_hint,
                     ):
                         # Bounded queue: if the consumer is slow, block here
                         # rather than balloon memory.  call_soon_threadsafe
@@ -1219,6 +1255,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     conversation_history: list[dict[str, str]] | None,
     locale: str,
     personalization_context: str,
+    tone_hint: str = "",
     tenant_id: str,
     user_id: str,
     user_role: str,
@@ -1261,6 +1298,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             conversation_history=conversation_history,
             locale=locale,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
             tenant_id=tenant_id,
             user_id=user_id,
             user_role=user_role,
@@ -1805,7 +1843,7 @@ class ChatModel:
         if not excerpts:
             return ""
         body = "\n\n".join(excerpts)
-        return f"Based on the URA guidance I retrieved:\n\n{body}"
+        return f"{GROUNDED_REVISION_PREAMBLE}\n\n{body}"
 
     def _finalize_reply(self, reply: str) -> str:
         """Apply response-side safety cleanup to generated, revised, and cached text."""
@@ -1877,8 +1915,12 @@ class ChatModel:
         query: str,
         hits: list[dict[str, Any]],
         citations: list[dict[str, Any]],
-    ) -> str:
-        """Return vetted procedural answers for common tasks without LLM synthesis.
+    ) -> tuple[str, bool]:
+        """Return (reply, curated) vetted procedural answers without LLM synthesis.
+
+        ``curated`` is True when the reply body is a fully hand-vetted template
+        (faithfulness 1.0 by construction); False when it is assembled from
+        retrieved hits and should be scored against them like any answer.
 
         References are intentionally NOT embedded inline here — they reach the UI via the
         result's ``citations`` / ``sources`` (the grounded-context panel), so the prose
@@ -1904,10 +1946,7 @@ class ChatModel:
                 None,
             )
             if apply_hit:
-                contact = (
-                    "For help, call URA toll-free 0800 117 000 / 0800 217 000, "
-                    "WhatsApp 0772 140 000, or use https://ura.go.ug."
-                )
+                contact = CONTACT_FOOTER
                 if help_hit:
                     contact = self._extract_grounded_answer_text(help_hit)
                 return (
@@ -1919,7 +1958,8 @@ class ChatModel:
                     "5. Enter your NIN and personal details\n"
                     "6. Confirm you are not a robot\n"
                     "7. Submit\n\n"
-                    f"{contact}"
+                    f"{contact}",
+                    True,
                 )
 
         if _RETURN_FILING_QUERY_RE.search(query):
@@ -1950,13 +1990,56 @@ class ChatModel:
                 ]
                 if due_hit:
                     lines.append(f"**Due date:** {self._extract_grounded_answer_text(due_hit)}")
-                lines.append(
-                    "For help, contact URA at https://ura.go.ug, toll-free 0800 117 000 / "
-                    "0800 217 000, or WhatsApp 0772 140 000."
-                )
-                return "\n\n".join(lines)
+                lines.append(CONTACT_FOOTER)
+                return "\n\n".join(lines), False
 
-        return ""
+        return "", False
+
+    def _deterministic_result(
+        self,
+        *,
+        reply: str,
+        curated: bool,
+        hits: list[dict[str, Any]],
+        sources: list[str],
+        citations: list[dict[str, Any]],
+        retrieval_mode: str,
+        thread_id: str,
+        locale: str,
+        agent_role: str,
+    ) -> dict[str, Any]:
+        """Result envelope for a deterministic procedural reply (KB-grounded).
+
+        Curated templates are faithful by construction and score 1.0;
+        replies assembled from retrieved hits are scored against those hits
+        like any other answer. Shared by the REST and streaming paths so
+        the same question earns the same score on both.
+        """
+        contexts = [str(h.get("text") or h.get("answer") or "") for h in hits]
+        faith = 1.0 if curated else HybridRetriever.compute_faithfulness(reply, contexts)
+        return {
+            "reply": reply,
+            "sources": sources,
+            "citations": citations,
+            "faithfulness_score": faith,
+            "retrieval_mode": retrieval_mode,
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": agent_role,
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["curated deterministic template"] if curated else [],
+                "confidence_band": "high" if faith >= 0.65 else "medium",
+            },
+            "next_actions": self._default_next_actions(agent_role=agent_role),
+            "ticket_id": "",
+        }
 
     def _evaluate_response_judge(
         self,
@@ -2256,6 +2339,124 @@ class ChatModel:
             turn = WorkflowRegistry.advance(session, "")
         return turn, tool_messages
 
+    def _maybe_handle_calculator(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Deterministic tax-calculator fast path (REST and streaming parity).
+
+        A calculation ask whose message already carries every figure is
+        answered instantly from the registered calculator tool — exact
+        arithmetic, no LLM. When something is missing, the matching guided
+        calculator workflow starts pre-filled with everything the message
+        did contain, so the user is asked only for what's absent.
+        """
+        plan = plan_calculation(message) or plan_calculation(rewritten)
+        if plan is None:
+            return None
+
+        if not plan.missing:
+            try:
+                from .mcp import get_client  # noqa: PLC0415
+
+                call = get_client().call_tool(plan.tool, dict(plan.params), user_role="public")
+                result = call.result
+            except Exception:
+                logger.exception("calculator tool execution failed")
+                return None
+            if not result.get("ok"):
+                logger.info("calculator rejected extracted args: %s", result.get("error", ""))
+                return None
+            reply = self._finalize_reply(
+                format_calc_reply(plan.tool, result, plan.assumptions)
+            )
+            return {
+                "reply": reply,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "calculator",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "tool_specialist",
+                "handoff": None,
+                "response_judge": {
+                    "decision": "approve",
+                    "final_decision": "approve",
+                    "applied_revision": False,
+                    "reasons": ["deterministic tax calculator"],
+                    "confidence_band": "high",
+                },
+                "next_actions": NEXT_ACTIONS_BY_TOOL.get(plan.tool, []),
+                "ticket_id": "",
+            }
+
+        # Missing details → guided elicitation via the matching workflow,
+        # sharing the durable-session machinery (and flag gate) of
+        # _maybe_handle_workflow so mid-flow answers keep working.
+        if not flags.is_enabled("workflows") or self._workflow_count <= 0:
+            return None
+        wf = WorkflowRegistry.get(plan.workflow_id)
+        if wf is None:
+            return None
+        session = WorkflowRegistry.create_session(plan.workflow_id)
+        if session is None:
+            return None
+        session.slots.update(plan.params)
+
+        turn, tool_messages = self._advance_workflow(session, "")
+        prompt = turn.question or ""
+        if tool_messages:
+            prompt = "\n\n".join(tool_messages + [prompt]).strip()
+        status = "completed" if (session.completed or turn.is_complete) else "active"
+        db.upsert_workflow_session(
+            thread_id,
+            session.workflow_id,
+            session.current_step_idx,
+            session.slots,
+            status=status,
+            last_prompt=prompt,
+        )
+        workflow = self._workflow_view(
+            session,
+            name=wf.name,
+            status=status,
+            pending_slot=turn.slot_name,
+        )
+        intro = "I can work that out for you — I just need a detail or two."
+        if plan.assumptions:
+            intro += (
+                "\n\n_I'll assume: "
+                + "; ".join(plan.assumptions)
+                + " — correct me if that's wrong._"
+            )
+        reply = f"{intro}\n\n{prompt}" if prompt else intro
+        return {
+            "reply": reply,
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "workflow",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "workflow_guide",
+            "workflow": workflow,
+            "next_actions": self._default_next_actions(
+                agent_role="workflow_guide",
+                workflow=workflow,
+            ),
+        }
+
     def _maybe_handle_workflow(
         self,
         *,
@@ -2464,6 +2665,12 @@ class ChatModel:
             personalization = self._load_personalization_state(user_id)
             cache_allowed = personalization is None
 
+            # Emotional-intelligence signal for this turn: adapts the LLM
+            # opening line (tone_hint) and prefixes deterministic replies
+            # with a short empathy acknowledgment. Never cached.
+            distress = detect_user_distress(message)
+            tone_hint = tone_hint_for(distress)
+
             # 1. Input guardrails FIRST (OWASP LLM01) — check original message
             with trace_stage("input_guard", timings=timings):
                 guard = self._input_guard.check(message)
@@ -2480,7 +2687,7 @@ class ChatModel:
                     "escalation_required": False,
                     "escalation_reason": "",
                     "agent_role": "safety_guard",
-                    "next_actions": ["Rephrase your request as a legitimate URA support question."],
+                    "next_actions": ["Rephrase your question about a URA service — I'm glad to help."],
                 }
                 self._audit_turn(
                     message=message, result=blocked, session_id=session_id, trace_ctx=trace_ctx
@@ -2497,6 +2704,10 @@ class ChatModel:
                         personalization=personalization,
                     )
                 if workflow_result:
+                    if distress and workflow_result.get("reply"):
+                        workflow_result["reply"] = (
+                            f"{empathy_ack(distress)}\n\n{workflow_result['reply']}"
+                        )
                     trace_ctx["agent_role"] = "workflow_guide"
                     self._audit_turn(
                         message=message,
@@ -2505,6 +2716,27 @@ class ChatModel:
                         trace_ctx=trace_ctx,
                     )
                     return workflow_result
+
+            # 1a1b. Deterministic tax calculator — instant when the message
+            #       carries the figures, guided elicitation when it doesn't.
+            with trace_stage("calculator_router", timings=timings):
+                calc_result = self._maybe_handle_calculator(
+                    message=message,
+                    rewritten=rewritten,
+                    thread_id=thread_id,
+                    locale=locale,
+                )
+            if calc_result:
+                if distress and calc_result.get("reply"):
+                    calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
+                trace_ctx["agent_role"] = calc_result.get("agent_role", "tool_specialist")
+                self._audit_turn(
+                    message=message,
+                    result=calc_result,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return calc_result
 
             # 1a2. Greeting detection — always active, independent of agentic_mode
             _q_lower = message.strip().lower().strip("!.?,")
@@ -2515,11 +2747,7 @@ class ChatModel:
                 or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in _q_words)
             ):
                 greeted = {
-                    "reply": (
-                        "Hello! I'm the URA Digital Assistant. I can help you with "
-                        "tax registration, filing returns, payments, customs, and more. "
-                        "What would you like to know?"
-                    ),
+                    "reply": GREETING_REPLY,
                     "sources": [],
                     "citations": [],
                     "faithfulness_score": None,
@@ -2585,11 +2813,7 @@ class ChatModel:
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
                 if route_decision.route == AgentRoute.GREET:
                     greeted = {
-                        "reply": (
-                            "Hello! I'm the URA Digital Assistant. I can help you with "
-                            "tax registration, filing returns, payments, customs, and more. "
-                            "What would you like to know?"
-                        ),
+                        "reply": GREETING_REPLY,
                         "sources": [],
                         "citations": [],
                         "faithfulness_score": None,
@@ -2616,11 +2840,7 @@ class ChatModel:
                 if route_decision.route == AgentRoute.CLARIFY:
                     clarified = {
                         "reply": route_decision.clarification_question
-                        or (
-                            "Could you provide a bit more detail about your "
-                            "question? I can help with VAT, PAYE, customs, "
-                            "registration, or specific tax types."
-                        ),
+                        or CLARIFICATION_PROMPT,
                         "sources": [],
                         "citations": [],
                         "faithfulness_score": None,
@@ -2659,10 +2879,7 @@ class ChatModel:
                             conversation_history=conversation_history or None,
                         )
 
-                    reply = (
-                        "This looks like a question best handled by a URA "
-                        "officer. I've flagged it for human review"
-                    )
+                    reply = ESCALATION_REPLY_LEAD
                     ticket_id = self._maybe_create_ticket(
                         reason=route_decision.reason,
                         user_query=message,
@@ -2677,10 +2894,7 @@ class ChatModel:
                         trace_ctx["ticket_id"] = ticket_id
                     if ticket_id:
                         reply += f" (ticket {ticket_id[:8]})"
-                    reply += (
-                        " — you can also contact URA directly at "
-                        "https://ura.go.ug or via the Contact Centre."
-                    )
+                    reply += ESCALATION_REPLY_FOOTER
                     escalated = {
                         "reply": reply,
                         "sources": [],
@@ -2841,41 +3055,35 @@ class ChatModel:
                 return clarify_result
 
             deterministic_reply = ""
+            deterministic_curated = False
             deterministic_sources: list[str] = []
             deterministic_citations: list[dict[str, Any]] = []
             if hits:
                 deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
                 deterministic_citations = HybridRetriever.build_citations(hits)
-                deterministic_reply = self._deterministic_procedure_reply(
+                deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
                     rewritten, hits, deterministic_citations
                 )
             if deterministic_reply:
                 reply = self._finalize_reply(deterministic_reply)
-                result = {
-                    "reply": reply,
-                    "sources": deterministic_sources,
-                    "citations": deterministic_citations,
-                    "faithfulness_score": 1.0,
-                    "retrieval_mode": retrieval_mode,
-                    "model": self.name,
-                    "conversation_id": thread_id,
-                    "locale": locale,
-                    "escalation_required": False,
-                    "escalation_reason": "",
-                    "agent_role": agent_role,
-                    "handoff": None,
-                    "response_judge": {
-                        "decision": "approve",
-                        "final_decision": "approve",
-                        "applied_revision": False,
-                        "reasons": [],
-                        "confidence_band": "high",
-                    },
-                    "next_actions": self._default_next_actions(agent_role=agent_role),
-                    "ticket_id": "",
-                }
+                result = self._deterministic_result(
+                    reply=reply,
+                    curated=deterministic_curated,
+                    hits=hits,
+                    sources=deterministic_sources,
+                    citations=deterministic_citations,
+                    retrieval_mode=retrieval_mode,
+                    thread_id=thread_id,
+                    locale=locale,
+                    agent_role=agent_role,
+                )
                 if cache_allowed:
-                    self._cache.put(rewritten, result)
+                    # Cache the neutral copy — a calm user hitting this entry
+                    # later must not receive someone else's empathy opener.
+                    self._cache.put(rewritten, dict(result))
+                if distress:
+                    reply = f"{empathy_ack(distress)}\n\n{reply}"
+                    result["reply"] = reply
                 self._persist_personalization_turn(
                     user_id=user_id,
                     conversation_id=thread_id,
@@ -2896,11 +3104,9 @@ class ChatModel:
             with trace_stage("abstention_check", timings=timings):
                 should_abstain = self._output_guard.should_abstain(hits)
             if should_abstain:
-                reply = (
-                    "I don't have enough information to answer this question reliably. "
-                    "Please contact URA directly at https://ura.go.ug or call "
-                    "the URA Contact Centre for assistance."
-                )
+                reply = ABSTENTION_REPLY
+                if distress:
+                    reply = f"{empathy_ack(distress)}\n\n{reply}"
                 escalate, esc_reason = self._output_guard.should_escalate(None, hits)
                 handoff = None
                 response_judge = {
@@ -2985,6 +3191,7 @@ class ChatModel:
                                 personalization_context=(
                                     (personalization or {}).get("prompt_context", "")
                                 ),
+                                tone_hint=tone_hint,
                                 tenant_id=tenant_id or "default",
                                 user_id=user_id or "",
                                 user_role=user_role,
@@ -3012,6 +3219,7 @@ class ChatModel:
                                     personalization_context=(
                                         (personalization or {}).get("prompt_context", "")
                                     ),
+                                    tone_hint=tone_hint,
                                 )
                     else:
                         with trace_stage("llm_generate", timings=timings):
@@ -3023,6 +3231,7 @@ class ChatModel:
                                 personalization_context=(
                                     (personalization or {}).get("prompt_context", "")
                                 ),
+                                tone_hint=tone_hint,
                             )
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
@@ -3049,11 +3258,9 @@ class ChatModel:
                     best = hits[0]
                     reply = best.get("answer") or best.get("text", "")
             else:
-                reply = (
-                    "I could not find a specific answer in the URA knowledge base. "
-                    "Please try rephrasing your question, or contact URA directly at "
-                    "https://ura.go.ug for assistance."
-                )
+                reply = NO_HITS_REPLY
+                if distress:
+                    reply = f"{empathy_ack(distress)}\n\n{reply}"
                 sources = []
                 citations = []
                 contexts = []
@@ -3100,6 +3307,7 @@ class ChatModel:
                             personalization_context=(personalization or {}).get(
                                 "prompt_context", ""
                             ),
+                            tone_hint=tone_hint,
                         )
                     if revised:
                         reply = self._output_guard.sanitize(self._output_guard.redact_pii(revised))
@@ -3384,6 +3592,11 @@ class ChatModel:
         personalization = self._load_personalization_state(user_id)
         cache_allowed = personalization is None
 
+        # Emotional-intelligence signal (parity with generate()): tone hint
+        # for the LLM stream, empathy prefix for deterministic short-circuits.
+        distress = detect_user_distress(message)
+        tone_hint = tone_hint_for(distress)
+
         # Input guardrails (OWASP LLM01)
         guard = self._input_guard.check(message)
         if not guard.allowed:
@@ -3399,7 +3612,7 @@ class ChatModel:
                 "escalation_required": False,
                 "escalation_reason": "",
                 "agent_role": "safety_guard",
-                "next_actions": ["Rephrase your request as a legitimate URA support question."],
+                "next_actions": ["Rephrase your question about a URA service — I'm glad to help."],
                 "_hits": [],
                 "_history": [],
             }
@@ -3412,12 +3625,36 @@ class ChatModel:
             personalization=personalization,
         )
         if workflow_result:
+            if distress and workflow_result.get("reply"):
+                workflow_result["reply"] = (
+                    f"{empathy_ack(distress)}\n\n{workflow_result['reply']}"
+                )
             return {
                 **workflow_result,
                 "_hits": [],
                 "_history": conversation_history,
                 "_rewritten": rewritten,
                 "_personalization_context": (personalization or {}).get("prompt_context", ""),
+            }
+
+        # Deterministic tax calculator (parity with generate()) — instant
+        # answer or guided elicitation, both as a single bundled payload.
+        calc_result = self._maybe_handle_calculator(
+            message=message,
+            rewritten=rewritten,
+            thread_id=thread_id,
+            locale=locale,
+        )
+        if calc_result:
+            if distress and calc_result.get("reply"):
+                calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
+            return {
+                **calc_result,
+                "_hits": [],
+                "_history": conversation_history,
+                "_rewritten": rewritten,
+                "_personalization_context": (personalization or {}).get("prompt_context", ""),
+                "_short_circuit": True,
             }
 
         # Greeting detection — always active (streaming path)
@@ -3429,11 +3666,7 @@ class ChatModel:
             or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in _q_words_s)
         ):
             return {
-                "reply": (
-                    "Hello! I'm the URA Digital Assistant. I can help you with "
-                    "tax registration, filing returns, payments, customs, and more. "
-                    "What would you like to know?"
-                ),
+                "reply": GREETING_REPLY,
                 "sources": [],
                 "citations": [],
                 "faithfulness_score": None,
@@ -3472,10 +3705,7 @@ class ChatModel:
             if route_decision.route == AgentRoute.CLARIFY:
                 return {
                     "reply": route_decision.clarification_question
-                    or (
-                        "Could you share a bit more context? For example, are you "
-                        "asking about VAT, PAYE, customs, registration, or a specific tax type?"
-                    ),
+                    or CLARIFICATION_PROMPT,
                     "sources": [],
                     "citations": [],
                     "faithfulness_score": None,
@@ -3508,10 +3738,7 @@ class ChatModel:
                         reason=route_decision.reason,
                         conversation_history=conversation_history or None,
                     )
-                reply = (
-                    "This looks like a question best handled by a URA officer. "
-                    "Please use the Contact Centre or request human follow-up."
-                )
+                reply = ESCALATION_REPLY_LEAD + ESCALATION_REPLY_FOOTER
                 ticket_id = self._maybe_create_ticket(
                     reason=route_decision.reason,
                     user_query=message,
@@ -3595,9 +3822,17 @@ class ChatModel:
                         h["score_rrf"] = h.get("score_rrf", 0.5) + 0.3
                 hits.sort(key=lambda x: x.get("score_rrf", 0), reverse=True)
 
-        # Blend top FAQ keyword hits after corrective RAG
+        # Blend top FAQ keyword hits after corrective RAG (parity with the
+        # REST path, including the priority FAQ hits the deterministic
+        # procedural fast path depends on).
         kw_hits = _simple_search(rewritten, self._faq_index, top_k=2)
+        priority_hits = self._priority_faq_hits(rewritten, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
+        for h in priority_hits:
+            if h.get("text", "")[:80] not in seen_texts:
+                hits.insert(0, h)
+                seen_texts.add(h.get("text", "")[:80])
+                retrieval_mode = "faq_priority"
         for h in kw_hits:
             faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
             if faq_text[:80] not in seen_texts:
@@ -3631,12 +3866,43 @@ class ChatModel:
                 "_history": [],
             }
 
-        if self._output_guard.should_abstain(hits):
-            reply = (
-                "I don't have enough information to answer this question reliably. "
-                "Please contact URA directly at https://ura.go.ug or call "
-                "the URA Contact Centre for assistance."
+        # Deterministic procedural fast path — parity with the REST path so
+        # curated KB answers stream with their real (high) faithfulness
+        # instead of being re-synthesised and re-scored via the LLM.
+        if hits:
+            deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
+            deterministic_citations = HybridRetriever.build_citations(hits)
+            deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
+                rewritten, hits, deterministic_citations
             )
+            if deterministic_reply:
+                result = self._deterministic_result(
+                    reply=self._finalize_reply(deterministic_reply),
+                    curated=deterministic_curated,
+                    hits=hits,
+                    sources=deterministic_sources,
+                    citations=deterministic_citations,
+                    retrieval_mode=retrieval_mode,
+                    thread_id=thread_id,
+                    locale=locale,
+                    agent_role=agent_role,
+                )
+                if cache_allowed:
+                    self._cache.put(rewritten, dict(result))
+                if distress:
+                    result["reply"] = f"{empathy_ack(distress)}\n\n{result['reply']}"
+                return {
+                    **result,
+                    "_hits": hits,
+                    "_history": conversation_history,
+                    "_rewritten": rewritten,
+                    "_short_circuit": True,
+                }
+
+        if self._output_guard.should_abstain(hits):
+            reply = ABSTENTION_REPLY
+            if distress:
+                reply = f"{empathy_ack(distress)}\n\n{reply}"
             escalate, esc_reason = self._output_guard.should_escalate(None, hits)
             handoff = None
             response_judge = {
@@ -3758,6 +4024,7 @@ class ChatModel:
             "_history": conversation_history,
             "_rewritten": rewritten,
             "_personalization_context": (personalization or {}).get("prompt_context", ""),
+            "_tone_hint": tone_hint,
         }
 
     @staticmethod

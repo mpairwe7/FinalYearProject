@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .resilience import CircuitBreaker, CircuitState  # re-export for backcompat
+from .text_signals import content_tokens, is_courtesy_sentence, split_sentences
 
 logger = logging.getLogger(__name__)
 
@@ -596,27 +597,38 @@ class HybridRetriever:
     # -- Grounding helpers ---------------------------------------------------
     @staticmethod
     def compute_faithfulness(answer: str, contexts: list[str]) -> float:
-        """Fraction of answer sentences whose tokens are >=50 % covered by contexts.
+        """Fraction of factual answer sentences grounded in the contexts.
 
-        Lightweight runtime proxy for the RAGAS faithfulness metric.
+        Lightweight runtime proxy for the RAGAS faithfulness metric: a
+        sentence counts as grounded when >=50 % of its content tokens
+        (stopwords removed) appear in the retrieved contexts. Courtesy
+        sentences — greetings, empathy acknowledgments, contact footers,
+        follow-up suggestions (see text_signals.is_courtesy_sentence) —
+        carry no factual claims and are excluded from both sides of the
+        ratio, so polite phrasing never reads as hallucination. An answer
+        left with no factual sentences asserts nothing and scores 1.0;
+        the courtesy filter never matches sentences carrying figures, so
+        fabricated rates/amounts/deadlines still drive the score down.
         """
         if not answer or not contexts:
             return 0.0
 
-        sentences = [s.strip() for s in re.split(r"[.!?]+", answer) if len(s.strip()) > 5]
-        if not sentences:
-            return 1.0
-
-        ctx_tokens = set(re.findall(r"\w+", " ".join(contexts).lower()))
+        ctx_tokens = content_tokens(" ".join(contexts))
         grounded = 0
-        for sent in sentences:
-            sent_tokens = set(re.findall(r"\w+", sent.lower()))
-            if not sent_tokens:
+        scoreable = 0
+        for sent in split_sentences(answer):
+            if is_courtesy_sentence(sent):
                 continue
+            sent_tokens = content_tokens(sent)
+            if len(sent_tokens) < 2:
+                continue
+            scoreable += 1
             if len(sent_tokens & ctx_tokens) / len(sent_tokens) >= 0.5:
                 grounded += 1
 
-        return round(grounded / len(sentences), 4)
+        if not scoreable:
+            return 1.0
+        return round(grounded / scoreable, 4)
 
     @staticmethod
     def build_citations(hits: list[dict[str, Any]]) -> list[dict[str, str]]:
