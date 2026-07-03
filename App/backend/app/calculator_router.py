@@ -533,11 +533,11 @@ def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, li
         ),
         "rental_tax_individual": (
             "**Individual rental income is taxed at {pct}** ({fy}) on gross rent "
-            "above the annual threshold of UGX 2,820,000."
+            "above the annual threshold of {threshold}."
         ),
         "rental_tax_company": (
             "**Company rental income is taxed at {pct}** ({fy}) on chargeable "
-            "income, with expenses deductible up to 50% of gross rent."
+            "income, with expenses deductible up to {cap} of gross rent."
         ),
         "withholding_services": "**WHT on services is {pct}** ({fy}), withheld at source.",
         "withholding_goods": "**WHT on goods is {pct}** ({fy}), withheld at source.",
@@ -548,7 +548,12 @@ def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, li
     rate = rates.get(plan.tax_type)
     if template is None or rate is None:
         return "", []
-    reply = template.format(pct=_pct(rate), fy=fy)
+    reply = template.format(
+        pct=_pct(rate),
+        fy=fy,
+        threshold=f"UGX {float(rates.get('rental_tax_individual_threshold', 0)):,.0f}",
+        cap=_pct(rates.get("rental_company_expense_cap", 0)),
+    )
     actions = NEXT_ACTIONS_BY_TOOL.get(
         {
             "vat_standard": "calculate_vat",
@@ -561,8 +566,6 @@ def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, li
         [],
     )
     return reply + footer, actions
-
-
 NEXT_ACTIONS_BY_TOOL: dict[str, list[str]] = {
     "calculate_paye": ["Calculate PAYE for a different salary", "Ask how PAYE bands work"],
     "calculate_vat": ["Calculate VAT on another amount", "Ask who must register for VAT"],
