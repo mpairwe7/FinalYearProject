@@ -9,10 +9,11 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-25bda62 = dev merge of PR #132 (EN/Luganda voice robustness:
-# mt/tts degradation events, voice LLM deadline, TTS phrase cache, Sunbird
-# retry+failover) on top of PR #130 (EI scoring + tax calculator).
-FROM landwind/ura-chatbot:sha-25bda62
+# image. sha-9245aab = dev merge of PR #137: deterministic rate answers
+# (VAT 18% etc.), TIN individual-vs-organisation clarification, clean
+# grounded revisions — on top of #132 (voice robustness) and #130
+# (EI scoring + tax calculator).
+FROM landwind/ura-chatbot:sha-9245aab
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
