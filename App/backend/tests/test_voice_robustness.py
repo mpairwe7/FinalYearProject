@@ -216,6 +216,50 @@ class TestAudioSniff(unittest.TestCase):
         self.assertFalse(_looks_like_audio(b"RIFF"))  # too short
 
 
+class TestCloudDeadline(unittest.TestCase):
+    """One hung cloud speech tier must fail THAT tier within
+    SPEECH_CLOUD_DEADLINE_S — never the whole request via a gateway 504."""
+
+    def test_cloud_call_bounds_hung_upstream(self) -> None:
+        from app import speech_service as ss
+
+        self.assertEqual(ss._cloud_call("fast", lambda: 42), 42)
+        t0 = time.time()
+        with patch.object(ss, "SPEECH_CLOUD_DEADLINE_S", 0.2):
+            with self.assertRaises(TimeoutError):
+                ss._cloud_call("test hang", time.sleep, 5)
+        self.assertLess(time.time() - t0, 2.0)
+
+    def test_hung_sunbird_tts_degrades_to_error_json(self) -> None:
+        import threading
+        from collections import OrderedDict
+
+        from app import speech_service as ss
+        from app import sunbird
+
+        model = ss.SpeechModel.__new__(ss.SpeechModel)
+        model.enabled = True
+        model._tts_cache = OrderedDict()
+        model._tts_cache_lock = threading.Lock()
+        breaker = MagicMock()
+        breaker.allow_request.return_value = False  # skip the local tier
+        model._breakers = {"tts": breaker}
+
+        t0 = time.time()
+        with patch.object(ss, "SPEECH_CLOUD_DEADLINE_S", 0.2), \
+                patch.object(ss.SpeechModel, "_synthesize_edge_tts",
+                             side_effect=RuntimeError("edge down")), \
+                patch.object(sunbird, "is_available", return_value=True), \
+                patch.object(sunbird, "text_to_speech",
+                             side_effect=lambda *a, **k: time.sleep(5)):
+            # Luganda skips the English-gated Workers AI tier.
+            result = model.synthesize("Oli otya", language="lg")
+
+        self.assertLess(time.time() - t0, 2.5)  # returned promptly, no hang
+        self.assertEqual(result.backend, "error")
+        self.assertIn("All TTS backends failed", result.error)
+
+
 class TestVoiceChatBudget(unittest.TestCase):
     """The batch /v1/voice/chat must return the TEXT reply before the
     deployment gateway can 504 the request: once the time budget is spent,
