@@ -88,6 +88,11 @@ _APP_LOGGER.propagate = False
 # ---------------------------------------------------------------------------
 _INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105
 
+# Wall-clock budget for the batch /v1/voice/chat pipeline. Once spent, the
+# reply-TTS leg is skipped (tts_skipped=True) so the text reply still beats
+# the deployment's gateway timeout; the client narrates via /v1/tts instead.
+VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
+
 
 def _truthy_env(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).lower() in ("1", "true", "yes", "on")
@@ -1079,26 +1084,43 @@ async def voice_chat(
             reply_text = mt_result.text
 
     # --- 5. TTS (synthesize reply in user's language) -------------------------
+    # Budget guard: on slow speech tiers (cloud Sunbird can take 30s+ per
+    # call) the four-stage pipeline can outlive the deployment's gateway
+    # timeout and the client receives a 504 with NOTHING — worse than a
+    # text-only reply. When the request has already burned the budget,
+    # return the text now (tts_skipped=True) and let the client fetch the
+    # narration as a separate single-leg /v1/tts request.
     tts_latency = 0.0
     tts_backend = ""
     audio_b64 = ""
     tts_sample_rate = 0
     tts_duration = 0.0
+    tts_skipped = False
     if tts_enabled and reply_text:
-        tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
-        tts_latency = tts_result.latency_s
-        tts_backend = tts_result.backend
-        tts_sample_rate = tts_result.sample_rate
-        tts_duration = tts_result.duration_s
-        metrics.inc("speech_tts_total")
-        if tts_result.latency_s:
-            metrics.observe("speech_tts_latency_s", tts_result.latency_s)
-        if tts_result.error:
-            metrics.inc("speech_tts_errors_total")
-            stage_errors.append(f"TTS: {tts_result.error}")
-            logger.warning("Voice chat TTS failed: %s", tts_result.error)
-        elif tts_result.audio:
-            audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
+        elapsed_s = time.perf_counter() - t_start
+        if elapsed_s > VOICE_CHAT_BUDGET_S:
+            tts_skipped = True
+            metrics.inc("speech_tts_skipped_total")
+            logger.info(
+                "Voice chat reply-TTS skipped: %.1fs elapsed exceeds %.0fs budget",
+                elapsed_s,
+                VOICE_CHAT_BUDGET_S,
+            )
+        else:
+            tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
+            tts_latency = tts_result.latency_s
+            tts_backend = tts_result.backend
+            tts_sample_rate = tts_result.sample_rate
+            tts_duration = tts_result.duration_s
+            metrics.inc("speech_tts_total")
+            if tts_result.latency_s:
+                metrics.observe("speech_tts_latency_s", tts_result.latency_s)
+            if tts_result.error:
+                metrics.inc("speech_tts_errors_total")
+                stage_errors.append(f"TTS: {tts_result.error}")
+                logger.warning("Voice chat TTS failed: %s", tts_result.error)
+            elif tts_result.audio:
+                audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
 
     total_latency = time.perf_counter() - t_start
     metrics.observe("speech_voice_chat_latency_s", total_latency)
@@ -1134,6 +1156,7 @@ async def voice_chat(
         conversation_id=chat_result.get("conversation_id") or conversation_id,
         reply=reply_text,
         reply_audio_base64=audio_b64,
+        tts_skipped=tts_skipped,
         sample_rate=tts_sample_rate,
         duration_s=tts_duration,
         sources=chat_result.get("sources", []),

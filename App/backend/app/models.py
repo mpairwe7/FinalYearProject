@@ -274,6 +274,14 @@ class VoiceChatResponse(BaseModel):
     conversation_id: str | None = Field(None, description="Stable conversation thread id")
     reply: str = Field("", description="LLM reply text (in user language)")
     reply_audio_base64: str = Field("", description="Base64-encoded WAV of narrated reply")
+    tts_skipped: bool = Field(
+        False,
+        description=(
+            "True when reply narration was skipped because the request had "
+            "already consumed the VOICE_CHAT_BUDGET_S time budget — the "
+            "client should fetch audio via /v1/tts instead"
+        ),
+    )
     sample_rate: int = 0
     duration_s: float = 0.0
     sources: list[str] = Field(default_factory=list)
