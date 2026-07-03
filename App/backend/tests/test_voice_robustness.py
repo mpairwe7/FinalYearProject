@@ -216,6 +216,80 @@ class TestAudioSniff(unittest.TestCase):
         self.assertFalse(_looks_like_audio(b"RIFF"))  # too short
 
 
+class TestVoiceChatBudget(unittest.TestCase):
+    """The batch /v1/voice/chat must return the TEXT reply before the
+    deployment gateway can 504 the request: once the time budget is spent,
+    reply-TTS is skipped and flagged so clients narrate via /v1/tts."""
+
+    @classmethod
+    def setUpClass(cls):
+        from fastapi.testclient import TestClient
+
+        from app import database as db
+        from app import main as main_module
+
+        db.init_db()
+        cls.main = main_module
+        cls.client = TestClient(main_module.app)
+
+    def _stub_speech(self) -> MagicMock:
+        speech = MagicMock()
+        speech.transcribe.return_value = TranscribeResult(
+            text="What is the VAT rate?", language="en",
+            duration_s=1.0, latency_s=0.1, backend="mock",
+        )
+        speech.synthesize.return_value = SynthesizeResult(
+            audio=b"RIFF" + b"\x00" * 200, sample_rate=22050, num_samples=200,
+            duration_s=1.0, latency_s=0.1, backend="mock", voice="v",
+        )
+        return speech
+
+    def _stub_model(self) -> MagicMock:
+        model = MagicMock()
+        model.generate.return_value = {
+            "reply": "The standard VAT rate in Uganda is 18%.",
+            "sources": [], "citations": [], "faithfulness_score": None,
+            "retrieval_mode": "calculator", "conversation_id": "vc1",
+        }
+        return model
+
+    def _post(self):
+        return self.client.post(
+            "/v1/voice/chat?language=en&sample_rate=16000&tts_enabled=true",
+            content=b"\x00\x01" * 800,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Voice-Consent": "true",
+            },
+        )
+
+    def test_spent_budget_skips_tts_but_returns_reply(self) -> None:
+        speech, model = self._stub_speech(), self._stub_model()
+        self.main.app.state.speech = speech
+        self.main.app.state.model = model
+        with patch.object(self.main, "VOICE_CHAT_BUDGET_S", 0.0):
+            resp = self._post()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["tts_skipped"])
+        self.assertEqual(data["reply_audio_base64"], "")
+        self.assertIn("18%", data["reply"])
+        self.assertIsNone(data["error"])
+        speech.synthesize.assert_not_called()
+
+    def test_within_budget_narrates_inline(self) -> None:
+        speech, model = self._stub_speech(), self._stub_model()
+        self.main.app.state.speech = speech
+        self.main.app.state.model = model
+        with patch.object(self.main, "VOICE_CHAT_BUDGET_S", 999.0):
+            resp = self._post()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data["tts_skipped"])
+        self.assertTrue(data["reply_audio_base64"])
+        speech.synthesize.assert_called_once()
+
+
 class TestSunbirdRetry(unittest.TestCase):
     def _response(self, status: int, headers: dict | None = None):
         import httpx

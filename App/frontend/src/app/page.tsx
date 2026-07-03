@@ -522,9 +522,13 @@ export default function Page() {
             if (r.reply) {
               addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword' })]);
               trackChatReceived(Date.now() - t0, (r.sources?.length ?? 0) > 0);
+              const tid = useChatStore.getState().chat[useChatStore.getState().chat.length - 1]?.id;
               if (r.reply_audio_base64) {
-                const tid = useChatStore.getState().chat[useChatStore.getState().chat.length - 1]?.id;
                 if (tid) { setPlayingTurnId(tid); try { await playAudioBase64(r.reply_audio_base64); } finally { setPlayingTurnId((p) => p === tid ? null : p); } }
+              } else if (autoNarrate && tid) {
+                // Server skipped inline narration (time budget) — the text is
+                // already on screen; fetch the audio as its own request.
+                void handleListenToReply(tid, r.reply);
               }
             }
           } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); saveCurrentSession(); }
@@ -547,7 +551,7 @@ export default function Page() {
     if (speechState === 'listening') { recognitionRef.current.stop(); return; }
     trackVoiceUsed();
     recognitionRef.current.start();
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, handleListenToReply]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {
