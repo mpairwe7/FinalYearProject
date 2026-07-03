@@ -299,16 +299,25 @@ App/backend/app/
 
 When `FLAG_AGENTIC_MODE=true`, the supervisor classifier (`agents/supervisor.py`) routes queries before retrieval:
 
-Calculation asks are intercepted BEFORE routing by the deterministic
-calculator router (`calculator_router.py` + `ChatModel._maybe_handle_calculator`,
-REST and streaming parity): a message that already carries the figures
-("VAT on 1.5m") is answered instantly from the registered calculator tool
-(`retrieval_mode="calculator"`, no LLM), and a message missing figures
-("how much PAYE will I pay?") starts the matching `calc_*` guided workflow,
-pre-filled with everything already extracted, so the user is asked only for
-what's absent. Defaults applied (residency, VAT direction, landlord type,
-annual→monthly conversion) are stated as visible assumptions. The `TOOLS`
-route below remains the fallback for phrasings the router abstains on.
+Three deterministic fast paths intercept BEFORE routing
+(`ChatModel._maybe_handle_fast_paths`, REST and streaming parity):
+
+1. **TIN clarification** — an untyped registration ask ("how do I register
+   for a TIN/pin?") asks individual-vs-organisation first (one-question
+   `tin_procedure_help` flow), then returns the matching curated template;
+   typed asks answer immediately.
+2. **Calculator** (`calculator_router.py`): a message that already carries
+   the figures ("VAT on 1.5m") is answered instantly from the registered
+   calculator tool (`retrieval_mode="calculator"`, no LLM); missing figures
+   start the matching `calc_*` guided workflow pre-filled with everything
+   already extracted. Defaults applied (residency, VAT direction, landlord
+   type, annual→monthly conversion) are stated as visible assumptions.
+3. **Rate lookup** — "what is the current VAT rate?" answers with the real
+   figure from the versioned FY rate table (gated on the authority-manifest
+   freshness check) instead of retrieval passages.
+
+The `TOOLS` route below remains the fallback for phrasings the fast paths
+abstain on.
 
 | Route | Trigger | Handler |
 |-------|---------|---------|

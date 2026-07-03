@@ -403,6 +403,169 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Rate questions ("what is the current VAT rate?")
+# ---------------------------------------------------------------------------
+# Answered deterministically from the versioned FY rate table instead of
+# letting retrieval + the grounded-revision fallback dump passages that
+# never state the number.
+
+
+@dataclass
+class RatePlan:
+    """A resolved rate question: a scalar rate key OR a multi-rate summary."""
+
+    tax_type: str = ""  # scalar key in the FY rate table
+    summary: str = ""  # "paye" | "rental" | "withholding"
+
+
+_RATE_ASK_RE = re.compile(
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me)\b[^?]*\brates?\b"
+    r"|\brates?\s+of\b",
+    re.IGNORECASE,
+)
+
+_RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
+    (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
+    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+band)\b", re.IGNORECASE)),
+    (RatePlan(tax_type="rental_tax_company"), re.compile(r"\b(compan(?:y|ies)|business)\b.*\brent(?:al)?\b|\brent(?:al)?\b.*\b(compan(?:y|ies)|business)\b", re.IGNORECASE)),
+    (RatePlan(summary="rental"), re.compile(r"\brent(?:al)?\b", re.IGNORECASE)),
+    (RatePlan(tax_type="capital_gains_corporate"), re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
+    (RatePlan(tax_type="corporation_tax"), re.compile(r"\b(corporation|corporate|company)\s+(income\s+)?tax\b", re.IGNORECASE)),
+    (RatePlan(tax_type="customs_duty_common"), re.compile(r"\b(customs|import\s+dut(?:y|ies))\b", re.IGNORECASE)),
+    (RatePlan(tax_type="vat_standard"), re.compile(r"\b(v\.?a\.?t\.?|value\s+added)\b", re.IGNORECASE)),
+]
+
+_WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
+    ("withholding_management_fees", re.compile(r"\bmanagement\s+fees?\b", re.IGNORECASE)),
+    ("withholding_dividend", re.compile(r"\bdividends?\b", re.IGNORECASE)),
+    ("withholding_services", re.compile(r"\bservices?\b", re.IGNORECASE)),
+    ("withholding_goods", re.compile(r"\bgoods\b", re.IGNORECASE)),
+]
+
+
+def plan_rate_lookup(message: str) -> RatePlan | None:
+    """Map a rate QUESTION to the FY rate table, or None when not one.
+
+    Fires only when the message asks about a rate, names a known tax, and
+    carries no amount (amount-bearing messages are calculations and are
+    handled by :func:`plan_calculation` first).
+    """
+    text = (message or "").strip()
+    if not text or extract_amounts(text):
+        return None
+    short_ask = len(text.split()) <= 8 and re.search(r"\brates?\b", text, re.IGNORECASE)
+    if not (_RATE_ASK_RE.search(text) or short_ask):
+        return None
+    for plan, pattern in _RATE_TYPE_RES:
+        if pattern.search(text):
+            if plan.summary == "withholding":
+                subtype = next((k for k, p in _WHT_SUBTYPE_RES if p.search(text)), "")
+                if subtype:
+                    return RatePlan(tax_type=subtype)
+            if plan.summary == "rental" and re.search(r"\bindividual\b", text, re.IGNORECASE):
+                return RatePlan(tax_type="rental_tax_individual")
+            return plan
+    return None
+
+
+def _pct(rate: object) -> str:
+    return f"{float(rate) * 100:.0f}%"
+
+
+def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, list[str]]:
+    """Render a rate answer from the FY rate table; returns (reply, next_actions)."""
+    fy = rates.get("version", "FY2025-26")
+    footer = f"\n\nThat comes from the official URA {fy} rate table."
+    if plan.summary == "paye":
+        bands = rates["paye_bands_resident"]
+        lines = [f"**PAYE rates for resident employees ({fy}, monthly income):**", ""]
+        for lo, hi, rate, _flat in bands:  # type: ignore[misc]
+            upper = f"UGX {hi:,.0f}" if hi != float("inf") else "above"
+            span = (
+                f"- Above UGX {lo:,.0f}: **{_pct(rate)}** (top band)"
+                if hi == float("inf")
+                else f"- UGX {lo:,.0f} – {upper}: **{_pct(rate)}**"
+            )
+            lines.append(span)
+        lines.append("")
+        lines.append("Non-resident employees are taxed from 10% on the first band.")
+        return "\n".join(lines) + footer, [
+            "Calculate PAYE for a salary",
+            "Ask how PAYE bands work",
+        ]
+    if plan.summary == "rental":
+        reply = (
+            f"**Rental income tax rates ({fy}):**\n\n"
+            f"- Individuals: **{_pct(rates['rental_tax_individual'])}** of gross rent above "
+            f"UGX {float(rates['rental_tax_individual_threshold']):,.0f} per year\n"
+            f"- Companies: **{_pct(rates['rental_tax_company'])}** of chargeable rental income "
+            f"(expenses deductible up to {_pct(rates['rental_company_expense_cap'])} of gross rent)"
+        )
+        return reply + footer, ["Calculate rental tax", "Ask how rental tax is declared"]
+    if plan.summary == "withholding":
+        reply = (
+            f"**Withholding tax (WHT) rates ({fy}):**\n\n"
+            f"- Services: **{_pct(rates['withholding_services'])}**\n"
+            f"- Goods: **{_pct(rates['withholding_goods'])}**\n"
+            f"- Management fees: **{_pct(rates['withholding_management_fees'])}**\n"
+            f"- Dividends: **{_pct(rates['withholding_dividend'])}**"
+        )
+        return reply + footer, ["Calculate WHT on a payment", "Ask when WHT applies"]
+
+    descriptions = {
+        "vat_standard": (
+            "**The standard VAT rate in Uganda is {pct}** ({fy}). Value Added Tax "
+            "is charged at {pct} on taxable supplies of goods and services; "
+            "VAT-registered businesses collect it from customers and remit it to URA."
+        ),
+        "corporation_tax": (
+            "**The corporation tax rate in Uganda is {pct}** ({fy}), applied to a "
+            "company's annual chargeable income."
+        ),
+        "capital_gains_corporate": (
+            "**Capital gains are taxed at {pct}** ({fy}) — the gain is included "
+            "in chargeable income."
+        ),
+        "customs_duty_common": (
+            "**The common external tariff for finished goods is {pct}** ({fy}). "
+            "The exact duty depends on the EAC tariff classification of the goods."
+        ),
+        "rental_tax_individual": (
+            "**Individual rental income is taxed at {pct}** ({fy}) on gross rent "
+            "above the annual threshold of {threshold}."
+        ),
+        "rental_tax_company": (
+            "**Company rental income is taxed at {pct}** ({fy}) on chargeable "
+            "income, with expenses deductible up to {cap} of gross rent."
+        ),
+        "withholding_services": "**WHT on services is {pct}** ({fy}), withheld at source.",
+        "withholding_goods": "**WHT on goods is {pct}** ({fy}), withheld at source.",
+        "withholding_management_fees": "**WHT on management fees is {pct}** ({fy}), withheld at source.",
+        "withholding_dividend": "**WHT on dividends is {pct}** ({fy}), withheld at source.",
+    }
+    template = descriptions.get(plan.tax_type)
+    rate = rates.get(plan.tax_type)
+    if template is None or rate is None:
+        return "", []
+    reply = template.format(
+        pct=_pct(rate),
+        fy=fy,
+        threshold=f"UGX {float(rates.get('rental_tax_individual_threshold', 0)):,.0f}",
+        cap=_pct(rates.get("rental_company_expense_cap", 0)),
+    )
+    actions = NEXT_ACTIONS_BY_TOOL.get(
+        {
+            "vat_standard": "calculate_vat",
+            "corporation_tax": "calculate_corporation_tax",
+            "capital_gains_corporate": "calculate_capital_gains",
+            "customs_duty_common": "calculate_customs_duty",
+            "rental_tax_individual": "calculate_rental_tax",
+            "rental_tax_company": "calculate_rental_tax",
+        }.get(plan.tax_type, "calculate_withholding"),
+        [],
+    )
+    return reply + footer, actions
 NEXT_ACTIONS_BY_TOOL: dict[str, list[str]] = {
     "calculate_paye": ["Calculate PAYE for a different salary", "Ask how PAYE bands work"],
     "calculate_vat": ["Calculate VAT on another amount", "Ask who must register for VAT"],
