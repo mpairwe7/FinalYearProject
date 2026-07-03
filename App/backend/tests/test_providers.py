@@ -635,7 +635,9 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
 
     def test_empty_agentic_reply_runs_plain_llm_chain(self):
         out, ag, fb = self._generate(
-            "What is the standard VAT rate in Uganda?",
+            # NB: must not match the deterministic fast paths (rate lookup /
+            # calculator / TIN) — this test exercises the agentic LLM chain.
+            "What documents do I need when importing a vehicle?",
             {"text": "", "tool_calls": [], "iterations": 0, "truncated": False},
         )
         ag.assert_called_once()

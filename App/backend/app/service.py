@@ -44,7 +44,13 @@ from . import llm as llm_module
 from .agents import AgentRoute, supervisor
 from .agents.supervisor import _GREETING_WORDS, _GREETING_PHRASES
 from .cache import create_cache
-from .calculator_router import NEXT_ACTIONS_BY_TOOL, format_calc_reply, plan_calculation
+from .calculator_router import (
+    NEXT_ACTIONS_BY_TOOL,
+    format_calc_reply,
+    format_rate_reply,
+    plan_calculation,
+    plan_rate_lookup,
+)
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
@@ -91,7 +97,8 @@ _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
 _WORKFLOW_CANCEL_WORDS = {"cancel", "stop", "quit", "exit", "nevermind", "never mind"}
 _WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
 _INFORMATIONAL_WORKFLOW_QUERY_RE = re.compile(
-    r"\b(?:how\s+(?:do|can)\s+i|what\s+are\s+the\s+steps|what\s+is\s+the\s+process|"
+    r"\b(?:how\s+(?:do|does|can|would|should)\s+(?:i|we|one|my|a|an)"
+    r"|what\s+are\s+the\s+steps|what\s+is\s+the\s+process|"
     r"requirements?|procedure|where\s+do\s+i)\b",
     re.IGNORECASE,
 )
@@ -112,9 +119,44 @@ _OBJECTION_QUERY_RE = re.compile(
     r"\b(dispute|objection|appeal|assessment|audit|fraud|lawyer|court)\b",
     re.IGNORECASE,
 )
+# "pin" tolerated as the common typo for TIN in registration asks.
 _TIN_REGISTRATION_QUERY_RE = re.compile(
-    r"\b(?:register|get|obtain|apply)\b.*\btin\b|\btin\b.*\b(?:register|get|obtain|apply)\b",
+    r"\b(?:register|get|obtain|apply)\b.*\b(?:tin|pin)\b"
+    r"|\b(?:tin|pin)\b.*\b(?:register|get|obtain|apply)\b",
     re.IGNORECASE,
+)
+_TIN_ORG_QUERY_RE = re.compile(
+    r"\b(organisations?|organizations?|compan(?:y|ies)|business(?:es)?|ngos?"
+    r"|partnerships?|non[-\s]?individual|trusts?|saccos?|institutions?)\b",
+    re.IGNORECASE,
+)
+_TIN_INDIVIDUAL_QUERY_RE = re.compile(
+    r"\b(individuals?|myself|personal|for\s+me|my\s+own|nin)\b",
+    re.IGNORECASE,
+)
+
+# Curated TIN procedure templates (KB-grounded: Instant TIN is NIN-holders
+# only; organisations use the standard Non-Individual registration with
+# incorporation documents and director TINs).
+_TIN_INDIVIDUAL_STEPS = (
+    "To register for an **instant TIN** as an individual:\n\n"
+    "1. Go to ura.go.ug\n"
+    "2. Click **Get a TIN**\n"
+    "3. Choose **Instant TIN**\n"
+    "4. Select **Individual**\n"
+    "5. Enter your NIN and personal details\n"
+    "6. Confirm you are not a robot\n"
+    "7. Submit"
+)
+_TIN_ORG_STEPS = (
+    "To register an **organisation** (company, NGO, partnership) for a TIN:\n\n"
+    "1. Go to ura.go.ug\n"
+    "2. Choose the standard **Non-Individual TIN registration** option\n"
+    "3. Fill in the organisation's details\n"
+    "4. Attach the incorporation/registration documents\n"
+    "5. Provide the TINs of the directors\n"
+    "6. Submit the application for URA review\n\n"
+    "Note: Instant TIN is only available to individuals with a NIN."
 )
 _RETURN_FILING_QUERY_RE = re.compile(
     r"\b(?:file|submit|lodge)\b.*\b(?:return|returns)\b|\b(?:return|returns)\b.*\b(?:file|submit|lodge)\b",
@@ -1829,17 +1871,14 @@ class ChatModel:
             if len(text) < 40:  # skip empty / artifact-only chunks
                 continue
             excerpt = _structure_excerpt(_trim_excerpt(text, 700))
-            # This is the grounding-restoration path — keep the source citation
-            # visible (appended to the clean excerpt, not dangling on a run-on).
-            ref = next(
-                (
-                    str(c.get("ref", "")).strip()
-                    for c in citations
-                    if str(c.get("source", "")) == str(hit.get("source", ""))
-                ),
-                "",
-            )
-            excerpts.append(f"{excerpt} {ref}".strip() if ref else excerpt)
+            # Trimming can leave a PDF footnote number dangling at the new
+            # end of the excerpt ("...remit to URA. 1") — strip it. Numbers
+            # BEFORE the final punctuation (amounts, hotlines) are untouched.
+            excerpt = re.sub(r"(?<=[.!?)])\s+\d{1,3}\s*$", "", excerpt).rstrip()
+            # References intentionally stay OUT of the prose — they reach the
+            # UI via the result's citations/sources (grounded-context panel),
+            # matching the deterministic-reply convention.
+            excerpts.append(excerpt)
         if not excerpts:
             return ""
         body = "\n\n".join(excerpts)
@@ -1927,6 +1966,12 @@ class ChatModel:
         stays clean, stepwise Markdown. ``citations`` is kept on the signature for callers.
         """
         if _TIN_REGISTRATION_QUERY_RE.search(query):
+            # Organisation asks are answered from the curated non-individual
+            # template regardless of hits (the instant-TIN FAQ hits are
+            # individual-specific).
+            if _TIN_ORG_QUERY_RE.search(query):
+                return self._tin_procedure_reply("organisation"), True
+
             apply_hit = next(
                 (
                     h
@@ -1949,18 +1994,16 @@ class ChatModel:
                 contact = CONTACT_FOOTER
                 if help_hit:
                     contact = self._extract_grounded_answer_text(help_hit)
-                return (
-                    "To register for an **instant TIN**:\n\n"
-                    "1. Go to ura.go.ug\n"
-                    "2. Click **Get a TIN**\n"
-                    "3. Choose **Instant TIN**\n"
-                    "4. Select **Individual**\n"
-                    "5. Enter your NIN and personal details\n"
-                    "6. Confirm you are not a robot\n"
-                    "7. Submit\n\n"
-                    f"{contact}",
-                    True,
-                )
+                reply = self._tin_procedure_reply("individual", contact)
+                if not _TIN_INDIVIDUAL_QUERY_RE.search(query):
+                    # Type unspecified and the clarification workflow didn't
+                    # intercept (workflows disabled) — point organisations to
+                    # their path instead of silently assuming individual.
+                    reply += (
+                        "\n\n_Registering an **organisation** instead? Ask me about "
+                        "non-individual TIN registration._"
+                    )
+                return reply, True
 
         if _RETURN_FILING_QUERY_RE.search(query):
             file_hit = next(
@@ -1994,6 +2037,12 @@ class ChatModel:
                 return "\n\n".join(lines), False
 
         return "", False
+
+    @staticmethod
+    def _tin_procedure_reply(kind: str, contact: str = "") -> str:
+        """Curated TIN registration steps for an individual or an organisation."""
+        steps = _TIN_ORG_STEPS if kind == "organisation" else _TIN_INDIVIDUAL_STEPS
+        return f"{steps}\n\n{contact or CONTACT_FOOTER}"
 
     def _deterministic_result(
         self,
@@ -2339,6 +2388,152 @@ class ChatModel:
             turn = WorkflowRegistry.advance(session, "")
         return turn, tool_messages
 
+    def _maybe_handle_fast_paths(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Deterministic fast paths, in precedence order (both chat paths):
+
+        1. TIN-registration asks with an unspecified taxpayer type start a
+           one-question clarification (individual vs organisation);
+        2. calculations with figures compute instantly, without figures they
+           elicit the missing details;
+        3. rate questions answer from the versioned FY rate table.
+        """
+        return (
+            self._maybe_handle_tin_clarification(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+            or self._maybe_handle_calculator(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+            or self._maybe_handle_rate_lookup(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+        )
+
+    def _maybe_handle_rate_lookup(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Answer "what is the current VAT rate?"-style questions exactly.
+
+        Uses the same versioned FY rate table the calculators use, so the
+        reply is a real figure instead of retrieval passages that happen to
+        mention the tax. Falls back to RAG when the authority manifest is
+        stale or the question names no known rate.
+        """
+        rate_plan = plan_rate_lookup(message) or plan_rate_lookup(rewritten)
+        if rate_plan is None:
+            return None
+        try:
+            from .tools.calculators import _get_rates  # noqa: PLC0415
+            from .tools.rates import _authority_payload  # noqa: PLC0415
+
+            authority_ok, _status = _authority_payload()
+            if not authority_ok:
+                logger.info("rate fast path skipped: authority manifest not fresh")
+                return None
+            reply_text, next_actions = format_rate_reply(rate_plan, _get_rates())
+        except Exception:
+            logger.exception("rate lookup fast path failed")
+            return None
+        if not reply_text:
+            return None
+        return {
+            "reply": self._finalize_reply(reply_text),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "calculator",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "tool_specialist",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["official rate table"],
+                "confidence_band": "high",
+            },
+            "next_actions": next_actions,
+            "ticket_id": "",
+        }
+
+    def _maybe_handle_tin_clarification(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Ask individual-vs-organisation before giving TIN registration steps.
+
+        Fires only when the ask names neither type; typed asks are answered
+        immediately by the deterministic template, and completion of this
+        one-question flow is special-cased in ``_maybe_handle_workflow``.
+        """
+        combined = f"{message or ''} {rewritten or ''}"
+        if not _TIN_REGISTRATION_QUERY_RE.search(combined):
+            return None
+        if _TIN_ORG_QUERY_RE.search(combined) or _TIN_INDIVIDUAL_QUERY_RE.search(combined):
+            return None
+        if not flags.is_enabled("workflows") or self._workflow_count <= 0:
+            return None
+        wf = WorkflowRegistry.get("tin_procedure_help")
+        if wf is None:
+            return None
+        session = WorkflowRegistry.create_session(wf.id)
+        if session is None:
+            return None
+        turn, _tool_messages = self._advance_workflow(session, "")
+        prompt = turn.question or ""
+        db.upsert_workflow_session(
+            thread_id,
+            session.workflow_id,
+            session.current_step_idx,
+            session.slots,
+            status="active",
+            last_prompt=prompt,
+        )
+        workflow = self._workflow_view(
+            session,
+            name=wf.name,
+            status="active",
+            pending_slot=turn.slot_name,
+        )
+        return {
+            "reply": f"Happy to help you get registered!\n\n{prompt}",
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "workflow",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "workflow_guide",
+            "workflow": workflow,
+            "next_actions": self._default_next_actions(
+                agent_role="workflow_guide",
+                workflow=workflow,
+            ),
+        }
+
     def _maybe_handle_calculator(
         self,
         *,
@@ -2506,6 +2701,41 @@ class ChatModel:
                 }
 
             turn, tool_messages = self._advance_workflow(session, user_input)
+
+            # The TIN clarification flow ends in a curated deterministic
+            # answer keyed on the collected taxpayer kind — not a generic
+            # workflow completion prompt.
+            if wf.id == "tin_procedure_help" and (session.completed or turn.is_complete):
+                db.complete_workflow_session(thread_id, status="completed")
+                kind = str(session.slots.get("taxpayer_kind", "individual"))
+                workflow = self._workflow_view(session, name=wf.name, status="completed")
+                return {
+                    "reply": self._finalize_reply(self._tin_procedure_reply(kind)),
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": 1.0,
+                    "retrieval_mode": "workflow",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "workflow_guide",
+                    "handoff": None,
+                    "response_judge": {
+                        "decision": "approve",
+                        "final_decision": "approve",
+                        "applied_revision": False,
+                        "reasons": ["curated deterministic template"],
+                        "confidence_band": "high",
+                    },
+                    "workflow": workflow,
+                    "next_actions": self._default_next_actions(
+                        agent_role="workflow_guide",
+                        workflow=workflow,
+                    ),
+                }
+
             status = "completed" if (session.completed or turn.is_complete) else "active"
             prompt = turn.question or persisted.get("last_prompt", "") or f"Let's continue the {wf.name} workflow."
             if tool_messages:
@@ -2720,7 +2950,7 @@ class ChatModel:
             # 1a1b. Deterministic tax calculator — instant when the message
             #       carries the figures, guided elicitation when it doesn't.
             with trace_stage("calculator_router", timings=timings):
-                calc_result = self._maybe_handle_calculator(
+                calc_result = self._maybe_handle_fast_paths(
                     message=message,
                     rewritten=rewritten,
                     thread_id=thread_id,
@@ -3639,7 +3869,7 @@ class ChatModel:
 
         # Deterministic tax calculator (parity with generate()) — instant
         # answer or guided elicitation, both as a single bundled payload.
-        calc_result = self._maybe_handle_calculator(
+        calc_result = self._maybe_handle_fast_paths(
             message=message,
             rewritten=rewritten,
             thread_id=thread_id,

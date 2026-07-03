@@ -591,6 +591,7 @@ direct-curl pattern from `mpairwe7/MLOPS_V1/.github/workflows/`:
 | Build & push | `.github/workflows/ura-chatbot-build-push.yml` | push to dev/main, `v*` tag, manual dispatch | Builds `Dockerfile.cranecloud`, pushes to `landwind/ura-chatbot:<tag>` on Docker Hub, then dispatches the deploy workflow (dev / `v*` only). |
 | Crane Cloud deploy | `.github/workflows/ura-chatbot-deploy-cranecloud.yml` | dispatched by build, or manual | `POST /users/login` → `PATCH /apps/<id>` → poll `/health` for 5 min. Direct REST API — no `cranecloud` CLI, no Python keyring shim. |
 | Redeploy retry loop | `.github/workflows/ura-chatbot-cc-redeploy-retry.yml` | cron every 3h, manual dispatch | Retries a blocked image roll while Crane Cloud's control plane can't resolve `hub.docker.com` (its tag-validation DNS quirk): probes the live app for the target build, dispatches the deploy workflow if stale, and on success opens a notification issue and **disables itself**. Re-enable + bump `TARGET_TAG` for future blocked rolls. |
+| HF Space keepalive | `.github/workflows/hf-space-keepalive.yml` | cron hourly, manual dispatch | Keeps `landwind22/ura-chatbot` from sleeping/pausing: checks the Space runtime stage via the HF API (secret `HF_TOKEN`) and restarts it when paused/errored, then pings `/v1/speech/health` so the free-tier inactivity timer keeps resetting. |
 
 ### Crane Cloud REST API contract used by the deploy workflow
 

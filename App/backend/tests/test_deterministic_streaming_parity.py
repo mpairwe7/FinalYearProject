@@ -57,8 +57,11 @@ class GenerateRetrievalOnlyDeterministicTest(unittest.TestCase):
         ), mock.patch.object(
             self.model._cache, "put"
         ) as cache_put:
+            # Typed as individual so the deterministic template answers
+            # directly (untyped asks now clarify individual vs organisation
+            # first — pinned in test_hf_quality_fixes.py).
             out = self.model.generate_retrieval_only(
-                message="how do I register for a TIN"
+                message="how do I register for a TIN as an individual"
             )
 
         self.assertTrue(out.get("_short_circuit"))
