@@ -1676,6 +1676,8 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `SPEECH_TTS_CACHE_SIZE` | LRU entries for repeated-phrase TTS (0 disables) | `64` |
 | `VOICE_LLM_DEADLINE_S` | Hard ceiling on the LLM stage of a voice turn | `45` |
 | `VOICE_CHAT_BUDGET_S` | Time budget for batch `/v1/voice/chat`; once spent, reply-TTS is skipped (`tts_skipped=true`) so the text reply beats the gateway timeout and the client narrates via `/v1/tts` | `50` |
+| `SPEECH_CLOUD_DEADLINE_S` | Hard ceiling per cloud speech-tier call (Sunbird/edge-tts/Workers AI, all of ASR/TTS/MT); a hung upstream fails that tier and falls through instead of 504ing the request | `40` |
+| `SPEECH_CLOUD_MAX_CONCURRENCY` | Worker threads for bounded cloud speech calls | `4` |
 | `SPEECH_EN_VOICE` | Default English TTS voice | `en_US-lessac-medium` |
 | `SPEECH_LG_VOICE` | Default Luganda TTS voice | `luganda-vits-v1` |
 | **Sunbird AI** | | |

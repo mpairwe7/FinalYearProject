@@ -68,6 +68,35 @@ SPEECH_DEADLINE_S = float(os.getenv("SPEECH_DEADLINE_S", "60"))
 # prompts). 0 disables. Keyed by (text, voice, language).
 TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "64"))
 
+# Hard ceiling for ONE cloud speech-tier call (Sunbird / edge-tts / Workers
+# AI). Sunbird latency swings 25s→90s+; a hung upstream must fail the TIER
+# (fall through to the next backend or a degraded JSON reply) — never the
+# whole request via a deployment-gateway 504.
+SPEECH_CLOUD_DEADLINE_S = float(os.getenv("SPEECH_CLOUD_DEADLINE_S", "40"))
+
+# Dedicated pool so bounded cloud calls can never deadlock the main speech
+# executor (transcribe_async already runs ON that executor).
+_CLOUD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=int(os.getenv("SPEECH_CLOUD_MAX_CONCURRENCY", "4")),
+    thread_name_prefix="speech-cloud",
+)
+
+
+def _cloud_call(label: str, func, *args, **kwargs):
+    """Run one cloud speech-tier call under :data:`SPEECH_CLOUD_DEADLINE_S`.
+
+    Raises ``TimeoutError`` on breach. The abandoned worker thread finishes
+    in the background (network I/O is uncancellable) but the caller moves
+    on to the next tier immediately.
+    """
+    future = _CLOUD_EXECUTOR.submit(func, *args, **kwargs)
+    try:
+        return future.result(timeout=SPEECH_CLOUD_DEADLINE_S)
+    except concurrent.futures.TimeoutError as exc:
+        future.cancel()
+        logger.warning("%s exceeded the %.0fs cloud deadline", label, SPEECH_CLOUD_DEADLINE_S)
+        raise TimeoutError(f"{label} exceeded {SPEECH_CLOUD_DEADLINE_S:.0f}s") from exc
+
 # Magic bytes for the audio containers our TTS tiers legitimately produce.
 _AUDIO_MAGIC = (b"RIFF", b"ID3", b"OggS", b"fLaC")
 
@@ -417,7 +446,12 @@ class SpeechModel:
         # ③.5 Cloudflare Workers AI — PRIMARY cloud STT for English (configurable
         # model). Sunbird is preferred for Luganda, so this tier is English-gated.
         if (language or "en") == "en":
-            cf_text = self._cf_whisper_transcribe(audio_bytes, sample_rate, language)
+            try:
+                cf_text = _cloud_call(
+                    "Workers AI STT", self._cf_whisper_transcribe, audio_bytes, sample_rate, language
+                )
+            except TimeoutError:
+                cf_text = ""
             if cf_text:
                 return TranscribeResult(text=cf_text, language="en", backend="cf_workers_ai")
 
@@ -436,7 +470,13 @@ class SpeechModel:
                     w.setframerate(sample_rate)
                     w.writeframes(pcm16.tobytes())
                 lang_code = {"en": "eng", "lg": "lug"}.get(language or "en", "eng")
-                stt_result = sunbird.speech_to_text(wav_buf.getvalue(), language=lang_code, filename="audio.wav")
+                stt_result = _cloud_call(
+                    "Sunbird STT",
+                    sunbird.speech_to_text,
+                    wav_buf.getvalue(),
+                    language=lang_code,
+                    filename="audio.wav",
+                )
                 if stt_result and stt_result.get("text"):
                     return TranscribeResult(
                         text=stt_result["text"],
@@ -447,7 +487,12 @@ class SpeechModel:
             logger.debug("Sunbird STT fallback also failed")
 
         # ⑤ Cloudflare Workers AI Whisper (final cloud net; flag/budget-gated)
-        cf_text = self._cf_whisper_transcribe(audio_bytes, sample_rate, language)
+        try:
+            cf_text = _cloud_call(
+                "Workers AI STT", self._cf_whisper_transcribe, audio_bytes, sample_rate, language
+            )
+        except TimeoutError:
+            cf_text = ""
         if cf_text:
             return TranscribeResult(
                 text=cf_text, language=language or "en", backend="cf_workers_ai"
@@ -718,7 +763,7 @@ class SpeechModel:
         # model + resilience fallback). Sunbird stays primary for Luganda.
         if (language or "en") == "en":
             try:
-                result = self._cf_workers_ai_tts(text, voice, language)
+                result = _cloud_call("Workers AI TTS", self._cf_workers_ai_tts, text, voice, language)
                 if result and result.audio:
                     return result
             except Exception:
@@ -726,7 +771,7 @@ class SpeechModel:
 
         # ② edge-tts (Microsoft neural voices — needs internet, no API key)
         try:
-            result = self._synthesize_edge_tts(text, language)
+            result = _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
             if result and result.audio:
                 return result
         except Exception:
@@ -736,10 +781,17 @@ class SpeechModel:
         try:
             from . import sunbird
             if sunbird.is_available():
-                tts_result = sunbird.text_to_speech(text, locale=language)
-                if tts_result and tts_result.get("audio_url"):
+
+                def _sunbird_tts():
+                    tts_result = sunbird.text_to_speech(text, locale=language)
+                    if not tts_result or not tts_result.get("audio_url"):
+                        return None
                     import httpx
-                    audio_resp = httpx.get(tts_result["audio_url"], timeout=15)
+
+                    return httpx.get(tts_result["audio_url"], timeout=15)
+
+                audio_resp = _cloud_call("Sunbird TTS", _sunbird_tts)
+                if audio_resp is not None:
                     if audio_resp.status_code == 200 and _looks_like_audio(audio_resp.content):
                         return SynthesizeResult(
                             audio=audio_resp.content,
@@ -1252,7 +1304,10 @@ class SpeechModel:
 
         prev: str | None = None
         for name, tier in tiers:
-            result = tier()
+            try:
+                result = _cloud_call(f"translate:{name}", tier)
+            except TimeoutError:
+                result = None
             if result is not None:
                 if prev is not None:
                     routing.log_fallback("translate", prev, result.backend, f"{prev}_unavailable")
