@@ -133,9 +133,21 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
         # Direct fraud/evasion requests
         r"(?:how\s+(?:to|do\s+(?:I|you|we))|explain\s+how\s+to|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to)\s+(?:evade|avoid|dodge|escape|cheat|hide|conceal|under[\-\s]?report|misreport|falsif|forge|fake|fabricat)",
         r"(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
-        r"(?:forge|fake|fabricat|counterfeit|falsif)\s+(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
+        r"(?:forge|fake|fabricat|counterfeit|falsif)\w*\s+(?:(?:a|an|the|my|some)\s+)?"
+        r"(?:fake\s+)?(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
         r"(?:under[\-\s]?report|misreport|under[\-\s]?declare)\s+(?:income|revenue|sales|earnings|profit|expenses?|VAT)",
-        r"(?:launder|smuggl|brib)\w*",
+        # Smuggling / laundering / bribery: block solicitation, not
+        # information. "What is smuggling?" and "How can I report smuggling?"
+        # are curated KB answers (ura_smuggling_effects, ura_customs_offences,
+        # ura_whistleblowing) and must pass; actionable requests must not.
+        r"(?:how\s+(?:to|do\s+(?:I|you|we)|can\s+(?:I|you|we|one))|explain\s+how\s+to"
+        r"|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to|best\s+way\s+to|help\s+me"
+        r"|teach\s+me\s+(?:how\s+)?to|I\s+(?:want|need|plan|intend)\s+to)\s+"
+        r"(?:launder|smuggle|bribe)",
+        r"(?:can|could|should|shall)\s+(?:I|we)\s+(?:just\s+)?"
+        r"(?:launder|smuggle|bribe|pay\s+off)",
+        r"(?:smuggl|launder|sneak)\w*\b.{0,60}?without\s+(?:being|getting)\s+"
+        r"(?:caught|detected|noticed|flagged)",
         r"(?:hide|conceal)\s+(?:income|money|earnings|revenue|assets?)\s+(?:from|against)\s+(?:URA|tax|government|authority)",
         # Role-play/persona-swap evasion
         r"(?:unrestricted|jailbroken|unfiltered)\s+(?:model|assistant|AI|mode)",
