@@ -9,10 +9,11 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-e9baded = dev merge of PR #139: batch voice time budget
-# (tts_skipped + client /v1/tts narration fallback — no more gateway
-# 504s) — on top of #137 (rate answers, TIN clarification) and earlier.
-FROM landwind/ura-chatbot:sha-e9baded
+# image. sha-49a1b53 = dev merge of PR #143: EI parity on the extractive
+# fallback, input-guard precision (smuggling/whistleblowing FAQs answer,
+# solicitation still blocks), gratitude/farewell closing courtesy, and
+# memory/audit tables created in init_db — on top of #141 and earlier.
+FROM landwind/ura-chatbot:sha-49a1b53
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
