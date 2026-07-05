@@ -7,6 +7,8 @@ from app.text_signals import (
     CLARIFICATION_PROMPT,
     CONTACT_FOOTER,
     ESCALATION_REPLY_LEAD,
+    FAREWELL_REPLY,
+    GRATITUDE_REPLY,
     GREETING_REPLY,
     GROUNDED_REVISION_PREAMBLE,
     NO_HITS_REPLY,
@@ -73,6 +75,8 @@ class CourtesySentenceTests(unittest.TestCase):
     def test_standalone_reply_constants_open_courteously(self) -> None:
         for constant in (
             GREETING_REPLY,
+            GRATITUDE_REPLY,
+            FAREWELL_REPLY,
             CLARIFICATION_PROMPT,
             ABSTENTION_REPLY,
             NO_HITS_REPLY,

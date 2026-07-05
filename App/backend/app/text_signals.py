@@ -243,6 +243,16 @@ GREETING_REPLY = (
     "I help you today?"
 )
 
+GRATITUDE_REPLY = (
+    "You're welcome — I'm glad I could help! Is there anything else you'd "
+    "like to know about URA services?"
+)
+
+FAREWELL_REPLY = (
+    "Thank you for chatting with the URA Digital Assistant — goodbye for "
+    "now! Feel free to reach out any time, or visit https://ura.go.ug."
+)
+
 CLARIFICATION_PROMPT = (
     "Of course — I'd be happy to help. Could you share a little more detail? "
     "For example, are you asking about VAT, PAYE, customs, registration, or "

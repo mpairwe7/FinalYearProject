@@ -42,7 +42,12 @@ from typing import Any, Callable
 from . import database as db
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
-from .agents.supervisor import _GREETING_WORDS, _GREETING_PHRASES
+from .agents.supervisor import (
+    _FAREWELL_PHRASES,
+    _GRATITUDE_PHRASES,
+    _GREETING_PHRASES,
+    _GREETING_WORDS,
+)
 from .cache import create_cache
 from .calculator_router import (
     NEXT_ACTIONS_BY_TOOL,
@@ -65,6 +70,8 @@ from .text_signals import (
     CONTACT_FOOTER,
     ESCALATION_REPLY_FOOTER,
     ESCALATION_REPLY_LEAD,
+    FAREWELL_REPLY,
+    GRATITUDE_REPLY,
     GREETING_REPLY,
     GROUNDED_REVISION_PREAMBLE,
     NO_HITS_REPLY,
@@ -1028,6 +1035,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         rewritten_query = result.get("_rewritten", message)
         personalization_context = result.get("_personalization_context", "")
         tone_hint = str(result.get("_tone_hint") or "")
+        distress = str(result.get("_distress") or "")
 
         # ── Phase 2: optional agentic branch ─────────────────────────
         # When tool_use is enabled, run the bounded tool-calling loop
@@ -1194,8 +1202,12 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 yield ("token", sanitized)
 
             if not saw_streamed_token:
-                # Pump produced nothing (breaker open or empty stream).
+                # Pump produced nothing (breaker open or empty stream) — the
+                # tone_hint never reached a model, so the extractive fallback
+                # carries the empathy acknowledgment itself (EI parity).
                 full_reply = result.get("reply", "")
+                if distress and full_reply:
+                    full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
                 yield ("token", full_reply)
                 yield ("done", "")
                 yield (
@@ -1271,7 +1283,10 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             except Exception:
                 logger.debug("Stream cache store failed", exc_info=True)
         else:
+            # No LLM tier at all — extractive reply, same EI parity as above.
             full_reply = result.get("reply", "")
+            if distress and full_reply:
+                full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
             yield ("token", full_reply)
 
         yield ("done", "")
@@ -1409,6 +1424,23 @@ def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) ->
             }
         )
     return payload
+
+
+def _closing_courtesy_reply(message: str) -> str:
+    """Reply for a gratitude/farewell turn, or "" when *message* is neither.
+
+    Exact-phrase matching (max four words) on purpose: mixed messages like
+    "thanks, but it still fails" must fall through to distress detection
+    and retrieval rather than end the conversation on a sign-off.
+    """
+    text = message.strip().lower().strip("!.?, ")
+    if len(text.split()) > 4:
+        return ""
+    if text in _GRATITUDE_PHRASES:
+        return GRATITUDE_REPLY
+    if text in _FAREWELL_PHRASES:
+        return FAREWELL_REPLY
+    return ""
 
 
 def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dict[str, str]]:
@@ -3002,6 +3034,36 @@ class ChatModel:
                 )
                 return greeted
 
+            # 1a3. Gratitude / farewell — closing courtesy, same always-on
+            # short-circuit as greetings (no retrieval, never scored).
+            closing_reply = _closing_courtesy_reply(message)
+            if closing_reply:
+                closing = {
+                    "reply": closing_reply,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "greeting",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "greeting_agent",
+                    "next_actions": [
+                        "Ask about TIN registration",
+                        "Learn about VAT",
+                        "File a tax return",
+                    ],
+                }
+                self._audit_turn(
+                    message=message,
+                    result=closing,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return closing
+
             # 1b. Semantic cache check AFTER guardrails (Phase 5)
             if cache_allowed:
                 with trace_stage("cache_lookup", timings=timings):
@@ -3390,6 +3452,7 @@ class ChatModel:
                 return abstained
 
             # 5. Build response with citations
+            extractive_fallback = False
             if hits:
                 sources = list({h.get("source", "") for h in hits if h.get("source")})
                 citations = HybridRetriever.build_citations(hits)
@@ -3483,10 +3546,12 @@ class ChatModel:
                         # or the circuit breaker is open
                         best = hits[0]
                         reply = best.get("answer") or best.get("text", "")
+                        extractive_fallback = True
                 else:
                     # FAQ lookup fallback (no LLM configured)
                     best = hits[0]
                     reply = best.get("answer") or best.get("text", "")
+                    extractive_fallback = True
             else:
                 reply = NO_HITS_REPLY
                 if distress:
@@ -3684,9 +3749,17 @@ class ChatModel:
         result = self._finalize_result(result)
         reply = result["reply"]
 
-        # Store in semantic cache (Phase 5)
+        # Store in semantic cache (Phase 5) — a copy, so the empathy prefix
+        # below never reaches a later (possibly calm) user via a cache hit.
         if cache_allowed and retrieval_mode not in ("blocked", "abstained"):
-            self._cache.put(rewritten, result)
+            self._cache.put(rewritten, dict(result))
+
+        # EI parity for the extractive fallback: with every LLM tier down the
+        # tone_hint never reached a model, so carry the acknowledgment here —
+        # after scoring and caching, same as the deterministic branch above.
+        if distress and extractive_fallback and reply:
+            reply = f"{empathy_ack(distress)}\n\n{reply}"
+            result["reply"] = reply
 
         self._persist_personalization_turn(
             user_id=user_id,
@@ -3897,6 +3970,30 @@ class ChatModel:
         ):
             return {
                 "reply": GREETING_REPLY,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "greeting",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "greeting_agent",
+                "next_actions": [
+                    "Ask about TIN registration",
+                    "Learn about VAT",
+                    "File a tax return",
+                ],
+                "_hits": [],
+                "_history": [],
+            }
+
+        # Gratitude / farewell — parity with the REST path.
+        closing_reply = _closing_courtesy_reply(message)
+        if closing_reply:
+            return {
+                "reply": closing_reply,
                 "sources": [],
                 "citations": [],
                 "faithfulness_score": None,
@@ -4255,6 +4352,7 @@ class ChatModel:
             "_rewritten": rewritten,
             "_personalization_context": (personalization or {}).get("prompt_context", ""),
             "_tone_hint": tone_hint,
+            "_distress": distress,
         }
 
     @staticmethod

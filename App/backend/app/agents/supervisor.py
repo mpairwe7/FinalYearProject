@@ -215,6 +215,20 @@ _GREETING_PHRASES = {
     "good day",
 }
 
+# Closing courtesy — exact phrases only, so "thanks for nothing" (sarcasm)
+# and "thanks, but the portal is down" (a real problem) still reach the
+# distress detector and retrieval instead of a cheery sign-off.
+_GRATITUDE_PHRASES = {
+    "thanks", "thank you", "thank u", "thanks a lot", "thanks so much",
+    "thank you so much", "thank you very much", "many thanks",
+    "ok thanks", "okay thanks", "great thanks", "perfect thanks",
+    "asante", "asante sana", "webale", "weebale",
+}
+_FAREWELL_PHRASES = {
+    "bye", "goodbye", "good bye", "bye bye", "see you", "see you later",
+    "good night", "goodnight", "thanks bye", "thank you bye",
+}
+
 
 # ---------------------------------------------------------------------------
 # Supervisor
