@@ -721,27 +721,42 @@ _STORE_DIR = Path(
 _DOC_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 
 
-def _record_path(doc_id: str) -> Path:
-    return _STORE_DIR / f"{doc_id}.json"
+def _record_path(doc_id: str) -> Path | None:
+    """Resolve the spool path for a doc id, refusing anything outside the spool.
+
+    ``doc_id`` reaches this from user input (chat ``attachment_ids``, the
+    report URL), so beyond the hex-only format check the resolved path must
+    stay directly inside the spool directory (path-injection barrier).
+    """
+    if not _DOC_ID_RE.fullmatch(doc_id):
+        return None
+    path = (_STORE_DIR / f"{doc_id}.json").resolve()
+    if path.parent != _STORE_DIR.resolve():
+        return None
+    return path
 
 
 def _spool_write(record: DocumentRecord) -> None:
     """Mirror a record into the shared spool (best-effort)."""
+    path = _record_path(record.doc_id)
+    if path is None:
+        return
     try:
         _STORE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-        tmp = _record_path(record.doc_id).with_suffix(".tmp")
+        tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(asdict(record)))
         tmp.chmod(0o600)
-        tmp.replace(_record_path(record.doc_id))
+        tmp.replace(path)
     except OSError:
         logger.warning("document spool write failed (memory-only fallback)", exc_info=True)
 
 
 def _spool_read(doc_id: str) -> DocumentRecord | None:
-    if not _DOC_ID_RE.fullmatch(doc_id):
+    path = _record_path(doc_id)
+    if path is None:
         return None
     try:
-        raw = _record_path(doc_id).read_text()
+        raw = path.read_text()
     except OSError:
         return None
     try:
@@ -749,7 +764,7 @@ def _spool_read(doc_id: str) -> DocumentRecord | None:
         payload["tables"] = [TableSummary(**t) for t in payload.get("tables", [])]
         return DocumentRecord(**payload)
     except (TypeError, ValueError, KeyError):
-        logger.warning("document spool entry unreadable: %s", doc_id[:8], exc_info=True)
+        logger.warning("document spool entry unreadable", exc_info=True)
         return None
 
 
