@@ -1002,13 +1002,16 @@ def document_report(
     _ctx: AuthContext = Depends(optional_user),
 ) -> Response:
     """Download the branded PDF analysis report for an analysed document."""
-    from .pdf_export import generate_document_report_pdf
-
     record = documents.get_document(
         document_id, session_id=request.headers.get("X-Session-ID", "")
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Document not found or expired")
+
+    # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
+    # on a runtime without fpdf2.
+    from .pdf_export import generate_document_report_pdf
+
     pdf_bytes = generate_document_report_pdf(record.to_report_payload())
     return Response(
         content=pdf_bytes,
