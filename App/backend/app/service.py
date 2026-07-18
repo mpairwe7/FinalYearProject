@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import database as db
+from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
 from .agents.supervisor import (
@@ -919,6 +920,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
     granted_purposes: list[str] | None = None,
     conversation_history_override: list[dict[str, str]] | None = None,
     turn_deadline_s: float | None = None,
+    attachments: list[Any] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run a single chat turn and stream event tuples to the caller.
 
@@ -996,6 +998,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             user_id=user_id or None,
             tenant_id=tenant_id,
             conversation_history_override=conversation_history_override,
+            attachments=attachments,
         )
 
         yield (
@@ -2886,8 +2889,14 @@ class ChatModel:
         tenant_id: str | None = None,
         user_role: str = "public",
         granted_purposes: list[str] | None = None,
+        attachments: list[documents_module.DocumentRecord] | None = None,
     ) -> dict[str, Any]:
-        """Return a grounded, cited answer via hybrid retrieval + guardrails."""
+        """Return a grounded, cited answer via hybrid retrieval + guardrails.
+
+        ``attachments`` are pre-analysed documents (``documents.DocumentRecord``)
+        resolved by the endpoint from ``ChatRequest.attachment_ids``; their
+        extracted content is injected as top-priority grounding passages.
+        """
         t0 = time.perf_counter()
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
@@ -2925,7 +2934,9 @@ class ChatModel:
                         logger.info("Auto-detected locale: %s", locale)
 
             personalization = self._load_personalization_state(user_id)
-            cache_allowed = personalization is None
+            # Attachment turns are never cache-served or cache-stored: the answer
+            # is specific to the attached document, not the query text alone.
+            cache_allowed = personalization is None and not attachments
 
             # Emotional-intelligence signal for this turn: adapts the LLM
             # opening line (tone_hint) and prefixes deterministic replies
@@ -3319,8 +3330,18 @@ class ChatModel:
                         })
                         seen_texts.add(faq_text[:80])
 
+            # 3d. Attached documents — prepend as top-priority grounding hits.
+            #     They flow through the same LLM01 scrub + spotlight markers
+            #     as retrieved passages (llm._build_messages) and count as
+            #     grounding for faithfulness scoring. The raw user message
+            #     stays subject to the normal input guardrails above.
+            if attachments:
+                hits = documents_module.attachment_passages(attachments) + hits
+
             # 3c. Clarification check — ask for more details if query is ambiguous
-            clarification = needs_clarification(message, hits)
+            #     (skipped for attachment turns: "what is this?" is answerable
+            #     from the attached document, not ambiguous)
+            clarification = None if attachments else needs_clarification(message, hits)
             if clarification:
                 clarify_result = {
                     "reply": clarification,
@@ -3350,7 +3371,9 @@ class ChatModel:
             deterministic_curated = False
             deterministic_sources: list[str] = []
             deterministic_citations: list[dict[str, Any]] = []
-            if hits:
+            # Attachment turns always go to the LLM — a canned procedure
+            # template cannot read the attached document.
+            if hits and not attachments:
                 deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
                 deterministic_citations = HybridRetriever.build_citations(hits)
                 deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
@@ -3394,7 +3417,8 @@ class ChatModel:
 
             # 4. Calibrated abstention — refuse to answer when confidence too low
             with trace_stage("abstention_check", timings=timings):
-                should_abstain = self._output_guard.should_abstain(hits)
+                # Attached documents are always usable grounding — never abstain.
+                should_abstain = not attachments and self._output_guard.should_abstain(hits)
             if should_abstain:
                 reply = ABSTENTION_REPLY
                 if distress:
@@ -3851,6 +3875,7 @@ class ChatModel:
         user_id: str | None = None,
         tenant_id: str | None = None,
         conversation_history_override: list[dict[str, str]] | None = None,
+        attachments: list[documents_module.DocumentRecord] | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
@@ -3893,7 +3918,9 @@ class ChatModel:
                 logger.info("Auto-detected locale: %s (streaming)", locale)
 
         personalization = self._load_personalization_state(user_id)
-        cache_allowed = personalization is None
+        # Attachment turns are never cache-served or cache-stored: the answer
+        # is specific to the attached document, not the query text alone.
+        cache_allowed = personalization is None and not attachments
 
         # Emotional-intelligence signal (parity with generate()): tone hint
         # for the LLM stream, empathy prefix for deterministic short-circuits.
@@ -4171,8 +4198,13 @@ class ChatModel:
                 })
                 seen_texts.add(faq_text[:80])
 
-        # Clarification check (Phase 6)
-        clarification = needs_clarification(message, hits)
+        # Attached documents — prepend as top-priority grounding hits
+        # (parity with generate(); see the comment there).
+        if attachments:
+            hits = documents_module.attachment_passages(attachments) + hits
+
+        # Clarification check (Phase 6) — skipped for attachment turns
+        clarification = None if attachments else needs_clarification(message, hits)
         if clarification:
             return {
                 "reply": clarification,
@@ -4196,7 +4228,8 @@ class ChatModel:
         # Deterministic procedural fast path — parity with the REST path so
         # curated KB answers stream with their real (high) faithfulness
         # instead of being re-synthesised and re-scored via the LLM.
-        if hits:
+        # Attachment turns always go to the LLM (templates can't read docs).
+        if hits and not attachments:
             deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
             deterministic_citations = HybridRetriever.build_citations(hits)
             deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
@@ -4226,7 +4259,7 @@ class ChatModel:
                     "_short_circuit": True,
                 }
 
-        if self._output_guard.should_abstain(hits):
+        if not attachments and self._output_guard.should_abstain(hits):
             reply = ABSTENTION_REPLY
             if distress:
                 reply = f"{empathy_ack(distress)}\n\n{reply}"
@@ -4369,10 +4402,17 @@ class ChatModel:
         Persisted alongside the conversation so the eval harness can score
         faithfulness against the ACTUAL retrieved context instead of the
         answer itself. Returns ``"[]"`` when no hits are available. Passages
-        are knowledge-base text (not user PII), so they are stored verbatim.
+        are knowledge-base text (not user PII), so they are stored verbatim —
+        EXCEPT attachment passages, which carry user document content and are
+        replaced by a placeholder (analytics.db must never hold them).
         """
         hits = (result or {}).get("_hits") or []
-        texts = [str(h.get("text") or h.get("answer") or "").strip() for h in hits[:limit]]
+        texts = []
+        for h in hits[:limit]:
+            if h.get("doc_type") == "attachment":
+                texts.append(f"[user attachment: {h.get('source') or 'attached:document'}]")
+            else:
+                texts.append(str(h.get("text") or h.get("answer") or "").strip())
         try:
             return json.dumps([t for t in texts if t])
         except Exception:

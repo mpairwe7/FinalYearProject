@@ -25,6 +25,7 @@ from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
 
 from . import database as db
+from . import documents
 from .analytics import AnalyticsMiddleware, metrics
 from .authority import authority_required, get_authority_status
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
@@ -39,6 +40,7 @@ from .models import (
     Citation,
     ClassifyRequest,
     ClassifyResponse,
+    DocumentAnalysisResponse,
     ExportConversationRequest,
     ExportTaxSummaryRequest,
     FAQResponse,
@@ -581,6 +583,7 @@ def chat(
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
 
+    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
     result = model.generate(
         message=body.message,
         conversation_id=body.conversation_id,
@@ -592,6 +595,7 @@ def chat(
         tenant_id=ctx.tenant_id,
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
+        attachments=attachments or None,
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -667,6 +671,7 @@ async def chat_stream(
 
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
+    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
 
     async def event_generator():
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
@@ -687,6 +692,7 @@ async def chat_stream(
             sentence_batching=True,  # SSE keeps historical behaviour
             user_role=getattr(ctx, "role", "public"),
             granted_purposes=getattr(ctx, "granted_purposes", []) or [],
+            attachments=attachments or None,
         ):
             if event_type == "_keepalive":
                 yield {
@@ -923,6 +929,94 @@ def export_tax_summary(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="ura_tax_summary_{int(time.time())}.pdf"',
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Document attachments (analysis + report)
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/v1/documents/analyze",
+    response_model=DocumentAnalysisResponse,
+    tags=["documents"],
+)
+@limiter.limit(_RATE_LIMIT)
+async def analyze_uploaded_document(
+    request: Request,
+    ctx: AuthContext = Depends(optional_user),
+) -> DocumentAnalysisResponse:
+    """Analyse an uploaded document (PDF, DOCX, XLSX, CSV, image, or text).
+
+    Accepts multipart/form-data with a single ``file`` part. Extracts text
+    and tables, classifies the document against the URA taxonomy, and pulls
+    URA-specific fields (TINs, UGX amounts, dates, references).
+
+    The returned ``document_id`` can be passed in chat ``attachment_ids``
+    to ground answers on the document, and used with
+    ``GET /v1/documents/{document_id}/report`` to download a PDF report.
+    Documents are held in memory only and expire after a TTL.
+    """
+    import asyncio
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or isinstance(upload, str):
+        raise HTTPException(status_code=422, detail="Missing 'file' part in form data")
+
+    data = await upload.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    if len(data) > documents.MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {documents.MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
+        )
+
+    session_id = request.headers.get("X-Session-ID", "")
+    try:
+        record = await asyncio.to_thread(
+            documents.analyze_document,
+            data,
+            upload.filename or "document",
+            upload.content_type or "",
+            session_id=session_id,
+            user_id=ctx.user_id or "",
+        )
+    except documents.UnsupportedDocumentError as err:
+        raise HTTPException(status_code=415, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+    metrics.inc("documents_analyzed_total")
+    return DocumentAnalysisResponse(**record.to_response_payload())
+
+
+@app.get("/v1/documents/{document_id}/report", tags=["documents"])
+@limiter.limit(_RATE_LIMIT)
+def document_report(
+    request: Request,
+    document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
+    _ctx: AuthContext = Depends(optional_user),
+) -> Response:
+    """Download the branded PDF analysis report for an analysed document."""
+    from .pdf_export import generate_document_report_pdf
+
+    record = documents.get_document(
+        document_id, session_id=request.headers.get("X-Session-ID", "")
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found or expired")
+    pdf_bytes = generate_document_report_pdf(record.to_report_payload())
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="ura_document_report_{document_id[:8]}.pdf"'
+            ),
         },
     )
 

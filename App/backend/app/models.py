@@ -19,6 +19,11 @@ class ChatRequest(BaseModel):
     locale: str = Field(
         "en", pattern=r"^[a-z]{2}(-[A-Z]{2})?$", description="ISO 639-1 locale (e.g. en, lg)"
     )
+    attachment_ids: list[Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Ids of analysed documents (POST /v1/documents/analyze) to ground this turn",
+    )
 
 
 class Citation(BaseModel):
@@ -352,6 +357,57 @@ class ExportConversationRequest(BaseModel):
 class ExportTaxSummaryRequest(BaseModel):
     calculation: dict = Field(..., description="Tax calculation with items[] and total")
     taxpayer_ref: str = Field("", max_length=50)
+
+
+# ---------------------------------------------------------------------------
+# Document attachments
+# ---------------------------------------------------------------------------
+class DocumentFields(BaseModel):
+    """URA-specific fields extracted from an attached document."""
+
+    tins: list[str] = Field(default_factory=list, description="Uganda TIN numbers found")
+    amounts: list[str] = Field(default_factory=list, description="UGX currency amounts found")
+    dates: list[str] = Field(default_factory=list, description="Date strings found")
+    references: list[str] = Field(
+        default_factory=list, description="URA reference/assessment numbers found"
+    )
+
+
+class DocumentTableSummary(BaseModel):
+    """Compact summary of one table or spreadsheet sheet."""
+
+    name: str
+    rows: int = Field(0, ge=0)
+    cols: int = Field(0, ge=0)
+    headers: list[str] = Field(default_factory=list)
+    numeric_totals: dict[str, float] = Field(
+        default_factory=dict, description="Per-column totals for numeric columns"
+    )
+
+
+class DocumentAnalysisResponse(BaseModel):
+    """Result of POST /v1/documents/analyze."""
+
+    document_id: str = Field(..., description="Opaque id used in chat attachment_ids")
+    filename: str
+    kind: str = Field(..., description="pdf | docx | xlsx | csv | image | text")
+    size_bytes: int = Field(0, ge=0)
+    doc_type: str = Field(
+        "generic",
+        description=(
+            "receipt | tin_card | assessment | customs_declaration | "
+            "filing_form | invoice | generic"
+        ),
+    )
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Classification confidence")
+    matched_keywords: list[str] = Field(default_factory=list)
+    fields: DocumentFields = Field(default_factory=DocumentFields)
+    tables: list[DocumentTableSummary] = Field(default_factory=list)
+    text_preview: str = Field("", description="First characters of the extracted text")
+    truncated: bool = Field(False, description="Whether extracted text was truncated")
+    summary: str = Field("", description="Heuristic analysis summary")
+    warnings: list[str] = Field(default_factory=list)
+    expires_in_seconds: int = Field(0, ge=0, description="TTL until the document is purged")
 
 
 # ---------------------------------------------------------------------------
