@@ -721,28 +721,15 @@ _STORE_DIR = Path(
 _DOC_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 
 
-def _record_path(doc_id: str) -> Path | None:
-    """Resolve the spool path for a doc id, refusing anything outside the spool.
-
-    ``doc_id`` reaches this from user input (chat ``attachment_ids``, the
-    report URL), so beyond the hex-only format check the resolved path must
-    stay directly inside the spool directory (path-injection barrier).
-    """
-    if not _DOC_ID_RE.fullmatch(doc_id):
-        return None
-    path = (_STORE_DIR / f"{doc_id}.json").resolve()
-    if path.parent != _STORE_DIR.resolve():
-        return None
-    return path
-
-
 def _spool_write(record: DocumentRecord) -> None:
-    """Mirror a record into the shared spool (best-effort)."""
-    path = _record_path(record.doc_id)
-    if path is None:
-        return
+    """Mirror a record into the shared spool (best-effort).
+
+    ``record.doc_id`` is server-generated (``uuid.uuid4().hex`` in
+    :func:`analyze_document`), never user input, so it is safe in a path.
+    """
     try:
         _STORE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = _STORE_DIR / f"{record.doc_id}.json"
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(asdict(record)))
         tmp.chmod(0o600)
@@ -752,7 +739,23 @@ def _spool_write(record: DocumentRecord) -> None:
 
 
 def _spool_read(doc_id: str) -> DocumentRecord | None:
-    path = _record_path(doc_id)
+    """Fetch a spool entry for a (user-supplied) doc id.
+
+    The id arrives from user input (chat ``attachment_ids``, the report
+    URL), so no path is ever built from it: the entry is selected by
+    comparing directory-listing names against the expected filename.
+    """
+    if not _DOC_ID_RE.fullmatch(doc_id):
+        return None
+    expected_name = f"{doc_id}.json"
+    path: Path | None = None
+    try:
+        for entry in _STORE_DIR.iterdir():
+            if entry.name == expected_name:
+                path = entry
+                break
+    except OSError:
+        return None
     if path is None:
         return None
     try:
