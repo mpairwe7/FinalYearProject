@@ -9,11 +9,12 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-49a1b53 = dev merge of PR #143: EI parity on the extractive
-# fallback, input-guard precision (smuggling/whistleblowing FAQs answer,
-# solicitation still blocks), gratitude/farewell closing courtesy, and
-# memory/audit tables created in init_db — on top of #141 and earlier.
-FROM landwind/ura-chatbot:sha-49a1b53
+# image. sha-d8a9db1 = dev merge of PR #152: document attachments — chat
+# uploads (PDF/DOCX/XLSX/CSV/image/TXT) with extraction, URA classification,
+# field analysis, grounded answers, and per-document branded PDF reports
+# (POST /v1/documents/analyze, GET /v1/documents/{id}/report) — on top of
+# #143 and earlier.
+FROM landwind/ura-chatbot:sha-d8a9db1
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
