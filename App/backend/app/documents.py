@@ -6,8 +6,13 @@ taxonomy (``vision.document_classifier``), pulls URA-specific fields (TINs,
 UGX amounts, dates, reference numbers via ``vision.ocr``), and builds a
 structured analysis that feeds chat grounding and PDF report generation.
 
-Storage is an in-process TTL registry keyed by an unguessable id — documents
-are transient chat context, never persisted to disk or the analytics DB.
+Storage is a TTL registry keyed by an unguessable id: an in-process dict
+fast path backed by an ephemeral JSON file store in the container's temp
+dir, so all uvicorn workers of one container see the same documents
+(``UVICORN_WORKERS=2`` in the deployed image — uploads and chat turns land
+on different workers). Documents are transient chat context: they expire
+after the TTL, die with the container, and are never written to the
+analytics database.
 
 All third-party extractors (PyMuPDF, python-docx, openpyxl, Pillow, OCR)
 are lazy-imported and failure-guarded so the slim Crane Cloud profile
@@ -22,14 +27,17 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import os
 import re
+import tempfile
 import threading
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .vision.document_classifier import classify_document
@@ -690,11 +698,75 @@ def analyze_document(
 
 
 # ---------------------------------------------------------------------------
-# TTL registry
+# TTL registry — in-process dict + shared ephemeral file spool
 # ---------------------------------------------------------------------------
+#
+# The deployed image runs uvicorn with multiple workers (UVICORN_WORKERS=2
+# in Dockerfile.cranecloud) and consecutive requests round-robin across
+# them: the upload can land on worker A and the chat/report request on
+# worker B. A pure in-process dict silently loses the attachment in that
+# case (live-verified on the HF Space), so every stored record is mirrored
+# as a JSON file in an ephemeral per-container spool directory (0600,
+# unguessable doc-id filename, TTL-purged, dies with the container). The
+# dict stays the fast path; a miss falls through to the spool.
 
 _registry: OrderedDict[str, DocumentRecord] = OrderedDict()
 _registry_lock = threading.Lock()
+
+_STORE_DIR = Path(
+    os.getenv("DOCUMENT_STORE_DIR", "")
+    or Path(tempfile.gettempdir()) / "ura_document_store"
+)
+
+_DOC_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+
+
+def _record_path(doc_id: str) -> Path:
+    return _STORE_DIR / f"{doc_id}.json"
+
+
+def _spool_write(record: DocumentRecord) -> None:
+    """Mirror a record into the shared spool (best-effort)."""
+    try:
+        _STORE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        tmp = _record_path(record.doc_id).with_suffix(".tmp")
+        tmp.write_text(json.dumps(asdict(record)))
+        tmp.chmod(0o600)
+        tmp.replace(_record_path(record.doc_id))
+    except OSError:
+        logger.warning("document spool write failed (memory-only fallback)", exc_info=True)
+
+
+def _spool_read(doc_id: str) -> DocumentRecord | None:
+    if not _DOC_ID_RE.fullmatch(doc_id):
+        return None
+    try:
+        raw = _record_path(doc_id).read_text()
+    except OSError:
+        return None
+    try:
+        payload = json.loads(raw)
+        payload["tables"] = [TableSummary(**t) for t in payload.get("tables", [])]
+        return DocumentRecord(**payload)
+    except (TypeError, ValueError, KeyError):
+        logger.warning("document spool entry unreadable: %s", doc_id[:8], exc_info=True)
+        return None
+
+
+def _spool_purge() -> None:
+    """Drop expired spool entries and enforce the size cap (best-effort)."""
+    try:
+        entries = sorted(_STORE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return
+    now = time.time()
+    excess = len(entries) - DOCUMENT_REGISTRY_MAX
+    for i, path in enumerate(entries):
+        try:
+            if i < excess or now - path.stat().st_mtime > DOCUMENT_TTL_SECONDS:
+                path.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 def _store(record: DocumentRecord) -> None:
@@ -704,6 +776,8 @@ def _store(record: DocumentRecord) -> None:
         _registry.move_to_end(record.doc_id)
         while len(_registry) > DOCUMENT_REGISTRY_MAX:
             _registry.popitem(last=False)
+    _spool_write(record)
+    _spool_purge()
 
 
 def _purge_expired_locked() -> None:
@@ -718,6 +792,15 @@ def get_document(doc_id: str, *, session_id: str = "") -> DocumentRecord | None:
     with _registry_lock:
         _purge_expired_locked()
         record = _registry.get(doc_id)
+    if record is None:
+        # Another worker may have analysed it — check the shared spool.
+        record = _spool_read(doc_id)
+        if record is not None and time.time() - record.created_at > DOCUMENT_TTL_SECONDS:
+            record = None
+        if record is not None:
+            with _registry_lock:
+                _registry[record.doc_id] = record
+                _registry.move_to_end(record.doc_id)
     if record is None:
         return None
     if record.session_id and record.session_id != (session_id or ""):

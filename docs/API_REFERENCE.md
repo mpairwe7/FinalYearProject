@@ -1191,8 +1191,9 @@ Generates IEEE-standard PNG figures and tables for project reports.
 
 Chat attachment endpoints: upload a document for analysis, ground chat
 answers on it, and download a branded PDF analysis report. Documents are
-held in memory only (TTL ~2 h) and are bound to the uploading
-`X-Session-ID`; they are never persisted to disk or the analytics DB.
+held in ephemeral container storage shared across the app's worker
+processes (TTL ~2 h, dies with the container) and are bound to the
+uploading `X-Session-ID`; they are never written to the analytics DB.
 
 ---
 
