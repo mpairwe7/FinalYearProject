@@ -9,12 +9,12 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-d8a9db1 = dev merge of PR #152: document attachments — chat
-# uploads (PDF/DOCX/XLSX/CSV/image/TXT) with extraction, URA classification,
-# field analysis, grounded answers, and per-document branded PDF reports
-# (POST /v1/documents/analyze, GET /v1/documents/{id}/report) — on top of
-# #143 and earlier.
-FROM landwind/ura-chatbot:sha-d8a9db1
+# image. sha-ae4df29 = dev merge of PR #154: fpdf2 + Pillow declared (all
+# PDF endpoints previously 500'd — fpdf2 was never in the image) and the
+# attachment registry mirrored to a shared spool so UVICORN_WORKERS=2
+# workers see the same documents — on top of #152 (document attachments)
+# and earlier.
+FROM landwind/ura-chatbot:sha-ae4df29
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
