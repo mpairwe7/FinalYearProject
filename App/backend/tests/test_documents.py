@@ -15,8 +15,11 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import shutil
+import tempfile
 import unittest
 import unittest.mock as mock
+from pathlib import Path
 
 # Env must be set before importing app.* (read at import time).
 os.environ.setdefault("LLM_ENABLED", "false")
@@ -57,13 +60,20 @@ def _analyze_receipt(session_id: str = "") -> documents.DocumentRecord:
 
 
 class _RegistryIsolation(unittest.TestCase):
-    """Clear the module-global registry around every test."""
+    """Isolate the in-memory registry AND the shared file spool per test."""
 
     def setUp(self) -> None:
+        self._spool_dir = tempfile.mkdtemp(prefix="ura-doc-test-")
+        self._spool_patch = mock.patch.object(
+            documents, "_STORE_DIR", Path(self._spool_dir)
+        )
+        self._spool_patch.start()
         with documents._registry_lock:
             documents._registry.clear()
 
     def tearDown(self) -> None:
+        self._spool_patch.stop()
+        shutil.rmtree(self._spool_dir, ignore_errors=True)
         with documents._registry_lock:
             documents._registry.clear()
 
@@ -198,7 +208,32 @@ class RegistryTest(_RegistryIsolation):
     def test_ttl_expiry(self):
         record = _analyze_receipt()
         record.created_at -= documents.DOCUMENT_TTL_SECONDS + 5
+        # Age the spool mirror too (both copies must expire together).
+        documents._spool_write(record)
         self.assertIsNone(documents.get_document(record.doc_id))
+
+    def test_cross_worker_lookup_via_spool(self):
+        """A record stored by one worker is visible from a fresh process.
+
+        The deployed image runs UVICORN_WORKERS=2; simulate the second
+        worker by clearing this process's in-memory dict and fetching
+        through the shared spool.
+        """
+        record = _analyze_receipt(session_id="sess-w")
+        with documents._registry_lock:
+            documents._registry.clear()
+        fetched = documents.get_document(record.doc_id, session_id="sess-w")
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched.doc_id, record.doc_id)
+        self.assertEqual(fetched.text, record.text)
+        self.assertEqual(fetched.fields, record.fields)
+        self.assertEqual(
+            [t.name for t in fetched.tables], [t.name for t in record.tables]
+        )
+        # Session binding survives the spool round-trip.
+        with documents._registry_lock:
+            documents._registry.clear()
+        self.assertIsNone(documents.get_document(record.doc_id, session_id="other"))
 
     def test_registry_size_cap_evicts_oldest(self):
         with mock.patch.object(documents, "DOCUMENT_REGISTRY_MAX", 2):
