@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ChatInput from "../../components/ChatInput";
+import type { PendingAttachment } from "../../lib/attachments";
 
 const defaults = {
   message: "",
@@ -80,5 +81,56 @@ describe("ChatInput", () => {
     render(<ChatInput {...defaults} isRecording />);
     expect(screen.getByLabelText("Cancel recording")).toBeInTheDocument();
     expect(screen.getByLabelText("Send recording")).toBeInTheDocument();
+  });
+});
+
+describe("ChatInput attachments", () => {
+  const readyAttachment: PendingAttachment = {
+    clientId: "c1",
+    name: "receipt.pdf",
+    sizeBytes: 2048,
+    status: "ready",
+    documentId: "d".repeat(32),
+    docType: "receipt",
+  };
+
+  it("renders the attach button only when onAttachFiles is provided", () => {
+    const { unmount } = render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
+    expect(screen.getByLabelText(/Attach a document/)).toBeInTheDocument();
+    unmount();
+    render(<ChatInput {...defaults} />);
+    expect(screen.queryByLabelText(/Attach a document/)).not.toBeInTheDocument();
+  });
+
+  it("renders ready chips with doc type and fires remove", async () => {
+    const onRemove = vi.fn();
+    render(
+      <ChatInput
+        {...defaults}
+        onAttachFiles={vi.fn()}
+        onRemoveAttachment={onRemove}
+        attachments={[readyAttachment]}
+      />,
+    );
+    expect(screen.getByText("receipt.pdf")).toBeInTheDocument();
+    expect(screen.getByText(/Receipt/)).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("Remove receipt.pdf"));
+    expect(onRemove).toHaveBeenCalledWith("c1");
+  });
+
+  it("marks failed uploads and disables send while analysing", () => {
+    render(
+      <ChatInput
+        {...defaults}
+        message="What is this?"
+        onAttachFiles={vi.fn()}
+        attachments={[
+          { ...readyAttachment, clientId: "c2", status: "error", error: "Over the 10 MB limit" },
+          { ...readyAttachment, clientId: "c3", status: "uploading" },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Over the 10 MB limit")).toBeInTheDocument();
+    expect(screen.getByLabelText("Analysing attachment...")).toBeDisabled();
   });
 });

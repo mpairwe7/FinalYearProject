@@ -1187,6 +1187,70 @@ Generates IEEE-standard PNG figures and tables for project reports.
 
 ---
 
+### Document Attachments
+
+Chat attachment endpoints: upload a document for analysis, ground chat
+answers on it, and download a branded PDF analysis report. Documents are
+held in memory only (TTL ~2 h) and are bound to the uploading
+`X-Session-ID`; they are never persisted to disk or the analytics DB.
+
+---
+
+#### Analyze Uploaded Document
+
+```http
+POST /v1/documents/analyze
+```
+
+`multipart/form-data` with a single `file` part. Supported: PDF, DOCX,
+XLSX/XLSM, CSV, TXT, and images (PNG/JPEG/WebP/BMP/TIFF, OCR best-effort).
+Max 10 MB. Extracts text and tables, classifies the document against the
+URA taxonomy (receipt, tin_card, assessment, customs_declaration,
+filing_form, invoice, generic), and pulls TINs, UGX amounts, dates, and
+reference numbers.
+
+**Response** `200`
+```json
+{
+  "document_id": "3f2a…(32 hex)",
+  "filename": "receipt.pdf",
+  "kind": "pdf",
+  "doc_type": "receipt",
+  "confidence": 0.92,
+  "fields": {"tins": ["1001234567"], "amounts": ["UGX 1,250,000"], "dates": [], "references": []},
+  "tables": [],
+  "text_preview": "…",
+  "summary": "Payment receipt (92% classification confidence). …",
+  "warnings": [],
+  "expires_in_seconds": 7200
+}
+```
+
+Errors: `413` over size limit, `415` unsupported type, `422` empty/missing file.
+
+To ground a chat turn on the document, pass the id in the chat request:
+`{"message": "…", "attachment_ids": ["<document_id>"]}` (max 3, both
+`/v1/chat` and `/v1/chat/stream`). Attachment turns bypass the semantic
+cache, clarification, and abstention; the extracted content is injected as
+top-priority grounded passages (same prompt-injection scrubbing as
+retrieved passages) and appears in `sources` as `attached:<filename>`.
+
+---
+
+#### Download Document Analysis Report
+
+```http
+GET /v1/documents/{document_id}/report
+```
+
+Requires the same `X-Session-ID` the document was uploaded with.
+
+**Response**: `application/pdf` binary stream (branded analysis report:
+classification, extracted fields, table totals, summary, content excerpt).
+`404` when the document is unknown, expired, or session-mismatched.
+
+---
+
 ### Evaluation
 
 RAG quality evaluation endpoints. The evaluate endpoint is operator-only.

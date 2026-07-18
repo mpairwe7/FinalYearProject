@@ -4,7 +4,7 @@ This module is the completeness guarantee for the HTTP/WS API surface. It has
 three jobs:
 
 1. **Drift guard** (``test_route_table_matches_manifest``) — enumerates the live
-   ``app.routes`` table and asserts it equals a hand-declared manifest of all 49
+   ``app.routes`` table and asserts it equals a hand-declared manifest of all 51
    application endpoints. Add or remove a route without updating the manifest and
    this test fails, so the surface can never silently grow untested.
 
@@ -122,6 +122,9 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Export (PDF) ---
     ("POST", "/v1/export/conversation"),
     ("POST", "/v1/export/tax-summary"),
+    # --- Document attachments ---
+    ("POST", "/v1/documents/analyze"),
+    ("GET", "/v1/documents/{document_id}/report"),
     # --- Identity / consent (/v1/me) ---
     ("GET", "/v1/me"),
     ("DELETE", "/v1/me"),
@@ -179,6 +182,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/evaluation/results"): "this:test_evaluation_results_admin + test_evaluation_results_requires_admin",
     ("POST", "/v1/export/conversation"): "this:test_export_conversation_pdf",
     ("POST", "/v1/export/tax-summary"): "this:test_export_tax_summary_pdf",
+    ("POST", "/v1/documents/analyze"): "test_documents.DocumentEndpointsTest",
+    ("GET", "/v1/documents/{document_id}/report"): "test_documents.DocumentEndpointsTest",
     ("GET", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("DELETE", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("GET", "/v1/me/profile"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
@@ -322,10 +327,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (46 HTTP + 3 WS)."""
+    """Lock the surface size so additions are deliberate (48 HTTP + 3 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 46, f"expected 46 HTTP endpoints, found {len(http)}"
+    assert len(http) == 48, f"expected 48 HTTP endpoints, found {len(http)}"
     assert len(ws) == 3, f"expected 3 WS endpoints, found {len(ws)}"
 
 

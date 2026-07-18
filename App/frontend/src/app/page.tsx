@@ -23,6 +23,11 @@ import {
   voiceChat,
 } from '../services/voiceService';
 import { authHeaders } from '../lib/authSession';
+import {
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+  PendingAttachment,
+} from '../lib/attachments';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
 import ConversationRail from '../components/ConversationRail';
@@ -127,6 +132,9 @@ export default function Page() {
 
   // Sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Document attachments awaiting the next chat turn
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
 
   // Voice state
   const [autoNarrate, setAutoNarrate] = useState(false);
@@ -323,23 +331,96 @@ export default function Page() {
     }
   }, [chat, autoNarrate, isLoading, handleListenToReply]);
 
+  // ---- Document attachments ----
+
+  const uploadAttachment = useCallback(async (file: File, clientId: string) => {
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      // No Content-Type header — the browser sets the multipart boundary.
+      const res = await fetch(`${API_URL}/v1/documents/analyze`, {
+        method: 'POST',
+        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+        body: form,
+      });
+      if (!res.ok) {
+        let detail = `Upload failed (${res.status})`;
+        try {
+          const body = await res.json();
+          if (typeof body.detail === 'string') detail = body.detail;
+        } catch { /* non-JSON error body */ }
+        throw new Error(detail);
+      }
+      const analysis = await res.json();
+      setPendingAttachments((prev) => prev.map((a) => (
+        a.clientId === clientId
+          ? { ...a, status: 'ready', documentId: analysis.document_id, docType: analysis.doc_type }
+          : a
+      )));
+    } catch (err) {
+      trackErrorOccurred('document_upload_failed');
+      setPendingAttachments((prev) => prev.map((a) => (
+        a.clientId === clientId
+          ? { ...a, status: 'error', error: err instanceof Error ? err.message : 'Upload failed' }
+          : a
+      )));
+    }
+  }, []);
+
+  const attachFiles = useCallback((files: FileList) => {
+    const room = MAX_ATTACHMENTS - pendingAttachments.length;
+    if (room <= 0) return;
+    const chips: PendingAttachment[] = [];
+    for (const file of Array.from(files).slice(0, room)) {
+      const clientId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const oversize = file.size > MAX_ATTACHMENT_BYTES;
+      chips.push({
+        clientId,
+        name: file.name,
+        sizeBytes: file.size,
+        status: oversize ? 'error' : 'uploading',
+        error: oversize ? 'Over the 10 MB limit' : undefined,
+      });
+      if (!oversize) void uploadAttachment(file, clientId);
+    }
+    if (chips.length) setPendingAttachments((prev) => [...prev, ...chips]);
+  }, [pendingAttachments.length, uploadAttachment]);
+
+  const removeAttachment = useCallback((clientId: string) => {
+    setPendingAttachments((prev) => prev.filter((a) => a.clientId !== clientId));
+  }, []);
+
   // ---- Text chat (SSE) ----
 
   const sendMessage = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? message).trim();
     if (!text || isLoading) return;
+    // Enter can fire while an upload is analysing — wait for it to settle.
+    if (pendingAttachments.some((a) => a.status === 'uploading')) return;
+    const sentAttachments = pendingAttachments
+      .filter((a) => a.status === 'ready' && a.documentId)
+      .map((a) => ({ id: a.documentId as string, name: a.name, docType: a.docType }));
     const conversationId = activeConversationId ?? ensureActiveConversationId();
     shouldStickToBottomRef.current = true;
     setShowScrollToLatest(false);
-    addTurns([createTurn('user', text)]);
+    addTurns([
+      createTurn('user', text, sentAttachments.length ? { attachments: sentAttachments } : undefined),
+    ]);
     setMessage('');
+    setPendingAttachments([]);
     setIsLoading(true);
     lastUserQueryRef.current = text;
     trackChatSent(text.length);
     const t0 = Date.now();
     const ac = new AbortController();
     const timeout = setTimeout(() => ac.abort(), 120_000);
-    const requestBody = JSON.stringify({ message: text, conversation_id: conversationId, top_k: 4, locale });
+    const requestBody = JSON.stringify({
+      message: text,
+      conversation_id: conversationId,
+      top_k: 4,
+      locale,
+      ...(sentAttachments.length ? { attachment_ids: sentAttachments.map((a) => a.id) } : {}),
+    });
     const requestHeaders = authHeaders({
       'Content-Type': 'application/json',
       'X-Session-ID': getAnalyticsSessionId(),
@@ -487,7 +568,7 @@ export default function Page() {
       setIsLoading(false);
       saveCurrentSession();
     }
-  }, [message, isLoading, locale, activeConversationId, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
+  }, [message, isLoading, locale, activeConversationId, pendingAttachments, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
 
   // ---- Voice input ----
 
@@ -604,6 +685,9 @@ export default function Page() {
       shouldStickToBottomRef.current = true;
       window.setTimeout(() => scrollToBottom('smooth'), 80);
     },
+    attachments: pendingAttachments,
+    onAttachFiles: attachFiles,
+    onRemoveAttachment: removeAttachment,
   };
 
   // ---- Render ----
