@@ -31,7 +31,7 @@ on:
       image_tag:
         description: "Image tag to roll Crane Cloud to"
         required: false
-        default: "sha-49a1b53"
+        default: "sha-ae4df29"
 
 permissions:
   actions: write   # dispatch the deploy workflow + disable this one
@@ -43,7 +43,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TARGET_TAG: ${{ inputs.image_tag || 'sha-49a1b53' }}
+  TARGET_TAG: ${{ inputs.image_tag || 'sha-ae4df29' }}
   APP_URL: https://ura-chatbot-6318a1b5.renu-01.cranecloud.io
   DEPLOY_WORKFLOW: ura-chatbot-deploy-cranecloud.yml
   GH_TOKEN: ${{ github.token }}
