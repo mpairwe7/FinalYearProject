@@ -30,6 +30,7 @@ import contextlib
 import json as _json
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -46,6 +47,55 @@ CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "3600"))
 CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "1000"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CACHE_REDIS_PREFIX = os.getenv("CACHE_REDIS_PREFIX", "ura:cache:")
+
+_CACHE_QUERY_STOPWORDS = frozenset(
+    "a an the is are was were be been am do does did will would can could may "
+    "might must have has had of in on at to for with by from and or not no "
+    "but so if then than that this these those it its i me my we our you your "
+    "what which who whom how when where why about current details information "
+    "please tell know like want".split()
+)
+_CACHE_TERM_ALIASES = {
+    "applications": "application",
+    "deadlines": "deadline",
+    "documents": "document",
+    "filing": "file",
+    "filings": "file",
+    "imports": "import",
+    "penalties": "penalty",
+    "payments": "payment",
+    "rates": "rate",
+    "returns": "return",
+    "taxes": "tax",
+    "thresholds": "threshold",
+    "vehicles": "vehicle",
+}
+
+
+def _query_terms(text: str) -> set[str]:
+    return {
+        _CACHE_TERM_ALIASES.get(token, token)
+        for token in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if token not in _CACHE_QUERY_STOPWORDS
+    }
+
+
+def _cache_queries_compatible(query: str, cached_query: str) -> bool:
+    """Reject semantic-cache hits that do not share the requested subject.
+
+    Embedding similarity is useful for paraphrases but can be dangerously high
+    for neighbouring FAQ intents (for example, a VAT rate and a VAT threshold).
+    A small lexical binding check makes cache reuse fail closed for those cases.
+    """
+    requested = _query_terms(query)
+    cached = _query_terms(cached_query)
+    if not requested or not cached:
+        return False
+    overlap = len(requested & cached)
+    # Two shared terms are required for normal multi-term questions.  Sharing
+    # only "VAT" must not make a rate answer eligible for a threshold query.
+    required = 1 if max(len(requested), len(cached)) <= 1 else 2
+    return overlap >= required
 
 
 @dataclass
@@ -113,6 +163,8 @@ class SemanticCache:
             for entry in self._entries:
                 # Must match locale
                 if entry.response.get("locale") != locale:
+                    continue
+                if not _cache_queries_compatible(query, entry.query):
                     continue
                 sim = self._cosine_sim(embedding, entry.embedding)
                 if sim > best_sim:
@@ -232,6 +284,9 @@ class RedisSemanticCache:
                     continue
                 entry_locale = data.get(b"locale", b"en").decode("utf-8", "ignore")
                 if entry_locale != locale:
+                    continue
+                entry_query = data.get(b"query", b"").decode("utf-8", "ignore")
+                if not _cache_queries_compatible(query, entry_query):
                     continue
                 emb_b64 = data.get(b"embedding")
                 if not emb_b64:
