@@ -35,6 +35,8 @@ from .models import (
     AnalyticsEvent,
     BatchClassifyRequest,
     BatchClassifyResponse,
+    CFRelayEmbedRequest,
+    CFRelayVectorizeQueryRequest,
     ChatRequest,
     ChatResponse,
     Citation,
@@ -1375,6 +1377,24 @@ def _require_ops_key(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Invalid or missing INDEX_API_KEY")
 
 
+def _require_relay_key(request: Request) -> None:
+    """Require the configured bearer token for the Cloudflare relay endpoints.
+
+    Deliberately a separate secret from ``INDEX_API_KEY`` — this endpoint lets
+    another deployment (e.g. the HF Space, when its own egress to Cloudflare
+    is blocked) make Cloudflare calls through this one, so it gets its own
+    credential rather than reusing an unrelated operator key.
+    """
+    from .providers.config import get_cloud_settings
+
+    secret = get_cloud_settings().cf_relay_secret.get_secret_value()
+    if not secret:
+        raise HTTPException(status_code=503, detail="CF_RELAY_SECRET not configured")
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {secret}":
+        raise HTTPException(status_code=403, detail="Invalid or missing relay credentials")
+
+
 def require_admin_access(
     request: Request,
 ) -> AuthContext:
@@ -1429,6 +1449,34 @@ def trigger_indexing(
     stats["retrieval_mode"] = "hybrid" if model._retriever_ready else "keyword"
 
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare relay — lets another deployment (e.g. the HF Space, when its own
+# egress to Cloudflare is blocked) make Vectorize/Workers AI calls through
+# this one. Requires ``Authorization: Bearer <CF_RELAY_SECRET>`` (a dedicated
+# secret, separate from the real Cloudflare token, which never leaves this
+# process — see providers/config.py). Deliberately narrow: these two ops are
+# exactly what dense-retrieval fallback needs (embed the query, then search
+# Vectorize) and nothing else is exposed, so there is no open-ended forwarding
+# surface to worry about.
+# ---------------------------------------------------------------------------
+@app.post("/internal/cf-relay/workers-ai-embed", include_in_schema=False)
+def cf_relay_workers_ai_embed(request: Request, body: CFRelayEmbedRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import gateway as _gw
+
+    vectors = _gw.workers_ai_embed(body.texts, model=body.model)
+    return {"vectors": vectors}
+
+
+@app.post("/internal/cf-relay/vectorize-query", include_in_schema=False)
+def cf_relay_vectorize_query(request: Request, body: CFRelayVectorizeQueryRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import vectorize as _vz
+
+    hits = _vz.vectorize_query(body.vector, top_k=body.top_k, vector_filter=body.vector_filter)
+    return {"hits": hits}
 
 
 # ---------------------------------------------------------------------------

@@ -553,3 +553,21 @@ class VoiceVisionChatResponse(BaseModel):
     tts_latency_s: float = 0.0
     total_latency_s: float = 0.0
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare relay (internal-only; see /internal/cf-relay/* in main.py)
+# ---------------------------------------------------------------------------
+class CFRelayEmbedRequest(BaseModel):
+    """Forwarded Workers AI embedding request."""
+
+    texts: list[str] = Field(..., min_length=1, max_length=32)
+    model: str = Field("@cf/baai/bge-m3", pattern=r"^@cf/[a-zA-Z0-9_.\-]+/[a-zA-Z0-9_.\-]+$")
+
+
+class CFRelayVectorizeQueryRequest(BaseModel):
+    """Forwarded Vectorize query request."""
+
+    vector: list[float] = Field(..., min_length=1, max_length=4096)
+    top_k: int = Field(10, ge=1, le=50)
+    vector_filter: dict[str, Any] | None = None

@@ -11,7 +11,7 @@ import os
 import unittest
 import unittest.mock as mock
 
-from app.providers import budget, config, gateway, vectorize
+from app.providers import budget, config, gateway, relay_client, vectorize
 
 _KEYS = {
     "CLOUDFLARE_ACCOUNT_ID": "acct123",
@@ -155,6 +155,79 @@ class VectorizeTest(unittest.TestCase):
         self.assertAlmostEqual(h["score"], 0.91)
         # direct Vectorize call uses the CF token only (no gateway header needed)
         self.assertIn("vectorize/v2/indexes/ura-kb-bge-m3/query", fake.calls[0]["url"])
+
+
+class RelayClientTest(unittest.TestCase):
+    """Client side of the Cloudflare relay: builds requests against
+    ``cf_relay_base_url`` using ``cf_relay_secret``, distinct from the real
+    Cloudflare credentials."""
+
+    def setUp(self):
+        os.environ["CF_RELAY_BASE_URL"] = "https://relay.example.internal"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-xyz"
+        config.get_cloud_settings.cache_clear()
+
+    def tearDown(self):
+        os.environ.pop("CF_RELAY_BASE_URL", None)
+        os.environ.pop("CF_RELAY_SECRET", None)
+        config.get_cloud_settings.cache_clear()
+        relay_client._client = None
+
+    def test_relay_workers_ai_embed_request_shape(self):
+        fake = _FakeClient({"vectors": [[0.1] * 1024]})
+        with mock.patch.object(relay_client, "_get_client", return_value=fake):
+            vecs = relay_client.relay_workers_ai_embed(["hello"], "@cf/baai/bge-m3")
+        self.assertEqual(len(vecs), 1)
+        call = fake.calls[0]
+        self.assertEqual(call["url"], "https://relay.example.internal/internal/cf-relay/workers-ai-embed")
+        self.assertEqual(call["headers"]["Authorization"], "Bearer relay-secret-xyz")
+        self.assertEqual(call["json"], {"texts": ["hello"], "model": "@cf/baai/bge-m3"})
+
+    def test_relay_vectorize_query_request_shape(self):
+        fake = _FakeClient({"hits": [{"id": "c1"}]})
+        with mock.patch.object(relay_client, "_get_client", return_value=fake):
+            hits = relay_client.relay_vectorize_query([0.1, 0.2], 5, {"tag": {"$eq": "vat"}})
+        self.assertEqual(hits, [{"id": "c1"}])
+        call = fake.calls[0]
+        self.assertEqual(call["url"], "https://relay.example.internal/internal/cf-relay/vectorize-query")
+        self.assertEqual(call["headers"]["Authorization"], "Bearer relay-secret-xyz")
+        self.assertEqual(
+            call["json"], {"vector": [0.1, 0.2], "top_k": 5, "vector_filter": {"tag": {"$eq": "vat"}}}
+        )
+
+
+class RelayRoutingTest(unittest.TestCase):
+    """When ``cf_relay_base_url`` is configured, the provider functions
+    delegate to the relay client instead of calling Cloudflare directly."""
+
+    def setUp(self):
+        _with_keys()
+        os.environ["CF_RELAY_BASE_URL"] = "https://relay.example.internal"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-xyz"
+        config.get_cloud_settings.cache_clear()
+
+    def tearDown(self):
+        os.environ.pop("CF_RELAY_BASE_URL", None)
+        os.environ.pop("CF_RELAY_SECRET", None)
+        _clear_keys()
+
+    def test_vectorize_query_uses_relay_when_configured(self):
+        with mock.patch.object(
+            relay_client, "relay_vectorize_query", return_value=[{"id": "c1"}]
+        ) as mocked, mock.patch.object(gateway, "_get_client") as direct_client:
+            hits = vectorize.vectorize_query([0.1] * 1024, top_k=4)
+        self.assertEqual(hits, [{"id": "c1"}])
+        mocked.assert_called_once_with([0.1] * 1024, 4, None)
+        direct_client.assert_not_called()  # never touches Cloudflare directly
+
+    def test_workers_ai_embed_uses_relay_when_configured(self):
+        with mock.patch.object(
+            relay_client, "relay_workers_ai_embed", return_value=[[0.1] * 1024]
+        ) as mocked, mock.patch.object(gateway, "_get_client") as direct_client:
+            vecs = gateway.workers_ai_embed(["hello"])
+        self.assertEqual(vecs, [[0.1] * 1024])
+        mocked.assert_called_once_with(["hello"], "@cf/baai/bge-m3")
+        direct_client.assert_not_called()
 
 
 class BudgetTest(unittest.TestCase):
