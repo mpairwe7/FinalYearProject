@@ -9,12 +9,14 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-ae4df29 = dev merge of PR #154: fpdf2 + Pillow declared (all
-# PDF endpoints previously 500'd — fpdf2 was never in the image) and the
-# attachment registry mirrored to a shared spool so UVICORN_WORKERS=2
-# workers see the same documents — on top of #152 (document attachments)
-# and earlier.
-FROM landwind/ura-chatbot:sha-ae4df29
+# image. sha-9d40610 = dev merge of PR #157: FAQ grounding hallucination
+# fixes — decimal points in figures (e.g. "37.5m") no longer get split into
+# fake unsupported claims, the semantic cache no longer cross-reuses answers
+# between neighbouring FAQ intents (e.g. VAT rate vs VAT threshold), and
+# keyword/hybrid FAQ retrieval now binds to the query's actual intent
+# instead of just topic-word overlap — on top of #154 (fpdf2 + Pillow) and
+# earlier.
+FROM landwind/ura-chatbot:sha-9d40610
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
