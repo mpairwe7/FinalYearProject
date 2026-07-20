@@ -176,12 +176,12 @@ class RelayClientTest(unittest.TestCase):
     def test_relay_workers_ai_embed_request_shape(self):
         fake = _FakeClient({"vectors": [[0.1] * 1024]})
         with mock.patch.object(relay_client, "_get_client", return_value=fake):
-            vecs = relay_client.relay_workers_ai_embed(["hello"], "@cf/baai/bge-m3")
+            vecs = relay_client.relay_workers_ai_embed(["hello"])
         self.assertEqual(len(vecs), 1)
         call = fake.calls[0]
         self.assertEqual(call["url"], "https://relay.example.internal/internal/cf-relay/workers-ai-embed")
         self.assertEqual(call["headers"]["Authorization"], "Bearer relay-secret-xyz")
-        self.assertEqual(call["json"], {"texts": ["hello"], "model": "@cf/baai/bge-m3"})
+        self.assertEqual(call["json"], {"texts": ["hello"]})  # no model — see relay_client docstring
 
     def test_relay_vectorize_query_request_shape(self):
         fake = _FakeClient({"hits": [{"id": "c1"}]})
@@ -226,7 +226,7 @@ class RelayRoutingTest(unittest.TestCase):
         ) as mocked, mock.patch.object(gateway, "_get_client") as direct_client:
             vecs = gateway.workers_ai_embed(["hello"])
         self.assertEqual(vecs, [[0.1] * 1024])
-        mocked.assert_called_once_with(["hello"], "@cf/baai/bge-m3")
+        mocked.assert_called_once_with(["hello"])
         direct_client.assert_not_called()
 
 

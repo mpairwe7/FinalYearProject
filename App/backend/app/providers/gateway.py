@@ -94,7 +94,7 @@ def workers_ai_embed(texts: list[str], model: str = "@cf/baai/bge-m3") -> list[l
     if get_cloud_settings().cf_relay_base_url.strip():
         from . import relay_client
 
-        return relay_client.relay_workers_ai_embed(texts, model)
+        return relay_client.relay_workers_ai_embed(texts)
     data = _post_json(f"{_gateway_url('workers-ai')}/{model}", _workers_ai_headers(), {"text": texts})
     result = data.get("result", {})
     vectors = result.get("data") or result.get("embedding")

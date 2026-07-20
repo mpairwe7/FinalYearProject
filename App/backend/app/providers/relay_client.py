@@ -35,10 +35,12 @@ def _relay_headers() -> dict[str, str]:
     }
 
 
-def relay_workers_ai_embed(texts: list[str], model: str) -> list[list[float]]:
+def relay_workers_ai_embed(texts: list[str]) -> list[list[float]]:
+    """Embed via the relay's fixed retrieval model (see CFRelayEmbedRequest —
+    the relay ignores any caller-supplied model string, so none is sent)."""
     s = get_cloud_settings()
     url = f"{s.cf_relay_base_url.rstrip('/')}/internal/cf-relay/workers-ai-embed"
-    resp = _get_client().post(url, headers=_relay_headers(), json={"texts": texts, "model": model})
+    resp = _get_client().post(url, headers=_relay_headers(), json={"texts": texts})
     resp.raise_for_status()
     vectors = resp.json().get("vectors")
     if not vectors:

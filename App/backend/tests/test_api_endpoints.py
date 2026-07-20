@@ -332,7 +332,23 @@ class CFRelayEndpoints(_Base):
             )
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), {"vectors": [[0.1, 0.2]]})
-        mocked.assert_called_once_with(["hello"], model="@cf/baai/bge-m3")
+        mocked.assert_called_once_with(["hello"])  # no caller-controlled model — see CFRelayEmbedRequest
+
+    def test_embed_rejects_caller_supplied_model(self):
+        """Regression guard for the partial-SSRF CodeQL finding: a ``model``
+        field in the request body must be rejected, not silently accepted
+        and threaded into the Cloudflare URL this process builds."""
+        from app.providers import config as cf_config
+
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"
+        cf_config.get_cloud_settings.cache_clear()
+        c = _client()
+        r = c.post(
+            "/internal/cf-relay/workers-ai-embed",
+            json={"texts": ["hello"], "model": "@cf/attacker/evil"},
+            headers=_bearer("relay-secret-123"),
+        )
+        self.assertEqual(r.status_code, 422)
 
 
 # ---------------------------------------------------------------------------

@@ -1466,7 +1466,9 @@ def cf_relay_workers_ai_embed(request: Request, body: CFRelayEmbedRequest) -> di
     _require_relay_key(request)
     from .providers import gateway as _gw
 
-    vectors = _gw.workers_ai_embed(body.texts, model=body.model)
+    # No caller-supplied model — always the retrieval embedding model
+    # (gateway.workers_ai_embed's own default); see CFRelayEmbedRequest.
+    vectors = _gw.workers_ai_embed(body.texts)
     return {"vectors": vectors}
 
 
