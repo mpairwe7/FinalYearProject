@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -553,3 +553,34 @@ class VoiceVisionChatResponse(BaseModel):
     tts_latency_s: float = 0.0
     total_latency_s: float = 0.0
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare relay (internal-only; see /internal/cf-relay/* in main.py)
+# ---------------------------------------------------------------------------
+class CFRelayEmbedRequest(BaseModel):
+    """Forwarded Workers AI embedding request.
+
+    No ``model`` field on purpose: this relay exists solely for the
+    dense-retrieval fallback, which always embeds with the same model
+    (``@cf/baai/bge-m3``, hardcoded server-side in main.py). Accepting a
+    caller-supplied model string would let request data influence the
+    Cloudflare URL this process builds — a partial-SSRF shape CodeQL flags
+    even with a regex constraint, since a pattern isn't a real allowlist.
+    ``extra="forbid"`` so a ``model`` field in the request body is rejected
+    outright rather than silently ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    texts: list[str] = Field(..., min_length=1, max_length=32)
+
+
+class CFRelayVectorizeQueryRequest(BaseModel):
+    """Forwarded Vectorize query request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vector: list[float] = Field(..., min_length=1, max_length=4096)
+    top_k: int = Field(10, ge=1, le=50)
+    vector_filter: dict[str, Any] | None = None

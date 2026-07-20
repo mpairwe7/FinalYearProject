@@ -50,6 +50,18 @@ class CloudSettings(BaseSettings):
     cf_neuron_daily_budget: int = 10000
     gemini_rpm: int = 10
 
+    # Cloudflare relay — when this deployment's own egress to Cloudflare is
+    # blocked (e.g. the HF Space free-tier network path), route Vectorize/
+    # Workers AI calls through another deployment with confirmed working
+    # egress instead (e.g. Crane Cloud). Leave unset to call Cloudflare
+    # directly, which remains the default on deployments that don't need it.
+    # ``cf_relay_secret`` doubles as the shared secret the relay ENDPOINT
+    # itself checks incoming requests against (see main.py) — the same value
+    # is set on both sides, distinct from the real Cloudflare token so a
+    # leaked relay secret can't reach the Cloudflare account directly.
+    cf_relay_base_url: str = ""
+    cf_relay_secret: SecretStr = SecretStr("")
+
 
 @functools.lru_cache(maxsize=1)
 def get_cloud_settings() -> CloudSettings:
