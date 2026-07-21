@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import database as db
+from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
 from .agents.supervisor import (
@@ -919,6 +920,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
     granted_purposes: list[str] | None = None,
     conversation_history_override: list[dict[str, str]] | None = None,
     turn_deadline_s: float | None = None,
+    attachments: list[Any] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run a single chat turn and stream event tuples to the caller.
 
@@ -996,6 +998,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             user_id=user_id or None,
             tenant_id=tenant_id,
             conversation_history_override=conversation_history_override,
+            attachments=attachments,
         )
 
         yield (
@@ -1493,6 +1496,128 @@ _STOP_WORDS = frozenset(
     "where why all each every any some".split()
 )
 
+# Keyword retrieval is deliberately conservative.  A FAQ answer can contain
+# common words such as "tax", "return", or "registration" while answering a
+# completely different question.  Those accidental matches used to be passed
+# to the LLM as authoritative context, which made an unrelated question look
+# grounded because the generated answer matched the wrong passage.
+_FAQ_QUERY_STOP_WORDS = _STOP_WORDS | frozenset(
+    {
+        "about",
+        "could",
+        "current",
+        "details",
+        "information",
+        "know",
+        "like",
+        "please",
+        "tell",
+        "want",
+    }
+)
+_FAQ_TERM_ALIASES = {
+    "applications": "application",
+    "deadlines": "deadline",
+    "documents": "document",
+    "filing": "file",
+    "filings": "file",
+    "imports": "import",
+    "penalties": "penalty",
+    "payments": "payment",
+    "rates": "rate",
+    "returns": "return",
+    "taxes": "tax",
+    "thresholds": "threshold",
+    "vehicles": "vehicle",
+}
+_FAQ_MATCH_MIN = float(os.getenv("FAQ_MATCH_MIN", "0.58"))
+_FAQ_MATCH_RELATIVE = float(os.getenv("FAQ_MATCH_RELATIVE", "0.82"))
+
+
+def _faq_terms(text: str) -> set[str]:
+    """Return normalized, query-bearing terms for FAQ binding.
+
+    This is intentionally smaller and stricter than BM25's vocabulary.  BM25
+    remains responsible for ranking, while these terms answer a separate
+    question: does this FAQ actually contain the subject and intent the user
+    asked about?
+    """
+    terms: set[str] = set()
+    for raw in re.findall(r"[a-z0-9]+", (text or "").lower()):
+        if raw in _FAQ_QUERY_STOP_WORDS:
+            continue
+        terms.add(_FAQ_TERM_ALIASES.get(raw, raw))
+    return terms
+
+
+def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
+    """Score whether an FAQ row is bound to *query*, independently of BM25.
+
+    The score combines coverage in the full Q&A with coverage in the FAQ's
+    question.  Requiring both prevents a generic answer paragraph from making
+    an unrelated row look relevant.  Deadline questions also need temporal
+    evidence; otherwise a topic-only hit such as "capital gains" can be
+    mistaken for a filing deadline answer.
+    """
+    query_terms = _faq_terms(query)
+    if not query_terms:
+        return 0.0
+
+    question_terms = _faq_terms(str(entry.get("question", "")))
+    answer_terms = _faq_terms(str(entry.get("answer", "")))
+    body_terms = question_terms | answer_terms
+
+    # Timing is an intent, not merely a topic.  Do not answer a deadline/due
+    # date question from a passage that never states a timing rule.
+    timing_terms = {"deadline", "due", "date", "period"}
+    timing_evidence = {"deadline", "due", "date", "period", "monthly", "annual"}
+    if query_terms & timing_terms and not (timing_evidence & body_terms):
+        return 0.0
+
+    body_coverage = len(query_terms & body_terms) / len(query_terms)
+    question_coverage = len(query_terms & question_terms) / len(query_terms)
+    score = (0.55 * body_coverage) + (0.45 * question_coverage)
+    return round(score, 4)
+
+
+def _retain_faq_candidates(
+    query: str,
+    scored: list[tuple[float, dict[str, str], float]],
+    top_k: int,
+) -> list[dict[str, str]]:
+    """Keep only FAQ rows with enough query coverage.
+
+    The relative cutoff is important for near-duplicate FAQs: for example,
+    "VAT registration threshold" should keep the compulsory-registration FAQ,
+    not a nearby late-registration-penalty FAQ just because both contain VAT
+    and registration.
+    """
+    if not scored:
+        return []
+    best_match = max(match for _rank, _entry, match in scored)
+    cutoff = max(_FAQ_MATCH_MIN, best_match * _FAQ_MATCH_RELATIVE)
+    retained: list[dict[str, str]] = []
+    for rank, entry, match in sorted(
+        scored,
+        key=lambda item: (item[2], item[0]),
+        reverse=True,
+    ):
+        if match < cutoff:
+            continue
+        out = dict(entry)
+        # BM25 caches per-row statistics on the in-memory source entry; do not
+        # leak those implementation details into retrieval metadata.
+        out.pop("_bm25_tf", None)
+        out.pop("_bm25_dl", None)
+        # Preserve the historical field used to carry BM25/overlap strength
+        # into the retrieval-hit shape.
+        out["_overlap"] = rank
+        out["_faq_match_score"] = match
+        retained.append(out)
+        if len(retained) >= top_k:
+            break
+    return retained
+
 # --- BM25 keyword scoring ----------------------------------------------------
 # Lazy module-level encoder loaded from Model/bm25_state.json (vocab + IDF +
 # avg_dl + k1/b).  Used by _simple_search to score the keyword fallback
@@ -1564,6 +1689,8 @@ def _simple_search(
     query: str,
     faq_index: dict[str, list[dict[str, str]]],
     top_k: int = 4,
+    *,
+    binding_query: str | None = None,
 ) -> list[dict[str, str]]:
     """Keyword retrieval over the in-memory FAQ index.
 
@@ -1575,49 +1702,43 @@ def _simple_search(
     which path was taken) — kept under the same name to preserve the
     score_rrf wiring in _faq_hits_to_retrieval_hits.
     """
+    # Query rewriting expands abbreviations (for example VAT → "Value Added
+    # Tax") and resolves conversational references.  Ranking can use the
+    # rewritten form, but answer authorization must remain bound to the words
+    # the user actually supplied; otherwise the expansion adds unmatched terms
+    # and either rejects a valid FAQ or distorts the match score.
+    match_query = binding_query or query
     encoder = _get_bm25_encoder()
 
     if encoder is not None:
         query_tokens = encoder._tokenize(query)
         if not query_tokens:
             return []
-        scored: list[tuple[float, dict[str, str]]] = []
+        scored: list[tuple[float, dict[str, str], float]] = []
         for entries in faq_index.values():
             for entry in entries:
                 s = _faq_bm25_score(query_tokens, entry, encoder)
                 if s > 0:
-                    scored.append((s, entry))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        results = []
-        for score, item in scored[:top_k]:
-            out = dict(item)
-            # Strip per-entry caches before returning so they don't pollute
-            # the downstream hit payload / JSON serialisation.
-            out.pop("_bm25_tf", None)
-            out.pop("_bm25_dl", None)
-            out["_overlap"] = score
-            results.append(out)
-        return results
+                    match = _faq_match_score(match_query, entry)
+                    if match > 0:
+                        scored.append((s, entry, match))
+        return _retain_faq_candidates(match_query, scored, top_k)
 
     # Fallback: plain content-word overlap (pre-BM25 behaviour).
-    query_tokens_set = set(query.lower().split()) - _STOP_WORDS
+    query_tokens_set = _faq_terms(match_query)
     if not query_tokens_set:
-        query_tokens_set = set(query.lower().split())
-    scored_fallback: list[tuple[float, dict[str, str]]] = []
+        return []
+    scored_fallback: list[tuple[float, dict[str, str], float]] = []
     for entries in faq_index.values():
         for entry in entries:
-            q_tokens = set(entry["question"].lower().split()) - _STOP_WORDS
-            a_tokens = set(entry["answer"].lower().split()) - _STOP_WORDS
+            q_tokens = _faq_terms(entry["question"])
+            a_tokens = _faq_terms(entry["answer"])
             overlap = len(query_tokens_set & (q_tokens | a_tokens))
             if overlap > 0:
-                scored_fallback.append((float(overlap), entry))
-    scored_fallback.sort(key=lambda x: x[0], reverse=True)
-    results_fb: list[dict[str, str]] = []
-    for overlap, item in scored_fallback[:top_k]:
-        out = dict(item)
-        out["_overlap"] = overlap
-        results_fb.append(out)
-    return results_fb
+                match = _faq_match_score(match_query, entry)
+                if match > 0:
+                    scored_fallback.append((float(overlap), entry, match))
+    return _retain_faq_candidates(match_query, scored_fallback, top_k)
 
 
 def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -1636,9 +1757,46 @@ def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str,
                 "section": tag,
                 "doc_type": "csv",
                 "score_rrf": float(entry.get("_overlap", 0.0) or 0.0),
+                "faq_match_score": float(entry.get("_faq_match_score", 0.0) or 0.0),
             }
         )
     return hits
+
+
+def _filter_unbound_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove canonical FAQ passages that do not answer the requested intent.
+
+    Keyword hits already carry ``faq_match_score``.  This second pass also
+    protects hybrid/indexed FAQ rows, whose stored metadata may not have been
+    produced by the in-memory loader.  Non-FAQ PDF and attachment passages are
+    left untouched and continue through the normal semantic/grounding gates.
+    """
+    faq_rows = [
+        h
+        for h in hits
+        if str(h.get("doc_type", "")).lower() == "csv"
+        and str(h.get("source", "")).lower().startswith("ura_")
+        and str(h.get("source", "")).lower().endswith("_faqs.csv")
+    ]
+    if not faq_rows:
+        return hits
+
+    scores: dict[int, float] = {}
+    for idx, hit in enumerate(hits):
+        if hit not in faq_rows:
+            continue
+        score = float(hit.get("faq_match_score") or _faq_match_score(query, hit))
+        scores[idx] = score
+
+    best = max(scores.values(), default=0.0)
+    cutoff = max(_FAQ_MATCH_MIN, best * _FAQ_MATCH_RELATIVE)
+    filtered: list[dict[str, Any]] = []
+    for idx, hit in enumerate(hits):
+        if idx not in scores or scores[idx] >= cutoff:
+            if idx in scores:
+                hit["faq_match_score"] = scores[idx]
+            filtered.append(hit)
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -2886,8 +3044,14 @@ class ChatModel:
         tenant_id: str | None = None,
         user_role: str = "public",
         granted_purposes: list[str] | None = None,
+        attachments: list[documents_module.DocumentRecord] | None = None,
     ) -> dict[str, Any]:
-        """Return a grounded, cited answer via hybrid retrieval + guardrails."""
+        """Return a grounded, cited answer via hybrid retrieval + guardrails.
+
+        ``attachments`` are pre-analysed documents (``documents.DocumentRecord``)
+        resolved by the endpoint from ``ChatRequest.attachment_ids``; their
+        extracted content is injected as top-priority grounding passages.
+        """
         t0 = time.perf_counter()
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
@@ -2925,7 +3089,9 @@ class ChatModel:
                         logger.info("Auto-detected locale: %s", locale)
 
             personalization = self._load_personalization_state(user_id)
-            cache_allowed = personalization is None
+            # Attachment turns are never cache-served or cache-stored: the answer
+            # is specific to the attached document, not the query text alone.
+            cache_allowed = personalization is None and not attachments
 
             # Emotional-intelligence signal for this turn: adapts the LLM
             # opening line (tone_hint) and prefixes deterministic replies
@@ -3260,7 +3426,12 @@ class ChatModel:
             # the BM25-only Crane Cloud profile).
             if not hits:
                 with trace_stage("keyword_search_fallback", timings=timings):
-                    kw_hits = _simple_search(rewritten, self._faq_index, top_k=top_k)
+                    kw_hits = _simple_search(
+                        rewritten,
+                        self._faq_index,
+                        top_k=top_k,
+                        binding_query=message,
+                    )
                     hits = _faq_hits_to_retrieval_hits(kw_hits)
 
             # 3b. Corrective RAG — re-retrieve if quality is low (Phase 6)
@@ -3295,7 +3466,12 @@ class ChatModel:
             # 3c. Always blend top FAQ keyword hits AFTER corrective RAG
             #     so precise CSV FAQ steps are never filtered out by reranking.
             with trace_stage("faq_blend", timings=timings):
-                kw_hits = _simple_search(rewritten, self._faq_index, top_k=2)
+                kw_hits = _simple_search(
+                    rewritten,
+                    self._faq_index,
+                    top_k=2,
+                    binding_query=message,
+                )
                 priority_hits = self._priority_faq_hits(rewritten, top_k=2)
                 seen_texts = {h.get("text", "")[:80] for h in hits}
                 for h in priority_hits:
@@ -3319,8 +3495,22 @@ class ChatModel:
                         })
                         seen_texts.add(faq_text[:80])
 
+            # Bind indexed FAQ passages to the user's original intent before
+            # they can be used as LLM context or as an extractive fallback.
+            hits = _filter_unbound_faq_hits(message, hits)
+
+            # 3d. Attached documents — prepend as top-priority grounding hits.
+            #     They flow through the same LLM01 scrub + spotlight markers
+            #     as retrieved passages (llm._build_messages) and count as
+            #     grounding for faithfulness scoring. The raw user message
+            #     stays subject to the normal input guardrails above.
+            if attachments:
+                hits = documents_module.attachment_passages(attachments) + hits
+
             # 3c. Clarification check — ask for more details if query is ambiguous
-            clarification = needs_clarification(message, hits)
+            #     (skipped for attachment turns: "what is this?" is answerable
+            #     from the attached document, not ambiguous)
+            clarification = None if attachments else needs_clarification(message, hits)
             if clarification:
                 clarify_result = {
                     "reply": clarification,
@@ -3350,7 +3540,9 @@ class ChatModel:
             deterministic_curated = False
             deterministic_sources: list[str] = []
             deterministic_citations: list[dict[str, Any]] = []
-            if hits:
+            # Attachment turns always go to the LLM — a canned procedure
+            # template cannot read the attached document.
+            if hits and not attachments:
                 deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
                 deterministic_citations = HybridRetriever.build_citations(hits)
                 deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
@@ -3394,7 +3586,8 @@ class ChatModel:
 
             # 4. Calibrated abstention — refuse to answer when confidence too low
             with trace_stage("abstention_check", timings=timings):
-                should_abstain = self._output_guard.should_abstain(hits)
+                # Attached documents are always usable grounding — never abstain.
+                should_abstain = not attachments and self._output_guard.should_abstain(hits)
             if should_abstain:
                 reply = ABSTENTION_REPLY
                 if distress:
@@ -3546,11 +3739,15 @@ class ChatModel:
                         # or the circuit breaker is open
                         best = hits[0]
                         reply = best.get("answer") or best.get("text", "")
+                        if citations and not re.search(r"\[\d{1,3}\]", reply):
+                            reply = f"{reply.rstrip()} [1]"
                         extractive_fallback = True
                 else:
                     # FAQ lookup fallback (no LLM configured)
                     best = hits[0]
                     reply = best.get("answer") or best.get("text", "")
+                    if citations and not re.search(r"\[\d{1,3}\]", reply):
+                        reply = f"{reply.rstrip()} [1]"
                     extractive_fallback = True
             else:
                 reply = NO_HITS_REPLY
@@ -3624,7 +3821,11 @@ class ChatModel:
             # 8. Escalation check
             escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
             claim_report = None
-            if hits and citations and reply:
+            # An extractive fallback is copied from the selected cited FAQ
+            # answer, so lexical claim verification would incorrectly label
+            # every sentence "uncited" even though it is not LLM-synthesized.
+            # It already carries [1] and is scored against the source passage.
+            if hits and citations and reply and not extractive_fallback:
                 with trace_stage("claim_verification", timings=timings):
                     claim_report = verify_claims(reply, citations, hits)
                     trace_ctx["claim_verification"] = {
@@ -3851,6 +4052,7 @@ class ChatModel:
         user_id: str | None = None,
         tenant_id: str | None = None,
         conversation_history_override: list[dict[str, str]] | None = None,
+        attachments: list[documents_module.DocumentRecord] | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
@@ -3893,7 +4095,9 @@ class ChatModel:
                 logger.info("Auto-detected locale: %s (streaming)", locale)
 
         personalization = self._load_personalization_state(user_id)
-        cache_allowed = personalization is None
+        # Attachment turns are never cache-served or cache-stored: the answer
+        # is specific to the attached document, not the query text alone.
+        cache_allowed = personalization is None and not attachments
 
         # Emotional-intelligence signal (parity with generate()): tone hint
         # for the LLM stream, empathy prefix for deterministic short-circuits.
@@ -4123,7 +4327,12 @@ class ChatModel:
         # carries _overlap into score_rrf so the abstention guard sees a real
         # signal (previously hardcoded 0.0 here, same bug as line 2167).
         if not hits:
-            kw_hits = _simple_search(rewritten, self._faq_index, top_k=top_k)
+            kw_hits = _simple_search(
+                rewritten,
+                self._faq_index,
+                top_k=top_k,
+                binding_query=message,
+            )
             hits = _faq_hits_to_retrieval_hits(kw_hits)
 
         # Corrective RAG (Phase 6)
@@ -4152,7 +4361,12 @@ class ChatModel:
         # Blend top FAQ keyword hits after corrective RAG (parity with the
         # REST path, including the priority FAQ hits the deterministic
         # procedural fast path depends on).
-        kw_hits = _simple_search(rewritten, self._faq_index, top_k=2)
+        kw_hits = _simple_search(
+            rewritten,
+            self._faq_index,
+            top_k=2,
+            binding_query=message,
+        )
         priority_hits = self._priority_faq_hits(rewritten, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
         for h in priority_hits:
@@ -4171,8 +4385,17 @@ class ChatModel:
                 })
                 seen_texts.add(faq_text[:80])
 
-        # Clarification check (Phase 6)
-        clarification = needs_clarification(message, hits)
+        # Apply the same FAQ intent binding as the REST path before streaming
+        # can expose a passage to the model.
+        hits = _filter_unbound_faq_hits(message, hits)
+
+        # Attached documents — prepend as top-priority grounding hits
+        # (parity with generate(); see the comment there).
+        if attachments:
+            hits = documents_module.attachment_passages(attachments) + hits
+
+        # Clarification check (Phase 6) — skipped for attachment turns
+        clarification = None if attachments else needs_clarification(message, hits)
         if clarification:
             return {
                 "reply": clarification,
@@ -4196,7 +4419,8 @@ class ChatModel:
         # Deterministic procedural fast path — parity with the REST path so
         # curated KB answers stream with their real (high) faithfulness
         # instead of being re-synthesised and re-scored via the LLM.
-        if hits:
+        # Attachment turns always go to the LLM (templates can't read docs).
+        if hits and not attachments:
             deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
             deterministic_citations = HybridRetriever.build_citations(hits)
             deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
@@ -4226,7 +4450,7 @@ class ChatModel:
                     "_short_circuit": True,
                 }
 
-        if self._output_guard.should_abstain(hits):
+        if not attachments and self._output_guard.should_abstain(hits):
             reply = ABSTENTION_REPLY
             if distress:
                 reply = f"{empathy_ack(distress)}\n\n{reply}"
@@ -4285,6 +4509,8 @@ class ChatModel:
         citations = HybridRetriever.build_citations(hits)
         best = hits[0] if hits else {}
         reply = best.get("answer") or best.get("text", "")
+        if citations and not re.search(r"\[\d{1,3}\]", reply):
+            reply = f"{reply.rstrip()} [1]"
 
         # Escalation check (same as sync path)
         escalate, esc_reason = self._output_guard.should_escalate(None, hits)
@@ -4369,10 +4595,17 @@ class ChatModel:
         Persisted alongside the conversation so the eval harness can score
         faithfulness against the ACTUAL retrieved context instead of the
         answer itself. Returns ``"[]"`` when no hits are available. Passages
-        are knowledge-base text (not user PII), so they are stored verbatim.
+        are knowledge-base text (not user PII), so they are stored verbatim —
+        EXCEPT attachment passages, which carry user document content and are
+        replaced by a placeholder (analytics.db must never hold them).
         """
         hits = (result or {}).get("_hits") or []
-        texts = [str(h.get("text") or h.get("answer") or "").strip() for h in hits[:limit]]
+        texts = []
+        for h in hits[:limit]:
+            if h.get("doc_type") == "attachment":
+                texts.append(f"[user attachment: {h.get('source') or 'attached:document'}]")
+            else:
+                texts.append(str(h.get("text") or h.get("answer") or "").strip())
         try:
             return json.dumps([t for t in texts if t])
         except Exception:
