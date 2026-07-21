@@ -5,7 +5,7 @@ pydantic==2.13.0
 slowapi>=0.1.9
 limits[redis]>=3.13
 sse-starlette>=2.0.0
-httpx>=0.27,<0.29
+httpx>=0.28.1,<0.29
 
 # Data / modeling stack for notebooks (CSV/PDF RAG + tagging + TTS)
 pandas>=1.5,<4.0
@@ -14,13 +14,13 @@ sentence-transformers==3.4.1
 langchain==1.2.15
 langchain-community==0.4.1
 langchain-core>=1.2.0,<2.0.0
-langchain-text-splitters==1.1.1
+langchain-text-splitters==1.1.2
 langchain-qdrant==1.1.0
-qdrant-client>=1.15.1,<2.0.0
+qdrant-client>=1.17.1,<2.0.0
 datasets==3.3.2
 evaluate==0.4.6
 transformers==4.48.3
-accelerate==1.3.0
+accelerate==1.13.0
 torch>=2.6.0
 huggingface-hub==0.27.1
 sentencepiece==0.2.1
@@ -32,7 +32,7 @@ rank-bm25==0.2.2
 
 # PDF ingestion + generation
 pymupdf4llm==0.0.17
-pymupdf==1.25.3
+pymupdf==1.27.2.3
 fpdf2>=2.8.7
 
 # Web crawling
@@ -61,7 +61,7 @@ jiwer>=3.0.0
 librosa>=0.10.0
 soundfile>=0.12.0
 # Streaming voice activity detection
-silero-vad>=5.1.0
+silero-vad>=6.2.1
 # Language identification (code-switching routing)
 lingua-language-detector>=2.0.0
 # Optional: reference-free MT quality (uncomment when adopting)
@@ -70,7 +70,7 @@ lingua-language-detector>=2.0.0
 # espnet-tts-frontend>=0.0.4
 
 # Data Ingestion & Augmentation
-datasketch==1.6.5
+datasketch==1.10.0
 pyarrow==18.1.0
 pandera==0.30.1
 ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
