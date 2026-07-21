@@ -177,8 +177,8 @@ class SemanticCache:
                 logger.debug(
                     "Cache HIT: sim=%.4f query=%s → cached=%s",
                     best_sim,
-                    query[:50],
-                    best_entry.query[:50],
+                    query[:50].replace("\r", "\\r").replace("\n", "\\n"),
+                    best_entry.query[:50].replace("\r", "\\r").replace("\n", "\\n"),
                 )
                 return best_entry.response
 

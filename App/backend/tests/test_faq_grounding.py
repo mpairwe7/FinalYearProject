@@ -5,7 +5,9 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from app.cache import _cache_queries_compatible
+import numpy as np
+
+from app.cache import SemanticCache, _cache_queries_compatible
 from app.claim_verifier import verify_claims
 from app.service import _filter_unbound_faq_hits, _simple_search
 
@@ -87,6 +89,25 @@ class FAQSafetyRegressionTests(unittest.TestCase):
                 "What is the VAT registration threshold?", "What is the VAT rate?"
             )
         )
+
+    def test_cache_hit_with_crlf_query_cannot_forge_log_lines(self) -> None:
+        """Regression guard for CodeQL py/log-injection: a query containing
+        CR/LF must not let a user forge fake log lines on a cache hit."""
+
+        class _FixedVectorModel:
+            def encode(self, text: str, normalize_embeddings: bool = True) -> np.ndarray:
+                return np.array([1.0, 0.0])  # identical vector for any input -> guaranteed hit
+
+        cache = SemanticCache(dense_model=_FixedVectorModel())
+        cache.put("What is the standard VAT rate?", {"reply": "18%", "locale": "en"})
+
+        malicious = "What is the VAT rate?\r\nWARNING: fake admin override granted"
+        with self.assertLogs("app.cache", level="DEBUG") as cm:
+            result = cache.get(malicious)
+        self.assertIsNotNone(result)  # confirms the log line under test actually ran
+        logged = "\n".join(cm.output)
+        self.assertNotIn("\r\n", logged)
+        self.assertIn("\\r\\n", logged)  # visible escape, not a real line break
 
 
 if __name__ == "__main__":
