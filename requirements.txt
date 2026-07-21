@@ -31,7 +31,7 @@ openpyxl==3.1.5
 rank-bm25==0.2.2
 
 # PDF ingestion + generation
-pymupdf4llm==0.0.17
+pymupdf4llm==1.27.2.3
 pymupdf==1.27.2.3
 fpdf2>=2.8.7
 
