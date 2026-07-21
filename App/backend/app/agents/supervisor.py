@@ -23,6 +23,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from ..text_signals import CLARIFICATION_PROMPT
 from .state import AgentRoute, RouteDecision
 
 if TYPE_CHECKING:
@@ -84,6 +85,24 @@ _CALC_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
         ),
         "Customs duty calculation intent",
         ["calculate_customs_duty", "lookup_rate"],
+    ),
+    (
+        re.compile(
+            r"(?=.*\brent(?:al)?\b)"
+            r"(?=.*\b(how\s+much|calculate|compute|work\s+out|tax\s+on)\b)",
+            re.IGNORECASE,
+        ),
+        "Rental income tax calculation intent",
+        ["calculate_rental_tax", "lookup_rate"],
+    ),
+    (
+        re.compile(
+            r"(?=.*\b(withholding|wht)\b)"
+            r"(?=.*\b(how\s+much|calculate|compute|work\s+out|deduct)\b)",
+            re.IGNORECASE,
+        ),
+        "Withholding tax calculation intent",
+        ["calculate_withholding", "lookup_rate"],
     ),
 ]
 
@@ -183,11 +202,31 @@ _CLARIFY_STOP_WORDS = {
     "who",
     "why",
     "help",
-    "hi",
-    "hello",
-    "hey",
     "tell",
     "info",
+}
+
+# Greeting triggers — warm welcome without retrieval.
+_GREETING_WORDS = {"hi", "hello", "hey", "howdy", "greetings", "yo"}
+_GREETING_PHRASES = {
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "good day",
+}
+
+# Closing courtesy — exact phrases only, so "thanks for nothing" (sarcasm)
+# and "thanks, but the portal is down" (a real problem) still reach the
+# distress detector and retrieval instead of a cheery sign-off.
+_GRATITUDE_PHRASES = {
+    "thanks", "thank you", "thank u", "thanks a lot", "thanks so much",
+    "thank you so much", "thank you very much", "many thanks",
+    "ok thanks", "okay thanks", "great thanks", "perfect thanks",
+    "asante", "asante sana", "webale", "weebale",
+}
+_FAREWELL_PHRASES = {
+    "bye", "goodbye", "good bye", "bye bye", "see you", "see you later",
+    "good night", "goodnight", "thanks bye", "thank you bye",
 }
 
 
@@ -233,6 +272,19 @@ class Supervisor:
                     confidence=0.95,
                 )
 
+        # 1b. Greetings — respond warmly without retrieval.
+        q_lower = q.lower().strip("!.?,")
+        if len(words) <= 3 and (
+            q_lower in _GREETING_WORDS
+            or q_lower in _GREETING_PHRASES
+            or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in words)
+        ):
+            return RouteDecision(
+                route=AgentRoute.GREET,
+                reason="greeting",
+                confidence=1.0,
+            )
+
         # 2. Clarify very short / stop-word-only queries when there's
         #    no conversation history to disambiguate them.
         if (
@@ -245,11 +297,7 @@ class Supervisor:
                 route=AgentRoute.CLARIFY,
                 reason=f"too short ({len(words)} word(s))",
                 confidence=0.9,
-                clarification_question=(
-                    "Could you share a bit more context? "
-                    "For example, are you asking about VAT, PAYE, "
-                    "customs, registration, or a specific tax type?"
-                ),
+                clarification_question=CLARIFICATION_PROMPT,
             )
 
         # 3. Calculation intents → tool route with calculator whitelist

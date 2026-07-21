@@ -27,6 +27,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from ..text_signals import detect_user_distress
 from .episodic import EpisodicMemory, EpisodicSummary
 from .extractor import FactExtractor
 from .semantic import SemanticMemory, UserFact
@@ -175,7 +176,13 @@ class MemoryService:
             conversation_id=conversation_id,
             summary=summary_text,
             topic_tag=_guess_topic_tag(first_user),
-            sentiment="neutral",
+            # Distress (frustration/anxiety) reads as negative; calm or
+            # merely time-pressured turns stay neutral.
+            sentiment=(
+                "negative"
+                if detect_user_distress(first_user) in ("frustration", "anxiety")
+                else "neutral"
+            ),
             turn_count=len(turns),
         )
         episodic_id = ""
@@ -195,6 +202,23 @@ class MemoryService:
     def update_working(self, user_id: str, **fields: Any) -> None:
         """Set/merge short-term working state (no consent gate — ephemeral)."""
         self.working.update(user_id, **fields)
+
+    # -- Subject-access export ----------------------------------------
+    def export_user(self, user_id: str) -> dict[str, Any]:
+        """Ungated subject-access export of stored memory (UDPA data portability).
+
+        Unlike :meth:`read_facts`, this is NOT consent-gated — a data subject is
+        entitled to a copy of their stored data regardless of current consent.
+        """
+        import dataclasses
+
+        facts = self.semantic.read(user_id=user_id, limit=1000)
+        return {
+            "facts": [
+                dataclasses.asdict(f) if dataclasses.is_dataclass(f) else dict(f) for f in facts
+            ],
+            "episodic": self.episodic.list_for_user(user_id=user_id, limit=1000),
+        }
 
     # -- Erasure cascade ----------------------------------------------
     def forget_user(self, user_id: str) -> dict[str, int]:

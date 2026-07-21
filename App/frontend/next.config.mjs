@@ -39,32 +39,41 @@ const nextConfig = {
     ];
   },
   async headers() {
-    return [
+    // Frame embedding: default allows the app itself + Hugging Face, so the UI
+    // renders inside the HF Space iframe. Attackers still cannot frame it (only
+    // the allow-listed origins can), so clickjacking protection is preserved.
+    // Set FRAME_ANCESTORS="'none'" at build time for a strict no-embed deploy.
+    const frameAncestors =
+      process.env.FRAME_ANCESTORS || "'self' https://huggingface.co https://*.hf.space";
+    const strictNoFrame = frameAncestors.trim() === "'none'";
+    const securityHeaders = [
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+      { key: "Permissions-Policy", value: "camera=(), geolocation=(), microphone=(self)" },
       {
-        source: "/(.*)",
-        headers: [
-          { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "X-Frame-Options", value: "DENY" },
-          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
-          { key: "Permissions-Policy", value: "camera=(), geolocation=(), microphone=(self)" },
-          {
-            key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "font-src 'self' https://fonts.gstatic.com",
-              "img-src 'self' data:",
-              // All API calls go through the Next.js rewrite at /api/*, so
-              // 'self' is the only origin the browser ever needs to reach.
-              // Allow ws: for Turbopack HMR in dev mode.
-              `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
-            ].join("; "),
-          },
-        ],
+        key: "Content-Security-Policy",
+        value: [
+          "default-src 'self'",
+          // frame-ancestors controls who may embed this app (modern browsers).
+          `frame-ancestors ${frameAncestors}`,
+          `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' https://fonts.gstatic.com",
+          "img-src 'self' data:",
+          // All API calls go through the Next.js rewrite at /api/*, so 'self' is
+          // the only origin the browser needs. Allow ws: for Turbopack HMR in dev.
+          `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
+        ].join("; "),
       },
     ];
+    // X-Frame-Options has no allow-list (ALLOW-FROM is dead) — it can only be the
+    // strict DENY, so include it ONLY for the no-embed deploy; otherwise it would
+    // override frame-ancestors and block the HF iframe.
+    if (strictNoFrame) {
+      securityHeaders.splice(1, 0, { key: "X-Frame-Options", value: "DENY" });
+    }
+    return [{ source: "/(.*)", headers: securityHeaders }];
   },
 };
 

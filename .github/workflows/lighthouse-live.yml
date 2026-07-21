@@ -1,0 +1,149 @@
+# =============================================================================
+# URA Chatbot — Lighthouse audit of the LIVE Crane Cloud deploy
+#
+# Runs Google Lighthouse (performance / accessibility / best-practices / seo)
+# against the deployed URL — NOT a locally-built server (that lives in
+# frontend-deploy.yml's "Accessibility Audit" job). Produces the full Lighthouse
+# numbers, a shareable temporary-public-storage report link per run, and a
+# scores table in the job summary.
+#
+# Triggers:
+#   * workflow_dispatch — manual; optionally override the target URL
+#   * workflow_run      — auto-runs after a successful Crane Cloud deploy
+#   * schedule          — weekly drift check (Mondays 06:00 UTC)
+#
+# Target URL resolution order: dispatch input → repo variable
+# `vars.LIGHTHOUSE_URL` → the hardcoded default below. The Crane Cloud app URL
+# is stable per-app (tied to the app, not the image), so the default is safe.
+# =============================================================================
+name: "URA Chatbot — Lighthouse (live deploy)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Target URL to audit (defaults to the live Crane Cloud deploy)"
+        type: string
+        required: false
+  workflow_run:
+    workflows: ["URA Chatbot — Deploy to Crane Cloud"]
+    types: [completed]
+  schedule:
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: lighthouse-live
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+  DEFAULT_URL: "https://ura-chatbot-6318a1b5.renu-01.cranecloud.io"
+
+jobs:
+  lighthouse:
+    name: Lighthouse (${{ matrix.form_factor }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # On the workflow_run trigger, only audit after a SUCCESSFUL deploy.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - form_factor: mobile
+            config: ./App/frontend/lighthouserc.live.mobile.json
+          - form_factor: desktop
+            config: ./App/frontend/lighthouserc.live.desktop.json
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Resolve target URL
+        id: target
+        env:
+          # Pass expressions through env — never interpolate ${{ }} into the
+          # script body. The workflow_dispatch URL input is attacker-controllable,
+          # so inlining it would be a template/shell-injection vector.
+          INPUT_URL: ${{ github.event.inputs.url }}
+          VAR_URL: ${{ vars.LIGHTHOUSE_URL }}
+        run: |
+          URL="${INPUT_URL:-${VAR_URL:-$DEFAULT_URL}}"
+          URL="${URL%/}"   # strip trailing slash
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Auditing: $URL"
+
+      - name: Wait for deploy to be healthy
+        env:
+          URL: ${{ steps.target.outputs.url }}
+        run: |
+          echo "Probing $URL/health …"
+          for i in $(seq 1 30); do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "$URL/health" || echo "000")
+            echo "  [$i] /health → $CODE"
+            [ "$CODE" = "200" ] && exit 0
+            sleep 6
+          done
+          echo "::error::$URL/health did not return 200 within ~3 min; aborting audit."
+          exit 1
+
+      - name: Run Lighthouse CI
+        id: lhci
+        uses: treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18 # v12
+        with:
+          urls: ${{ steps.target.outputs.url }}
+          configPath: ${{ matrix.config }}
+          uploadArtifacts: true
+
+      - name: Publish scores to job summary
+        if: always()
+        env:
+          # `manifest` is NOT a declared output of treosh/lighthouse-ci-action
+          # (only resultsPath / links / assertionResults are). Read the manifest
+          # LHCI writes into the results folder instead of a non-existent output.
+          RESULTS_PATH: ${{ steps.lhci.outputs.resultsPath }}
+          LINKS: ${{ steps.lhci.outputs.links }}
+          FORM: ${{ matrix.form_factor }}
+          URL: ${{ steps.target.outputs.url }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          rp = os.environ.get("RESULTS_PATH") or ""
+          mf = os.path.join(rp, "manifest.json") if rp else ""
+          man = []
+          if mf and os.path.exists(mf):
+              with open(mf) as f:
+                  man = json.load(f)
+          links = json.loads(os.environ.get("LINKS") or "{}")
+          form, url = os.environ.get("FORM"), os.environ.get("URL")
+          out = [f"## Lighthouse — {form} — {url}", ""]
+          rep = [m for m in man if m.get("isRepresentativeRun")] or man
+          if not rep:
+              out.append("_No Lighthouse manifest found (collection failed — see logs)._")
+          else:
+              s = rep[0].get("summary", {})
+              cats = ["performance", "accessibility", "best-practices", "seo"]
+              out.append("| Category | Score |")
+              out.append("|---|---|")
+              for c in cats:
+                  v = s.get(c)
+                  out.append(f"| {c.replace('-', ' ').title()} | {round(v*100) if isinstance(v,(int,float)) else 'n/a'} |")
+              for u, link in links.items():
+                  out.append("")
+                  out.append(f"📊 [Full report]({link})")
+                  break
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a") as f:
+                  f.write("\n".join(out) + "\n")
+          print("\n".join(out))
+          PY
