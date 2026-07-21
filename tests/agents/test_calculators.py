@@ -65,7 +65,9 @@ class TestPAYE:
         (500_000,     52_000.0,   0.30),   # 30% band: flat 25000 + 30%*(500-410) = 25000+27000 = 52000
         (2_000_000,   502_000.0,  0.30),   # 30% band: 25000 + 30%*(2M - 410k) = 25000 + 477000
         (1_500_000,   352_000.0,  0.30),   # 25000 + 30%*(1.5M - 410k) = 25000 + 327000
-        (15_000_000,  4_902_500.0, 0.40),  # 40% band: 2902500 + 40%*(15M - 10M) = 2902500 + 2M
+        # 40% band flat = 25,000 + 30% x (10M - 410k) = 2,902,000 (ITA Third
+        # Schedule); 2,902,000 + 40% x (15M - 10M) = 4,902,000.
+        (15_000_000,  4_902_000.0, 0.40),
     ])
     def test_resident_progressive_bands(self, fresh_registry, gross, expected_paye, expected_band_rate):
         r = fresh_registry.call("calculate_paye", {"monthly_gross": gross})

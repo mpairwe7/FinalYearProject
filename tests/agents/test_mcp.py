@@ -85,8 +85,9 @@ class TestAvailableFor:
             user_role="ura_staff",
             granted_purposes=["ura_account_access"],
         )
-        # All 11 starter tools should be visible
-        assert len(allowed) == 11
+        # All 13 low/medium+staff tools should be visible (11 starter tools
+        # + rental income tax + withholding tax calculators)
+        assert len(allowed) == 13
 
 
 class TestCallTool:

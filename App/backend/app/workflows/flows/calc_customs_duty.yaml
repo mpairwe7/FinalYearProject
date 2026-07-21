@@ -1,0 +1,28 @@
+id: calc_customs_duty
+name: Customs Duty Estimator
+version: "1"
+description: Guided customs duty estimate from the CIF value of an import.
+requires_auth: false
+trigger_phrases: []
+
+steps:
+  - id: ask_cif
+    question: "What is the **CIF value** (cost + insurance + freight) of the goods in UGX? (e.g. 5,000,000 or 5m)"
+    slot: cif_value
+    validator: number
+
+  - id: run_calc
+    slot: ""
+    tool: calculate_customs_duty
+    args:
+      cif_value: "{cif_value}"
+      duty_rate: "{duty_rate}"
+      include_vat: "{include_vat}"
+
+  - id: done
+    question: >-
+      That is an estimate at the common 25% external tariff — the exact
+      duty depends on the EAC tariff classification of your goods. URA can
+      confirm the classification if you get stuck.
+    slot: ""
+    validator: text

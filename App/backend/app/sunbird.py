@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -27,7 +28,19 @@ logger = logging.getLogger("ura.sunbird")
 
 SUNBIRD_API_URL = os.getenv("SUNBIRD_API_URL", "https://api.sunbird.ai")
 SUNBIRD_API_TOKEN = os.getenv("SUNBIRD_API_TOKEN", "")
+# Fallback account — used for resilience when the primary token fails (auth,
+# rate-limit, transient errors). Set via "# Sunbird fall back account" in .env
+# (SUNBIRD_FALLBACK_API_TOKEN). A request is retried on this account if the
+# primary one fails.
+SUNBIRD_FALLBACK_API_TOKEN = os.getenv("SUNBIRD_FALLBACK_API_TOKEN", "")
 SUNBIRD_TIMEOUT = int(os.getenv("SUNBIRD_TIMEOUT", "30"))
+# Attempts per account before failing over (1 = no retry). Retries apply to
+# timeouts, transport errors, 429 and 5xx — never to auth failures.
+SUNBIRD_RETRIES = max(1, int(os.getenv("SUNBIRD_RETRIES", "2")))
+
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+_BACKOFF_BASE_S = 0.5
+_RETRY_AFTER_CAP_S = 5.0
 
 # URA locale → Sunbird language code
 LOCALE_TO_SUNBIRD: dict[str, str] = {
@@ -57,25 +70,125 @@ _SUNBIRD_TO_LOCALE: dict[str, str] = {
 
 # ── Client ────────────────────────────────────────────────────────────────
 
-_client: httpx.Client | None = None
+# One client per account token (lazily built, reused). A call that fails on the
+# primary account is retried on the fallback account for resilience.
+_clients: dict[str, httpx.Client] = {}
 
 
-def _get_client() -> httpx.Client:
-    global _client
-    if _client is None:
-        if not SUNBIRD_API_TOKEN:
-            raise RuntimeError("SUNBIRD_API_TOKEN not set")
-        _client = httpx.Client(
+def _account_tokens() -> list[str]:
+    """Configured account tokens in priority order (primary, then fallback)."""
+    return [t for t in (SUNBIRD_API_TOKEN, SUNBIRD_FALLBACK_API_TOKEN) if t]
+
+
+def _client_for(token: str) -> httpx.Client:
+    client = _clients.get(token)
+    if client is None:
+        client = httpx.Client(
             base_url=SUNBIRD_API_URL,
-            headers={"Authorization": f"Bearer {SUNBIRD_API_TOKEN}"},
+            headers={"Authorization": f"Bearer {token}"},
             timeout=SUNBIRD_TIMEOUT,
         )
-    return _client
+        _clients[token] = client
+    return client
 
 
 def is_available() -> bool:
-    """Check if Sunbird API is configured."""
-    return bool(SUNBIRD_API_TOKEN)
+    """True if at least one Sunbird account (primary or fallback) is configured."""
+    return bool(_account_tokens())
+
+
+def _rewind_uploads(kwargs: dict[str, Any]) -> None:
+    """Seek file-like upload bodies back to 0 so a retry re-sends the bytes.
+
+    Without this, a retried multipart request would silently upload an
+    already-consumed (empty) stream.
+    """
+    for value in (kwargs.get("files") or {}).values():
+        stream = value[1] if isinstance(value, tuple) and len(value) > 1 else value
+        if hasattr(stream, "seek"):
+            try:
+                stream.seek(0)
+            except Exception:  # noqa: BLE001 — non-seekable; retry sends as-is
+                pass
+
+
+def _retry_delay(attempt: int, retry_after: str = "") -> float:
+    """Exponential backoff, honouring a small server Retry-After when given."""
+    if retry_after:
+        try:
+            return min(float(retry_after), _RETRY_AFTER_CAP_S)
+        except ValueError:
+            pass
+    return _BACKOFF_BASE_S * (2 ** (attempt - 1))
+
+
+def _post(path: str, **kwargs: Any) -> httpx.Response:
+    """POST to Sunbird with bounded retry, then account failover.
+
+    Per account: up to :data:`SUNBIRD_RETRIES` attempts with short
+    exponential backoff on timeouts, transport errors, and retryable
+    statuses (429/5xx — honouring small ``Retry-After`` values). Auth
+    failures (401/403) skip straight to the fallback account. Raises the
+    last error when every configured account is exhausted.
+    """
+    tokens = _account_tokens()
+    if not tokens:
+        raise RuntimeError("no Sunbird token configured")
+    last_exc: Exception | None = None
+    for idx, token in enumerate(tokens):
+        for attempt in range(1, SUNBIRD_RETRIES + 1):
+            _rewind_uploads(kwargs)
+            try:
+                resp = _client_for(token).post(path, **kwargs)
+                resp.raise_for_status()
+                if idx > 0:
+                    logger.info("Sunbird fallback account served %s", path)
+                return resp
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+                status = e.response.status_code
+                if status in (401, 403):
+                    logger.warning(
+                        "Sunbird auth failed (%d) on account #%d for %s", status, idx + 1, path
+                    )
+                    break  # retrying the same credentials cannot help
+                if status in _RETRYABLE_STATUSES and attempt < SUNBIRD_RETRIES:
+                    delay = _retry_delay(attempt, e.response.headers.get("Retry-After", ""))
+                    logger.warning(
+                        "Sunbird %d on %s (account #%d, attempt %d); retrying in %.1fs",
+                        status, path, idx + 1, attempt, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                break
+            except httpx.HTTPError as e:  # timeouts + transport errors
+                last_exc = e
+                if attempt < SUNBIRD_RETRIES:
+                    delay = _retry_delay(attempt)
+                    logger.warning(
+                        "Sunbird transport error on %s (account #%d, attempt %d): %s; "
+                        "retrying in %.1fs", path, idx + 1, attempt, e, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                break
+            except Exception as e:  # noqa: BLE001 — unexpected; fail over to next account
+                last_exc = e
+                break
+        if idx + 1 < len(tokens):
+            logger.warning(
+                "Sunbird account #%d exhausted for %s (%s); trying fallback",
+                idx + 1, path, last_exc,
+            )
+    raise last_exc  # type: ignore[misc]
+
+
+def _get_client() -> httpx.Client:
+    """Back-compat shim — the primary account client (prefer ``_post``)."""
+    tokens = _account_tokens()
+    if not tokens:
+        raise RuntimeError("SUNBIRD_API_TOKEN not set")
+    return _client_for(tokens[0])
 
 
 # ── Translation ───────────────────────────────────────────────────────────
@@ -86,13 +199,11 @@ def translate(text: str, source_lang: str, target_lang: str) -> str | None:
         logger.warning("Translation not supported: %s → %s", source_lang, target_lang)
         return None
     try:
-        client = _get_client()
-        resp = client.post("/tasks/translate", json={
+        resp = _post("/tasks/translate", json={
             "source_language": source_lang,
             "target_language": target_lang,
             "text": text,
         })
-        resp.raise_for_status()
         data = resp.json()
         result = data.get("output", {}).get("translated_text") or data.get("translated_text")
         if result:
@@ -133,13 +244,11 @@ def speech_to_text(
     if not is_available():
         return None
     try:
-        client = _get_client()
         files = {"audio": (filename, io.BytesIO(audio_bytes))}
         data: dict[str, Any] = {}
         if language:
             data["language"] = language
-        resp = client.post("/tasks/modal/stt", files=files, data=data)
-        resp.raise_for_status()
+        resp = _post("/tasks/modal/stt", files=files, data=data)
         result = resp.json()
         transcription = (
             result.get("output", {}).get("audio_transcription")
@@ -163,13 +272,11 @@ def text_to_speech(
     if not is_available() or not speaker_id:
         return None
     try:
-        client = _get_client()
-        resp = client.post("/tasks/modal/tts", json={
+        resp = _post("/tasks/modal/tts", json={
             "text": text[:10000],
             "speaker_id": speaker_id,
             "response_mode": "url",
         })
-        resp.raise_for_status()
         data = resp.json()
         audio_url = data.get("output", {}).get("audio_url") or data.get("audio_url")
         logger.info("Sunbird TTS (%s, speaker %d): url=%s", locale, speaker_id,
@@ -191,9 +298,7 @@ def detect_language(text: str) -> dict[str, Any] | None:
     if len(text.strip()) < 3:
         return None
     try:
-        client = _get_client()
-        resp = client.post("/tasks/language_id", json={"text": text[:200]})
-        resp.raise_for_status()
+        resp = _post("/tasks/language_id", json={"text": text[:200]})
         data = resp.json()
         lang_code = (
             data.get("output", {}).get("language")

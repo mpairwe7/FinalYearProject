@@ -1,0 +1,30 @@
+id: calc_paye
+name: PAYE Calculator
+version: "1"
+description: Guided PAYE (take-home pay) calculation from gross monthly salary.
+requires_auth: false
+
+# Started programmatically by the calculator router — no trigger phrases,
+# so info-queries and messages that already carry the figures never
+# accidentally enter the guided flow.
+trigger_phrases: []
+
+steps:
+  - id: ask_salary
+    question: "What is your **gross monthly salary** in UGX? (e.g. 1,500,000 or 1.5m)"
+    slot: monthly_gross
+    validator: number
+
+  - id: run_calc
+    slot: ""
+    tool: calculate_paye
+    args:
+      monthly_gross: "{monthly_gross}"
+      residency: "{residency}"
+
+  - id: done
+    question: >-
+      Those figures use the official FY2025-26 URA rate table. If your
+      salary changes, just ask me to recalculate — I'm happy to help.
+    slot: ""
+    validator: text
