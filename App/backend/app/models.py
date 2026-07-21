@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -598,29 +598,23 @@ class CFRelayChatMessage(BaseModel):
 class CFRelayChatRequest(BaseModel):
     """Forwarded Workers AI chat-completion request.
 
-    ``model`` is checked against ``routing.ALLOWED_CHAT_MODELS`` — the same
-    fixed 3-model cloud-primary chain this deployment already trusts (see
-    service._llm_cloud_fallback) — rather than accepted as a free string.
-    Unlike the embed relay this endpoint genuinely needs to select between a
-    few different models (the primary/fallback/fallback-2 chain), so it can't
-    just drop the field the way CFRelayEmbedRequest does; a closed-set
-    membership check is a real taint sanitizer where a regex ``Field(pattern=)``
-    would not be — it can only ever select a model this deployment's own
-    operator already configured, never an arbitrary caller-supplied string.
+    ``model_slot`` names a slot in ``routing.CHAT_MODEL_SLOTS``
+    (primary/fallback/fallback2 — the same cloud-primary chain this
+    deployment already trusts, see service._llm_cloud_fallback), never a raw
+    model string. Unlike the embed relay this endpoint genuinely needs to
+    select between a few different models, so it can't just drop the field
+    the way CFRelayEmbedRequest does — but a ``str`` field checked in a
+    ``field_validator`` still reads as tainted to CodeQL's dataflow analysis
+    (a validator is arbitrary code to it, not a proven sanitizer, the same
+    problem a regex ``Field(pattern=)`` had on the embed relay). A
+    ``Literal`` of slot NAMES resolved through a fixed dict in main.py is the
+    pattern it recognizes as safe: the value that ever reaches the outbound
+    Cloudflare URL always comes from ``routing.py``, never from this field.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     messages: list[CFRelayChatMessage] = Field(..., min_length=1, max_length=64)
-    model: str
+    model_slot: Literal["primary", "fallback", "fallback2"]
     max_tokens: int = Field(512, ge=1, le=2048)
     temperature: float = Field(0.2, ge=0.0, le=2.0)
-
-    @field_validator("model")
-    @classmethod
-    def _model_must_be_allowlisted(cls, v: str) -> str:
-        from .providers import routing
-
-        if v not in routing.ALLOWED_CHAT_MODELS:
-            raise ValueError("model is not in the configured Cloudflare chat chain")
-        return v

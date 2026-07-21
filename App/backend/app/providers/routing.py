@@ -43,14 +43,19 @@ CF_LLM_FALLBACK_MODEL_2 = os.getenv(
 CF_LLM_FAST_MODEL = os.getenv("CF_LLM_FAST_MODEL", "@cf/meta/llama-3.1-8b-instruct-fp8")
 # (STT/TTS/MT model IDs live in speech_service.py: STT_FALLBACK_MODEL, etc.)
 
-# Closed set of chat-completion models the relay's cf-relay/workers-ai-chat
-# endpoint (main.py) will forward to Cloudflare on a caller's behalf — the
-# actual configured chain, not a pattern, so a relay caller can only ever pick
-# a model this deployment's own operator chose (see CFRelayChatRequest in
-# models.py for why a regex/free-string model field isn't good enough).
-ALLOWED_CHAT_MODELS = frozenset(
-    {CF_LLM_MODEL, CF_LLM_FALLBACK_MODEL, CF_LLM_FALLBACK_MODEL_2}
-)
+# Named slots for the relay's cf-relay/workers-ai-chat endpoint (main.py): a
+# relay caller picks a SLOT ("primary"/"fallback"/"fallback2"), never a raw
+# model string — the endpoint looks the actual id up from this dict, so the
+# value that ever reaches the outbound Cloudflare URL always originates here,
+# not from request data. A caller-supplied model string, even checked against
+# an allowlist in a Pydantic validator, still reads as tainted to CodeQL's
+# dataflow analysis (a validator is just code to it, not a proven sanitizer);
+# a dict lookup by a Literal-typed key is the pattern it recognizes as safe.
+CHAT_MODEL_SLOTS: dict[str, str] = {
+    "primary": CF_LLM_MODEL,
+    "fallback": CF_LLM_FALLBACK_MODEL,
+    "fallback2": CF_LLM_FALLBACK_MODEL_2,
+}
 
 
 def log_model_use(task: str, model: str) -> None:

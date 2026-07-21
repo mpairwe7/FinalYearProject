@@ -198,11 +198,13 @@ class RelayClientTest(unittest.TestCase):
         )
 
     def test_relay_workers_ai_chat_request_shape(self):
+        from app.providers import routing
+
         fake = _FakeClient({"text": "Double the VAT due."})
         with mock.patch.object(relay_client, "_get_client", return_value=fake):
             text = relay_client.relay_workers_ai_chat(
                 [{"role": "user", "content": "hi"}],
-                "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                routing.CF_LLM_MODEL,
                 max_tokens=512,
                 temperature=0.2,
             )
@@ -214,13 +216,22 @@ class RelayClientTest(unittest.TestCase):
             call["json"],
             {
                 "messages": [{"role": "user", "content": "hi"}],
-                "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                "model_slot": "primary",  # never the raw model id — see CFRelayChatRequest
                 "max_tokens": 512,
                 "temperature": 0.2,
             },
         )
         # Chat gets its own per-call timeout override, not the client's default.
         self.assertEqual(call["timeout"], relay_client._CHAT_HTTP_TIMEOUT)
+
+    def test_relay_workers_ai_chat_rejects_unknown_model(self):
+        with self.assertRaises(ValueError):
+            relay_client.relay_workers_ai_chat(
+                [{"role": "user", "content": "hi"}],
+                "@cf/not-a-configured-model",
+                max_tokens=512,
+                temperature=0.2,
+            )
 
 
 class RelayRoutingTest(unittest.TestCase):

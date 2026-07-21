@@ -98,16 +98,33 @@ def relay_vectorize_query(
     return resp.json().get("hits", [])
 
 
+def _chat_model_slot(model: str) -> str:
+    """Reverse-lookup a model id to its routing.CHAT_MODEL_SLOTS name.
+
+    ``model`` here always originates from this deployment's own trusted call
+    sites (service._llm_cloud_fallback, speech_service — both read straight
+    from routing.py), never from a request — but the *relay endpoint* only
+    accepts a slot name (see CFRelayChatRequest), so the caller's already-
+    trusted model id has to be translated to the slot the far side expects.
+    """
+    from . import routing
+
+    for slot, m in routing.CHAT_MODEL_SLOTS.items():
+        if m == model:
+            return slot
+    raise ValueError(f"relay_workers_ai_chat: {model!r} is not in routing.CHAT_MODEL_SLOTS")
+
+
 def relay_workers_ai_chat(
     messages: list[dict[str, str]], model: str, *, max_tokens: int, temperature: float
 ) -> str:
-    """Chat-completion via the relay (see CFRelayChatRequest — ``model`` is
-    checked server-side against the deployment's own configured chat chain)."""
+    """Chat-completion via the relay (see CFRelayChatRequest — the relay picks
+    the actual model id from its own routing.CHAT_MODEL_SLOTS by name)."""
     s = get_cloud_settings()
     url = f"{s.cf_relay_base_url.rstrip('/')}/internal/cf-relay/workers-ai-chat"
     payload = {
         "messages": messages,
-        "model": model,
+        "model_slot": _chat_model_slot(model),
         "max_tokens": max_tokens,
         "temperature": temperature,
     }

@@ -1486,12 +1486,16 @@ def cf_relay_vectorize_query(request: Request, body: CFRelayVectorizeQueryReques
 def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict:
     _require_relay_key(request)
     from .providers import gateway as _gw
+    from .providers import routing as _routing
 
-    # body.model already validated against routing.ALLOWED_CHAT_MODELS —
-    # see CFRelayChatRequest._model_must_be_allowlisted.
+    # Resolve the slot to an actual model id via a fixed dict lookup — the
+    # string that reaches gateway.workers_ai_chat (and the Cloudflare URL it
+    # builds) always originates in routing.py, never in the request body.
+    # See CFRelayChatRequest for why this indirection exists.
+    model = _routing.CHAT_MODEL_SLOTS[body.model_slot]
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
     text = _gw.workers_ai_chat(
-        messages, body.model, max_tokens=body.max_tokens, temperature=body.temperature
+        messages, model, max_tokens=body.max_tokens, temperature=body.temperature
     )
     return {"text": text}
 

@@ -364,7 +364,7 @@ class CFRelayEndpoints(_Base):
                 "/internal/cf-relay/workers-ai-chat",
                 json={
                     "messages": [{"role": "user", "content": "penalty for late VAT registration?"}],
-                    "model": routing.CF_LLM_MODEL,
+                    "model_slot": "primary",
                     "max_tokens": 512,
                     "temperature": 0.2,
                 },
@@ -372,6 +372,8 @@ class CFRelayEndpoints(_Base):
             )
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), {"text": "Double the VAT due."})
+        # The endpoint resolves "primary" -> routing.CF_LLM_MODEL itself — the
+        # request never carries (or controls) the actual model id.
         mocked.assert_called_once_with(
             [{"role": "user", "content": "penalty for late VAT registration?"}],
             routing.CF_LLM_MODEL,
@@ -382,8 +384,11 @@ class CFRelayEndpoints(_Base):
     def test_chat_rejects_non_allowlisted_model(self):
         """Same SSRF-shape guard as embed, but for chat: unlike embed, chat
         genuinely needs to pick between a few models, so it can't just drop
-        the field — the fix is a closed-set membership check instead of
-        accepting whatever string the caller sends."""
+        the field. ``model_slot`` is a Literal of slot NAMES, resolved to an
+        actual model id via a fixed dict in main.py — a raw ``model`` string
+        (even one an app-level check would allowlist) is rejected outright by
+        the schema, since a Pydantic validator isn't a taint sanitizer CodeQL
+        credits, but a Literal + dict-lookup is."""
         from app.providers import config as cf_config
 
         os.environ["CF_RELAY_SECRET"] = "relay-secret-123"
@@ -394,6 +399,18 @@ class CFRelayEndpoints(_Base):
             json={
                 "messages": [{"role": "user", "content": "hi"}],
                 "model": "@cf/attacker/evil",
+                "max_tokens": 512,
+                "temperature": 0.2,
+            },
+            headers=_bearer("relay-secret-123"),
+        )
+        self.assertEqual(r.status_code, 422)
+
+        r = c.post(
+            "/internal/cf-relay/workers-ai-chat",
+            json={
+                "messages": [{"role": "user", "content": "hi"}],
+                "model_slot": "not-a-real-slot",
                 "max_tokens": 512,
                 "temperature": 0.2,
             },
