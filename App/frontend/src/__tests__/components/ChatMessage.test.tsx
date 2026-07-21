@@ -5,7 +5,7 @@
  * grounding badge, WCAG roles/labels.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import ChatMessage from "../../components/ChatMessage";
 import type { ChatTurn } from "../../store/useChatStore";
 
@@ -41,17 +41,43 @@ const assistantTurn: ChatTurn = {
   retrievalMode: "hybrid",
 };
 
+const attachmentTurn: ChatTurn = {
+  ...userTurn,
+  id: "u2",
+  content: "What does this receipt say?",
+  attachments: [{ id: "a".repeat(32), name: "receipt.pdf", docType: "receipt" }],
+};
+
 describe("ChatMessage", () => {
   it("renders user message with user icon", () => {
     renderMsg(userTurn);
     expect(screen.getByText("What is VAT?")).toBeInTheDocument();
-    expect(screen.getByText("user")).toBeInTheDocument();
+    // Role is announced to screen readers (visually hidden), not shown as a label.
+    expect(screen.getByText("You said")).toBeInTheDocument();
   });
 
   it("renders assistant message with bot icon", () => {
     renderMsg(assistantTurn);
     expect(screen.getByText("VAT is 18% in Uganda.")).toBeInTheDocument();
-    expect(screen.getByText("assistant")).toBeInTheDocument();
+    expect(screen.getByText("Assistant replied")).toBeInTheDocument();
+  });
+
+  it("renders attachment chips with a report download on user turns", () => {
+    renderMsg(attachmentTurn);
+    expect(screen.getByText("receipt.pdf")).toBeInTheDocument();
+    expect(screen.getByText("Receipt")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Download analysis report for receipt\.pdf/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("copies the assistant reply to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderMsg(assistantTurn);
+    fireEvent.click(screen.getByRole("button", { name: "Copy reply" }));
+    expect(writeText).toHaveBeenCalledWith("VAT is 18% in Uganda.");
+    expect(await screen.findByRole("button", { name: "Reply copied" })).toBeInTheDocument();
   });
 
   it("shows citations with source details", () => {

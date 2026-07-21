@@ -1,0 +1,38 @@
+# Build-context filter specific to Dockerfile.cranecloud.
+# BuildKit picks this up when the Dockerfile is referenced via
+# -f App/Dockerfile.cranecloud.
+
+# Exclude everything by default; allow the few things the build needs.
+*
+
+# Allow paths the Dockerfile COPY directives reference.
+!App/backend/app/**
+!App/backend/requirements-cranecloud.txt
+!App/backend/pyproject.toml
+!App/frontend/**
+!App/deploy/cranecloud/**
+!App/Dockerfile.cranecloud
+!Model/bm25_state.json
+!Data/dataset/**
+
+# Within the allow-listed paths, still strip cruft.
+App/frontend/node_modules/
+App/frontend/.next/
+App/backend/__pycache__/
+App/backend/data_store/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.git/
+**/.vscode/
+**/.idea/
+**/*.log
+**/.env
+**/.env.*
+**/*.db
+**/*.sqlite
+**/*.swp
+**/.DS_Store

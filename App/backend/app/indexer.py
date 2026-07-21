@@ -17,7 +17,6 @@ import csv
 import json
 import logging
 import os
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -182,7 +181,11 @@ def build_index(
     from qdrant_client import QdrantClient, models
     from sentence_transformers import SentenceTransformer
 
-    from .retriever import BM25SparseEncoder
+    from .retriever import (
+        BM25SparseEncoder,
+        bm25_binding_sentinel_id,
+        deterministic_point_id,
+    )
 
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
     dense_model = SentenceTransformer(DENSE_MODEL_NAME)
@@ -237,7 +240,7 @@ def build_index(
             payload = dict(doc.items())
             points.append(
                 models.PointStruct(
-                    id=str(uuid.uuid4()),
+                    id=deterministic_point_id(doc),
                     vector=vectors,
                     payload=payload,
                 )
@@ -252,6 +255,19 @@ def build_index(
             total_upserted,
             len(documents),
         )
+
+    # Stamp the corpus hash into Qdrant so the retriever can detect a
+    # bm25_state.json that is out of sync with these vectors (P1-6).
+    client.upsert(
+        collection_name=QDRANT_COLLECTION,
+        points=[
+            models.PointStruct(
+                id=bm25_binding_sentinel_id(QDRANT_COLLECTION),
+                vector={"dense": [0.0] * DENSE_DIM},
+                payload={"_meta": "bm25_binding", "corpus_hash": sparse_encoder.corpus_hash},
+            )
+        ],
+    )
 
     stats = {
         "collection": QDRANT_COLLECTION,
