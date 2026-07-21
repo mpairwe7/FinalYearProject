@@ -86,7 +86,10 @@ User Query
   │     └── check_grounding() — faithfulness via NLI entailment (OWASP LLM09)
   │
   ├─► Stage 7: Grounding Verification
-  │     ├── Faithfulness score via NLI / entailment
+  │     ├── Faithfulness: content-token overlap of non-courtesy sentences
+  │     │   (retriever.compute_faithfulness + text_signals.is_courtesy_sentence —
+  │     │   politeness/empathy/contact footers never score as hallucination;
+  │     │   curated deterministic replies score 1.0 on REST *and* streaming)
   │     └── Optional self-reflection: regenerate if faithfulness weak [FLAG_SELF_REFLECT]
   │
   ├─► Stage 8: Escalation Check
@@ -265,7 +268,8 @@ App/backend/app/
 │
 ├── tools/               # LLM tool-calling framework (Phase 14-A/B)
 │   ├── __init__.py      #   Tool base class + ToolRegistry (auto-registration)
-│   ├── calculators.py   #   VAT, PAYE, capital gains, corporation tax, customs duty
+│   ├── calculators.py   #   VAT, PAYE, capital gains, corporation tax, customs duty,
+│   │                    #   rental income tax, withholding tax (FY-versioned rates)
 │   ├── rates.py         #   Tax rate lookups by category
 │   ├── calendar.py      #   Filing deadlines, fiscal year, current date
 │   ├── escalate.py      #   Human escalation tool
@@ -294,6 +298,26 @@ App/backend/app/
 ## Agent Runtime (Phase 14)
 
 When `FLAG_AGENTIC_MODE=true`, the supervisor classifier (`agents/supervisor.py`) routes queries before retrieval:
+
+Three deterministic fast paths intercept BEFORE routing
+(`ChatModel._maybe_handle_fast_paths`, REST and streaming parity):
+
+1. **TIN clarification** — an untyped registration ask ("how do I register
+   for a TIN/pin?") asks individual-vs-organisation first (one-question
+   `tin_procedure_help` flow), then returns the matching curated template;
+   typed asks answer immediately.
+2. **Calculator** (`calculator_router.py`): a message that already carries
+   the figures ("VAT on 1.5m") is answered instantly from the registered
+   calculator tool (`retrieval_mode="calculator"`, no LLM); missing figures
+   start the matching `calc_*` guided workflow pre-filled with everything
+   already extracted. Defaults applied (residency, VAT direction, landlord
+   type, annual→monthly conversion) are stated as visible assumptions.
+3. **Rate lookup** — "what is the current VAT rate?" answers with the real
+   figure from the versioned FY rate table (gated on the authority-manifest
+   freshness check) instead of retrieval passages.
+
+The `TOOLS` route below remains the fallback for phrasings the fast paths
+abstain on.
 
 | Route | Trigger | Handler |
 |-------|---------|---------|

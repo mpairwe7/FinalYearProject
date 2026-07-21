@@ -214,8 +214,9 @@ Set these in the Crane Cloud app dashboard → **Environment variables**:
 | `INDEX_API_KEY` | `<openssl rand -hex 32>` | yes | Protects `/v1/index`, `/v1/evaluate` |
 | `STORE_RAW_PROMPTS` | `false` | yes | NDPA §19 data minimisation |
 | `LLM_TRUST_REMOTE_CODE` | `false` | yes | OWASP LLM03 supply-chain |
-| `SPEECH_ENABLED` | `false` | recommended | Whisper/Piper don't fit; voice via Sunbird API only |
-| `SUNBIRD_API_TOKEN` | `<token>` | optional | Cloud ASR/TTS/MT for Ugandan languages |
+| `SPEECH_ENABLED` | `true` | enabled in this deployment | Cloud (Sunbird) speech mode; see §7. `false`/unset → speech routes 503. |
+| `SUNBIRD_API_TOKEN` | `<token>` | required if speech on | Cloud ASR/TTS/MT for Ugandan languages (§7.1). |
+| `FLAG_VOICE_CONSENT` | `true` | required if speech on | NDPA consent gate; blocks boot if speech on + `APP_ENV=production` without it (§7.1). |
 | `FLAG_WS_CHAT` | `false` | optional | Enable `/v2/chat/stream` WebSocket text chat (Phase 29). See §13. |
 | `WS_CONFIRM_HMAC_SECRET` | `<openssl rand -hex 32>` | if `FLAG_WS_CHAT=true` | HMAC secret for HITL tool-call confirmation tokens. Required when WS chat is enabled in production. |
 | `LLM_TOOL_MAX_ITER` | `10` | optional | Per-turn agentic tool-call cap (1–20). Default 10. |
@@ -280,18 +281,138 @@ picks it up automatically.
 
 ## 7. Speech on Crane Cloud
 
-The local Whisper/Piper stack is intentionally **disabled** on Crane
-Cloud (no GPU, image bloat). Two options:
+> **Status (last verified 2026-06-17):** speech is **ENABLED** in the live
+> deployment in "Cloud (Sunbird)" mode. `GET /v1/speech/health` →
+> `{"enabled":true,"status":"ready"}`. All STT/TTS/MT/voice-chat checks pass
+> for English and Luganda — see §7.3.
+
+The local Whisper/Piper stack is intentionally **not** shipped on Crane
+Cloud (no GPU, image bloat). The 296 MB image carries no local ASR/TTS
+models, so every speech call is delegated to cloud providers. Two modes:
 
 | Mode | Setup | Behavior |
 |---|---|---|
-| Off (default) | `SPEECH_ENABLED=false` | `/v1/voice/*` returns 503; text chat works fully |
-| Cloud (Sunbird) | `SPEECH_ENABLED=true` + `SUNBIRD_API_TOKEN` | ASR/TTS/MT delegated to Sunbird AI cloud API |
+| Off | `SPEECH_ENABLED=false` (or unset → `app.state.speech=None`) | `/v1/asr`, `/v1/tts`, `/v1/translate`, `/v1/voice/chat` all return **503** (`get_speech_model`, `main.py:471`); text chat unaffected |
+| Cloud (Sunbird) | `SPEECH_ENABLED=true` + `SUNBIRD_API_TOKEN` (+ `FLAG_VOICE_CONSENT=true`, `USE_DOH=true`) | ASR/TTS delegated to Sunbird AI; MT to Gemini (via Cloudflare AI Gateway) or Sunbird NLLB |
+
+### 7.1 Required environment variables
+
+| Key | Value | Why |
+|---|---|---|
+| `SPEECH_ENABLED` | `true` | Builds the `SpeechModel` at startup; without it every speech route 503s. |
+| `SUNBIRD_API_TOKEN` | `<token>` | Primary Sunbird account — cloud ASR/TTS/MT for Ugandan languages. `SUNBIRD_API_URL` defaults to `https://api.sunbird.ai`. |
+| `SUNBIRD_FALLBACK_API_TOKEN` | `<token>` | Optional second Sunbird account for resilience — a request that fails on the primary token is automatically retried on this one (`sunbird._post`). `is_available()` is true if **either** token is set. |
+| `FLAG_VOICE_CONSENT` | `true` | NDPA consent gate. **Hard-required when `SPEECH_ENABLED=true` AND `APP_ENV=production`** (`_validate_production_env`, `main.py:258`) — the app refuses to boot otherwise. With it on, anonymous `/v1/asr` & `/v1/voice/chat` calls must send header `X-Voice-Consent: true` (`main.py:312`). |
+| `USE_DOH` | `true` | RENU pods have no upstream DNS; the DoH resolver (1.1.1.1) is what lets the pod resolve `api.sunbird.ai`. Already set for the LLM egress path. |
+
+MT/translation additionally uses the **Gemini** path when these are present
+(they already are in this deployment): `FLAG_CLOUDFLARE_FALLBACK=true`,
+`TRANSLATE_FALLBACK_BACKEND=gemini`, `GEMINI_API_KEY`, `GEMINI_MODEL`,
+`CLOUDFLARE_ACCOUNT_ID`, `CF_AIG_GATEWAY`, `CF_AIG_TOKEN`. Gemini is **not**
+an STT/TTS provider — it only serves translation.
+
+### 7.2 Setting the env vars via the Crane Cloud API (operational gotcha)
+
+Env vars can be set in the dashboard, or via the REST API. Two traps:
+
+1. **Omit the `image` field when updating only env vars.** A `PATCH /apps/{id}`
+   that includes an `image` (even the *current, unchanged* tag) makes Crane
+   Cloud re-validate the tag against Docker Hub's web API
+   (`hub.docker.com/v2/namespaces/landwind/repositories/ura-chatbot/tags/<tag>`).
+   When that lookup is unreachable/lagging the whole PATCH fails with
+   **HTTP 500 `Max retries exceeded ... hub.docker.com`** and nothing is
+   applied. Sending **only** `{"env_vars": {...}}` skips image validation and
+   succeeds, leaving the running image untouched.
+2. **Send the complete merged env dict.** `GET /apps/{id}` first
+   (env lives at `data.apps.env_vars`), merge your keys into that dict, and
+   PATCH the whole thing — partial PATCHes don't reliably overwrite existing
+   keys, and a bare replacement would drop the other ~19 vars and break the
+   production gate.
+
+```bash
+# token via POST /users/login {email,password} -> data.access_token
+# (See §13 for the login flow. From a network where api.cranecloud.io has a
+#  valid cert; the RENU edge serves a *.renu-01 cert, so a sandbox may need to
+#  TLS to a *.renu-01 host and route with `Host: api.cranecloud.io`.)
+curl -sf -X PATCH "https://api.cranecloud.io/apps/$APP_ID" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"env_vars": { <full merged dict incl. SPEECH_ENABLED/SUNBIRD_API_TOKEN/FLAG_VOICE_CONSENT> }}'
+# NOTE: no "image" key — that is deliberate.
+```
+
+The env change bumps the deployment revision and triggers a rolling pod
+restart on its own (no image change needed). Poll `/v1/speech/health` until
+`{"enabled":true,"status":"ready"}`.
+
+### 7.3 Audit / QA verification
+
+Run the speech smoke against the live URL (companion to `live_smoke.sh`,
+which covers only text chat):
+
+```bash
+BACKEND_URL=https://ura-chatbot-6318a1b5.renu-01.cranecloud.io \
+  bash App/scripts/live_speech_smoke.sh
+```
+
+It exercises `/v1/speech/health`, TTS (en+lg), STT round-trip (en+lg),
+`/v1/translate` (both directions), and `/v1/voice/chat` (en+lg), asserting
+HTTP 200, `error=null`, audio that decodes to valid WAV, and
+language-appropriate transcripts. Expected serving backends:
+
+| Route | Expected `backend` |
+|---|---|
+| `/v1/tts` en | `edge_tts` (`en-US-AriaNeural` neural — requires `edge-tts` in the image, added 2026-06) |
+| `/v1/tts` lg | `sunbird_cloud` (native speaker 248) |
+| `/v1/asr` en & lg | `sunbird_cloud` |
+| `/v1/translate` en↔lg | `gemini_flash` (Gemini via CF AI Gateway) |
+| `/v1/voice/chat` en | asr `sunbird_cloud`, tts `edge_tts` |
+| `/v1/voice/chat` lg | asr `sunbird_cloud`, mt `gemini_flash`, tts `sunbird_cloud` |
+
+**Known caveats (not failures):**
+- **English TTS uses edge-tts neural voices.** English synthesizes with
+  `edge_tts` (`en-US-AriaNeural` by default; override with `SPEECH_EN_EDGE_VOICE`).
+  This needs the `edge-tts` package in the image (added 2026-06 via
+  `requirements-cranecloud.txt`). If its egress to Microsoft fails it falls
+  back to Sunbird's non-English voice — which mispronounces acronyms (an early
+  round-trip rendered "VAT" as "fertilizer") — so **watch the `backend` field**:
+  `edge_tts` = good, `sunbird_cloud` for English = the degraded fallback.
+  Luganda TTS uses Sunbird's native speaker 248 directly (good quality).
+- **Latency is network-bound.** Single STT/TTS calls run ~5–8 s (incl. Sunbird
+  modal cold start); a full `/v1/voice/chat` round-trip ~30–34 s. Do **not**
+  advertise sub-1s targets.
 
 Voice WebSocket endpoints (`/v1/voice/chat/stream`, `/v2/voice/chat/stream`)
-require `FLAG_VOICE_STREAMING=true` and a working `SpeechModel`. On
-Crane Cloud with Sunbird cloud mode they work but latency is
-network-bound; do not advertise sub-1s targets.
+require `FLAG_VOICE_STREAMING=true` and a working `SpeechModel`; they work in
+Sunbird cloud mode but are similarly network-bound.
+
+### 7.4 English STT/TTS via Cloudflare Workers AI (optional)
+
+Route **English** speech to Cloudflare Workers AI (Luganda stays on Sunbird —
+the CF audio models are English-strong). Models are **env-configurable**, so you
+can swap them (e.g. to Deepgram) without code changes. For English the TTS chain
+is **Aura-2-en → MeloTTS → edge_tts → Sunbird** and STT is **whisper-large-v3-turbo
+→ Sunbird** — every tier is retained for resilience (circuit-breaker + budget
+gated), degrading down the chain on failure.
+
+| Env | Default | Notes |
+|---|---|---|
+| `FLAG_CLOUDFLARE_FALLBACK` | `true` | master switch for all CF fallbacks |
+| `STT_FALLBACK_BACKEND` | `workers_ai` | enables CF STT for English |
+| `STT_FALLBACK_MODEL` | `@cf/openai/whisper-large-v3-turbo` | or `@cf/deepgram/nova-3`, `@cf/deepgram/flux` |
+| `TTS_FALLBACK_BACKEND` | `workers_ai` | enables CF TTS for English |
+| `TTS_FALLBACK_MODEL` | `@cf/deepgram/aura-2-en` | **primary** English TTS — Deepgram Aura-2, context-aware/natural (returns MP3) |
+| `TTS_FALLBACK_MODEL_2` | `@cf/myshell-ai/melotts` | resilience fallback — MeloTTS (returns WAV) |
+
+Request/response shapes differ by model family and are handled in
+`app/providers/gateway.py` (`workers_ai_stt`/`workers_ai_tts`): original
+`@cf/openai/whisper` takes raw bytes; `whisper-large-v3-turbo` takes JSON
+`{"audio": base64}`; MeloTTS JSON `{prompt,lang}` → base64 WAV; Deepgram Aura
+JSON `{text}` → binary MP3. ("grok-voice" is **not** a Cloudflare model.)
+
+Verify: `python -m pytest backend/tests/test_providers.py -k "CfWorkersTts or CfGatewayDispatch"`
+(mocked) and, for a real round-trip,
+`CF_LIVE_TEST=1 python -m pytest backend/tests/test_providers.py -k CfLive` —
+or the speech smoke, where the English backend then reports `cf_workers_ai`.
 
 ---
 
@@ -318,6 +439,10 @@ docker push landwind/ura-chatbot:latest
 BACKEND_URL=https://ura-chatbot-<hash>.renu-01.cranecloud.io \
 FRONTEND_URL=https://ura-chatbot-<hash>.renu-01.cranecloud.io \
 bash App/scripts/live_smoke.sh
+
+# 5b. If speech is enabled (§7), also run the speech smoke (STT/TTS/MT/voice)
+BACKEND_URL=https://ura-chatbot-<hash>.renu-01.cranecloud.io \
+bash App/scripts/live_speech_smoke.sh
 ```
 
 The `live_smoke.sh` script (see `App/scripts/live_smoke.sh`) verifies:
@@ -345,7 +470,7 @@ After deploy, these should all return 200:
 | `GET /ready` | `{"status":"degraded","model_loaded":true,"retrieval_mode":"keyword"}` |
 | `POST /v1/chat` | `ChatResponse` with `reply`, `citations`, `retrieval_mode` |
 | `POST /v1/chat/stream` | SSE: `metadata`, `token`*, `grounding`, `done` |
-| `GET /v1/speech/health` | `{"status":"unavailable"}` (or `"ready"` with Sunbird) |
+| `GET /v1/speech/health` | `{"enabled":true,"status":"ready"}` (Sunbird cloud mode; §7). `{"status":"unavailable"}` when speech is off. |
 | `GET /tags` | List of FAQ tags |
 | `GET /docs` | Swagger UI |
 | `GET /` | Next.js chat UI |
@@ -465,6 +590,8 @@ direct-curl pattern from `mpairwe7/MLOPS_V1/.github/workflows/`:
 |---|---|---|---|
 | Build & push | `.github/workflows/ura-chatbot-build-push.yml` | push to dev/main, `v*` tag, manual dispatch | Builds `Dockerfile.cranecloud`, pushes to `landwind/ura-chatbot:<tag>` on Docker Hub, then dispatches the deploy workflow (dev / `v*` only). |
 | Crane Cloud deploy | `.github/workflows/ura-chatbot-deploy-cranecloud.yml` | dispatched by build, or manual | `POST /users/login` → `PATCH /apps/<id>` → poll `/health` for 5 min. Direct REST API — no `cranecloud` CLI, no Python keyring shim. |
+| Redeploy retry loop | `.github/workflows/ura-chatbot-cc-redeploy-retry.yml` | cron every 3h, manual dispatch | Retries a blocked image roll while Crane Cloud's control plane can't resolve `hub.docker.com` (its tag-validation DNS quirk): probes the live app for the target build, dispatches the deploy workflow if stale, and on success opens a notification issue and **disables itself**. Re-enable + bump `TARGET_TAG` for future blocked rolls. |
+| HF Space keepalive | `.github/workflows/hf-space-keepalive.yml` | cron hourly, manual dispatch | Keeps `landwind22/ura-chatbot` from sleeping/pausing: checks the Space runtime stage via the HF API (secret `HF_TOKEN`) and restarts it when paused/errored, then pings `/v1/speech/health` so the free-tier inactivity timer keeps resetting. |
 
 ### Crane Cloud REST API contract used by the deploy workflow
 
@@ -539,3 +666,114 @@ curl -sf -X PATCH "$CRANE_CLOUD_API/apps/$APP_ID" \
 - Sibling references: `Musawo/docs/crane-cloud-deployment.md`,
   `HustleCoach/docs/crane-cloud-deployment.md`,
   `Magezi/docs/crane-cloud-deployment.md` — same RENU cluster, simpler stacks
+
+---
+
+## 15. Alternate pipeline — Hugging Face Docker Space
+
+A second, Crane-Cloud-independent deployment of the **same image** — useful when
+the Crane Cloud control plane is unavailable (e.g. its Docker Hub image
+validation is failing, §7.2). Definition lives in `App/deploy/hf-space/`.
+
+| Field | Value |
+|---|---|
+| Space | `landwind22/ura-chatbot` (HF account `landwind22`) |
+| App URL | `https://landwind22-ura-chatbot.hf.space` |
+| SDK | `docker` — `Dockerfile` is `FROM landwind/ura-chatbot:<sha>`; HF pulls and runs it (no rebuild) |
+| Port | `app_port: 8080` in `README.md` (the image's nginx) |
+
+**How it works:** HF Docker Spaces build any Dockerfile; ours just references the
+prebuilt Docker Hub image, so there is **no separate build** — bump the `FROM`
+tag in `App/deploy/hf-space/Dockerfile` to roll the Space.
+
+**Secrets & config:** runtime config mirrors the Crane Cloud app's env, set as
+**Space secrets/variables** (Settings, or run `App/deploy/hf-space/replicate_secrets.py`
+to copy the live Crane Cloud env, and `App/deploy/hf-space/set_fallback_secret.py`
+to set the Sunbird fallback token). Overrides vs Crane Cloud: `USE_DOH=false` (HF
+has native DNS) and `CORS_ORIGINS` = the Space URL. Model-routing IDs (`CF_LLM_*`,
+`STT_/TTS_FALLBACK_*`) are set as non-secret Space **variables**. Both helpers are
+stdlib-only and print key names only, never values.
+
+**Frame-embedding fix (§7.4 note):** the frontend originally sent
+`X-Frame-Options: DENY`, which blanked the HF Space *page* (it embeds the app in an
+iframe; the direct `*.hf.space` URL always rendered). `next.config.mjs` now drops
+`X-Frame-Options` and uses CSP `frame-ancestors 'self' https://huggingface.co
+https://*.hf.space` (env `FRAME_ANCESTORS`; `"'none'"` restores strict no-embed).
+Headers are baked at Next.js build time, so this required a rebuild — not a runtime
+env change.
+
+**Verify** exactly as for Crane Cloud:
+
+```bash
+BACKEND_URL=https://landwind22-ura-chatbot.hf.space \
+  bash App/scripts/live_speech_smoke.sh
+```
+
+Verified 2026-06-17 (live image `sha-c2722c4`): TTS en → `cf_workers_ai`
+(`@cf/deepgram/aura-2-en`, MP3; MeloTTS/edge_tts/Sunbird as fallbacks), TTS lg →
+`sunbird_cloud` (speaker 248), STT en/lg → `sunbird_cloud`, translate →
+`gemini_flash`, voice/chat (en+lg) full pipeline. Sunbird modal cold starts make
+the first call of each kind slow (voice/chat ~30–45 s; the compound English call
+can exceed HF's proxy timeout → 504 — real clients should use streaming).
+
+---
+
+## 16. Model routing strategy
+
+Per-task model selection follows **Best capability → cost → resilience**, declared
+in `App/backend/app/providers/routing.py` (env-overridable model IDs) and recorded
+on `/metrics` as `model_usage_total{task,model}` + `model_fallback_total{task,from,to,reason}`.
+
+| Task | Primary → fallbacks |
+|---|---|
+| Reasoning / RAG / summarization (LLM) | Gemini 2.5 Flash → CF `llama-3.3-70b-instruct-fp8-fast` → CF `qwq-32b` (local/vLLM stays primary when present) |
+| Translation (en↔lg) | Gemini 2.5 Flash → CF Llama (prompted) → Sunbird NLLB → local MT → Qwen3 |
+| Luganda STT | Sunbird → CF `whisper-large-v3-turbo` (Gemini-audio deferred) |
+| English STT / TTS | STT `whisper-large-v3-turbo`; TTS `aura-2-en` → `melotts` → edge_tts → Sunbird — see §7.4 |
+| Embedding | CF `bge-m3` (the index's vector space) → degrade to BM25 keyword |
+
+Env knobs (defaults apply if unset): `CF_LLM_MODEL`, `CF_LLM_FALLBACK_MODEL`,
+`CF_LLM_FAST_MODEL`, plus the existing `LLM_FALLBACK_BACKEND=gemini`,
+`TRANSLATE_FALLBACK_BACKEND=gemini`, `FLAG_CLOUDFLARE_FALLBACK=true`, and the speech
+model envs (§7.4). Cloud tiers **self-skip** when their flag/keys are absent, so
+local/GPU deploys fall through to offline tiers; breakers + budget + keyword
+degradation keep it resilient when a cloud tier is down.
+
+**Catalog substitutions** (spec models absent from this account's Workers AI catalog):
+Llama 405B / Command R+ / Qwen2.5-72B → `@cf/qwen/qwq-32b`; "Gemini 3.5 Flash" →
+Gemini 2.5 Flash; "Sunbird 2" → the existing Sunbird API. **Embedding caveat:** a
+Vectorize index is bound to ONE embedding model's vector space, so a *different*
+embed model is not a valid fallback — resilience is retry `bge-m3` → BM25 keyword.
+
+**Grok voice (evaluated 2026-06, not adopted):** xAI's Grok STT/TTS APIs exist and
+Cloudflare AI Gateway added a `grok` provider, but the gateway routes Grok **chat
+completions only** — voice (STT/TTS/`/v1/realtime`) needs **direct `api.x.ai`** calls
+(paid: ~$0.10–0.20/hr STT, $4.20/1M-char TTS), a separate `XAI_API_KEY`, and has no
+Luganda. The gateway-native, free-tier-friendly premium English voice
+(`@cf/deepgram/aura-2-en`) was chosen instead.
+
+---
+
+## 17. Deployment state & change log (audit — 2026-06-17)
+
+Snapshot after this session's changes.
+
+| Pipeline | Image | Status |
+|---|---|---|
+| HF Space `landwind22/ura-chatbot` | `sha-c2722c4` | **Live** — model routing + CF speech + Aura-2 English TTS + iframe fix |
+| Crane Cloud app `b01219c6-…` | `sha-0d7cd2f` (older) | Speech enabled; routing/CF-TTS env **staged**, applies when its image deploy recovers (Docker-Hub validation outage, §7.2) |
+
+**Per-task models (live)** — see §16:
+- English: STT `@cf/openai/whisper-large-v3-turbo`; TTS `@cf/deepgram/aura-2-en` → MeloTTS → edge_tts → Sunbird.
+- Luganda: STT/TTS Sunbird (TTS speaker 248); CF whisper-turbo as the STT net.
+- Translation en↔lg: Gemini 2.5 Flash → CF Llama-3.3-70B → Sunbird NLLB → local MT → Qwen3.
+- LLM reasoning: Gemini → CF Llama-3.3-70B → QwQ-32B (local/vLLM primary when present).
+- Embedding: bge-m3 → BM25 keyword.
+
+**Resilience:** Sunbird primary + fallback account (`SUNBIRD_API_TOKEN` / `SUNBIRD_FALLBACK_API_TOKEN`, `sunbird._post`); per-channel circuit breakers + free-tier budget guards; cloud tiers self-skip when unconfigured.
+
+**Observability:** `model_usage_total{task,model}` + `model_fallback_total{task,from,to,reason}` on `/metrics` (admin-gated).
+
+**Change log / PRs (this session):** #116 speech enable + edge-tts English · #117 HF Docker Space pipeline · #118 CF English STT/TTS · #119 Sunbird fallback account · #120 `set_fallback_secret.py` helper · #121 model-routing policy + observability · #122 HF iframe `frame-ancestors` fix · (Aura-2-en TTS primary + `CF_LLM_*` env = config-only, no PR).
+
+**Ops gotchas:** (1) change CC env during the Docker-Hub outage via an **env-only PATCH** — omit the `image` field (§7.2); (2) **build-push is path-filtered** — docs/`hf-space/`-only merges don't build a new image; (3) HF/security headers are **baked at build** (the frame fix needed a rebuild, not an env change); (4) Grok voice not gateway-routable (see above).

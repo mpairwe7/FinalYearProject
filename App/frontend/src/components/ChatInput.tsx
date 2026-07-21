@@ -1,5 +1,12 @@
 import React, { memo, useLayoutEffect, useRef } from 'react';
-import { MicIcon, SendIcon, CloseIcon, CheckIcon } from './Icons';
+import { MicIcon, SendIcon, CloseIcon, CheckIcon, PaperclipIcon, FileIcon, LoadingDots } from './Icons';
+import {
+  ATTACHMENT_ACCEPT,
+  MAX_ATTACHMENTS,
+  PendingAttachment,
+  formatDocType,
+  formatFileSize,
+} from '../lib/attachments';
 
 interface ChatInputProps {
   message: string;
@@ -14,6 +21,9 @@ interface ChatInputProps {
   onMicClick: () => void;
   onCancelRecording?: () => void;
   onFocus?: () => void;
+  attachments?: PendingAttachment[];
+  onAttachFiles?: (files: FileList) => void;
+  onRemoveAttachment?: (clientId: string) => void;
 }
 
 /** Inline waveform — 5 animated bars */
@@ -38,8 +48,13 @@ function ChatInputInner({
   onMicClick,
   onCancelRecording,
   onFocus,
+  attachments,
+  onAttachFiles,
+  onRemoveAttachment,
 }: ChatInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
 
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -82,9 +97,62 @@ function ChatInputInner({
   }
 
   // ── Normal state ──
+  const showAttachments = Boolean(onAttachFiles);
   return (
     <>
+      {showAttachments && attachments && attachments.length > 0 && (
+        <div className="composer-attachments" aria-label="Attached documents">
+          {attachments.map((a) => (
+            <div
+              key={a.clientId}
+              className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
+            >
+              <FileIcon />
+              <span className="attachment-name" title={a.name}>{a.name}</span>
+              <span className="attachment-meta">
+                {a.status === 'uploading' && <LoadingDots />}
+                {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
+                {a.status === 'error' && (a.error || 'Failed')}
+              </span>
+              <button
+                type="button"
+                className="attachment-remove"
+                onClick={() => onRemoveAttachment?.(a.clientId)}
+                aria-label={`Remove ${a.name}`}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="composer">
+        {showAttachments && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ATTACHMENT_ACCEPT}
+              className="attachment-file-input"
+              aria-hidden="true"
+              tabIndex={-1}
+              onChange={(e) => {
+                if (e.target.files?.length) onAttachFiles?.(e.target.files);
+                e.target.value = '';
+              }}
+            />
+            <button
+              className="composer-circle-btn attach-circle-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
+              aria-label="Attach a document (PDF, Word, Excel, CSV, or image)"
+              title="Attach a document"
+            >
+              <PaperclipIcon />
+            </button>
+          </>
+        )}
         <textarea
           ref={inputRef}
           className="input"
@@ -117,8 +185,8 @@ function ChatInputInner({
         <button
           className="composer-circle-btn send-circle-btn"
           onClick={() => onSend()}
-          disabled={isLoading || !message.trim()}
-          aria-label="Send message"
+          disabled={isLoading || isUploading || !message.trim()}
+          aria-label={isUploading ? 'Analysing attachment...' : 'Send message'}
         >
           <SendIcon />
         </button>

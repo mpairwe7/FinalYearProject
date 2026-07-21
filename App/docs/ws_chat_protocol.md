@@ -154,6 +154,20 @@ Streams sanitized text chunks. Multiple per turn.
 {"type": "response.token", "delta": "Hello "}
 ```
 
+#### Short-circuit turns (single token frame)
+
+Guarded or templated turns skip the LLM stream and arrive as one bundled
+payload: `response.metadata` extended with `faithfulness_score`,
+`escalation_required`, `workflow`, and `handoff`, then a **single**
+`response.token` carrying the full reply, then `response.done`. This covers
+`retrieval_mode` ∈ {`blocked`, `abstained`, `clarification`, `workflow`,
+`escalated`, `calculator`} and deterministic procedural replies (curated
+TIN-registration / return-filing answers), which carry their real
+faithfulness score — 1.0 for curated templates — instead of an LLM-stream
+estimate. `calculator` frames are instant tax computations from the
+deterministic calculator router; a calculation missing its figures arrives
+as a `workflow` frame instead (guided slot-filling for the absent details).
+
 ### `response.retrieval.*` *(Phase 2)*
 
 `retrieval.started`, `retrieval.completed`, `rerank.completed`. Carries
