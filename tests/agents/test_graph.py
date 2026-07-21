@@ -134,7 +134,7 @@ class TestGraphRuntime:
 class TestMainGraph:
     def test_clarify_for_stop_word(self, fresh_registry):
         graph = build_main_graph()
-        state = AgentGraphState(query="hello", rewritten_query="hello")
+        state = AgentGraphState(query="help", rewritten_query="help")
         final = graph.run(state)
         assert final.outcome == GraphOutcome.CLARIFY
         assert final.clarification_question

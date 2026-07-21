@@ -1,0 +1,182 @@
+# =============================================================================
+# URA Chatbot — Crane Cloud image build & push (2026)
+#
+# Builds the single-container Crane Cloud image (App/Dockerfile.cranecloud)
+# and pushes to Docker Hub as `landwind/ura-chatbot:<tag>`.  Mirrors the
+# HealthSyncUganda build-push.yml shape but targets Docker Hub instead of
+# GHCR because the URA chatbot image is published under the `landwind`
+# Docker Hub namespace (see docs/CRANE_CLOUD_DEPLOYMENT.md §3).
+#
+# Triggers:
+#   * push to dev / main             → tags: <branch>, sha-<short>
+#   * push of v* tag                 → tags: <version>, <maj.min>, latest
+#   * workflow_dispatch              → manual rebuild from any ref
+#
+# Outputs:
+#   * pushed image reference (single line on $GITHUB_STEP_SUMMARY)
+#   * image digest (used by the downstream deploy workflow)
+#
+# Required secrets (configure under repo Settings → Secrets):
+#   * DOCKERHUB_USERNAME            — Docker Hub account (e.g. `landwind`)
+#   * DOCKERHUB_TOKEN               — Docker Hub PAT with `repo:write` on
+#                                     the `landwind/ura-chatbot` repository
+# =============================================================================
+name: "URA Chatbot — Build & Push (Crane Cloud)"
+
+on:
+  push:
+    branches: [dev, main]
+    tags: ["v*"]
+    paths:
+      - "App/backend/**"
+      - "App/frontend/**"
+      - "App/deploy/cranecloud/**"
+      - "App/Dockerfile.cranecloud"
+      - "App/Dockerfile.cranecloud.dockerignore"
+      - "App/backend/requirements-cranecloud.txt"
+      - "Model/bm25_state.json"
+      - "Data/dataset/**"
+      - ".github/workflows/ura-chatbot-build-push.yml"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you rebuilding? (audit trail)"
+        required: false
+        default: "manual rebuild"
+
+concurrency:
+  group: ura-chatbot-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+  actions: write   # dispatch-deploy job calls createWorkflowDispatch on
+                   # ura-chatbot-deploy-cranecloud.yml; without this scope
+                   # actions/github-script@v7 hits "Resource not accessible
+                   # by integration" on the dispatch.
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: landwind/ura-chatbot
+
+jobs:
+  build:
+    name: build + push image
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.publish.outputs.image_ref }}
+      digest:    ${{ steps.build.outputs.digest }}
+      tag:       ${{ steps.publish.outputs.tag }}
+    steps:
+      - name: Checkout (full context needed — Dockerfile copies Model/ + Data/)
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Docker Hub secrets
+        run: |
+          set -euo pipefail
+          : "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME secret is missing}"
+          : "${DOCKERHUB_TOKEN:?DOCKERHUB_TOKEN secret is missing}"
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Derive tag list:
+      #   type=ref      — branch name (dev / main / feature-X)
+      #   type=sha      — sha-<short>, always present (used by deploy)
+      #   type=semver   — when ref is v* (e.g. v1.2.3 → 1.2.3 + 1.2)
+      #   type=raw      — `latest` only on non-pre-release v* tags
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+          labels: |
+            org.opencontainers.image.title=URA Chatbot (Crane Cloud)
+            org.opencontainers.image.description=Single-container CPU image for Crane Cloud RENU cluster
+            org.opencontainers.image.vendor=mpairweLandwind
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build & push (linux/amd64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: App/Dockerfile.cranecloud
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          cache-from: type=gha,scope=ura-chatbot-cranecloud
+          cache-to: type=gha,mode=max,scope=ura-chatbot-cranecloud
+
+      - name: Compute primary deploy tag
+        id: publish
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="sha-$(git rev-parse --short HEAD)"
+          fi
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
+          echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
+          echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### URA Chatbot image pushed"
+            echo
+            echo "| Field      | Value |"
+            echo "| ---------- | ----- |"
+            echo "| Image      | \`${IMAGE_REF}\` |"
+            echo "| Digest     | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| Tags       | see workflow log |"
+            echo "| Builder    | linux/amd64 |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Auto-trigger Crane Cloud deploy after a successful push on dev / v* tag.
+  # Production deploys (main) are operator-gated via manual workflow_dispatch
+  # on the deploy workflow.  Mirrors MLOPS_V1's deploy-on-build pattern in
+  # docker-publish.yml (Stage 3: deploy-crane-cloud, gated on needs.build).
+  # ---------------------------------------------------------------------------
+  dispatch-deploy:
+    needs: build
+    if: github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Crane Cloud deploy
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = '${{ needs.build.outputs.tag }}';
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              workflow_id: 'ura-chatbot-deploy-cranecloud.yml',
+              ref: context.ref,
+              inputs: {
+                image_tag: tag,
+                deploy_only: true,
+              },
+            });
+            core.notice(`Dispatched ura-chatbot-deploy-cranecloud (tag=${tag})`);
