@@ -7,3 +7,9 @@ out
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+
+# Playwright E2E artifacts
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

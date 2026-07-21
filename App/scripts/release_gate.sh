@@ -24,7 +24,10 @@ printf 'Release gate: backend syntax\n'
   backend/app/tools/ura_account.py \
   backend/app/tools/ura_actions.py \
   backend/app/service.py \
-  backend/app/main.py
+  backend/app/main.py \
+  backend/app/chat_ws_v2.py \
+  backend/app/confirm_tokens.py \
+  backend/app/llm.py
 
 printf 'Release gate: backend tests\n'
 (
@@ -34,6 +37,11 @@ printf 'Release gate: backend tests\n'
     tests/test_claim_verifier.py \
     tests/test_mcp_policy.py \
     tests/test_production_hardening.py \
+    tests/test_chat_ws_lifecycle.py \
+    tests/test_ws_session_resume.py \
+    tests/test_generate_with_tools_events.py \
+    tests/test_tool_confirmation.py \
+    tests/test_ws_hardening.py \
     -q
 )
 

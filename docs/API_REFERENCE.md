@@ -810,9 +810,11 @@ barge-in support. Gated by `FLAG_VOICE_STREAMING=true`.
 | *(binary)* | Binary | TTS audio chunks (PCM16 LE or WAV) |
 | `audio_end` | JSON | TTS playback complete |
 | `reply_text` | JSON | Text of each TTS sentence with chunk_index |
-| `reply_meta` | JSON | Sources, citations, faithfulness_score, conversation_id |
+| `mt_degraded` | JSON | `{direction: "lg-en"\|"en-lg", detail}` — translation unavailable after retry; the pipeline continues honestly (inbound: original text + real locale to the LLM; outbound: English reply spoken by the English voice) |
+| `tts_degraded` | JSON | `{detail}` — every sentence failed to synthesize; the turn is text-only |
+| `reply_meta` | JSON | Sources, citations, faithfulness_score, conversation_id, reply_language, mt_degraded[] |
 | `latency_report` | JSON | Per-stage timing: asr_ms, mt_ms, llm_ms, tts_first_chunk_ms, total_ms |
-| `error` | JSON | `{detail, recoverable}` — recoverable errors keep connection open |
+| `error` | JSON | `{detail, recoverable, stage?}` — recoverable errors keep connection open; the LLM stage is bounded by `VOICE_LLM_DEADLINE_S` (default 45s) |
 
 **Latency targets:** < 800ms p95 for simple queries, < 1.2s p95 for full RAG.
 
@@ -1182,6 +1184,71 @@ POST /v1/export/artifacts
 Generates IEEE-standard PNG figures and tables for project reports.
 
 **Response**: `application/zip` binary stream containing PNG artifacts.
+
+---
+
+### Document Attachments
+
+Chat attachment endpoints: upload a document for analysis, ground chat
+answers on it, and download a branded PDF analysis report. Documents are
+held in ephemeral container storage shared across the app's worker
+processes (TTL ~2 h, dies with the container) and are bound to the
+uploading `X-Session-ID`; they are never written to the analytics DB.
+
+---
+
+#### Analyze Uploaded Document
+
+```http
+POST /v1/documents/analyze
+```
+
+`multipart/form-data` with a single `file` part. Supported: PDF, DOCX,
+XLSX/XLSM, CSV, TXT, and images (PNG/JPEG/WebP/BMP/TIFF, OCR best-effort).
+Max 10 MB. Extracts text and tables, classifies the document against the
+URA taxonomy (receipt, tin_card, assessment, customs_declaration,
+filing_form, invoice, generic), and pulls TINs, UGX amounts, dates, and
+reference numbers.
+
+**Response** `200`
+```json
+{
+  "document_id": "3f2a…(32 hex)",
+  "filename": "receipt.pdf",
+  "kind": "pdf",
+  "doc_type": "receipt",
+  "confidence": 0.92,
+  "fields": {"tins": ["1001234567"], "amounts": ["UGX 1,250,000"], "dates": [], "references": []},
+  "tables": [],
+  "text_preview": "…",
+  "summary": "Payment receipt (92% classification confidence). …",
+  "warnings": [],
+  "expires_in_seconds": 7200
+}
+```
+
+Errors: `413` over size limit, `415` unsupported type, `422` empty/missing file.
+
+To ground a chat turn on the document, pass the id in the chat request:
+`{"message": "…", "attachment_ids": ["<document_id>"]}` (max 3, both
+`/v1/chat` and `/v1/chat/stream`). Attachment turns bypass the semantic
+cache, clarification, and abstention; the extracted content is injected as
+top-priority grounded passages (same prompt-injection scrubbing as
+retrieved passages) and appears in `sources` as `attached:<filename>`.
+
+---
+
+#### Download Document Analysis Report
+
+```http
+GET /v1/documents/{document_id}/report
+```
+
+Requires the same `X-Session-ID` the document was uploaded with.
+
+**Response**: `application/pdf` binary stream (branded analysis report:
+classification, extracted fields, table totals, summary, content excerpt).
+`404` when the document is unknown, expired, or session-mismatched.
 
 ---
 
@@ -1671,11 +1738,17 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `SPEECH_MT_BACKEND` | MT backend selection | `prompted` |
 | `SPEECH_DEADLINE_S` | Max wall-clock time per speech inference | `20` |
 | `SPEECH_MAX_CONCURRENCY` | Thread pool workers for speech | `2` |
+| `SPEECH_TTS_CACHE_SIZE` | LRU entries for repeated-phrase TTS (0 disables) | `64` |
+| `VOICE_LLM_DEADLINE_S` | Hard ceiling on the LLM stage of a voice turn | `45` |
+| `VOICE_CHAT_BUDGET_S` | Time budget for batch `/v1/voice/chat`; once spent, reply-TTS is skipped (`tts_skipped=true`) so the text reply beats the gateway timeout and the client narrates via `/v1/tts` | `50` |
+| `SPEECH_CLOUD_DEADLINE_S` | Hard ceiling per cloud speech-tier call (Sunbird/edge-tts/Workers AI, all of ASR/TTS/MT); a hung upstream fails that tier and falls through instead of 504ing the request | `40` |
+| `SPEECH_CLOUD_MAX_CONCURRENCY` | Worker threads for bounded cloud speech calls | `4` |
 | `SPEECH_EN_VOICE` | Default English TTS voice | `en_US-lessac-medium` |
 | `SPEECH_LG_VOICE` | Default Luganda TTS voice | `luganda-vits-v1` |
 | **Sunbird AI** | | |
 | `SUNBIRD_API_URL` | Sunbird AI cloud API base URL | `https://api.sunbird.ai` |
 | `SUNBIRD_API_TOKEN` | Bearer token for Sunbird AI services | |
+| `SUNBIRD_RETRIES` | Attempts per Sunbird account before failover (429/5xx/timeouts only) | `2` |
 | **Feature Flags** | | |
 | `FLAG_TOOL_USE` | Enable LLM tool-calling loop | `false` |
 | `FLAG_AGENTIC_MODE` | Enable agentic supervisor routing | `false` |

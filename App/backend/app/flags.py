@@ -50,6 +50,11 @@ _REGISTRY: dict[str, Flag] = {
         Flag("semantic_cache", True, "Cache semantically similar queries"),
         Flag("query_rewrite", True, "Spelling / abbreviation / coreference"),
         Flag("reranker", True, "Cross-encoder reranking"),
+        Flag(
+            "cloudflare_fallback",
+            False,
+            "Route to Cloudflare Workers AI / Vectorize / R2 + Gemini when primaries are down/over-budget",
+        ),
         Flag("eval_auto_run", False, "Run evaluation harness on every Nth request"),
         # Phase 14 — agentic workflows (feature-flagged off by default)
         Flag(
@@ -177,6 +182,42 @@ _REGISTRY: dict[str, Flag] = {
             False,
             "Enable fully offline ASR + TTS (Whisper-tiny + Piper/Sherpa). "
             "No network required for speech I/O. Target WER ≤ 18% on Ugandan English.",
+        ),
+        # Phase 28 (2026) — native voice-to-voice + streaming TTS + voice+vision V2
+        Flag(
+            "native_voice",
+            False,
+            "Enable native voice-to-voice engine with streaming ASR, speculative "
+            "prefetch, token-level TTS (CosyVoice2), and dual-path routing. "
+            "Requires CosyVoice2 model in artifacts/speech/tts/cosyvoice2/.",
+        ),
+        Flag(
+            "streaming_tts_v2",
+            False,
+            "Enable token-level streaming TTS via CosyVoice2 flow-matching codec. "
+            "Falls back to sentence-chunked Piper if disabled or model unavailable.",
+        ),
+        Flag(
+            "voice_vision_v2",
+            False,
+            "Enable V2 voice+vision with streaming WebSocket image frames, "
+            "parallel ASR+vision encoding, and Qwen2-VL document understanding. "
+            "Extends the existing voice_vision flag with real-time capabilities.",
+        ),
+        Flag(
+            "speculative_prefetch",
+            False,
+            "Start RAG retrieval on partial ASR hypotheses (stable prefix). "
+            "Saves 100-300ms when the final query matches the prefetched prefix.",
+        ),
+        # Phase 29 (2026) — WebSocket-native agentic chat transport
+        Flag(
+            "ws_chat",
+            False,
+            "Enable the WebSocket text-chat endpoint at /v2/chat/stream. "
+            "Persistent duplex transport that mirrors the SSE protocol shape "
+            "and adds an agentic event surface (tool_call.*, retrieval.*, "
+            "response.cancel). SSE endpoint /v1/chat/stream stays unchanged.",
         ),
     ]
 }
