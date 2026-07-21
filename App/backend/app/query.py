@@ -274,8 +274,12 @@ def rewrite(
 # (no space after the period) is never mistaken for one — same guard
 # claim_verifier applies. Em/en dash and colon/semicolon also split clauses
 # even without a following `.!?` (distress preambles commonly use "— " or
-# ": " rather than a full stop before the actual question).
-_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+|\s*[—–:;]\s+")
+# ": " rather than a full stop before the actual question). No leading `\s*`
+# before the dash/colon branch — it and the trailing `\s+` would otherwise
+# both match long whitespace runs, a polynomial-backtracking pattern on
+# user-controlled text (CodeQL py/polynomial-redos); any leading space stays
+# on the previous segment and is removed by the caller's per-segment strip().
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+|[—–:;]\s+")
 
 
 def extract_question_span(text: str) -> str:
