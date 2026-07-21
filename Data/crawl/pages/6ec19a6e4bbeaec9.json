@@ -3,7 +3,7 @@
   "title": "PAYE rates - Uganda Revenue Authority",
   "text": "\n| TAXABLE INCOME (MONTHLY) (UGX) | RATE OF TAX |\n| --- | --- |\n| RESIDENTS |  |\n| 0 to 235,000 | Nil |\n| 235,000 to 335,000 | (Taxable Income – 235,000UGX) x 10% |\n| 335,000 to 410,000 | (Taxable Income – 335,000UGX) x 20% + 10,000UGX |\n| 410,000 to 10,000,000 | (Taxable Income – 410,000UGX) x 30% + 25,000UGX |\n| Above 10,000,000 | [(Taxable Income – 410,000UGX) x 30% + 25,000UGX] + [(Taxable Income – 10,000,000UGX) x 10%] |\n\n| TAXABLE INCOME (MONTHLY) UGX | RATE OF TAX |\n| --- | --- |\n| NON – RESIDENTS. |  |\n| 0 to 335,000 | Taxable Income x 10% |\n| 335,000 to 410,000 | (Taxable Income – 335,000UGX) x 20% + 33,500UGX |\n| 410,000 to 10,000,000 | (Taxable Income – 410,000UGX) x 30% + 48,500UGX |\n| Above 10,000,000 | [(Taxable Income – 410,000UGX) x 30% + 48,500UGX] +[( Taxable Income – 10,000,000UGX) x 10%] |\n",
   "content_hash": "6ec19a6e4bbeaec9",
-  "timestamp": "2026-07-12T06:48:35Z",
+  "timestamp": "2026-07-21T06:41:47Z",
   "discovered_pdfs": [
     "https://www.ura.go.ug/resources/webuploads/INLB/Employment%20Income%20English.pdf"
   ],
