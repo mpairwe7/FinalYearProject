@@ -179,6 +179,27 @@ def rewrite_with_history(
     return query
 
 
+# Lingua eager-preloads its language models, so constructing the detector is
+# expensive (~12s). Build it ONCE per process and reuse it across requests —
+# rebuilding per call made language detection the dominant chat-latency stage.
+_LANG_DETECTOR = None
+_LANG_DETECTOR_INIT_FAILED = False
+
+
+def _get_language_detector():
+    """Return a cached :class:`LanguageDetector`, or ``None`` if unavailable."""
+    global _LANG_DETECTOR, _LANG_DETECTOR_INIT_FAILED
+    if _LANG_DETECTOR is None and not _LANG_DETECTOR_INIT_FAILED:
+        try:
+            from ml.scripts.lang_id import LanguageDetector
+
+            _LANG_DETECTOR = LanguageDetector(min_confidence=0.55)
+        except Exception:
+            _LANG_DETECTOR_INIT_FAILED = True
+            logger.debug("LanguageDetector unavailable, using heuristic only")
+    return _LANG_DETECTOR
+
+
 def detect_language(text: str) -> str:
     """Detect input language, returning a locale code (en, lg, sw, nyn, ach).
 
@@ -213,15 +234,15 @@ def detect_language(text: str) -> str:
     if sw_ratio >= 0.15 and sw_hits >= 2:
         return "sw"
 
-    # Fall back to LanguageDetector (en/lg/sw via lingua)
-    try:
-        from ml.scripts.lang_id import LanguageDetector
-        det = LanguageDetector(min_confidence=0.55)
-        result = det.detect(text)
-        if result.is_confident(0.55):
-            return result.lang
-    except Exception:
-        logger.debug("LanguageDetector unavailable, using heuristic only")
+    # Fall back to the cached LanguageDetector (en/lg/sw via lingua)
+    det = _get_language_detector()
+    if det is not None:
+        try:
+            result = det.detect(text)
+            if result.is_confident(0.55):
+                return result.lang
+        except Exception:
+            logger.debug("LanguageDetector.detect failed; using heuristic only")
 
     # If local detection is low-confidence, try Sunbird API
     try:

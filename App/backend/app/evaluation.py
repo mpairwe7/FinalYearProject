@@ -34,6 +34,7 @@ from typing import Any
 
 from . import database as db
 from .retriever import HybridRetriever
+from .text_signals import content_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +115,15 @@ def _heuristic_faithfulness(answer: str, contexts: list[str]) -> float:
 
 
 def _heuristic_answer_relevancy(question: str, answer: str) -> float:
-    """Token-overlap proxy for the Ragas answer_relevancy metric."""
+    """Token-overlap proxy for the Ragas answer_relevancy metric.
+
+    Question tokens are reduced to content tokens so "what is the..."
+    boilerplate cannot make an off-topic answer look relevant; questions
+    made of stopwords only fall back to raw tokens rather than scoring 0.
+    """
     import re as _re
 
-    q_tokens = set(_re.findall(r"\w+", question.lower()))
+    q_tokens = content_tokens(question) or set(_re.findall(r"\w+", question.lower()))
     a_tokens = set(_re.findall(r"\w+", answer.lower()))
     if not q_tokens or not a_tokens:
         return 0.0
@@ -218,28 +224,40 @@ def collect_samples(
     Uses the existing feedback export plus last-n conversations.  Falls
     back to an empty list if no data is available.
     """
+    import json as _json
+
     samples: list[dict[str, Any]] = []
 
     try:
-        review = db.export_review_feedback(days=days)
+        rows = db.export_eval_samples(days=days, limit=max(sample_size * 4, sample_size))
     except Exception:
-        review = []
+        rows = []
 
-    for row in review[:sample_size]:
+    for row in rows:
         question = str(row.get("user_query", "")).strip()
         answer = str(row.get("bot_reply", "")).strip()
         if not question or not answer:
             continue
-        # No per-row retrieved contexts persisted — use answer as a proxy
-        # context so the harness is runnable.  Production deployments should
-        # extend the DB schema to store the top-k contexts per conversation.
+        # P0-2: score faithfulness against the ACTUAL persisted retrieved
+        # contexts.  Rows without contexts are skipped rather than falling back
+        # to the answer-as-its-own-context proxy, which made the gate vacuous
+        # (faithfulness ~1.0 regardless of correctness).
+        try:
+            contexts = _json.loads(row.get("contexts") or "[]")
+        except (ValueError, TypeError):
+            contexts = []
+        contexts = [str(c) for c in contexts if str(c).strip()]
+        if not contexts:
+            continue
         samples.append(
             {
                 "question": question,
                 "answer": answer,
-                "contexts": [answer],
+                "contexts": contexts,
             }
         )
+        if len(samples) >= sample_size:
+            break
 
     return samples[:sample_size]
 

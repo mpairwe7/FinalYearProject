@@ -32,12 +32,14 @@ paths are enabled by default.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import logging
 import os
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 # Ensure the project root is on sys.path so `ml.scripts.*` imports resolve.
@@ -62,10 +64,71 @@ SPEECH_ASR_BACKEND = os.getenv("SPEECH_ASR_BACKEND", "auto")
 SPEECH_TTS_BACKEND = os.getenv("SPEECH_TTS_BACKEND", "auto")
 SPEECH_MT_BACKEND = os.getenv("SPEECH_MT_BACKEND", "prompted")
 SPEECH_DEADLINE_S = float(os.getenv("SPEECH_DEADLINE_S", "60"))
+# LRU cache for repeated short phrases (greetings, empathy openers, workflow
+# prompts). 0 disables. Keyed by (text, voice, language).
+TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "64"))
+
+# Hard ceiling for ONE cloud speech-tier call (Sunbird / edge-tts / Workers
+# AI). Sunbird latency swings 25s→90s+; a hung upstream must fail the TIER
+# (fall through to the next backend or a degraded JSON reply) — never the
+# whole request via a deployment-gateway 504.
+SPEECH_CLOUD_DEADLINE_S = float(os.getenv("SPEECH_CLOUD_DEADLINE_S", "40"))
+
+# Dedicated pool so bounded cloud calls can never deadlock the main speech
+# executor (transcribe_async already runs ON that executor).
+_CLOUD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=int(os.getenv("SPEECH_CLOUD_MAX_CONCURRENCY", "4")),
+    thread_name_prefix="speech-cloud",
+)
+
+
+def _cloud_call(label: str, func, *args, **kwargs):
+    """Run one cloud speech-tier call under :data:`SPEECH_CLOUD_DEADLINE_S`.
+
+    Raises ``TimeoutError`` on breach. The abandoned worker thread finishes
+    in the background (network I/O is uncancellable) but the caller moves
+    on to the next tier immediately.
+    """
+    future = _CLOUD_EXECUTOR.submit(func, *args, **kwargs)
+    try:
+        return future.result(timeout=SPEECH_CLOUD_DEADLINE_S)
+    except concurrent.futures.TimeoutError as exc:
+        future.cancel()
+        logger.warning("%s exceeded the %.0fs cloud deadline", label, SPEECH_CLOUD_DEADLINE_S)
+        raise TimeoutError(f"{label} exceeded {SPEECH_CLOUD_DEADLINE_S:.0f}s") from exc
+
+# Magic bytes for the audio containers our TTS tiers legitimately produce.
+_AUDIO_MAGIC = (b"RIFF", b"ID3", b"OggS", b"fLaC")
+
+
+def _looks_like_audio(data: bytes) -> bool:
+    """Cheap container sniff so an HTML error page never reaches a client
+    as 'audio' (RIFF/WAV, MP3, Ogg, FLAC, or a bare MPEG frame)."""
+    if len(data) < 44:
+        return False
+    if data.startswith(_AUDIO_MAGIC):
+        return True
+    return data[0] == 0xFF and (data[1] & 0xE0) == 0xE0  # raw MPEG frame sync
 SPEECH_MAX_CONCURRENCY = int(os.getenv("SPEECH_MAX_CONCURRENCY", "2"))
 
 DEFAULT_EN_VOICE = os.getenv("SPEECH_EN_VOICE", "en_US-lessac-medium")
 DEFAULT_LG_VOICE = os.getenv("SPEECH_LG_VOICE", "luganda-vits-v1")
+
+# edge-tts neural voices — used when the local Piper stack is absent (e.g. the
+# slim Crane Cloud image). Override per deployment via env. en-US-AriaNeural is
+# a natural English neural voice; Sunbird has no native English voice, so this
+# is what keeps English TTS off the poor Sunbird-English fallback.
+SPEECH_EN_EDGE_VOICE = os.getenv("SPEECH_EN_EDGE_VOICE", "en-US-AriaNeural")
+SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-UG-MaleNeural")
+
+# Cloudflare Workers AI models for ENGLISH STT/TTS — configurable so the model
+# can be swapped (e.g. to Deepgram nova-3/flux/aura-2) via env without code
+# changes. Defaults are the free-tier-friendly combo; TTS_FALLBACK_MODEL_2 is a
+# resilience fallback tried if the primary TTS model fails. Gated by
+# FLAG_CLOUDFLARE_FALLBACK + STT_FALLBACK_BACKEND/TTS_FALLBACK_BACKEND=workers_ai.
+STT_FALLBACK_MODEL = os.getenv("STT_FALLBACK_MODEL", "@cf/openai/whisper-large-v3-turbo")
+TTS_FALLBACK_MODEL = os.getenv("TTS_FALLBACK_MODEL", "@cf/myshell-ai/melotts")
+TTS_FALLBACK_MODEL_2 = os.getenv("TTS_FALLBACK_MODEL_2", "@cf/deepgram/aura-2-en")
 
 # Whisper LoRA adapters — per-language fine-tuned for multilingual ASR.
 # Set WHISPER_ADAPTER_PATH for single-language (backward-compat), or
@@ -146,6 +209,8 @@ class SpeechModel:
         self.enabled = SPEECH_ENABLED
         self._lock = threading.Lock()
         self._closed = False
+        self._tts_cache: OrderedDict[tuple[str, str, str], SynthesizeResult] = OrderedDict()
+        self._tts_cache_lock = threading.Lock()
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=SPEECH_MAX_CONCURRENCY,
             thread_name_prefix="speech",
@@ -378,6 +443,18 @@ class SpeechModel:
         except Exception:
             logger.debug("faster-whisper failed", exc_info=True)
 
+        # ③.5 Cloudflare Workers AI — PRIMARY cloud STT for English (configurable
+        # model). Sunbird is preferred for Luganda, so this tier is English-gated.
+        if (language or "en") == "en":
+            try:
+                cf_text = _cloud_call(
+                    "Workers AI STT", self._cf_whisper_transcribe, audio_bytes, sample_rate, language
+                )
+            except TimeoutError:
+                cf_text = ""
+            if cf_text:
+                return TranscribeResult(text=cf_text, language="en", backend="cf_workers_ai")
+
         # ④ Sunbird cloud (fallback when all local backends unavailable)
         try:
             from . import sunbird
@@ -393,7 +470,13 @@ class SpeechModel:
                     w.setframerate(sample_rate)
                     w.writeframes(pcm16.tobytes())
                 lang_code = {"en": "eng", "lg": "lug"}.get(language or "en", "eng")
-                stt_result = sunbird.speech_to_text(wav_buf.getvalue(), language=lang_code, filename="audio.wav")
+                stt_result = _cloud_call(
+                    "Sunbird STT",
+                    sunbird.speech_to_text,
+                    wav_buf.getvalue(),
+                    language=lang_code,
+                    filename="audio.wav",
+                )
                 if stt_result and stt_result.get("text"):
                     return TranscribeResult(
                         text=stt_result["text"],
@@ -403,10 +486,119 @@ class SpeechModel:
         except Exception:
             logger.debug("Sunbird STT fallback also failed")
 
+        # ⑤ Cloudflare Workers AI Whisper (final cloud net; flag/budget-gated)
+        try:
+            cf_text = _cloud_call(
+                "Workers AI STT", self._cf_whisper_transcribe, audio_bytes, sample_rate, language
+            )
+        except TimeoutError:
+            cf_text = ""
+        if cf_text:
+            return TranscribeResult(
+                text=cf_text, language=language or "en", backend="cf_workers_ai"
+            )
+
         return TranscribeResult(
             text="", backend="unavailable",
-            error="All ASR backends failed (local Whisper+LoRA, Sherpa, faster-whisper, Sunbird)",
+            error="All ASR backends failed (Whisper+LoRA, Sherpa, faster-whisper, Sunbird, Workers AI)",
         )
+
+    def _cf_whisper_transcribe(
+        self, audio_bytes: bytes, sample_rate: int, language: str | None
+    ) -> str:
+        """Cloud STT via Cloudflare Workers AI Whisper (flag/budget/breaker-gated)."""
+        from .flags import flags
+
+        if not flags.is_enabled("cloudflare_fallback"):
+            return ""
+        if os.getenv("STT_FALLBACK_BACKEND", "").strip().lower() != "workers_ai":
+            return ""
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+        except Exception:
+            return ""
+        if not (
+            cfg.is_cloudflare_configured()
+            and breakers.CF_STT_BREAKER.allow_request()
+            and budget.try_consume_neurons(5)
+        ):
+            return ""
+        try:
+            import io as _io
+            import wave as _wave
+
+            import numpy as np
+
+            samples = self._decode_audio_bytes(audio_bytes, target_sr=sample_rate)
+            pcm16 = (samples * 32768).clip(-32768, 32767).astype("int16")
+            buf = _io.BytesIO()
+            with _wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sample_rate)
+                w.writeframes(pcm16.tobytes())
+            res = gw.workers_ai_stt(buf.getvalue(), model=STT_FALLBACK_MODEL)
+            breakers.CF_STT_BREAKER.record_success()
+            return (res.get("text") or "").strip()
+        except Exception:
+            breakers.CF_STT_BREAKER.record_failure()
+            logger.warning("Workers AI Whisper STT failed", exc_info=True)
+            return ""
+
+    def _cf_workers_ai_tts(
+        self, text: str, voice: str | None, language: str
+    ) -> "SynthesizeResult | None":
+        """Cloud TTS via Cloudflare Workers AI (flag/backend/config/breaker/budget
+        gated). Tries TTS_FALLBACK_MODEL then TTS_FALLBACK_MODEL_2 for resilience.
+        Returns None when disabled/unavailable so the caller falls through."""
+        from .flags import flags
+
+        if not flags.is_enabled("cloudflare_fallback"):
+            return None
+        if os.getenv("TTS_FALLBACK_BACKEND", "").strip().lower() != "workers_ai":
+            return None
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+        except Exception:
+            return None
+        if not (cfg.is_cloudflare_configured() and breakers.CF_TTS_BREAKER.allow_request()):
+            return None
+        lang = "en" if (language or "en") == "en" else language
+        for model in (TTS_FALLBACK_MODEL, TTS_FALLBACK_MODEL_2):
+            if not model:
+                continue
+            if not budget.try_consume_neurons(10):
+                break
+            t0 = time.perf_counter()
+            try:
+                out = gw.workers_ai_tts(text, model=model, lang=lang)
+                audio = out.get("audio") or b""
+                if not audio:
+                    continue
+                breakers.CF_TTS_BREAKER.record_success()
+                sr = out.get("sample_rate") or 24000
+                if out.get("fmt") == "wav":
+                    try:
+                        import io as _io
+                        import wave as _wave
+                        with _wave.open(_io.BytesIO(audio), "rb") as w:
+                            sr = w.getframerate()
+                    except Exception:
+                        pass
+                return SynthesizeResult(
+                    audio=audio, sample_rate=sr, num_samples=0, duration_s=0.0,
+                    latency_s=round(time.perf_counter() - t0, 3),
+                    backend="cf_workers_ai", voice=model,
+                )
+            except Exception:
+                breakers.CF_TTS_BREAKER.record_failure()
+                logger.warning("Workers AI TTS failed (model=%s)", model, exc_info=True)
+                continue
+        return None
 
     def _transcribe_whisper_peft(
         self,
@@ -526,6 +718,36 @@ class SpeechModel:
             )
         voice = voice or (DEFAULT_LG_VOICE if language == "lg" else DEFAULT_EN_VOICE)
 
+        # ⓪ Phrase cache — repeated short prompts (greetings, empathy openers,
+        #    workflow questions) skip the whole backend chain.
+        cache_key = (
+            hashlib.sha1(text.encode("utf-8")).hexdigest(),
+            voice,
+            language,
+        )
+        if TTS_CACHE_SIZE > 0:
+            with self._tts_cache_lock:
+                cached = self._tts_cache.get(cache_key)
+                if cached is not None:
+                    self._tts_cache.move_to_end(cache_key)
+                    return replace(cached, latency_s=0.0, backend=f"{cached.backend}+cache")
+
+        result = self._synthesize_uncached(text, voice, language)
+        if TTS_CACHE_SIZE > 0 and result.audio and not result.error:
+            with self._tts_cache_lock:
+                self._tts_cache[cache_key] = result
+                self._tts_cache.move_to_end(cache_key)
+                while len(self._tts_cache) > TTS_CACHE_SIZE:
+                    self._tts_cache.popitem(last=False)
+        return result
+
+    def _synthesize_uncached(
+        self,
+        text: str,
+        voice: str,
+        language: str,
+    ) -> SynthesizeResult:
+        """The actual backend fallback chain behind :meth:`synthesize`."""
         # ① Local Sherpa/Piper TTS (primary — offline, low-latency)
         if self._breakers["tts"].allow_request():
             future = self._executor.submit(self._do_synthesize, text, voice)
@@ -537,9 +759,19 @@ class SpeechModel:
                 self._breakers["tts"].record_failure()
                 logger.debug("Local TTS failed (%s), trying edge-tts", exc)
 
+        # ①.5 Cloudflare Workers AI — PRIMARY cloud TTS for English (configurable
+        # model + resilience fallback). Sunbird stays primary for Luganda.
+        if (language or "en") == "en":
+            try:
+                result = _cloud_call("Workers AI TTS", self._cf_workers_ai_tts, text, voice, language)
+                if result and result.audio:
+                    return result
+            except Exception:
+                logger.debug("Workers AI TTS failed", exc_info=True)
+
         # ② edge-tts (Microsoft neural voices — needs internet, no API key)
         try:
-            result = self._synthesize_edge_tts(text, language)
+            result = _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
             if result and result.audio:
                 return result
         except Exception:
@@ -549,11 +781,18 @@ class SpeechModel:
         try:
             from . import sunbird
             if sunbird.is_available():
-                tts_result = sunbird.text_to_speech(text, locale=language)
-                if tts_result and tts_result.get("audio_url"):
+
+                def _sunbird_tts():
+                    tts_result = sunbird.text_to_speech(text, locale=language)
+                    if not tts_result or not tts_result.get("audio_url"):
+                        return None
                     import httpx
-                    audio_resp = httpx.get(tts_result["audio_url"], timeout=15)
-                    if audio_resp.status_code == 200 and len(audio_resp.content) > 100:
+
+                    return httpx.get(tts_result["audio_url"], timeout=15)
+
+                audio_resp = _cloud_call("Sunbird TTS", _sunbird_tts)
+                if audio_resp is not None:
+                    if audio_resp.status_code == 200 and _looks_like_audio(audio_resp.content):
                         return SynthesizeResult(
                             audio=audio_resp.content,
                             sample_rate=22050,
@@ -563,6 +802,11 @@ class SpeechModel:
                             backend="sunbird_cloud",
                             voice=f"sunbird_{language}",
                         )
+                    logger.warning(
+                        "Sunbird TTS returned non-audio payload (status=%s, %d bytes)",
+                        audio_resp.status_code,
+                        len(audio_resp.content),
+                    )
         except Exception:
             logger.debug("Sunbird TTS fallback also failed")
 
@@ -634,10 +878,10 @@ class SpeechModel:
             return None
 
         voice_map = {
-            "lg": "en-UG-MaleNeural",
-            "en": "en-US-JennyNeural",
+            "lg": SPEECH_LG_EDGE_VOICE,
+            "en": SPEECH_EN_EDGE_VOICE,
         }
-        voice_id = voice_map.get(language, "en-US-JennyNeural")
+        voice_id = voice_map.get(language, SPEECH_EN_EDGE_VOICE)
         t0 = time.perf_counter()
 
         def _generate_sync() -> bytes:
@@ -984,68 +1228,196 @@ class SpeechModel:
         )
 
     def _do_translate(self, text: str, source_lang: str, target_lang: str) -> TranslateResult:
+        """Translate via the model-routing policy, with a language-aware order.
+
+        For **Luganda** (``lg↔en``) Sunbird's Luganda-native NLLB leads — it is the
+        most accurate for this low-resource language — with Gemini 2.5 Flash as a
+        strong fallback (then Cloudflare Llama → local MT → prompted Qwen3). For all
+        other languages Gemini leads. Every cloud tier self-skips when its
+        flags/keys are absent, so a local/GPU deploy still reaches the offline tiers.
+        """
+        from .providers import routing
+
         t0 = time.perf_counter()
 
-        # 1. LLM-prompted translation (uses already-loaded Qwen3 — no extra model)
-        if self._chat_model is not None:
+        def _res(out: str, backend: str) -> TranslateResult:
+            return TranslateResult(
+                text=out, source_lang=source_lang, target_lang=target_lang,
+                latency_s=round(time.perf_counter() - t0, 3), backend=backend,
+            )
+
+        def _gemini():
+            out = self._gemini_translate(text, source_lang, target_lang)
+            return _res(out, "gemini_flash") if out else None
+
+        def _cf():
+            out = self._cf_llama_translate(text, source_lang, target_lang)
+            return _res(out, "cf_workers_ai") if out else None
+
+        def _sunbird():
             try:
-                from . import llm as llm_module
-
-                reply = llm_module.translate_text(
-                    text, source_lang=source_lang, target_lang=target_lang,
-                )
-                if reply and reply.strip():
-                    return TranslateResult(
-                        text=reply.strip(),
-                        source_lang=source_lang,
-                        target_lang=target_lang,
-                        latency_s=round(time.perf_counter() - t0, 3),
-                        backend="prompted_qwen3",
-                    )
+                from . import sunbird
+                if sunbird.is_available():
+                    src_code = {"en": "eng", "lg": "lug"}.get(source_lang, source_lang)
+                    tgt_code = {"en": "eng", "lg": "lug"}.get(target_lang, target_lang)
+                    result = sunbird.translate(text, src_code, tgt_code)
+                    if result:
+                        return _res(result, "sunbird_cloud")
             except Exception:
-                logger.debug("Prompted MT via Qwen3 failed", exc_info=True)
+                logger.debug("Sunbird translate failed", exc_info=True)
+            return None
 
-        # 2. Local MT module (ONNX/teacher MADLAD+LoRA — heavier, offline)
-        if self._mt is not None:
+        def _local():
+            if self._mt is not None:
+                try:
+                    result = self._mt.translate(text, source_lang=source_lang, target_lang=target_lang)
+                    if result and result.text:
+                        return _res(result.text, result.backend or "local_mt")
+                except Exception:
+                    logger.debug("Local MT failed", exc_info=True)
+            return None
+
+        def _prompted():
+            if self._chat_model is not None:
+                try:
+                    from . import llm as llm_module
+                    reply = llm_module.translate_text(text, source_lang=source_lang, target_lang=target_lang)
+                    if reply and reply.strip():
+                        return _res(reply.strip(), "prompted_qwen3")
+                except Exception:
+                    logger.debug("Prompted MT via Qwen3 failed", exc_info=True)
+            return None
+
+        # Luganda is low-resource → Sunbird's native NLLB leads; Gemini backs it up.
+        # All other languages → Gemini leads (Sunbird stays a fallback).
+        is_luganda = "lg" in (source_lang.lower(), target_lang.lower())
+        if is_luganda:
+            tiers = [
+                ("sunbird_cloud", _sunbird), ("gemini_flash", _gemini),
+                ("cf_workers_ai", _cf), ("local_mt", _local), ("prompted_qwen3", _prompted),
+            ]
+        else:
+            tiers = [
+                ("gemini_flash", _gemini), ("cf_workers_ai", _cf),
+                ("sunbird_cloud", _sunbird), ("local_mt", _local), ("prompted_qwen3", _prompted),
+            ]
+
+        prev: str | None = None
+        for name, tier in tiers:
             try:
-                result = self._mt.translate(text, source_lang=source_lang, target_lang=target_lang)
-                if result and result.text:
-                    return TranslateResult(
-                        text=result.text,
-                        source_lang=result.source_lang,
-                        target_lang=result.target_lang,
-                        latency_s=round(time.perf_counter() - t0, 3),
-                        backend=result.backend,
-                    )
-            except Exception:
-                logger.debug("Local MT failed, trying Sunbird cloud fallback")
-
-        # 3. Sunbird cloud (fallback — NLLB translation API)
-        try:
-            from . import sunbird
-            if sunbird.is_available():
-                src_code = {"en": "eng", "lg": "lug"}.get(source_lang, source_lang)
-                tgt_code = {"en": "eng", "lg": "lug"}.get(target_lang, target_lang)
-                result = sunbird.translate(text, src_code, tgt_code)
-                if result:
-                    return TranslateResult(
-                        text=result,
-                        source_lang=source_lang,
-                        target_lang=target_lang,
-                        latency_s=round(time.perf_counter() - t0, 3),
-                        backend="sunbird_cloud",
-                    )
-        except Exception:
-            logger.debug("Sunbird translate fallback also failed")
+                result = _cloud_call(f"translate:{name}", tier)
+            except TimeoutError:
+                result = None
+            if result is not None:
+                if prev is not None:
+                    routing.log_fallback("translate", prev, result.backend, f"{prev}_unavailable")
+                routing.log_model_use("translate", result.backend)
+                return result
+            prev = name
 
         return TranslateResult(
-            text="",
-            source_lang=source_lang,
-            target_lang=target_lang,
-            latency_s=round(time.perf_counter() - t0, 3),
-            backend="error",
-            error="No translation backend available (Qwen3, local MT, and Sunbird all failed)",
+            text="", source_lang=source_lang, target_lang=target_lang,
+            latency_s=round(time.perf_counter() - t0, 3), backend="error",
+            error="No translation backend available (Sunbird, Gemini, CF Llama, local MT, Qwen3 all failed)",
         )
+
+    @staticmethod
+    def _gemini_translate(text: str, source_lang: str, target_lang: str) -> str:
+        """Translate via Gemini 2.5 Flash through the AI Gateway (Luganda-strong).
+
+        Flag/budget/breaker-gated; returns "" when disabled or unavailable so the
+        Sunbird tier still runs.
+        """
+        from .flags import flags
+
+        if not flags.is_enabled("cloudflare_fallback"):
+            return ""
+        if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() != "gemini":
+            return ""
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+        except Exception:
+            return ""
+        if not (
+            cfg.is_gemini_configured()
+            and breakers.GEMINI_BREAKER.allow_request()
+            and budget.try_consume_gemini_call()
+        ):
+            return ""
+        names = {
+            "lg": "Luganda", "en": "English", "nyn": "Runyankole",
+            "ach": "Acholi", "sw": "Swahili",
+        }
+        src, tgt = names.get(source_lang, source_lang), names.get(target_lang, target_lang)
+        try:
+            out = gw.gemini_generate(
+                text,
+                system=(
+                    f"You are a professional translator. Translate the user's text "
+                    f"from {src} to {tgt}. Output ONLY the translation — no notes, "
+                    f"quotes, or transliteration."
+                ),
+                max_tokens=512,
+                temperature=0.1,
+            )
+            breakers.GEMINI_BREAKER.record_success()
+            return out.strip()
+        except Exception:
+            breakers.GEMINI_BREAKER.record_failure()
+            logger.warning("Gemini translation failed", exc_info=True)
+            return ""
+
+    @staticmethod
+    def _cf_llama_translate(text: str, source_lang: str, target_lang: str) -> str:
+        """Translate via Cloudflare Workers AI Llama (prompted) — the model-routing
+        fallback after Gemini. Flag/budget/breaker-gated; returns "" when disabled
+        or unavailable so the Sunbird tier still runs."""
+        from .flags import flags
+
+        if not flags.is_enabled("cloudflare_fallback"):
+            return ""
+        if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() not in ("gemini", "workers_ai"):
+            return ""
+        try:
+            from .providers import breakers, budget
+            from .providers import config as cfg
+            from .providers import gateway as gw
+            from .providers import routing
+        except Exception:
+            return ""
+        if not (
+            cfg.is_cloudflare_configured()
+            and breakers.CF_LLM_BREAKER.allow_request()
+            and budget.try_consume_neurons(5)
+        ):
+            return ""
+        names = {
+            "lg": "Luganda", "en": "English", "nyn": "Runyankole",
+            "ach": "Acholi", "sw": "Swahili",
+        }
+        src, tgt = names.get(source_lang, source_lang), names.get(target_lang, target_lang)
+        try:
+            out = gw.workers_ai_chat(
+                [
+                    {"role": "system", "content": (
+                        f"You are a professional translator. Translate the user's text "
+                        f"from {src} to {tgt}. Output ONLY the translation — no notes, "
+                        f"quotes, or transliteration."
+                    )},
+                    {"role": "user", "content": text},
+                ],
+                model=routing.CF_LLM_MODEL,
+                max_tokens=512,
+                temperature=0.1,
+            )
+            breakers.CF_LLM_BREAKER.record_success()
+            return (out or "").strip()
+        except Exception:
+            breakers.CF_LLM_BREAKER.record_failure()
+            logger.warning("CF Llama translation failed", exc_info=True)
+            return ""
 
     # ------------------------------------------------------------------
     # Lifecycle
