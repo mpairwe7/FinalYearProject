@@ -268,3 +268,27 @@ def rewrite(
     if history:
         q = rewrite_with_history(q, history)
     return q
+
+
+# Sentence boundary requires trailing whitespace after `.!?`, so "37.5m"
+# (no space after the period) is never mistaken for one — same guard
+# claim_verifier applies. Em/en dash and colon/semicolon also split clauses
+# even without a following `.!?` (distress preambles commonly use "— " or
+# ": " rather than a full stop before the actual question).
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+|\s*[—–:;]\s+")
+
+
+def extract_question_span(text: str) -> str:
+    """Return only the interrogative sentence(s) in *text*, or "" if none.
+
+    Distress-framed messages ("I've tried three times and it still doesn't
+    work!! What is EFRIS?", "I'm worried — What is EFRIS?") combine
+    emotional preamble with a real question in one string. Retrieving on the
+    raw combination dilutes BM25/embedding relevance enough to push an
+    otherwise-answerable question into false abstention, so callers handling
+    a distressed turn should retrieve on this extracted span instead of the
+    full rewritten text.
+    """
+    sentences = _SENTENCE_BOUNDARY_RE.split((text or "").strip())
+    questions = [s.strip() for s in sentences if s.strip().endswith("?")]
+    return " ".join(questions)
