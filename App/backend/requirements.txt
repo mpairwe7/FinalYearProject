@@ -34,9 +34,23 @@ numpy>=2.4.4,<3
 pymupdf4llm>=0.0.17
 pymupdf>=1.25.3
 
+# Document attachment analysis (POST /v1/documents/analyze) — DOCX/XLSX
+# extraction plus multipart form parsing for the upload endpoint. All
+# import sites are lazy + ImportError-guarded, matching the app's
+# graceful-degradation pattern.
+python-docx>=1.1.2
+openpyxl>=3.1.5
+python-multipart>=0.0.18
+
+# PDF report generation (pdf_export.py: /v1/export/* and
+# /v1/documents/{id}/report) + image-attachment decoding. Previously
+# undeclared — PDF export only worked where fpdf2 happened to be installed.
+fpdf2>=2.8
+Pillow>=10.4
+
 # LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch)
 transformers>=4.46.0
-torch==2.10.0+cu128
+torch==2.12.1
 accelerate>=1.2.0
 peft>=0.13.0
 bitsandbytes>=0.45.0
@@ -50,3 +64,13 @@ sse-starlette>=2.0.0
 opentelemetry-api>=1.29.0
 opentelemetry-sdk>=1.29.0
 opentelemetry-exporter-otlp-proto-grpc>=1.29.0
+
+# Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
+pydantic-settings>=2.5.0
+boto3>=1.34.0
+# DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
+dnspython>=2.6.0
+
+# Cloud neural TTS fallback (edge-tts) — used when local Piper is unavailable;
+# English voice configurable via SPEECH_EN_EDGE_VOICE (default en-US-AriaNeural)
+edge-tts>=7.0,<8

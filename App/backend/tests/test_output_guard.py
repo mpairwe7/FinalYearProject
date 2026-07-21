@@ -34,6 +34,25 @@ class OutputGuardSanitizerTests(unittest.TestCase):
 
         self.assertEqual(OutputGuard.sanitize(raw), raw)
 
+    def test_sanitize_preserves_however_with_factual_content(self) -> None:
+        raw = "However, the VAT rate is 18% on most goods and services in Uganda."
+
+        self.assertEqual(OutputGuard.sanitize(raw), raw)
+
+    def test_sanitize_preserves_the_prefix_answers(self) -> None:
+        raw = "The standard VAT rate in Uganda is 18% [1]."
+
+        self.assertEqual(OutputGuard.sanitize(raw), raw)
+
+    def test_sanitize_still_strips_reasoning_with_however(self) -> None:
+        raw = (
+            "Okay, the user is asking about VAT. "
+            "The standard VAT rate in Uganda is 18% [1]."
+        )
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertIn("18%", sanitized)
+        self.assertNotIn("Okay, the user", sanitized)
+
 
 if __name__ == "__main__":
     unittest.main()
