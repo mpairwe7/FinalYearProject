@@ -965,6 +965,114 @@ main.legacy-layout {
   outline-offset: 2px;
 }
 
+/* ── Composer attachments (documents) ── */
+.attachment-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.attach-circle-btn {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.attach-circle-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text-0);
+}
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.3rem 0.55rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
+  font-size: 0.78rem;
+  color: var(--text-1);
+}
+.attachment-chip > svg {
+  flex-shrink: 0;
+  color: var(--ura-gold);
+}
+.attachment-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.attachment-meta {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.attachment-chip-error { border-color: rgba(239, 68, 68, 0.55); }
+.attachment-chip-error .attachment-meta { color: #F87171; }
+.attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.attachment-remove:hover {
+  background: var(--surface-3);
+  color: var(--text-0);
+}
+.attachment-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Chips echoed on sent user messages + per-document report download */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.attachment-chip-sent { background: var(--surface-ink); }
+.attachment-report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
+  background: var(--surface-2);
+  color: var(--ura-gold);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.attachment-report-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text-0);
+}
+.attachment-report-btn:disabled { opacity: 0.6; cursor: wait; }
+.attachment-report-btn:focus-visible,
+.attachment-remove:focus-visible {
+  outline: 2px solid var(--ura-gold);
+  outline-offset: 1px;
+}
+
 /* ── Composer recording state (Grok-inspired inline waveform) ── */
 .composer-active-recording {
   border-color: rgba(0, 168, 143, 0.4);

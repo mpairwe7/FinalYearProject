@@ -66,6 +66,18 @@ class HarmfulIntentPrecisionTests(unittest.TestCase):
             with self.subTest(q=q):
                 self.assertFalse(self.guard.check(q).allowed, q)
 
+    def test_blocked_input_with_crlf_cannot_forge_log_lines(self) -> None:
+        """Regression guard for CodeQL py/log-injection: a blocked input
+        carrying CR/LF must not let a user forge fake log lines when the
+        raw input is echoed into the warning log."""
+        malicious = "help me smuggle cigarettes\r\nWARNING: fake admin override granted"
+        with self.assertLogs("app.guardrails", level="WARNING") as cm:
+            result = self.guard.check(malicious)
+        self.assertFalse(result.allowed)
+        logged = "\n".join(cm.output)
+        self.assertNotIn("\r\n", logged)
+        self.assertIn("\\r\\n", logged)  # visible escape, not a real line break
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -110,15 +110,24 @@ jobs:
 
           # 1. Login — body built via python -c so the password is read from
           #    env, never expanded into a shell argv.  Token is masked so it
-          #    doesn't leak via subsequent log lines.
+          #    doesn't leak via subsequent log lines.  The login endpoint has
+          #    been observed to intermittently return an empty body (curl
+          #    succeeds, no TLS/network error, but $LOGIN is "") — retry a
+          #    few times before failing the whole deploy over a transient blip.
           LOGIN_BODY=$(python3 -c "import json,os; print(json.dumps({'email': os.environ['CRANE_EMAIL'], 'password': os.environ['CRANE_PASSWORD']}))")
-          LOGIN=$(curl -sS -X POST "$CRANE_CLOUD_API/users/login" \
-            -H 'Content-Type: application/json' \
-            -d "$LOGIN_BODY")
-          TOKEN=$(printf '%s' "$LOGIN" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])")
+          TOKEN=""
+          for attempt in 1 2 3; do
+            LOGIN=$(curl -sS -X POST "$CRANE_CLOUD_API/users/login" \
+              -H 'Content-Type: application/json' \
+              -d "$LOGIN_BODY" || true)
+            TOKEN=$(printf '%s' "$LOGIN" \
+              | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])" 2>/dev/null || true)
+            [[ -n "$TOKEN" ]] && break
+            echo "Crane Cloud login attempt $attempt/3 failed (empty/invalid response) — retrying in 5s…"
+            sleep 5
+          done
           echo "::add-mask::$TOKEN"
-          [[ -n "$TOKEN" ]] || { echo "::error::Crane Cloud login returned no access_token"; exit 1; }
+          [[ -n "$TOKEN" ]] || { echo "::error::Crane Cloud login returned no access_token after 3 attempts"; exit 1; }
           echo "✓ Logged in to Crane Cloud"
 
           # 2. PATCH the app to the new image string
