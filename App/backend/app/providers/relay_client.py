@@ -10,13 +10,26 @@ confirmed working Cloudflare egress instead. Only used when
 
 from __future__ import annotations
 
+import logging
+import os
+import time
 from typing import Any
 
 import httpx
 
 from .config import get_cloud_settings
 
-_HTTP_TIMEOUT = 30.0
+logger = logging.getLogger("ura.providers.relay_client")
+
+# _search_vectorize() calls embed then query *sequentially*, so a caller on a
+# platform with a tight front-door gateway timeout (observed ~60s on the HF
+# Space free tier) can stack two of these before generation even starts. Kept
+# short and env-tunable so a slow/hanging relay call fails fast into the
+# local keyword fallback instead of stalling the whole request past that
+# ceiling — a hybrid answer that never arrives is worse than a fast keyword
+# one. Cloudflare + one extra network hop through the relay host should
+# comfortably finish well under this on a healthy path.
+_HTTP_TIMEOUT = float(os.getenv("CF_RELAY_HTTP_TIMEOUT", "15"))
 _client: httpx.Client | None = None
 
 
@@ -40,8 +53,16 @@ def relay_workers_ai_embed(texts: list[str]) -> list[list[float]]:
     the relay ignores any caller-supplied model string, so none is sent)."""
     s = get_cloud_settings()
     url = f"{s.cf_relay_base_url.rstrip('/')}/internal/cf-relay/workers-ai-embed"
-    resp = _get_client().post(url, headers=_relay_headers(), json={"texts": texts})
-    resp.raise_for_status()
+    t0 = time.perf_counter()
+    try:
+        resp = _get_client().post(url, headers=_relay_headers(), json={"texts": texts})
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        logger.warning(
+            "relay_workers_ai_embed failed after %.2fs", time.perf_counter() - t0, exc_info=True
+        )
+        raise
+    logger.info("relay_workers_ai_embed took %.2fs", time.perf_counter() - t0)
     vectors = resp.json().get("vectors")
     if not vectors:
         raise RuntimeError("relay_workers_ai_embed: empty embedding response")
@@ -56,6 +77,14 @@ def relay_vectorize_query(
     payload: dict[str, Any] = {"vector": vector, "top_k": top_k}
     if vector_filter:
         payload["vector_filter"] = vector_filter
-    resp = _get_client().post(url, headers=_relay_headers(), json=payload)
-    resp.raise_for_status()
+    t0 = time.perf_counter()
+    try:
+        resp = _get_client().post(url, headers=_relay_headers(), json=payload)
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        logger.warning(
+            "relay_vectorize_query failed after %.2fs", time.perf_counter() - t0, exc_info=True
+        )
+        raise
+    logger.info("relay_vectorize_query took %.2fs", time.perf_counter() - t0)
     return resp.json().get("hits", [])
