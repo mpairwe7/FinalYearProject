@@ -23,18 +23,33 @@ export default defineConfig({
     baseURL: process.env.BASE_URL || "http://localhost:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    // Grant the microphone up-front so getUserMedia() in the voice flow never
+    // shows a permission prompt (which Playwright can't click through).
+    permissions: ["microphone"],
     // Chromium sandbox requires specific kernel namespaces; disable in
     // environments where they are unavailable (Docker, shared servers).
     // CI runners (GitHub Actions) provide a compatible environment.
     launchOptions: {
-      args: process.env.CI
-        ? []
-        : [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-gpu",
-            "--disable-software-rasterizer",
-          ],
+      args: [
+        // Voice E2E: auto-accept the mic prompt, feed a synthetic capture device,
+        // and let TTS playback start without a user gesture. These are safe for
+        // the non-voice specs too (no real device is touched).
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        "--autoplay-policy=no-user-gesture-required",
+        ...(process.env.CI
+          ? []
+          : [
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+              "--disable-gpu",
+              "--disable-software-rasterizer",
+              "--disable-dev-shm-usage",
+              // Some locked-down containers can't spawn Chromium's zygote/renderer
+              // even with --no-sandbox; opt into single-process there via env.
+              ...(process.env.PW_SINGLE_PROCESS ? ["--single-process", "--no-zygote"] : []),
+            ]),
+      ],
     },
   },
 
