@@ -17,6 +17,7 @@ Route: ``/v2/voice/chat/stream``
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -24,6 +25,7 @@ import uuid
 
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
+from . import ws_concurrency
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .flags import flags
 from .voice_stream import VADConfig
@@ -143,15 +145,31 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
         return
 
     try:
-        user_id, tenant_id = _resolve_ws_auth(websocket)
+        user_id, tenant_id = _resolve_ws_auth(
+            websocket, required=flags.is_enabled("auth_required")
+        )
     except JWTAuthError as exc:
         await websocket.close(code=1008, reason=f"authentication failed: {exc}")
+        return
+
+    # P1-9: cap concurrent voice sockets per-user and globally so an
+    # (anonymous) client cannot exhaust ASR/TTS/LLM resources.
+    socket_user_key = user_id or f"anon::{websocket.client.host if websocket.client else 'unknown'}"
+    if not ws_concurrency.try_acquire(
+        "voice",
+        socket_user_key,
+        per_user_cap=ws_concurrency.int_env("VOICE_WS_MAX_PER_USER", 3),
+        global_cap=ws_concurrency.int_env("VOICE_WS_MAX_GLOBAL", 64),
+    ):
+        await websocket.close(code=1013, reason="voice concurrency limit reached")
         return
 
     await websocket.accept()
     _v2_metric("_v2_connections_total")
     _v2_metric("_v2_active")
     session_start_time = time.perf_counter()
+    max_duration_s = ws_concurrency.int_env("VOICE_WS_MAX_DURATION_S", 30 * 60)
+    idle_timeout_s = ws_concurrency.int_env("VOICE_WS_IDLE_TIMEOUT_S", 120)
 
     session: VoiceSessionV2 | None = None
 
@@ -279,7 +297,20 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
 
         # ── Main loop ─────────────────────────────────────────────
         while True:
-            message = await websocket.receive()
+            if time.perf_counter() - session_start_time > max_duration_s:
+                await _send_json(
+                    websocket, {"type": "session.expired", "reason": "max_duration_exceeded"}
+                )
+                break
+            try:
+                message = await asyncio.wait_for(
+                    websocket.receive(), timeout=idle_timeout_s
+                )
+            except asyncio.TimeoutError:
+                await _send_json(
+                    websocket, {"type": "session.expired", "reason": "idle_timeout"}
+                )
+                break
 
             if message.get("type") == "websocket.disconnect":
                 break
@@ -379,6 +410,7 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
         except Exception:
             pass
     finally:
+        ws_concurrency.release("voice", socket_user_key)
         if session is not None:
             session.close()
         _v2_dec("_v2_active")

@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", "2000"))
 STORE_RAW_PROMPTS = os.getenv("STORE_RAW_PROMPTS", "false").lower() == "true"
 ABSTENTION_THRESHOLD = float(os.getenv("ABSTENTION_THRESHOLD", "0.15"))
+# P1-5: abstention threshold on the normalized [0,1] reranker scale.
+ABSTENTION_THRESHOLD_NORM = float(os.getenv("ABSTENTION_THRESHOLD_NORM", "0.30"))
 ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 
 # System prompt phrases that must never appear verbatim in a model response
@@ -131,9 +133,21 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
         # Direct fraud/evasion requests
         r"(?:how\s+(?:to|do\s+(?:I|you|we))|explain\s+how\s+to|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to)\s+(?:evade|avoid|dodge|escape|cheat|hide|conceal|under[\-\s]?report|misreport|falsif|forge|fake|fabricat)",
         r"(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
-        r"(?:forge|fake|fabricat|counterfeit|falsif)\s+(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
+        r"(?:forge|fake|fabricat|counterfeit|falsif)\w*\s+(?:(?:a|an|the|my|some)\s+)?"
+        r"(?:fake\s+)?(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
         r"(?:under[\-\s]?report|misreport|under[\-\s]?declare)\s+(?:income|revenue|sales|earnings|profit|expenses?|VAT)",
-        r"(?:launder|smuggl|brib)\w*",
+        # Smuggling / laundering / bribery: block solicitation, not
+        # information. "What is smuggling?" and "How can I report smuggling?"
+        # are curated KB answers (ura_smuggling_effects, ura_customs_offences,
+        # ura_whistleblowing) and must pass; actionable requests must not.
+        r"(?:how\s+(?:to|do\s+(?:I|you|we)|can\s+(?:I|you|we|one))|explain\s+how\s+to"
+        r"|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to|best\s+way\s+to|help\s+me"
+        r"|teach\s+me\s+(?:how\s+)?to|I\s+(?:want|need|plan|intend)\s+to)\s+"
+        r"(?:launder|smuggle|bribe)",
+        r"(?:can|could|should|shall)\s+(?:I|we)\s+(?:just\s+)?"
+        r"(?:launder|smuggle|bribe|pay\s+off)",
+        r"(?:smuggl|launder|sneak)\w*\b.{0,60}?without\s+(?:being|getting)\s+"
+        r"(?:caught|detected|noticed|flagged)",
         r"(?:hide|conceal)\s+(?:income|money|earnings|revenue|assets?)\s+(?:from|against)\s+(?:URA|tax|government|authority)",
         # Role-play/persona-swap evasion
         r"(?:unrestricted|jailbroken|unfiltered)\s+(?:model|assistant|AI|mode)",
@@ -194,11 +208,15 @@ class InputGuard:
                 logger.warning(
                     "Prompt injection blocked: pattern=%s input=%s",
                     pattern.pattern[:60],
-                    text[:80],
+                    text[:80].replace("\r", "\\r").replace("\n", "\\n"),
                 )
                 return GuardResult(
                     allowed=False,
-                    reason="Input rejected: potential prompt injection detected",
+                    reason=(
+                        "Sorry — I can't process that request as written. "
+                        "Please rephrase it as a plain URA support question "
+                        "and I'll be glad to help."
+                    ),
                     flags=["prompt_injection"],
                 )
 
@@ -207,7 +225,7 @@ class InputGuard:
                 logger.warning(
                     "Harmful intent blocked: pattern=%s input=%s",
                     pattern.pattern[:60],
-                    text[:80],
+                    text[:80].replace("\r", "\\r").replace("\n", "\\n"),
                 )
                 return GuardResult(
                     allowed=False,
@@ -380,12 +398,22 @@ class OutputGuard:
         return GuardResult(allowed=True, sanitized_text=answer)
 
     @staticmethod
-    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD) -> bool:
-        """Return True if the best retrieval score is too low to answer."""
+    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD_NORM) -> bool:
+        """Return True if the best calibrated retrieval relevance is too low.
+
+        Uses the normalized [0,1] reranker score (P1-5). When no reranker
+        signal is available (RRF-only / keyword fallback), relevance is unknown
+        — we do NOT abstain on an incomparable raw score; the presence of hits
+        plus downstream grounding/claim checks govern.
+        """
         if not hits:
             return True
-        best_score = max(h.get("score_rerank", h.get("score_rrf", 0.0)) for h in hits)
-        return best_score < threshold
+        from .retriever import hit_relevance
+
+        scores = [r for h in hits if (r := hit_relevance(h)) is not None]
+        if not scores:
+            return False  # degraded mode — cannot assess relevance by score
+        return max(scores) < threshold
 
     @staticmethod
     def should_escalate(

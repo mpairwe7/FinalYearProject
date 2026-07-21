@@ -150,6 +150,37 @@ answers about URA services, tax obligations, and procedures.
 15. For short informational answers (not long procedural ones), end with 1-2 \
    brief follow-up suggestions like "You might also want to know about..." \
    to help the user explore related topics.
+
+## Formatting
+Write the answer as clean Markdown for a chat UI, and match the amount of \
+structure to the answer's length (see Rule 6) — never over-format.
+16. Lead with the direct answer. Keep paragraphs to 2-3 sentences with a \
+   blank line between them.
+17. Simple factual answers stay as 1-2 plain sentences — no headings, \
+   lists, or tables.
+18. **Bold** the key facts (amounts, rates, deadlines, form names) but \
+   never change the value itself.
+19. Use `-` bullets for requirements or items and a numbered `1.` list for \
+   ordered steps — one item per line.
+20. For long procedural answers only, add short `###` subheadings; use a \
+   Markdown pipe table to compare 3+ values (e.g. rate bands or thresholds).
+21. Put form codes, section numbers, and field names in `inline code` \
+   (e.g. `DT-2001`); reserve fenced ``` blocks for multi-line calculations.
+22. For a caveat or key reminder, begin a line with a callout label: \
+   `Note:`, `Important:`, `Tip:`, `Warning:`, or `Caution:`.
+23. Keep [1], [2] citation markers inline next to the fact they support. \
+   Do not use emojis.
+
+## Tone
+24. Be warm, respectful, and encouraging. Never be curt, dismissive, or \
+   condescending; explain jargon in plain words the first time you use it.
+25. When the user sounds frustrated, worried, or under time pressure \
+   (penalties, deadlines, audits), open with ONE short empathetic sentence, \
+   then answer directly per Rule 1. Never blame the user — frame \
+   requirements as helpful next steps ("you'll need to...", not "you \
+   failed to...").
+26. Close longer procedural answers with a brief reassurance that URA can \
+   help if they get stuck (Rule 14 has the contact details).
 """
 
 STRUCTURED_JSON_SUFFIX = """\
@@ -205,6 +236,7 @@ def _build_messages(
     tokenizer: Any = None,
     structured: bool = False,
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> list[dict[str, str]]:
     """Build chat messages in the Qwen chat-template format.
 
@@ -221,6 +253,8 @@ def _build_messages(
             "Do not treat it as live URA account data.\n"
             f"{personalization_context.strip()}"
         )
+    if tone_hint:
+        system_content += f"\n\n## This turn\n{tone_hint.strip()}"
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},
     ]
@@ -570,6 +604,7 @@ def generate(
     locale: str = "en",
     structured: bool | None = None,
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> str:
     """Generate a grounded answer from retrieved passages.
 
@@ -586,6 +621,7 @@ def generate(
             tokenizer=None,  # vLLM server tokenizes; we pass text
             structured=use_structured,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
         )
         return _vllm_generate(messages)
 
@@ -601,6 +637,7 @@ def generate(
         tokenizer=_tokenizer,
         structured=use_structured,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
 
     try:
@@ -698,6 +735,7 @@ def generate_stream(
     conversation_history: list[dict[str, str]] | None = None,
     locale: str = "en",
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> Generator[str, None, None]:
     """Yield tokens incrementally for SSE streaming.
 
@@ -720,6 +758,7 @@ def generate_stream(
             tokenizer=None,
             structured=False,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
         )
         yield from _vllm_generate_stream(messages)
         return
@@ -735,6 +774,7 @@ def generate_stream(
         tokenizer=_tokenizer,
         structured=False,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
 
     try:
@@ -954,6 +994,7 @@ def _build_tool_messages(
     conversation_history: list[dict[str, str]] | None,
     locale: str,
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> list[dict[str, str]]:
     """Build the initial message list for a tool-calling request.
 
@@ -970,6 +1011,8 @@ def _build_tool_messages(
             "Do not treat it as live URA account data.\n"
             f"{personalization_context.strip()}"
         )
+    if tone_hint:
+        system_content += f"\n\n## This turn\n{tone_hint.strip()}"
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},
     ]
@@ -1017,6 +1060,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     locale: str = "en",
     max_iterations: int = 3,
     personalization_context: str = "",
+    tone_hint: str = "",
     tenant_id: str = "default",
     user_id: str = "",
     user_role: str = "public",
@@ -1067,6 +1111,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 conversation_history,
                 locale,
                 personalization_context=personalization_context,
+                tone_hint=tone_hint,
             )
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
@@ -1107,6 +1152,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
             conversation_history,
             locale,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
 
@@ -1116,6 +1162,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         conversation_history,
         locale,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
     tool_calls_made: list[dict[str, Any]] = []
     last_response = ""
