@@ -152,7 +152,10 @@ class AgenticPhaseTests(unittest.TestCase):
 
         self.assertEqual(judgment["decision"], "revise")
         self.assertIn("grounding confidence is below the release threshold", judgment["reasons"])
-        self.assertIn("[1]", judgment["revised_reply"])
+        # References stay OUT of the revised prose — they reach the UI via
+        # the citations panel (no orphan "[1]"/"1" at passage ends).
+        self.assertNotIn("[1]", judgment["revised_reply"])
+        self.assertTrue(judgment["revised_reply"].startswith("Here's the most relevant guidance"))
 
     def test_ticket_roundtrip_preserves_handoff_and_judge_metadata(self) -> None:
         ticket = db.create_ticket(

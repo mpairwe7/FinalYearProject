@@ -15,6 +15,11 @@ torch>=2.2.0
 # Web Interface — Gradio 5 stable (SSR, improved streaming, accessibility)
 gradio>=5.0.0,<6.0.0
 
+# Hugging Face ZeroGPU ("free GPU" on Spaces). Optional: only used when the
+# Space hardware is set to ZeroGPU. app.py guards the import, so CPU/local
+# runs work without it installed.
+spaces>=0.30.0
+
 # Hugging Face Integration
 huggingface-hub>=0.19.0
 transformers>=4.35.0

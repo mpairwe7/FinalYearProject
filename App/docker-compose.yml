@@ -52,7 +52,7 @@ services:
       target: runtime
     container_name: ura-app-api
     ports:
-      - "8885:8000"
+      - "8083:8000"
     environment:
       - APP_ENV=development
       - PORT=8000
@@ -63,14 +63,23 @@ services:
       - SLOWAPI_STORAGE_URI=redis://redis:6379/1
       - CACHE_BACKEND=redis
       - CORS_ORIGINS=http://localhost:3032,https://struttingly-nongeological-briella.ngrok-free.dev
+      # Fast local generation: API uses the least-loaded visible GPU for dense
+      # retrieval, while the host-level ura-vllm service serves Qwen on GPU 7.
+      - LLM_BACKEND=vllm
+      - VLLM_BASE_URL=http://host.docker.internal:8011/v1
+      - VLLM_API_KEY=not-needed
+      - VLLM_HTTP_TIMEOUT=90
+      - LLM_MAX_TOKENS=512
       - LLM_DEVICE=cuda:0
       - LLM_LOAD_IN_4BIT=true
+      - RETRIEVER_DENSE_DEVICE=cuda:0
+      - RERANKER_DEVICE=cpu
       # --- Qwen3-8B LoRA adapters ---
       - LORA_ADAPTER_LG=/app/adapters/luganda-lora
       - LORA_ADAPTER_SW=/app/adapters/sw-lora
       - LORA_ADAPTER_NYN=/app/adapters/nyn-lora
       - LORA_ADAPTER_ACH=/app/adapters/ach-lora
-      - NVIDIA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=2
       - PROJECT_ROOT=/app
       - HF_HOME=/app/hf_cache
       - HF_HUB_OFFLINE=1
@@ -86,6 +95,12 @@ services:
       - SPEECH_ENABLED=true
       - SPEECH_ASR_BACKEND=auto
       - SPEECH_TTS_BACKEND=auto
+      # --- Phase 28: Native voice-to-voice + Vision ---
+      - FLAG_VOICE_STREAMING=true
+      - FLAG_NATIVE_VOICE=true
+      - FLAG_STREAMING_TTS_V2=true
+      - FLAG_VOICE_VISION_V2=true
+      - FLAG_SPECULATIVE_PREFETCH=true
     env_file:
       - ../.env
     init: true
@@ -96,6 +111,8 @@ services:
     tmpfs:
       - /tmp
       - /app/cache
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../Data/dataset:/app/Data/dataset:ro
       - ../Data/pdfs:/app/Data/pdfs:ro

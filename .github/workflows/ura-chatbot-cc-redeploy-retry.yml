@@ -1,0 +1,119 @@
+# =============================================================================
+# URA Chatbot — Crane Cloud redeploy retry loop
+#
+# WHY THIS EXISTS: Crane Cloud's control plane intermittently cannot resolve
+# hub.docker.com when validating an image tag, which makes every image-roll
+# PATCH fail server-side with "Temporary failure in name resolution" (five
+# identical failures Jul 1–2, 2026: runs 28525575148, 28617816269,
+# 28619097168, 28620074946 + retry). Nothing client-side can fix it — this
+# loop simply retries every 3 hours until their resolver recovers.
+#
+# WHAT IT DOES each tick:
+#   1. Probe the live app with a build marker ("Calculate VAT on 1,000,000"
+#      answers with retrieval_mode "calculator" only on sha-2e74b27+).
+#   2. If the target build is NOT live, dispatch the existing deploy
+#      workflow (ura-chatbot-deploy-cranecloud.yml) and watch it.
+#   3. Re-probe. On success: open a notification issue and DISABLE this
+#      workflow (the loop stops itself).
+#
+# A failed deploy attempt exits 0 (quiet until the next tick) so the Actions
+# inbox is not spammed while Crane Cloud is broken. Re-enable manually with
+#   gh workflow enable ura-chatbot-cc-redeploy-retry.yml
+# after bumping TARGET_TAG, or run it ad hoc via workflow_dispatch.
+# =============================================================================
+name: "URA Chatbot — Crane Cloud redeploy retry"
+
+# checkov:skip=CKV_GHA_7:image_tag only lets an operator pick which ALREADY
+# -built, ALREADY-pushed Docker Hub tag to redeploy (dispatch-target for
+# ura-chatbot-deploy-cranecloud.yml, which itself verifies the tag exists on
+# Docker Hub before deploying) — this workflow never builds anything itself,
+# so there's no build-provenance/artifact-integrity surface for a caller-
+# supplied value to influence. Restricted to repo collaborators via the
+# default workflow_dispatch permission model. Reviewed and accepted
+# 2026-07-21 — see PR that added this comment for the discussion.
+on:
+  schedule:
+    - cron: "15 */3 * * *"  # every 3 hours at :15 UTC
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to roll Crane Cloud to"
+        required: false
+        default: "sha-ae4df29"
+
+permissions:
+  actions: write   # dispatch the deploy workflow + disable this one
+  contents: read
+  issues: write    # success notification
+
+concurrency:
+  group: cc-redeploy-retry
+  cancel-in-progress: false
+
+env:
+  TARGET_TAG: ${{ inputs.image_tag || 'sha-ae4df29' }}
+  APP_URL: https://ura-chatbot-6318a1b5.renu-01.cranecloud.io
+  DEPLOY_WORKFLOW: ura-chatbot-deploy-cranecloud.yml
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Probe whether Crane Cloud already serves the target build
+        id: probe
+        run: |
+          set -uo pipefail
+          MODE=$(
+            curl -sS --max-time 60 -X POST "$APP_URL/v1/chat" \
+              -H "Content-Type: application/json" \
+              -d '{"message": "Calculate VAT on 1,000,000", "conversation_id": "cc-redeploy-probe"}' \
+            | python3 -c "import sys, json; print(json.load(sys.stdin).get('retrieval_mode', ''))" \
+            2>/dev/null || echo probe_error
+          )
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+          echo "Pre-deploy probe: retrieval_mode=\`${MODE}\` (target build answers \`calculator\`)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch the Crane Cloud deploy
+        if: steps.probe.outputs.mode != 'calculator'
+        run: |
+          set -euo pipefail
+          gh workflow run "$DEPLOY_WORKFLOW" --repo "$GITHUB_REPOSITORY" \
+            --ref dev -f image_tag="$TARGET_TAG" -f deploy_only=true
+          sleep 20
+          RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$DEPLOY_WORKFLOW" \
+            --limit 1 --json databaseId --jq '.[0].databaseId')
+          echo "Watching deploy run ${RUN_ID}" >> "$GITHUB_STEP_SUMMARY"
+          if gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 20; then
+            echo "Deploy run succeeded." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Deploy attempt failed — expected while Crane Cloud's resolver is broken; retrying next tick." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Re-probe after deploy
+        id: reprobe
+        if: steps.probe.outputs.mode != 'calculator'
+        run: |
+          set -uo pipefail
+          sleep 45  # allow the rolling restart to settle
+          MODE=$(
+            curl -sS --max-time 60 -X POST "$APP_URL/v1/chat" \
+              -H "Content-Type: application/json" \
+              -d '{"message": "Calculate VAT on 1,000,000", "conversation_id": "cc-redeploy-probe"}' \
+            | python3 -c "import sys, json; print(json.load(sys.stdin).get('retrieval_mode', ''))" \
+            2>/dev/null || echo probe_error
+          )
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+          echo "Post-deploy probe: retrieval_mode=\`${MODE}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Success — notify and disable this retry loop
+        if: steps.probe.outputs.mode == 'calculator' || steps.reprobe.outputs.mode == 'calculator'
+        run: |
+          set -euo pipefail
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Crane Cloud is now on ${TARGET_TAG} — redeploy retry succeeded" \
+            --body "The scheduled retry loop confirmed ${APP_URL} now serves the \`${TARGET_TAG}\` build (VAT probe answered with \`retrieval_mode: calculator\`). This workflow has disabled itself; re-enable it after bumping TARGET_TAG for future blocked rolls." \
+            || echo "issue creation failed (continuing to disable)"
+          gh workflow disable "ura-chatbot-cc-redeploy-retry.yml" --repo "$GITHUB_REPOSITORY"
+          echo "Target build is LIVE on Crane Cloud — retry loop disabled itself." >> "$GITHUB_STEP_SUMMARY"

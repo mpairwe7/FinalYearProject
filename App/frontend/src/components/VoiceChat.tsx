@@ -122,12 +122,14 @@ function VoiceChatInner({ open, locale, conversationId, onClose }: VoiceChatProp
   // ── Connect WebSocket when panel opens ─────────────────────────
   useEffect(() => {
     if (open) {
+      const voiceId = useVoiceStore.getState().voiceId;
       connect({
         language: locale,
         conversation_id: conversationId,
         sample_rate: 16000,
         vad_sensitivity: "medium",
         tts_enabled: true,
+        voice: voiceId || undefined,
         voice_consent_accepted: true,
       });
     }
@@ -188,6 +190,19 @@ function VoiceChatInner({ open, locale, conversationId, onClose }: VoiceChatProp
       role="dialog"
       aria-label="Voice chat"
       aria-modal="true"
+      onKeyDown={(e) => {
+        // Keyboard operability: Space toggles the mic from anywhere in the
+        // dialog (unless a control already owns the key), Escape closes.
+        if (e.key === "Escape") {
+          onClose();
+          return;
+        }
+        const target = e.target as HTMLElement;
+        if (e.code === "Space" && target.tagName !== "BUTTON" && target.tagName !== "INPUT") {
+          e.preventDefault();
+          void handleOrbTap();
+        }
+      }}
     >
       {/* Header */}
       <div className="voice-chat-header">
@@ -239,7 +254,10 @@ function VoiceChatInner({ open, locale, conversationId, onClose }: VoiceChatProp
 
         {/* Latency indicator */}
         {lastLatency && (
-          <p className="voice-latency" aria-hidden="true">
+          <p
+            className="voice-latency"
+            aria-label={`Reply completed in ${Math.round(lastLatency.total_ms)} milliseconds`}
+          >
             {lastLatency.total_ms}ms
           </p>
         )}
@@ -254,10 +272,10 @@ function VoiceChatInner({ open, locale, conversationId, onClose }: VoiceChatProp
               bargeIn();
               if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
             }}
-            aria-label="Interrupt and speak"
+            aria-label="Stop and speak"
           >
             <BargeInIcon />
-            <span>Interrupt</span>
+            <span>Stop and speak</span>
           </button>
         )}
       </div>
