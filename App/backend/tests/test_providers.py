@@ -51,8 +51,10 @@ class _FakeClient:
         self._payload = payload
         self.calls: list[dict] = []
 
-    def post(self, url, headers=None, json=None, content=None):
-        self.calls.append({"url": url, "headers": headers or {}, "json": json, "content": content})
+    def post(self, url, headers=None, json=None, content=None, timeout=None):
+        self.calls.append(
+            {"url": url, "headers": headers or {}, "json": json, "content": content, "timeout": timeout}
+        )
         return _Resp(self._payload)
 
 
@@ -195,6 +197,31 @@ class RelayClientTest(unittest.TestCase):
             call["json"], {"vector": [0.1, 0.2], "top_k": 5, "vector_filter": {"tag": {"$eq": "vat"}}}
         )
 
+    def test_relay_workers_ai_chat_request_shape(self):
+        fake = _FakeClient({"text": "Double the VAT due."})
+        with mock.patch.object(relay_client, "_get_client", return_value=fake):
+            text = relay_client.relay_workers_ai_chat(
+                [{"role": "user", "content": "hi"}],
+                "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                max_tokens=512,
+                temperature=0.2,
+            )
+        self.assertEqual(text, "Double the VAT due.")
+        call = fake.calls[0]
+        self.assertEqual(call["url"], "https://relay.example.internal/internal/cf-relay/workers-ai-chat")
+        self.assertEqual(call["headers"]["Authorization"], "Bearer relay-secret-xyz")
+        self.assertEqual(
+            call["json"],
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                "max_tokens": 512,
+                "temperature": 0.2,
+            },
+        )
+        # Chat gets its own per-call timeout override, not the client's default.
+        self.assertEqual(call["timeout"], relay_client._CHAT_HTTP_TIMEOUT)
+
 
 class RelayRoutingTest(unittest.TestCase):
     """When ``cf_relay_base_url`` is configured, the provider functions
@@ -227,6 +254,25 @@ class RelayRoutingTest(unittest.TestCase):
             vecs = gateway.workers_ai_embed(["hello"])
         self.assertEqual(vecs, [[0.1] * 1024])
         mocked.assert_called_once_with(["hello"])
+        direct_client.assert_not_called()
+
+    def test_workers_ai_chat_uses_relay_when_configured(self):
+        with mock.patch.object(
+            relay_client, "relay_workers_ai_chat", return_value="Double the VAT due."
+        ) as mocked, mock.patch.object(gateway, "_get_client") as direct_client:
+            text = gateway.workers_ai_chat(
+                [{"role": "user", "content": "hi"}],
+                "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                max_tokens=512,
+                temperature=0.2,
+            )
+        self.assertEqual(text, "Double the VAT due.")
+        mocked.assert_called_once_with(
+            [{"role": "user", "content": "hi"}],
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            max_tokens=512,
+            temperature=0.2,
+        )
         direct_client.assert_not_called()
 
 

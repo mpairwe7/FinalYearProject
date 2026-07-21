@@ -35,6 +35,7 @@ from .models import (
     AnalyticsEvent,
     BatchClassifyRequest,
     BatchClassifyResponse,
+    CFRelayChatRequest,
     CFRelayEmbedRequest,
     CFRelayVectorizeQueryRequest,
     ChatRequest,
@@ -1456,10 +1457,10 @@ def trigger_indexing(
 # egress to Cloudflare is blocked) make Vectorize/Workers AI calls through
 # this one. Requires ``Authorization: Bearer <CF_RELAY_SECRET>`` (a dedicated
 # secret, separate from the real Cloudflare token, which never leaves this
-# process — see providers/config.py). Deliberately narrow: these two ops are
-# exactly what dense-retrieval fallback needs (embed the query, then search
-# Vectorize) and nothing else is exposed, so there is no open-ended forwarding
-# surface to worry about.
+# process — see providers/config.py). Deliberately narrow: these three ops are
+# exactly what dense-retrieval fallback and the cloud-primary LLM chain need
+# (embed the query, search Vectorize, run a chat completion) and nothing else
+# is exposed, so there is no open-ended forwarding surface to worry about.
 # ---------------------------------------------------------------------------
 @app.post("/internal/cf-relay/workers-ai-embed", include_in_schema=False)
 def cf_relay_workers_ai_embed(request: Request, body: CFRelayEmbedRequest) -> dict:
@@ -1479,6 +1480,20 @@ def cf_relay_vectorize_query(request: Request, body: CFRelayVectorizeQueryReques
 
     hits = _vz.vectorize_query(body.vector, top_k=body.top_k, vector_filter=body.vector_filter)
     return {"hits": hits}
+
+
+@app.post("/internal/cf-relay/workers-ai-chat", include_in_schema=False)
+def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import gateway as _gw
+
+    # body.model already validated against routing.ALLOWED_CHAT_MODELS —
+    # see CFRelayChatRequest._model_must_be_allowlisted.
+    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    text = _gw.workers_ai_chat(
+        messages, body.model, max_tokens=body.max_tokens, temperature=body.temperature
+    )
+    return {"text": text}
 
 
 # ---------------------------------------------------------------------------

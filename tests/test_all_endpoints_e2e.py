@@ -4,7 +4,7 @@ This module is the completeness guarantee for the HTTP/WS API surface. It has
 three jobs:
 
 1. **Drift guard** (``test_route_table_matches_manifest``) — enumerates the live
-   ``app.routes`` table and asserts it equals a hand-declared manifest of all 53
+   ``app.routes`` table and asserts it equals a hand-declared manifest of all 54
    application endpoints. Add or remove a route without updating the manifest and
    this test fails, so the surface can never silently grow untested.
 
@@ -120,6 +120,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Cloudflare relay (internal-only; CF_RELAY_SECRET-gated) ---
     ("POST", "/internal/cf-relay/workers-ai-embed"),
     ("POST", "/internal/cf-relay/vectorize-query"),
+    ("POST", "/internal/cf-relay/workers-ai-chat"),
     # --- Evaluation dashboard ---
     ("GET", "/v1/evaluation/results"),
     # --- Export (PDF) ---
@@ -183,6 +184,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/evaluate"): "test_api_endpoints.OpsKeyEndpoints",
     ("POST", "/internal/cf-relay/workers-ai-embed"): "test_api_endpoints.CFRelayEndpoints",
     ("POST", "/internal/cf-relay/vectorize-query"): "test_api_endpoints.CFRelayEndpoints",
+    ("POST", "/internal/cf-relay/workers-ai-chat"): "test_api_endpoints.CFRelayEndpoints",
     ("POST", "/v1/export/artifacts"): "test_api_endpoints.OpsKeyEndpoints",
     ("GET", "/v1/evaluation/results"): "this:test_evaluation_results_admin + test_evaluation_results_requires_admin",
     ("POST", "/v1/export/conversation"): "this:test_export_conversation_pdf",
@@ -332,10 +334,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (50 HTTP + 3 WS)."""
+    """Lock the surface size so additions are deliberate (51 HTTP + 3 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 50, f"expected 50 HTTP endpoints, found {len(http)}"
+    assert len(http) == 51, f"expected 51 HTTP endpoints, found {len(http)}"
     assert len(ws) == 3, f"expected 3 WS endpoints, found {len(ws)}"
 
 

@@ -43,6 +43,15 @@ CF_LLM_FALLBACK_MODEL_2 = os.getenv(
 CF_LLM_FAST_MODEL = os.getenv("CF_LLM_FAST_MODEL", "@cf/meta/llama-3.1-8b-instruct-fp8")
 # (STT/TTS/MT model IDs live in speech_service.py: STT_FALLBACK_MODEL, etc.)
 
+# Closed set of chat-completion models the relay's cf-relay/workers-ai-chat
+# endpoint (main.py) will forward to Cloudflare on a caller's behalf — the
+# actual configured chain, not a pattern, so a relay caller can only ever pick
+# a model this deployment's own operator chose (see CFRelayChatRequest in
+# models.py for why a regex/free-string model field isn't good enough).
+ALLOWED_CHAT_MODELS = frozenset(
+    {CF_LLM_MODEL, CF_LLM_FALLBACK_MODEL, CF_LLM_FALLBACK_MODEL_2}
+)
+
 
 def log_model_use(task: str, model: str) -> None:
     """Record that *model* served *task* (Prometheus ``model_usage_total``)."""

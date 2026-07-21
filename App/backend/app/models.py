@@ -1,8 +1,8 @@
 """Pydantic v2 request/response models for the URA Chatbot API."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -584,3 +584,43 @@ class CFRelayVectorizeQueryRequest(BaseModel):
     vector: list[float] = Field(..., min_length=1, max_length=4096)
     top_k: int = Field(10, ge=1, le=50)
     vector_filter: dict[str, Any] | None = None
+
+
+class CFRelayChatMessage(BaseModel):
+    """One chat-completion message, forwarded to Workers AI verbatim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(..., max_length=16_000)
+
+
+class CFRelayChatRequest(BaseModel):
+    """Forwarded Workers AI chat-completion request.
+
+    ``model`` is checked against ``routing.ALLOWED_CHAT_MODELS`` — the same
+    fixed 3-model cloud-primary chain this deployment already trusts (see
+    service._llm_cloud_fallback) — rather than accepted as a free string.
+    Unlike the embed relay this endpoint genuinely needs to select between a
+    few different models (the primary/fallback/fallback-2 chain), so it can't
+    just drop the field the way CFRelayEmbedRequest does; a closed-set
+    membership check is a real taint sanitizer where a regex ``Field(pattern=)``
+    would not be — it can only ever select a model this deployment's own
+    operator already configured, never an arbitrary caller-supplied string.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[CFRelayChatMessage] = Field(..., min_length=1, max_length=64)
+    model: str
+    max_tokens: int = Field(512, ge=1, le=2048)
+    temperature: float = Field(0.2, ge=0.0, le=2.0)
+
+    @field_validator("model")
+    @classmethod
+    def _model_must_be_allowlisted(cls, v: str) -> str:
+        from .providers import routing
+
+        if v not in routing.ALLOWED_CHAT_MODELS:
+            raise ValueError("model is not in the configured Cloudflare chat chain")
+        return v
