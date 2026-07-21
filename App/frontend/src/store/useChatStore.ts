@@ -8,6 +8,14 @@ export interface Citation {
   passage?: string;
 }
 
+/** A document attached to a user turn (analysed via /v1/documents/analyze). */
+export interface ChatAttachment {
+  /** Backend document id — keys the PDF analysis report download. */
+  id: string;
+  name: string;
+  docType?: string;
+}
+
 export interface ChatTurn {
   id: string;
   role: 'user' | 'assistant';
@@ -20,6 +28,8 @@ export interface ChatTurn {
   escalationReason?: string;
   /** Whether this turn was answered from the offline RAG pipeline */
   offlineMode?: boolean;
+  /** Documents attached to this (user) turn */
+  attachments?: ChatAttachment[];
 }
 
 export interface Conversation {
@@ -80,6 +90,7 @@ export function createTurn(
     retrievalMode?: string;
     escalationRequired?: boolean;
     escalationReason?: string;
+    attachments?: ChatAttachment[];
   },
 ): ChatTurn {
   return { id: generateId(), role, content, timestamp: Date.now(), ...meta };
@@ -134,6 +145,17 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   if (typeof value.escalationRequired === 'boolean') turn.escalationRequired = value.escalationRequired;
   if (typeof value.escalationReason === 'string') turn.escalationReason = value.escalationReason;
   if (typeof value.offlineMode === 'boolean') turn.offlineMode = value.offlineMode;
+  if (Array.isArray(value.attachments)) {
+    const attachments = value.attachments
+      .filter(isRecord)
+      .filter((a) => typeof a.id === 'string' && a.id && typeof a.name === 'string')
+      .map((a) => {
+        const attachment: ChatAttachment = { id: a.id as string, name: a.name as string };
+        if (typeof a.docType === 'string') attachment.docType = a.docType;
+        return attachment;
+      });
+    if (attachments.length) turn.attachments = attachments;
+  }
 
   return turn;
 }
@@ -270,7 +292,7 @@ const THINKING_SIGNALS = [
   /passage \[?\d/i,
   /^so,? (the|i |none|based|from)/i,
   /^since (the|none|it|this|there)/i,
-  /^(therefore|however|also|additionally),? (note|the|i )/i,
+  /^(therefore|however|also|additionally),? (note that|i think|i should|the user|the passage|looking)/i,
   // Self-narration about what to do
   /^(the (main|key|relevant) point|the answer|my response|i.ll |let.s )/i,
   /^(this|that) (means|is|doesn|seem|suggest|passage)/i,

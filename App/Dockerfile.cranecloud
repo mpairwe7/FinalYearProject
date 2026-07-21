@@ -1,0 +1,152 @@
+# syntax=docker/dockerfile:1.7
+#
+# URA Chatbot — Crane Cloud single-container image.
+#
+# Crane Cloud has two constraints that shape this Dockerfile:
+#   1. One service per app, one public port.  We bundle nginx + FastAPI
+#      + Next.js together and front them with supervisord.
+#   2. No persistent volumes.  The BM25 keyword index and the FAQ CSV
+#      corpus are baked into the image at build time.
+#
+# CPU profile: torch / transformers / sentence-transformers are
+# excluded (no GPU on Crane Cloud).  The app's LLM dispatches through
+# an external endpoint (LLM_BACKEND=vllm pointing at VLLM_BASE_URL).
+# Retrieval falls back to keyword search; QDRANT_ENABLED=false is the
+# default operating mode on Crane Cloud.
+#
+# Build:
+#   docker build -t landwind/ura-chatbot:cranecloud -f App/Dockerfile.cranecloud .
+#
+# Run locally:
+#   docker run --rm -p 8080:8080 \
+#     -e LLM_BACKEND=vllm \
+#     -e VLLM_BASE_URL=https://your-vllm-endpoint/v1 \
+#     -e CORS_ORIGINS=https://your-public-url \
+#     landwind/ura-chatbot:cranecloud
+
+# =============================================================================
+# Stage 1 — Python backend deps (slim, CPU-only)
+# =============================================================================
+FROM python:3.11-slim-bookworm AS backend-builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install slim Crane Cloud profile (no torch / transformers / etc.)
+COPY App/backend/requirements-cranecloud.txt ./requirements-cranecloud.txt
+RUN pip install --upgrade pip wheel setuptools && \
+    pip install -r requirements-cranecloud.txt && \
+    # Aggressive prune to keep image small.
+    find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + && \
+    find /opt/venv -type d -name "tests" -prune -exec rm -rf {} + && \
+    find /opt/venv -type d -name "test" -prune -exec rm -rf {} + && \
+    find /opt/venv -type f -name "*.dist-info" -prune -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/venv -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+
+# =============================================================================
+# Stage 2 — Frontend (Next.js standalone build)
+# =============================================================================
+FROM node:20-bookworm-slim AS frontend-builder
+
+WORKDIR /build/frontend
+
+# Install bun (matches local dev tooling per CLAUDE.md).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl unzip ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://bun.sh/install | bash \
+    && ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+
+COPY App/frontend/package.json App/frontend/bun.lockb* App/frontend/package-lock.json* ./
+RUN if [ -f bun.lockb ]; then bun install --frozen-lockfile; \
+    else npm install --no-audit --no-fund; fi
+
+COPY App/frontend/ ./
+# next.config sets `output: "standalone"` per the live-smoke note; that
+# emits .next/standalone/server.js + .next/static/.
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN bun run build || npm run build
+
+# =============================================================================
+# Stage 3 — Runtime (nginx + supervisord + uvicorn + node)
+# =============================================================================
+FROM python:3.11-slim-bookworm AS runtime
+
+LABEL org.opencontainers.image.title="URA Chatbot (Crane Cloud)" \
+      org.opencontainers.image.description="Single-container CPU image for Crane Cloud RENU cluster" \
+      org.opencontainers.image.source="https://github.com/mpairweLandwind/FinalYearProject"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin" \
+    APP_ENV=production \
+    LOG_LEVEL=info \
+    UVICORN_WORKERS=2 \
+    QDRANT_ENABLED=false \
+    SPEECH_ENABLED=false \
+    LLM_BACKEND=vllm
+
+# System dependencies: nginx, supervisord, node (for Next.js standalone),
+# plus libgomp1 which sentence-transformers wheel sometimes links against
+# (we exclude the package, but a few transitive deps do touch libgomp).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nginx \
+        supervisor \
+        ca-certificates \
+        curl \
+        libgomp1 \
+        tini \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/dpkg.log
+
+# Bring in the slim Python venv from stage 1.
+COPY --from=backend-builder /opt/venv /opt/venv
+
+# Backend source.
+WORKDIR /app
+COPY App/backend/app /app/backend/app
+COPY App/backend/pyproject.toml* /app/backend/
+
+# Bake in the BM25 keyword index + the FAQ corpus.  Crane Cloud has
+# no persistent storage, so these MUST ship inside the image.
+COPY Model/bm25_state.json /app/Model/bm25_state.json
+COPY Data/dataset /app/Data/dataset
+
+# Frontend: copy the Next.js standalone output ONLY.
+COPY --from=frontend-builder /build/frontend/.next/standalone /app/frontend
+COPY --from=frontend-builder /build/frontend/.next/static    /app/frontend/.next/static
+COPY --from=frontend-builder /build/frontend/public          /app/frontend/public
+
+# Process supervision + reverse proxy.
+COPY App/deploy/cranecloud/nginx.conf       /etc/nginx/nginx.conf
+COPY App/deploy/cranecloud/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+RUN rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-available/default
+
+# Crane Cloud expects port 8080.
+EXPOSE 8080
+
+# Default operational env — overridable by the Crane Cloud env panel.
+ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
+    DATA_DIR=/app/Data/dataset \
+    FLAG_WS_CHAT=false \
+    FLAG_TOOL_USE=false \
+    FLAG_AGENTIC_MODE=false \
+    FLAG_AUTH_REQUIRED=false \
+    AUTH_ALG=HS256
+
+# tini reaps zombies cleanly under supervisord.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

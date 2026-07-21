@@ -112,6 +112,15 @@ describe("createTurn", () => {
     expect(turn.citations).toHaveLength(1);
     expect(turn.escalationRequired).toBe(true);
   });
+
+  it("carries document attachments on user turns", () => {
+    const turn = createTurn("user", "What is this?", {
+      attachments: [{ id: "a".repeat(32), name: "receipt.pdf", docType: "receipt" }],
+    });
+    expect(turn.attachments).toHaveLength(1);
+    expect(turn.attachments?.[0].name).toBe("receipt.pdf");
+    expect(turn.attachments?.[0].docType).toBe("receipt");
+  });
 });
 
 describe("normalizeAssistantResponse", () => {

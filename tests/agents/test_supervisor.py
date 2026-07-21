@@ -20,7 +20,7 @@ from app.agents import AgentRoute, RouteDecision, supervisor
 def test_route_enum_has_expected_values():
     expected = {
         "rag", "tools", "tax_specialist", "customs_specialist",
-        "clarify", "escalate", "blocked",
+        "clarify", "escalate", "blocked", "greet",
     }
     assert {r.value for r in AgentRoute} == expected
 
@@ -162,22 +162,30 @@ class TestEscalate:
 class TestClarify:
     @pytest.mark.parametrize("query", [
         "",
-        "hello",
-        "hi",
         "help",
-        "hey",
     ])
     def test_stop_word_only_queries_clarify(self, query):
         d = supervisor.classify(query, has_conversation_history=False)
         assert d.route == AgentRoute.CLARIFY, f"{query!r} → {d.route.value}"
         assert d.clarification_question != ""
 
+    @pytest.mark.parametrize("query", [
+        "hello",
+        "hi",
+        "hey",
+        "good morning",
+    ])
+    def test_greetings_route_to_greet(self, query):
+        # Greetings get a warm welcome (GREET), not a clarification prompt.
+        d = supervisor.classify(query, has_conversation_history=False)
+        assert d.route == AgentRoute.GREET, f"{query!r} → {d.route.value}"
+
     def test_whitespace_only_treated_as_empty(self):
         d = supervisor.classify("   \t  \n  ")
         assert d.route == AgentRoute.CLARIFY
 
     def test_clarify_question_mentions_tax_domain(self):
-        d = supervisor.classify("hello")
+        d = supervisor.classify("help")
         q = d.clarification_question.lower()
         assert any(t in q for t in ("vat", "paye", "tax", "registration"))
 

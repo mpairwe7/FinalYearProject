@@ -465,12 +465,15 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
                   ]);
                   setFinalTranscript(text);
 
-                  // Use browser TTS for offline reply hint
+                  // Use browser TTS for the offline hint. Browsers ship no
+                  // Luganda voices, so the hint deliberately stays English —
+                  // and is labelled as English so the synthesizer picks a
+                  // voice that matches the text instead of mangling it.
                   if ("speechSynthesis" in window) {
                     const utterance = new SpeechSynthesisUtterance(
                       "I'm currently offline. Your question has been saved and will be answered when you're back online."
                     );
-                    utterance.lang = locale === "lg" ? "en-UG" : "en-US";
+                    utterance.lang = "en-US";
                     speechSynthesis.speak(utterance);
                   }
                 }
@@ -614,8 +617,9 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
           <button
             onClick={handleBargeIn}
             className="px-6 py-3 bg-red-500/80 text-white rounded-full font-medium hover:bg-red-500 transition-colors"
+            aria-label="Stop and speak"
           >
-            Stop speaking
+            Stop and speak
           </button>
         )}
 

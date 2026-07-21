@@ -4,6 +4,7 @@ import React from 'react';
 import ConsentBanner from '../components/ConsentBanner';
 import Providers from '../components/Providers';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
+import { THEME_INIT_SCRIPT } from '../lib/theme';
 
 export const metadata: Metadata = {
   title: 'URA Chatbot — AI Tax Assistant',
@@ -30,7 +31,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0A0A12',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F5F7FA' },
+    { media: '(prefers-color-scheme: dark)', color: '#0A0A12' },
+  ],
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
@@ -40,6 +44,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
+        {/* Set the theme attribute before paint to avoid a flash. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <ServiceWorkerRegistrar />
         <Providers>
           <ConsentBanner />

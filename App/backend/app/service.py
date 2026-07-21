@@ -24,21 +24,39 @@ References:
 
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import csv
+import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
-from collections.abc import Generator
+from collections import Counter
+from collections.abc import AsyncIterator, Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import database as db
+from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
+from .agents.supervisor import (
+    _FAREWELL_PHRASES,
+    _GRATITUDE_PHRASES,
+    _GREETING_PHRASES,
+    _GREETING_WORDS,
+)
 from .cache import create_cache
+from .calculator_router import (
+    NEXT_ACTIONS_BY_TOOL,
+    format_calc_reply,
+    format_rate_reply,
+    plan_calculation,
+    plan_rate_lookup,
+)
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
@@ -47,6 +65,21 @@ from .memory import get_memory_service
 from .query import detect_language, rewrite as rewrite_query
 from .resilience import CircuitBreaker
 from .retriever import HybridRetriever
+from .text_signals import (
+    ABSTENTION_REPLY,
+    CLARIFICATION_PROMPT,
+    CONTACT_FOOTER,
+    ESCALATION_REPLY_FOOTER,
+    ESCALATION_REPLY_LEAD,
+    FAREWELL_REPLY,
+    GRATITUDE_REPLY,
+    GREETING_REPLY,
+    GROUNDED_REVISION_PREAMBLE,
+    NO_HITS_REPLY,
+    detect_user_distress,
+    empathy_ack,
+    tone_hint_for,
+)
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
 from .workflows.registry import WorkflowRegistry, WorkflowSession, auto_load_flows
 
@@ -71,6 +104,17 @@ SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
 _WORKFLOW_CANCEL_WORDS = {"cancel", "stop", "quit", "exit", "nevermind", "never mind"}
 _WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
+_INFORMATIONAL_WORKFLOW_QUERY_RE = re.compile(
+    r"\b(?:how\s+(?:do|does|can|would|should)\s+(?:i|we|one|my|a|an)"
+    r"|what\s+are\s+the\s+steps|what\s+is\s+the\s+process|"
+    r"requirements?|procedure|where\s+do\s+i)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_WORKFLOW_START_RE = re.compile(
+    r"\b(?:start|begin|launch|open|proceed|continue|guide\s+me|walk\s+me\s+through|"
+    r"help\s+me\s+(?:apply|register|file|submit))\b",
+    re.IGNORECASE,
+)
 _ACCOUNT_QUERY_RE = re.compile(
     r"\b(my\s+tin|my\s+filing|my\s+return|my\s+account|my\s+balance)\b",
     re.IGNORECASE,
@@ -83,10 +127,114 @@ _OBJECTION_QUERY_RE = re.compile(
     r"\b(dispute|objection|appeal|assessment|audit|fraud|lawyer|court)\b",
     re.IGNORECASE,
 )
+# "pin" tolerated as the common typo for TIN in registration asks.
+_TIN_REGISTRATION_QUERY_RE = re.compile(
+    r"\b(?:register|get|obtain|apply)\b.*\b(?:tin|pin)\b"
+    r"|\b(?:tin|pin)\b.*\b(?:register|get|obtain|apply)\b",
+    re.IGNORECASE,
+)
+_TIN_ORG_QUERY_RE = re.compile(
+    r"\b(organisations?|organizations?|compan(?:y|ies)|business(?:es)?|ngos?"
+    r"|partnerships?|non[-\s]?individual|trusts?|saccos?|institutions?)\b",
+    re.IGNORECASE,
+)
+_TIN_INDIVIDUAL_QUERY_RE = re.compile(
+    r"\b(individuals?|myself|personal|for\s+me|my\s+own|nin)\b",
+    re.IGNORECASE,
+)
+
+# Curated TIN procedure templates (KB-grounded: Instant TIN is NIN-holders
+# only; organisations use the standard Non-Individual registration with
+# incorporation documents and director TINs).
+_TIN_INDIVIDUAL_STEPS = (
+    "To register for an **instant TIN** as an individual:\n\n"
+    "1. Go to ura.go.ug\n"
+    "2. Click **Get a TIN**\n"
+    "3. Choose **Instant TIN**\n"
+    "4. Select **Individual**\n"
+    "5. Enter your NIN and personal details\n"
+    "6. Confirm you are not a robot\n"
+    "7. Submit"
+)
+_TIN_ORG_STEPS = (
+    "To register an **organisation** (company, NGO, partnership) for a TIN:\n\n"
+    "1. Go to ura.go.ug\n"
+    "2. Choose the standard **Non-Individual TIN registration** option\n"
+    "3. Fill in the organisation's details\n"
+    "4. Attach the incorporation/registration documents\n"
+    "5. Provide the TINs of the directors\n"
+    "6. Submit the application for URA review\n\n"
+    "Note: Instant TIN is only available to individuals with a NIN."
+)
+_RETURN_FILING_QUERY_RE = re.compile(
+    r"\b(?:file|submit|lodge)\b.*\b(?:return|returns)\b|\b(?:return|returns)\b.*\b(?:file|submit|lodge)\b",
+    re.IGNORECASE,
+)
 _REGISTRATION_QUERY_RE = re.compile(
     r"\b(register|registration|get a tin|tin registration|apply for tin|obtain a tin)\b",
     re.IGNORECASE,
 )
+
+# ---------------------------------------------------------------------------
+# Passage cleanup — strip PDF-extraction noise before surfacing a raw retrieved
+# chunk to a user (omitted-image blocks, page footers, TOC dot leaders,
+# letter-spaced headers, trailing page numbers).  No-op for clean FAQ answers.
+# ---------------------------------------------------------------------------
+_PIC_BLOCK_RE = re.compile(
+    r"=*>?\s*picture\s*\[?\d+\s*[xX]\s*\d+\]?\s*intentionally omitted"
+    r".*?-{2,}\s*End of picture text\s*-{2,}",
+    re.IGNORECASE | re.DOTALL,
+)
+_PIC_MARK_RE = re.compile(
+    r"-{2,}\s*(?:Start|End) of picture text\s*-{2,}"
+    r"|picture\s*\[?\d+\s*[xX]\s*\d+\]?\s*intentionally omitted"
+    r"|\bbr\s*-{2,}",
+    re.IGNORECASE,
+)
+_PDF_FOOTER_RE = re.compile(
+    r"\*+\s*A Guide to Taxation in Uganda\s*\|\s*[A-Za-z]+\s+Edition[\s\d]*", re.IGNORECASE
+)
+_PDF_EDITION_RE = re.compile(
+    r"\|\s*(?:First|Second|Third|Fourth|Fifth|Sixth|Seventh|Eighth|Ninth|Tenth)\s+Edition[\s\d]*",
+    re.IGNORECASE,
+)
+_DOT_LEADER_RE = re.compile(r"(?:\.\s*){4,}")
+_SPACED_LETTERS_RE = re.compile(r"(?:\b[A-Za-z]\b[ ]){4,}\b[A-Za-z]\b")
+
+
+def _clean_passage_text(text: str) -> str:
+    """Remove PDF-extraction artifacts from a retrieved chunk; no-op for clean text."""
+    if not text:
+        return ""
+    t = _PIC_BLOCK_RE.sub(" ", text)
+    t = _PIC_MARK_RE.sub(" ", t)
+    t = _PDF_FOOTER_RE.sub(" ", t)
+    t = _PDF_EDITION_RE.sub(" ", t)
+    t = _DOT_LEADER_RE.sub(" ", t)
+    t = _SPACED_LETTERS_RE.sub(" ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"[\s;]+\d{1,3}\s*$", "", t)  # trailing orphan page number
+    t = re.sub(r"[\s;]+\d{1,2}\.\s*$", "", t)  # trailing orphan list marker
+    return t.strip()
+
+
+def _trim_excerpt(text: str, limit: int = 700) -> str:
+    """Trim to ~``limit`` chars at a sentence/clause boundary (never mid-word)."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = max(cut.rfind(". "), cut.rfind("; "), cut.rfind("\n"))
+    if boundary > limit * 0.5:
+        return cut[: boundary + 1].rstrip()
+    return cut.rsplit(" ", 1)[0].rstrip()
+
+
+def _structure_excerpt(text: str) -> str:
+    """Put an inline numbered list (``...: 1. X; 2. Y``) onto its own lines so it
+    renders as a Markdown list instead of a run-on."""
+    t = re.sub(r":\s+(?=\d{1,2}\.\s)", ":\n\n", text, count=1)  # blank line before the list
+    t = re.sub(r"\s*;\s+(?=\d{1,2}\.\s)", "\n", t)
+    return t
 
 # Shared executor for LLM calls — bounded so one slow generation cannot
 # exhaust worker threads under load.  Size is small on purpose: Qwen runs
@@ -103,6 +251,192 @@ _LLM_CIRCUIT = CircuitBreaker(
 )
 
 
+def _build_fallback_prompt(
+    query: str, passages: list[dict[str, Any]], locale: str, tone_hint: str = ""
+) -> tuple[str, str]:
+    """RAG system+user prompt for a cloud LLM fallback (Gemini / Workers AI)."""
+    ctx = "\n\n".join(
+        f"[{i + 1}] {(p.get('text') or p.get('answer') or p.get('question') or '')[:800]}"
+        for i, p in enumerate(passages[:6])
+    )
+    system = (
+        "You are the URA (Uganda Revenue Authority) tax assistant. Answer ONLY "
+        "from the context below and cite passages like [1]. If the context does "
+        "not contain the answer, say you don't have enough information. Be warm "
+        "and respectful, never condescending."
+    )
+    if tone_hint:
+        system += f" {tone_hint.strip()}"
+    if locale and locale != "en":
+        system += f" Respond in the user's language (locale={locale})."
+    return system, f"Context:\n{ctx}\n\nQuestion: {query}"
+
+
+def _llm_cloud_fallback(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str = "",
+    tone_hint: str = "",
+) -> str:
+    """Generate via Cloudflare Gemini / Workers AI when the primary LLM is down.
+
+    Gated by ``cloudflare_fallback`` + ``LLM_FALLBACK_BACKEND`` and each provider's
+    circuit breaker + free-tier budget, so it fires only when the primary is
+    unavailable and the cloud path is configured/under budget. Returns "" to let
+    the caller fall back to the best-hit FAQ answer.
+    """
+    if not flags.is_enabled("cloudflare_fallback"):
+        return ""
+    backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
+    if backend not in ("gemini", "workers_ai"):
+        return ""
+    try:
+        from .providers import breakers, budget
+        from .providers import config as cfg
+        from .providers import gateway as gw
+        from .providers import routing
+    except Exception:  # providers optional / deps missing
+        return ""
+
+    if (
+        backend == "gemini"
+        and cfg.is_gemini_configured()
+        and breakers.GEMINI_BREAKER.allow_request()
+        and budget.try_consume_gemini_call()
+    ):
+        system, user = _build_fallback_prompt(query, passages, locale, tone_hint)
+        try:
+            text = gw.gemini_generate(user, system=system, max_tokens=512, temperature=0.2)
+            breakers.GEMINI_BREAKER.record_success()
+            routing.log_model_use("llm", "gemini_flash")
+            logger.info("LLM fallback via Gemini succeeded")
+            return text
+        except Exception:
+            breakers.GEMINI_BREAKER.record_failure()
+            logger.warning("LLM Gemini fallback failed", exc_info=True)
+
+    # Cloudflare Workers AI — the cloud-PRIMARY generator when
+    # LLM_PRIMARY_BACKEND=workers_ai, otherwise the cloud fallback.  Reuse the
+    # canonical message builder so cloud answers carry the FULL governed prompt
+    # (formatting, citation, refusal, multilingual rules) + the LLM01 passage
+    # scrub, matching local quality.  Chain: Llama 3.3 70B → Mistral Small 3.1
+    # → Llama 4 Scout, all sharing CF_LLM_BREAKER + the neuron budget.
+    messages = llm_module._build_messages(
+        query=query,
+        passages=passages,
+        conversation_history=conversation_history,
+        locale=locale,
+        tokenizer=None,  # CF models have ≥24k context; skip local-tokenizer trim
+        structured=llm_module.LLM_STRUCTURED_OUTPUT,
+        personalization_context=personalization_context,
+        tone_hint=tone_hint,
+    )
+    # Strip the Qwen-only /no_think directive — a no-op token for Llama/Mistral.
+    if messages and messages[0].get("role") == "system":
+        sys_content = messages[0]["content"]
+        if sys_content.startswith("/no_think"):
+            messages[0]["content"] = sys_content.split("\n", 1)[-1]
+    cf_chain = (
+        routing.CF_LLM_MODEL,
+        routing.CF_LLM_FALLBACK_MODEL,
+        routing.CF_LLM_FALLBACK_MODEL_2,
+    )
+    for model in cf_chain:
+        if not (
+            cfg.is_cloudflare_configured()
+            and breakers.CF_LLM_BREAKER.allow_request()
+            and budget.try_consume_neurons(5)
+        ):
+            break
+        try:
+            text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2)
+            breakers.CF_LLM_BREAKER.record_success()
+            routing.log_model_use("llm", model)
+            logger.info("LLM via Workers AI (%s) succeeded", model)
+            return text
+        except Exception:
+            breakers.CF_LLM_BREAKER.record_failure()
+            logger.warning("LLM Workers AI failed (model=%s)", model, exc_info=True)
+    return ""
+
+
+def _stream_cloud_fallback(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str = "",
+    tone_hint: str = "",
+) -> Generator[str, None, None]:
+    """Yield the cloud-fallback answer in word chunks for the SSE/WS stream path."""
+    text = _llm_cloud_fallback(
+        query, passages, conversation_history, locale, personalization_context, tone_hint
+    )
+    if not text:
+        return
+    for chunk in re.findall(r"\S+\s*", text):
+        yield chunk
+
+
+def _cloud_llm_ready() -> bool:
+    """True when the flag-gated cloud LLM fallback is configured to serve a
+    reply on its own.
+
+    Used by the chat entrypoints to keep RAG generation alive when the local
+    LLM is entirely unavailable (``llm_module.is_available()`` False — e.g. an
+    LLM-less deployment profile), not merely failing per-request.  Without
+    this, the availability gates skip the generation step and the configured
+    Cloudflare/Gemini tier never gets a chance.
+    """
+    if not flags.is_enabled("cloudflare_fallback"):
+        return False
+    backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
+    if backend not in ("gemini", "workers_ai"):
+        return False
+    try:
+        from .providers import config as cfg
+    except Exception:  # providers optional / deps missing
+        return False
+    if backend == "gemini" and cfg.is_gemini_configured():
+        return True
+    return cfg.is_cloudflare_configured()
+
+
+# Locales kept on the local Qwen3-8B (+ per-language LoRA adapters): the cloud
+# models document no Luganda/Runyankole/Acholi support, so a blanket cloud flip
+# would regress them.  Override with LOCAL_PRIMARY_LOCALES (comma-separated).
+LOCAL_PRIMARY_LOCALES = frozenset(
+    s.strip().lower()
+    for s in os.getenv("LOCAL_PRIMARY_LOCALES", "lg,nyn,ach").split(",")
+    if s.strip()
+)
+
+
+def _prefer_cloud_primary(locale: str) -> bool:
+    """Hybrid model routing: should the cloud chain run BEFORE the local LLM?
+
+    Opt-in via ``LLM_PRIMARY_BACKEND`` (``workers_ai``/``cloudflare``/``cloud``)
+    so the default stays the resilient local-first behaviour.  Cloud leads for
+    high-resource locales (English, Swahili, …) where the CF chain (Llama 3.3
+    70B → Mistral Small 3.1 → Llama 4 Scout) beats the local 8B; the Ugandan
+    languages in :data:`LOCAL_PRIMARY_LOCALES` stay local-primary, and local is
+    the universal fallback for everyone.  Returns ``False`` whenever the cloud
+    tier is not actually configured/ready, so misconfiguration degrades safely
+    to local-first.
+    """
+    if os.getenv("LLM_PRIMARY_BACKEND", "local").strip().lower() not in (
+        "workers_ai",
+        "cloudflare",
+        "cloud",
+    ):
+        return False
+    if (locale or "en").strip().lower() in LOCAL_PRIMARY_LOCALES:
+        return False
+    return _cloud_llm_ready()
+
+
 def _call_llm_with_deadline(
     query: str,
     passages: list[dict[str, Any]],
@@ -110,16 +444,72 @@ def _call_llm_with_deadline(
     locale: str,
     personalization_context: str = "",
     deadline_s: float = LLM_DEADLINE_SECONDS,
+    tone_hint: str = "",
+) -> str:
+    """Generate a reply, honouring the hybrid cloud/local routing policy.
+
+    For cloud-primary locales (see :func:`_prefer_cloud_primary`) the CF chain
+    runs first with the local Qwen3-8B as the fallback; otherwise the resilient
+    local-first path runs with the cloud chain as its fallback.
+    """
+    if _prefer_cloud_primary(locale):
+        text = _llm_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context, tone_hint
+        )
+        if text and text.strip():
+            return text
+        logger.warning("Cloud-primary LLM unavailable/empty — falling back to local Qwen3-8B")
+        return _local_llm_then_cloud(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            deadline_s,
+            allow_cloud_fallback=False,  # cloud already attempted above
+            tone_hint=tone_hint,
+        )
+    return _local_llm_then_cloud(
+        query,
+        passages,
+        conversation_history,
+        locale,
+        personalization_context,
+        deadline_s,
+        allow_cloud_fallback=True,
+        tone_hint=tone_hint,
+    )
+
+
+def _local_llm_then_cloud(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str = "",
+    deadline_s: float = LLM_DEADLINE_SECONDS,
+    *,
+    allow_cloud_fallback: bool = True,
+    tone_hint: str = "",
 ) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
 
     The generation runs on a bounded executor, guarded by a dedicated
-    circuit breaker.  On timeout, breaker failure, or exception we
-    return an empty string so the caller falls back to FAQ lookup.
+    circuit breaker.  On timeout, breaker failure, or empty/exception we route
+    to the cloud chain (when ``allow_cloud_fallback``) and otherwise return an
+    empty string so the caller falls back to FAQ lookup.
     """
+
+    def _cloud() -> str:
+        if not allow_cloud_fallback:
+            return ""
+        return _llm_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context, tone_hint
+        )
+
     if not _LLM_CIRCUIT.allow_request():
-        logger.warning("LLM circuit breaker OPEN — skipping generation")
-        return ""
+        logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
+        return _cloud()
 
     future = _LLM_EXECUTOR.submit(
         llm_module.generate,
@@ -128,20 +518,30 @@ def _call_llm_with_deadline(
         conversation_history=conversation_history,
         locale=locale,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
     try:
         reply = future.result(timeout=deadline_s)
-        _LLM_CIRCUIT.record_success()
-        return reply or ""
+        if reply and reply.strip():
+            _LLM_CIRCUIT.record_success()
+            return reply
+        # Empty reply — llm_module.generate logs+swallows its own errors and
+        # returns "" (e.g. _vllm_generate on HTTP failure), so an empty string
+        # is our only failure signal here. Mirror the streaming path: record a
+        # failure and try the cloud fallback before the caller drops to the
+        # extractive best-hit answer.
+        _LLM_CIRCUIT.record_failure()
+        logger.warning("LLM returned empty — trying cloud fallback")
+        return _cloud()
     except concurrent.futures.TimeoutError:
         future.cancel()  # best-effort; transformers generate may ignore
         _LLM_CIRCUIT.record_failure()
         logger.warning("LLM deadline %.1fs exceeded", deadline_s)
-        return ""
+        return _cloud()
     except Exception:
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM generation raised")
-        return ""
+        return _cloud()
 
 
 def stream_llm_tokens(
@@ -150,6 +550,8 @@ def stream_llm_tokens(
     conversation_history: list[dict[str, str]] | None,
     locale: str,
     personalization_context: str = "",
+    cancel_event: threading.Event | None = None,
+    tone_hint: str = "",
 ) -> Generator[str, None, None]:
     """Stream LLM tokens through the shared circuit breaker.
 
@@ -157,11 +559,82 @@ def stream_llm_tokens(
     Yields nothing when the breaker is OPEN, the generator raises,
     or no tokens are produced — the caller then falls back to
     returning the best-hit answer as a single event.
+
+    Passing ``cancel_event`` lets the caller cooperatively stop token
+    generation at the next yield boundary (e.g. when an SSE client
+    disconnects or a WS client emits ``response.cancel``).  The
+    underlying transformer thread cannot be killed; the next decoded
+    token is the cancellation latency floor.
+
+    Honours the hybrid routing policy: cloud-primary locales stream the CF
+    answer first (chunked) with the local model as fallback; everyone else
+    streams locally with the cloud chain as fallback.
     """
+    if _prefer_cloud_primary(locale):
+        saw_cloud = False
+        for chunk in _stream_cloud_fallback(
+            query, passages, conversation_history, locale, personalization_context, tone_hint
+        ):
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            saw_cloud = True
+            yield chunk
+        if saw_cloud:
+            return
+        logger.warning("Cloud-primary stream unavailable — falling back to local Qwen3-8B")
+        yield from _stream_local_then_cloud(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            cancel_event,
+            allow_cloud_fallback=False,  # cloud already attempted above
+            tone_hint=tone_hint,
+        )
+        return
+    yield from _stream_local_then_cloud(
+        query,
+        passages,
+        conversation_history,
+        locale,
+        personalization_context,
+        cancel_event,
+        allow_cloud_fallback=True,
+        tone_hint=tone_hint,
+    )
+
+
+def _stream_local_then_cloud(
+    query: str,
+    passages: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str = "",
+    cancel_event: threading.Event | None = None,
+    *,
+    allow_cloud_fallback: bool = True,
+    tone_hint: str = "",
+) -> Generator[str, None, None]:
+    """Stream from the local model; route to the cloud chain on failure.
+
+    Yields nothing when the breaker is OPEN, the generator raises, or no tokens
+    are produced AND ``allow_cloud_fallback`` is False — the caller then falls
+    back to returning the best-hit answer as a single event.
+    """
+
+    def _cloud_stream() -> Generator[str, None, None]:
+        if allow_cloud_fallback:
+            yield from _stream_cloud_fallback(
+                query, passages, conversation_history, locale, personalization_context, tone_hint
+            )
+
     if not llm_module.is_available():
+        yield from _cloud_stream()
         return
     if not _LLM_CIRCUIT.allow_request():
-        logger.warning("LLM circuit breaker OPEN — skipping stream")
+        logger.warning("LLM circuit breaker OPEN — streaming via cloud fallback")
+        yield from _cloud_stream()
         return
 
     saw_tokens = False
@@ -172,7 +645,11 @@ def stream_llm_tokens(
             conversation_history=conversation_history,
             locale=locale,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
         ):
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info("LLM stream cancelled by caller")
+                break
             if not token:
                 continue
             saw_tokens = True
@@ -184,9 +661,11 @@ def stream_llm_tokens(
             # Empty stream counts as a soft failure — the breaker tracks
             # it so a continually empty worker eventually trips.
             _LLM_CIRCUIT.record_failure()
+            yield from _cloud_stream()
     except Exception:
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM streaming raised")
+        yield from _cloud_stream()
         return
 
 
@@ -197,13 +676,15 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     locale: str,
     *,
     tool_names: list[str] | None = None,
-    max_iterations: int = 3,
+    max_iterations: int | None = None,
     personalization_context: str = "",
+    tone_hint: str = "",
     tenant_id: str = "default",
     user_id: str = "",
     user_role: str = "public",
     granted_purposes: list[str] | None = None,
     deadline_s: float = LLM_DEADLINE_SECONDS * 2,
+    event_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -221,6 +702,9 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         logger.warning("LLM circuit breaker OPEN — skipping agentic path")
         return empty
 
+    if max_iterations is None:
+        max_iterations = _resolve_tool_max_iterations()
+
     future = _LLM_EXECUTOR.submit(
         llm_module.generate_with_tools,
         query=query,
@@ -230,10 +714,12 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         locale=locale,
         max_iterations=max_iterations,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
         tenant_id=tenant_id,
         user_id=user_id,
         user_role=user_role,
         granted_purposes=granted_purposes or [],
+        event_callback=event_callback,
     )
     try:
         result = future.result(timeout=deadline_s)
@@ -252,6 +738,712 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         _LLM_CIRCUIT.record_failure()
         logger.exception("agentic LLM generation raised")
         return empty
+
+
+# Phase 2: the historical default was 3 (UX defense — agentic UX was opaque
+# so we capped runaway loops).  With Phase 2 events streamed to the client,
+# the UI shows every iteration, so we raise the default to 10 and let
+# operators override via LLM_TOOL_MAX_ITER up to a hard cap of 20.
+_LLM_TOOL_MAX_ITER_HARD_CAP = 20
+_LLM_TOOL_MAX_ITER_DEFAULT = 10
+
+
+def _resolve_tool_max_iterations() -> int:
+    """Resolve the per-turn tool-iteration budget from env."""
+    raw = os.getenv("LLM_TOOL_MAX_ITER")
+    if not raw:
+        return _LLM_TOOL_MAX_ITER_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("LLM_TOOL_MAX_ITER=%r is not an int; using default", raw)
+        return _LLM_TOOL_MAX_ITER_DEFAULT
+    return max(1, min(value, _LLM_TOOL_MAX_ITER_HARD_CAP))
+
+
+# Phase 6: per-turn deadline.  Default 120 s gives the agentic loop room
+# for several tool round trips while still bounding worst-case latency.
+# A turn that exceeds the deadline is cancelled cooperatively at the
+# next token / await boundary.  Set to 0 to disable.
+_TURN_DEADLINE_DEFAULT_S = 120
+
+
+def _resolve_turn_deadline() -> float:
+    raw = os.getenv("AGENTIC_TURN_DEADLINE_S")
+    if raw is None:
+        return _TURN_DEADLINE_DEFAULT_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        logger.warning("AGENTIC_TURN_DEADLINE_S=%r is not numeric; using default", raw)
+        return _TURN_DEADLINE_DEFAULT_S
+
+
+# ---------------------------------------------------------------------------
+# Transport-agnostic chat turn generator (Phase 1 of the WS upgrade)
+# ---------------------------------------------------------------------------
+
+# Bounded queue for streamed tokens.  Unbounded queues are an OOM hazard
+# when a slow client lets the LLM pump out faster than tokens are drained.
+_STREAM_QUEUE_MAX = 256
+
+
+def _apply_output_guards(
+    model: Any,
+    *,
+    message: str,
+    reply: str,
+    hits: list[dict[str, Any]],
+    citations: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    session_id: str | None,
+    conversation_id: str,
+    output_guard: Any,
+    existing_handoff: dict[str, Any] | None = None,
+    existing_ticket_id: str = "",
+) -> dict[str, Any]:
+    """Run the full post-generation guard pipeline for a streamed turn.
+
+    Faithfulness → claim verification → response judge → grounded revision →
+    escalation → handoff → ticket.  This is called by BOTH the token-streaming
+    branch and the agentic (tool-use) branch of :func:`run_chat_turn` so the
+    two paths enforce an identical safety bar — previously the agentic branch
+    only computed faithfulness and skipped the judge, revision, claim
+    verification, and escalation/handoff/ticket steps (P0-3).
+
+    ``reply`` is assumed already PII-redacted + sanitized by the caller.  The
+    returned ``reply`` may differ (a grounded revision was substituted); when
+    ``revised`` is True the caller should emit a ``("revision", reply)`` event.
+    """
+    contexts = [h.get("text") or h.get("answer", "") for h in hits]
+    faith = HybridRetriever.compute_faithfulness(reply, contexts)
+    escalate, esc_reason = output_guard.should_escalate(faith, hits)
+
+    claim_report: dict[str, Any] | None = None
+    if reply and hits and citations:
+        try:
+            claim_report = verify_claims(reply, citations, hits)
+        except Exception:
+            logger.debug("claim verification failed", exc_info=True)
+            claim_report = None
+
+    response_judge = model._evaluate_response_judge(
+        message=message,
+        reply=reply,
+        hits=hits,
+        citations=citations,
+        faithfulness_score=faith,
+        escalation_required=escalate,
+        escalation_reason=esc_reason,
+        claim_report=claim_report,
+    )
+
+    revised = False
+    if response_judge.get("decision") == "revise" and response_judge.get("revised_reply"):
+        reply = output_guard.sanitize(output_guard.redact_pii(response_judge["revised_reply"]))
+        faith = HybridRetriever.compute_faithfulness(reply, contexts)
+        escalate, esc_reason = output_guard.should_escalate(faith, hits)
+        response_judge["applied_revision"] = True
+        response_judge["final_decision"] = "escalate" if escalate else "approve"
+        revised = True
+        # Re-verify the substituted text so a revision can't smuggle in
+        # unsupported claims.
+        if citations:
+            try:
+                claim_report = verify_claims(reply, citations, hits)
+                if claim_report.get("decision") == "escalate":
+                    response_judge["final_decision"] = "escalate"
+            except Exception:
+                logger.debug("post-revision claim verification failed", exc_info=True)
+    else:
+        response_judge["final_decision"] = response_judge.get("decision", "approve")
+
+    if response_judge.get("final_decision") == "escalate":
+        escalate = True
+        if not esc_reason:
+            esc_reason = "; ".join(response_judge.get("reasons") or [])
+    if claim_report is not None:
+        response_judge["claim_verification"] = claim_report
+    response_judge.pop("revised_reply", None)
+
+    handoff = existing_handoff
+    if escalate and not handoff:
+        handoff = model._build_handoff_packet(
+            message=message,
+            reason=esc_reason,
+            conversation_history=conversation_history or None,
+            hits=hits,
+            faithfulness_score=faith,
+        )
+    ticket_id = existing_ticket_id
+    if escalate and not ticket_id:
+        ticket_id = model._maybe_create_ticket(
+            reason=esc_reason,
+            user_query=message,
+            bot_reply=reply,
+            session_id=session_id or None,
+            conversation_id=conversation_id or "",
+            priority=(handoff or {}).get("priority", "normal"),
+            handoff=handoff,
+            response_judge=response_judge,
+        )
+
+    return {
+        "reply": reply,
+        "faithfulness": faith,
+        "escalate": escalate,
+        "escalation_reason": esc_reason,
+        "response_judge": response_judge,
+        "handoff": handoff,
+        "ticket_id": ticket_id,
+        "revised": revised,
+        "claim_report": claim_report,
+    }
+
+
+async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE generator one-to-one
+    model: Any,
+    *,
+    message: str,
+    conversation_id: str | None,
+    top_k: int,
+    locale: str,
+    session_id: str | None,
+    request_id: str | None,
+    user_id: str | None,
+    tenant_id: str,
+    should_continue: Callable[[], "asyncio.Future[bool] | bool"] | None = None,
+    cancel_event: threading.Event | None = None,
+    sentence_batching: bool = True,
+    event_callback: Callable[[dict[str, Any]], None] | None = None,
+    user_role: str = "public",
+    granted_purposes: list[str] | None = None,
+    conversation_history_override: list[dict[str, str]] | None = None,
+    turn_deadline_s: float | None = None,
+    attachments: list[Any] | None = None,
+) -> "AsyncIterator[tuple[str, Any]]":
+    """Run a single chat turn and stream event tuples to the caller.
+
+    This is the transport-agnostic core that backs both SSE
+    (``/v1/chat/stream``) and WebSocket (``/v2/chat/stream``).  Yielded
+    tuples have the shape ``(event_type, payload)``:
+
+    * ``("metadata", dict)`` — pre-token metadata (sources, citations, ...).
+    * ``("token", str)``     — a sanitized text chunk.
+    * ``("revision", str)``  — judge revised the full reply; new text.
+    * ``("grounding", dict)``— faithfulness, escalation, handoff, judge.
+    * ``("done", "")``       — terminal frame for a turn.
+    * ``("error", dict)``    — payload has ``code`` and ``message``.
+    * ``("_log", dict)``     — internal final frame for adapter logging.
+                               Payload: ``{"result", "full_reply", "elapsed_ms"}``.
+                               Adapters consume this and do not forward it.
+
+    Parameters
+    ----------
+    sentence_batching:
+        SSE keeps this ``True`` to match historical behaviour; WS sets
+        ``False`` for lower TTFT (per-token frames pass through the same
+        OutputGuard sanitiser).
+    should_continue:
+        Optional callable polled between awaits.  Returning ``False``
+        (or an awaitable that resolves to ``False``) cancels the turn.
+        SSE wires this to ``request.is_disconnected``; WS sets it from
+        its socket-state check.
+    cancel_event:
+        Optional :class:`threading.Event`.  When set (by ``response.cancel``,
+        client disconnect, or a future deadline), token generation halts at
+        the next decoded token.  Created internally if absent.
+    event_callback:
+        Phase 2 hook; ignored in Phase 1.
+    """
+    import inspect
+
+    from .guardrails import OutputGuard
+
+    _output_guard = OutputGuard()
+    t0 = time.perf_counter()
+    full_reply = ""
+    result: dict[str, Any] = {}
+    cancel_event = cancel_event or threading.Event()
+    deadline_s = turn_deadline_s if turn_deadline_s is not None else _resolve_turn_deadline()
+
+    async def _should_stop() -> bool:
+        if cancel_event.is_set():
+            return True
+        if deadline_s > 0 and (time.perf_counter() - t0) > deadline_s:
+            logger.warning("run_chat_turn deadline %.1fs exceeded", deadline_s)
+            cancel_event.set()
+            return True
+        if should_continue is None:
+            return False
+        outcome = should_continue()
+        if inspect.isawaitable(outcome):
+            outcome = await outcome
+        return not bool(outcome)
+
+    try:
+        yield (
+            "retrieval.started",
+            {"top_k": top_k, "query_preview": message[:200]},
+        )
+
+        result = await asyncio.to_thread(
+            model.generate_retrieval_only,
+            message=message,
+            conversation_id=conversation_id,
+            top_k=top_k,
+            locale=locale,
+            session_id=session_id or None,
+            request_id=request_id,
+            user_id=user_id or None,
+            tenant_id=tenant_id,
+            conversation_history_override=conversation_history_override,
+            attachments=attachments,
+        )
+
+        yield (
+            "retrieval.completed",
+            {
+                "hit_count": len(result.get("_hits", []) or []),
+                "retrieval_mode": result.get("retrieval_mode"),
+                "sources": result.get("sources", []),
+            },
+        )
+
+        # Short-circuit branches: blocked / abstained / clarification /
+        # workflow / escalated — plus deterministic procedural replies
+        # (``_short_circuit``) — skip the LLM stream and return a single
+        # bundled payload.
+        if result.get("retrieval_mode") in (
+            "blocked",
+            "abstained",
+            "clarification",
+            "workflow",
+            "escalated",
+        ) or result.get("_short_circuit"):
+            yield ("metadata", _metadata_payload(result, include_short_circuit=True))
+            full_reply = result.get("reply", "")
+            yield ("token", full_reply)
+            yield ("done", "")
+            yield (
+                "_log",
+                {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+            )
+            return
+
+        yield ("metadata", _metadata_payload(result, include_short_circuit=False))
+
+        hits = result.get("_hits", [])
+        conversation_history = result.get("_history", [])
+        rewritten_query = result.get("_rewritten", message)
+        personalization_context = result.get("_personalization_context", "")
+        tone_hint = str(result.get("_tone_hint") or "")
+        distress = str(result.get("_distress") or "")
+
+        # ── Phase 2: optional agentic branch ─────────────────────────
+        # When tool_use is enabled, run the bounded tool-calling loop
+        # and surface every tool event as part of the same stream.  The
+        # final answer text is yielded as a single token frame because
+        # the agentic path produces a complete reply (no per-token
+        # streaming for tool calls — that's a tradeoff documented in
+        # docs/ws_chat_protocol.md).
+        if llm_module.is_available() and hits and flags.is_enabled("tool_use"):
+            async for event in _stream_agentic_turn(
+                rewritten_query=rewritten_query,
+                hits=hits,
+                conversation_history=conversation_history,
+                locale=locale,
+                personalization_context=str(personalization_context or ""),
+                tone_hint=tone_hint,
+                tenant_id=tenant_id,
+                user_id=user_id or "",
+                user_role=user_role,
+                granted_purposes=granted_purposes or [],
+                cancel_event=cancel_event,
+                _output_guard=_output_guard,
+            ):
+                if event[0] == "_full_reply":
+                    full_reply = event[1]
+                    continue
+                yield event
+
+            if full_reply:
+                # P0-3: run the SAME post-generation guard pipeline the
+                # token-streaming branch uses (judge + claim verification +
+                # grounded revision + escalation/handoff/ticket), not just a
+                # bare faithfulness score.
+                guard = _apply_output_guards(
+                    model,
+                    message=message,
+                    reply=full_reply,
+                    hits=hits,
+                    citations=result.get("citations", []),
+                    conversation_history=conversation_history,
+                    session_id=session_id,
+                    conversation_id=result.get("conversation_id") or conversation_id or "",
+                    output_guard=_output_guard,
+                    existing_handoff=result.get("handoff"),
+                    existing_ticket_id=result.get("ticket_id", ""),
+                )
+                full_reply = guard["reply"]
+                if guard["revised"]:
+                    yield ("revision", full_reply)
+                result["handoff"] = guard["handoff"]
+                result["response_judge"] = guard["response_judge"]
+                result["ticket_id"] = guard["ticket_id"]
+                yield (
+                    "grounding",
+                    {
+                        "faithfulness_score": guard["faithfulness"],
+                        "escalation_required": guard["escalate"],
+                        "escalation_reason": guard["escalation_reason"],
+                        "agent_role": result.get("agent_role", "rag_answerer"),
+                        "handoff": guard["handoff"],
+                        "response_judge": guard["response_judge"],
+                        "next_actions": result.get("next_actions", []),
+                        "ticket_id": guard["ticket_id"],
+                    },
+                )
+                yield ("done", "")
+                yield (
+                    "_log",
+                    {
+                        "result": result,
+                        "full_reply": full_reply,
+                        "elapsed_ms": (time.perf_counter() - t0) * 1000,
+                    },
+                )
+                return
+
+        # The cloud fallback alone keeps token streaming on when no local LLM
+        # is configured — stream_llm_tokens routes straight to it in that case.
+        if hits and (llm_module.is_available() or _cloud_llm_ready()):
+            loop = asyncio.get_running_loop()
+            token_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue(
+                maxsize=_STREAM_QUEUE_MAX
+            )
+
+            def _pump_tokens() -> None:
+                try:
+                    for token in stream_llm_tokens(
+                        query=rewritten_query,
+                        passages=hits,
+                        conversation_history=conversation_history or None,
+                        locale=locale,
+                        personalization_context=str(personalization_context or ""),
+                        cancel_event=cancel_event,
+                        tone_hint=tone_hint,
+                    ):
+                        # Bounded queue: if the consumer is slow, block here
+                        # rather than balloon memory.  call_soon_threadsafe
+                        # schedules an awaitable put on the event loop.
+                        future = asyncio.run_coroutine_threadsafe(
+                            token_queue.put(("token", token)), loop
+                        )
+                        try:
+                            future.result(timeout=30)
+                        except Exception:
+                            # Consumer gone / loop closed / queue full beyond
+                            # backpressure window — stop pumping.
+                            return
+                finally:
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            token_queue.put(("done", None)), loop
+                        ).result(timeout=5)
+                    except Exception:
+                        pass
+
+            threading.Thread(target=_pump_tokens, daemon=True).start()
+
+            saw_streamed_token = False
+            pending_stream_chunk = ""
+
+            def _flush_stream_chunk(*, force: bool = False) -> str:
+                nonlocal pending_stream_chunk, full_reply, saw_streamed_token
+                if not pending_stream_chunk:
+                    return ""
+                if (
+                    sentence_batching
+                    and not force
+                    and not re.search(r"(?:\n\s*\n|[.!?](?:\s|$))", pending_stream_chunk)
+                ):
+                    return ""
+                sanitized = _output_guard.sanitize(pending_stream_chunk)
+                pending_stream_chunk = ""
+                if not sanitized:
+                    return ""
+                saw_streamed_token = True
+                full_reply += sanitized
+                return sanitized
+
+            while True:
+                if await _should_stop():
+                    logger.info("chat turn cancelled mid-stream")
+                    cancel_event.set()
+                    return
+                try:
+                    event_type, payload = await asyncio.wait_for(
+                        token_queue.get(), timeout=15
+                    )
+                except asyncio.TimeoutError:
+                    # Heartbeat: yield an empty token tuple so adapters can
+                    # send keepalive comments without inventing a new event.
+                    yield ("_keepalive", "")
+                    continue
+
+                if event_type == "done":
+                    final_chunk = _flush_stream_chunk(force=True)
+                    if final_chunk:
+                        yield ("token", final_chunk)
+                    break
+
+                pending_stream_chunk += payload or ""
+                sanitized = _flush_stream_chunk()
+                if not sanitized:
+                    continue
+                yield ("token", sanitized)
+
+            if not saw_streamed_token:
+                # Pump produced nothing (breaker open or empty stream) — the
+                # tone_hint never reached a model, so the extractive fallback
+                # carries the empathy acknowledgment itself (EI parity).
+                full_reply = result.get("reply", "")
+                if distress and full_reply:
+                    full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
+                yield ("token", full_reply)
+                yield ("done", "")
+                yield (
+                    "_log",
+                    {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+                )
+                return
+
+            full_reply = _output_guard.redact_pii(full_reply)
+
+            guard = _apply_output_guards(
+                model,
+                message=message,
+                reply=full_reply,
+                hits=hits,
+                citations=result.get("citations", []),
+                conversation_history=conversation_history,
+                session_id=session_id,
+                conversation_id=result.get("conversation_id") or conversation_id or "",
+                output_guard=_output_guard,
+                existing_handoff=result.get("handoff"),
+                existing_ticket_id=result.get("ticket_id", ""),
+            )
+            full_reply = guard["reply"]
+            faith = guard["faithfulness"]
+            escalate = guard["escalate"]
+            esc_reason = guard["escalation_reason"]
+            response_judge = guard["response_judge"]
+            handoff = guard["handoff"]
+            ticket_id = guard["ticket_id"]
+            if guard["revised"]:
+                yield ("revision", full_reply)
+
+            result["handoff"] = handoff
+            result["response_judge"] = response_judge
+            result["ticket_id"] = ticket_id
+
+            yield (
+                "grounding",
+                {
+                    "faithfulness_score": faith,
+                    "escalation_required": escalate,
+                    "escalation_reason": esc_reason,
+                    "agent_role": result.get("agent_role", "rag_answerer"),
+                    "handoff": handoff,
+                    "response_judge": response_judge,
+                    "next_actions": result.get("next_actions", []),
+                    "ticket_id": ticket_id,
+                },
+            )
+
+            try:
+                model._cache.put(
+                    rewritten_query,
+                    {
+                        "reply": full_reply,
+                        "sources": result.get("sources", []),
+                        "citations": result.get("citations", []),
+                        "faithfulness_score": faith,
+                        "retrieval_mode": result.get("retrieval_mode"),
+                        "model": result.get("model"),
+                        "conversation_id": result.get("conversation_id"),
+                        "locale": result.get("locale"),
+                        "escalation_required": escalate,
+                        "escalation_reason": esc_reason,
+                        "agent_role": result.get("agent_role", "rag_answerer"),
+                        "handoff": handoff,
+                        "response_judge": response_judge,
+                        "next_actions": result.get("next_actions", []),
+                        "ticket_id": ticket_id,
+                    },
+                )
+            except Exception:
+                logger.debug("Stream cache store failed", exc_info=True)
+        else:
+            # No LLM tier at all — extractive reply, same EI parity as above.
+            full_reply = result.get("reply", "")
+            if distress and full_reply:
+                full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
+            yield ("token", full_reply)
+
+        yield ("done", "")
+        yield (
+            "_log",
+            {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+        )
+
+    except Exception:
+        logger.exception("run_chat_turn error")
+        yield ("error", {"code": "internal", "message": "Internal server error"})
+        yield ("done", "")
+        yield (
+            "_log",
+            {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+        )
+
+
+async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuration
+    *,
+    rewritten_query: str,
+    hits: list[dict[str, Any]],
+    conversation_history: list[dict[str, str]] | None,
+    locale: str,
+    personalization_context: str,
+    tone_hint: str = "",
+    tenant_id: str,
+    user_id: str,
+    user_role: str,
+    granted_purposes: list[str],
+    cancel_event: threading.Event,
+    _output_guard: Any,
+) -> "AsyncIterator[tuple[str, Any]]":
+    """Run the agentic tool-call loop and stream its events.
+
+    Wraps :func:`_call_llm_agentic` in a coroutine task so we can drain
+    its ``event_callback`` events while it's still running.  Yields:
+
+    * ``("tool_call.started", dict)``
+    * ``("tool_call.completed", dict)``
+    * ``("tool_call.error", dict)``
+    * ``("iteration.started", dict)``
+    * ``("iteration.final", dict)``
+    * ``("token", str)`` — the final answer text (single chunk)
+    * ``("_full_reply", str)`` — internal: full text for the caller
+                                 to pass to the grounding stage.
+    """
+    loop = asyncio.get_running_loop()
+    event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=512)
+
+    def _emit(ev: dict[str, Any]) -> None:
+        if cancel_event.is_set():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(event_queue.put(ev), loop).result(
+                timeout=5
+            )
+        except Exception:
+            logger.debug("agentic event drop", exc_info=True)
+
+    async def _run_in_thread() -> dict[str, Any]:
+        return await asyncio.to_thread(
+            _call_llm_agentic,
+            query=rewritten_query,
+            passages=hits,
+            conversation_history=conversation_history,
+            locale=locale,
+            personalization_context=personalization_context,
+            tone_hint=tone_hint,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            user_role=user_role,
+            granted_purposes=granted_purposes,
+            event_callback=_emit,
+        )
+
+    agentic_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(_run_in_thread())
+
+    try:
+        while not agentic_task.done():
+            try:
+                ev = await asyncio.wait_for(event_queue.get(), timeout=0.25)
+            except asyncio.TimeoutError:
+                if cancel_event.is_set():
+                    agentic_task.cancel()
+                    return
+                continue
+            yield (ev.get("type", "tool_event"), ev)
+
+        # Drain anything queued after the task finished.
+        while not event_queue.empty():
+            ev = event_queue.get_nowait()
+            yield (ev.get("type", "tool_event"), ev)
+
+        agentic = agentic_task.result()
+    except Exception:
+        logger.exception("agentic stream failed")
+        yield ("error", {"code": "agentic_failed", "message": "Tool loop error"})
+        return
+
+    text = (agentic or {}).get("text", "")
+    if not text:
+        # Nothing to say — yield an empty marker and let the caller
+        # fall back to the regular streaming path on the next branch.
+        return
+
+    sanitized = _output_guard.sanitize(_output_guard.redact_pii(text))
+    if sanitized:
+        yield ("token", sanitized)
+        yield ("_full_reply", sanitized)
+
+
+def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) -> dict[str, Any]:
+    """Build the ``metadata`` event payload from a retrieval result."""
+    payload: dict[str, Any] = {
+        "sources": result.get("sources", []),
+        "citations": result.get("citations", []),
+        "retrieval_mode": result.get("retrieval_mode"),
+        "model": result.get("model"),
+        "conversation_id": result.get("conversation_id"),
+        "locale": result.get("locale"),
+        "agent_role": result.get("agent_role", "rag_answerer"),
+        "response_judge": result.get("response_judge"),
+        "next_actions": result.get("next_actions", []),
+        "ticket_id": result.get("ticket_id", ""),
+    }
+    if include_short_circuit:
+        payload.update(
+            {
+                "faithfulness_score": result.get("faithfulness_score"),
+                "escalation_required": result.get("escalation_required", False),
+                "escalation_reason": result.get("escalation_reason", ""),
+                "workflow": result.get("workflow"),
+                "handoff": result.get("handoff"),
+            }
+        )
+    return payload
+
+
+def _closing_courtesy_reply(message: str) -> str:
+    """Reply for a gratitude/farewell turn, or "" when *message* is neither.
+
+    Exact-phrase matching (max four words) on purpose: mixed messages like
+    "thanks, but it still fails" must fall through to distress detection
+    and retrieval rather than end the conversation on a sign-off.
+    """
+    text = message.strip().lower().strip("!.?, ")
+    if len(text.split()) > 4:
+        return ""
+    if text in _GRATITUDE_PHRASES:
+        return GRATITUDE_REPLY
+    if text in _FAREWELL_PHRASES:
+        return FAREWELL_REPLY
+    return ""
 
 
 def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dict[str, str]]:
@@ -304,37 +1496,307 @@ _STOP_WORDS = frozenset(
     "where why all each every any some".split()
 )
 
+# Keyword retrieval is deliberately conservative.  A FAQ answer can contain
+# common words such as "tax", "return", or "registration" while answering a
+# completely different question.  Those accidental matches used to be passed
+# to the LLM as authoritative context, which made an unrelated question look
+# grounded because the generated answer matched the wrong passage.
+_FAQ_QUERY_STOP_WORDS = _STOP_WORDS | frozenset(
+    {
+        "about",
+        "could",
+        "current",
+        "details",
+        "information",
+        "know",
+        "like",
+        "please",
+        "tell",
+        "want",
+    }
+)
+_FAQ_TERM_ALIASES = {
+    "applications": "application",
+    "deadlines": "deadline",
+    "documents": "document",
+    "filing": "file",
+    "filings": "file",
+    "imports": "import",
+    "penalties": "penalty",
+    "payments": "payment",
+    "rates": "rate",
+    "returns": "return",
+    "taxes": "tax",
+    "thresholds": "threshold",
+    "vehicles": "vehicle",
+}
+_FAQ_MATCH_MIN = float(os.getenv("FAQ_MATCH_MIN", "0.58"))
+_FAQ_MATCH_RELATIVE = float(os.getenv("FAQ_MATCH_RELATIVE", "0.82"))
+
+
+def _faq_terms(text: str) -> set[str]:
+    """Return normalized, query-bearing terms for FAQ binding.
+
+    This is intentionally smaller and stricter than BM25's vocabulary.  BM25
+    remains responsible for ranking, while these terms answer a separate
+    question: does this FAQ actually contain the subject and intent the user
+    asked about?
+    """
+    terms: set[str] = set()
+    for raw in re.findall(r"[a-z0-9]+", (text or "").lower()):
+        if raw in _FAQ_QUERY_STOP_WORDS:
+            continue
+        terms.add(_FAQ_TERM_ALIASES.get(raw, raw))
+    return terms
+
+
+def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
+    """Score whether an FAQ row is bound to *query*, independently of BM25.
+
+    The score combines coverage in the full Q&A with coverage in the FAQ's
+    question.  Requiring both prevents a generic answer paragraph from making
+    an unrelated row look relevant.  Deadline questions also need temporal
+    evidence; otherwise a topic-only hit such as "capital gains" can be
+    mistaken for a filing deadline answer.
+    """
+    query_terms = _faq_terms(query)
+    if not query_terms:
+        return 0.0
+
+    question_terms = _faq_terms(str(entry.get("question", "")))
+    answer_terms = _faq_terms(str(entry.get("answer", "")))
+    body_terms = question_terms | answer_terms
+
+    # Timing is an intent, not merely a topic.  Do not answer a deadline/due
+    # date question from a passage that never states a timing rule.
+    timing_terms = {"deadline", "due", "date", "period"}
+    timing_evidence = {"deadline", "due", "date", "period", "monthly", "annual"}
+    if query_terms & timing_terms and not (timing_evidence & body_terms):
+        return 0.0
+
+    body_coverage = len(query_terms & body_terms) / len(query_terms)
+    question_coverage = len(query_terms & question_terms) / len(query_terms)
+    score = (0.55 * body_coverage) + (0.45 * question_coverage)
+    return round(score, 4)
+
+
+def _retain_faq_candidates(
+    query: str,
+    scored: list[tuple[float, dict[str, str], float]],
+    top_k: int,
+) -> list[dict[str, str]]:
+    """Keep only FAQ rows with enough query coverage.
+
+    The relative cutoff is important for near-duplicate FAQs: for example,
+    "VAT registration threshold" should keep the compulsory-registration FAQ,
+    not a nearby late-registration-penalty FAQ just because both contain VAT
+    and registration.
+    """
+    if not scored:
+        return []
+    best_match = max(match for _rank, _entry, match in scored)
+    cutoff = max(_FAQ_MATCH_MIN, best_match * _FAQ_MATCH_RELATIVE)
+    retained: list[dict[str, str]] = []
+    for rank, entry, match in sorted(
+        scored,
+        key=lambda item: (item[2], item[0]),
+        reverse=True,
+    ):
+        if match < cutoff:
+            continue
+        out = dict(entry)
+        # BM25 caches per-row statistics on the in-memory source entry; do not
+        # leak those implementation details into retrieval metadata.
+        out.pop("_bm25_tf", None)
+        out.pop("_bm25_dl", None)
+        # Preserve the historical field used to carry BM25/overlap strength
+        # into the retrieval-hit shape.
+        out["_overlap"] = rank
+        out["_faq_match_score"] = match
+        retained.append(out)
+        if len(retained) >= top_k:
+            break
+    return retained
+
+# --- BM25 keyword scoring ----------------------------------------------------
+# Lazy module-level encoder loaded from Model/bm25_state.json (vocab + IDF +
+# avg_dl + k1/b).  Used by _simple_search to score the keyword fallback
+# properly — rare URA-domain terms (vat, paye, presumptive, …) get high
+# weight, common words get near-zero weight.  Without the state file we
+# transparently fall back to plain content-word overlap counting.
+_BM25_ENCODER: Any = None
+_BM25_LOAD_ATTEMPTED = False
+
+
+def _get_bm25_encoder() -> Any:
+    global _BM25_ENCODER, _BM25_LOAD_ATTEMPTED
+    if _BM25_ENCODER is not None:
+        return _BM25_ENCODER
+    if _BM25_LOAD_ATTEMPTED:
+        return None
+    _BM25_LOAD_ATTEMPTED = True
+    try:
+        from .retriever import BM25SparseEncoder, BM25_STATE_PATH
+        if not BM25_STATE_PATH.exists():
+            logger.info("BM25 state %s not found; _simple_search will use overlap counting", BM25_STATE_PATH)
+            return None
+        with open(BM25_STATE_PATH) as f:
+            state = json.load(f)
+        _BM25_ENCODER = BM25SparseEncoder.from_dict(state)
+        logger.info("BM25 keyword scoring active (vocab=%d, avg_dl=%.1f)",
+                    len(_BM25_ENCODER._vocab), _BM25_ENCODER._avg_dl)
+        return _BM25_ENCODER
+    except Exception:
+        logger.warning("Failed to load BM25 encoder; falling back to overlap counting", exc_info=True)
+        return None
+
+
+def _faq_bm25_score(query_tokens: list[str], entry: dict, encoder: Any) -> float:
+    """BM25 score of an FAQ entry against pre-tokenized query tokens.
+
+    Caches per-entry document statistics (TF + length) directly on the
+    entry dict so subsequent calls are cheap — entries are loaded once
+    at ChatModel init and reused for every request.
+    """
+    if "_bm25_tf" not in entry:
+        doc_tokens = encoder._tokenize(f"{entry['question']} {entry['answer']}")
+        entry["_bm25_tf"] = dict(Counter(doc_tokens))
+        entry["_bm25_dl"] = len(doc_tokens)
+    tf, dl = entry["_bm25_tf"], entry["_bm25_dl"]
+    k1, b = encoder._k1, encoder._b
+    avg_dl = max(encoder._avg_dl, 1.0)
+    norm = 1 - b + b * dl / avg_dl
+    score = 0.0
+    seen: set[str] = set()
+    for q_term in query_tokens:
+        if q_term in seen:
+            continue
+        seen.add(q_term)
+        tid = encoder._vocab.get(q_term)
+        if tid is None:
+            continue
+        idf = encoder._idf.get(tid, 0.0)
+        if idf <= 0.0:
+            continue
+        f_t = tf.get(q_term, 0)
+        if f_t == 0:
+            continue
+        score += idf * f_t * (k1 + 1) / (f_t + k1 * norm)
+    return score
+
 
 def _simple_search(
     query: str,
     faq_index: dict[str, list[dict[str, str]]],
     top_k: int = 4,
+    *,
+    binding_query: str | None = None,
 ) -> list[dict[str, str]]:
-    """Keyword-based retrieval fallback: score each FAQ by content-word overlap.
+    """Keyword retrieval over the in-memory FAQ index.
 
-    Stop words are excluded so that domain terms (TIN, VAT, register, etc.)
-    dominate the scoring.  Each returned dict includes a ``_overlap`` key.
+    Prefers proper BM25 scoring (using the committed Model/bm25_state.json
+    vocab+IDF+avg_dl) so rare domain terms like vat, paye, presumptive
+    dominate ranking; falls back to plain content-word overlap counting
+    when the BM25 state isn't present.  Each returned dict includes an
+    ``_overlap`` key carrying the score (BM25 or overlap, depending on
+    which path was taken) — kept under the same name to preserve the
+    score_rrf wiring in _faq_hits_to_retrieval_hits.
     """
-    query_tokens = set(query.lower().split()) - _STOP_WORDS
-    if not query_tokens:
-        query_tokens = set(query.lower().split())  # fallback: keep all
-    scored: list[tuple[float, dict[str, str]]] = []
+    # Query rewriting expands abbreviations (for example VAT → "Value Added
+    # Tax") and resolves conversational references.  Ranking can use the
+    # rewritten form, but answer authorization must remain bound to the words
+    # the user actually supplied; otherwise the expansion adds unmatched terms
+    # and either rejects a valid FAQ or distorts the match score.
+    match_query = binding_query or query
+    encoder = _get_bm25_encoder()
 
+    if encoder is not None:
+        query_tokens = encoder._tokenize(query)
+        if not query_tokens:
+            return []
+        scored: list[tuple[float, dict[str, str], float]] = []
+        for entries in faq_index.values():
+            for entry in entries:
+                s = _faq_bm25_score(query_tokens, entry, encoder)
+                if s > 0:
+                    match = _faq_match_score(match_query, entry)
+                    if match > 0:
+                        scored.append((s, entry, match))
+        return _retain_faq_candidates(match_query, scored, top_k)
+
+    # Fallback: plain content-word overlap (pre-BM25 behaviour).
+    query_tokens_set = _faq_terms(match_query)
+    if not query_tokens_set:
+        return []
+    scored_fallback: list[tuple[float, dict[str, str], float]] = []
     for entries in faq_index.values():
         for entry in entries:
-            q_tokens = set(entry["question"].lower().split()) - _STOP_WORDS
-            a_tokens = set(entry["answer"].lower().split()) - _STOP_WORDS
-            overlap = len(query_tokens & (q_tokens | a_tokens))
+            q_tokens = _faq_terms(entry["question"])
+            a_tokens = _faq_terms(entry["answer"])
+            overlap = len(query_tokens_set & (q_tokens | a_tokens))
             if overlap > 0:
-                scored.append((overlap, entry))
+                match = _faq_match_score(match_query, entry)
+                if match > 0:
+                    scored_fallback.append((float(overlap), entry, match))
+    return _retain_faq_candidates(match_query, scored_fallback, top_k)
 
-    scored.sort(key=lambda x: x[0], reverse=True)
-    results = []
-    for overlap, item in scored[:top_k]:
-        out = dict(item)
-        out["_overlap"] = overlap
-        results.append(out)
-    return results
+
+def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Convert FAQ index rows into the retrieval-hit shape used downstream."""
+    hits: list[dict[str, Any]] = []
+    for entry in entries:
+        tag = str(entry.get("tag") or "")
+        hits.append(
+            {
+                "text": f"Question: {entry['question']}\nAnswer: {entry['answer']}",
+                "answer": entry["answer"],
+                "question": entry["question"],
+                "source": entry["source"],
+                "chunk_id": "",
+                "page": "",
+                "section": tag,
+                "doc_type": "csv",
+                "score_rrf": float(entry.get("_overlap", 0.0) or 0.0),
+                "faq_match_score": float(entry.get("_faq_match_score", 0.0) or 0.0),
+            }
+        )
+    return hits
+
+
+def _filter_unbound_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove canonical FAQ passages that do not answer the requested intent.
+
+    Keyword hits already carry ``faq_match_score``.  This second pass also
+    protects hybrid/indexed FAQ rows, whose stored metadata may not have been
+    produced by the in-memory loader.  Non-FAQ PDF and attachment passages are
+    left untouched and continue through the normal semantic/grounding gates.
+    """
+    faq_rows = [
+        h
+        for h in hits
+        if str(h.get("doc_type", "")).lower() == "csv"
+        and str(h.get("source", "")).lower().startswith("ura_")
+        and str(h.get("source", "")).lower().endswith("_faqs.csv")
+    ]
+    if not faq_rows:
+        return hits
+
+    scores: dict[int, float] = {}
+    for idx, hit in enumerate(hits):
+        if hit not in faq_rows:
+            continue
+        score = float(hit.get("faq_match_score") or _faq_match_score(query, hit))
+        scores[idx] = score
+
+    best = max(scores.values(), default=0.0)
+    cutoff = max(_FAQ_MATCH_MIN, best * _FAQ_MATCH_RELATIVE)
+    filtered: list[dict[str, Any]] = []
+    for idx, hit in enumerate(hits):
+        if idx not in scores or scores[idx] >= cutoff:
+            if idx in scores:
+                hit["faq_match_score"] = scores[idx]
+            filtered.append(hit)
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -535,40 +1997,288 @@ class ChatModel:
                 session.slots[slot_name] = value
 
     @staticmethod
+    def _content_tokens(text: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9]+", text.lower())) - _STOP_WORDS
+
+    @staticmethod
     def _extract_grounded_answer_text(hit: dict[str, Any]) -> str:
         answer = str(hit.get("answer", "") or "").strip()
         if answer:
-            return " ".join(answer.split())
+            return _clean_passage_text(answer)
         text = str(hit.get("text", "") or "").strip()
         if text.lower().startswith("question:") and "\nanswer:" in text.lower():
             parts = re.split(r"\nanswer:\s*", text, maxsplit=1, flags=re.IGNORECASE)
             text = parts[1] if len(parts) == 2 else text
-        return " ".join(text.split())
+        return _clean_passage_text(text)
+
+    @staticmethod
+    def _format_procedure_steps(text: str, lead: str) -> str:
+        """Render a run-on procedural answer as a numbered Markdown list.
+
+        FAQ procedures separate major steps with ``;`` and use ``→`` for
+        navigation *within* a step (kept inline). Returns ``lead`` followed by a
+        numbered list when ≥2 steps are found, otherwise a single paragraph
+        ``"{lead} {text}"`` so non-procedural text is left untouched.
+        """
+        clean = " ".join((text or "").split())
+        parts = [p.strip(" .;") for p in clean.split(";")]
+        parts = [p for p in parts if p]
+        if len(parts) < 2:
+            return f"{lead} {clean}".strip()
+        steps = "\n".join(f"{i}. {p[:1].upper() + p[1:]}" for i, p in enumerate(parts, 1))
+        return f"{lead}\n\n{steps}"
 
     @classmethod
     def _build_grounded_revision(
         cls,
         hits: list[dict[str, Any]],
         citations: list[dict[str, Any]],
+        query: str = "",
     ) -> str:
         excerpts: list[str] = []
-        for idx, hit in enumerate(hits[:2]):
-            text = cls._extract_grounded_answer_text(hit)
-            if not text:
+        query_tokens = cls._content_tokens(query)
+
+        def rank(item: tuple[int, dict[str, Any]]) -> tuple[float, int]:
+            idx, hit = item
+            body = f"{hit.get('question') or ''} {hit.get('answer') or hit.get('text') or ''}"
+            tokens = cls._content_tokens(body)
+            overlap = len(query_tokens & tokens) if query_tokens else 0
+            priority = 0
+            if "tin" in query.lower() and "instant tin" in body.lower():
+                priority += 8
+            if "return" in query.lower() and "file a return" in body.lower():
+                priority += 8
+            if str(hit.get("source", "")).lower() in {
+                "ura_objection_appeals_faqs.csv",
+                "ura_double_taxation_agreements_faqs.csv",
+            }:
+                priority -= 8
+            return (overlap + priority + float(hit.get("score_rrf") or 0.0) / 100.0, -idx)
+
+        ranked_hits = [hit for _, hit in sorted(enumerate(hits), key=rank, reverse=True)]
+        for hit in ranked_hits[:2]:
+            text = cls._extract_grounded_answer_text(hit)  # PDF-artifact-cleaned
+            if len(text) < 40:  # skip empty / artifact-only chunks
                 continue
-            trimmed = text[:360].rsplit(" ", 1)[0] if len(text) > 360 else text
-            ref = ""
-            if idx < len(citations):
-                ref = str(citations[idx].get("ref", "")).strip()
-            if ref:
-                excerpts.append(f"{trimmed} {ref}".strip())
-            else:
-                excerpts.append(trimmed)
+            excerpt = _structure_excerpt(_trim_excerpt(text, 700))
+            # Trimming can leave a PDF footnote number dangling at the new
+            # end of the excerpt ("...remit to URA. 1") — strip it. Numbers
+            # BEFORE the final punctuation (amounts, hotlines) are untouched.
+            excerpt = re.sub(r"(?<=[.!?)])\s+\d{1,3}\s*$", "", excerpt).rstrip()
+            # References intentionally stay OUT of the prose — they reach the
+            # UI via the result's citations/sources (grounded-context panel),
+            # matching the deterministic-reply convention.
+            excerpts.append(excerpt)
         if not excerpts:
             return ""
-        if len(excerpts) == 1:
-            return f"Based on the URA guidance I retrieved, {excerpts[0]}".strip()
-        return "Based on the URA guidance I retrieved:\n\n- " + "\n- ".join(excerpts)
+        body = "\n\n".join(excerpts)
+        return f"{GROUNDED_REVISION_PREAMBLE}\n\n{body}"
+
+    def _finalize_reply(self, reply: str) -> str:
+        """Apply response-side safety cleanup to generated, revised, and cached text."""
+        cleaned = self._output_guard.redact_pii(str(reply or ""))
+        cleaned = self._output_guard.sanitize(cleaned)
+        leakage = self._output_guard.check_prompt_leakage(cleaned)
+        return leakage.sanitized_text
+
+    def _finalize_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Return a shallow copy with a production-safe user-facing reply."""
+        out = dict(result)
+        out["reply"] = self._finalize_reply(str(out.get("reply", "")))
+        return out
+
+    def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:
+        """Inject high-precision FAQ hits for common procedures that reranking can miss."""
+        if not _TIN_REGISTRATION_QUERY_RE.search(query):
+            if not _RETURN_FILING_QUERY_RE.search(query):
+                return []
+            candidates: list[dict[str, str]] = []
+            for tag in ("processes_systems", "taxpayer_starter_pack", "taxation_handbook_fy2025_26"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "return" in text and any(
+                        term in text for term in ("file a return", "return filing", "due")
+                    ):
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+
+            candidates.sort(
+                key=lambda e: (
+                    "how do i file a return" in e["question"].lower(),
+                    "what is a return filing" in e["question"].lower(),
+                    len(e["answer"]),
+                ),
+                reverse=True,
+            )
+            return _faq_hits_to_retrieval_hits(candidates[:top_k])
+
+        candidates: list[dict[str, str]] = []
+        for tag in ("instant_tin_application", "processes_systems", "taxpayer_starter_pack"):
+            for entry in self._faq_index.get(tag, []):
+                text = f"{entry['question']} {entry['answer']}".lower()
+                if "tin" in text and any(
+                    term in text for term in ("register", "registration", "apply", "get a tin")
+                ):
+                    enriched = dict(entry)
+                    enriched["tag"] = tag
+                    enriched["_overlap"] = "99"
+                    candidates.append(enriched)
+
+        if not candidates:
+            return []
+
+        def score(entry: dict[str, str]) -> tuple[int, int]:
+            question = entry["question"].lower()
+            text = f"{entry['question']} {entry['answer']}".lower()
+            exact = int("how do i apply for an instant tin" in question)
+            procedure = int("go to ura.go.ug" in text and "get a tin" in text)
+            return (exact + procedure, len(text))
+
+        candidates.sort(key=score, reverse=True)
+        return _faq_hits_to_retrieval_hits(candidates[:top_k])
+
+    def _deterministic_procedure_reply(
+        self,
+        query: str,
+        hits: list[dict[str, Any]],
+        citations: list[dict[str, Any]],
+    ) -> tuple[str, bool]:
+        """Return (reply, curated) vetted procedural answers without LLM synthesis.
+
+        ``curated`` is True when the reply body is a fully hand-vetted template
+        (faithfulness 1.0 by construction); False when it is assembled from
+        retrieved hits and should be scored against them like any answer.
+
+        References are intentionally NOT embedded inline here — they reach the UI via the
+        result's ``citations`` / ``sources`` (the grounded-context panel), so the prose
+        stays clean, stepwise Markdown. ``citations`` is kept on the signature for callers.
+        """
+        if _TIN_REGISTRATION_QUERY_RE.search(query):
+            # Organisation asks are answered from the curated non-individual
+            # template regardless of hits (the instant-TIN FAQ hits are
+            # individual-specific).
+            if _TIN_ORG_QUERY_RE.search(query):
+                return self._tin_procedure_reply("organisation"), True
+
+            apply_hit = next(
+                (
+                    h
+                    for h in hits
+                    if h.get("source") == "ura_instant_tin_application_faqs.csv"
+                    and "apply for an instant tin" in str(h.get("question", "")).lower()
+                ),
+                None,
+            )
+            help_hit = next(
+                (
+                    h
+                    for h in hits
+                    if h.get("source") == "ura_instant_tin_application_faqs.csv"
+                    and "contact" in str(h.get("question", "")).lower()
+                ),
+                None,
+            )
+            if apply_hit:
+                contact = CONTACT_FOOTER
+                if help_hit:
+                    contact = self._extract_grounded_answer_text(help_hit)
+                reply = self._tin_procedure_reply("individual", contact)
+                if not _TIN_INDIVIDUAL_QUERY_RE.search(query):
+                    # Type unspecified and the clarification workflow didn't
+                    # intercept (workflows disabled) — point organisations to
+                    # their path instead of silently assuming individual.
+                    reply += (
+                        "\n\n_Registering an **organisation** instead? Ask me about "
+                        "non-individual TIN registration._"
+                    )
+                return reply, True
+
+        if _RETURN_FILING_QUERY_RE.search(query):
+            file_hit = next(
+                (
+                    h
+                    for h in hits
+                    if h.get("source") == "ura_processes_systems_faqs.csv"
+                    and "how do i file a return" in str(h.get("question", "")).lower()
+                ),
+                None,
+            )
+            due_hit = next(
+                (
+                    h
+                    for h in hits
+                    if "return" in str(h.get("question", "")).lower()
+                    and "due" in str(h.get("question", "")).lower()
+                ),
+                None,
+            )
+            if file_hit:
+                lines = [
+                    self._format_procedure_steps(
+                        self._extract_grounded_answer_text(file_hit),
+                        "To file your annual tax return:",
+                    )
+                ]
+                if due_hit:
+                    lines.append(f"**Due date:** {self._extract_grounded_answer_text(due_hit)}")
+                lines.append(CONTACT_FOOTER)
+                return "\n\n".join(lines), False
+
+        return "", False
+
+    @staticmethod
+    def _tin_procedure_reply(kind: str, contact: str = "") -> str:
+        """Curated TIN registration steps for an individual or an organisation."""
+        steps = _TIN_ORG_STEPS if kind == "organisation" else _TIN_INDIVIDUAL_STEPS
+        return f"{steps}\n\n{contact or CONTACT_FOOTER}"
+
+    def _deterministic_result(
+        self,
+        *,
+        reply: str,
+        curated: bool,
+        hits: list[dict[str, Any]],
+        sources: list[str],
+        citations: list[dict[str, Any]],
+        retrieval_mode: str,
+        thread_id: str,
+        locale: str,
+        agent_role: str,
+    ) -> dict[str, Any]:
+        """Result envelope for a deterministic procedural reply (KB-grounded).
+
+        Curated templates are faithful by construction and score 1.0;
+        replies assembled from retrieved hits are scored against those hits
+        like any other answer. Shared by the REST and streaming paths so
+        the same question earns the same score on both.
+        """
+        contexts = [str(h.get("text") or h.get("answer") or "") for h in hits]
+        faith = 1.0 if curated else HybridRetriever.compute_faithfulness(reply, contexts)
+        return {
+            "reply": reply,
+            "sources": sources,
+            "citations": citations,
+            "faithfulness_score": faith,
+            "retrieval_mode": retrieval_mode,
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": agent_role,
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["curated deterministic template"] if curated else [],
+                "confidence_band": "high" if faith >= 0.65 else "medium",
+            },
+            "next_actions": self._default_next_actions(agent_role=agent_role),
+            "ticket_id": "",
+        }
 
     def _evaluate_response_judge(
         self,
@@ -600,7 +2310,10 @@ class ChatModel:
 
         if decision != "escalate" and hits and citations and not self._has_inline_citations(reply):
             reasons.append("reply did not expose visible citation markers")
-            decision = "revise"
+            # Only revise if faithfulness is also below threshold — a well-grounded
+            # answer without explicit [N] markers is acceptable.
+            if faithfulness_score is not None and faithfulness_score < 0.5:
+                decision = "revise"
 
         if faithfulness_score is not None:
             if faithfulness_score < 0.2:
@@ -624,7 +2337,7 @@ class ChatModel:
 
         revised_reply = ""
         if decision == "revise":
-            revised_reply = self._build_grounded_revision(hits, citations)
+            revised_reply = self._build_grounded_revision(hits, citations, message)
             if not revised_reply:
                 decision = "escalate"
                 reasons.append("no deterministic grounded fallback was available")
@@ -865,6 +2578,270 @@ class ChatModel:
             turn = WorkflowRegistry.advance(session, "")
         return turn, tool_messages
 
+    def _maybe_handle_fast_paths(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Deterministic fast paths, in precedence order (both chat paths):
+
+        1. TIN-registration asks with an unspecified taxpayer type start a
+           one-question clarification (individual vs organisation);
+        2. calculations with figures compute instantly, without figures they
+           elicit the missing details;
+        3. rate questions answer from the versioned FY rate table.
+        """
+        return (
+            self._maybe_handle_tin_clarification(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+            or self._maybe_handle_calculator(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+            or self._maybe_handle_rate_lookup(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+        )
+
+    def _maybe_handle_rate_lookup(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Answer "what is the current VAT rate?"-style questions exactly.
+
+        Uses the same versioned FY rate table the calculators use, so the
+        reply is a real figure instead of retrieval passages that happen to
+        mention the tax. Falls back to RAG when the authority manifest is
+        stale or the question names no known rate.
+        """
+        rate_plan = plan_rate_lookup(message) or plan_rate_lookup(rewritten)
+        if rate_plan is None:
+            return None
+        try:
+            from .tools.calculators import _get_rates  # noqa: PLC0415
+            from .tools.rates import _authority_payload  # noqa: PLC0415
+
+            authority_ok, _status = _authority_payload()
+            if not authority_ok:
+                logger.info("rate fast path skipped: authority manifest not fresh")
+                return None
+            reply_text, next_actions = format_rate_reply(rate_plan, _get_rates())
+        except Exception:
+            logger.exception("rate lookup fast path failed")
+            return None
+        if not reply_text:
+            return None
+        return {
+            "reply": self._finalize_reply(reply_text),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "calculator",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "tool_specialist",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["official rate table"],
+                "confidence_band": "high",
+            },
+            "next_actions": next_actions,
+            "ticket_id": "",
+        }
+
+    def _maybe_handle_tin_clarification(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Ask individual-vs-organisation before giving TIN registration steps.
+
+        Fires only when the ask names neither type; typed asks are answered
+        immediately by the deterministic template, and completion of this
+        one-question flow is special-cased in ``_maybe_handle_workflow``.
+        """
+        combined = f"{message or ''} {rewritten or ''}"
+        if not _TIN_REGISTRATION_QUERY_RE.search(combined):
+            return None
+        if _TIN_ORG_QUERY_RE.search(combined) or _TIN_INDIVIDUAL_QUERY_RE.search(combined):
+            return None
+        if not flags.is_enabled("workflows") or self._workflow_count <= 0:
+            return None
+        wf = WorkflowRegistry.get("tin_procedure_help")
+        if wf is None:
+            return None
+        session = WorkflowRegistry.create_session(wf.id)
+        if session is None:
+            return None
+        turn, _tool_messages = self._advance_workflow(session, "")
+        prompt = turn.question or ""
+        db.upsert_workflow_session(
+            thread_id,
+            session.workflow_id,
+            session.current_step_idx,
+            session.slots,
+            status="active",
+            last_prompt=prompt,
+        )
+        workflow = self._workflow_view(
+            session,
+            name=wf.name,
+            status="active",
+            pending_slot=turn.slot_name,
+        )
+        return {
+            "reply": f"Happy to help you get registered!\n\n{prompt}",
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "workflow",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "workflow_guide",
+            "workflow": workflow,
+            "next_actions": self._default_next_actions(
+                agent_role="workflow_guide",
+                workflow=workflow,
+            ),
+        }
+
+    def _maybe_handle_calculator(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Deterministic tax-calculator fast path (REST and streaming parity).
+
+        A calculation ask whose message already carries every figure is
+        answered instantly from the registered calculator tool — exact
+        arithmetic, no LLM. When something is missing, the matching guided
+        calculator workflow starts pre-filled with everything the message
+        did contain, so the user is asked only for what's absent.
+        """
+        plan = plan_calculation(message) or plan_calculation(rewritten)
+        if plan is None:
+            return None
+
+        if not plan.missing:
+            try:
+                from .mcp import get_client  # noqa: PLC0415
+
+                call = get_client().call_tool(plan.tool, dict(plan.params), user_role="public")
+                result = call.result
+            except Exception:
+                logger.exception("calculator tool execution failed")
+                return None
+            if not result.get("ok"):
+                logger.info("calculator rejected extracted args: %s", result.get("error", ""))
+                return None
+            reply = self._finalize_reply(
+                format_calc_reply(plan.tool, result, plan.assumptions)
+            )
+            return {
+                "reply": reply,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "calculator",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "tool_specialist",
+                "handoff": None,
+                "response_judge": {
+                    "decision": "approve",
+                    "final_decision": "approve",
+                    "applied_revision": False,
+                    "reasons": ["deterministic tax calculator"],
+                    "confidence_band": "high",
+                },
+                "next_actions": NEXT_ACTIONS_BY_TOOL.get(plan.tool, []),
+                "ticket_id": "",
+            }
+
+        # Missing details → guided elicitation via the matching workflow,
+        # sharing the durable-session machinery (and flag gate) of
+        # _maybe_handle_workflow so mid-flow answers keep working.
+        if not flags.is_enabled("workflows") or self._workflow_count <= 0:
+            return None
+        wf = WorkflowRegistry.get(plan.workflow_id)
+        if wf is None:
+            return None
+        session = WorkflowRegistry.create_session(plan.workflow_id)
+        if session is None:
+            return None
+        session.slots.update(plan.params)
+
+        turn, tool_messages = self._advance_workflow(session, "")
+        prompt = turn.question or ""
+        if tool_messages:
+            prompt = "\n\n".join(tool_messages + [prompt]).strip()
+        status = "completed" if (session.completed or turn.is_complete) else "active"
+        db.upsert_workflow_session(
+            thread_id,
+            session.workflow_id,
+            session.current_step_idx,
+            session.slots,
+            status=status,
+            last_prompt=prompt,
+        )
+        workflow = self._workflow_view(
+            session,
+            name=wf.name,
+            status=status,
+            pending_slot=turn.slot_name,
+        )
+        intro = "I can work that out for you — I just need a detail or two."
+        if plan.assumptions:
+            intro += (
+                "\n\n_I'll assume: "
+                + "; ".join(plan.assumptions)
+                + " — correct me if that's wrong._"
+            )
+        reply = f"{intro}\n\n{prompt}" if prompt else intro
+        return {
+            "reply": reply,
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "workflow",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "workflow_guide",
+            "workflow": workflow,
+            "next_actions": self._default_next_actions(
+                agent_role="workflow_guide",
+                workflow=workflow,
+            ),
+        }
+
     def _maybe_handle_workflow(
         self,
         *,
@@ -914,6 +2891,41 @@ class ChatModel:
                 }
 
             turn, tool_messages = self._advance_workflow(session, user_input)
+
+            # The TIN clarification flow ends in a curated deterministic
+            # answer keyed on the collected taxpayer kind — not a generic
+            # workflow completion prompt.
+            if wf.id == "tin_procedure_help" and (session.completed or turn.is_complete):
+                db.complete_workflow_session(thread_id, status="completed")
+                kind = str(session.slots.get("taxpayer_kind", "individual"))
+                workflow = self._workflow_view(session, name=wf.name, status="completed")
+                return {
+                    "reply": self._finalize_reply(self._tin_procedure_reply(kind)),
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": 1.0,
+                    "retrieval_mode": "workflow",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "workflow_guide",
+                    "handoff": None,
+                    "response_judge": {
+                        "decision": "approve",
+                        "final_decision": "approve",
+                        "applied_revision": False,
+                        "reasons": ["curated deterministic template"],
+                        "confidence_band": "high",
+                    },
+                    "workflow": workflow,
+                    "next_actions": self._default_next_actions(
+                        agent_role="workflow_guide",
+                        workflow=workflow,
+                    ),
+                }
+
             status = "completed" if (session.completed or turn.is_complete) else "active"
             prompt = turn.question or persisted.get("last_prompt", "") or f"Let's continue the {wf.name} workflow."
             if tool_messages:
@@ -963,6 +2975,12 @@ class ChatModel:
 
         matched = WorkflowRegistry.match_trigger(message) or WorkflowRegistry.match_trigger(rewritten)
         if matched is None:
+            return None
+        combined_query = f"{message or ''} {rewritten or ''}".strip()
+        if (
+            _INFORMATIONAL_WORKFLOW_QUERY_RE.search(combined_query)
+            and not _EXPLICIT_WORKFLOW_START_RE.search(combined_query)
+        ):
             return None
 
         session = WorkflowRegistry.create_session(matched.id)
@@ -1026,8 +3044,14 @@ class ChatModel:
         tenant_id: str | None = None,
         user_role: str = "public",
         granted_purposes: list[str] | None = None,
+        attachments: list[documents_module.DocumentRecord] | None = None,
     ) -> dict[str, Any]:
-        """Return a grounded, cited answer via hybrid retrieval + guardrails."""
+        """Return a grounded, cited answer via hybrid retrieval + guardrails.
+
+        ``attachments`` are pre-analysed documents (``documents.DocumentRecord``)
+        resolved by the endpoint from ``ChatRequest.attachment_ids``; their
+        extracted content is injected as top-priority grounding passages.
+        """
         t0 = time.perf_counter()
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
@@ -1065,7 +3089,15 @@ class ChatModel:
                         logger.info("Auto-detected locale: %s", locale)
 
             personalization = self._load_personalization_state(user_id)
-            cache_allowed = personalization is None
+            # Attachment turns are never cache-served or cache-stored: the answer
+            # is specific to the attached document, not the query text alone.
+            cache_allowed = personalization is None and not attachments
+
+            # Emotional-intelligence signal for this turn: adapts the LLM
+            # opening line (tone_hint) and prefixes deterministic replies
+            # with a short empathy acknowledgment. Never cached.
+            distress = detect_user_distress(message)
+            tone_hint = tone_hint_for(distress)
 
             # 1. Input guardrails FIRST (OWASP LLM01) — check original message
             with trace_stage("input_guard", timings=timings):
@@ -1083,7 +3115,7 @@ class ChatModel:
                     "escalation_required": False,
                     "escalation_reason": "",
                     "agent_role": "safety_guard",
-                    "next_actions": ["Rephrase your request as a legitimate URA support question."],
+                    "next_actions": ["Rephrase your question about a URA service — I'm glad to help."],
                 }
                 self._audit_turn(
                     message=message, result=blocked, session_id=session_id, trace_ctx=trace_ctx
@@ -1100,6 +3132,10 @@ class ChatModel:
                         personalization=personalization,
                     )
                 if workflow_result:
+                    if distress and workflow_result.get("reply"):
+                        workflow_result["reply"] = (
+                            f"{empathy_ack(distress)}\n\n{workflow_result['reply']}"
+                        )
                     trace_ctx["agent_role"] = "workflow_guide"
                     self._audit_turn(
                         message=message,
@@ -1109,17 +3145,102 @@ class ChatModel:
                     )
                     return workflow_result
 
+            # 1a1b. Deterministic tax calculator — instant when the message
+            #       carries the figures, guided elicitation when it doesn't.
+            with trace_stage("calculator_router", timings=timings):
+                calc_result = self._maybe_handle_fast_paths(
+                    message=message,
+                    rewritten=rewritten,
+                    thread_id=thread_id,
+                    locale=locale,
+                )
+            if calc_result:
+                if distress and calc_result.get("reply"):
+                    calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
+                trace_ctx["agent_role"] = calc_result.get("agent_role", "tool_specialist")
+                self._audit_turn(
+                    message=message,
+                    result=calc_result,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return calc_result
+
+            # 1a2. Greeting detection — always active, independent of agentic_mode
+            _q_lower = message.strip().lower().strip("!.?,")
+            _q_words = message.strip().split()
+            if len(_q_words) <= 3 and (
+                _q_lower in _GREETING_WORDS
+                or _q_lower in _GREETING_PHRASES
+                or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in _q_words)
+            ):
+                greeted = {
+                    "reply": GREETING_REPLY,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "greeting",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "greeting_agent",
+                    "next_actions": [
+                        "Ask about TIN registration",
+                        "Learn about VAT",
+                        "File a tax return",
+                    ],
+                }
+                self._audit_turn(
+                    message=message,
+                    result=greeted,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return greeted
+
+            # 1a3. Gratitude / farewell — closing courtesy, same always-on
+            # short-circuit as greetings (no retrieval, never scored).
+            closing_reply = _closing_courtesy_reply(message)
+            if closing_reply:
+                closing = {
+                    "reply": closing_reply,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "greeting",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "greeting_agent",
+                    "next_actions": [
+                        "Ask about TIN registration",
+                        "Learn about VAT",
+                        "File a tax return",
+                    ],
+                }
+                self._audit_turn(
+                    message=message,
+                    result=closing,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return closing
+
             # 1b. Semantic cache check AFTER guardrails (Phase 5)
             if cache_allowed:
                 with trace_stage("cache_lookup", timings=timings):
                     cached = self._cache.get(rewritten, locale=locale)
                 if cached:
                     logger.info("generate: cache HIT for query=%s", message[:50])
-                    return {
+                    return self._finalize_result({
                         **cached,
                         "conversation_id": thread_id,
                         "locale": locale,
-                    }
+                    })
 
             # 1c. Phase 14-C — supervisor routing.  When FLAG_AGENTIC_MODE
             #     is on, the supervisor classifies the query and routes
@@ -1148,14 +3269,36 @@ class ChatModel:
                 )
 
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
+                if route_decision.route == AgentRoute.GREET:
+                    greeted = {
+                        "reply": GREETING_REPLY,
+                        "sources": [],
+                        "citations": [],
+                        "faithfulness_score": None,
+                        "retrieval_mode": "greeting",
+                        "model": self.name,
+                        "conversation_id": thread_id,
+                        "locale": locale,
+                        "escalation_required": False,
+                        "escalation_reason": "",
+                        "agent_role": "greeting_agent",
+                        "next_actions": [
+                            "Ask about TIN registration",
+                            "Learn about VAT",
+                            "File a tax return",
+                        ],
+                    }
+                    self._audit_turn(
+                        message=message,
+                        result=greeted,
+                        session_id=session_id,
+                        trace_ctx=trace_ctx,
+                    )
+                    return greeted
                 if route_decision.route == AgentRoute.CLARIFY:
                     clarified = {
                         "reply": route_decision.clarification_question
-                        or (
-                            "Could you provide a bit more detail about your "
-                            "question? I can help with VAT, PAYE, customs, "
-                            "registration, or specific tax types."
-                        ),
+                        or CLARIFICATION_PROMPT,
                         "sources": [],
                         "citations": [],
                         "faithfulness_score": None,
@@ -1194,10 +3337,7 @@ class ChatModel:
                             conversation_history=conversation_history or None,
                         )
 
-                    reply = (
-                        "This looks like a question best handled by a URA "
-                        "officer. I've flagged it for human review"
-                    )
+                    reply = ESCALATION_REPLY_LEAD
                     ticket_id = self._maybe_create_ticket(
                         reason=route_decision.reason,
                         user_query=message,
@@ -1212,10 +3352,7 @@ class ChatModel:
                         trace_ctx["ticket_id"] = ticket_id
                     if ticket_id:
                         reply += f" (ticket {ticket_id[:8]})"
-                    reply += (
-                        " — you can also contact URA directly at "
-                        "https://ura.go.ug or via the Contact Centre."
-                    )
+                    reply += ESCALATION_REPLY_FOOTER
                     escalated = {
                         "reply": reply,
                         "sources": [],
@@ -1282,24 +3419,20 @@ class ChatModel:
                 # Update readiness if retriever was disconnected during search
                 self._retriever_ready = self._retriever._ready
 
-            # 3. Fallback to keyword search if Qdrant returned nothing
+            # 3. Fallback to keyword search if Qdrant returned nothing.
+            # Use _faq_hits_to_retrieval_hits so the per-hit _overlap count
+            # carries into score_rrf (was hardcoded 0.0 here, which guaranteed
+            # OutputGuard.should_abstain rejected every keyword-only hit on
+            # the BM25-only Crane Cloud profile).
             if not hits:
                 with trace_stage("keyword_search_fallback", timings=timings):
-                    kw_hits = _simple_search(rewritten, self._faq_index, top_k=top_k)
-                    hits = [
-                        {
-                            "text": f"Question: {h['question']}\nAnswer: {h['answer']}",
-                            "answer": h["answer"],
-                            "question": h["question"],
-                            "source": h["source"],
-                            "chunk_id": "",
-                            "page": "",
-                            "section": h.get("tag", ""),
-                            "doc_type": "csv",
-                            "score_rrf": 0.0,
-                        }
-                        for h in kw_hits
-                    ]
+                    kw_hits = _simple_search(
+                        rewritten,
+                        self._faq_index,
+                        top_k=top_k,
+                        binding_query=message,
+                    )
+                    hits = _faq_hits_to_retrieval_hits(kw_hits)
 
             # 3b. Corrective RAG — re-retrieve if quality is low (Phase 6)
             if hits and self._retriever_ready:
@@ -1333,8 +3466,19 @@ class ChatModel:
             # 3c. Always blend top FAQ keyword hits AFTER corrective RAG
             #     so precise CSV FAQ steps are never filtered out by reranking.
             with trace_stage("faq_blend", timings=timings):
-                kw_hits = _simple_search(rewritten, self._faq_index, top_k=2)
+                kw_hits = _simple_search(
+                    rewritten,
+                    self._faq_index,
+                    top_k=2,
+                    binding_query=message,
+                )
+                priority_hits = self._priority_faq_hits(rewritten, top_k=2)
                 seen_texts = {h.get("text", "")[:80] for h in hits}
+                for h in priority_hits:
+                    if h.get("text", "")[:80] not in seen_texts:
+                        hits.insert(0, h)
+                        seen_texts.add(h.get("text", "")[:80])
+                        retrieval_mode = "faq_priority"
                 for h in kw_hits:
                     faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
                     if faq_text[:80] not in seen_texts:
@@ -1351,8 +3495,22 @@ class ChatModel:
                         })
                         seen_texts.add(faq_text[:80])
 
+            # Bind indexed FAQ passages to the user's original intent before
+            # they can be used as LLM context or as an extractive fallback.
+            hits = _filter_unbound_faq_hits(message, hits)
+
+            # 3d. Attached documents — prepend as top-priority grounding hits.
+            #     They flow through the same LLM01 scrub + spotlight markers
+            #     as retrieved passages (llm._build_messages) and count as
+            #     grounding for faithfulness scoring. The raw user message
+            #     stays subject to the normal input guardrails above.
+            if attachments:
+                hits = documents_module.attachment_passages(attachments) + hits
+
             # 3c. Clarification check — ask for more details if query is ambiguous
-            clarification = needs_clarification(message, hits)
+            #     (skipped for attachment turns: "what is this?" is answerable
+            #     from the attached document, not ambiguous)
+            clarification = None if attachments else needs_clarification(message, hits)
             if clarification:
                 clarify_result = {
                     "reply": clarification,
@@ -1378,15 +3536,62 @@ class ChatModel:
                 )
                 return clarify_result
 
+            deterministic_reply = ""
+            deterministic_curated = False
+            deterministic_sources: list[str] = []
+            deterministic_citations: list[dict[str, Any]] = []
+            # Attachment turns always go to the LLM — a canned procedure
+            # template cannot read the attached document.
+            if hits and not attachments:
+                deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
+                deterministic_citations = HybridRetriever.build_citations(hits)
+                deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
+                    rewritten, hits, deterministic_citations
+                )
+            if deterministic_reply:
+                reply = self._finalize_reply(deterministic_reply)
+                result = self._deterministic_result(
+                    reply=reply,
+                    curated=deterministic_curated,
+                    hits=hits,
+                    sources=deterministic_sources,
+                    citations=deterministic_citations,
+                    retrieval_mode=retrieval_mode,
+                    thread_id=thread_id,
+                    locale=locale,
+                    agent_role=agent_role,
+                )
+                if cache_allowed:
+                    # Cache the neutral copy — a calm user hitting this entry
+                    # later must not receive someone else's empathy opener.
+                    self._cache.put(rewritten, dict(result))
+                if distress:
+                    reply = f"{empathy_ack(distress)}\n\n{reply}"
+                    result["reply"] = reply
+                self._persist_personalization_turn(
+                    user_id=user_id,
+                    conversation_id=thread_id,
+                    message=message,
+                    reply=reply,
+                    agent_role=agent_role,
+                    personalization=personalization,
+                )
+                self._audit_turn(
+                    message=message,
+                    result=result,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return result
+
             # 4. Calibrated abstention — refuse to answer when confidence too low
             with trace_stage("abstention_check", timings=timings):
-                should_abstain = self._output_guard.should_abstain(hits)
+                # Attached documents are always usable grounding — never abstain.
+                should_abstain = not attachments and self._output_guard.should_abstain(hits)
             if should_abstain:
-                reply = (
-                    "I don't have enough information to answer this question reliably. "
-                    "Please contact URA directly at https://ura.go.ug or call "
-                    "the URA Contact Centre for assistance."
-                )
+                reply = ABSTENTION_REPLY
+                if distress:
+                    reply = f"{empathy_ack(distress)}\n\n{reply}"
                 escalate, esc_reason = self._output_guard.should_escalate(None, hits)
                 handoff = None
                 response_judge = {
@@ -1440,19 +3645,27 @@ class ChatModel:
                 return abstained
 
             # 5. Build response with citations
+            extractive_fallback = False
             if hits:
                 sources = list({h.get("source", "") for h in hits if h.get("source")})
                 citations = HybridRetriever.build_citations(hits)
                 contexts = [h.get("text") or h.get("answer", "") for h in hits]
 
-                # Phase 2: LLM synthesis from top-k passages (true RAG)
-                if self._llm_available:
+                # Phase 2: LLM synthesis from top-k passages (true RAG).
+                # The cloud fallback alone is enough to keep generation on
+                # when no local LLM is configured (_call_llm_with_deadline
+                # routes there via the breaker/empty-reply handling).
+                if self._llm_available or _cloud_llm_ready():
                     # Phase 14-B/C: agentic path is active when either
                     # FLAG_TOOL_USE is on (tool calling for everyone), or
                     # the supervisor routed this specific request to it
                     # (force_agentic).  The supervisor can also narrow
-                    # the tool whitelist (force_tool_whitelist).
-                    use_agentic = force_agentic or flags.is_enabled("tool_use")
+                    # the tool whitelist (force_tool_whitelist).  Tool
+                    # calling runs on the local model only, so the agentic
+                    # branch additionally requires local availability.
+                    use_agentic = (
+                        force_agentic or flags.is_enabled("tool_use")
+                    ) and self._llm_available
                     if use_agentic:
                         with trace_stage("llm_agentic", timings=timings):
                             agentic = _call_llm_agentic(
@@ -1464,6 +3677,7 @@ class ChatModel:
                                 personalization_context=(
                                     (personalization or {}).get("prompt_context", "")
                                 ),
+                                tone_hint=tone_hint,
                                 tenant_id=tenant_id or "default",
                                 user_id=user_id or "",
                                 user_role=user_role,
@@ -1475,6 +3689,24 @@ class ChatModel:
                                 tc.get("name") for tc in agentic["tool_calls"]
                             ]
                             trace_ctx["tool_iterations"] = agentic.get("iterations", 0)
+                        if not reply:
+                            # Agentic produced no text (breaker OPEN, deadline,
+                            # or empty completion).  Run the plain RAG chain —
+                            # _call_llm_with_deadline carries the cloud
+                            # fallback — before dropping to the extractive
+                            # best-hit answer, mirroring stream_chat_turn's
+                            # fall-through to stream_llm_tokens.
+                            with trace_stage("llm_generate", timings=timings):
+                                reply = _call_llm_with_deadline(
+                                    query=rewritten,
+                                    passages=hits,
+                                    conversation_history=conversation_history or None,
+                                    locale=locale,
+                                    personalization_context=(
+                                        (personalization or {}).get("prompt_context", "")
+                                    ),
+                                    tone_hint=tone_hint,
+                                )
                     else:
                         with trace_stage("llm_generate", timings=timings):
                             reply = _call_llm_with_deadline(
@@ -1485,6 +3717,7 @@ class ChatModel:
                                 personalization_context=(
                                     (personalization or {}).get("prompt_context", "")
                                 ),
+                                tone_hint=tone_hint,
                             )
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
@@ -1506,27 +3739,28 @@ class ChatModel:
                         # or the circuit breaker is open
                         best = hits[0]
                         reply = best.get("answer") or best.get("text", "")
+                        if citations and not re.search(r"\[\d{1,3}\]", reply):
+                            reply = f"{reply.rstrip()} [1]"
+                        extractive_fallback = True
                 else:
                     # FAQ lookup fallback (no LLM configured)
                     best = hits[0]
                     reply = best.get("answer") or best.get("text", "")
+                    if citations and not re.search(r"\[\d{1,3}\]", reply):
+                        reply = f"{reply.rstrip()} [1]"
+                    extractive_fallback = True
             else:
-                reply = (
-                    "I could not find a specific answer in the URA knowledge base. "
-                    "Please try rephrasing your question, or contact URA directly at "
-                    "https://ura.go.ug for assistance."
-                )
+                reply = NO_HITS_REPLY
+                if distress:
+                    reply = f"{empathy_ack(distress)}\n\n{reply}"
                 sources = []
                 citations = []
                 contexts = []
 
             # 6. Output guardrails (OWASP LLM02 + LLM05 + LLM07)
             with trace_stage("output_guard", timings=timings):
-                reply = self._output_guard.redact_pii(reply)
-                reply = self._output_guard.sanitize(reply)
-                # LLM07 — system prompt leakage
+                reply = self._finalize_reply(reply)
                 leakage = self._output_guard.check_prompt_leakage(reply)
-                reply = leakage.sanitized_text
                 if leakage.flags:
                     trace_ctx["prompt_leakage"] = True
 
@@ -1565,6 +3799,7 @@ class ChatModel:
                             personalization_context=(personalization or {}).get(
                                 "prompt_context", ""
                             ),
+                            tone_hint=tone_hint,
                         )
                     if revised:
                         reply = self._output_guard.sanitize(self._output_guard.redact_pii(revised))
@@ -1586,7 +3821,11 @@ class ChatModel:
             # 8. Escalation check
             escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
             claim_report = None
-            if hits and citations and reply:
+            # An extractive fallback is copied from the selected cited FAQ
+            # answer, so lexical claim verification would incorrectly label
+            # every sentence "uncited" even though it is not LLM-synthesized.
+            # It already carries [1] and is scored against the source passage.
+            if hits and citations and reply and not extractive_fallback:
                 with trace_stage("claim_verification", timings=timings):
                     claim_report = verify_claims(reply, citations, hits)
                     trace_ctx["claim_verification"] = {
@@ -1708,10 +3947,20 @@ class ChatModel:
             ),
             "ticket_id": ticket_id,
         }
+        result = self._finalize_result(result)
+        reply = result["reply"]
 
-        # Store in semantic cache (Phase 5)
+        # Store in semantic cache (Phase 5) — a copy, so the empathy prefix
+        # below never reaches a later (possibly calm) user via a cache hit.
         if cache_allowed and retrieval_mode not in ("blocked", "abstained"):
-            self._cache.put(rewritten, result)
+            self._cache.put(rewritten, dict(result))
+
+        # EI parity for the extractive fallback: with every LLM tier down the
+        # tone_hint never reached a model, so carry the acknowledgment here —
+        # after scoring and caching, same as the deterministic branch above.
+        if distress and extractive_fallback and reply:
+            reply = f"{empathy_ack(distress)}\n\n{reply}"
+            result["reply"] = reply
 
         self._persist_personalization_turn(
             user_id=user_id,
@@ -1802,28 +4051,38 @@ class ChatModel:
         request_id: str | None = None,
         user_id: str | None = None,
         tenant_id: str | None = None,
+        conversation_history_override: list[dict[str, str]] | None = None,
+        attachments: list[documents_module.DocumentRecord] | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
         Returns the same dict as ``generate()`` but with ``_hits`` and
         ``_history`` included so the streaming endpoint can pass them to
         the LLM stream.
+
+        Passing ``conversation_history_override`` (Phase 3 of the WS
+        upgrade) skips the SQLite history fetch — callers with their own
+        in-memory cache (e.g. a long-lived WebSocket session) avoid one
+        DB round trip per turn.
         """
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
 
-        # Multi-turn memory (Phase 4)
+        # Multi-turn memory (Phase 4 -> overridable in Phase 29)
         conversation_history: list[dict[str, str]] = []
-        history_session_id = None if conversation_id else session_id
-        if conversation_id or history_session_id:
-            try:
-                conversation_history = db.get_recent_turns(
-                    session_id=history_session_id,
-                    conversation_id=conversation_id,
-                    limit=5,
-                )
-            except Exception:
-                logger.debug("Failed to fetch conversation history", exc_info=True)
+        if conversation_history_override is not None:
+            conversation_history = list(conversation_history_override)
+        else:
+            history_session_id = None if conversation_id else session_id
+            if conversation_id or history_session_id:
+                try:
+                    conversation_history = db.get_recent_turns(
+                        session_id=history_session_id,
+                        conversation_id=conversation_id,
+                        limit=5,
+                    )
+                except Exception:
+                    logger.debug("Failed to fetch conversation history", exc_info=True)
 
         # Query rewriting (Phase 4)
         rewritten = rewrite_query(message, history=conversation_history or None)
@@ -1836,7 +4095,14 @@ class ChatModel:
                 logger.info("Auto-detected locale: %s (streaming)", locale)
 
         personalization = self._load_personalization_state(user_id)
-        cache_allowed = personalization is None
+        # Attachment turns are never cache-served or cache-stored: the answer
+        # is specific to the attached document, not the query text alone.
+        cache_allowed = personalization is None and not attachments
+
+        # Emotional-intelligence signal (parity with generate()): tone hint
+        # for the LLM stream, empathy prefix for deterministic short-circuits.
+        distress = detect_user_distress(message)
+        tone_hint = tone_hint_for(distress)
 
         # Input guardrails (OWASP LLM01)
         guard = self._input_guard.check(message)
@@ -1853,7 +4119,7 @@ class ChatModel:
                 "escalation_required": False,
                 "escalation_reason": "",
                 "agent_role": "safety_guard",
-                "next_actions": ["Rephrase your request as a legitimate URA support question."],
+                "next_actions": ["Rephrase your question about a URA service — I'm glad to help."],
                 "_hits": [],
                 "_history": [],
             }
@@ -1866,6 +4132,10 @@ class ChatModel:
             personalization=personalization,
         )
         if workflow_result:
+            if distress and workflow_result.get("reply"):
+                workflow_result["reply"] = (
+                    f"{empathy_ack(distress)}\n\n{workflow_result['reply']}"
+                )
             return {
                 **workflow_result,
                 "_hits": [],
@@ -1874,15 +4144,88 @@ class ChatModel:
                 "_personalization_context": (personalization or {}).get("prompt_context", ""),
             }
 
+        # Deterministic tax calculator (parity with generate()) — instant
+        # answer or guided elicitation, both as a single bundled payload.
+        calc_result = self._maybe_handle_fast_paths(
+            message=message,
+            rewritten=rewritten,
+            thread_id=thread_id,
+            locale=locale,
+        )
+        if calc_result:
+            if distress and calc_result.get("reply"):
+                calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
+            return {
+                **calc_result,
+                "_hits": [],
+                "_history": conversation_history,
+                "_rewritten": rewritten,
+                "_personalization_context": (personalization or {}).get("prompt_context", ""),
+                "_short_circuit": True,
+            }
+
+        # Greeting detection — always active (streaming path)
+        _q_lower_s = message.strip().lower().strip("!.?,")
+        _q_words_s = message.strip().split()
+        if len(_q_words_s) <= 3 and (
+            _q_lower_s in _GREETING_WORDS
+            or _q_lower_s in _GREETING_PHRASES
+            or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in _q_words_s)
+        ):
+            return {
+                "reply": GREETING_REPLY,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "greeting",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "greeting_agent",
+                "next_actions": [
+                    "Ask about TIN registration",
+                    "Learn about VAT",
+                    "File a tax return",
+                ],
+                "_hits": [],
+                "_history": [],
+            }
+
+        # Gratitude / farewell — parity with the REST path.
+        closing_reply = _closing_courtesy_reply(message)
+        if closing_reply:
+            return {
+                "reply": closing_reply,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "greeting",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "greeting_agent",
+                "next_actions": [
+                    "Ask about TIN registration",
+                    "Learn about VAT",
+                    "File a tax return",
+                ],
+                "_hits": [],
+                "_history": [],
+            }
+
         # Semantic cache check (Phase 5)
         if cache_allowed:
             cached = self._cache.get(rewritten, locale=locale)
             if cached:
-                return {
+                return self._finalize_result({
                     **cached,
                     "conversation_id": thread_id,
                     "locale": locale,
-                }
+                })
 
         route_decision = None
         if flags.is_enabled("agentic_mode"):
@@ -1893,10 +4236,7 @@ class ChatModel:
             if route_decision.route == AgentRoute.CLARIFY:
                 return {
                     "reply": route_decision.clarification_question
-                    or (
-                        "Could you share a bit more context? For example, are you "
-                        "asking about VAT, PAYE, customs, registration, or a specific tax type?"
-                    ),
+                    or CLARIFICATION_PROMPT,
                     "sources": [],
                     "citations": [],
                     "faithfulness_score": None,
@@ -1929,10 +4269,7 @@ class ChatModel:
                         reason=route_decision.reason,
                         conversation_history=conversation_history or None,
                     )
-                reply = (
-                    "This looks like a question best handled by a URA officer. "
-                    "Please use the Contact Centre or request human follow-up."
-                )
+                reply = ESCALATION_REPLY_LEAD + ESCALATION_REPLY_FOOTER
                 ticket_id = self._maybe_create_ticket(
                     reason=route_decision.reason,
                     user_query=message,
@@ -1986,19 +4323,17 @@ class ChatModel:
                 retrieval_mode = "hybrid"
             self._retriever_ready = self._retriever._ready
 
+        # Mirror the REST path's keyword fallback — _faq_hits_to_retrieval_hits
+        # carries _overlap into score_rrf so the abstention guard sees a real
+        # signal (previously hardcoded 0.0 here, same bug as line 2167).
         if not hits:
-            kw_hits = _simple_search(rewritten, self._faq_index, top_k=top_k)
-            hits = [
-                {
-                    "text": f"Question: {h['question']}\nAnswer: {h['answer']}",
-                    "answer": h["answer"],
-                    "question": h["question"],
-                    "source": h["source"],
-                    "chunk_id": "", "page": "", "section": h.get("tag", ""),
-                    "doc_type": "csv", "score_rrf": 0.0,
-                }
-                for h in kw_hits
-            ]
+            kw_hits = _simple_search(
+                rewritten,
+                self._faq_index,
+                top_k=top_k,
+                binding_query=message,
+            )
+            hits = _faq_hits_to_retrieval_hits(kw_hits)
 
         # Corrective RAG (Phase 6)
         if hits and self._retriever_ready:
@@ -2023,9 +4358,22 @@ class ChatModel:
                         h["score_rrf"] = h.get("score_rrf", 0.5) + 0.3
                 hits.sort(key=lambda x: x.get("score_rrf", 0), reverse=True)
 
-        # Blend top FAQ keyword hits after corrective RAG
-        kw_hits = _simple_search(rewritten, self._faq_index, top_k=2)
+        # Blend top FAQ keyword hits after corrective RAG (parity with the
+        # REST path, including the priority FAQ hits the deterministic
+        # procedural fast path depends on).
+        kw_hits = _simple_search(
+            rewritten,
+            self._faq_index,
+            top_k=2,
+            binding_query=message,
+        )
+        priority_hits = self._priority_faq_hits(rewritten, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
+        for h in priority_hits:
+            if h.get("text", "")[:80] not in seen_texts:
+                hits.insert(0, h)
+                seen_texts.add(h.get("text", "")[:80])
+                retrieval_mode = "faq_priority"
         for h in kw_hits:
             faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
             if faq_text[:80] not in seen_texts:
@@ -2037,8 +4385,17 @@ class ChatModel:
                 })
                 seen_texts.add(faq_text[:80])
 
-        # Clarification check (Phase 6)
-        clarification = needs_clarification(message, hits)
+        # Apply the same FAQ intent binding as the REST path before streaming
+        # can expose a passage to the model.
+        hits = _filter_unbound_faq_hits(message, hits)
+
+        # Attached documents — prepend as top-priority grounding hits
+        # (parity with generate(); see the comment there).
+        if attachments:
+            hits = documents_module.attachment_passages(attachments) + hits
+
+        # Clarification check (Phase 6) — skipped for attachment turns
+        clarification = None if attachments else needs_clarification(message, hits)
         if clarification:
             return {
                 "reply": clarification,
@@ -2059,12 +4416,44 @@ class ChatModel:
                 "_history": [],
             }
 
-        if self._output_guard.should_abstain(hits):
-            reply = (
-                "I don't have enough information to answer this question reliably. "
-                "Please contact URA directly at https://ura.go.ug or call "
-                "the URA Contact Centre for assistance."
+        # Deterministic procedural fast path — parity with the REST path so
+        # curated KB answers stream with their real (high) faithfulness
+        # instead of being re-synthesised and re-scored via the LLM.
+        # Attachment turns always go to the LLM (templates can't read docs).
+        if hits and not attachments:
+            deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
+            deterministic_citations = HybridRetriever.build_citations(hits)
+            deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
+                rewritten, hits, deterministic_citations
             )
+            if deterministic_reply:
+                result = self._deterministic_result(
+                    reply=self._finalize_reply(deterministic_reply),
+                    curated=deterministic_curated,
+                    hits=hits,
+                    sources=deterministic_sources,
+                    citations=deterministic_citations,
+                    retrieval_mode=retrieval_mode,
+                    thread_id=thread_id,
+                    locale=locale,
+                    agent_role=agent_role,
+                )
+                if cache_allowed:
+                    self._cache.put(rewritten, dict(result))
+                if distress:
+                    result["reply"] = f"{empathy_ack(distress)}\n\n{result['reply']}"
+                return {
+                    **result,
+                    "_hits": hits,
+                    "_history": conversation_history,
+                    "_rewritten": rewritten,
+                    "_short_circuit": True,
+                }
+
+        if not attachments and self._output_guard.should_abstain(hits):
+            reply = ABSTENTION_REPLY
+            if distress:
+                reply = f"{empathy_ack(distress)}\n\n{reply}"
             escalate, esc_reason = self._output_guard.should_escalate(None, hits)
             handoff = None
             response_judge = {
@@ -2120,6 +4509,8 @@ class ChatModel:
         citations = HybridRetriever.build_citations(hits)
         best = hits[0] if hits else {}
         reply = best.get("answer") or best.get("text", "")
+        if citations and not re.search(r"\[\d{1,3}\]", reply):
+            reply = f"{reply.rstrip()} [1]"
 
         # Escalation check (same as sync path)
         escalate, esc_reason = self._output_guard.should_escalate(None, hits)
@@ -2186,6 +4577,8 @@ class ChatModel:
             "_history": conversation_history,
             "_rewritten": rewritten,
             "_personalization_context": (personalization or {}).get("prompt_context", ""),
+            "_tone_hint": tone_hint,
+            "_distress": distress,
         }
 
     @staticmethod
@@ -2194,6 +4587,29 @@ class ChatModel:
         if STORE_RAW_PROMPTS:
             return text
         return redact_pii_text(text)
+
+    @staticmethod
+    def contexts_json(result: dict[str, Any] | None, limit: int = 8) -> str:
+        """Serialise the top-k retrieved passage texts for this turn (P0-2).
+
+        Persisted alongside the conversation so the eval harness can score
+        faithfulness against the ACTUAL retrieved context instead of the
+        answer itself. Returns ``"[]"`` when no hits are available. Passages
+        are knowledge-base text (not user PII), so they are stored verbatim —
+        EXCEPT attachment passages, which carry user document content and are
+        replaced by a placeholder (analytics.db must never hold them).
+        """
+        hits = (result or {}).get("_hits") or []
+        texts = []
+        for h in hits[:limit]:
+            if h.get("doc_type") == "attachment":
+                texts.append(f"[user attachment: {h.get('source') or 'attached:document'}]")
+            else:
+                texts.append(str(h.get("text") or h.get("answer") or "").strip())
+        try:
+            return json.dumps([t for t in texts if t])
+        except Exception:
+            return "[]"
 
     # -- Classification -----------------------------------------------------
     def classify(self, text: str, top_k: int = 1) -> dict[str, Any]:
