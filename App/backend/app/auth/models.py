@@ -7,6 +7,32 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# ---------------------------------------------------------------------------
+# Shared enums — single source of truth for consent purposes and taxpayer
+# types, reused by both the canonical models and the request payloads so an
+# invalid value is rejected with 422 at the API boundary (not a 500 from a
+# downstream DB CHECK constraint).
+# ---------------------------------------------------------------------------
+ConsentPurpose = Literal[
+    "personalization",
+    "analytics",
+    "ticket_escalation",
+    "long_term_storage",
+    "ura_account_access",
+    "ura_actions",
+    "voice_recording",
+    "voice_analytics",
+]
+TaxpayerType = Literal[
+    "unknown",
+    "individual",
+    "sole_trader",
+    "company",
+    "partnership",
+    "ngo",
+    "non_resident",
+]
+
 
 # ---------------------------------------------------------------------------
 # Auth primitives
@@ -53,15 +79,7 @@ class UserProfile(BaseModel):
     """
 
     user_id: str
-    taxpayer_type: Literal[
-        "unknown",
-        "individual",
-        "sole_trader",
-        "company",
-        "partnership",
-        "ngo",
-        "non_resident",
-    ] = "unknown"
+    taxpayer_type: TaxpayerType = "unknown"
     industry: str = Field("", max_length=100, description="Free-text industry or sector")
     primary_language: Literal["en", "lg"] = "en"
     detail_level: Literal["beginner", "intermediate", "expert"] = "intermediate"
@@ -77,7 +95,7 @@ class UserProfile(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     """Patch payload — only fields set here are updated."""
 
-    taxpayer_type: str | None = None
+    taxpayer_type: TaxpayerType | None = None
     industry: str | None = Field(None, max_length=100)
     primary_language: Literal["en", "lg"] | None = None
     detail_level: Literal["beginner", "intermediate", "expert"] | None = None
@@ -98,16 +116,7 @@ class ConsentReceipt(BaseModel):
 
     receipt_id: str
     user_id: str
-    purpose: Literal[
-        "personalization",  # memory, profile, tailored prompts
-        "analytics",  # usage statistics, quality metrics
-        "ticket_escalation",  # passing query + context to URA staff
-        "long_term_storage",  # retention beyond default TTL
-        "ura_account_access",  # tool access to URA account data
-        "ura_actions",  # confirmed writes/submissions through URA action APIs
-        "voice_recording",  # ASR/streaming voice processing
-        "voice_analytics",  # voice quality analytics
-    ]
+    purpose: ConsentPurpose
     version: str = Field(..., description="Version tag of the consent text, e.g. '2026-04'")
     granted_at: float = Field(default_factory=time.time)
     withdrawn_at: float | None = None
@@ -121,7 +130,7 @@ class ConsentReceipt(BaseModel):
 class ConsentGrantRequest(BaseModel):
     """Request payload for POST /v1/me/consents/grant."""
 
-    purposes: list[str] = Field(..., min_length=1, description="Purposes to grant")
+    purposes: list[ConsentPurpose] = Field(..., min_length=1, description="Purposes to grant")
     version: str = Field(..., description="Current consent text version")
 
 

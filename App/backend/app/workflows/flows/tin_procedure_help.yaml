@@ -1,0 +1,16 @@
+id: tin_procedure_help
+name: TIN Registration Help
+version: "1"
+description: >-
+  One-question clarification (individual vs organisation) before giving the
+  matching curated TIN registration steps. Started programmatically by the
+  TIN fast path when the ask names neither type; completion is special-cased
+  in service._maybe_handle_workflow to return the curated template.
+requires_auth: false
+trigger_phrases: []
+
+steps:
+  - id: ask_kind
+    question: "Are you registering as an **individual** or an **organisation** (company, NGO, partnership)?"
+    slot: taxpayer_kind
+    validator: "enum[individual,organisation]"

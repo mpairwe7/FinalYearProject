@@ -223,6 +223,83 @@ def init_db() -> None:
             updated_at     REAL NOT NULL
         );
 
+        -- Memory + audit tables (memory/semantic.py, memory/episodic.py,
+        -- audit/ledger.py). Part of the shared analytics schema: those
+        -- stores are process-wide singletons that only create their tables
+        -- on the connection active at FIRST construction, so every freshly
+        -- initialised DB must already carry them or /v1/me export/erasure
+        -- and audit reads break on any other connection.
+        CREATE TABLE IF NOT EXISTS user_facts (
+            fact_id          TEXT PRIMARY KEY,
+            user_id          TEXT NOT NULL,
+            tenant_id        TEXT NOT NULL DEFAULT 'default',
+            category         TEXT NOT NULL,
+            subject          TEXT NOT NULL DEFAULT 'user',
+            predicate        TEXT NOT NULL,
+            object_value     TEXT NOT NULL,
+            confidence       REAL NOT NULL DEFAULT 0.5,
+            extracted_at     REAL NOT NULL,
+            conversation_id  TEXT DEFAULT '',
+            turn_id          TEXT DEFAULT '',
+            extractor_model  TEXT DEFAULT '',
+            superseded_by    TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_facts_user
+            ON user_facts(user_id);
+        CREATE INDEX IF NOT EXISTS idx_facts_user_category
+            ON user_facts(user_id, category);
+        CREATE INDEX IF NOT EXISTS idx_facts_extracted
+            ON user_facts(extracted_at);
+
+        CREATE TABLE IF NOT EXISTS episodic_summaries (
+            summary_id      TEXT PRIMARY KEY,
+            user_id         TEXT NOT NULL,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            conversation_id TEXT NOT NULL,
+            summary         TEXT NOT NULL,
+            topic_tag       TEXT DEFAULT '',
+            sentiment       TEXT DEFAULT 'neutral',
+            turn_count      INTEGER DEFAULT 0,
+            created_at      REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_episodic_user
+            ON episodic_summaries(user_id);
+        CREATE INDEX IF NOT EXISTS idx_episodic_created
+            ON episodic_summaries(created_at);
+        CREATE INDEX IF NOT EXISTS idx_episodic_topic
+            ON episodic_summaries(user_id, topic_tag);
+
+        CREATE TABLE IF NOT EXISTS audit_events (
+            event_id     TEXT PRIMARY KEY,
+            event_type   TEXT NOT NULL,
+            tenant_id    TEXT NOT NULL DEFAULT 'default',
+            user_id      TEXT DEFAULT '',
+            payload      TEXT NOT NULL,
+            ts           REAL NOT NULL,
+            seq          INTEGER NOT NULL,
+            prev_hash    TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            row_hash     TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts);
+        CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_events(user_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_events(tenant_id, ts);
+        CREATE INDEX IF NOT EXISTS idx_audit_seq ON audit_events(seq);
+
+        CREATE TABLE IF NOT EXISTS audit_anchors (
+            anchor_id    TEXT PRIMARY KEY,
+            tenant_id    TEXT NOT NULL DEFAULT 'default',
+            first_seq    INTEGER NOT NULL,
+            last_seq     INTEGER NOT NULL,
+            merkle_root  TEXT NOT NULL,
+            created_at   REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_anchors_created
+            ON audit_anchors(created_at);
         CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id);
         CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
         CREATE INDEX IF NOT EXISTS idx_events_type ON analytics_events(event_type);
@@ -250,6 +327,13 @@ def init_db() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(conversation_id)")
     _ensure_column(conn, "tickets", "handoff_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "tickets", "response_judge_json", "TEXT DEFAULT '{}'")
+    # P0-2: persist the top-k retrieved passage texts per turn so the eval
+    # harness scores faithfulness against the real context, not the answer.
+    _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
+    # Phase 14 — link chat history to the authenticated user (OIDC `sub`) so
+    # /v1/me export + erasure can reach it.  Empty string for anonymous turns.
+    _ensure_column(conn, "conversations", "user_id", "TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)")
 
     # Seed the default tenant if missing
     conn.execute(
@@ -484,11 +568,17 @@ def log_conversation(
     user_message: str,
     bot_reply: str,
     sources: str = "[]",
+    contexts: str = "[]",
     response_time_ms: float = 0,
     confidence: float = 0,
     topic_tag: str = "",
+    user_id: str = "",
 ) -> str:
-    """Log a conversation turn and return the stable thread id."""
+    """Log a conversation turn and return the stable thread id.
+
+    ``user_id`` is the authenticated OIDC ``sub`` (empty for anonymous turns) —
+    it links the turn to the user for /v1/me export + erasure.
+    """
     conn = _get_connection()
     row_id = str(uuid.uuid4())
     thread_id = conversation_id or row_id
@@ -496,8 +586,8 @@ def log_conversation(
         conn.execute(
             """INSERT INTO conversations
                (id, conversation_id, session_id, user_message, bot_reply, sources,
-                response_time_ms, confidence, topic_tag, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                contexts, response_time_ms, confidence, topic_tag, created_at, user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row_id,
                 thread_id,
@@ -505,10 +595,12 @@ def log_conversation(
                 user_message,
                 bot_reply,
                 sources,
+                contexts,
                 response_time_ms,
                 confidence,
                 topic_tag,
                 time.time(),
+                user_id,
             ),
         )
         conn.commit()
@@ -714,6 +806,27 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
     ).fetchall()
 
     return [dict(r) for r in down_rows] + [dict(r) for r in low_conf_rows]
+
+
+def export_eval_samples(days: int = 30, limit: int = 200) -> list[dict[str, Any]]:
+    """Export recent turns that persisted their retrieved contexts (P0-2).
+
+    Unlike :func:`export_review_feedback` (review/tuning, no contexts), these
+    rows carry the actual top-k retrieved passages, letting the eval harness
+    score faithfulness against real context instead of the answer itself.
+    """
+    conn = _get_connection()
+    cutoff = time.time() - (days * 86400)
+    rows = conn.execute(
+        """SELECT user_message AS user_query, bot_reply, contexts, created_at
+           FROM conversations
+           WHERE created_at >= ?
+             AND contexts IS NOT NULL
+             AND contexts NOT IN ('', '[]')
+           ORDER BY created_at DESC LIMIT ?""",
+        (cutoff, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -1138,45 +1251,126 @@ def get_active_consents(user_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def has_active_consent(user_id: str, purpose: str) -> bool:
+def _resolve_internal_user_id(external_id: str, tenant_id: str = "default") -> str | None:
+    """Map an external OIDC ``sub`` to the internal ``users.id`` (None if unknown)."""
+    if not external_id:
+        return None
     conn = _get_connection()
     row = conn.execute(
-        """SELECT 1 FROM consent_receipts
-           WHERE user_id = ? AND purpose = ? AND withdrawn_at IS NULL LIMIT 1""",
-        (user_id, purpose),
+        "SELECT id FROM users WHERE tenant_id = ? AND external_id = ?",
+        (tenant_id, external_id),
     ).fetchone()
-    return row is not None
+    return row["id"] if row else None
 
 
-def export_user_data(user_id: str) -> dict[str, Any]:
-    """GET /v1/me/export — subject right to data portability (UDPA 2019)."""
+def has_active_consent(user_id: str, purpose: str, tenant_id: str = "default") -> bool:
+    """True when the user has an active (not-withdrawn) receipt for *purpose*.
+
+    Accepts EITHER the internal user UUID or the external OIDC ``sub``. Consent
+    receipts are keyed by the internal UUID, but the chat/voice runtime only holds
+    the ``sub`` — so when a direct match fails we resolve ``sub`` → internal id and
+    retry. This single bridge fixes the gate that otherwise left personalization
+    memory and voice consent permanently denied for authenticated users.
+    """
+    if not user_id:
+        return False
+    conn = _get_connection()
+    sql = (
+        "SELECT 1 FROM consent_receipts "
+        "WHERE user_id = ? AND purpose = ? AND withdrawn_at IS NULL LIMIT 1"
+    )
+    if conn.execute(sql, (user_id, purpose)).fetchone() is not None:
+        return True
+    internal_id = _resolve_internal_user_id(user_id, tenant_id)
+    if internal_id and internal_id != user_id:
+        return conn.execute(sql, (internal_id, purpose)).fetchone() is not None
+    return False
+
+
+def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
+    """GET /v1/me/export — subject right to data portability (UDPA 2019).
+
+    ``user_id`` is the internal UUID (users/profiles/consents); ``external_id`` is
+    the OIDC ``sub`` that chat history is keyed by. Conversations (and their
+    escalation tickets, linked by ``conversation_id``) are returned under it.
+    ``facts`` is filled by the caller from the memory service.
+    """
+    conn = _get_connection()
+    conversations: list[dict[str, Any]] = []
+    tickets: list[dict[str, Any]] = []
+    if external_id:
+        conversations = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
+                (external_id,),
+            ).fetchall()
+        ]
+        conv_ids = [c["conversation_id"] for c in conversations if c.get("conversation_id")]
+        if conv_ids:
+            ph = ",".join("?" * len(conv_ids))
+            tickets = [
+                dict(r)
+                for r in conn.execute(
+                    f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                    conv_ids,
+                ).fetchall()
+            ]
     return {
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
         "consents": get_active_consents(user_id),
-        "conversations": [],  # filled in by service.py (tenant + user filter)
-        "tickets": [],  # filled in by service.py
-        "facts": [],  # filled by Phase 16 memory module
+        "conversations": conversations,
+        "tickets": tickets,
+        "facts": [],  # filled by the caller from the memory service (export_user)
     }
 
 
-def delete_user_cascade(user_id: str) -> dict[str, int]:
+def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
     """DELETE /v1/me — right to erasure.
 
-    Cascades through every table that holds user data.  The
-    audit ledger is INTENTIONALLY not touched — erasure must be
-    cryptographically marked, not the log rewritten (per UDPA +
-    EU precedent for audit integrity).
+    Cascades through every table that holds user data.  The audit ledger is
+    INTENTIONALLY not touched — erasure must be cryptographically marked, not the
+    log rewritten (per UDPA + EU precedent for audit integrity).
+
+    ``user_id`` is the internal UUID (users/profiles/consents). ``external_id`` is
+    the OIDC ``sub`` that chat history is keyed by — conversations (and their
+    escalation tickets, linked by ``conversation_id``) are erased under it. Memory
+    facts are erased by the caller via the memory service.
     """
     conn = _get_connection()
     counts: dict[str, int] = {}
-    # (table, fk_column)
-    cascade = [
-        ("consent_receipts", "user_id"),
-        ("user_profiles", "user_id"),
-        ("users", "id"),
-    ]
-    for table, col in cascade:
+
+    # External-id-keyed: chat history + the escalation tickets linked to it.
+    if external_id:
+        conv_ids = [
+            r["conversation_id"]
+            for r in conn.execute(
+                "SELECT conversation_id FROM conversations "
+                "WHERE user_id = ? AND conversation_id IS NOT NULL",
+                (external_id,),
+            ).fetchall()
+        ]
+        if conv_ids:
+            ph = ",".join("?" * len(conv_ids))
+            try:
+                cur = conn.execute(
+                    f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                    conv_ids,
+                )
+                counts["tickets"] = cur.rowcount
+            except Exception:
+                logger.exception("delete_user_cascade: tickets")
+                counts["tickets"] = -1
+        try:
+            cur = conn.execute("DELETE FROM conversations WHERE user_id = ?", (external_id,))
+            counts["conversations"] = cur.rowcount
+        except Exception:
+            logger.exception("delete_user_cascade: conversations")
+            counts["conversations"] = -1
+
+    # Internal-UUID-keyed: identity, profile, consent receipts.
+    for table, col in (("consent_receipts", "user_id"), ("user_profiles", "user_id"), ("users", "id")):
         try:
             cursor = conn.execute(
                 f"DELETE FROM {table} WHERE {col} = ?",  # noqa: S608 — hardcoded list
