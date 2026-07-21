@@ -23,6 +23,14 @@
 # =============================================================================
 name: "URA Chatbot — Crane Cloud redeploy retry"
 
+# checkov:skip=CKV_GHA_7:image_tag only lets an operator pick which ALREADY
+# -built, ALREADY-pushed Docker Hub tag to redeploy (dispatch-target for
+# ura-chatbot-deploy-cranecloud.yml, which itself verifies the tag exists on
+# Docker Hub before deploying) — this workflow never builds anything itself,
+# so there's no build-provenance/artifact-integrity surface for a caller-
+# supplied value to influence. Restricted to repo collaborators via the
+# default workflow_dispatch permission model. Reviewed and accepted
+# 2026-07-21 — see PR that added this comment for the discussion.
 on:
   schedule:
     - cron: "15 */3 * * *"  # every 3 hours at :15 UTC
