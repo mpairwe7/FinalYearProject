@@ -14,7 +14,7 @@ limits[redis]>=3.13
 # Distributed semantic cache + analytics backends (opt-in)
 redis>=5.0.0
 psycopg[binary]>=3.2.0
-psycopg-pool>=3.2.0
+psycopg-pool>=3.3.1
 
 # Continuous evaluation — the harness in App/backend/app/evaluation.py
 # uses these when installed and falls back to heuristic metrics otherwise.
@@ -55,10 +55,10 @@ accelerate>=1.2.0
 peft>=0.13.0
 bitsandbytes>=0.45.0
 lingua-language-detector>=2.0.0
-cryptography>=44.0.0
+cryptography>=47.0.0
 
 # SSE streaming
-sse-starlette>=2.0.0
+sse-starlette>=3.4.1
 
 # OpenTelemetry GenAI observability (opt-in, aligned with 2025 stable semconv)
 opentelemetry-api>=1.29.0
