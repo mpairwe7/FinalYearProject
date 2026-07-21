@@ -34,6 +34,7 @@ from typing import Any
 
 from . import database as db
 from .retriever import HybridRetriever
+from .text_signals import content_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +115,15 @@ def _heuristic_faithfulness(answer: str, contexts: list[str]) -> float:
 
 
 def _heuristic_answer_relevancy(question: str, answer: str) -> float:
-    """Token-overlap proxy for the Ragas answer_relevancy metric."""
+    """Token-overlap proxy for the Ragas answer_relevancy metric.
+
+    Question tokens are reduced to content tokens so "what is the..."
+    boilerplate cannot make an off-topic answer look relevant; questions
+    made of stopwords only fall back to raw tokens rather than scoring 0.
+    """
     import re as _re
 
-    q_tokens = set(_re.findall(r"\w+", question.lower()))
+    q_tokens = content_tokens(question) or set(_re.findall(r"\w+", question.lower()))
     a_tokens = set(_re.findall(r"\w+", answer.lower()))
     if not q_tokens or not a_tokens:
         return 0.0

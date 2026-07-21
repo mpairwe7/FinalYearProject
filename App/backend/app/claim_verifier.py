@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from .entailment import is_contradicted
+from .text_signals import is_courtesy_sentence
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
 _SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|$)")
@@ -74,13 +75,20 @@ def _numbers(text: str) -> set[str]:
 
 def _split_claims(reply: str) -> list[str]:
     claims: list[str] = []
-    text = re.sub(r"([.!?])\s+(\[\d{1,3}\])", r" \2\1", reply or "")
+    # Protect decimal points before sentence splitting.  FAQ answers commonly
+    # contain figures such as ``37.5m``; treating that period as a sentence
+    # boundary creates two truncated, apparently unsupported claims.
+    text = re.sub(r"(?<=\d)\.(?=\d)", "<decimal_point>", reply or "")
+    text = re.sub(r"([.!?])\s+(\[\d{1,3}\])", r" \2\1", text)
     for raw in _SENTENCE_RE.findall(text):
         sentence = " ".join(raw.strip(" -\t\r\n").split())
+        sentence = sentence.replace("<decimal_point>", ".")
         if len(sentence) < 18:
             continue
         lowered = sentence.lower()
         if any(hint in lowered for hint in _NON_CLAIM_HINTS):
+            continue
+        if is_courtesy_sentence(sentence):
             continue
         if len(_tokens(sentence)) < 3:
             continue

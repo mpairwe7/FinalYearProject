@@ -11,7 +11,7 @@ import os
 import unittest
 import unittest.mock as mock
 
-from app.providers import budget, config, gateway, vectorize
+from app.providers import budget, config, gateway, relay_client, vectorize
 
 _KEYS = {
     "CLOUDFLARE_ACCOUNT_ID": "acct123",
@@ -51,8 +51,10 @@ class _FakeClient:
         self._payload = payload
         self.calls: list[dict] = []
 
-    def post(self, url, headers=None, json=None, content=None):
-        self.calls.append({"url": url, "headers": headers or {}, "json": json, "content": content})
+    def post(self, url, headers=None, json=None, content=None, timeout=None):
+        self.calls.append(
+            {"url": url, "headers": headers or {}, "json": json, "content": content, "timeout": timeout}
+        )
         return _Resp(self._payload)
 
 
@@ -155,6 +157,134 @@ class VectorizeTest(unittest.TestCase):
         self.assertAlmostEqual(h["score"], 0.91)
         # direct Vectorize call uses the CF token only (no gateway header needed)
         self.assertIn("vectorize/v2/indexes/ura-kb-bge-m3/query", fake.calls[0]["url"])
+
+
+class RelayClientTest(unittest.TestCase):
+    """Client side of the Cloudflare relay: builds requests against
+    ``cf_relay_base_url`` using ``cf_relay_secret``, distinct from the real
+    Cloudflare credentials."""
+
+    def setUp(self):
+        os.environ["CF_RELAY_BASE_URL"] = "https://relay.example.internal"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-xyz"
+        config.get_cloud_settings.cache_clear()
+
+    def tearDown(self):
+        os.environ.pop("CF_RELAY_BASE_URL", None)
+        os.environ.pop("CF_RELAY_SECRET", None)
+        config.get_cloud_settings.cache_clear()
+        relay_client._client = None
+
+    def test_relay_workers_ai_embed_request_shape(self):
+        fake = _FakeClient({"vectors": [[0.1] * 1024]})
+        with mock.patch.object(relay_client, "_get_client", return_value=fake):
+            vecs = relay_client.relay_workers_ai_embed(["hello"])
+        self.assertEqual(len(vecs), 1)
+        call = fake.calls[0]
+        self.assertEqual(call["url"], "https://relay.example.internal/internal/cf-relay/workers-ai-embed")
+        self.assertEqual(call["headers"]["Authorization"], "Bearer relay-secret-xyz")
+        self.assertEqual(call["json"], {"texts": ["hello"]})  # no model — see relay_client docstring
+
+    def test_relay_vectorize_query_request_shape(self):
+        fake = _FakeClient({"hits": [{"id": "c1"}]})
+        with mock.patch.object(relay_client, "_get_client", return_value=fake):
+            hits = relay_client.relay_vectorize_query([0.1, 0.2], 5, {"tag": {"$eq": "vat"}})
+        self.assertEqual(hits, [{"id": "c1"}])
+        call = fake.calls[0]
+        self.assertEqual(call["url"], "https://relay.example.internal/internal/cf-relay/vectorize-query")
+        self.assertEqual(call["headers"]["Authorization"], "Bearer relay-secret-xyz")
+        self.assertEqual(
+            call["json"], {"vector": [0.1, 0.2], "top_k": 5, "vector_filter": {"tag": {"$eq": "vat"}}}
+        )
+
+    def test_relay_workers_ai_chat_request_shape(self):
+        from app.providers import routing
+
+        fake = _FakeClient({"text": "Double the VAT due."})
+        with mock.patch.object(relay_client, "_get_client", return_value=fake):
+            text = relay_client.relay_workers_ai_chat(
+                [{"role": "user", "content": "hi"}],
+                routing.CF_LLM_MODEL,
+                max_tokens=512,
+                temperature=0.2,
+            )
+        self.assertEqual(text, "Double the VAT due.")
+        call = fake.calls[0]
+        self.assertEqual(call["url"], "https://relay.example.internal/internal/cf-relay/workers-ai-chat")
+        self.assertEqual(call["headers"]["Authorization"], "Bearer relay-secret-xyz")
+        self.assertEqual(
+            call["json"],
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "model_slot": "primary",  # never the raw model id — see CFRelayChatRequest
+                "max_tokens": 512,
+                "temperature": 0.2,
+            },
+        )
+        # Chat gets its own per-call timeout override, not the client's default.
+        self.assertEqual(call["timeout"], relay_client._CHAT_HTTP_TIMEOUT)
+
+    def test_relay_workers_ai_chat_rejects_unknown_model(self):
+        with self.assertRaises(ValueError):
+            relay_client.relay_workers_ai_chat(
+                [{"role": "user", "content": "hi"}],
+                "@cf/not-a-configured-model",
+                max_tokens=512,
+                temperature=0.2,
+            )
+
+
+class RelayRoutingTest(unittest.TestCase):
+    """When ``cf_relay_base_url`` is configured, the provider functions
+    delegate to the relay client instead of calling Cloudflare directly."""
+
+    def setUp(self):
+        _with_keys()
+        os.environ["CF_RELAY_BASE_URL"] = "https://relay.example.internal"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-xyz"
+        config.get_cloud_settings.cache_clear()
+
+    def tearDown(self):
+        os.environ.pop("CF_RELAY_BASE_URL", None)
+        os.environ.pop("CF_RELAY_SECRET", None)
+        _clear_keys()
+
+    def test_vectorize_query_uses_relay_when_configured(self):
+        with mock.patch.object(
+            relay_client, "relay_vectorize_query", return_value=[{"id": "c1"}]
+        ) as mocked, mock.patch.object(gateway, "_get_client") as direct_client:
+            hits = vectorize.vectorize_query([0.1] * 1024, top_k=4)
+        self.assertEqual(hits, [{"id": "c1"}])
+        mocked.assert_called_once_with([0.1] * 1024, 4, None)
+        direct_client.assert_not_called()  # never touches Cloudflare directly
+
+    def test_workers_ai_embed_uses_relay_when_configured(self):
+        with mock.patch.object(
+            relay_client, "relay_workers_ai_embed", return_value=[[0.1] * 1024]
+        ) as mocked, mock.patch.object(gateway, "_get_client") as direct_client:
+            vecs = gateway.workers_ai_embed(["hello"])
+        self.assertEqual(vecs, [[0.1] * 1024])
+        mocked.assert_called_once_with(["hello"])
+        direct_client.assert_not_called()
+
+    def test_workers_ai_chat_uses_relay_when_configured(self):
+        with mock.patch.object(
+            relay_client, "relay_workers_ai_chat", return_value="Double the VAT due."
+        ) as mocked, mock.patch.object(gateway, "_get_client") as direct_client:
+            text = gateway.workers_ai_chat(
+                [{"role": "user", "content": "hi"}],
+                "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                max_tokens=512,
+                temperature=0.2,
+            )
+        self.assertEqual(text, "Double the VAT due.")
+        mocked.assert_called_once_with(
+            [{"role": "user", "content": "hi"}],
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            max_tokens=512,
+            temperature=0.2,
+        )
+        direct_client.assert_not_called()
 
 
 class BudgetTest(unittest.TestCase):
@@ -624,7 +754,7 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
              mock.patch.object(service, "_simple_search", return_value=[dict(self._FAQ_ROW)]), \
              mock.patch.object(service, "needs_clarification", return_value=""), \
              mock.patch.object(service, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
-             mock.patch.object(service.ChatModel, "_deterministic_procedure_reply", return_value=""), \
+             mock.patch.object(service.ChatModel, "_deterministic_procedure_reply", return_value=("", False)), \
              mock.patch.object(service.ChatModel, "_priority_faq_hits", return_value=[]), \
              mock.patch.object(service.ChatModel, "_evaluate_response_judge", return_value=approve), \
              mock.patch.object(self.model._output_guard, "should_abstain", return_value=False), \
@@ -635,7 +765,9 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
 
     def test_empty_agentic_reply_runs_plain_llm_chain(self):
         out, ag, fb = self._generate(
-            "What is the standard VAT rate in Uganda?",
+            # NB: must not match the deterministic fast paths (rate lookup /
+            # calculator / TIN) — this test exercises the agentic LLM chain.
+            "What documents do I need when importing a vehicle?",
             {"text": "", "tool_calls": [], "iterations": 0, "truncated": False},
         )
         ag.assert_called_once()
@@ -1253,9 +1385,12 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
             },
         ]
         citations = R.HybridRetriever.build_citations(hits)
-        return self.model._deterministic_procedure_reply(
+        reply, curated = self.model._deterministic_procedure_reply(
             "how do I register for a TIN", hits, citations
         )
+        # The TIN template is fully hand-vetted → faithful by construction.
+        self.assertTrue(curated)
+        return reply
 
     def test_tin_reply_is_stepwise_markdown(self):
         reply = self._tin_reply()
@@ -1291,9 +1426,12 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
             },
         ]
         citations = R.HybridRetriever.build_citations(hits)
-        return self.model._deterministic_procedure_reply(
+        reply, curated = self.model._deterministic_procedure_reply(
             "how do I file my annual tax return", hits, citations
         )
+        # Assembled from retrieved hits → scored against them, not assumed 1.0.
+        self.assertFalse(curated)
+        return reply
 
     def test_return_filing_reply_is_stepwise(self):
         import re
@@ -1332,7 +1470,9 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         out = service.ChatModel._build_grounded_revision(
             [{"source": "taxation_guide.pdf", "text": raw}], [], "explain taxation in uganda"
         )
-        self.assertTrue(out.startswith("Based on the URA guidance I retrieved:"))
+        self.assertTrue(
+            out.startswith("Here's the most relevant guidance I found in official URA sources:")
+        )
         for noise in ("intentionally omitted", "End of picture text", "Sixth Edition", "picture ["):
             self.assertNotIn(noise, out)
         # inline numbered list is split onto its own lines (renders as a list)

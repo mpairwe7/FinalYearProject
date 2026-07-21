@@ -27,7 +27,7 @@ The URA Chatbot is the final-year project of four computer science students at M
 
 ### Division of Labor
 - **System Architecture, ML Processing & Fine-tuning**: Mpairwe Lauben designed the overall architecture and owned the machine-learning core.
-- **Backend Development & TTS Pipeline**: Olwol Philly built the FastAPI backend and the text-to-speech pipeline.
+- **Backend Development & TTS Pipeline**: Olowo Omondi Philly built the FastAPI backend and the text-to-speech pipeline.
 - **Frontend Design & Ingestion Pipeline**: Rwemera David built the web experience and the data ingestion pipeline.
 - **Optimization, STT Pipeline & Security**: Okwel Edgar Mark optimized performance, built speech-to-text, and implemented security.
 
@@ -592,18 +592,18 @@ Lauben's architecture and ML work delivered:
 - A clean component boundary that the rest of the team could build on confidently`,
   },
   {
-    title: 'Deep Dive: Olwol Philly - Backend Development & the TTS Pipeline',
-    slug: 'contributor-olwol-philly',
+    title: 'Deep Dive: Olowo Omondi Philly - Backend Development & the TTS Pipeline',
+    slug: 'contributor-olowo-omondi-philly',
     date: 'June 2026',
     category: 'Team',
     excerpt:
-      'How Olwol Philly built the FastAPI backend that powers the URA Chatbot and engineered the text-to-speech pipeline that gives it a voice.',
+      'How Olowo Omondi Philly built the FastAPI backend that powers the URA Chatbot and engineered the text-to-speech pipeline that gives it a voice.',
     tags: ['Team', 'Backend', 'FastAPI', 'Text-to-Speech'],
-    content: `# Deep Dive: Olwol Philly - Backend Development & the TTS Pipeline
+    content: `# Deep Dive: Olowo Omondi Philly - Backend Development & the TTS Pipeline
 
 ## Introduction
 
-Olwol Philly built the backbone of the URA Chatbot: the FastAPI service that ties the frontend, the retrieval engine, and the model together, plus the text-to-speech pipeline that lets the chatbot answer out loud.
+Olowo Omondi Philly built the backbone of the URA Chatbot: the FastAPI service that ties the frontend, the retrieval engine, and the model together, plus the text-to-speech pipeline that lets the chatbot answer out loud.
 
 ## Backend Architecture
 

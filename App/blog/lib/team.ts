@@ -26,9 +26,9 @@ export const teamMembers: TeamMember[] = [
       'Shaped the end-to-end system architecture and owned the machine-learning core — model processing and LoRA fine-tuning for the multilingual RAG engine.',
   },
   {
-    name: 'Olwol Philly',
-    slug: 'contributor-olwol-philly',
-    photo: '/team/olwol-philly.jpeg',
+    name: 'Olowo Omondi Philly',
+    slug: 'contributor-olowo-omondi-philly',
+    photo: '/team/olowo-omondi-philly.jpeg',
     roles: ['Backend Development', 'TTS Pipeline'],
     blurb:
       'Built the FastAPI backend and the services that power it, and engineered the text-to-speech pipeline that gives the chatbot a voice.',
@@ -71,8 +71,8 @@ export const projectFlow: FlowActivity[] = [
   { stage: 'System design', activity: 'System Architecture', owner: 'Mpairwe Lauben' },
   { stage: 'ML', activity: 'ML Processing', owner: 'Mpairwe Lauben' },
   { stage: 'ML', activity: 'Model Fine-tuning (LoRA adapters)', owner: 'Mpairwe Lauben' },
-  { stage: 'Backend', activity: 'Backend Development (FastAPI / APIs)', owner: 'Olwol Philly' },
-  { stage: 'Voice', activity: 'TTS Pipeline', owner: 'Olwol Philly' },
+  { stage: 'Backend', activity: 'Backend Development (FastAPI / APIs)', owner: 'Olowo Omondi Philly' },
+  { stage: 'Voice', activity: 'TTS Pipeline', owner: 'Olowo Omondi Philly' },
   { stage: 'Frontend', activity: 'Frontend Design (Web UI/UX)', owner: 'Rwemera David' },
   { stage: 'Data', activity: 'Ingestion Pipeline (crawl / PDF-CSV ETL)', owner: 'Rwemera David' },
   { stage: 'Performance', activity: 'Optimization', owner: 'Okwel Edgar Mark' },

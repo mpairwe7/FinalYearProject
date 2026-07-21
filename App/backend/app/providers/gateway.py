@@ -91,6 +91,10 @@ def _post_json(url: str, headers: dict[str, str], payload: dict) -> dict[str, An
 
 def workers_ai_embed(texts: list[str], model: str = "@cf/baai/bge-m3") -> list[list[float]]:
     """Embed via Workers AI bge-m3 (1024-dim) — same space as the local corpus."""
+    if get_cloud_settings().cf_relay_base_url.strip():
+        from . import relay_client
+
+        return relay_client.relay_workers_ai_embed(texts)
     data = _post_json(f"{_gateway_url('workers-ai')}/{model}", _workers_ai_headers(), {"text": texts})
     result = data.get("result", {})
     vectors = result.get("data") or result.get("embedding")
@@ -107,6 +111,12 @@ def workers_ai_chat(
     temperature: float = 0.2,
 ) -> str:
     """Chat-completion via a Workers AI text model; returns the reply string."""
+    if get_cloud_settings().cf_relay_base_url.strip():
+        from . import relay_client
+
+        return relay_client.relay_workers_ai_chat(
+            messages, model, max_tokens=max_tokens, temperature=temperature
+        )
     data = _post_json(
         f"{_gateway_url('workers-ai')}/{model}",
         _workers_ai_headers(),

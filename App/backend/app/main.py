@@ -25,6 +25,7 @@ from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
 
 from . import database as db
+from . import documents
 from .analytics import AnalyticsMiddleware, metrics
 from .authority import authority_required, get_authority_status
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
@@ -34,11 +35,15 @@ from .models import (
     AnalyticsEvent,
     BatchClassifyRequest,
     BatchClassifyResponse,
+    CFRelayChatRequest,
+    CFRelayEmbedRequest,
+    CFRelayVectorizeQueryRequest,
     ChatRequest,
     ChatResponse,
     Citation,
     ClassifyRequest,
     ClassifyResponse,
+    DocumentAnalysisResponse,
     ExportConversationRequest,
     ExportTaxSummaryRequest,
     FAQResponse,
@@ -87,6 +92,11 @@ _APP_LOGGER.propagate = False
 # Production environment validation (NIST SSDF PO.1.1)
 # ---------------------------------------------------------------------------
 _INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105
+
+# Wall-clock budget for the batch /v1/voice/chat pipeline. Once spent, the
+# reply-TTS leg is skipped (tts_skipped=True) so the text reply still beats
+# the deployment's gateway timeout; the client narrates via /v1/tts instead.
+VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
 
 
 def _truthy_env(name: str, default: str = "false") -> bool:
@@ -576,6 +586,7 @@ def chat(
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
 
+    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
     result = model.generate(
         message=body.message,
         conversation_id=body.conversation_id,
@@ -587,6 +598,7 @@ def chat(
         tenant_id=ctx.tenant_id,
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
+        attachments=attachments or None,
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -662,6 +674,7 @@ async def chat_stream(
 
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
+    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
 
     async def event_generator():
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
@@ -682,6 +695,7 @@ async def chat_stream(
             sentence_batching=True,  # SSE keeps historical behaviour
             user_role=getattr(ctx, "role", "public"),
             granted_purposes=getattr(ctx, "granted_purposes", []) or [],
+            attachments=attachments or None,
         ):
             if event_type == "_keepalive":
                 yield {
@@ -922,6 +936,97 @@ def export_tax_summary(
     )
 
 
+# ---------------------------------------------------------------------------
+# Document attachments (analysis + report)
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/v1/documents/analyze",
+    response_model=DocumentAnalysisResponse,
+    tags=["documents"],
+)
+@limiter.limit(_RATE_LIMIT)
+async def analyze_uploaded_document(
+    request: Request,
+    ctx: AuthContext = Depends(optional_user),
+) -> DocumentAnalysisResponse:
+    """Analyse an uploaded document (PDF, DOCX, XLSX, CSV, image, or text).
+
+    Accepts multipart/form-data with a single ``file`` part. Extracts text
+    and tables, classifies the document against the URA taxonomy, and pulls
+    URA-specific fields (TINs, UGX amounts, dates, references).
+
+    The returned ``document_id`` can be passed in chat ``attachment_ids``
+    to ground answers on the document, and used with
+    ``GET /v1/documents/{document_id}/report`` to download a PDF report.
+    Documents are held in memory only and expire after a TTL.
+    """
+    import asyncio
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or isinstance(upload, str):
+        raise HTTPException(status_code=422, detail="Missing 'file' part in form data")
+
+    data = await upload.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    if len(data) > documents.MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {documents.MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
+        )
+
+    session_id = request.headers.get("X-Session-ID", "")
+    try:
+        record = await asyncio.to_thread(
+            documents.analyze_document,
+            data,
+            upload.filename or "document",
+            upload.content_type or "",
+            session_id=session_id,
+            user_id=ctx.user_id or "",
+        )
+    except documents.UnsupportedDocumentError as err:
+        raise HTTPException(status_code=415, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+    metrics.inc("documents_analyzed_total")
+    return DocumentAnalysisResponse(**record.to_response_payload())
+
+
+@app.get("/v1/documents/{document_id}/report", tags=["documents"])
+@limiter.limit(_RATE_LIMIT)
+def document_report(
+    request: Request,
+    document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
+    _ctx: AuthContext = Depends(optional_user),
+) -> Response:
+    """Download the branded PDF analysis report for an analysed document."""
+    record = documents.get_document(
+        document_id, session_id=request.headers.get("X-Session-ID", "")
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found or expired")
+
+    # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
+    # on a runtime without fpdf2.
+    from .pdf_export import generate_document_report_pdf
+
+    pdf_bytes = generate_document_report_pdf(record.to_report_payload())
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="ura_document_report_{document_id[:8]}.pdf"'
+            ),
+        },
+    )
+
+
 @app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])
 def speech_health(
     request: Request,
@@ -1079,26 +1184,43 @@ async def voice_chat(
             reply_text = mt_result.text
 
     # --- 5. TTS (synthesize reply in user's language) -------------------------
+    # Budget guard: on slow speech tiers (cloud Sunbird can take 30s+ per
+    # call) the four-stage pipeline can outlive the deployment's gateway
+    # timeout and the client receives a 504 with NOTHING — worse than a
+    # text-only reply. When the request has already burned the budget,
+    # return the text now (tts_skipped=True) and let the client fetch the
+    # narration as a separate single-leg /v1/tts request.
     tts_latency = 0.0
     tts_backend = ""
     audio_b64 = ""
     tts_sample_rate = 0
     tts_duration = 0.0
+    tts_skipped = False
     if tts_enabled and reply_text:
-        tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
-        tts_latency = tts_result.latency_s
-        tts_backend = tts_result.backend
-        tts_sample_rate = tts_result.sample_rate
-        tts_duration = tts_result.duration_s
-        metrics.inc("speech_tts_total")
-        if tts_result.latency_s:
-            metrics.observe("speech_tts_latency_s", tts_result.latency_s)
-        if tts_result.error:
-            metrics.inc("speech_tts_errors_total")
-            stage_errors.append(f"TTS: {tts_result.error}")
-            logger.warning("Voice chat TTS failed: %s", tts_result.error)
-        elif tts_result.audio:
-            audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
+        elapsed_s = time.perf_counter() - t_start
+        if elapsed_s > VOICE_CHAT_BUDGET_S:
+            tts_skipped = True
+            metrics.inc("speech_tts_skipped_total")
+            logger.info(
+                "Voice chat reply-TTS skipped: %.1fs elapsed exceeds %.0fs budget",
+                elapsed_s,
+                VOICE_CHAT_BUDGET_S,
+            )
+        else:
+            tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
+            tts_latency = tts_result.latency_s
+            tts_backend = tts_result.backend
+            tts_sample_rate = tts_result.sample_rate
+            tts_duration = tts_result.duration_s
+            metrics.inc("speech_tts_total")
+            if tts_result.latency_s:
+                metrics.observe("speech_tts_latency_s", tts_result.latency_s)
+            if tts_result.error:
+                metrics.inc("speech_tts_errors_total")
+                stage_errors.append(f"TTS: {tts_result.error}")
+                logger.warning("Voice chat TTS failed: %s", tts_result.error)
+            elif tts_result.audio:
+                audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
 
     total_latency = time.perf_counter() - t_start
     metrics.observe("speech_voice_chat_latency_s", total_latency)
@@ -1134,6 +1256,7 @@ async def voice_chat(
         conversation_id=chat_result.get("conversation_id") or conversation_id,
         reply=reply_text,
         reply_audio_base64=audio_b64,
+        tts_skipped=tts_skipped,
         sample_rate=tts_sample_rate,
         duration_s=tts_duration,
         sources=chat_result.get("sources", []),
@@ -1255,6 +1378,24 @@ def _require_ops_key(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Invalid or missing INDEX_API_KEY")
 
 
+def _require_relay_key(request: Request) -> None:
+    """Require the configured bearer token for the Cloudflare relay endpoints.
+
+    Deliberately a separate secret from ``INDEX_API_KEY`` — this endpoint lets
+    another deployment (e.g. the HF Space, when its own egress to Cloudflare
+    is blocked) make Cloudflare calls through this one, so it gets its own
+    credential rather than reusing an unrelated operator key.
+    """
+    from .providers.config import get_cloud_settings
+
+    secret = get_cloud_settings().cf_relay_secret.get_secret_value()
+    if not secret:
+        raise HTTPException(status_code=503, detail="CF_RELAY_SECRET not configured")
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {secret}":
+        raise HTTPException(status_code=403, detail="Invalid or missing relay credentials")
+
+
 def require_admin_access(
     request: Request,
 ) -> AuthContext:
@@ -1309,6 +1450,54 @@ def trigger_indexing(
     stats["retrieval_mode"] = "hybrid" if model._retriever_ready else "keyword"
 
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare relay — lets another deployment (e.g. the HF Space, when its own
+# egress to Cloudflare is blocked) make Vectorize/Workers AI calls through
+# this one. Requires ``Authorization: Bearer <CF_RELAY_SECRET>`` (a dedicated
+# secret, separate from the real Cloudflare token, which never leaves this
+# process — see providers/config.py). Deliberately narrow: these three ops are
+# exactly what dense-retrieval fallback and the cloud-primary LLM chain need
+# (embed the query, search Vectorize, run a chat completion) and nothing else
+# is exposed, so there is no open-ended forwarding surface to worry about.
+# ---------------------------------------------------------------------------
+@app.post("/internal/cf-relay/workers-ai-embed", include_in_schema=False)
+def cf_relay_workers_ai_embed(request: Request, body: CFRelayEmbedRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import gateway as _gw
+
+    # No caller-supplied model — always the retrieval embedding model
+    # (gateway.workers_ai_embed's own default); see CFRelayEmbedRequest.
+    vectors = _gw.workers_ai_embed(body.texts)
+    return {"vectors": vectors}
+
+
+@app.post("/internal/cf-relay/vectorize-query", include_in_schema=False)
+def cf_relay_vectorize_query(request: Request, body: CFRelayVectorizeQueryRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import vectorize as _vz
+
+    hits = _vz.vectorize_query(body.vector, top_k=body.top_k, vector_filter=body.vector_filter)
+    return {"hits": hits}
+
+
+@app.post("/internal/cf-relay/workers-ai-chat", include_in_schema=False)
+def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import gateway as _gw
+    from .providers import routing as _routing
+
+    # Resolve the slot to an actual model id via a fixed dict lookup — the
+    # string that reaches gateway.workers_ai_chat (and the Cloudflare URL it
+    # builds) always originates in routing.py, never in the request body.
+    # See CFRelayChatRequest for why this indirection exists.
+    model = _routing.CHAT_MODEL_SLOTS[body.model_slot]
+    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    text = _gw.workers_ai_chat(
+        messages, model, max_tokens=body.max_tokens, temperature=body.temperature
+    )
+    return {"text": text}
 
 
 # ---------------------------------------------------------------------------

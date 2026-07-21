@@ -223,6 +223,83 @@ def init_db() -> None:
             updated_at     REAL NOT NULL
         );
 
+        -- Memory + audit tables (memory/semantic.py, memory/episodic.py,
+        -- audit/ledger.py). Part of the shared analytics schema: those
+        -- stores are process-wide singletons that only create their tables
+        -- on the connection active at FIRST construction, so every freshly
+        -- initialised DB must already carry them or /v1/me export/erasure
+        -- and audit reads break on any other connection.
+        CREATE TABLE IF NOT EXISTS user_facts (
+            fact_id          TEXT PRIMARY KEY,
+            user_id          TEXT NOT NULL,
+            tenant_id        TEXT NOT NULL DEFAULT 'default',
+            category         TEXT NOT NULL,
+            subject          TEXT NOT NULL DEFAULT 'user',
+            predicate        TEXT NOT NULL,
+            object_value     TEXT NOT NULL,
+            confidence       REAL NOT NULL DEFAULT 0.5,
+            extracted_at     REAL NOT NULL,
+            conversation_id  TEXT DEFAULT '',
+            turn_id          TEXT DEFAULT '',
+            extractor_model  TEXT DEFAULT '',
+            superseded_by    TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_facts_user
+            ON user_facts(user_id);
+        CREATE INDEX IF NOT EXISTS idx_facts_user_category
+            ON user_facts(user_id, category);
+        CREATE INDEX IF NOT EXISTS idx_facts_extracted
+            ON user_facts(extracted_at);
+
+        CREATE TABLE IF NOT EXISTS episodic_summaries (
+            summary_id      TEXT PRIMARY KEY,
+            user_id         TEXT NOT NULL,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            conversation_id TEXT NOT NULL,
+            summary         TEXT NOT NULL,
+            topic_tag       TEXT DEFAULT '',
+            sentiment       TEXT DEFAULT 'neutral',
+            turn_count      INTEGER DEFAULT 0,
+            created_at      REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_episodic_user
+            ON episodic_summaries(user_id);
+        CREATE INDEX IF NOT EXISTS idx_episodic_created
+            ON episodic_summaries(created_at);
+        CREATE INDEX IF NOT EXISTS idx_episodic_topic
+            ON episodic_summaries(user_id, topic_tag);
+
+        CREATE TABLE IF NOT EXISTS audit_events (
+            event_id     TEXT PRIMARY KEY,
+            event_type   TEXT NOT NULL,
+            tenant_id    TEXT NOT NULL DEFAULT 'default',
+            user_id      TEXT DEFAULT '',
+            payload      TEXT NOT NULL,
+            ts           REAL NOT NULL,
+            seq          INTEGER NOT NULL,
+            prev_hash    TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            row_hash     TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts);
+        CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_events(user_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_events(tenant_id, ts);
+        CREATE INDEX IF NOT EXISTS idx_audit_seq ON audit_events(seq);
+
+        CREATE TABLE IF NOT EXISTS audit_anchors (
+            anchor_id    TEXT PRIMARY KEY,
+            tenant_id    TEXT NOT NULL DEFAULT 'default',
+            first_seq    INTEGER NOT NULL,
+            last_seq     INTEGER NOT NULL,
+            merkle_root  TEXT NOT NULL,
+            created_at   REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_anchors_created
+            ON audit_anchors(created_at);
         CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id);
         CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
         CREATE INDEX IF NOT EXISTS idx_events_type ON analytics_events(event_type);

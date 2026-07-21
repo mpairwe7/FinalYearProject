@@ -51,7 +51,7 @@ from App.backend.app.providers import config as cloud_config  # noqa: E402
 CLOUD_REPLY = "According to the cloud fallback, the standard VAT rate in Uganda is 18% [1]."
 
 _FAQ_ROW = {
-    "question": "What is the standard VAT rate?",
+    "question": "How is VAT charged on local supplies?",
     "answer": "The standard VAT rate in Uganda is 18%.",
     "source": "vat.csv",
     "tag": "vat",
@@ -129,7 +129,7 @@ def deterministic_pipeline(client):
                            return_value={"decision": "approve", "score": 1.0}), \
          mock.patch.object(service_module, "_apply_output_guards", _passthrough_guard), \
          mock.patch.object(service_module.ChatModel, "_deterministic_procedure_reply",
-                           return_value=""), \
+                           return_value=("", False)), \
          mock.patch.object(service_module.ChatModel, "_priority_faq_hits", return_value=[]), \
          mock.patch.object(service_module.ChatModel, "_evaluate_response_judge",
                            return_value=dict(_APPROVE_JUDGE)), \
@@ -147,7 +147,7 @@ class TestChatEndpointFallback:
         model._llm_available = True
         with mock.patch.object(service_module.llm_module, "generate", return_value=""), \
              mock.patch.object(gateway, "gemini_generate", return_value=CLOUD_REPLY) as gg:
-            resp = client.post("/v1/chat", json={"message": "What is the standard VAT rate?"})
+            resp = client.post("/v1/chat", json={"message": "How is VAT charged on local supplies?"})
 
         assert resp.status_code == 200
         assert "cloud fallback" in resp.json()["reply"]
@@ -166,7 +166,7 @@ class TestChatEndpointFallback:
                  mock.patch.object(service_module.llm_module, "generate", return_value=""), \
                  mock.patch.object(gateway, "gemini_generate", return_value=CLOUD_REPLY) as gg:
                 resp = client.post(
-                    "/v1/chat", json={"message": "Which VAT rate applies to imports?"}
+                    "/v1/chat", json={"message": "Which VAT rules apply to imports?"}
                 )
         finally:
             model._llm_available = True
@@ -183,7 +183,7 @@ class TestChatEndpointFallback:
         model._llm_available = True
         with mock.patch.object(service_module.llm_module, "generate", return_value=""), \
              mock.patch.object(gateway, "gemini_generate") as gg:
-            resp = client.post("/v1/chat", json={"message": "What is the standard VAT rate?"})
+            resp = client.post("/v1/chat", json={"message": "How is VAT charged on local supplies?"})
 
         assert resp.status_code == 200
         reply = resp.json()["reply"]
@@ -203,7 +203,7 @@ class TestChatStreamEndpointFallback:
                                return_value=iter([])), \
              mock.patch.object(gateway, "gemini_generate", return_value=CLOUD_REPLY) as gg:
             with client.stream(
-                "POST", "/v1/chat/stream", json={"message": "What is the standard VAT rate?"}
+                "POST", "/v1/chat/stream", json={"message": "How is VAT charged on local supplies?"}
             ) as resp:
                 assert resp.status_code == 200
                 body = "".join(resp.iter_text())

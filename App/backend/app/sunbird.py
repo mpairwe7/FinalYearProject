@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -33,6 +34,13 @@ SUNBIRD_API_TOKEN = os.getenv("SUNBIRD_API_TOKEN", "")
 # primary one fails.
 SUNBIRD_FALLBACK_API_TOKEN = os.getenv("SUNBIRD_FALLBACK_API_TOKEN", "")
 SUNBIRD_TIMEOUT = int(os.getenv("SUNBIRD_TIMEOUT", "30"))
+# Attempts per account before failing over (1 = no retry). Retries apply to
+# timeouts, transport errors, 429 and 5xx — never to auth failures.
+SUNBIRD_RETRIES = max(1, int(os.getenv("SUNBIRD_RETRIES", "2")))
+
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+_BACKOFF_BASE_S = 0.5
+_RETRY_AFTER_CAP_S = 5.0
 
 # URA locale → Sunbird language code
 LOCALE_TO_SUNBIRD: dict[str, str] = {
@@ -89,27 +97,89 @@ def is_available() -> bool:
     return bool(_account_tokens())
 
 
-def _post(path: str, **kwargs: Any) -> httpx.Response:
-    """POST to Sunbird, trying the primary account then the fallback account.
+def _rewind_uploads(kwargs: dict[str, Any]) -> None:
+    """Seek file-like upload bodies back to 0 so a retry re-sends the bytes.
 
-    Retries on the next account for ANY failure (auth, rate-limit, transient
-    5xx, network). Raises the last error if every configured account fails.
+    Without this, a retried multipart request would silently upload an
+    already-consumed (empty) stream.
+    """
+    for value in (kwargs.get("files") or {}).values():
+        stream = value[1] if isinstance(value, tuple) and len(value) > 1 else value
+        if hasattr(stream, "seek"):
+            try:
+                stream.seek(0)
+            except Exception:  # noqa: BLE001 — non-seekable; retry sends as-is
+                pass
+
+
+def _retry_delay(attempt: int, retry_after: str = "") -> float:
+    """Exponential backoff, honouring a small server Retry-After when given."""
+    if retry_after:
+        try:
+            return min(float(retry_after), _RETRY_AFTER_CAP_S)
+        except ValueError:
+            pass
+    return _BACKOFF_BASE_S * (2 ** (attempt - 1))
+
+
+def _post(path: str, **kwargs: Any) -> httpx.Response:
+    """POST to Sunbird with bounded retry, then account failover.
+
+    Per account: up to :data:`SUNBIRD_RETRIES` attempts with short
+    exponential backoff on timeouts, transport errors, and retryable
+    statuses (429/5xx — honouring small ``Retry-After`` values). Auth
+    failures (401/403) skip straight to the fallback account. Raises the
+    last error when every configured account is exhausted.
     """
     tokens = _account_tokens()
     if not tokens:
         raise RuntimeError("no Sunbird token configured")
     last_exc: Exception | None = None
     for idx, token in enumerate(tokens):
-        try:
-            resp = _client_for(token).post(path, **kwargs)
-            resp.raise_for_status()
-            if idx > 0:
-                logger.info("Sunbird fallback account served %s", path)
-            return resp
-        except Exception as e:  # noqa: BLE001 — try the next account, re-raise if last
-            last_exc = e
-            if idx + 1 < len(tokens):
-                logger.warning("Sunbird account #%d failed for %s (%s); trying fallback", idx + 1, path, e)
+        for attempt in range(1, SUNBIRD_RETRIES + 1):
+            _rewind_uploads(kwargs)
+            try:
+                resp = _client_for(token).post(path, **kwargs)
+                resp.raise_for_status()
+                if idx > 0:
+                    logger.info("Sunbird fallback account served %s", path)
+                return resp
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+                status = e.response.status_code
+                if status in (401, 403):
+                    logger.warning(
+                        "Sunbird auth failed (%d) on account #%d for %s", status, idx + 1, path
+                    )
+                    break  # retrying the same credentials cannot help
+                if status in _RETRYABLE_STATUSES and attempt < SUNBIRD_RETRIES:
+                    delay = _retry_delay(attempt, e.response.headers.get("Retry-After", ""))
+                    logger.warning(
+                        "Sunbird %d on %s (account #%d, attempt %d); retrying in %.1fs",
+                        status, path, idx + 1, attempt, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                break
+            except httpx.HTTPError as e:  # timeouts + transport errors
+                last_exc = e
+                if attempt < SUNBIRD_RETRIES:
+                    delay = _retry_delay(attempt)
+                    logger.warning(
+                        "Sunbird transport error on %s (account #%d, attempt %d): %s; "
+                        "retrying in %.1fs", path, idx + 1, attempt, e, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                break
+            except Exception as e:  # noqa: BLE001 — unexpected; fail over to next account
+                last_exc = e
+                break
+        if idx + 1 < len(tokens):
+            logger.warning(
+                "Sunbird account #%d exhausted for %s (%s); trying fallback",
+                idx + 1, path, last_exc,
+            )
     raise last_exc  # type: ignore[misc]
 
 

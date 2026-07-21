@@ -41,6 +41,13 @@ const assistantTurn: ChatTurn = {
   retrievalMode: "hybrid",
 };
 
+const attachmentTurn: ChatTurn = {
+  ...userTurn,
+  id: "u2",
+  content: "What does this receipt say?",
+  attachments: [{ id: "a".repeat(32), name: "receipt.pdf", docType: "receipt" }],
+};
+
 describe("ChatMessage", () => {
   it("renders user message with user icon", () => {
     renderMsg(userTurn);
@@ -53,6 +60,15 @@ describe("ChatMessage", () => {
     renderMsg(assistantTurn);
     expect(screen.getByText("VAT is 18% in Uganda.")).toBeInTheDocument();
     expect(screen.getByText("Assistant replied")).toBeInTheDocument();
+  });
+
+  it("renders attachment chips with a report download on user turns", () => {
+    renderMsg(attachmentTurn);
+    expect(screen.getByText("receipt.pdf")).toBeInTheDocument();
+    expect(screen.getByText("Receipt")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Download analysis report for receipt\.pdf/ }),
+    ).toBeInTheDocument();
   });
 
   it("copies the assistant reply to the clipboard", async () => {
