@@ -19,6 +19,7 @@ import logging
 
 from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
+from ...text_signals import ABSTENTION_REPLY
 from ..state import AgentRoute
 from .runtime import END, GraphNode, GraphRuntime, NodeResult
 from .state import AgentGraphState, GraphOutcome
@@ -161,10 +162,7 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
     for now.
     """
     if not state.hits and not state.observations:
-        state.reply = (
-            "I don't have enough information to answer this question reliably. "
-            "Please contact URA directly at https://ura.go.ug."
-        )
+        state.reply = ABSTENTION_REPLY
         state.outcome = GraphOutcome.ABSTAINED
         return NodeResult(next_node="respond", outcome=GraphOutcome.ABSTAINED)
 

@@ -1,44 +1,55 @@
 /**
- * E2E smoke test — validates the full chat flow renders and responds.
- *
- * This test proves the Frontend -> API -> (mock/real) LLM -> Response chain
- * works end-to-end, satisfying RTM REQ-08 (loading indicator) and
- * week08 V&V "stakeholder acceptance testing".
+ * E2E smoke test — validates the landing shell renders and the composer
+ * responds, satisfying RTM REQ-08 and week08 V&V "stakeholder acceptance
+ * testing".  Assertions target the current landing design (hero + suggested
+ * questions; no seeded greeting bubble) with the consent banner pre-seeded
+ * so it cannot intercept clicks (see helpers.ts).
  */
 import { test, expect } from "@playwright/test";
 
+import { clearChatStore, mockBackend, seedConsent } from "./helpers";
+
 test.describe("URA Chatbot Smoke", () => {
-  test("homepage loads with greeting message", async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page);
+  });
+
+  test("homepage loads with the assistant landing shell", async ({ page }) => {
     await page.goto("/");
     await expect(page).toHaveTitle(/URA Chatbot/);
     await expect(
-      page.getByText(/I can answer your questions about URA/),
+      page.getByRole("heading", { name: /URA Tax Assistant/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Official AI-powered assistant for Uganda Revenue Authority/),
     ).toBeVisible();
   });
 
   test("starter prompts are visible and clickable", async ({ page }) => {
     await page.goto("/");
-    const prompt = page.getByText("How do I register for a TIN?");
+    const prompt = page.getByRole("button", { name: "How do I register for a TIN?" });
     await expect(prompt).toBeVisible();
     await prompt.click();
-    await expect(
-      page.locator(".message-row").or(page.locator("#composer-input")),
-    ).toBeVisible();
+    // Either the composer is seeded or the message is sent immediately.
+    const composer = page.getByLabel("Type your message");
+    const sent = page.locator(".message-row-user");
+    await expect
+      .poll(async () =>
+        (await composer.inputValue()).includes("TIN") || (await sent.count()) > 0,
+      )
+      .toBeTruthy();
   });
 
   test("composer and chat area coexist", async ({ page }) => {
     await page.goto("/");
 
-    // Verify both the input area and chat conversation are present
+    // Verify the input area and the landing chat surface are both present
     await expect(page.getByLabel("Type your message")).toBeVisible();
     await expect(page.getByLabel("Send message")).toBeVisible();
-
-    // At least one message-row (the greeting) should be visible
-    await expect(page.locator(".message-row").first()).toBeVisible();
-
-    // The greeting is from the assistant
     await expect(
-      page.getByText(/I can answer your questions about URA/),
+      page.getByRole("group", { name: "Suggested questions" }),
     ).toBeVisible();
   });
 
@@ -80,9 +91,13 @@ test.describe("URA Chatbot Smoke", () => {
     const response = await page.goto("/");
     const headers = response!.headers();
     expect(headers["x-content-type-options"]).toBe("nosniff");
-    expect(headers["x-frame-options"]).toBe("DENY");
     expect(headers["strict-transport-security"]).toContain("max-age=63072000");
     expect(headers["content-security-policy"]).toContain("default-src 'self'");
+    // Embedding is controlled via CSP frame-ancestors (allows self + Hugging Face
+    // so the HF Space iframe renders); X-Frame-Options is omitted unless the
+    // strict no-embed build (FRAME_ANCESTORS="'none'") is used.
+    expect(headers["content-security-policy"]).toContain("frame-ancestors");
+    expect(headers["content-security-policy"]).toContain("huggingface.co");
     expect(headers["permissions-policy"]).toContain("camera=()");
   });
 });

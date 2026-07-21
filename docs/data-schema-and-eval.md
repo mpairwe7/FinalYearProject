@@ -169,7 +169,7 @@ retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registrat
 
 | Metric | Method | Description |
 |--------|--------|-------------|
-| **Faithfulness** | Sentence-level token overlap >= 50% | Fraction of answer sentences grounded in context |
+| **Faithfulness** | Content-token overlap >= 50% per sentence; courtesy sentences (greetings, empathy, contact footers) excluded | Fraction of factual answer sentences grounded in context |
 | **Answer Relevancy** | Cosine similarity (sentence-transformers) | Question-answer embedding similarity |
 | **Context Precision** | Ground-truth word overlap > 20% | Fraction of retrieved contexts containing GT info |
 | **Context Recall** | GT sentence coverage >= 40% | Fraction of GT content covered by contexts |

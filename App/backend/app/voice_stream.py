@@ -54,6 +54,11 @@ _VAD_SILENCE_MS = int(os.getenv("VOICE_VAD_SILENCE_MS", "600"))
 _VAD_MIN_SPEECH_MS = int(os.getenv("VOICE_VAD_MIN_SPEECH_MS", "250"))
 _VAD_MAX_UTTERANCE_S = float(os.getenv("VOICE_VAD_MAX_UTTERANCE_S", "30.0"))
 
+# Hard wall-clock ceiling for the LLM stage of a voice turn. The chat model
+# has its own internal deadlines, but a stall anywhere else in generate()
+# must not hang the WebSocket session forever.
+_VOICE_LLM_DEADLINE_S = float(os.getenv("VOICE_LLM_DEADLINE_S", "45"))
+
 # Sentence split regex — split on .!? followed by whitespace
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
@@ -65,6 +70,29 @@ async def _run_blocking(func, *args):
         return func(*args)
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, func, *args)
+
+
+async def _translate_with_retry(speech, text: str, source: str, target: str):
+    """One transient-failure retry before declaring the MT stage degraded.
+
+    Returns the TranslateResult on success, None when both attempts fail —
+    the caller decides how to degrade (never silently swap languages).
+    """
+    last_exc: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            result = await _run_blocking(speech.translate, text, source, target)
+            if result.text and not result.error:
+                return result
+            logger.warning(
+                "MT %s->%s attempt %d returned error: %s", source, target, attempt, result.error
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade, don't crash the session
+            last_exc = exc
+            logger.warning("MT %s->%s attempt %d raised: %s", source, target, attempt, exc)
+    if last_exc is not None:
+        logger.error("MT %s->%s failed after retry: %s", source, target, last_exc)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -260,43 +288,61 @@ class VoiceSession:
 
         # ── Stage 2: MT (lg->en) ─────────────────────────────────────
         query_text = asr_result.text
+        llm_locale = "en"
         timings["mt_ms"] = 0.0
         mt_backend = ""
+        mt_degraded: list[str] = []
 
         if detected_lang == "lg":
             t0 = time.perf_counter()
-            try:
-                mt_result = await _run_blocking(
-                    self._speech.translate,
-                    asr_result.text,
-                    "lg",
-                    "en",
+            mt_result = await _translate_with_retry(self._speech, asr_result.text, "lg", "en")
+            if mt_result is not None:
+                query_text = mt_result.text
+                mt_backend = mt_result.backend
+            else:
+                # Degraded: send the original Luganda to the LLM and tell it
+                # so (multilingual prompt rule) rather than mislabel it as
+                # English; surface the degradation to the client.
+                llm_locale = detected_lang
+                mt_degraded.append("lg-en")
+                yield VoiceStreamEvent(
+                    type="mt_degraded",
+                    data={"direction": "lg-en", "detail": "translation unavailable"},
                 )
-                if mt_result.text and not mt_result.error:
-                    query_text = mt_result.text
-                    mt_backend = mt_result.backend
-            except Exception as exc:
-                logger.warning("MT lg->en failed: %s", exc)
             timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         if self._cancelled.is_set():
             return
 
-        # ── Stage 3: LLM ─────────────────────────────────────────────
+        # ── Stage 3: LLM (hard deadline — a stall must not hang the WS) ──
         t0 = time.perf_counter()
         try:
-            llm_result = await _run_blocking(
-                partial(
-                    self._chat_model.generate,
-                    message=query_text,
-                    conversation_id=self.conversation_id,
-                    top_k=self.top_k,
-                    locale="en",
-                    user_id=self.user_id or None,
-                    tenant_id=self.tenant_id,
+            llm_result = await asyncio.wait_for(
+                _run_blocking(
+                    partial(
+                        self._chat_model.generate,
+                        message=query_text,
+                        conversation_id=self.conversation_id,
+                        top_k=self.top_k,
+                        locale=llm_locale,
+                        user_id=self.user_id or None,
+                        tenant_id=self.tenant_id,
+                    ),
                 ),
+                timeout=_VOICE_LLM_DEADLINE_S,
             )
             reply_text = llm_result.get("reply", "")
+        except asyncio.TimeoutError:
+            logger.error("LLM generation exceeded %.0fs voice deadline", _VOICE_LLM_DEADLINE_S)
+            yield VoiceStreamEvent(
+                type="error",
+                data={
+                    "detail": "The assistant took too long to answer. Please try again.",
+                    "recoverable": True,
+                    "stage": "llm",
+                },
+            )
+            return
         except Exception as exc:
             logger.error("LLM generation failed: %s", exc)
             yield VoiceStreamEvent(
@@ -312,21 +358,28 @@ class VoiceSession:
 
         # ── Stage 4: MT (en->lg) ─────────────────────────────────────
         reply_for_tts = reply_text
-        if detected_lang == "lg":
+        tts_lang = detected_lang
+        if detected_lang == "lg" and "lg-en" not in mt_degraded:
             t0 = time.perf_counter()
-            try:
-                mt_back = await _run_blocking(
-                    self._speech.translate,
-                    reply_text,
-                    "en",
-                    "lg",
+            mt_back = await _translate_with_retry(self._speech, reply_text, "en", "lg")
+            if mt_back is not None:
+                reply_for_tts = mt_back.text
+                mt_backend = mt_back.backend
+            else:
+                # Degraded: speak the English reply with an English voice —
+                # intelligible English beats a Luganda voice mangling it.
+                tts_lang = "en"
+                mt_degraded.append("en-lg")
+                yield VoiceStreamEvent(
+                    type="mt_degraded",
+                    data={"direction": "en-lg", "detail": "translation unavailable"},
                 )
-                if mt_back.text and not mt_back.error:
-                    reply_for_tts = mt_back.text
-                    mt_backend = mt_back.backend
-            except Exception:
-                logger.warning("MT en->lg failed, using English reply")
             timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
+        elif detected_lang == "lg":
+            # Inbound MT already degraded — the reply is whatever language
+            # the LLM answered in; keep the detected voice only if the reply
+            # was generated for that locale.
+            tts_lang = detected_lang
 
         if self._cancelled.is_set():
             return
@@ -356,7 +409,7 @@ class VoiceSession:
                         self._speech.synthesize,
                         sentence,
                         self.voice,
-                        detected_lang,
+                        tts_lang,
                     )
                 except Exception as exc:
                     logger.warning("TTS failed for chunk %d: %s", chunk_idx, exc)
@@ -385,6 +438,13 @@ class VoiceSession:
                     )
                 chunk_idx += 1
 
+            if not audio_started and not self._cancelled.is_set():
+                # Every sentence failed to synthesize — tell the client the
+                # turn is text-only instead of ending in silent confusion.
+                yield VoiceStreamEvent(
+                    type="tts_degraded",
+                    data={"detail": "voice output unavailable for this reply"},
+                )
             yield VoiceStreamEvent(type="audio_end", data={})
         else:
             # No TTS — just emit the reply text as a single chunk
@@ -409,6 +469,8 @@ class VoiceSession:
                 "faithfulness_score": llm_result.get("faithfulness_score"),
                 "retrieval_mode": llm_result.get("retrieval_mode", "keyword"),
                 "conversation_id": self.conversation_id,
+                "reply_language": tts_lang,
+                "mt_degraded": mt_degraded,
             },
         )
 

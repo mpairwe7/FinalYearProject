@@ -42,8 +42,9 @@ import hashlib
 import logging
 import os
 import threading
+import time
 from contextlib import nullcontext
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from .guardrails import scan_retrieved_text
 
@@ -106,6 +107,7 @@ def _local_generation_context():
 # Prompt template
 # ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """\
+/no_think
 You are the **URA Digital Assistant**, an official AI helper for the \
 Uganda Revenue Authority. Your role is to provide accurate, helpful \
 answers about URA services, tax obligations, and procedures.
@@ -114,7 +116,9 @@ answers about URA services, tax obligations, and procedures.
 1. **OUTPUT THE ANSWER DIRECTLY.** Do NOT include your reasoning, thinking, \
    analysis of passages, or internal monologue. Do NOT write sentences like \
    "Okay, the user is asking...", "Let me check...", "Looking at passage...", \
-   "Since the context...", etc. Start your response with the answer itself.
+   "Since the context...", etc. You may begin with a brief, natural \
+   acknowledgment (e.g., "Great question!" or "Here's what you need to know:") \
+   followed immediately by the answer.
 2. Answer ONLY from the provided context passages. Do NOT use prior knowledge.
 3. If the context does not contain enough information, say so clearly and \
    direct the user to https://ura.go.ug or the URA Contact Centre.
@@ -143,6 +147,40 @@ answers about URA services, tax obligations, and procedures.
 14. When answering procedural questions, always include the relevant URA contact \
    details: toll-free 0800 117 000 / 0800 217 000, WhatsApp 0772 140 000, \
    or the web portal https://ura.go.ug.
+15. For short informational answers (not long procedural ones), end with 1-2 \
+   brief follow-up suggestions like "You might also want to know about..." \
+   to help the user explore related topics.
+
+## Formatting
+Write the answer as clean Markdown for a chat UI, and match the amount of \
+structure to the answer's length (see Rule 6) — never over-format.
+16. Lead with the direct answer. Keep paragraphs to 2-3 sentences with a \
+   blank line between them.
+17. Simple factual answers stay as 1-2 plain sentences — no headings, \
+   lists, or tables.
+18. **Bold** the key facts (amounts, rates, deadlines, form names) but \
+   never change the value itself.
+19. Use `-` bullets for requirements or items and a numbered `1.` list for \
+   ordered steps — one item per line.
+20. For long procedural answers only, add short `###` subheadings; use a \
+   Markdown pipe table to compare 3+ values (e.g. rate bands or thresholds).
+21. Put form codes, section numbers, and field names in `inline code` \
+   (e.g. `DT-2001`); reserve fenced ``` blocks for multi-line calculations.
+22. For a caveat or key reminder, begin a line with a callout label: \
+   `Note:`, `Important:`, `Tip:`, `Warning:`, or `Caution:`.
+23. Keep [1], [2] citation markers inline next to the fact they support. \
+   Do not use emojis.
+
+## Tone
+24. Be warm, respectful, and encouraging. Never be curt, dismissive, or \
+   condescending; explain jargon in plain words the first time you use it.
+25. When the user sounds frustrated, worried, or under time pressure \
+   (penalties, deadlines, audits), open with ONE short empathetic sentence, \
+   then answer directly per Rule 1. Never blame the user — frame \
+   requirements as helpful next steps ("you'll need to...", not "you \
+   failed to...").
+26. Close longer procedural answers with a brief reassurance that URA can \
+   help if they get stuck (Rule 14 has the contact details).
 """
 
 STRUCTURED_JSON_SUFFIX = """\
@@ -198,6 +236,7 @@ def _build_messages(
     tokenizer: Any = None,
     structured: bool = False,
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> list[dict[str, str]]:
     """Build chat messages in the Qwen chat-template format.
 
@@ -214,6 +253,8 @@ def _build_messages(
             "Do not treat it as live URA account data.\n"
             f"{personalization_context.strip()}"
         )
+    if tone_hint:
+        system_content += f"\n\n## This turn\n{tone_hint.strip()}"
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},
     ]
@@ -479,6 +520,7 @@ def _vllm_generate(messages: list[dict[str, str]]) -> str:
                 "top_p": 0.95,
                 "max_tokens": LLM_MAX_TOKENS,
                 "stream": False,
+                "chat_template_kwargs": {"enable_thinking": False},
             }
         ).encode("utf-8")
         req = urllib.request.Request(
@@ -519,6 +561,7 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
                 "top_p": 0.95,
                 "max_tokens": LLM_MAX_TOKENS,
                 "stream": True,
+                "chat_template_kwargs": {"enable_thinking": False},
             }
         ).encode("utf-8")
         req = urllib.request.Request(
@@ -561,6 +604,7 @@ def generate(
     locale: str = "en",
     structured: bool | None = None,
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> str:
     """Generate a grounded answer from retrieved passages.
 
@@ -577,6 +621,7 @@ def generate(
             tokenizer=None,  # vLLM server tokenizes; we pass text
             structured=use_structured,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
         )
         return _vllm_generate(messages)
 
@@ -592,6 +637,7 @@ def generate(
         tokenizer=_tokenizer,
         structured=use_structured,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
 
     try:
@@ -689,6 +735,7 @@ def generate_stream(
     conversation_history: list[dict[str, str]] | None = None,
     locale: str = "en",
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> Generator[str, None, None]:
     """Yield tokens incrementally for SSE streaming.
 
@@ -711,6 +758,7 @@ def generate_stream(
             tokenizer=None,
             structured=False,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
         )
         yield from _vllm_generate_stream(messages)
         return
@@ -726,6 +774,7 @@ def generate_stream(
         tokenizer=_tokenizer,
         structured=False,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
 
     try:
@@ -945,6 +994,7 @@ def _build_tool_messages(
     conversation_history: list[dict[str, str]] | None,
     locale: str,
     personalization_context: str = "",
+    tone_hint: str = "",
 ) -> list[dict[str, str]]:
     """Build the initial message list for a tool-calling request.
 
@@ -961,6 +1011,8 @@ def _build_tool_messages(
             "Do not treat it as live URA account data.\n"
             f"{personalization_context.strip()}"
         )
+    if tone_hint:
+        system_content += f"\n\n## This turn\n{tone_hint.strip()}"
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},
     ]
@@ -1000,7 +1052,7 @@ def _build_tool_messages(
     return messages
 
 
-def generate_with_tools(
+def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     query: str,
     passages: list[dict[str, Any]] | None = None,
     tool_names: list[str] | None = None,
@@ -1008,10 +1060,12 @@ def generate_with_tools(
     locale: str = "en",
     max_iterations: int = 3,
     personalization_context: str = "",
+    tone_hint: str = "",
     tenant_id: str = "default",
     user_id: str = "",
     user_role: str = "public",
     granted_purposes: list[str] | None = None,
+    event_callback: "Callable[[dict[str, Any]], None] | None" = None,
 ) -> dict[str, Any]:
     """Run a bounded tool-calling loop with the local Qwen3 model.
 
@@ -1057,6 +1111,7 @@ def generate_with_tools(
                 conversation_history,
                 locale,
                 personalization_context=personalization_context,
+                tone_hint=tone_hint,
             )
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
@@ -1097,6 +1152,7 @@ def generate_with_tools(
             conversation_history,
             locale,
             personalization_context=personalization_context,
+            tone_hint=tone_hint,
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
 
@@ -1106,10 +1162,19 @@ def generate_with_tools(
         conversation_history,
         locale,
         personalization_context=personalization_context,
+        tone_hint=tone_hint,
     )
     tool_calls_made: list[dict[str, Any]] = []
     last_response = ""
     truncated = False
+
+    def _emit(event: dict[str, Any]) -> None:
+        if event_callback is None:
+            return
+        try:
+            event_callback(event)
+        except Exception:
+            logger.debug("event_callback raised; suppressing", exc_info=True)
 
     try:
         import torch
@@ -1117,6 +1182,7 @@ def generate_with_tools(
         return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
 
     for iteration in range(max_iterations):
+        _emit({"type": "iteration.started", "iteration": iteration})
         try:
             text = _tokenizer.apply_chat_template(
                 messages,
@@ -1173,6 +1239,14 @@ def generate_with_tools(
         )
 
         if not parsed_calls:
+            _emit(
+                {
+                    "type": "iteration.final",
+                    "iterations": iteration + 1,
+                    "truncated": False,
+                    "tool_call_count": len(tool_calls_made),
+                }
+            )
             # Terminal: no more tool calls — return the text
             return {
                 "text": _strip_tool_calls(response),
@@ -1185,17 +1259,74 @@ def generate_with_tools(
         assistant_tool_call_entries: list[dict[str, Any]] = []
         tool_result_messages: list[dict[str, Any]] = []
         for idx, pc in enumerate(parsed_calls):
-            result_obj = client.call_tool(
-                pc["name"],
-                pc.get("arguments", {}),
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role=user_role,
-                granted_purposes=granted_purposes or [],
-                iteration=iteration,
-            )
-            result = result_obj.result
             call_id = f"call_{iteration}_{idx}"
+            _emit(
+                {
+                    "type": "tool_call.started",
+                    "call_id": call_id,
+                    "name": pc["name"],
+                    "arguments": pc.get("arguments", {}),
+                    "iteration": iteration,
+                }
+            )
+            call_t0 = time.perf_counter()
+            try:
+                result_obj = client.call_tool(
+                    pc["name"],
+                    pc.get("arguments", {}),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    user_role=user_role,
+                    granted_purposes=granted_purposes or [],
+                    iteration=iteration,
+                )
+                result = result_obj.result
+                ok = bool(getattr(result_obj, "ok", True))
+            except Exception as exc:
+                logger.exception("tool dispatch raised for %s", pc.get("name"))
+                _emit(
+                    {
+                        "type": "tool_call.error",
+                        "call_id": call_id,
+                        "name": pc["name"],
+                        "error": str(exc),
+                        "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
+                    }
+                )
+                result = {"ok": False, "error": str(exc)}
+                ok = False
+            elapsed_ms = (time.perf_counter() - call_t0) * 1000
+            # Phase 4: HITL hook — tools with requires_confirmation=True
+            # return ``submitted=False`` plus a ``proposal`` struct on the
+            # first invocation.  Surface this so the client can elicit
+            # approval before the server re-invokes with submit=True.
+            if (
+                isinstance(result, dict)
+                and result.get("submitted") is False
+                and result.get("proposal")
+            ):
+                proposal = result.get("proposal", {})
+                _emit(
+                    {
+                        "type": "tool_call.confirmation_required",
+                        "call_id": call_id,
+                        "name": pc["name"],
+                        "proposal": proposal,
+                        "idempotency_key": proposal.get("idempotency_key", ""),
+                        "iteration": iteration,
+                    }
+                )
+            _emit(
+                {
+                    "type": "tool_call.completed",
+                    "call_id": call_id,
+                    "name": pc["name"],
+                    "ok": ok,
+                    "result_summary": _summarise_tool_result(result),
+                    "elapsed_ms": round(elapsed_ms, 2),
+                    "iteration": iteration,
+                }
+            )
             tool_calls_made.append(
                 {
                     "id": call_id,
@@ -1241,6 +1372,14 @@ def generate_with_tools(
         max_iterations,
         len(tool_calls_made),
     )
+    _emit(
+        {
+            "type": "iteration.final",
+            "iterations": max_iterations,
+            "truncated": True,
+            "tool_call_count": len(tool_calls_made),
+        }
+    )
     return {
         "text": _strip_tool_calls(last_response)
         or "I wasn't able to produce a complete answer within the tool-call budget.",
@@ -1248,3 +1387,27 @@ def generate_with_tools(
         "iterations": max_iterations,
         "truncated": truncated,
     }
+
+
+def _summarise_tool_result(result: Any) -> str:
+    """Compact, UI-safe summary of a tool result (no raw payload leaks).
+
+    The full result still flows to the model; this is purely for the
+    agent-trace event surface that the WS client renders.  Keep it short
+    and ASCII-friendly.
+    """
+    if result is None:
+        return "<empty>"
+    if isinstance(result, dict):
+        if "error" in result:
+            return f"error: {str(result['error'])[:120]}"
+        # Common URA tool keys, in priority order
+        for key in ("summary", "message", "human_readable", "answer"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                return value[:200]
+        return f"ok ({len(result)} fields)"
+    if isinstance(result, (list, tuple)):
+        return f"list[{len(result)}]"
+    text = str(result)
+    return text[:200] if text else "<empty>"
