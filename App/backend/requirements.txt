@@ -34,6 +34,20 @@ numpy>=2.4.4,<3
 pymupdf4llm>=0.0.17
 pymupdf>=1.25.3
 
+# Document attachment analysis (POST /v1/documents/analyze) — DOCX/XLSX
+# extraction plus multipart form parsing for the upload endpoint. All
+# import sites are lazy + ImportError-guarded, matching the app's
+# graceful-degradation pattern.
+python-docx>=1.1.2
+openpyxl>=3.1.5
+python-multipart>=0.0.18
+
+# PDF report generation (pdf_export.py: /v1/export/* and
+# /v1/documents/{id}/report) + image-attachment decoding. Previously
+# undeclared — PDF export only worked where fpdf2 happened to be installed.
+fpdf2>=2.8
+Pillow>=10.4
+
 # LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch)
 transformers>=4.46.0
 torch==2.12.1

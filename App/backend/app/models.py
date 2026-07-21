@@ -1,8 +1,8 @@
 """Pydantic v2 request/response models for the URA Chatbot API."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -18,6 +18,11 @@ class ChatRequest(BaseModel):
     top_k: int = Field(4, ge=1, le=10, description="Number of passages to retrieve")
     locale: str = Field(
         "en", pattern=r"^[a-z]{2}(-[A-Z]{2})?$", description="ISO 639-1 locale (e.g. en, lg)"
+    )
+    attachment_ids: list[Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Ids of analysed documents (POST /v1/documents/analyze) to ground this turn",
     )
 
 
@@ -355,6 +360,57 @@ class ExportTaxSummaryRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Document attachments
+# ---------------------------------------------------------------------------
+class DocumentFields(BaseModel):
+    """URA-specific fields extracted from an attached document."""
+
+    tins: list[str] = Field(default_factory=list, description="Uganda TIN numbers found")
+    amounts: list[str] = Field(default_factory=list, description="UGX currency amounts found")
+    dates: list[str] = Field(default_factory=list, description="Date strings found")
+    references: list[str] = Field(
+        default_factory=list, description="URA reference/assessment numbers found"
+    )
+
+
+class DocumentTableSummary(BaseModel):
+    """Compact summary of one table or spreadsheet sheet."""
+
+    name: str
+    rows: int = Field(0, ge=0)
+    cols: int = Field(0, ge=0)
+    headers: list[str] = Field(default_factory=list)
+    numeric_totals: dict[str, float] = Field(
+        default_factory=dict, description="Per-column totals for numeric columns"
+    )
+
+
+class DocumentAnalysisResponse(BaseModel):
+    """Result of POST /v1/documents/analyze."""
+
+    document_id: str = Field(..., description="Opaque id used in chat attachment_ids")
+    filename: str
+    kind: str = Field(..., description="pdf | docx | xlsx | csv | image | text")
+    size_bytes: int = Field(0, ge=0)
+    doc_type: str = Field(
+        "generic",
+        description=(
+            "receipt | tin_card | assessment | customs_declaration | "
+            "filing_form | invoice | generic"
+        ),
+    )
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Classification confidence")
+    matched_keywords: list[str] = Field(default_factory=list)
+    fields: DocumentFields = Field(default_factory=DocumentFields)
+    tables: list[DocumentTableSummary] = Field(default_factory=list)
+    text_preview: str = Field("", description="First characters of the extracted text")
+    truncated: bool = Field(False, description="Whether extracted text was truncated")
+    summary: str = Field("", description="Heuristic analysis summary")
+    warnings: list[str] = Field(default_factory=list)
+    expires_in_seconds: int = Field(0, ge=0, description="TTL until the document is purged")
+
+
+# ---------------------------------------------------------------------------
 # System
 # ---------------------------------------------------------------------------
 class HealthResponse(BaseModel):
@@ -497,3 +553,68 @@ class VoiceVisionChatResponse(BaseModel):
     tts_latency_s: float = 0.0
     total_latency_s: float = 0.0
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare relay (internal-only; see /internal/cf-relay/* in main.py)
+# ---------------------------------------------------------------------------
+class CFRelayEmbedRequest(BaseModel):
+    """Forwarded Workers AI embedding request.
+
+    No ``model`` field on purpose: this relay exists solely for the
+    dense-retrieval fallback, which always embeds with the same model
+    (``@cf/baai/bge-m3``, hardcoded server-side in main.py). Accepting a
+    caller-supplied model string would let request data influence the
+    Cloudflare URL this process builds — a partial-SSRF shape CodeQL flags
+    even with a regex constraint, since a pattern isn't a real allowlist.
+    ``extra="forbid"`` so a ``model`` field in the request body is rejected
+    outright rather than silently ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    texts: list[str] = Field(..., min_length=1, max_length=32)
+
+
+class CFRelayVectorizeQueryRequest(BaseModel):
+    """Forwarded Vectorize query request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vector: list[float] = Field(..., min_length=1, max_length=4096)
+    top_k: int = Field(10, ge=1, le=50)
+    vector_filter: dict[str, Any] | None = None
+
+
+class CFRelayChatMessage(BaseModel):
+    """One chat-completion message, forwarded to Workers AI verbatim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(..., max_length=16_000)
+
+
+class CFRelayChatRequest(BaseModel):
+    """Forwarded Workers AI chat-completion request.
+
+    ``model_slot`` names a slot in ``routing.CHAT_MODEL_SLOTS``
+    (primary/fallback/fallback2 — the same cloud-primary chain this
+    deployment already trusts, see service._llm_cloud_fallback), never a raw
+    model string. Unlike the embed relay this endpoint genuinely needs to
+    select between a few different models, so it can't just drop the field
+    the way CFRelayEmbedRequest does — but a ``str`` field checked in a
+    ``field_validator`` still reads as tainted to CodeQL's dataflow analysis
+    (a validator is arbitrary code to it, not a proven sanitizer, the same
+    problem a regex ``Field(pattern=)`` had on the embed relay). A
+    ``Literal`` of slot NAMES resolved through a fixed dict in main.py is the
+    pattern it recognizes as safe: the value that ever reaches the outbound
+    Cloudflare URL always comes from ``routing.py``, never from this field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[CFRelayChatMessage] = Field(..., min_length=1, max_length=64)
+    model_slot: Literal["primary", "fallback", "fallback2"]
+    max_tokens: int = Field(512, ge=1, le=2048)
+    temperature: float = Field(0.2, ge=0.0, le=2.0)

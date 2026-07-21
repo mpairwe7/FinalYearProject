@@ -208,7 +208,7 @@ class InputGuard:
                 logger.warning(
                     "Prompt injection blocked: pattern=%s input=%s",
                     pattern.pattern[:60],
-                    text[:80],
+                    text[:80].replace("\r", "\\r").replace("\n", "\\n"),
                 )
                 return GuardResult(
                     allowed=False,
@@ -225,7 +225,7 @@ class InputGuard:
                 logger.warning(
                     "Harmful intent blocked: pattern=%s input=%s",
                     pattern.pattern[:60],
-                    text[:80],
+                    text[:80].replace("\r", "\\r").replace("\n", "\\n"),
                 )
                 return GuardResult(
                     allowed=False,
