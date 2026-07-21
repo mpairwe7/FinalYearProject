@@ -2,6 +2,7 @@ import React from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import Providers from "../../components/Providers";
+import ThemeToggle from "../../components/ThemeToggle";
 
 export const metadata: Metadata = {
   title: "URA Chatbot — Analytics Dashboard",
@@ -15,6 +16,7 @@ export default function AnalyticsLayout({ children }: { children: React.ReactNod
         <Link href="/analytics" className="nav-link">Overview</Link>
         <Link href="/analytics/evaluation" className="nav-link">Evaluation</Link>
         <Link href="/" className="nav-link nav-back">Back to Chat</Link>
+        <ThemeToggle />
       </nav>
       <Providers>{children}</Providers>
     </>

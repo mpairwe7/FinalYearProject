@@ -39,7 +39,8 @@ _FY2025_26_RATES = {
         (235_000, 335_000, 0.10, 0),
         (335_000, 410_000, 0.20, 10_000),
         (410_000, 10_000_000, 0.30, 25_000),
-        (10_000_000, float("inf"), 0.40, 2_902_500),
+        # flat = 25,000 + 30% x (10,000,000 - 410,000) per ITA Third Schedule
+        (10_000_000, float("inf"), 0.40, 2_902_000),
     ],
     # Non-resident PAYE rates (simpler, flat brackets)
     "paye_bands_non_resident": [
@@ -53,6 +54,9 @@ _FY2025_26_RATES = {
     "rental_tax_individual": 0.12,  # 12% on gross rental income above 2.82M p.a.
     "rental_tax_individual_threshold": 2_820_000,
     "rental_tax_company": 0.30,
+    # Companies may deduct expenses up to 50% of gross rental income
+    # (Income Tax (Amendment) Act 2022, s.22(1)(c)).
+    "rental_company_expense_cap": 0.50,
     "withholding_services": 0.06,
     "withholding_goods": 0.06,
     "withholding_management_fees": 0.15,
@@ -491,6 +495,201 @@ class CustomsDutyCalculator(Tool):
 
 
 # ---------------------------------------------------------------------------
+# Rental income tax calculator
+# ---------------------------------------------------------------------------
+class RentalIncomeTaxCalculator(Tool):
+    """Compute annual rental income tax for individuals or companies."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="calculate_rental_tax",
+            description=(
+                "Calculate annual rental income tax in Uganda. Individuals "
+                "pay 12% of gross rental income above the UGX 2,820,000 "
+                "annual threshold; companies pay 30% of chargeable rental "
+                "income after deductible expenses (capped at 50% of gross "
+                "rent). Use when the user asks about tax on rent they "
+                "collect from tenants."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "landlord_type": {
+                        "type": "string",
+                        "enum": ["individual", "company"],
+                        "description": "Whether the landlord is an individual or a company.",
+                        "default": "individual",
+                    },
+                    "annual_gross_rent": {
+                        "type": "number",
+                        "description": "Total gross rental income for the year in UGX.",
+                    },
+                    "allowable_expenses": {
+                        "type": "number",
+                        "description": (
+                            "Company landlords only: deductible expenses in UGX "
+                            "(capped at 50% of gross rent). Ignored for individuals."
+                        ),
+                        "default": 0,
+                    },
+                    "fiscal_year": {
+                        "type": "string",
+                        "description": "FY identifier, e.g. 'FY2025-26'.",
+                    },
+                },
+                "required": ["annual_gross_rent"],
+            },
+            risk="low",
+        )
+
+    def execute(
+        self,
+        annual_gross_rent: float,
+        landlord_type: str = "individual",
+        allowable_expenses: float = 0,
+        fiscal_year: str = "FY2025-26",
+    ) -> dict[str, Any]:
+        rates = _get_rates(fiscal_year)
+        rent = float(annual_gross_rent)
+        if rent < 0:
+            return {"ok": False, "error": "annual_gross_rent must be non-negative"}
+
+        if landlord_type == "company":
+            cap = rates["rental_company_expense_cap"]
+            expenses = min(max(float(allowable_expenses), 0.0), rent * cap)
+            chargeable = rent - expenses
+            rate = rates["rental_tax_company"]
+            tax = chargeable * rate
+            return {
+                "ok": True,
+                "landlord_type": landlord_type,
+                "annual_gross_rent": round(rent, 2),
+                "allowable_expenses": round(expenses, 2),
+                "chargeable_income": round(chargeable, 2),
+                "rate": rate,
+                "tax": round(tax, 2),
+                "fiscal_year": fiscal_year,
+                "explanation": (
+                    f"Company rental tax at {rate * 100:.0f}% on chargeable income of "
+                    f"UGX {chargeable:,.2f} (gross rent UGX {rent:,.2f} minus deductible "
+                    f"expenses UGX {expenses:,.2f}, capped at {cap * 100:.0f}% of gross) "
+                    f"= UGX {tax:,.2f}."
+                ),
+            }
+
+        threshold = rates["rental_tax_individual_threshold"]
+        rate = rates["rental_tax_individual"]
+        taxable = max(rent - threshold, 0.0)
+        tax = taxable * rate
+        return {
+            "ok": True,
+            "landlord_type": "individual",
+            "annual_gross_rent": round(rent, 2),
+            "threshold": threshold,
+            "taxable_amount": round(taxable, 2),
+            "rate": rate,
+            "tax": round(tax, 2),
+            "fiscal_year": fiscal_year,
+            "explanation": (
+                f"Individual rental tax is {rate * 100:.0f}% of gross rent above the "
+                f"UGX {threshold:,.0f} annual threshold: {rate * 100:.0f}% x "
+                f"UGX {taxable:,.2f} = UGX {tax:,.2f}."
+                if taxable > 0
+                else (
+                    f"Gross rent of UGX {rent:,.2f} is within the UGX "
+                    f"{threshold:,.0f} annual threshold, so no rental tax is due."
+                )
+            ),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Withholding tax calculator
+# ---------------------------------------------------------------------------
+class WithholdingTaxCalculator(Tool):
+    """Compute withholding tax on common payment types."""
+
+    _RATE_KEYS = {
+        "services": "withholding_services",
+        "goods": "withholding_goods",
+        "management_fees": "withholding_management_fees",
+        "dividend": "withholding_dividend",
+    }
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="calculate_withholding",
+            description=(
+                "Calculate withholding tax (WHT) deducted at source on a "
+                "payment in Uganda: 6% on services and goods, 15% on "
+                "management fees and dividends. Use when the user asks how "
+                "much tax is withheld from a payment, invoice, or dividend."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "payment_type": {
+                        "type": "string",
+                        "enum": ["services", "goods", "management_fees", "dividend"],
+                        "description": "The kind of payment the WHT applies to.",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "Gross payment amount in UGX before withholding.",
+                    },
+                    "fiscal_year": {
+                        "type": "string",
+                        "description": "FY identifier, e.g. 'FY2025-26'.",
+                    },
+                },
+                "required": ["payment_type", "amount"],
+            },
+            risk="low",
+        )
+
+    def execute(
+        self,
+        payment_type: str,
+        amount: float,
+        fiscal_year: str = "FY2025-26",
+    ) -> dict[str, Any]:
+        rates = _get_rates(fiscal_year)
+        rate_key = self._RATE_KEYS.get(payment_type)
+        if rate_key is None:
+            return {
+                "ok": False,
+                "error": (
+                    f"Unknown payment_type '{payment_type}'. "
+                    f"Choose one of: {', '.join(sorted(self._RATE_KEYS))}"
+                ),
+            }
+        gross = float(amount)
+        if gross < 0:
+            return {"ok": False, "error": "amount must be non-negative"}
+
+        rate = rates[rate_key]
+        wht = gross * rate
+        net = gross - wht
+        label = payment_type.replace("_", " ")
+        return {
+            "ok": True,
+            "payment_type": payment_type,
+            "amount": round(gross, 2),
+            "rate": rate,
+            "withholding_tax": round(wht, 2),
+            "net_payable": round(net, 2),
+            "fiscal_year": fiscal_year,
+            "explanation": (
+                f"Withholding tax on {label} at {rate * 100:.0f}% of "
+                f"UGX {gross:,.2f} is UGX {wht:,.2f}; the payee receives "
+                f"UGX {net:,.2f} net."
+            ),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Register everything on import
 # ---------------------------------------------------------------------------
 ToolRegistry.register(VATCalculator())
@@ -498,3 +697,5 @@ ToolRegistry.register(PAYECalculator())
 ToolRegistry.register(CorporationTaxCalculator())
 ToolRegistry.register(CapitalGainsCalculator())
 ToolRegistry.register(CustomsDutyCalculator())
+ToolRegistry.register(RentalIncomeTaxCalculator())
+ToolRegistry.register(WithholdingTaxCalculator())

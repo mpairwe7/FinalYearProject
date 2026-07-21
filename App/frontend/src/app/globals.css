@@ -42,11 +42,12 @@
   --border-2:    rgba(255, 255, 255, 0.16);
   --border-glow: rgba(249, 199, 79, 0.45);
 
-  /* Text hierarchy (WCAG AAA on --bg-0) */
+  /* Text hierarchy (WCAG AA+ on --bg-0/--bg-1; #6B7280 measured 3.9–4.1:1
+     as body text on the dark surfaces — below the 4.5:1 AA minimum) */
   --text-0:      #F8F9FA;
   --text-1:      #E4E5E9;
   --text-2:      #9CA3AF;
-  --text-3:      #6B7280;
+  --text-3:      #848D9C;
 
   /* ── URA Official Palette ── */
   --ura-blue:         #003087;
@@ -57,6 +58,8 @@
   --ura-teal:         #00A88F;
   --ura-teal-light:   #2EC4A8;
   --accent:           var(--ura-gold);
+  /* Data/analytics accent — bright on dark, deep blue on light (overridden below). */
+  --accent-data:      var(--ura-blue-bright);
 
   /* Gradients */
   --grad-primary:      linear-gradient(135deg, #003087 0%, #005BA0 50%, #00A88F 100%);
@@ -107,6 +110,61 @@
   --chat-dock-height: 92px;
   --keyboard-inset: 0px;
 }
+
+/* -----------------------------------------------------------------------------
+   Light theme — applied via data-theme="light" on <html>, set before paint by
+   the layout init script. The preference is Auto / Light / Dark; "auto" resolves
+   to the OS scheme. Overrides the dark tokens; the URA blue/gold/teal is kept.
+   -------------------------------------------------------------------------- */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-0:        #F5F7FA;
+  --bg-1:        #FFFFFF;
+  --bg-2:        #FFFFFF;
+
+  /* Glass surfaces become translucent ink over the light canvas. */
+  --surface-1:   rgba(15, 23, 42, 0.025);
+  --surface-2:   rgba(15, 23, 42, 0.045);
+  --surface-3:   rgba(15, 23, 42, 0.07);
+  --surface-4:   rgba(15, 23, 42, 0.11);
+  --surface-ink: rgba(255, 255, 255, 0.82);
+
+  --border-0:    rgba(15, 23, 42, 0.08);
+  --border-1:    rgba(15, 23, 42, 0.12);
+  --border-2:    rgba(15, 23, 42, 0.18);
+
+  --text-0:      #0B1220;
+  --text-1:      #28303B;
+  --text-2:      #55606E;
+  --text-3:      #6B7480;
+
+  /* Deep blue accent for data UIs reads better than the bright on white. */
+  --accent-data: var(--ura-blue);
+
+  /* User bubble: a touch more gold so it reads on white. */
+  --grad-user:   linear-gradient(135deg, rgba(249, 199, 79, 0.34), rgba(249, 199, 79, 0.16));
+
+  /* Lighter, tighter shadows; hairline insets go dark. */
+  --shadow-sm:   0 1px 2px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --shadow-md:   0 6px 20px rgba(15, 23, 42, 0.10), 0 0 0 1px rgba(15, 23, 42, 0.05);
+  --shadow-lg:   0 16px 44px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.06);
+  --shadow-glow: 0 0 26px rgba(0, 48, 135, 0.14);
+}
+
+/* Softer, lighter gradient mesh on the light canvas. */
+:root[data-theme="light"] body::before {
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 10%, rgba(0, 48, 135, 0.08), transparent 60%),
+    radial-gradient(ellipse 50% 45% at 80% 30%, rgba(0, 168, 143, 0.07), transparent 55%),
+    radial-gradient(ellipse 55% 40% at 50% 95%, rgba(249, 199, 79, 0.06), transparent 60%),
+    linear-gradient(180deg, var(--bg-0) 0%, #EEF2F7 50%, var(--bg-0) 100%);
+}
+/* The overlay-blend noise reads as grime on a light canvas — drop it. */
+:root[data-theme="light"] body::after { opacity: 0; }
+
+:root[data-theme="light"] a { color: var(--ura-blue); }
+:root[data-theme="light"] a:hover { color: var(--ura-teal); }
 
 /* -----------------------------------------------------------------------------
    Reset + base
@@ -394,7 +452,7 @@ main.legacy-layout {
   scroll-padding-bottom: calc(var(--chat-dock-height, 92px) + 1rem);
   display: flex;
   flex-direction: column;
-  gap: clamp(0.65rem, 2vw, 1rem);
+  gap: clamp(1rem, 2.5vw, 1.6rem);
   padding: 0.25rem 0.5rem 0.25rem 0.25rem;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
@@ -403,6 +461,20 @@ main.legacy-layout {
 .messages-end-spacer {
   height: 1px;
   flex: 0 0 auto;
+}
+
+/* Screen-reader-only (visually hidden but announced) — used for per-message
+   role labels now that they're no longer shown visually. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .msg-content {
@@ -484,20 +556,19 @@ main.legacy-layout {
   background: var(--grad-user);
   border-color: rgba(249, 199, 79, 0.22);
   color: var(--text-0);
+  /* Subtle "tail" toward the avatar — modern asymmetric speech-bubble. */
+  border-bottom-right-radius: var(--radius-xs);
 }
+/* Assistant replies are bubble-less (2026 chat-app convention): full-width
+   text flowing beside the avatar, no box/border/shadow — cleaner and easier to
+   read for long, markdown-rich answers. */
 .bubble.assistant {
-  background: rgba(0, 48, 135, 0.06);
-  border-color: rgba(0, 48, 135, 0.18);
-}
-
-.bubble-role {
-  display: block;
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  margin-bottom: 0.35rem;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  padding: 0.1rem 0 0.05rem;
+  font-size: 0.97rem;
+  line-height: 1.72;
 }
 
 /* -----------------------------------------------------------------------------
@@ -559,6 +630,17 @@ main.legacy-layout {
   line-height: 1.55;
   opacity: 0.85;
 }
+
+/* Clickable citation source → official URA portal */
+.cite-source-link {
+  color: var(--ura-gold-muted);
+  text-decoration: underline;
+  text-decoration-color: rgba(249, 199, 79, 0.3);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 150ms ease;
+}
+.cite-source-link:hover { text-decoration-color: var(--ura-gold); }
+.cite-source-link strong { color: inherit; font-weight: 600; }
 
 /* -----------------------------------------------------------------------------
    Voice controls (hero area)
@@ -637,13 +719,23 @@ main.legacy-layout {
    Bubble actions (listen + feedback row)
    -------------------------------------------------------------------------- */
 .bubble-actions {
-  margin-top: 0.65rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--border-0);
+  margin-top: 0.55rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  /* Quiet until the message is hovered/focused (revealed below) — keeps the
+     transcript clean. Always shown on touch + when a reply is playing. */
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.message-row:hover .bubble-actions,
+.message-row:focus-within .bubble-actions,
+.bubble-actions:has(.listen-btn-active) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .bubble-actions { opacity: 1; }
 }
 .bubble-actions .feedback-container {
   margin-top: 0;
@@ -651,7 +743,8 @@ main.legacy-layout {
   border-top: 0;
 }
 
-.listen-btn {
+.listen-btn,
+.copy-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -670,13 +763,15 @@ main.legacy-layout {
   transition: all 180ms ease;
   white-space: nowrap;
 }
-.listen-btn:hover:not(:disabled) {
+.listen-btn:hover:not(:disabled),
+.copy-btn:hover:not(:disabled) {
   background: var(--surface-3);
   border-color: var(--border-2);
   color: var(--text-0);
   transform: translateY(-1px);
 }
-.listen-btn:active:not(:disabled) {
+.listen-btn:active:not(:disabled),
+.copy-btn:active:not(:disabled) {
   background: var(--surface-4);
   transform: scale(0.97);
 }
@@ -684,6 +779,16 @@ main.legacy-layout {
   opacity: 0.45;
   cursor: default;
   transform: none;
+}
+/* Copy: brief success state (green check). */
+.copy-btn.copied {
+  background: rgba(52, 211, 153, 0.14);
+  border-color: rgba(52, 211, 153, 0.45);
+  color: var(--success);
+}
+.copy-btn.copied:hover {
+  background: rgba(52, 211, 153, 0.20);
+  color: var(--success);
 }
 
 .listen-btn-active {
@@ -718,8 +823,19 @@ main.legacy-layout {
   color: rgba(253, 224, 71, 0.95);
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.45rem;
 }
+
+/* Tappable URA contact line shown when human review is recommended */
+.escalation-contacts {
+  flex-basis: 100%;
+  margin-top: 0.3rem;
+  font-size: 0.82em;
+  line-height: 1.7;
+  color: rgba(253, 224, 71, 0.88);
+}
+.escalation-contacts .md-link { white-space: nowrap; }
 
 /* -----------------------------------------------------------------------------
    Composer (floating input)
@@ -847,6 +963,114 @@ main.legacy-layout {
 .composer-circle-btn:focus-visible {
   outline: 2px solid var(--ura-gold);
   outline-offset: 2px;
+}
+
+/* ── Composer attachments (documents) ── */
+.attachment-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.attach-circle-btn {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.attach-circle-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text-0);
+}
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.3rem 0.55rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
+  font-size: 0.78rem;
+  color: var(--text-1);
+}
+.attachment-chip > svg {
+  flex-shrink: 0;
+  color: var(--ura-gold);
+}
+.attachment-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.attachment-meta {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.attachment-chip-error { border-color: rgba(239, 68, 68, 0.55); }
+.attachment-chip-error .attachment-meta { color: #F87171; }
+.attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.attachment-remove:hover {
+  background: var(--surface-3);
+  color: var(--text-0);
+}
+.attachment-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Chips echoed on sent user messages + per-document report download */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.attachment-chip-sent { background: var(--surface-ink); }
+.attachment-report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-xl);
+  background: var(--surface-2);
+  color: var(--ura-gold);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.attachment-report-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text-0);
+}
+.attachment-report-btn:disabled { opacity: 0.6; cursor: wait; }
+.attachment-report-btn:focus-visible,
+.attachment-remove:focus-visible {
+  outline: 2px solid var(--ura-gold);
+  outline-offset: 1px;
 }
 
 /* ── Composer recording state (Grok-inspired inline waveform) ── */
@@ -1556,7 +1780,10 @@ main.legacy-layout {
    -------------------------------------------------------------------------- */
 .consent-banner {
   position: fixed;
-  bottom: 1.5rem;
+  /* Anchored just below the header so it never covers the composer (chat) or
+     the suggested prompts (landing), which both sit toward the bottom. */
+  top: calc(env(safe-area-inset-top, 0px) + 4.5rem);
+  bottom: auto;
   left: 50%;
   transform: translateX(-50%);
   z-index: 800;
@@ -2396,7 +2623,7 @@ main.legacy-layout {
   to   { opacity: 1; }
 }
 @keyframes consent-enter {
-  from { opacity: 0; transform: translate(-50%, 10px); }
+  from { opacity: 0; transform: translate(-50%, -10px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
@@ -2580,14 +2807,11 @@ summary {
   }
   .message-row-assistant .bubble,
   .bubble.assistant {
-    max-width: min(100%, 640px);
-    border-bottom-left-radius: 6px;
-    background: rgba(255, 255, 255, 0.035);
-    border-color: rgba(255, 255, 255, 0.055);
+    max-width: 100%;
+    background: transparent;
+    border-color: transparent;
     box-shadow: none;
-  }
-  .bubble-role {
-    display: none;
+    padding: 0.1rem 0;
   }
   .md-body {
     font-size: 0.94rem;
