@@ -148,7 +148,14 @@ function ConversationRailInner({
           />
         </div>
 
-        <div className="rail-list" role="list" aria-label="Conversation threads">
+        {/* role="list" requires rendered listitem children (WCAG 1.3.1 /
+            axe aria-required-children), so drop the role when only the
+            empty-state placeholder is shown. */}
+        <div
+          className="rail-list"
+          role={grouped.length > 0 ? 'list' : undefined}
+          aria-label={grouped.length > 0 ? 'Conversation threads' : undefined}
+        >
           {grouped.map(([group, items]) => (
             <div key={group} className="rail-group">
               <div className="rail-group-label">{group}</div>

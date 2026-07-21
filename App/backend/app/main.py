@@ -25,6 +25,7 @@ from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
 
 from . import database as db
+from . import documents
 from .analytics import AnalyticsMiddleware, metrics
 from .authority import authority_required, get_authority_status
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
@@ -34,11 +35,15 @@ from .models import (
     AnalyticsEvent,
     BatchClassifyRequest,
     BatchClassifyResponse,
+    CFRelayChatRequest,
+    CFRelayEmbedRequest,
+    CFRelayVectorizeQueryRequest,
     ChatRequest,
     ChatResponse,
     Citation,
     ClassifyRequest,
     ClassifyResponse,
+    DocumentAnalysisResponse,
     ExportConversationRequest,
     ExportTaxSummaryRequest,
     FAQResponse,
@@ -88,6 +93,11 @@ _APP_LOGGER.propagate = False
 # ---------------------------------------------------------------------------
 _INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105
 
+# Wall-clock budget for the batch /v1/voice/chat pipeline. Once spent, the
+# reply-TTS leg is skipped (tts_skipped=True) so the text reply still beats
+# the deployment's gateway timeout; the client narrates via /v1/tts instead.
+VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
+
 
 def _truthy_env(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).lower() in ("1", "true", "yes", "on")
@@ -131,6 +141,37 @@ def _validate_production_env() -> None:
     for flag_name in ("auth_required", "multi_tenant", "audit_ledger"):
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
+
+    # Cloudflare/Gemini fallbacks: if the flag is explicitly on, the credentials
+    # it needs must be present (otherwise the fallback silently no-ops in prod).
+    # NB: use an explicit-on check (not _production_flag_enabled, which treats
+    # "unset" as on — that semantics is only for must-be-on security flags).
+    if os.getenv("FLAG_CLOUDFLARE_FALLBACK", "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from .providers import config as _cloud_cfg
+
+            if not _cloud_cfg.is_cloudflare_configured():
+                errors.append(
+                    "FLAG_CLOUDFLARE_FALLBACK=true but Cloudflare is not fully configured "
+                    "(need CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_AIG_GATEWAY, CF_AIG_TOKEN)."
+                )
+            if (
+                os.getenv("DENSE_FALLBACK_BACKEND", "").strip().lower() == "workers_ai"
+                and not _cloud_cfg.is_vectorize_configured()
+            ):
+                errors.append("DENSE_FALLBACK_BACKEND=workers_ai requires VECTORIZE_INDEX.")
+            gemini_used = (
+                os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower() == "gemini"
+                or os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() == "gemini"
+            )
+            if gemini_used and not _cloud_cfg.is_gemini_configured():
+                errors.append(
+                    "A *_FALLBACK_BACKEND=gemini is set but GEMINI_API_KEY (+ AI Gateway) is missing."
+                )
+        except Exception:
+            errors.append(
+                "FLAG_CLOUDFLARE_FALLBACK=true but the providers package failed to import."
+            )
 
     # CORS must not be localhost in production
     cors = os.getenv("CORS_ORIGINS", "")
@@ -188,8 +229,36 @@ def _validate_production_env() -> None:
     if index_key in ("", "dev-index-key"):
         errors.append("INDEX_API_KEY must be a strong non-dev operator token in production.")
 
-    if os.getenv("QDRANT_URL") and not os.getenv("QDRANT_API_KEY"):
+    # P0-4: vectors must live in an external/managed Qdrant, not the ephemeral
+    # in-container default that is wiped on restart.
+    qdrant_url = os.getenv("QDRANT_URL", "")
+    if not qdrant_url:
+        errors.append(
+            "QDRANT_URL must point at an external/managed Qdrant in production "
+            "(the in-container default is not durable)."
+        )
+    elif any(h in qdrant_url for h in ("localhost", "127.0.0.1", "[::1]")):
+        errors.append(
+            "QDRANT_URL must not be localhost in production — use an external/managed Qdrant."
+        )
+    if qdrant_url and not os.getenv("QDRANT_API_KEY"):
         errors.append("QDRANT_API_KEY must be set when QDRANT_URL is configured in production.")
+
+    # P0-4: the audit ledger and conversation memory are SQLite-backed via
+    # ANALYTICS_DB_DIR even when analytics use Postgres, so that directory MUST
+    # be a mounted persistent volume — otherwise the tamper-evident audit trail
+    # and user memory are wiped on every container restart.
+    data_dir = os.getenv("ANALYTICS_DB_DIR", "")
+    if not data_dir:
+        errors.append(
+            "ANALYTICS_DB_DIR must be set to a mounted persistent volume in production "
+            "(the SQLite-backed audit ledger and memory are otherwise lost on restart)."
+        )
+    elif not os.path.isabs(data_dir) or data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):  # nosec B108 ephemeral-dir denylist, not temp-file creation  # noqa: S108
+        errors.append(
+            "ANALYTICS_DB_DIR must be an absolute path on a persistent volume in production "
+            f"(got {data_dir!r}; ephemeral or relative paths are not durable)."
+        )
 
     for redis_env in ("REDIS_URL", "SLOWAPI_STORAGE_URI"):
         redis_url = os.getenv(redis_env, "")
@@ -214,6 +283,14 @@ def _validate_production_env() -> None:
             "WS_CONFIRM_HMAC_SECRET must be set in production when FLAG_WS_CHAT=true "
             "(per-process random fallback is not safe across replicas)."
         )
+    # P1-9: voice sockets spin up ASR/TTS/LLM work per connection and must
+    # likewise never serve anonymous traffic in production.
+    for _voice_flag in ("native_voice", "voice_streaming"):
+        if _production_flag_enabled(_voice_flag) and not _production_flag_enabled("auth_required"):
+            errors.append(
+                f"FLAG_{_voice_flag.upper()}=true requires FLAG_AUTH_REQUIRED=true in production "
+                "(anonymous voice WebSocket is not allowed)."
+            )
 
     if authority_required():
         authority = get_authority_status()
@@ -264,6 +341,18 @@ def _require_voice_processing_consent(request: Request, ctx: AuthContext) -> Non
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down the ChatModel singleton."""
+    # DNS-over-HTTPS workaround — must run BEFORE any outbound HTTPS (model
+    # init, retriever, Cloudflare fallback, vLLM). On Crane Cloud / RENU the pod
+    # has no working upstream DNS; this routes external hostname resolution
+    # through 1.1.1.1 over TCP/443. No-op unless USE_DOH=true (doh_resolver.py).
+    try:
+        from . import doh_resolver
+
+        if doh_resolver.is_enabled():
+            doh_resolver.activate()
+    except Exception:
+        logger.warning("DoH resolver activation skipped", exc_info=True)
+
     # Production safety gate — blocks startup on insecure config
     _validate_production_env()
 
@@ -497,6 +586,7 @@ def chat(
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
 
+    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
     result = model.generate(
         message=body.message,
         conversation_id=body.conversation_id,
@@ -508,6 +598,7 @@ def chat(
         tenant_id=ctx.tenant_id,
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
+        attachments=attachments or None,
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -531,9 +622,11 @@ def chat(
         db.log_conversation(
             session_id=session_id or None,
             conversation_id=result.get("conversation_id"),
+            user_id=ctx.user_id or "",
             user_message=_CM.redact_for_storage(body.message),
             bot_reply=_CM.redact_for_storage(result["reply"]),
             sources=json.dumps(result.get("sources", [])),
+            contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             confidence=confidence,
             topic_tag=topic_tag,
@@ -581,6 +674,7 @@ async def chat_stream(
 
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
+    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
 
     async def event_generator():
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
@@ -601,6 +695,7 @@ async def chat_stream(
             sentence_batching=True,  # SSE keeps historical behaviour
             user_role=getattr(ctx, "role", "public"),
             granted_purposes=getattr(ctx, "granted_purposes", []) or [],
+            attachments=attachments or None,
         ):
             if event_type == "_keepalive":
                 yield {
@@ -608,7 +703,7 @@ async def chat_stream(
                 }
                 continue
             if event_type == "_log":
-                _log_stream_conversation(body, session_id, payload)
+                _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
                 continue
             if event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
                 # Buffer for the agent_trace summary; do not forward live.
@@ -637,7 +732,12 @@ async def _sse_not_disconnected(request: Request) -> bool:
     return not (await request.is_disconnected())
 
 
-def _log_stream_conversation(body: ChatRequest, session_id: str, log_payload: dict[str, Any]) -> None:
+def _log_stream_conversation(
+    body: ChatRequest,
+    session_id: str,
+    log_payload: dict[str, Any],
+    user_id: str = "",
+) -> None:
     """Mirror the old SSE ``finally`` block — log to analytics DB."""
     from .service import ChatModel as _CM
 
@@ -651,7 +751,9 @@ def _log_stream_conversation(body: ChatRequest, session_id: str, log_payload: di
             user_message=_CM.redact_for_storage(body.message),
             bot_reply=_CM.redact_for_storage(full_reply),
             sources=json.dumps(result.get("sources", []) if result else []),
+            contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
+            user_id=user_id,
         )
     except Exception:
         logger.warning("Stream conversation logging failed", exc_info=True)
@@ -834,6 +936,97 @@ def export_tax_summary(
     )
 
 
+# ---------------------------------------------------------------------------
+# Document attachments (analysis + report)
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/v1/documents/analyze",
+    response_model=DocumentAnalysisResponse,
+    tags=["documents"],
+)
+@limiter.limit(_RATE_LIMIT)
+async def analyze_uploaded_document(
+    request: Request,
+    ctx: AuthContext = Depends(optional_user),
+) -> DocumentAnalysisResponse:
+    """Analyse an uploaded document (PDF, DOCX, XLSX, CSV, image, or text).
+
+    Accepts multipart/form-data with a single ``file`` part. Extracts text
+    and tables, classifies the document against the URA taxonomy, and pulls
+    URA-specific fields (TINs, UGX amounts, dates, references).
+
+    The returned ``document_id`` can be passed in chat ``attachment_ids``
+    to ground answers on the document, and used with
+    ``GET /v1/documents/{document_id}/report`` to download a PDF report.
+    Documents are held in memory only and expire after a TTL.
+    """
+    import asyncio
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or isinstance(upload, str):
+        raise HTTPException(status_code=422, detail="Missing 'file' part in form data")
+
+    data = await upload.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    if len(data) > documents.MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {documents.MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
+        )
+
+    session_id = request.headers.get("X-Session-ID", "")
+    try:
+        record = await asyncio.to_thread(
+            documents.analyze_document,
+            data,
+            upload.filename or "document",
+            upload.content_type or "",
+            session_id=session_id,
+            user_id=ctx.user_id or "",
+        )
+    except documents.UnsupportedDocumentError as err:
+        raise HTTPException(status_code=415, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+    metrics.inc("documents_analyzed_total")
+    return DocumentAnalysisResponse(**record.to_response_payload())
+
+
+@app.get("/v1/documents/{document_id}/report", tags=["documents"])
+@limiter.limit(_RATE_LIMIT)
+def document_report(
+    request: Request,
+    document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
+    _ctx: AuthContext = Depends(optional_user),
+) -> Response:
+    """Download the branded PDF analysis report for an analysed document."""
+    record = documents.get_document(
+        document_id, session_id=request.headers.get("X-Session-ID", "")
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found or expired")
+
+    # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
+    # on a runtime without fpdf2.
+    from .pdf_export import generate_document_report_pdf
+
+    pdf_bytes = generate_document_report_pdf(record.to_report_payload())
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="ura_document_report_{document_id[:8]}.pdf"'
+            ),
+        },
+    )
+
+
 @app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])
 def speech_health(
     request: Request,
@@ -991,26 +1184,43 @@ async def voice_chat(
             reply_text = mt_result.text
 
     # --- 5. TTS (synthesize reply in user's language) -------------------------
+    # Budget guard: on slow speech tiers (cloud Sunbird can take 30s+ per
+    # call) the four-stage pipeline can outlive the deployment's gateway
+    # timeout and the client receives a 504 with NOTHING — worse than a
+    # text-only reply. When the request has already burned the budget,
+    # return the text now (tts_skipped=True) and let the client fetch the
+    # narration as a separate single-leg /v1/tts request.
     tts_latency = 0.0
     tts_backend = ""
     audio_b64 = ""
     tts_sample_rate = 0
     tts_duration = 0.0
+    tts_skipped = False
     if tts_enabled and reply_text:
-        tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
-        tts_latency = tts_result.latency_s
-        tts_backend = tts_result.backend
-        tts_sample_rate = tts_result.sample_rate
-        tts_duration = tts_result.duration_s
-        metrics.inc("speech_tts_total")
-        if tts_result.latency_s:
-            metrics.observe("speech_tts_latency_s", tts_result.latency_s)
-        if tts_result.error:
-            metrics.inc("speech_tts_errors_total")
-            stage_errors.append(f"TTS: {tts_result.error}")
-            logger.warning("Voice chat TTS failed: %s", tts_result.error)
-        elif tts_result.audio:
-            audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
+        elapsed_s = time.perf_counter() - t_start
+        if elapsed_s > VOICE_CHAT_BUDGET_S:
+            tts_skipped = True
+            metrics.inc("speech_tts_skipped_total")
+            logger.info(
+                "Voice chat reply-TTS skipped: %.1fs elapsed exceeds %.0fs budget",
+                elapsed_s,
+                VOICE_CHAT_BUDGET_S,
+            )
+        else:
+            tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
+            tts_latency = tts_result.latency_s
+            tts_backend = tts_result.backend
+            tts_sample_rate = tts_result.sample_rate
+            tts_duration = tts_result.duration_s
+            metrics.inc("speech_tts_total")
+            if tts_result.latency_s:
+                metrics.observe("speech_tts_latency_s", tts_result.latency_s)
+            if tts_result.error:
+                metrics.inc("speech_tts_errors_total")
+                stage_errors.append(f"TTS: {tts_result.error}")
+                logger.warning("Voice chat TTS failed: %s", tts_result.error)
+            elif tts_result.audio:
+                audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
 
     total_latency = time.perf_counter() - t_start
     metrics.observe("speech_voice_chat_latency_s", total_latency)
@@ -1030,9 +1240,11 @@ async def voice_chat(
         db.log_conversation(
             session_id=session_id,
             conversation_id=chat_result.get("conversation_id") or conversation_id,
+            user_id=ctx.user_id or "",
             user_message=_CM.redact_for_storage(transcript),
             bot_reply=_CM.redact_for_storage(reply_text),
             sources=json.dumps(chat_result.get("sources", [])),
+            contexts=_CM.contexts_json(chat_result),
             response_time_ms=round(total_latency * 1000, 2),
         )
     except Exception:
@@ -1044,6 +1256,7 @@ async def voice_chat(
         conversation_id=chat_result.get("conversation_id") or conversation_id,
         reply=reply_text,
         reply_audio_base64=audio_b64,
+        tts_skipped=tts_skipped,
         sample_rate=tts_sample_rate,
         duration_s=tts_duration,
         sources=chat_result.get("sources", []),
@@ -1165,6 +1378,24 @@ def _require_ops_key(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Invalid or missing INDEX_API_KEY")
 
 
+def _require_relay_key(request: Request) -> None:
+    """Require the configured bearer token for the Cloudflare relay endpoints.
+
+    Deliberately a separate secret from ``INDEX_API_KEY`` — this endpoint lets
+    another deployment (e.g. the HF Space, when its own egress to Cloudflare
+    is blocked) make Cloudflare calls through this one, so it gets its own
+    credential rather than reusing an unrelated operator key.
+    """
+    from .providers.config import get_cloud_settings
+
+    secret = get_cloud_settings().cf_relay_secret.get_secret_value()
+    if not secret:
+        raise HTTPException(status_code=503, detail="CF_RELAY_SECRET not configured")
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {secret}":
+        raise HTTPException(status_code=403, detail="Invalid or missing relay credentials")
+
+
 def require_admin_access(
     request: Request,
 ) -> AuthContext:
@@ -1219,6 +1450,54 @@ def trigger_indexing(
     stats["retrieval_mode"] = "hybrid" if model._retriever_ready else "keyword"
 
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare relay — lets another deployment (e.g. the HF Space, when its own
+# egress to Cloudflare is blocked) make Vectorize/Workers AI calls through
+# this one. Requires ``Authorization: Bearer <CF_RELAY_SECRET>`` (a dedicated
+# secret, separate from the real Cloudflare token, which never leaves this
+# process — see providers/config.py). Deliberately narrow: these three ops are
+# exactly what dense-retrieval fallback and the cloud-primary LLM chain need
+# (embed the query, search Vectorize, run a chat completion) and nothing else
+# is exposed, so there is no open-ended forwarding surface to worry about.
+# ---------------------------------------------------------------------------
+@app.post("/internal/cf-relay/workers-ai-embed", include_in_schema=False)
+def cf_relay_workers_ai_embed(request: Request, body: CFRelayEmbedRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import gateway as _gw
+
+    # No caller-supplied model — always the retrieval embedding model
+    # (gateway.workers_ai_embed's own default); see CFRelayEmbedRequest.
+    vectors = _gw.workers_ai_embed(body.texts)
+    return {"vectors": vectors}
+
+
+@app.post("/internal/cf-relay/vectorize-query", include_in_schema=False)
+def cf_relay_vectorize_query(request: Request, body: CFRelayVectorizeQueryRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import vectorize as _vz
+
+    hits = _vz.vectorize_query(body.vector, top_k=body.top_k, vector_filter=body.vector_filter)
+    return {"hits": hits}
+
+
+@app.post("/internal/cf-relay/workers-ai-chat", include_in_schema=False)
+def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import gateway as _gw
+    from .providers import routing as _routing
+
+    # Resolve the slot to an actual model id via a fixed dict lookup — the
+    # string that reaches gateway.workers_ai_chat (and the Cloudflare URL it
+    # builds) always originates in routing.py, never in the request body.
+    # See CFRelayChatRequest for why this indirection exists.
+    model = _routing.CHAT_MODEL_SLOTS[body.model_slot]
+    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    text = _gw.workers_ai_chat(
+        messages, model, max_tokens=body.max_tokens, temperature=body.temperature
+    )
+    return {"text": text}
 
 
 # ---------------------------------------------------------------------------
@@ -1590,19 +1869,30 @@ def me_withdraw_consent(
         role=ctx.role,
     )
     withdrawn = {p: db.withdraw_consent(row["id"], p) for p in body.purposes}
+    # UDPA: withdrawal must cease processing — purge the personalization memory
+    # built under that consent (future reads are already consent-gated).
+    if "personalization" in body.purposes:
+        from .memory.service import get_memory_service
+
+        get_memory_service().forget_user(ctx.user.user_id)
     return {"user_id": row["id"], "withdrawn": withdrawn}
 
 
 @app.get("/v1/me/export", tags=["me"])
 def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
-    """UDPA 2019 data-portability export."""
+    """UDPA 2019 data-portability export — identity, profile, consents, chat
+    history (+ escalation tickets), and personalization memory facts."""
+    from .memory.service import get_memory_service
+
     row = db.upsert_user(
         external_id=ctx.user.user_id,
         tenant_id=ctx.tenant_id,
         email=ctx.user.email,
         role=ctx.role,
     )
-    return db.export_user_data(row["id"])
+    data = db.export_user_data(row["id"], external_id=ctx.user.user_id)
+    data["facts"] = get_memory_service().export_user(ctx.user.user_id)["facts"]
+    return data
 
 
 @app.delete("/v1/me", tags=["me"])
@@ -1619,7 +1909,10 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
         email=ctx.user.email,
         role=ctx.role,
     )
-    counts = db.delete_user_cascade(row["id"])
+    from .memory.service import get_memory_service
+
+    counts = db.delete_user_cascade(row["id"], external_id=ctx.user.user_id)
+    counts["memory"] = sum(get_memory_service().forget_user(ctx.user.user_id).values())
     return {"deleted": counts, "external_id": ctx.user.user_id}
 
 

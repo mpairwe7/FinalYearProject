@@ -42,9 +42,9 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from . import confirm_tokens
 from . import database as db
 from . import service as service_module
-from .auth.jwt_auth import JWTAuthError
+from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .flags import flags
-from .voice_ws_v2 import _resolve_ws_auth, _send_error, _send_json
+from .voice_ws_v2 import _send_error, _send_json
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +150,39 @@ def _release_socket_slot(user_key: str) -> None:
             _active_per_user[user_key] = current - 1
 
 
+def _resolve_ws_principal(
+    websocket: WebSocket, *, required: bool = False
+) -> tuple[str, str, str, list[str]]:
+    """Resolve ``(user_id, tenant_id, user_role, granted_purposes)`` from the socket.
+
+    Role and consent purposes are read **only** from the verified JWT — never
+    from a client frame — so a later ``tool_call.confirm`` re-authorizes the
+    submit against the real authenticated principal (P0-1).  Mirrors
+    :func:`voice_ws_v2._resolve_ws_auth` for token extraction; returns the
+    anonymous ``public`` principal when no token is present and auth is optional.
+    """
+    auth_header = websocket.headers.get("authorization", "")
+    token = ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = websocket.query_params.get("access_token", "")
+    if not token:
+        if required:
+            raise JWTAuthError("authentication required")
+        return "", "default", "public", []
+
+    claims = JWTVerifier().verify(token)
+    granted = claims.get("granted_purposes", [])
+    purposes = [str(p) for p in granted] if isinstance(granted, list) else []
+    return (
+        str(claims.get("sub", "")),
+        str(claims.get("tenant_id", "default")),
+        str(claims.get("role", "public")),
+        purposes,
+    )
+
+
 @dataclass
 class WsChatSession:
     """Phase 3 — connection-local state for a single WebSocket session.
@@ -164,6 +197,10 @@ class WsChatSession:
     user_id: str
     tenant_id: str
     locale: str
+    # Authenticated principal — resolved from the verified JWT at session_start,
+    # never from a client frame.  Used to re-authorize HITL tool confirmations.
+    user_role: str = "public"
+    granted_purposes: list[str] = field(default_factory=list)
     history: list[dict[str, str]] = field(default_factory=list)
     last_response_id: str = ""
     workflow_session: Any = None  # WorkflowSession when active; loaded lazily.
@@ -273,6 +310,8 @@ async def _run_response_create(
             request_id=request_id,
             user_id=session.user_id or None,
             tenant_id=session.tenant_id,
+            user_role=session.user_role,
+            granted_purposes=session.granted_purposes,
             should_continue=_alive,
             cancel_event=cancel_event,
             sentence_batching=False,  # WS wants low TTFT per-token frames
@@ -363,6 +402,7 @@ async def _run_response_create(
                 user_message=user_input,
                 full_reply=full_reply,
                 log_payload=final_log,
+                user_id=session.user_id or "",
             )
             # Update the in-memory history cache so subsequent turns can
             # skip the DB fetch.  Also pick up the conversation_id the
@@ -485,16 +525,29 @@ async def _handle_tool_call_confirm(
         )
         return
 
-    # Approve path — invoke the tool with submit=True.
+    # Approve path — re-authorize at submit time through the MCP policy
+    # boundary (role, consent, critical tier, confirmed-flag, idempotency)
+    # and only then execute with submit=True.  Calling ToolRegistry directly
+    # here would skip authorization entirely, letting a confirmation token —
+    # which carries no role/consent — drive a privileged write (P0-1).
     try:
-        from .tools import ToolRegistry
+        from .mcp import get_client
 
         args = dict(proposal)
         args.pop("requires_confirmation", None)
         args["submit"] = True
         if bound_idem:
             args["idempotency_key"] = bound_idem
-        result = ToolRegistry.call(tool_name, args)
+        call_result = get_client().call_tool(
+            tool_name,
+            args,
+            tenant_id=session.tenant_id,
+            user_id=session.user_id,
+            user_role=session.user_role,
+            granted_purposes=session.granted_purposes,
+            confirmed=True,
+            idempotency_key=bound_idem,
+        )
     except Exception as exc:
         logger.exception("tool confirmation dispatch failed")
         await _send_json(
@@ -503,6 +556,26 @@ async def _handle_tool_call_confirm(
                 "type": "response.tool_call.confirm_failed",
                 "call_id": call_id,
                 "reason": f"tool dispatch error: {exc}",
+            },
+        )
+        return
+
+    result = (
+        call_result.result
+        if isinstance(call_result.result, dict)
+        else {"result": call_result.result}
+    )
+    # Fail closed when the policy boundary rejected the submit (insufficient
+    # role/consent, missing confirmation, etc.) — do NOT forward as confirmed.
+    if not call_result.ok and result.get("error") == "policy_denied":
+        reasons = "; ".join((result.get("policy") or {}).get("reasons", []))
+        await _send_json(
+            websocket,
+            {
+                "type": "response.tool_call.confirm_failed",
+                "call_id": call_id,
+                "name": tool_name,
+                "reason": f"authorization denied at submit: {reasons or 'policy denied'}",
             },
         )
         return
@@ -561,6 +634,7 @@ def _log_ws_turn(
     user_message: str,
     full_reply: str,
     log_payload: dict[str, Any],
+    user_id: str = "",
 ) -> None:
     """Persist a chat-WS turn to the analytics DB (mirrors SSE behaviour)."""
     from .service import ChatModel as _CM
@@ -574,7 +648,9 @@ def _log_ws_turn(
             user_message=_CM.redact_for_storage(user_message),
             bot_reply=_CM.redact_for_storage(full_reply),
             sources=json.dumps(result.get("sources", []) if result else []),
+            contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
+            user_id=user_id,
         )
     except Exception:
         logger.warning("chat WS conversation logging failed", exc_info=True)
@@ -594,7 +670,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         return
 
     try:
-        user_id, tenant_id = _resolve_ws_auth(websocket)
+        user_id, tenant_id, user_role, granted_purposes = _resolve_ws_principal(websocket)
     except JWTAuthError as exc:
         await websocket.close(code=1008, reason=f"authentication failed: {exc}")
         return
@@ -646,6 +722,8 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
             user_id=session_user_id or "",
             tenant_id=session_tenant_id,
             locale=locale,
+            user_role=user_role if session_user_id else "public",
+            granted_purposes=granted_purposes if session_user_id else [],
         )
 
         # Phase 3: best-effort resume from a prior turn.

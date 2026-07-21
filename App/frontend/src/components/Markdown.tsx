@@ -2,6 +2,8 @@
 
 import React, { lazy, memo, Suspense, useMemo } from "react";
 
+import { PHONE_SRC } from "../lib/uraContacts";
+
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
 /**
@@ -14,15 +16,70 @@ const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
  *   - Breaking on --- for disclaimer sections
  */
 
+function isExternalHttp(href: string): boolean {
+  return /^https?:\/\//i.test(href);
+}
+
+/**
+ * Allowlist URL schemes for LLM/RAG-authored `[text](url)` links (output is
+ * semi-untrusted). Permit http(s), mailto, tel, site-relative and in-page
+ * anchors; reject javascript:, data:, vbscript:, protocol-relative `//`, etc.
+ * Returns the original href when safe, or null so the caller renders plain text.
+ */
+function safeHref(href: string): string | null {
+  const h = href.trim();
+  // Strip whitespace + control chars before scheme-testing so obfuscated
+  // schemes (with embedded tabs/newlines) cannot slip past the allowlist.
+  const probe = Array.from(h).filter((ch) => ch.charCodeAt(0) > 32).join("");
+  return /^(?:https?:\/\/|mailto:|tel:|\/(?!\/)|#)/i.test(probe) ? h : null;
+}
+
+/** Peel trailing sentence punctuation off an autolinked URL so it stays as text. */
+function splitTrail(s: string): [string, string] {
+  const m = s.match(/[.,;:!?)\]]+$/);
+  return m ? [s.slice(0, s.length - m[0].length), m[0]] : [s, ""];
+}
+
+// Inline matcher: bold, italic, code, [text](url), [n] citation, bare URL,
+// email, phone, and the scheme-less ura.go.ug domain — tried left-to-right at
+// each position, so `[text](url)` beats `[n]` (numeric link text stays a link)
+// and a URL inside `(...)` is consumed as a unit (never double-linked).
+const INLINE_RE = new RegExp(
+  [
+    /(\*\*(.+?)\*\*)/.source, //                              1,2  **bold**
+    /(\*(.+?)\*)/.source, //                                  3,4  *italic*
+    /(`([^`]+)`)/.source, //                                  5,6  `code`
+    /(\[([^\]]+)\]\(([^)]+)\))/.source, //                    7,8,9  [text](url)
+    /(\[(\d+)\])/.source, //                                  10,11  [n] citation
+    /((?:https?:\/\/|www\.)[^\s<]+)/.source, //               12   bare URL / www.
+    /([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/.source, // 13  email
+    `((?<!\\d)(?:${PHONE_SRC})(?!\\d))`, //                    14   phone
+    /(\bura\.go\.ug(?:\/[^\s<]*)?)/.source, //                15   scheme-less ura.go.ug
+  ].join("|"),
+  "gi",
+);
+
 function renderInline(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  const pattern =
-    /(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`([^`]+)`)|\[(\d+)\]|\[([^\]]+)\]\(([^)]+)\)/g;
   let lastIdx = 0;
   let match: RegExpExecArray | null;
   let key = 0;
+  INLINE_RE.lastIndex = 0;
 
-  while ((match = pattern.exec(text)) !== null) {
+  const pushLink = (href: string, label: React.ReactNode, external: boolean) => {
+    nodes.push(
+      <a
+        key={key++}
+        href={href}
+        className="md-link"
+        {...(external ? { target: "_blank", rel: "noopener noreferrer nofollow" } : {})}
+      >
+        {label}
+      </a>,
+    );
+  };
+
+  while ((match = INLINE_RE.exec(text)) !== null) {
     if (match.index > lastIdx) {
       nodes.push(text.slice(lastIdx, match.index));
     }
@@ -36,24 +93,30 @@ function renderInline(text: string): React.ReactNode[] {
           {match[6]}
         </code>
       );
-    } else if (match[7]) {
+    } else if (match[8] && match[9]) {
+      // [text](url) — sanitized; unsafe schemes degrade to plain styled text
+      const href = safeHref(match[9]);
+      if (href) pushLink(href, match[8], isExternalHttp(href));
+      else nodes.push(<span key={key++} className="md-link">{match[8]}</span>);
+    } else if (match[11]) {
       nodes.push(
         <sup key={key++} className="md-cite-ref">
-          {match[7]}
+          {match[11]}
         </sup>
       );
-    } else if (match[8] && match[9]) {
-      const href = match[9];
-      const isSafe = /^https?:\/\//i.test(href);
-      nodes.push(
-        isSafe ? (
-          <a key={key++} href={href} target="_blank" rel="noopener noreferrer" className="md-link">
-            {match[8]}
-          </a>
-        ) : (
-          <span key={key++} className="md-link">{match[8]}</span>
-        ),
-      );
+    } else if (match[12]) {
+      const [url, trail] = splitTrail(match[12]);
+      const href = /^www\./i.test(url) ? `https://${url}` : url;
+      pushLink(href, url, true);
+      if (trail) nodes.push(trail);
+    } else if (match[13]) {
+      pushLink(`mailto:${match[13]}`, match[13], false);
+    } else if (match[14]) {
+      pushLink(`tel:${match[14].replace(/[\s-]/g, "")}`, match[14], false);
+    } else if (match[15]) {
+      const [dom, trail] = splitTrail(match[15]);
+      pushLink(`https://${dom}`, dom, true);
+      if (trail) nodes.push(trail);
     }
     lastIdx = match.index + match[0].length;
   }

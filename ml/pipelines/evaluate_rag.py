@@ -32,6 +32,30 @@ sys.path.insert(0, str(PROJECT_ROOT))
 logger = logging.getLogger(__name__)
 
 
+def _load_text_signals():
+    """Load the runtime text-signals module (stdlib-only) by file path.
+
+    Keeps this offline harness scoring EXACTLY like the runtime scorer in
+    ``App/backend/app/retriever.py`` — courtesy sentences excluded,
+    content-token overlap — without importing the backend package (App/ is
+    not a Python package).
+    """
+    import importlib.util
+
+    path = PROJECT_ROOT / "App" / "backend" / "app" / "text_signals.py"
+    spec = importlib.util.spec_from_file_location("ura_text_signals", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+try:
+    _TEXT_SIGNALS = _load_text_signals()
+except Exception:  # pragma: no cover — legacy raw-token scoring still works
+    logger.warning("text_signals unavailable; using legacy raw-token faithfulness")
+    _TEXT_SIGNALS = None
+
+
 # ---------------------------------------------------------------------------
 # Dataset loader
 # ---------------------------------------------------------------------------
@@ -60,7 +84,33 @@ def load_eval_dataset(path: Path) -> list[dict[str, Any]]:
 # Individual metrics
 # ---------------------------------------------------------------------------
 def compute_faithfulness(answer: str, contexts: list[str]) -> float:
-    """Fraction of answer sentences whose tokens are >=50 % covered by contexts."""
+    """Fraction of factual answer sentences grounded in the contexts.
+
+    Mirrors the runtime scorer (``HybridRetriever.compute_faithfulness``):
+    a sentence is grounded when >=50 % of its content tokens (stopwords
+    removed) appear in the contexts, and courtesy sentences — greetings,
+    empathy acknowledgments, contact footers, follow-up suggestions — are
+    excluded from both sides of the ratio so politeness is never scored
+    as hallucination.
+    """
+    if _TEXT_SIGNALS is not None:
+        ctx_words = _TEXT_SIGNALS.content_tokens(" ".join(contexts))
+        grounded = 0
+        scoreable = 0
+        for sent in _TEXT_SIGNALS.split_sentences(answer):
+            if _TEXT_SIGNALS.is_courtesy_sentence(sent):
+                continue
+            sent_words = _TEXT_SIGNALS.content_tokens(sent)
+            if len(sent_words) < 2:
+                continue
+            scoreable += 1
+            if len(sent_words & ctx_words) / len(sent_words) >= 0.5:
+                grounded += 1
+        if not scoreable:
+            return 1.0
+        return grounded / scoreable
+
+    # Legacy raw-token fallback (text_signals unavailable)
     sentences = [s.strip() for s in re.split(r"[.!?]+", answer) if len(s.strip()) > 5]
     if not sentences:
         return 1.0
