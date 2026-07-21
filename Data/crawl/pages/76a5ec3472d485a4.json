@@ -1,0 +1,50 @@
+{
+  "url": "https://ura.go.ug/ac/small-business-2/",
+  "title": "Bicacara matino tino obedo gin ango - Uganda Revenue Authority",
+  "text": "\n| ADWOGI ME CATO WIL DUCU I MWAKA | WEL MUCORO MA MYERO KICUL |  |\n| --- | --- | --- |\n|  | Ka rekod ne tye | Ka rekod ne peke |\n| Adwogi cato wil ducu pe kato Ciling million apar (10). | Pe kiculu mucoro mo. | Pe kiculu mucoro mo. |\n| Adwogi cato wil ducu kato ciling million apar (10) ento pe kato ciling million pyeradek (30). | 0.4% (pacen) me wel cato wil weng/ducu pi mwaka acel ma okato iwi ciling million apar (10) | Ciling Ugx 80,000 |\n| Adwogi cato wil weng/ducu kato ciling million pyeradek (30) ento pe kato ciling million pyerabic (50) | Ciling alib 80,000 med ki 0.5% (pacen) me wel cato wil ducu pi mwaka acel ma okato iwi ciling  million 30. | Ciling 200,000 |\n| Adwogi cato wil weng/ducu kato ciling million pyerabic (50) ento pe kato ciling million pyeraboro (80) | Ciling 180,000 med ki 0.6% (pacen) me wel cato wil weng/ducu pi mwaka acel ma okato iwi ciling million 50 (Pyerabic). | Ciling 400,000 |\n| Adwogi cato wil weng/ducu kato ciling million 80 ento pe kato ciling million 150. | Ciling 360,000 med ki 0.7% me wel cato wil ducu pi mwaka acel ma okato iwi ciling million 80. | Ciling 900,000 |\n",
+  "content_hash": "76a5ec3472d485a4",
+  "timestamp": "2026-07-15T06:35:00Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "ADWOGI ME CATO WIL DUCU I MWAKA",
+        "WEL MUCORO MA MYERO KICUL",
+        ""
+      ],
+      "rows": [
+        [
+          "",
+          "Ka rekod ne tye",
+          "Ka rekod ne peke"
+        ],
+        [
+          "Adwogi cato wil ducu pe kato Ciling million apar (10).",
+          "Pe kiculu mucoro mo.",
+          "Pe kiculu mucoro mo."
+        ],
+        [
+          "Adwogi cato wil ducu kato ciling million apar (10) ento pe kato ciling million pyeradek (30).",
+          "0.4% (pacen) me wel cato wil weng/ducu pi mwaka acel ma okato iwi ciling million apar (10)",
+          "Ciling Ugx 80,000"
+        ],
+        [
+          "Adwogi cato wil weng/ducu kato ciling million pyeradek (30) ento pe kato ciling million pyerabic (50)",
+          "Ciling alib 80,000 med ki 0.5% (pacen) me wel cato wil ducu pi mwaka acel ma okato iwi ciling  million 30.",
+          "Ciling 200,000"
+        ],
+        [
+          "Adwogi cato wil weng/ducu kato ciling million pyerabic (50) ento pe kato ciling million pyeraboro (80)",
+          "Ciling 180,000 med ki 0.6% (pacen) me wel cato wil weng/ducu pi mwaka acel ma okato iwi ciling million 50 (Pyerabic).",
+          "Ciling 400,000"
+        ],
+        [
+          "Adwogi cato wil weng/ducu kato ciling million 80 ento pe kato ciling million 150.",
+          "Ciling 360,000 med ki 0.7% me wel cato wil ducu pi mwaka acel ma okato iwi ciling million 80.",
+          "Ciling 900,000"
+        ]
+      ],
+      "row_count": 6
+    }
+  ]
+}

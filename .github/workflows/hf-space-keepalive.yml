@@ -1,0 +1,68 @@
+# =============================================================================
+# HF Space keepalive — landwind22/ura-chatbot
+#
+# Free-tier Spaces sleep after 48h without requests, and a runtime error can
+# leave the Space paused until someone notices. This workflow, every hour:
+#   1. checks the Space runtime stage via the HF API and restarts it when it
+#      is paused / sleeping / errored (requires the HF_TOKEN repo secret);
+#   2. pings /v1/speech/health so the Space always sees recent traffic.
+#
+# A restart takes ~2 min to come back; this job reports the stage it saw and
+# only fails when the HF API itself rejects us (bad/expired token).
+# =============================================================================
+name: "HF Space — keepalive"
+
+on:
+  schedule:
+    - cron: "7 * * * *"  # hourly at :07 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SPACE_ID: landwind22/ura-chatbot
+  SPACE_URL: https://landwind22-ura-chatbot.hf.space
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check runtime stage and restart if not running
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          pip install --quiet huggingface_hub
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["SPACE_ID"]
+          stage = api.get_space_runtime(space).stage
+          print(f"Space stage: {stage}")
+          summary = [f"Space stage at check: `{stage}`"]
+          if stage not in ("RUNNING", "RUNNING_BUILDING", "RUNNING_APP_STARTING", "BUILDING"):
+              print(f"Restarting {space} (stage was {stage})")
+              api.restart_space(space)
+              summary.append("→ restart issued")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write("\n".join(summary) + "\n")
+          PY
+
+      - name: Ping the app (keeps the free-tier sleep timer reset)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 45 "$SPACE_URL/v1/speech/health" || echo 000)
+            echo "Ping attempt ${attempt}: HTTP ${CODE}"
+            if [ "$CODE" = "200" ]; then
+              echo "Health ping OK (HTTP 200)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 45
+          done
+          echo "Health ping did not reach 200 (Space may still be booting after a restart)" >> "$GITHUB_STEP_SUMMARY"

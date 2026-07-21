@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import re
 
+from ..calculator_router import parse_ugx_amount
+
 _ENUM_RE = re.compile(r"^enum\[(.+)]$")
 _REGEX_RE = re.compile(r"^regex\[(.+)]$")
+_NUMBER_RE = re.compile(r"^number(?:\[min=(\d+(?:\.\d+)?)])?$")
 
 
 def _validate_enum(value: str, spec: str) -> tuple[bool, str, str]:
@@ -51,6 +54,24 @@ def _validate_text(value: str) -> tuple[bool, str, str]:
     return False, v, "Please provide a non-empty value."
 
 
+def _validate_number(value: str, spec: str) -> tuple[bool, float | str, str]:
+    """Parse a UGX-style amount ("1,500,000", "1.5m", "500k")."""
+    m = _NUMBER_RE.match(spec)
+    minimum = float(m.group(1)) if m and m.group(1) is not None else None
+    amount = parse_ugx_amount(value)
+    if amount is None:
+        return (
+            False,
+            value,
+            "Please give me one amount in UGX — for example 1,500,000 or 1.5m.",
+        )
+    if minimum is not None and amount < minimum:
+        return False, value, f"Please give an amount of at least UGX {minimum:,.0f}."
+    if minimum is None and amount <= 0:
+        return False, value, "Please give an amount greater than zero."
+    return True, amount, ""
+
+
 def validate_slot(value: str, validator_spec: str) -> tuple[bool, object, str]:
     """Dispatch validation based on *validator_spec*.
 
@@ -66,5 +87,7 @@ def validate_slot(value: str, validator_spec: str) -> tuple[bool, object, str]:
         return _validate_enum(value, spec)
     if spec.startswith("regex["):
         return _validate_regex(value, spec)
+    if spec.startswith("number"):
+        return _validate_number(value, spec)
 
     return _validate_text(value)

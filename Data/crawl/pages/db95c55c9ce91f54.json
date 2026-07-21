@@ -1,0 +1,27 @@
+{
+  "url": "https://ura.go.ug/ac/fish-processing/",
+  "title": "YUBU REC - (Fish processing) - Uganda Revenue Authority",
+  "text": "\n| Kit Yub | Yub me mucoro/Mucoro ma pe kiculu |\n| --- | --- |\n| Mutoka me keto rec ma ngic (Mutoka matye ki ngico me gwoko rec). | Pe culu mucoro weng manonge ite dul 5 me Cik me tung kunyango me Afrika (East African Community Customs Management Act, 2004) |\n| Ot mangic Ot ma kigwoko ma ngic kare ducu (macalo fridge) | Mucoro me kelo jami man ilobo tye zero 0% malube ki cik me tung kunyango me Africa (EAC CET).  Man konyo ka pwod rec kimako amaka ki me gwoko jami apura kama ngic wek pe obale macalo ringo, gweno, rec ki mukene macalo magi. |\n",
+  "content_hash": "db95c55c9ce91f54",
+  "timestamp": "2026-07-15T06:34:46Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Kit Yub",
+        "Yub me mucoro/Mucoro ma pe kiculu"
+      ],
+      "rows": [
+        [
+          "Mutoka me keto rec ma ngic (Mutoka matye ki ngico me gwoko rec).",
+          "Pe culu mucoro weng manonge ite dul 5 me Cik me tung kunyango me Afrika (East African Community Customs Management Act, 2004)"
+        ],
+        [
+          "Ot mangic Ot ma kigwoko ma ngic kare ducu (macalo fridge)",
+          "Mucoro me kelo jami man ilobo tye zero 0% malube ki cik me tung kunyango me Africa (EAC CET).  Man konyo ka pwod rec kimako amaka ki me gwoko jami apura kama ngic wek pe obale macalo ringo, gweno, rec ki mukene macalo magi."
+        ]
+      ],
+      "row_count": 2
+    }
+  ]
+}

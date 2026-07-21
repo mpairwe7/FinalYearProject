@@ -47,6 +47,9 @@ class AgentRoute(str, Enum):
     # The response goes to the ticket queue (Phase D).
     ESCALATE = "escalate"
 
+    # User sent a greeting — respond warmly without retrieval.
+    GREET = "greet"
+
     # Input was blocked by the InputGuard (prompt injection etc).
     BLOCKED = "blocked"
 

@@ -66,6 +66,8 @@ export interface VoiceChatResult {
   conversation_id?: string | null;
   reply: string;
   reply_audio_base64: string;
+  /** Server skipped inline narration (time budget) — fetch audio via /v1/tts. */
+  tts_skipped?: boolean;
   sample_rate: number;
   duration_s: number;
   sources: string[];
