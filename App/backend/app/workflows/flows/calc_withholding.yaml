@@ -1,0 +1,32 @@
+id: calc_withholding
+name: Withholding Tax Calculator
+version: "1"
+description: Guided withholding tax (WHT) calculation on a payment.
+requires_auth: false
+trigger_phrases: []
+
+steps:
+  - id: ask_type
+    question: "What kind of payment is it — **services**, **goods**, **management_fees**, or **dividend**?"
+    slot: payment_type
+    validator: "enum[services,goods,management_fees,dividend]"
+
+  - id: ask_amount
+    question: "What is the **gross payment amount** in UGX, before withholding? (e.g. 2,000,000 or 2m)"
+    slot: amount
+    validator: number
+
+  - id: run_calc
+    slot: ""
+    tool: calculate_withholding
+    args:
+      payment_type: "{payment_type}"
+      amount: "{amount}"
+
+  - id: done
+    question: >-
+      Those rates come from the FY2025-26 URA rate table (6% on services
+      and goods, 15% on management fees and dividends). Ask me anytime to
+      run another payment.
+    slot: ""
+    validator: text

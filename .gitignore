@@ -118,3 +118,7 @@ temp/
 ci-ml-pipeline.yml
 .claude/
 Data/common_voice_*
+
+# Runtime analytics databases (conversation logs — privacy: never commit).
+# Created by the backend and by pytest runs at the repo root and App/backend.
+data_store/

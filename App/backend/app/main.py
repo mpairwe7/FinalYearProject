@@ -25,6 +25,7 @@ from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
 
 from . import database as db
+from . import documents
 from .analytics import AnalyticsMiddleware, metrics
 from .authority import authority_required, get_authority_status
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
@@ -34,11 +35,15 @@ from .models import (
     AnalyticsEvent,
     BatchClassifyRequest,
     BatchClassifyResponse,
+    CFRelayChatRequest,
+    CFRelayEmbedRequest,
+    CFRelayVectorizeQueryRequest,
     ChatRequest,
     ChatResponse,
     Citation,
     ClassifyRequest,
     ClassifyResponse,
+    DocumentAnalysisResponse,
     ExportConversationRequest,
     ExportTaxSummaryRequest,
     FAQResponse,
@@ -88,6 +93,11 @@ _APP_LOGGER.propagate = False
 # ---------------------------------------------------------------------------
 _INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105
 
+# Wall-clock budget for the batch /v1/voice/chat pipeline. Once spent, the
+# reply-TTS leg is skipped (tts_skipped=True) so the text reply still beats
+# the deployment's gateway timeout; the client narrates via /v1/tts instead.
+VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
+
 
 def _truthy_env(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).lower() in ("1", "true", "yes", "on")
@@ -131,6 +141,37 @@ def _validate_production_env() -> None:
     for flag_name in ("auth_required", "multi_tenant", "audit_ledger"):
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
+
+    # Cloudflare/Gemini fallbacks: if the flag is explicitly on, the credentials
+    # it needs must be present (otherwise the fallback silently no-ops in prod).
+    # NB: use an explicit-on check (not _production_flag_enabled, which treats
+    # "unset" as on — that semantics is only for must-be-on security flags).
+    if os.getenv("FLAG_CLOUDFLARE_FALLBACK", "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            from .providers import config as _cloud_cfg
+
+            if not _cloud_cfg.is_cloudflare_configured():
+                errors.append(
+                    "FLAG_CLOUDFLARE_FALLBACK=true but Cloudflare is not fully configured "
+                    "(need CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_AIG_GATEWAY, CF_AIG_TOKEN)."
+                )
+            if (
+                os.getenv("DENSE_FALLBACK_BACKEND", "").strip().lower() == "workers_ai"
+                and not _cloud_cfg.is_vectorize_configured()
+            ):
+                errors.append("DENSE_FALLBACK_BACKEND=workers_ai requires VECTORIZE_INDEX.")
+            gemini_used = (
+                os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower() == "gemini"
+                or os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() == "gemini"
+            )
+            if gemini_used and not _cloud_cfg.is_gemini_configured():
+                errors.append(
+                    "A *_FALLBACK_BACKEND=gemini is set but GEMINI_API_KEY (+ AI Gateway) is missing."
+                )
+        except Exception:
+            errors.append(
+                "FLAG_CLOUDFLARE_FALLBACK=true but the providers package failed to import."
+            )
 
     # CORS must not be localhost in production
     cors = os.getenv("CORS_ORIGINS", "")
@@ -188,8 +229,36 @@ def _validate_production_env() -> None:
     if index_key in ("", "dev-index-key"):
         errors.append("INDEX_API_KEY must be a strong non-dev operator token in production.")
 
-    if os.getenv("QDRANT_URL") and not os.getenv("QDRANT_API_KEY"):
+    # P0-4: vectors must live in an external/managed Qdrant, not the ephemeral
+    # in-container default that is wiped on restart.
+    qdrant_url = os.getenv("QDRANT_URL", "")
+    if not qdrant_url:
+        errors.append(
+            "QDRANT_URL must point at an external/managed Qdrant in production "
+            "(the in-container default is not durable)."
+        )
+    elif any(h in qdrant_url for h in ("localhost", "127.0.0.1", "[::1]")):
+        errors.append(
+            "QDRANT_URL must not be localhost in production — use an external/managed Qdrant."
+        )
+    if qdrant_url and not os.getenv("QDRANT_API_KEY"):
         errors.append("QDRANT_API_KEY must be set when QDRANT_URL is configured in production.")
+
+    # P0-4: the audit ledger and conversation memory are SQLite-backed via
+    # ANALYTICS_DB_DIR even when analytics use Postgres, so that directory MUST
+    # be a mounted persistent volume — otherwise the tamper-evident audit trail
+    # and user memory are wiped on every container restart.
+    data_dir = os.getenv("ANALYTICS_DB_DIR", "")
+    if not data_dir:
+        errors.append(
+            "ANALYTICS_DB_DIR must be set to a mounted persistent volume in production "
+            "(the SQLite-backed audit ledger and memory are otherwise lost on restart)."
+        )
+    elif not os.path.isabs(data_dir) or data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):  # nosec B108 ephemeral-dir denylist, not temp-file creation  # noqa: S108
+        errors.append(
+            "ANALYTICS_DB_DIR must be an absolute path on a persistent volume in production "
+            f"(got {data_dir!r}; ephemeral or relative paths are not durable)."
+        )
 
     for redis_env in ("REDIS_URL", "SLOWAPI_STORAGE_URI"):
         redis_url = os.getenv(redis_env, "")
@@ -198,6 +267,30 @@ def _validate_production_env() -> None:
 
     if _truthy_env("SPEECH_ENABLED", "true") and not _production_flag_enabled("voice_consent"):
         errors.append("FLAG_VOICE_CONSENT must not be disabled when speech is enabled.")
+
+    # Phase 6 of the agentic-WS rollout: the new WebSocket endpoint must
+    # never serve anonymous traffic in production.
+    if _production_flag_enabled("ws_chat") and not _production_flag_enabled("auth_required"):
+        errors.append(
+            "FLAG_WS_CHAT=true requires FLAG_AUTH_REQUIRED=true in production "
+            "(anonymous WebSocket chat is not allowed)."
+        )
+    # The confirmation HMAC secret must come from real config in prod;
+    # leaving the env unset would fall back to a per-process random key
+    # and break any cross-replica confirmation flow.
+    if _production_flag_enabled("ws_chat") and not os.getenv("WS_CONFIRM_HMAC_SECRET"):
+        errors.append(
+            "WS_CONFIRM_HMAC_SECRET must be set in production when FLAG_WS_CHAT=true "
+            "(per-process random fallback is not safe across replicas)."
+        )
+    # P1-9: voice sockets spin up ASR/TTS/LLM work per connection and must
+    # likewise never serve anonymous traffic in production.
+    for _voice_flag in ("native_voice", "voice_streaming"):
+        if _production_flag_enabled(_voice_flag) and not _production_flag_enabled("auth_required"):
+            errors.append(
+                f"FLAG_{_voice_flag.upper()}=true requires FLAG_AUTH_REQUIRED=true in production "
+                "(anonymous voice WebSocket is not allowed)."
+            )
 
     if authority_required():
         authority = get_authority_status()
@@ -248,6 +341,18 @@ def _require_voice_processing_consent(request: Request, ctx: AuthContext) -> Non
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down the ChatModel singleton."""
+    # DNS-over-HTTPS workaround — must run BEFORE any outbound HTTPS (model
+    # init, retriever, Cloudflare fallback, vLLM). On Crane Cloud / RENU the pod
+    # has no working upstream DNS; this routes external hostname resolution
+    # through 1.1.1.1 over TCP/443. No-op unless USE_DOH=true (doh_resolver.py).
+    try:
+        from . import doh_resolver
+
+        if doh_resolver.is_enabled():
+            doh_resolver.activate()
+    except Exception:
+        logger.warning("DoH resolver activation skipped", exc_info=True)
+
     # Production safety gate — blocks startup on insecure config
     _validate_production_env()
 
@@ -481,6 +586,7 @@ def chat(
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
 
+    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
     result = model.generate(
         message=body.message,
         conversation_id=body.conversation_id,
@@ -492,6 +598,7 @@ def chat(
         tenant_id=ctx.tenant_id,
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
+        attachments=attachments or None,
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -515,9 +622,11 @@ def chat(
         db.log_conversation(
             session_id=session_id or None,
             conversation_id=result.get("conversation_id"),
+            user_id=ctx.user_id or "",
             user_message=_CM.redact_for_storage(body.message),
             bot_reply=_CM.redact_for_storage(result["reply"]),
             sources=json.dumps(result.get("sources", [])),
+            contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             confidence=confidence,
             topic_tag=topic_tag,
@@ -556,291 +665,98 @@ async def chat_stream(
     model: ChatModel = Depends(get_model),
     ctx: AuthContext = Depends(optional_user),
 ):
-    """Server-Sent Events streaming chat — tokens arrive progressively."""
-    from . import llm as llm_module
+    """Server-Sent Events streaming chat — tokens arrive progressively.
+
+    Thin adapter around :func:`service.run_chat_turn`.  Maps the
+    transport-agnostic ``(event_type, payload)`` tuples into SSE frames.
+    """
     from . import service as service_module
 
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
+    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
 
     async def event_generator():
-        import asyncio
-        import threading
-
-        from .guardrails import OutputGuard
-        from .retriever import HybridRetriever
-
-        _output_guard = OutputGuard()
-        t0 = time.perf_counter()
-        full_reply = ""  # FIX BUG: initialise before branches
-        result: dict = {}  # Sentinel: safe default for finally block
-
-        try:
-            # FIX LOGIC: run blocking retrieval in thread pool
-            result = await asyncio.to_thread(
-                model.generate_retrieval_only,
-                message=body.message,
-                conversation_id=body.conversation_id,
-                top_k=body.top_k,
-                locale=body.locale,
-                session_id=session_id or None,
-                request_id=request_id,
-                user_id=ctx.user_id or None,
-                tenant_id=ctx.tenant_id,
-            )
-
-            # If the turn resolved before LLM streaming, send a single payload.
-            if result.get("retrieval_mode") in (
-                "blocked",
-                "abstained",
-                "clarification",
-                "workflow",
-                "escalated",
-            ):
+        # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
+        # summary emitted just before ``grounding``.  Live tool-call frames
+        # are exclusive to the WS path.
+        agent_trace: list[dict[str, Any]] = []
+        async for event_type, payload in service_module.run_chat_turn(
+            model,
+            message=body.message,
+            conversation_id=body.conversation_id,
+            top_k=body.top_k,
+            locale=body.locale,
+            session_id=session_id or None,
+            request_id=request_id,
+            user_id=ctx.user_id or None,
+            tenant_id=ctx.tenant_id,
+            should_continue=lambda: _sse_not_disconnected(request),
+            sentence_batching=True,  # SSE keeps historical behaviour
+            user_role=getattr(ctx, "role", "public"),
+            granted_purposes=getattr(ctx, "granted_purposes", []) or [],
+            attachments=attachments or None,
+        ):
+            if event_type == "_keepalive":
                 yield {
-                    "event": "metadata",
-                    "data": json.dumps(
-                        {
-                            "sources": result.get("sources", []),
-                            "citations": result.get("citations", []),
-                            "faithfulness_score": result.get("faithfulness_score"),
-                            "retrieval_mode": result.get("retrieval_mode"),
-                            "model": result.get("model"),
-                            "conversation_id": result.get("conversation_id"),
-                            "locale": result.get("locale"),
-                            "escalation_required": result.get("escalation_required", False),
-                            "escalation_reason": result.get("escalation_reason", ""),
-                            "agent_role": result.get("agent_role", "rag_answerer"),
-                            "workflow": result.get("workflow"),
-                            "handoff": result.get("handoff"),
-                            "response_judge": result.get("response_judge"),
-                            "next_actions": result.get("next_actions", []),
-                            "ticket_id": result.get("ticket_id", ""),
-                        }
-                    ),
+                    "comment": f"ping - {datetime.datetime.now(datetime.timezone.utc).isoformat()}"
                 }
-                yield {"event": "token", "data": result.get("reply", "")}
-                yield {"event": "done", "data": ""}
-                return
+                continue
+            if event_type == "_log":
+                _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
+                continue
+            if event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
+                # Buffer for the agent_trace summary; do not forward live.
+                event_dict = payload if isinstance(payload, dict) else {"value": payload}
+                agent_trace.append({"type": event_type, **{k: v for k, v in event_dict.items() if k != "type"}})
+                continue
+            if event_type == "grounding" and agent_trace:
+                yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
+                agent_trace = []
+            if event_type == "metadata" or event_type == "grounding":
+                yield {"event": event_type, "data": json.dumps(payload)}
+            elif event_type == "error":
+                yield {"event": "error", "data": payload.get("message", "Internal server error")}
+            else:  # token / revision / done
+                yield {"event": event_type, "data": payload if isinstance(payload, str) else ""}
 
-            # Send metadata first
-            yield {
-                "event": "metadata",
-                "data": json.dumps(
-                    {
-                        "sources": result.get("sources", []),
-                        "citations": result.get("citations", []),
-                        "retrieval_mode": result.get("retrieval_mode"),
-                        "model": result.get("model"),
-                        "conversation_id": result.get("conversation_id"),
-                        "locale": result.get("locale"),
-                        "agent_role": result.get("agent_role", "rag_answerer"),
-                        "response_judge": result.get("response_judge"),
-                        "next_actions": result.get("next_actions", []),
-                        "ticket_id": result.get("ticket_id", ""),
-                    }
-                ),
-            }
-
-            # Stream LLM tokens
-            hits = result.get("_hits", [])
-            conversation_history = result.get("_history", [])
-            rewritten_query = result.get("_rewritten", body.message)
-            personalization_context = result.get("_personalization_context", "")
-            if llm_module.is_available() and hits:
-                loop = asyncio.get_running_loop()
-                token_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
-
-                def _pump_tokens() -> None:
-                    try:
-                        for token in service_module.stream_llm_tokens(
-                            query=rewritten_query,
-                            passages=hits,
-                            conversation_history=conversation_history or None,
-                            locale=body.locale,
-                            personalization_context=str(personalization_context or ""),
-                        ):
-                            loop.call_soon_threadsafe(token_queue.put_nowait, ("token", token))
-                    finally:
-                        loop.call_soon_threadsafe(token_queue.put_nowait, ("done", None))
-
-                threading.Thread(target=_pump_tokens, daemon=True).start()
-
-                saw_streamed_token = False
-                pending_stream_chunk = ""
-
-                def _flush_stream_chunk(*, force: bool = False) -> str:
-                    nonlocal pending_stream_chunk, full_reply, saw_streamed_token
-                    if not pending_stream_chunk:
-                        return ""
-                    if not force and not re.search(r"(?:\n\s*\n|[.!?](?:\s|$))", pending_stream_chunk):
-                        return ""
-                    sanitized = _output_guard.sanitize(pending_stream_chunk)
-                    pending_stream_chunk = ""
-                    if not sanitized:
-                        return ""
-                    saw_streamed_token = True
-                    full_reply += sanitized
-                    return sanitized
-
-                while True:
-                    if await request.is_disconnected():
-                        logger.info("SSE client disconnected mid-stream")
-                        return
-                    try:
-                        event_type, payload = await asyncio.wait_for(token_queue.get(), timeout=15)
-                    except asyncio.TimeoutError:
-                        yield {
-                            "comment": f"ping - {datetime.datetime.now(datetime.timezone.utc).isoformat()}"
-                        }
-                        continue
-
-                    if event_type == "done":
-                        final_chunk = _flush_stream_chunk(force=True)
-                        if final_chunk:
-                            yield {"event": "token", "data": final_chunk}
-                        break
-
-                    pending_stream_chunk += payload or ""
-                    sanitized = _flush_stream_chunk()
-                    if not sanitized:
-                        continue
-                    yield {"event": "token", "data": sanitized}
-
-                # Breaker OPEN / empty stream → fall through to single-event
-                # fallback below (same branch as "llm not available")
-                if not saw_streamed_token:
-                    full_reply = result.get("reply", "")
-                    yield {"event": "token", "data": result.get("reply", "")}
-                    yield {"event": "done", "data": ""}
-                    return
-
-                # Apply PII redaction to full accumulated reply
-                full_reply = _output_guard.redact_pii(full_reply)
-
-                # Compute faithfulness + grounding on full reply
-                contexts = [h.get("text") or h.get("answer", "") for h in hits]
-                faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
-                escalate, esc_reason = _output_guard.should_escalate(faith, hits)
-                response_judge = model._evaluate_response_judge(
-                    message=body.message,
-                    reply=full_reply,
-                    hits=hits,
-                    citations=result.get("citations", []),
-                    faithfulness_score=faith,
-                    escalation_required=escalate,
-                    escalation_reason=esc_reason,
-                )
-                if response_judge.get("decision") == "revise" and response_judge.get("revised_reply"):
-                    full_reply = _output_guard.sanitize(
-                        _output_guard.redact_pii(response_judge["revised_reply"])
-                    )
-                    faith = HybridRetriever.compute_faithfulness(full_reply, contexts)
-                    escalate, esc_reason = _output_guard.should_escalate(faith, hits)
-                    response_judge["applied_revision"] = True
-                    response_judge["final_decision"] = "escalate" if escalate else "approve"
-                    yield {"event": "revision", "data": full_reply}
-                else:
-                    response_judge["final_decision"] = response_judge.get("decision", "approve")
-                if response_judge.get("final_decision") == "escalate":
-                    escalate = True
-                    if not esc_reason:
-                        esc_reason = "; ".join(response_judge.get("reasons") or [])
-                response_judge.pop("revised_reply", None)
-
-                handoff = result.get("handoff")
-                if escalate and not handoff:
-                    handoff = model._build_handoff_packet(
-                        message=body.message,
-                        reason=esc_reason,
-                        conversation_history=conversation_history or None,
-                        hits=hits,
-                        faithfulness_score=faith,
-                    )
-                ticket_id = result.get("ticket_id", "")
-                if escalate and not ticket_id:
-                    ticket_id = model._maybe_create_ticket(
-                        reason=esc_reason,
-                        user_query=body.message,
-                        bot_reply=full_reply,
-                        session_id=session_id or None,
-                        conversation_id=result.get("conversation_id") or body.conversation_id or "",
-                        priority=(handoff or {}).get("priority", "normal"),
-                        handoff=handoff,
-                        response_judge=response_judge,
-                    )
-                result["handoff"] = handoff
-                result["response_judge"] = response_judge
-                result["ticket_id"] = ticket_id
-                yield {
-                    "event": "grounding",
-                    "data": json.dumps(
-                        {
-                            "faithfulness_score": faith,
-                            "escalation_required": escalate,
-                            "escalation_reason": esc_reason,
-                            "agent_role": result.get("agent_role", "rag_answerer"),
-                            "handoff": handoff,
-                            "response_judge": response_judge,
-                            "next_actions": result.get("next_actions", []),
-                            "ticket_id": ticket_id,
-                        }
-                    ),
-                }
-
-                # Cache the completed streaming response
-                try:
-                    model._cache.put(
-                        rewritten_query,
-                        {
-                            "reply": full_reply,
-                            "sources": result.get("sources", []),
-                            "citations": result.get("citations", []),
-                            "faithfulness_score": faith,
-                            "retrieval_mode": result.get("retrieval_mode"),
-                            "model": result.get("model"),
-                            "conversation_id": result.get("conversation_id"),
-                            "locale": result.get("locale"),
-                            "escalation_required": escalate,
-                            "escalation_reason": esc_reason,
-                            "agent_role": result.get("agent_role", "rag_answerer"),
-                            "handoff": handoff,
-                            "response_judge": response_judge,
-                            "next_actions": result.get("next_actions", []),
-                            "ticket_id": ticket_id,
-                        },
-                    )
-                except Exception:
-                    logger.debug("Stream cache store failed", exc_info=True)
-            else:
-                # Fallback: send best-hit answer as single token
-                full_reply = result.get("reply", "")
-                yield {"event": "token", "data": full_reply}
-
-            yield {"event": "done", "data": ""}
-
-        except Exception:
-            logger.exception("SSE stream error")
-            yield {"event": "error", "data": "Internal server error"}
-            yield {"event": "done", "data": ""}
-        finally:
-            # FIX LOGIC: log conversation in finally block (runs even on disconnect)
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            try:
-                from .service import ChatModel as _CM
-
-                db.log_conversation(
-                    session_id=session_id or None,
-                    conversation_id=result.get("conversation_id"),
-                    user_message=_CM.redact_for_storage(body.message),
-                    bot_reply=_CM.redact_for_storage(full_reply),
-                    sources=json.dumps(result.get("sources", []) if result else []),
-                    response_time_ms=round(elapsed_ms, 2),
-                )
-            except Exception:
-                logger.warning("Stream conversation logging failed", exc_info=True)
+        # Flush trailing trace (e.g. if grounding was skipped).
+        if agent_trace:
+            yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
 
     return EventSourceResponse(event_generator())
+
+
+async def _sse_not_disconnected(request: Request) -> bool:
+    """Adapter for ``run_chat_turn.should_continue`` over Starlette HTTP."""
+    return not (await request.is_disconnected())
+
+
+def _log_stream_conversation(
+    body: ChatRequest,
+    session_id: str,
+    log_payload: dict[str, Any],
+    user_id: str = "",
+) -> None:
+    """Mirror the old SSE ``finally`` block — log to analytics DB."""
+    from .service import ChatModel as _CM
+
+    result = log_payload.get("result") or {}
+    full_reply = log_payload.get("full_reply", "")
+    elapsed_ms = log_payload.get("elapsed_ms", 0.0)
+    try:
+        db.log_conversation(
+            session_id=session_id or None,
+            conversation_id=result.get("conversation_id"),
+            user_message=_CM.redact_for_storage(body.message),
+            bot_reply=_CM.redact_for_storage(full_reply),
+            sources=json.dumps(result.get("sources", []) if result else []),
+            contexts=_CM.contexts_json(result),
+            response_time_ms=round(elapsed_ms, 2),
+            user_id=user_id,
+        )
+    except Exception:
+        logger.warning("Stream conversation logging failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1020,6 +936,97 @@ def export_tax_summary(
     )
 
 
+# ---------------------------------------------------------------------------
+# Document attachments (analysis + report)
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/v1/documents/analyze",
+    response_model=DocumentAnalysisResponse,
+    tags=["documents"],
+)
+@limiter.limit(_RATE_LIMIT)
+async def analyze_uploaded_document(
+    request: Request,
+    ctx: AuthContext = Depends(optional_user),
+) -> DocumentAnalysisResponse:
+    """Analyse an uploaded document (PDF, DOCX, XLSX, CSV, image, or text).
+
+    Accepts multipart/form-data with a single ``file`` part. Extracts text
+    and tables, classifies the document against the URA taxonomy, and pulls
+    URA-specific fields (TINs, UGX amounts, dates, references).
+
+    The returned ``document_id`` can be passed in chat ``attachment_ids``
+    to ground answers on the document, and used with
+    ``GET /v1/documents/{document_id}/report`` to download a PDF report.
+    Documents are held in memory only and expire after a TTL.
+    """
+    import asyncio
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or isinstance(upload, str):
+        raise HTTPException(status_code=422, detail="Missing 'file' part in form data")
+
+    data = await upload.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    if len(data) > documents.MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {documents.MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
+        )
+
+    session_id = request.headers.get("X-Session-ID", "")
+    try:
+        record = await asyncio.to_thread(
+            documents.analyze_document,
+            data,
+            upload.filename or "document",
+            upload.content_type or "",
+            session_id=session_id,
+            user_id=ctx.user_id or "",
+        )
+    except documents.UnsupportedDocumentError as err:
+        raise HTTPException(status_code=415, detail=str(err)) from err
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
+
+    metrics.inc("documents_analyzed_total")
+    return DocumentAnalysisResponse(**record.to_response_payload())
+
+
+@app.get("/v1/documents/{document_id}/report", tags=["documents"])
+@limiter.limit(_RATE_LIMIT)
+def document_report(
+    request: Request,
+    document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
+    _ctx: AuthContext = Depends(optional_user),
+) -> Response:
+    """Download the branded PDF analysis report for an analysed document."""
+    record = documents.get_document(
+        document_id, session_id=request.headers.get("X-Session-ID", "")
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found or expired")
+
+    # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
+    # on a runtime without fpdf2.
+    from .pdf_export import generate_document_report_pdf
+
+    pdf_bytes = generate_document_report_pdf(record.to_report_payload())
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="ura_document_report_{document_id[:8]}.pdf"'
+            ),
+        },
+    )
+
+
 @app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])
 def speech_health(
     request: Request,
@@ -1177,26 +1184,43 @@ async def voice_chat(
             reply_text = mt_result.text
 
     # --- 5. TTS (synthesize reply in user's language) -------------------------
+    # Budget guard: on slow speech tiers (cloud Sunbird can take 30s+ per
+    # call) the four-stage pipeline can outlive the deployment's gateway
+    # timeout and the client receives a 504 with NOTHING — worse than a
+    # text-only reply. When the request has already burned the budget,
+    # return the text now (tts_skipped=True) and let the client fetch the
+    # narration as a separate single-leg /v1/tts request.
     tts_latency = 0.0
     tts_backend = ""
     audio_b64 = ""
     tts_sample_rate = 0
     tts_duration = 0.0
+    tts_skipped = False
     if tts_enabled and reply_text:
-        tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
-        tts_latency = tts_result.latency_s
-        tts_backend = tts_result.backend
-        tts_sample_rate = tts_result.sample_rate
-        tts_duration = tts_result.duration_s
-        metrics.inc("speech_tts_total")
-        if tts_result.latency_s:
-            metrics.observe("speech_tts_latency_s", tts_result.latency_s)
-        if tts_result.error:
-            metrics.inc("speech_tts_errors_total")
-            stage_errors.append(f"TTS: {tts_result.error}")
-            logger.warning("Voice chat TTS failed: %s", tts_result.error)
-        elif tts_result.audio:
-            audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
+        elapsed_s = time.perf_counter() - t_start
+        if elapsed_s > VOICE_CHAT_BUDGET_S:
+            tts_skipped = True
+            metrics.inc("speech_tts_skipped_total")
+            logger.info(
+                "Voice chat reply-TTS skipped: %.1fs elapsed exceeds %.0fs budget",
+                elapsed_s,
+                VOICE_CHAT_BUDGET_S,
+            )
+        else:
+            tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
+            tts_latency = tts_result.latency_s
+            tts_backend = tts_result.backend
+            tts_sample_rate = tts_result.sample_rate
+            tts_duration = tts_result.duration_s
+            metrics.inc("speech_tts_total")
+            if tts_result.latency_s:
+                metrics.observe("speech_tts_latency_s", tts_result.latency_s)
+            if tts_result.error:
+                metrics.inc("speech_tts_errors_total")
+                stage_errors.append(f"TTS: {tts_result.error}")
+                logger.warning("Voice chat TTS failed: %s", tts_result.error)
+            elif tts_result.audio:
+                audio_b64 = base64.b64encode(tts_result.audio).decode("ascii")
 
     total_latency = time.perf_counter() - t_start
     metrics.observe("speech_voice_chat_latency_s", total_latency)
@@ -1216,9 +1240,11 @@ async def voice_chat(
         db.log_conversation(
             session_id=session_id,
             conversation_id=chat_result.get("conversation_id") or conversation_id,
+            user_id=ctx.user_id or "",
             user_message=_CM.redact_for_storage(transcript),
             bot_reply=_CM.redact_for_storage(reply_text),
             sources=json.dumps(chat_result.get("sources", [])),
+            contexts=_CM.contexts_json(chat_result),
             response_time_ms=round(total_latency * 1000, 2),
         )
     except Exception:
@@ -1230,6 +1256,7 @@ async def voice_chat(
         conversation_id=chat_result.get("conversation_id") or conversation_id,
         reply=reply_text,
         reply_audio_base64=audio_b64,
+        tts_skipped=tts_skipped,
         sample_rate=tts_sample_rate,
         duration_s=tts_duration,
         sources=chat_result.get("sources", []),
@@ -1263,6 +1290,33 @@ async def voice_chat_stream_ws(websocket: WebSocket) -> None:
     from .voice_ws import voice_stream_ws
 
     await voice_stream_ws(websocket, app)
+
+
+@app.websocket("/v2/voice/chat/stream")
+async def voice_chat_stream_ws_v2(websocket: WebSocket) -> None:
+    """V2 WebSocket — native voice-to-voice with streaming TTS + vision.
+
+    Gated by the ``native_voice`` feature flag.  Extends the V1 protocol
+    with partial transcripts, speculative prefetch, token-level TTS
+    (CosyVoice2), and parallel vision encoding.  See ``voice_ws_v2.py``.
+    """
+    from .voice_ws_v2 import voice_stream_ws_v2
+
+    await voice_stream_ws_v2(websocket, app)
+
+
+@app.websocket("/v2/chat/stream")
+async def chat_stream_ws_v2(websocket: WebSocket) -> None:
+    """V2 WebSocket — persistent text chat with agentic event surface.
+
+    Gated by the ``ws_chat`` feature flag.  See ``chat_ws_v2.py`` and
+    ``docs/ws_chat_protocol.md``.  Phase 0 ships lifecycle + protocol
+    negotiation only; ``response.create`` returns a ``not_implemented``
+    error until Phase 1 wires the existing chat pipeline through.
+    """
+    from .chat_ws_v2 import chat_stream_ws
+
+    await chat_stream_ws(websocket, app)
 
 
 # ---------------------------------------------------------------------------
@@ -1324,6 +1378,24 @@ def _require_ops_key(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Invalid or missing INDEX_API_KEY")
 
 
+def _require_relay_key(request: Request) -> None:
+    """Require the configured bearer token for the Cloudflare relay endpoints.
+
+    Deliberately a separate secret from ``INDEX_API_KEY`` — this endpoint lets
+    another deployment (e.g. the HF Space, when its own egress to Cloudflare
+    is blocked) make Cloudflare calls through this one, so it gets its own
+    credential rather than reusing an unrelated operator key.
+    """
+    from .providers.config import get_cloud_settings
+
+    secret = get_cloud_settings().cf_relay_secret.get_secret_value()
+    if not secret:
+        raise HTTPException(status_code=503, detail="CF_RELAY_SECRET not configured")
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {secret}":
+        raise HTTPException(status_code=403, detail="Invalid or missing relay credentials")
+
+
 def require_admin_access(
     request: Request,
 ) -> AuthContext:
@@ -1378,6 +1450,54 @@ def trigger_indexing(
     stats["retrieval_mode"] = "hybrid" if model._retriever_ready else "keyword"
 
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare relay — lets another deployment (e.g. the HF Space, when its own
+# egress to Cloudflare is blocked) make Vectorize/Workers AI calls through
+# this one. Requires ``Authorization: Bearer <CF_RELAY_SECRET>`` (a dedicated
+# secret, separate from the real Cloudflare token, which never leaves this
+# process — see providers/config.py). Deliberately narrow: these three ops are
+# exactly what dense-retrieval fallback and the cloud-primary LLM chain need
+# (embed the query, search Vectorize, run a chat completion) and nothing else
+# is exposed, so there is no open-ended forwarding surface to worry about.
+# ---------------------------------------------------------------------------
+@app.post("/internal/cf-relay/workers-ai-embed", include_in_schema=False)
+def cf_relay_workers_ai_embed(request: Request, body: CFRelayEmbedRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import gateway as _gw
+
+    # No caller-supplied model — always the retrieval embedding model
+    # (gateway.workers_ai_embed's own default); see CFRelayEmbedRequest.
+    vectors = _gw.workers_ai_embed(body.texts)
+    return {"vectors": vectors}
+
+
+@app.post("/internal/cf-relay/vectorize-query", include_in_schema=False)
+def cf_relay_vectorize_query(request: Request, body: CFRelayVectorizeQueryRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import vectorize as _vz
+
+    hits = _vz.vectorize_query(body.vector, top_k=body.top_k, vector_filter=body.vector_filter)
+    return {"hits": hits}
+
+
+@app.post("/internal/cf-relay/workers-ai-chat", include_in_schema=False)
+def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict:
+    _require_relay_key(request)
+    from .providers import gateway as _gw
+    from .providers import routing as _routing
+
+    # Resolve the slot to an actual model id via a fixed dict lookup — the
+    # string that reaches gateway.workers_ai_chat (and the Cloudflare URL it
+    # builds) always originates in routing.py, never in the request body.
+    # See CFRelayChatRequest for why this indirection exists.
+    model = _routing.CHAT_MODEL_SLOTS[body.model_slot]
+    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    text = _gw.workers_ai_chat(
+        messages, model, max_tokens=body.max_tokens, temperature=body.temperature
+    )
+    return {"text": text}
 
 
 # ---------------------------------------------------------------------------
@@ -1749,19 +1869,30 @@ def me_withdraw_consent(
         role=ctx.role,
     )
     withdrawn = {p: db.withdraw_consent(row["id"], p) for p in body.purposes}
+    # UDPA: withdrawal must cease processing — purge the personalization memory
+    # built under that consent (future reads are already consent-gated).
+    if "personalization" in body.purposes:
+        from .memory.service import get_memory_service
+
+        get_memory_service().forget_user(ctx.user.user_id)
     return {"user_id": row["id"], "withdrawn": withdrawn}
 
 
 @app.get("/v1/me/export", tags=["me"])
 def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
-    """UDPA 2019 data-portability export."""
+    """UDPA 2019 data-portability export — identity, profile, consents, chat
+    history (+ escalation tickets), and personalization memory facts."""
+    from .memory.service import get_memory_service
+
     row = db.upsert_user(
         external_id=ctx.user.user_id,
         tenant_id=ctx.tenant_id,
         email=ctx.user.email,
         role=ctx.role,
     )
-    return db.export_user_data(row["id"])
+    data = db.export_user_data(row["id"], external_id=ctx.user.user_id)
+    data["facts"] = get_memory_service().export_user(ctx.user.user_id)["facts"]
+    return data
 
 
 @app.delete("/v1/me", tags=["me"])
@@ -1778,7 +1909,10 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
         email=ctx.user.email,
         role=ctx.role,
     )
-    counts = db.delete_user_cascade(row["id"])
+    from .memory.service import get_memory_service
+
+    counts = db.delete_user_cascade(row["id"], external_id=ctx.user.user_id)
+    counts["memory"] = sum(get_memory_service().forget_user(ctx.user.user_id).values())
     return {"deleted": counts, "external_id": ctx.user.user_id}
 
 
