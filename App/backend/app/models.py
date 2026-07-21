@@ -1,6 +1,6 @@
 """Pydantic v2 request/response models for the URA Chatbot API."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -584,3 +584,37 @@ class CFRelayVectorizeQueryRequest(BaseModel):
     vector: list[float] = Field(..., min_length=1, max_length=4096)
     top_k: int = Field(10, ge=1, le=50)
     vector_filter: dict[str, Any] | None = None
+
+
+class CFRelayChatMessage(BaseModel):
+    """One chat-completion message, forwarded to Workers AI verbatim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(..., max_length=16_000)
+
+
+class CFRelayChatRequest(BaseModel):
+    """Forwarded Workers AI chat-completion request.
+
+    ``model_slot`` names a slot in ``routing.CHAT_MODEL_SLOTS``
+    (primary/fallback/fallback2 — the same cloud-primary chain this
+    deployment already trusts, see service._llm_cloud_fallback), never a raw
+    model string. Unlike the embed relay this endpoint genuinely needs to
+    select between a few different models, so it can't just drop the field
+    the way CFRelayEmbedRequest does — but a ``str`` field checked in a
+    ``field_validator`` still reads as tainted to CodeQL's dataflow analysis
+    (a validator is arbitrary code to it, not a proven sanitizer, the same
+    problem a regex ``Field(pattern=)`` had on the embed relay). A
+    ``Literal`` of slot NAMES resolved through a fixed dict in main.py is the
+    pattern it recognizes as safe: the value that ever reaches the outbound
+    Cloudflare URL always comes from ``routing.py``, never from this field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[CFRelayChatMessage] = Field(..., min_length=1, max_length=64)
+    model_slot: Literal["primary", "fallback", "fallback2"]
+    max_tokens: int = Field(512, ge=1, le=2048)
+    temperature: float = Field(0.2, ge=0.0, le=2.0)
