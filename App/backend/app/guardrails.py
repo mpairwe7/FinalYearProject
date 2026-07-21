@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", "2000"))
 STORE_RAW_PROMPTS = os.getenv("STORE_RAW_PROMPTS", "false").lower() == "true"
 ABSTENTION_THRESHOLD = float(os.getenv("ABSTENTION_THRESHOLD", "0.15"))
+# P1-5: abstention threshold on the normalized [0,1] reranker scale.
+ABSTENTION_THRESHOLD_NORM = float(os.getenv("ABSTENTION_THRESHOLD_NORM", "0.30"))
 ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 
 # System prompt phrases that must never appear verbatim in a model response
@@ -43,16 +45,62 @@ _PROMPT_SIGNATURE_REGEX = re.compile(
 )
 _REASONING_PREFIX_REGEX = re.compile(
     r"^\s*(?:"
-    r"okay,\s*(?:the\s+user|let\s+me|i(?:'m| am)|looking\s+at|based\s+on|from\s+the|the\s+context)"
-    r"|the\s+user\s+is\s+asking"
+    r"okay,\s*(?:the\s+user|let\s+me|i(?:'m| am)|looking\s+(?:at|through)|based\s+on|from\s+the|the\s+context)"
+    r"|the\s+user\s+(?:is\s+asking|probably\s+wants|wants\s+(?:a|to)|seems\s+to)"
     r"|let\s+me\s+(?:check|look|see|review|think)"
-    r"|looking\s+at\s+passage"
+    r"|i\s+(?:need\s+to|should\s+also|also\s+need)\s+(?:check|present|include|mention|look)"
+    r"|it\s+also\s+(?:says|states|mentions|shows|indicates)"
+    r"|however,\s+(?:this|it|that)\s+(?:passage|context|section|source)"
+    r"|but\s+the\s+(?:user|passages?|context)"
+    r"|since\s+the\s+context"
+    r"|so,\s+the\s+most\s+relevant"
+    r"|the\s+answer\s+should"
+    r"|also,\s+include"
+    r"|looking\s+(?:at|through|over|in)\s+(?:the\s+)?(?:passage|passages|context|sources)"
     r"|based\s+on\s+(?:the|these)\s+(?:provided\s+)?(?:passages|context)"
     r"|from\s+(?:the|these)\s+(?:provided\s+)?(?:passages|context)"
     r"|the\s+key\s+detail\s+here\s+is"
     r"|i\s+should\s+(?:combine|answer|respond|cite|use)"
     r"|the\s+passages?\s+(?:say|show|mention|indicate)"
     r")\b",
+    re.IGNORECASE,
+)
+_REASONING_FRAGMENT_REGEX = re.compile(
+    r"(?:"
+    r"\bpassage\s+\d+\b"
+    r"|\b(?:looking|looked)\s+(?:through|at|over|in)\s+(?:the\s+)?(?:passages|context|sources)\b"
+    r"|\b(?:the|these)\s+passages?\s+(?:say|show|mention|indicate|state|talk|discuss)\b"
+    r"|\b(?:it|this|that)\s+also\s+(?:says|states|mentions|shows|indicates)\b"
+    r"|\bhowever,\s+(?:this|it|that)\s+(?:passage|context|section|source)\b"
+    r"|\bbut\s+the\s+(?:user|passages?|context)\b"
+    r"|\bsince\s+the\s+context\b"
+    r"|\bso,\s+the\s+most\s+relevant\b"
+    r"|\bthe\s+answer\s+should\b"
+    r"|\balso,\s+include\b"
+    r"|\b(?:the\s+)?user\s+(?:is\s+)?(?:asking|wants|probably)\b"
+    r"|\bi\s+(?:should|need\s+to|can|also\s+need)\s+(?:answer|include|mention|cite|direct|use|check|present|look)\b"
+    r"|\bso\s+the\s+best\s+answer\b"
+    r"|\bI\s+need\s+to\s+present\b"
+    r"|\balso,?\s+maybe\b"
+    r"|\b(?:context|passages?)\s+(?:does\s+not|doesn't|do\s+not|don't)\s+(?:provide|contain|outline)\b"
+    r"|\bmost\s+relevant\s+(?:info|information|passages?)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ANSWER_START_REGEX = re.compile(
+    r"^\s*(?:"
+    r"to\s+[a-z]"
+    r"|you\s+(?:can|should|need\s+to|must|may)\b"
+    r"|for\s+(?:individuals|companies|taxpayers|businesses|employers|employees)\b"
+    r"|if\s+you\b"
+    r"|log\s+in\b"
+    r"|visit\b"
+    r"|please\b"
+    r"|the\s+\w+"
+    r"|a\s+\w+"
+    r"|an\s+\w+"
+    r"|i\s+don['’]t\s+have\s+enough\s+information"
+    r")",
     re.IGNORECASE,
 )
 
@@ -85,9 +133,21 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
         # Direct fraud/evasion requests
         r"(?:how\s+(?:to|do\s+(?:I|you|we))|explain\s+how\s+to|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to)\s+(?:evade|avoid|dodge|escape|cheat|hide|conceal|under[\-\s]?report|misreport|falsif|forge|fake|fabricat)",
         r"(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
-        r"(?:forge|fake|fabricat|counterfeit|falsif)\s+(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
+        r"(?:forge|fake|fabricat|counterfeit|falsif)\w*\s+(?:(?:a|an|the|my|some)\s+)?"
+        r"(?:fake\s+)?(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
         r"(?:under[\-\s]?report|misreport|under[\-\s]?declare)\s+(?:income|revenue|sales|earnings|profit|expenses?|VAT)",
-        r"(?:launder|smuggl|brib)\w*",
+        # Smuggling / laundering / bribery: block solicitation, not
+        # information. "What is smuggling?" and "How can I report smuggling?"
+        # are curated KB answers (ura_smuggling_effects, ura_customs_offences,
+        # ura_whistleblowing) and must pass; actionable requests must not.
+        r"(?:how\s+(?:to|do\s+(?:I|you|we)|can\s+(?:I|you|we|one))|explain\s+how\s+to"
+        r"|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to|best\s+way\s+to|help\s+me"
+        r"|teach\s+me\s+(?:how\s+)?to|I\s+(?:want|need|plan|intend)\s+to)\s+"
+        r"(?:launder|smuggle|bribe)",
+        r"(?:can|could|should|shall)\s+(?:I|we)\s+(?:just\s+)?"
+        r"(?:launder|smuggle|bribe|pay\s+off)",
+        r"(?:smuggl|launder|sneak)\w*\b.{0,60}?without\s+(?:being|getting)\s+"
+        r"(?:caught|detected|noticed|flagged)",
         r"(?:hide|conceal)\s+(?:income|money|earnings|revenue|assets?)\s+(?:from|against)\s+(?:URA|tax|government|authority)",
         # Role-play/persona-swap evasion
         r"(?:unrestricted|jailbroken|unfiltered)\s+(?:model|assistant|AI|mode)",
@@ -148,11 +208,15 @@ class InputGuard:
                 logger.warning(
                     "Prompt injection blocked: pattern=%s input=%s",
                     pattern.pattern[:60],
-                    text[:80],
+                    text[:80].replace("\r", "\\r").replace("\n", "\\n"),
                 )
                 return GuardResult(
                     allowed=False,
-                    reason="Input rejected: potential prompt injection detected",
+                    reason=(
+                        "Sorry — I can't process that request as written. "
+                        "Please rephrase it as a plain URA support question "
+                        "and I'll be glad to help."
+                    ),
                     flags=["prompt_injection"],
                 )
 
@@ -161,7 +225,7 @@ class InputGuard:
                 logger.warning(
                     "Harmful intent blocked: pattern=%s input=%s",
                     pattern.pattern[:60],
-                    text[:80],
+                    text[:80].replace("\r", "\\r").replace("\n", "\\n"),
                 )
                 return GuardResult(
                     allowed=False,
@@ -221,6 +285,28 @@ class OutputGuard:
     """Validate and sanitise model outputs (OWASP LLM02, LLM05, LLM09)."""
 
     @staticmethod
+    def _strip_reasoning_preamble(text: str) -> str:
+        """Drop hidden passage-analysis preambles before the user-facing answer."""
+        stripped = text.strip()
+        if not stripped or not _REASONING_FRAGMENT_REGEX.search(stripped[:1200]):
+            return stripped
+
+        sentences = re.split(r"(?<=[.!?])(?:\s+|(?=[A-Z]))", stripped)
+        if len(sentences) <= 1:
+            return stripped
+
+        for idx, sentence in enumerate(sentences):
+            candidate = sentence.strip()
+            if idx == 0:
+                continue
+            if _ANSWER_START_REGEX.match(candidate) and not _REASONING_FRAGMENT_REGEX.search(
+                candidate
+            ):
+                return " ".join(s.strip() for s in sentences[idx:] if s.strip()).strip()
+
+        return stripped
+
+    @staticmethod
     def redact_pii(text: str) -> str:
         """Replace detected PII with redaction markers (LLM02)."""
         return redact_pii_text(text)
@@ -241,19 +327,23 @@ class OutputGuard:
             text,
         )
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-        while paragraphs and _REASONING_PREFIX_REGEX.match(paragraphs[0]):
+        while (
+            len(paragraphs) > 1
+            and _REASONING_PREFIX_REGEX.match(paragraphs[0])
+            and not _ANSWER_START_REGEX.match(paragraphs[0])
+        ):
             paragraphs.pop(0)
         text = "\n\n".join(paragraphs).strip()
 
         # Handle single-paragraph outputs where the model prepends a reasoning
         # sentence directly before the real answer.
         while text and _REASONING_PREFIX_REGEX.match(text):
-            split = re.search(r"(?<=[.!?])\s+", text)
+            split = re.search(r"(?<=[.!?])(?:\s+|(?=[A-Z]))", text)
             if split is None:
                 return ""
             text = text[split.end() :].lstrip()
 
-        return text
+        return OutputGuard._strip_reasoning_preamble(text)
 
     @staticmethod
     def check_prompt_leakage(text: str) -> GuardResult:
@@ -308,12 +398,22 @@ class OutputGuard:
         return GuardResult(allowed=True, sanitized_text=answer)
 
     @staticmethod
-    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD) -> bool:
-        """Return True if the best retrieval score is too low to answer."""
+    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD_NORM) -> bool:
+        """Return True if the best calibrated retrieval relevance is too low.
+
+        Uses the normalized [0,1] reranker score (P1-5). When no reranker
+        signal is available (RRF-only / keyword fallback), relevance is unknown
+        — we do NOT abstain on an incomparable raw score; the presence of hits
+        plus downstream grounding/claim checks govern.
+        """
         if not hits:
             return True
-        best_score = max(h.get("score_rerank", h.get("score_rrf", 0.0)) for h in hits)
-        return best_score < threshold
+        from .retriever import hit_relevance
+
+        scores = [r for h in hits if (r := hit_relevance(h)) is not None]
+        if not scores:
+            return False  # degraded mode — cannot assess relevance by score
+        return max(scores) < threshold
 
     @staticmethod
     def should_escalate(

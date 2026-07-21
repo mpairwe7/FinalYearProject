@@ -1,0 +1,50 @@
+{
+  "url": "https://ura.go.ug/ac/pharmacy-and-drug-shops/",
+  "title": "KACATO YAT KI DUKAN YAT - Pharmacy and drug shops - Uganda Revenue Authority",
+  "text": "\n| WEL WENG MA KICATO I MWAKA ACEL | Mucoro ma kingolo ka itye ki rekod | Mucoro ma kingolo ka ipeke ki rekod |\n| --- | --- | --- |\n|  | WEL MUCORO ME ACULA |  |\n| Wel cente jami ma kicato ducu pe kato million 10 (10,000,000) | Jero/mucoro peke | Jero/mucoro peke |\n| Wel cato jami ma kicato kato million 1o ento pe kato milliom 30. | Pacen 0.4% ikom cente ducu ma inongo ki icat pi mwaka acel ma dong ka ikwanyo ciling million 10. | Alib pyera aboro (80,000) |\n| Wel cato jami ma kicato ducu kato milliom 30 ento pe kato millom 50. | 80,000 med iye pacen 0.5% me cente ducu ma dong ka ikwanyo million 30. | Ugx 200,000 200,000 |\n| Wel cato jami ma kicato ducu kato milliom 50 ento pe kato millom 80. | 180,000 med iye pacen 0.6% me cente ducu ma dong ka ikwanyo million 50 | Ugx 400,000 |\n| Wel cato jami ma kicato ducu kato milliom 80 ento pe kato millom 150 | 360,000 med iye pacen 0.7% me cente ducu ma dong ka ikwanyo million 80 | Ugx 900,000 |\n",
+  "content_hash": "acbb96049e13831c",
+  "timestamp": "2026-07-15T06:34:40Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "WEL WENG MA KICATO I MWAKA ACEL",
+        "Mucoro ma kingolo ka itye ki rekod",
+        "Mucoro ma kingolo ka ipeke ki rekod"
+      ],
+      "rows": [
+        [
+          "",
+          "WEL MUCORO ME ACULA",
+          ""
+        ],
+        [
+          "Wel cente jami ma kicato ducu pe kato million 10 (10,000,000)",
+          "Jero/mucoro peke",
+          "Jero/mucoro peke"
+        ],
+        [
+          "Wel cato jami ma kicato kato million 1o ento pe kato milliom 30.",
+          "Pacen 0.4% ikom cente ducu ma inongo ki icat pi mwaka acel ma dong ka ikwanyo ciling million 10.",
+          "Alib pyera aboro (80,000)"
+        ],
+        [
+          "Wel cato jami ma kicato ducu kato milliom 30 ento pe kato millom 50.",
+          "80,000 med iye pacen 0.5% me cente ducu ma dong ka ikwanyo million 30.",
+          "Ugx 200,000 200,000"
+        ],
+        [
+          "Wel cato jami ma kicato ducu kato milliom 50 ento pe kato millom 80.",
+          "180,000 med iye pacen 0.6% me cente ducu ma dong ka ikwanyo million 50",
+          "Ugx 400,000"
+        ],
+        [
+          "Wel cato jami ma kicato ducu kato milliom 80 ento pe kato millom 150",
+          "360,000 med iye pacen 0.7% me cente ducu ma dong ka ikwanyo million 80",
+          "Ugx 900,000"
+        ]
+      ],
+      "row_count": 6
+    }
+  ]
+}
