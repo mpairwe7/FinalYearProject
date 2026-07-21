@@ -23,6 +23,10 @@ def vectorize_query(
 ) -> list[dict[str, Any]]:
     """Return up to *top_k* nearest chunks as retriever-shaped hit dicts."""
     s = get_cloud_settings()
+    if s.cf_relay_base_url.strip():
+        from . import relay_client
+
+        return relay_client.relay_vectorize_query(vector, top_k, vector_filter)
     url = (
         f"{_API_BASE}/accounts/{s.cloudflare_account_id}"
         f"/vectorize/v2/indexes/{s.vectorize_index}/query"
