@@ -62,7 +62,7 @@ from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
 from .guardrails import STORE_RAW_PROMPTS, InputGuard, OutputGuard, redact_pii_text
 from .memory import get_memory_service
-from .query import detect_language, rewrite as rewrite_query
+from .query import detect_language, extract_question_span, rewrite as rewrite_query
 from .resilience import CircuitBreaker
 from .retriever import HybridRetriever
 from .text_signals import (
@@ -3099,6 +3099,28 @@ class ChatModel:
             distress = detect_user_distress(message)
             tone_hint = tone_hint_for(distress)
 
+            # A distressed message mixes emotional preamble with the real
+            # question; retrieving on the raw combination dilutes relevance
+            # enough to false-abstain, so retrieval searches on just the
+            # question span when one is extractable. Cache keys, deterministic-
+            # template matching, and workflow/calculator routing still use the
+            # full `rewritten` text unchanged.
+            retrieval_query = rewritten
+            # _simple_search's binding_query keeps FAQ-match authorization
+            # bound to the user's own (unexpanded) words rather than
+            # rewrite()'s abbreviation expansion — see its docstring. That
+            # same authorization gate must drop the distress preamble too,
+            # or it silently re-dilutes match coverage and rejects the very
+            # FAQ retrieval_query just found, independent of the search step.
+            binding_query = message
+            if distress:
+                question_span = extract_question_span(rewritten)
+                if question_span:
+                    retrieval_query = question_span
+                message_question_span = extract_question_span(message)
+                if message_question_span:
+                    binding_query = message_question_span
+
             # 1. Input guardrails FIRST (OWASP LLM01) — check original message
             with trace_stage("input_guard", timings=timings):
                 guard = self._input_guard.check(message)
@@ -3411,7 +3433,7 @@ class ChatModel:
             if self._retriever_ready:
                 with trace_stage("hybrid_search", timings=timings):
                     search_t0 = time.perf_counter()
-                    hits = self._retriever.search(rewritten, top_k=top_k)
+                    hits = self._retriever.search(retrieval_query, top_k=top_k)
                     search_ms = (time.perf_counter() - search_t0) * 1000
                 if hits:
                     retrieval_mode = "hybrid"
@@ -3427,10 +3449,10 @@ class ChatModel:
             if not hits:
                 with trace_stage("keyword_search_fallback", timings=timings):
                     kw_hits = _simple_search(
-                        rewritten,
+                        retrieval_query,
                         self._faq_index,
                         top_k=top_k,
-                        binding_query=message,
+                        binding_query=binding_query,
                     )
                     hits = _faq_hits_to_retrieval_hits(kw_hits)
 
@@ -3438,7 +3460,7 @@ class ChatModel:
             if hits and self._retriever_ready:
                 with trace_stage("corrective_rag", timings=timings):
                     hits, was_corrected = corrective_retrieve(
-                        rewritten, self._retriever, hits, top_k=top_k
+                        retrieval_query, self._retriever, hits, top_k=top_k
                     )
                     if was_corrected:
                         retrieval_mode = "hybrid_corrected"
@@ -3467,12 +3489,12 @@ class ChatModel:
             #     so precise CSV FAQ steps are never filtered out by reranking.
             with trace_stage("faq_blend", timings=timings):
                 kw_hits = _simple_search(
-                    rewritten,
+                    retrieval_query,
                     self._faq_index,
                     top_k=2,
-                    binding_query=message,
+                    binding_query=binding_query,
                 )
-                priority_hits = self._priority_faq_hits(rewritten, top_k=2)
+                priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
                 seen_texts = {h.get("text", "")[:80] for h in hits}
                 for h in priority_hits:
                     if h.get("text", "")[:80] not in seen_texts:
@@ -3497,7 +3519,10 @@ class ChatModel:
 
             # Bind indexed FAQ passages to the user's original intent before
             # they can be used as LLM context or as an extractive fallback.
-            hits = _filter_unbound_faq_hits(message, hits)
+            # Same binding_query as above — a distress preamble in `message`
+            # would otherwise re-dilute this second authorization gate too
+            # and filter every hit out (score below cutoff for all of them).
+            hits = _filter_unbound_faq_hits(binding_query, hits)
 
             # 3d. Attached documents — prepend as top-priority grounding hits.
             #     They flow through the same LLM01 scrub + spotlight markers
@@ -4104,6 +4129,19 @@ class ChatModel:
         distress = detect_user_distress(message)
         tone_hint = tone_hint_for(distress)
 
+        # See generate()'s matching comment: retrieve on the question span
+        # alone when distress framing is present, so it doesn't dilute
+        # relevance into a false abstention.
+        retrieval_query = rewritten
+        binding_query = message
+        if distress:
+            question_span = extract_question_span(rewritten)
+            if question_span:
+                retrieval_query = question_span
+            message_question_span = extract_question_span(message)
+            if message_question_span:
+                binding_query = message_question_span
+
         # Input guardrails (OWASP LLM01)
         guard = self._input_guard.check(message)
         if not guard.allowed:
@@ -4318,7 +4356,7 @@ class ChatModel:
             self._retriever_ready = self._retriever.initialize()
 
         if self._retriever_ready:
-            hits = self._retriever.search(rewritten, top_k=top_k)
+            hits = self._retriever.search(retrieval_query, top_k=top_k)
             if hits:
                 retrieval_mode = "hybrid"
             self._retriever_ready = self._retriever._ready
@@ -4328,16 +4366,16 @@ class ChatModel:
         # signal (previously hardcoded 0.0 here, same bug as line 2167).
         if not hits:
             kw_hits = _simple_search(
-                rewritten,
+                retrieval_query,
                 self._faq_index,
                 top_k=top_k,
-                binding_query=message,
+                binding_query=binding_query,
             )
             hits = _faq_hits_to_retrieval_hits(kw_hits)
 
         # Corrective RAG (Phase 6)
         if hits and self._retriever_ready:
-            hits, was_corrected = corrective_retrieve(rewritten, self._retriever, hits, top_k=top_k)
+            hits, was_corrected = corrective_retrieve(retrieval_query, self._retriever, hits, top_k=top_k)
             if was_corrected:
                 retrieval_mode = "hybrid_corrected"
 
@@ -4362,12 +4400,12 @@ class ChatModel:
         # REST path, including the priority FAQ hits the deterministic
         # procedural fast path depends on).
         kw_hits = _simple_search(
-            rewritten,
+            retrieval_query,
             self._faq_index,
             top_k=2,
-            binding_query=message,
+            binding_query=binding_query,
         )
-        priority_hits = self._priority_faq_hits(rewritten, top_k=2)
+        priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
         for h in priority_hits:
             if h.get("text", "")[:80] not in seen_texts:
@@ -4387,7 +4425,7 @@ class ChatModel:
 
         # Apply the same FAQ intent binding as the REST path before streaming
         # can expose a passage to the model.
-        hits = _filter_unbound_faq_hits(message, hits)
+        hits = _filter_unbound_faq_hits(binding_query, hits)
 
         # Attached documents — prepend as top-priority grounding hits
         # (parity with generate(); see the comment there).
