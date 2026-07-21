@@ -58,7 +58,7 @@ lingua-language-detector>=2.0.0
 cryptography>=44.0.0
 
 # SSE streaming
-sse-starlette>=2.0.0
+sse-starlette>=3.4.1
 
 # OpenTelemetry GenAI observability (opt-in, aligned with 2025 stable semconv)
 opentelemetry-api>=1.29.0
