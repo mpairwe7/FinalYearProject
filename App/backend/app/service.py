@@ -272,6 +272,25 @@ def _build_fallback_prompt(
     return system, f"Context:\n{ctx}\n\nQuestion: {query}"
 
 
+# A generation that stops short with no terminal/citation punctuation reads
+# as an early cutoff rather than a deliberately terse answer — genuine short
+# replies still land on a sentence, quote, or citation boundary. Seen
+# intermittently in production (e.g. "...The Electronic" with nothing after
+# it) from whichever backend served that request. The threshold sits well
+# under the shortest real FAQ answer so it won't flag legitimate short
+# replies (deterministic templates/calculators don't go through this path).
+_MIN_COMPLETE_REPLY_CHARS = 60
+_REPLY_TERMINATORS = (".", "!", "?", '"', "'", ")", "]", "”", "’", "»")
+
+
+def _looks_truncated(text: str) -> bool:
+    """True if *text* reads like a generation that was cut off mid-stream."""
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) >= _MIN_COMPLETE_REPLY_CHARS:
+        return False
+    return not stripped.endswith(_REPLY_TERMINATORS)
+
+
 def _llm_cloud_fallback(
     query: str,
     passages: list[dict[str, Any]],
@@ -286,6 +305,11 @@ def _llm_cloud_fallback(
     circuit breaker + free-tier budget, so it fires only when the primary is
     unavailable and the cloud path is configured/under budget. Returns "" to let
     the caller fall back to the best-hit FAQ answer.
+
+    Each candidate backend that responds but :func:`_looks_truncated` is kept
+    as a best-effort ``best`` rather than returned outright — the chain keeps
+    trying the next backend for a complete answer, only settling for a short
+    reply if nothing better comes back.
     """
     if not flags.is_enabled("cloudflare_fallback"):
         return ""
@@ -300,6 +324,8 @@ def _llm_cloud_fallback(
     except Exception:  # providers optional / deps missing
         return ""
 
+    best = ""
+
     if (
         backend == "gemini"
         and cfg.is_gemini_configured()
@@ -311,8 +337,15 @@ def _llm_cloud_fallback(
             text = gw.gemini_generate(user, system=system, max_tokens=512, temperature=0.2)
             breakers.GEMINI_BREAKER.record_success()
             routing.log_model_use("llm", "gemini_flash")
-            logger.info("LLM fallback via Gemini succeeded")
-            return text
+            if text and text.strip() and not _looks_truncated(text):
+                logger.info("LLM fallback via Gemini succeeded")
+                return text
+            if text and text.strip():
+                logger.warning(
+                    "LLM fallback via Gemini looks truncated (%d chars) — trying Workers AI",
+                    len(text.strip()),
+                )
+                best = best or text
         except Exception:
             breakers.GEMINI_BREAKER.record_failure()
             logger.warning("LLM Gemini fallback failed", exc_info=True)
@@ -354,12 +387,20 @@ def _llm_cloud_fallback(
             text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2)
             breakers.CF_LLM_BREAKER.record_success()
             routing.log_model_use("llm", model)
-            logger.info("LLM via Workers AI (%s) succeeded", model)
-            return text
+            if text and text.strip() and not _looks_truncated(text):
+                logger.info("LLM via Workers AI (%s) succeeded", model)
+                return text
+            if text and text.strip():
+                logger.warning(
+                    "LLM via Workers AI (%s) looks truncated (%d chars) — trying next",
+                    model,
+                    len(text.strip()),
+                )
+                best = best or text
         except Exception:
             breakers.CF_LLM_BREAKER.record_failure()
             logger.warning("LLM Workers AI failed (model=%s)", model, exc_info=True)
-    return ""
+    return best
 
 
 def _stream_cloud_fallback(
@@ -524,7 +565,18 @@ def _local_llm_then_cloud(
         reply = future.result(timeout=deadline_s)
         if reply and reply.strip():
             _LLM_CIRCUIT.record_success()
-            return reply
+            if not _looks_truncated(reply):
+                return reply
+            # Responded, so this isn't a breaker-worthy failure — but the
+            # reply looks cut off mid-stream, so try the cloud chain for a
+            # complete answer before settling for it.
+            logger.warning(
+                "LLM reply looks truncated (%d chars, no terminal punctuation) — "
+                "trying cloud fallback",
+                len(reply.strip()),
+            )
+            cloud_reply = _cloud()
+            return cloud_reply if (cloud_reply and cloud_reply.strip()) else reply
         # Empty reply — llm_module.generate logs+swallows its own errors and
         # returns "" (e.g. _vllm_generate on HTTP failure), so an empty string
         # is our only failure signal here. Mirror the streaming path: record a
