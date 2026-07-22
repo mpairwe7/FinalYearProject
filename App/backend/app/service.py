@@ -276,17 +276,24 @@ def _build_fallback_prompt(
 # as an early cutoff rather than a deliberately terse answer — genuine short
 # replies still land on a sentence, quote, or citation boundary. Seen
 # intermittently in production (e.g. "...The Electronic" with nothing after
-# it) from whichever backend served that request. The threshold sits well
-# under the shortest real FAQ answer so it won't flag legitimate short
-# replies (deterministic templates/calculators don't go through this path).
-_MIN_COMPLETE_REPLY_CHARS = 60
+# it) from whichever backend served that request. No length exemption: an
+# earlier version only flagged replies under 60 chars, reasoning a longer
+# unterminated reply was less certain to be truncated — but a distress-tone
+# reply routinely opens with the model's own empathy sentence (tone_hint
+# instructs it to) before the substantive answer, which alone can push a
+# genuinely truncated reply over 60 chars (e.g. "I understand you're under
+# time pressure! ... the fastest path to your answer:\n\nFor" — 85 chars,
+# still cut off mid-word). Every reply on this path is expected to end in a
+# sentence or a citation marker regardless of length, so "no terminator" is
+# trusted on its own — deterministic templates/calculators never reach this
+# check (they bypass the LLM entirely), so this can't misfire on them.
 _REPLY_TERMINATORS = (".", "!", "?", '"', "'", ")", "]", "”", "’", "»")
 
 
 def _looks_truncated(text: str) -> bool:
     """True if *text* reads like a generation that was cut off mid-stream."""
     stripped = (text or "").strip()
-    if not stripped or len(stripped) >= _MIN_COMPLETE_REPLY_CHARS:
+    if not stripped:
         return False
     return not stripped.endswith(_REPLY_TERMINATORS)
 
