@@ -720,6 +720,87 @@ class LLMFallbackTest(unittest.TestCase):
         self.assertEqual(out, "VAT is 18%.")
         cf.assert_not_called()
 
+    def test_deadline_already_past_skips_entire_chain(self):
+        """A request that enters the cloud chain with no budget left must not
+        attempt Gemini or any Workers AI model — regression test for Crane
+        Cloud's /v1/chat hanging to a uniform ~51s then 504ing under load:
+        a request with no time left should fail fast, not still try every
+        hop's own ~30s timeout on top of an already-exhausted budget."""
+        from app import service
+
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
+             mock.patch.object(gateway, "gemini_generate") as gg, \
+             mock.patch.object(gateway, "workers_ai_chat") as wac:
+            out = service._llm_cloud_fallback(
+                "vat rate?",
+                [{"text": "VAT is 18%"}],
+                None,
+                "en",
+                deadline=service.time.monotonic() - 1,
+            )
+        self.assertEqual(out, "")
+        gg.assert_not_called()
+        wac.assert_not_called()
+
+    def test_deadline_exhausted_between_gemini_and_workers_ai_stops_chain(self):
+        """Budget is re-checked before each hop, not just once at entry — a
+        Gemini attempt that itself eats the remaining budget must stop the
+        chain from also trying every Workers AI model afterward."""
+        from app import service
+
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
+             mock.patch.object(gateway, "gemini_generate", return_value="Short") as gg, \
+             mock.patch.object(gateway, "workers_ai_chat") as wac, \
+             mock.patch.object(service.time, "monotonic", side_effect=[100.0, 200.0]):
+            out = service._llm_cloud_fallback(
+                "vat rate?", [{"text": "VAT is 18%"}], None, "en", deadline=150.0
+            )
+        self.assertEqual(out, "Short")  # best-effort floor from the Gemini attempt
+        gg.assert_called_once()
+        wac.assert_not_called()
+
+    def test_deadline_not_exhausted_behaves_as_before(self):
+        """A generous deadline must not change existing behaviour — same
+        assertion as test_fallback_uses_gemini_when_configured, plus an
+        explicit far-future deadline."""
+        from app import service
+
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
+             mock.patch.object(gateway, "gemini_generate", return_value="VAT is 18%. [1]") as gg:
+            out = service._llm_cloud_fallback(
+                "vat rate?",
+                [{"text": "VAT is 18%"}],
+                None,
+                "en",
+                deadline=service.time.monotonic() + 100,
+            )
+        self.assertEqual(out, "VAT is 18%. [1]")
+        gg.assert_called_once()
+
+    def test_local_then_cloud_shares_one_budget_across_local_and_cloud(self):
+        """_local_llm_then_cloud must compute the chain-wide deadline once,
+        before the local attempt, and pass it through to the cloud fallback
+        — not give the cloud chain a fresh full budget on top of whatever
+        the local attempt already spent."""
+        from app import service
+
+        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(service.llm_module, "generate", return_value=""), \
+             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cf:
+            before = service.time.monotonic()
+            service._call_llm_with_deadline("vat?", [{"text": "x"}], None, "en")
+            after = service.time.monotonic()
+        cf.assert_called_once()
+        deadline = cf.call_args.kwargs["deadline"]
+        self.assertIsNotNone(deadline)
+        # Must land within [now, now + LLM_TOTAL_BUDGET_SECONDS], not None
+        # (unbounded) and not some unrelated/huge value.
+        self.assertGreaterEqual(deadline, before)
+        self.assertLessEqual(deadline, after + service.LLM_TOTAL_BUDGET_SECONDS)
+
 
 class LooksTruncatedHeuristicTest(unittest.TestCase):
     def test_short_without_terminal_punctuation_is_truncated(self):

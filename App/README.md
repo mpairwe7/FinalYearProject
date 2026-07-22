@@ -896,6 +896,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `LLM_TEMPERATURE` | Generation temperature | `0.2` |
 | `LLM_MAX_TOKENS` | Max new tokens; compose uses `512` for complete procedural answers | `512` |
 | `LLM_DEADLINE_SECONDS` | Hard wall-clock deadline per LLM call | `45` |
+| `LLM_TOTAL_BUDGET_SECONDS` | Hard wall-clock cap on the *whole* local→Gemini→Workers AI chain for one request (checked before each hop, not mid-call) — keeps one degraded request from tying up a worker for the sum of every hop's own timeout | `70` |
 | `LLM_MAX_CONCURRENCY` | Bounded LLM thread-pool size | `2` |
 | `LLM_STRUCTURED_OUTPUT` | Emit JSON `{answer, citations, abstain}` | `false` |
 | **Self-Reflection (Self-RAG)** | | |
@@ -1090,6 +1091,15 @@ changed and why.
   `LLM_DEADLINE_SECONDS` wall-clock deadline.
 - On timeout / breaker-open / exception the pipeline gracefully
   falls back to the best-matching FAQ answer.
+- The local→Gemini→Workers AI fallback chain a request may walk shares one
+  `LLM_TOTAL_BUDGET_SECONDS` wall-clock budget across every hop, checked
+  before starting each new hop (not mid-call). Each hop already has its own
+  timeout (`LLM_DEADLINE_SECONDS` locally, `CF_HTTP_TIMEOUT` per cloud call),
+  but nothing previously capped their *sum* — a single degraded request
+  could otherwise hold a worker for up to ~165s (45s local + 30s Gemini +
+  30s × 3 Workers AI models). On a small worker pool, a handful of
+  concurrent slow requests exhausts every worker and queues every new
+  request behind them until it also times out.
 
 **Phase 4 — Structured outputs + self-reflection**
 
