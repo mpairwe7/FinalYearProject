@@ -2141,6 +2141,23 @@ class ChatModel:
                 priority -= 8
             return (overlap + priority + float(hit.get("score_rrf") or 0.0) / 100.0, -idx)
 
+        def is_near_duplicate(tokens: set[str], seen: set[str]) -> bool:
+            if not tokens or not seen:
+                return False
+            overlap = len(tokens & seen)
+            union = len(tokens | seen)
+            if union and overlap / union > 0.6:
+                return True
+            # Jaccard alone misses a short excerpt that is almost entirely a
+            # *subset* of a much longer one (two editions of the same section,
+            # where one excerpt's 700-char trim window reaches further before
+            # cutting off) — its unique tail content dilutes the union enough
+            # to pull Jaccard under the threshold even though the shorter
+            # excerpt is essentially all duplicate. A containment ratio over
+            # the shorter excerpt's own token count catches that case too.
+            shorter = min(len(tokens), len(seen))
+            return shorter >= 15 and overlap / shorter > 0.75
+
         ranked_hits = [hit for _, hit in sorted(enumerate(hits), key=rank, reverse=True)]
         excerpt_tokens: list[set[str]] = []
         for hit in ranked_hits:
@@ -2156,13 +2173,11 @@ class ChatModel:
             excerpt = re.sub(r"(?<=[.!?)])\s+\d{1,3}\s*$", "", excerpt).rstrip()
             # Different handbook fiscal-year editions often carry near-identical
             # wording for the same section, so the top-ranked hits can be the
-            # same passage from two editions. A token-overlap gate skips a
-            # near-duplicate in favour of the next genuinely distinct hit
-            # instead of showing the user the same content twice.
+            # same passage from two editions. This gate skips a near-duplicate
+            # in favour of the next genuinely distinct hit instead of showing
+            # the user the same content twice.
             tokens = cls._content_tokens(excerpt)
-            if tokens and any(
-                len(tokens & seen) / len(tokens | seen) > 0.6 for seen in excerpt_tokens
-            ):
+            if any(is_near_duplicate(tokens, seen) for seen in excerpt_tokens):
                 continue
             # References intentionally stay OUT of the prose — they reach the
             # UI via the result's citations/sources (grounded-context panel),
