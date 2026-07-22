@@ -76,6 +76,64 @@ class GroundedRevisionDigitTests(unittest.TestCase):
         self.assertIn("0800 117 000.", out)
 
 
+class CleanPassageMarkdownTests(unittest.TestCase):
+    """The Vectorize-fallback corpus (backend/scripts/reindex_vectorize.py)
+    embeds raw pymupdf4llm Markdown chunks and never populates a hit's
+    ``answer`` field, so ``_extract_grounded_answer_text`` always falls
+    through to the raw ``text`` for those hits. Reproduces the exact
+    "What services does URA provide?" reply observed live on the HF Space
+    deployment, where ATX headings and bold markers leaked into the
+    extractive-fallback reply verbatim."""
+
+    def test_atx_headings_and_bold_markers_are_stripped(self) -> None:
+        from app.service import _clean_passage_text
+
+        raw = (
+            "omes and wealth of the rich. The revenue raised is then used to "
+            "provide social services for the benefit of the society. \n\n"
+            "## **8.0 About Uganda Revenue Authority** \n\n"
+            "Uganda Revenue Authority (URA) is a Statutory Authority "
+            "established by the Uganda Revenue Authority Act, Cap 196 with "
+            "the mandate of assessment, collection and administration of "
+            "taxes, fees and Non- Tax revenue in Uganda. \n\n"
+            "## **8.1 Vision** \n\n"
+            "A transformational Revenue Service for Uganda's Economic "
+            "Independence \n\n"
+            "## **8.2 Mission**"
+        )
+        cleaned = _clean_passage_text(raw)
+        self.assertNotIn("#", cleaned)
+        self.assertNotIn("**", cleaned)
+        self.assertIn("8.0 About Uganda Revenue Authority", cleaned)
+        self.assertIn("8.1 Vision", cleaned)
+
+    def test_bare_hash_in_prose_is_not_a_heading(self) -> None:
+        from app.service import _clean_passage_text
+
+        self.assertEqual(
+            _clean_passage_text("Room #12 is on the third floor."),
+            "Room #12 is on the third floor.",
+        )
+
+    def test_grounded_revision_excludes_markdown_artifacts(self) -> None:
+        from app import service
+
+        hits = [{
+            "source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+            "text": (
+                "## **8.0 About Uganda Revenue Authority**\n\n"
+                "Uganda Revenue Authority (URA) is a Statutory Authority "
+                "established by the Uganda Revenue Authority Act, Cap 196 "
+                "with the mandate of assessment, collection and "
+                "administration of taxes, fees and Non-Tax revenue in "
+                "Uganda."
+            ),
+        }]
+        out = service.ChatModel._build_grounded_revision(hits, [], "what services does ura provide")
+        self.assertNotIn("##", out)
+        self.assertNotIn("**", out)
+
+
 class TinClarificationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
