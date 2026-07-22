@@ -743,10 +743,38 @@ class LooksTruncatedHeuristicTest(unittest.TestCase):
         self.assertFalse(service._looks_truncated(""))
         self.assertFalse(service._looks_truncated("   "))
 
-    def test_long_text_without_terminal_punctuation_is_not_flagged(self):
+    def test_long_text_without_terminal_punctuation_is_still_flagged(self):
+        """Regression: an empathy preamble sentence (the model's own, per
+        tone_hint) can push a genuinely truncated reply past any reasonable
+        length exemption — e.g. observed live: "I understand you're under
+        time pressure! ... the fastest path to your answer:\\n\\nFor" (85
+        chars, cut off mid-word). Length alone must not exempt a reply from
+        the truncation check."""
         from app import service
 
-        self.assertFalse(service._looks_truncated("x" * 80))
+        self.assertTrue(service._looks_truncated("x" * 80))
+        self.assertTrue(
+            service._looks_truncated(
+                "I understand you're under time pressure! Here's the fastest "
+                "path to your answer:\n\nFor"
+            )
+        )
+        self.assertTrue(
+            service._looks_truncated(
+                "Please don't worry, we're here to help you understand.\n\nA customs"
+            )
+        )
+
+    def test_long_complete_text_is_not_flagged(self):
+        from app import service
+
+        self.assertFalse(
+            service._looks_truncated(
+                "VAT is charged at 18% on most goods and services supplied in "
+                "Uganda, and registration is mandatory once annual taxable "
+                "turnover exceeds UGX 150 million. [1]"
+            )
+        )
 
 
 class StreamFallbackTest(unittest.TestCase):
