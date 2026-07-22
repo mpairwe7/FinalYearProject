@@ -67,7 +67,18 @@ def _chunk_text(
                     end = idx + len(sep)
                     break
         chunks.append(text[start:end].strip())
-        start = end - overlap
+        next_start = end - overlap
+        if 0 < next_start < len(text) and not text[next_start - 1].isspace():
+            # `end` was snapped to a sentence/word boundary above, but
+            # subtracting a fixed overlap from it is not: the next chunk can
+            # start inside the word straddling that offset (observed live —
+            # "...for the benefit of the society. incomes and wealth..."
+            # started its next chunk at "omes and wealth..."). Snap forward
+            # to the next whitespace so every chunk begins on a word boundary.
+            ws = text.find(" ", next_start, end)
+            if ws != -1:
+                next_start = ws + 1
+        start = next_start
 
     return [c for c in chunks if len(c) > 50]
 

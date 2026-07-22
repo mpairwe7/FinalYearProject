@@ -200,17 +200,27 @@ _PDF_EDITION_RE = re.compile(
 )
 _DOT_LEADER_RE = re.compile(r"(?:\.\s*){4,}")
 _SPACED_LETTERS_RE = re.compile(r"(?:\b[A-Za-z]\b[ ]){4,}\b[A-Za-z]\b")
+# A stray U+FFFD replacement character between two digits is almost always a
+# decimal point that survived a lossy PDF text-extraction encoding step
+# (observed corrupting handbook section numbers "8.0" -> "8�0").  Any
+# other occurrence carries no recoverable meaning, so it is dropped outright.
+_MOJIBAKE_DECIMAL_RE = re.compile(r"(?<=\d)�(?=\d)")
 # pymupdf4llm converts PDFs to Markdown for the Vectorize-fallback corpus
 # (raw handbook chunks, unlike the clean FAQ/teacher-QA answers Qdrant
 # serves), so ATX headings and bold markers leak into extractive-fallback
 # replies verbatim (e.g. "## **8.0 About Uganda Revenue Authority**")
-# unless stripped here too.
-_MD_HEADING_RE = re.compile(r"(?m)^\s*#{1,6}\s+")
+# unless stripped here too.  Headings are turned into their own paragraph
+# (instead of being deleted in place) so a multi-section chunk still reads
+# as distinct paragraphs rather than one run-on wall of text.
+_MD_HEADING_RE = re.compile(r"(?m)^[ \t]*#{1,6}[ \t]+")
 _MD_BOLD_RE = re.compile(r"\*\*")
+_PARA_BREAK_RE = re.compile(r"[ \t]*\n(?:[ \t]*\n)+[ \t]*")
+_PARA_SENTINEL = "\x00PARA\x00"
 
 
 def _clean_passage_text(text: str) -> str:
-    """Remove PDF-extraction and Markdown artifacts from a retrieved chunk; no-op for clean text."""
+    """Remove PDF-extraction and Markdown artifacts from a retrieved chunk,
+    preserving paragraph breaks; no-op for clean text."""
     if not text:
         return ""
     t = _PIC_BLOCK_RE.sub(" ", text)
@@ -219,9 +229,17 @@ def _clean_passage_text(text: str) -> str:
     t = _PDF_EDITION_RE.sub(" ", t)
     t = _DOT_LEADER_RE.sub(" ", t)
     t = _SPACED_LETTERS_RE.sub(" ", t)
-    t = _MD_HEADING_RE.sub(" ", t)
+    t = _MOJIBAKE_DECIMAL_RE.sub(".", t)
+    t = t.replace("�", "")
+    t = _MD_HEADING_RE.sub(_PARA_SENTINEL, t)
     t = _MD_BOLD_RE.sub("", t)
-    t = re.sub(r"\s+", " ", t).strip()
+    t = _PARA_BREAK_RE.sub(_PARA_SENTINEL, t)
+    t = t.replace("\n", " ")  # any remaining single newline is a mid-paragraph line-wrap
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(rf"(?:{re.escape(_PARA_SENTINEL)}[ ]*)+", _PARA_SENTINEL, t)  # collapse runs
+    t = re.sub(rf"^(?:{re.escape(_PARA_SENTINEL)}[ ]*)+", "", t)  # trim leading break
+    t = re.sub(rf"(?:{re.escape(_PARA_SENTINEL)}[ ]*)+$", "", t)  # trim trailing break
+    t = t.replace(_PARA_SENTINEL, "\n\n")
     t = re.sub(r"[\s;]+\d{1,3}\s*$", "", t)  # trailing orphan page number
     t = re.sub(r"[\s;]+\d{1,2}\.\s*$", "", t)  # trailing orphan list marker
     return t.strip()
@@ -2124,7 +2142,10 @@ class ChatModel:
             return (overlap + priority + float(hit.get("score_rrf") or 0.0) / 100.0, -idx)
 
         ranked_hits = [hit for _, hit in sorted(enumerate(hits), key=rank, reverse=True)]
-        for hit in ranked_hits[:2]:
+        excerpt_tokens: list[set[str]] = []
+        for hit in ranked_hits:
+            if len(excerpts) >= 2:
+                break
             text = cls._extract_grounded_answer_text(hit)  # PDF-artifact-cleaned
             if len(text) < 40:  # skip empty / artifact-only chunks
                 continue
@@ -2133,10 +2154,21 @@ class ChatModel:
             # end of the excerpt ("...remit to URA. 1") — strip it. Numbers
             # BEFORE the final punctuation (amounts, hotlines) are untouched.
             excerpt = re.sub(r"(?<=[.!?)])\s+\d{1,3}\s*$", "", excerpt).rstrip()
+            # Different handbook fiscal-year editions often carry near-identical
+            # wording for the same section, so the top-ranked hits can be the
+            # same passage from two editions. A token-overlap gate skips a
+            # near-duplicate in favour of the next genuinely distinct hit
+            # instead of showing the user the same content twice.
+            tokens = cls._content_tokens(excerpt)
+            if tokens and any(
+                len(tokens & seen) / len(tokens | seen) > 0.6 for seen in excerpt_tokens
+            ):
+                continue
             # References intentionally stay OUT of the prose — they reach the
             # UI via the result's citations/sources (grounded-context panel),
             # matching the deterministic-reply convention.
             excerpts.append(excerpt)
+            excerpt_tokens.append(tokens)
         if not excerpts:
             return ""
         body = "\n\n".join(excerpts)
