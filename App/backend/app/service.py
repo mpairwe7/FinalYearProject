@@ -99,6 +99,21 @@ if not _DATA_DIR.is_relative_to(_PROJECT_ROOT):
 
 GROUNDING_THRESHOLD = float(os.getenv("GROUNDING_THRESHOLD", "0.3"))
 LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
+# Hard cap on the *total* wall-clock time one request may spend across the
+# whole local -> Gemini -> Workers AI chain, not just each hop's own
+# timeout. Each hop already has its own budget (LLM_DEADLINE_SECONDS for
+# local, CF_HTTP_TIMEOUT=30s per cloud call) but nothing previously bounded
+# their sum, so a single degraded request could hold a uvicorn worker for
+# ~45s + 30s + 30s + 30s (Gemini + 3 Workers AI models) = up to ~165s.  On a
+# small worker pool, a handful of concurrent slow requests exhausts every
+# worker and every *new* request queues behind them until it also times
+# out — observed live as Crane Cloud's /v1/chat hanging to a uniform ~51s
+# then 504ing for every request after the first several, recovering only
+# after a redeploy. This budget is checked before starting each subsequent
+# hop (not mid-call — an in-flight HTTP call still runs to its own
+# timeout), so the worst case becomes roughly this budget plus one more
+# hop's own timeout instead of the sum of every hop's timeout.
+LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "70"))
 SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "true"
 SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
@@ -332,6 +347,7 @@ def _llm_cloud_fallback(
     locale: str,
     personalization_context: str = "",
     tone_hint: str = "",
+    deadline: float | None = None,
 ) -> str:
     """Generate via Cloudflare Gemini / Workers AI when the primary LLM is down.
 
@@ -344,6 +360,13 @@ def _llm_cloud_fallback(
     as a best-effort ``best`` rather than returned outright — the chain keeps
     trying the next backend for a complete answer, only settling for a short
     reply if nothing better comes back.
+
+    ``deadline`` is an optional absolute ``time.monotonic()`` timestamp (see
+    :data:`LLM_TOTAL_BUDGET_SECONDS`) checked before each hop so one request
+    can't walk the whole chain unbounded — a small worker pool only needs a
+    handful of requests each holding a worker for minutes to queue every
+    other request behind them.  An in-flight HTTP call still runs to its own
+    timeout; this only stops a *new* hop from starting once time is up.
     """
     if not flags.is_enabled("cloudflare_fallback"):
         return ""
@@ -358,9 +381,14 @@ def _llm_cloud_fallback(
     except Exception:  # providers optional / deps missing
         return ""
 
+    def _budget_exhausted() -> bool:
+        return deadline is not None and time.monotonic() >= deadline
+
     best = ""
 
-    if (
+    if _budget_exhausted():
+        logger.warning("LLM fallback chain total budget exhausted before Gemini attempt")
+    elif (
         backend == "gemini"
         and cfg.is_gemini_configured()
         and breakers.GEMINI_BREAKER.allow_request()
@@ -411,6 +439,11 @@ def _llm_cloud_fallback(
         routing.CF_LLM_FALLBACK_MODEL_2,
     )
     for model in cf_chain:
+        if _budget_exhausted():
+            logger.warning(
+                "LLM fallback chain total budget exhausted — stopping before %s", model
+            )
+            break
         if not (
             cfg.is_cloudflare_configured()
             and breakers.CF_LLM_BREAKER.allow_request()
@@ -447,7 +480,13 @@ def _stream_cloud_fallback(
 ) -> Generator[str, None, None]:
     """Yield the cloud-fallback answer in word chunks for the SSE/WS stream path."""
     text = _llm_cloud_fallback(
-        query, passages, conversation_history, locale, personalization_context, tone_hint
+        query,
+        passages,
+        conversation_history,
+        locale,
+        personalization_context,
+        tone_hint,
+        deadline=time.monotonic() + LLM_TOTAL_BUDGET_SECONDS,
     )
     if not text:
         return
@@ -529,7 +568,13 @@ def _call_llm_with_deadline(
     """
     if _prefer_cloud_primary(locale):
         text = _llm_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context, tone_hint
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            tone_hint,
+            deadline=time.monotonic() + LLM_TOTAL_BUDGET_SECONDS,
         )
         if text and text.strip():
             return text
@@ -574,12 +619,24 @@ def _local_llm_then_cloud(
     to the cloud chain (when ``allow_cloud_fallback``) and otherwise return an
     empty string so the caller falls back to FAQ lookup.
     """
+    # Shared budget for local + every cloud hop this request may walk (see
+    # LLM_TOTAL_BUDGET_SECONDS). Starts now, before the local attempt, so a
+    # local generation that runs close to its own deadline_s leaves
+    # correspondingly less time for the cloud chain rather than the two
+    # budgets stacking on top of each other.
+    chain_deadline = time.monotonic() + LLM_TOTAL_BUDGET_SECONDS
 
     def _cloud() -> str:
         if not allow_cloud_fallback:
             return ""
         return _llm_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context, tone_hint
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            tone_hint,
+            deadline=chain_deadline,
         )
 
     if not _LLM_CIRCUIT.allow_request():
