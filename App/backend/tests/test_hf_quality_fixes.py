@@ -217,6 +217,66 @@ class CleanPassageMarkdownTests(unittest.TestCase):
             [hit_a, hit_b, hit_c], [], "what services does ura provide"
         )
         self.assertEqual(out.count("Statutory Authority"), 1)
+
+    def test_near_duplicate_detection_handles_asymmetric_length(self) -> None:
+        """Live miss: a plain Jaccard-over-union check missed this pair
+        (0.53, just under the 0.6 cutoff) because the longer excerpt's
+        unique tail content (Vision/Mission/Core Values sections) dilutes
+        the union, even though the shorter excerpt is ~97% contained in the
+        longer one. A containment ratio over the shorter excerpt's own
+        token count must still catch it."""
+        from app import service
+
+        hit_a = {
+            "source": "Taxation-handbook-FY2023-24.pdf",
+            "text": (
+                "omes and wealth of the rich. The revenue raised is then "
+                "used to provide social services for the benefit of the "
+                "society. \n\n"
+                "## **8.0 About Uganda Revenue Authority** \n\n"
+                "Uganda Revenue Authority (URA) is a Statutory Authority "
+                "established by the Uganda Revenue Authority Act, Cap 196 "
+                "with the mandate of assessment, collection and "
+                "administration of taxes, fees and Non- Tax revenue in "
+                "Uganda. \n\n"
+                "## **8.1 Vision** \n\n"
+                "A transformational Revenue Service for Uganda's Economic "
+                "Independence \n\n"
+                "## **8.2 Mission** \n\n"
+                "Mobilize revenue for National Development in a "
+                "Transparent and Efficient manner. \n\n"
+                "## **8.3 Core Values** \n\n"
+                "- Patriotism \n\n- Integrity \n\n- Professionalism \n\n"
+                "## **8.4 Client Value Proposition**"
+            ),
+        }
+        hit_b = {
+            "source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+            "text": (
+                "incomes and wealth of the rich. The revenue raised is "
+                "then used to provide social services for the benefit of "
+                "society. \n\n"
+                "## **8�0 About Uganda Revenue Authority** \n\n"
+                "Uganda Revenue Authority (URA) is a Statutory Authority "
+                "established by the Uganda Revenue Authority Act, Cap 196, "
+                "with the mandate of assessment, collection, and "
+                "administration of taxes, fees, and non-tax revenue in "
+                "Uganda."
+            ),
+        }
+        hit_c = {
+            "source": "ura_vat_faqs.csv",
+            "answer": (
+                "VAT registration is compulsory once taxable turnover "
+                "exceeds UGX 150 million in any 12 consecutive months, or "
+                "UGX 37.5 million in any 3 consecutive months."
+            ),
+        }
+        out = service.ChatModel._build_grounded_revision(
+            [hit_a, hit_b, hit_c], [], "what services does ura provide"
+        )
+        self.assertEqual(out.count("Statutory Authority"), 1)
+        self.assertIn("VAT registration", out)
         self.assertIn("VAT registration", out)
 
 
