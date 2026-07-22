@@ -107,6 +107,29 @@ class CleanPassageMarkdownTests(unittest.TestCase):
         self.assertIn("8.0 About Uganda Revenue Authority", cleaned)
         self.assertIn("8.1 Vision", cleaned)
 
+    def test_headings_become_their_own_paragraph(self) -> None:
+        """Stripping the "##"/"**" markers must not collapse a multi-section
+        chunk into one run-on paragraph — each former heading should still
+        start a new paragraph so the excerpt stays readable."""
+        from app.service import _clean_passage_text
+
+        raw = (
+            "Intro sentence about revenue. \n\n"
+            "## **8.0 About Uganda Revenue Authority** \n\n"
+            "URA body text here. \n\n"
+            "## **8.1 Vision** \n\n"
+            "Vision body text here."
+        )
+        cleaned = _clean_passage_text(raw)
+        self.assertEqual(
+            cleaned,
+            "Intro sentence about revenue.\n\n"
+            "8.0 About Uganda Revenue Authority\n\n"
+            "URA body text here.\n\n"
+            "8.1 Vision\n\n"
+            "Vision body text here.",
+        )
+
     def test_bare_hash_in_prose_is_not_a_heading(self) -> None:
         from app.service import _clean_passage_text
 
@@ -114,6 +137,22 @@ class CleanPassageMarkdownTests(unittest.TestCase):
             _clean_passage_text("Room #12 is on the third floor."),
             "Room #12 is on the third floor.",
         )
+
+    def test_mojibake_replacement_char_between_digits_becomes_a_period(self) -> None:
+        """A lossy PDF-extraction encoding step corrupted section numbers like
+        "8.0" into "8�0" in the live corpus; any other stray U+FFFD carries
+        no recoverable meaning and is dropped outright."""
+        from app.service import _clean_passage_text
+
+        cleaned = _clean_passage_text(
+            "Section 8�0 covers the tax base, split into 5�1 and 5�2. "
+            "A stray�character elsewhere is just dropped."
+        )
+        self.assertNotIn("�", cleaned)
+        self.assertIn("8.0", cleaned)
+        self.assertIn("5.1", cleaned)
+        self.assertIn("5.2", cleaned)
+        self.assertIn("straycharacter", cleaned)
 
     def test_grounded_revision_excludes_markdown_artifacts(self) -> None:
         from app import service
@@ -132,6 +171,53 @@ class CleanPassageMarkdownTests(unittest.TestCase):
         out = service.ChatModel._build_grounded_revision(hits, [], "what services does ura provide")
         self.assertNotIn("##", out)
         self.assertNotIn("**", out)
+
+    def test_near_duplicate_excerpts_across_editions_are_skipped(self) -> None:
+        """Different handbook fiscal-year editions often carry near-identical
+        wording for the same section. The top-2 ranked hits repeating that
+        passage must not both make it into the reply — the second slot
+        should fall through to the next genuinely distinct hit."""
+        from app import service
+
+        hit_a = {
+            "source": "Taxation-handbook-FY2023-24.pdf",
+            "text": (
+                "The revenue raised is then used to provide social services "
+                "for the benefit of the society. \n\n"
+                "## **8.0 About Uganda Revenue Authority** \n\n"
+                "Uganda Revenue Authority (URA) is a Statutory Authority "
+                "established by the Uganda Revenue Authority Act, Cap 196 "
+                "with the mandate of assessment, collection and "
+                "administration of taxes, fees and Non-Tax revenue in "
+                "Uganda."
+            ),
+        }
+        hit_b = {
+            "source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+            "text": (
+                "The revenue raised is then used to provide social services "
+                "for the benefit of society. \n\n"
+                "## **8�0 About Uganda Revenue Authority** \n\n"
+                "Uganda Revenue Authority (URA) is a Statutory Authority "
+                "established by the Uganda Revenue Authority Act, Cap 196, "
+                "with the mandate of assessment, collection, and "
+                "administration of taxes, fees, and non-tax revenue in "
+                "Uganda."
+            ),
+        }
+        hit_c = {
+            "source": "ura_vat_faqs.csv",
+            "answer": (
+                "VAT registration is compulsory once taxable turnover "
+                "exceeds UGX 150 million in any 12 consecutive months, or "
+                "UGX 37.5 million in any 3 consecutive months."
+            ),
+        }
+        out = service.ChatModel._build_grounded_revision(
+            [hit_a, hit_b, hit_c], [], "what services does ura provide"
+        )
+        self.assertEqual(out.count("Statutory Authority"), 1)
+        self.assertIn("VAT registration", out)
 
 
 class TinClarificationTests(unittest.TestCase):
