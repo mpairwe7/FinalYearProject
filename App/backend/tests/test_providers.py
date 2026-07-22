@@ -548,6 +548,15 @@ class LLMFallbackTest(unittest.TestCase):
         budget._redis_tried = True  # force in-process budget
         budget._local_gemini.clear()
         budget._local_neurons.clear()
+        # Some tests below let a "truncated" Gemini reply fall through to a
+        # real (unmocked) Workers AI call, matching production's chain
+        # behaviour; force both breakers healthy first so an unrelated
+        # earlier test's failures can't leave them OPEN here (see
+        # LLMRoutingOrderTest, which does the same).
+        from app.providers import breakers
+
+        breakers.GEMINI_BREAKER.record_success()
+        breakers.CF_LLM_BREAKER.record_success()
 
     def tearDown(self):
         _clear_keys()
@@ -609,10 +618,135 @@ class LLMFallbackTest(unittest.TestCase):
 
         with mock.patch.object(service.flags, "is_enabled", return_value=True), \
              mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
-             mock.patch.object(gateway, "gemini_generate", return_value="VAT is eighteen percent"):
+             mock.patch.object(gateway, "gemini_generate", return_value="VAT is eighteen percent."):
             chunks = list(service._stream_cloud_fallback("vat?", [{"text": "VAT"}], None, "en"))
         self.assertGreater(len(chunks), 1)
-        self.assertEqual("".join(chunks).strip(), "VAT is eighteen percent")
+        self.assertEqual("".join(chunks).strip(), "VAT is eighteen percent.")
+
+    def test_gemini_truncated_reply_falls_through_to_workers_ai(self):
+        """A short, punctuation-less Gemini reply (early-stop artifact) must
+        not win outright — the chain should still try Workers AI for a
+        complete answer (regression test for the Crane Cloud truncation
+        bug: '...The Electronic' with nothing after it)."""
+        from app import service
+
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), \
+             mock.patch.object(gateway, "gemini_generate", return_value="The Electronic") as gg, \
+             mock.patch.object(
+                 gateway,
+                 "workers_ai_chat",
+                 return_value="EFRIS is mandatory for VAT-registered taxpayers. [1]",
+             ) as wac:
+            out = service._llm_cloud_fallback(
+                "what is efris?", [{"text": "EFRIS info"}], None, "en"
+            )
+        self.assertEqual(out, "EFRIS is mandatory for VAT-registered taxpayers. [1]")
+        gg.assert_called_once()
+        wac.assert_called_once()
+
+    def test_workers_ai_chain_tries_next_model_on_truncated_reply(self):
+        from app import service
+        from app.providers import routing
+
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "workers_ai"}), \
+             mock.patch.object(
+                 gateway,
+                 "workers_ai_chat",
+                 side_effect=["Short", "The full VAT rate is eighteen percent. [1]"],
+             ) as wac:
+            out = service._llm_cloud_fallback(
+                "vat rate?", [{"text": "VAT is 18%"}], None, "en"
+            )
+        self.assertEqual(out, "The full VAT rate is eighteen percent. [1]")
+        self.assertEqual(wac.call_count, 2)
+        self.assertEqual(wac.call_args_list[0].kwargs["model"], routing.CF_LLM_MODEL)
+        self.assertEqual(wac.call_args_list[1].kwargs["model"], routing.CF_LLM_FALLBACK_MODEL)
+
+    def test_workers_ai_chain_returns_best_effort_when_all_truncated(self):
+        """Every backend in the chain coming back short is still strictly
+        better than propagating "" (which drops the caller to the raw
+        extractive answer) — the first non-empty candidate is kept as a
+        floor, so this path is never worse than before the truncation
+        check existed."""
+        from app import service
+
+        with mock.patch.object(service.flags, "is_enabled", return_value=True), \
+             mock.patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "workers_ai"}), \
+             mock.patch.object(gateway, "workers_ai_chat", return_value="Short"):
+            out = service._llm_cloud_fallback(
+                "vat rate?", [{"text": "VAT is 18%"}], None, "en"
+            )
+        self.assertEqual(out, "Short")
+
+    def test_local_truncated_reply_upgrades_via_cloud_fallback(self):
+        from app import service
+
+        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(service.llm_module, "generate", return_value="The Electronic"), \
+             mock.patch.object(
+                 service,
+                 "_llm_cloud_fallback",
+                 return_value="The Electronic Fiscal Receipting and Invoicing System "
+                 "(EFRIS) is mandatory for VAT-registered taxpayers. [1]",
+             ) as cf:
+            out = service._call_llm_with_deadline("what is efris?", [{"text": "x"}], None, "en")
+        self.assertTrue(out.startswith("The Electronic Fiscal"))
+        cf.assert_called_once()
+
+    def test_local_truncated_reply_keeps_local_when_cloud_also_short(self):
+        """If the cloud chain can't do better (disabled/empty), keep the
+        original truncated-but-present local reply rather than discarding a
+        usable answer — same floor as before this check existed."""
+        from app import service
+
+        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(service.llm_module, "generate", return_value="The Electronic"), \
+             mock.patch.object(service, "_llm_cloud_fallback", return_value="") as cf:
+            out = service._call_llm_with_deadline("what is efris?", [{"text": "x"}], None, "en")
+        self.assertEqual(out, "The Electronic")
+        cf.assert_called_once()
+
+    def test_local_complete_short_reply_skips_fallback(self):
+        """A short but properly terminated reply is a legitimate terse
+        answer, not a truncation — must not trigger the cloud round-trip."""
+        from app import service
+
+        with mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             mock.patch.object(service.llm_module, "generate", return_value="VAT is 18%."), \
+             mock.patch.object(service, "_llm_cloud_fallback", return_value="CLOUD") as cf:
+            out = service._call_llm_with_deadline("vat rate?", [{"text": "x"}], None, "en")
+        self.assertEqual(out, "VAT is 18%.")
+        cf.assert_not_called()
+
+
+class LooksTruncatedHeuristicTest(unittest.TestCase):
+    def test_short_without_terminal_punctuation_is_truncated(self):
+        from app import service
+
+        self.assertTrue(service._looks_truncated("The Electronic"))
+
+    def test_short_with_terminal_punctuation_is_not_truncated(self):
+        from app import service
+
+        self.assertFalse(service._looks_truncated("VAT is 18%."))
+
+    def test_short_ending_in_citation_bracket_is_not_truncated(self):
+        from app import service
+
+        self.assertFalse(service._looks_truncated("See section 5 [1]"))
+
+    def test_empty_or_blank_text_is_not_truncated(self):
+        from app import service
+
+        self.assertFalse(service._looks_truncated(""))
+        self.assertFalse(service._looks_truncated("   "))
+
+    def test_long_text_without_terminal_punctuation_is_not_flagged(self):
+        from app import service
+
+        self.assertFalse(service._looks_truncated("x" * 80))
 
 
 class StreamFallbackTest(unittest.TestCase):
