@@ -20,7 +20,7 @@
     "mermaid": "^11.14.0",
     "next": "16.2.10",
     "react": "19.2.7",
-    "react-dom": "19.2.7",
+    "react-dom": "19.2.8",
     "recharts": "^3.8.1",
     "zustand": "5.0.14"
   },
