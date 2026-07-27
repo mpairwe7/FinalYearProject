@@ -1,5 +1,5 @@
 # Core API backend (2026 production stable)
-fastapi>=0.136.1,<0.137
+fastapi>=0.140.7,<0.141
 uvicorn[standard]>=0.46.0,<0.47
 pydantic>=2.13.3,<2.14
 
