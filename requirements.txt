@@ -49,7 +49,7 @@ pydub==0.25.1
 # Fine-tuning stack (explicitly pinned — previously imported but missing)
 peft>=0.14.0
 trl>=0.12.0
-bitsandbytes>=0.43.0; sys_platform == 'linux'
+bitsandbytes>=0.50.0; sys_platform == 'linux'
 # ONNX export + quantisation
 optimum[onnxruntime]>=1.24.0
 onnxruntime>=1.20.0
