@@ -2,7 +2,7 @@
 fastapi==0.135.3
 uvicorn[standard]==0.30.1
 pydantic==2.13.0
-slowapi>=0.1.9
+slowapi>=0.1.10
 limits[redis]>=3.13
 sse-starlette>=2.0.0
 httpx>=0.28.1,<0.29
