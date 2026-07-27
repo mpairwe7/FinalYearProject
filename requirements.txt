@@ -77,7 +77,7 @@ ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
 
 # Fine-tuning evaluation
 rouge-score==0.1.2
-nltk==3.9.3
+nltk==3.10.0
 sacrebleu==2.6.0
 
 # Visualization & reporting
