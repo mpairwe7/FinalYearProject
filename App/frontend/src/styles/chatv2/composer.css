@@ -115,8 +115,13 @@
 .chatv2 .cmpv2-bar .voice-toggle input[type="checkbox"] {
   accent-color: var(--cv2-accent);
 }
+/* Disabled: dim only the checkbox glyph, never the label — a 0.45 opacity on
+   the whole toggle drops the label to ~2.35:1 on white and fails axe AA. */
 .chatv2 .cmpv2-bar .voice-toggle:has(input:disabled) {
-  opacity: 0.45;
+  cursor: not-allowed;
+}
+.chatv2 .cmpv2-bar .voice-toggle input[type="checkbox"]:disabled {
+  opacity: 0.5;
 }
 
 /* Language trigger */
