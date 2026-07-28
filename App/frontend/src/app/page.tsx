@@ -36,7 +36,7 @@ import { VoiceChat } from '../components/VoiceChat';
 import { VoiceFirstChat } from '../components/VoiceFirstChat';
 import { VoiceVisionMode } from '../components/VoiceVisionMode';
 import ChatHeader from '../components/ChatHeader';
-import { BotIcon, LoadingDots } from '../components/Icons';
+import { BotIcon } from '../components/Icons';
 
 // ---------------------------------------------------------------------------
 // Browser Speech Recognition types
@@ -791,7 +791,11 @@ export default function Page() {
         ) : (
           /* ── Chat state — full-width messages ── */
           <div className="chat-area" aria-label="Chat conversation">
-            <div ref={messageListRef} className="message-list" aria-live="polite">
+            <div
+              ref={messageListRef}
+              className={`message-list${isLoading ? ' is-streaming' : ''}`}
+              aria-live="polite"
+            >
               {chat.map((turn) => (
                 <ChatMessage
                   key={turn.id}
@@ -810,7 +814,12 @@ export default function Page() {
                 return (
                   <article className="message-row message-row-assistant">
                     <div className="avatar assistant" aria-hidden="true"><BotIcon /></div>
-                    <div className="bubble assistant"><span className="bubble-role">assistant</span><LoadingDots /></div>
+                    <div className="bubble assistant">
+                      <div className="stagev2" role="status">
+                        <span className="stagev2-label">Searching the URA knowledge base…</span>
+                        <div className="stagev2-skl" aria-hidden="true"><span /><span /></div>
+                      </div>
+                    </div>
                   </article>
                 );
               })()}

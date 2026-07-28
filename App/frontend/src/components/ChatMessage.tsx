@@ -151,15 +151,23 @@ function ChatMessageInner({
           </div>
         )}
 
+        {/* chatv2: grounding sits outside the citations block — a low-confidence
+            answer often has no citations, and that is exactly when the reader
+            most needs the warning. */}
+        {isAssistant && !isGreeting && turn.content && turn.faithfulnessScore != null && (
+          <div className="grounding-row">
+            <span
+              className={`grounding-badge ${turn.faithfulnessScore >= 0.6 ? 'grounding-ok' : 'grounding-warn'}`}
+            >
+              {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
+            </span>
+          </div>
+        )}
+
         {isAssistant && turn.citations && turn.citations.length > 0 && (
           <details className="citations">
             <summary>
               <SparklesIcon /> Sources ({turn.citations.length})
-              {turn.faithfulnessScore != null && (
-                <span className={turn.faithfulnessScore >= 0.6 ? 'grounding-ok' : 'grounding-warn'}>
-                  {turn.faithfulnessScore >= 0.6 ? ' Well grounded' : ' Verify with URA'}
-                </span>
-              )}
             </summary>
             <ol>
               {turn.citations.map((c: Citation) => {
