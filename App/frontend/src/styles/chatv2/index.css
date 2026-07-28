@@ -1,0 +1,8 @@
+/* chatv2 — redesigned chat surface, all rules scoped under `.chatv2`.
+ * Imported by app/layout.tsx AFTER globals.css so these rules win the cascade
+ * at equal specificity. globals.css itself is untouched by the redesign. */
+@import "./tokens.css";
+@import "./shell.css";
+@import "./composer.css";
+@import "./messages.css";
+@import "./overlays.css";

@@ -1,0 +1,201 @@
+/* =============================================================================
+ * chatv2 — app shell: grid, header, sidebar restyle + desktop collapse.
+ * Overrides legacy .app-shell/.conversation-rail/.rail-* rules by carrying the
+ * extra .chatv2 class (higher specificity + later in the cascade).
+ * ========================================================================== */
+
+.app-shell.chatv2 {
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.chatv2 .app-main-col {
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+/* ---------------------------------------------------------------------------
+ * Header (new markup: .hdrv2). Reuses .top-bar-icon-btn / .top-bar-brand /
+ * .top-bar-title / .pill-sm so legacy sizing + the ≤720px brand-title hide
+ * keep working; tokens above re-tint them.
+ * ------------------------------------------------------------------------- */
+.chatv2 .hdrv2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  padding-top: max(8px, env(safe-area-inset-top, 0px));
+  flex-shrink: 0;
+  background: var(--bg-0);
+}
+
+.chatv2 .hdrv2 .top-bar-title {
+  font-size: 15px;
+  color: var(--text-0);
+}
+
+/* Desktop-only sidebar collapse toggle; hamburger stays mobile-only via the
+   legacy .sidebar-toggle-btn rule (display:none at ≥1024px). */
+.chatv2 .hdrv2-collapse {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .chatv2 .hdrv2-collapse {
+    display: flex;
+  }
+}
+
+/* Kebab (overflow) menu */
+.chatv2 .hdrv2-kebab {
+  position: relative;
+}
+.chatv2 .hdrv2-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 120;
+  min-width: 220px;
+  padding: 6px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+}
+.chatv2 .hdrv2-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+.chatv2 .hdrv2-menu-item:hover {
+  background: var(--surface-2);
+}
+.chatv2 .hdrv2-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.chatv2 .hdrv2-menu-item svg {
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+/* Health pill: flat AA colors on both themes; hidden ≤720px (parity with the
+   legacy header, which hides it on mobile). */
+.chatv2 .pill-sm {
+  background: var(--surface-1);
+  border-color: var(--border-0);
+  color: var(--text-2);
+}
+.chatv2 .pill-sm.pill-ok {
+  background: var(--cv2-success-soft);
+  border-color: var(--success);
+  color: var(--success);
+}
+.chatv2 .pill-sm.pill-warn {
+  background: var(--cv2-warning-soft);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+@media (max-width: 720px) {
+  .chatv2 .hdrv2 .pill-sm {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Sidebar (legacy .conversation-rail markup, restyled).
+ * ------------------------------------------------------------------------- */
+.chatv2 .conversation-rail {
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-0);
+}
+
+.chatv2 .rail-overlay {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* "New chat": solid accent, AA label — replaces gold-on-gradient. */
+.chatv2 .rail-new {
+  background: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+  border-radius: 8px;
+  font-size: 13.5px;
+  box-shadow: none;
+}
+.chatv2 .rail-new:hover {
+  background: var(--cv2-accent-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+.chatv2 .rail-search {
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 8px;
+}
+.chatv2 .rail-search:focus {
+  border-color: var(--cv2-focus);
+}
+
+.chatv2 .rail-item {
+  border-radius: 8px;
+}
+.chatv2 .rail-item:hover {
+  background: var(--surface-2);
+}
+.chatv2 .rail-item-active {
+  background: var(--surface-3);
+  border-left: 2px solid var(--cv2-accent);
+}
+:root[data-theme="dark"] .chatv2 .rail-item-active {
+  border-left-color: var(--brand-goldish, #f9c74f);
+}
+.chatv2 .rail-item-delete:hover {
+  color: var(--danger);
+  background: var(--cv2-danger-soft);
+  border-radius: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Desktop collapse: the grid column is driven by --cv2-rail (an `auto` track
+ * cannot size itself from an overflow:hidden flex child and collapses to the
+ * border — learned in the sandbox). Track is not transitioned (grid tracks fed
+ * by a custom property interpolate unreliably); the swap is instant.
+ * ------------------------------------------------------------------------- */
+@media (min-width: 1024px) {
+  .app-shell.chatv2 {
+    display: grid;
+    grid-template-columns: var(--cv2-rail) minmax(0, 1fr);
+  }
+  .app-shell.chatv2[data-sidebar="collapsed"] {
+    --cv2-rail: 0px;
+  }
+  .chatv2 .conversation-rail {
+    width: 100%;
+    overflow: hidden;
+  }
+  .app-shell.chatv2[data-sidebar="collapsed"] .conversation-rail {
+    border-right-width: 0;
+  }
+  /* Pin children to the open width so collapsing clips instead of rewrapping */
+  .chatv2 .rail-top,
+  .chatv2 .rail-new,
+  .chatv2 .rail-search-wrap,
+  .chatv2 .rail-list {
+    min-width: 276px;
+  }
+}

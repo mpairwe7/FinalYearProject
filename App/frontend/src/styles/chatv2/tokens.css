@@ -1,0 +1,156 @@
+/* =============================================================================
+ * chatv2 — scoped design tokens for the redesigned chat surface.
+ *
+ * Everything is scoped under `.chatv2` (the chat page root). The `:root`
+ * token values in globals.css are NEVER edited: analytics, the voice overlay,
+ * the consent banner and every other surface keep today's values. Inside the
+ * chat subtree these definitions shadow the legacy tokens, so legacy component
+ * rules that read var(--text-*) / var(--surface-*) re-theme automatically.
+ *
+ * Light = pure white (ChatGPT-light calibrated); dark = #212121 canvas.
+ * URA navy #003087 / gold #F9C74F survive as accents only — never as text on
+ * gradients (the old 1.9:1 failure mode is structurally impossible here).
+ *
+ * theme.ts already writes the RESOLVED data-theme="dark"|"light" before paint,
+ * so dark simply keys off :root[data-theme="dark"].
+ * ========================================================================== */
+
+.chatv2 {
+  /* ---- shadowed legacy tokens (light) ---- */
+  --bg-0: #ffffff;
+  --bg-1: #f9f9f9;
+  --bg-2: #ffffff;
+
+  --surface-1: #f7f7f7;
+  --surface-2: #f0f0f0;
+  --surface-3: #e8e8e8;
+  --surface-4: #e0e0e0;
+  --surface-ink: #ffffff;
+
+  --border-0: #e6e6e6;
+  --border-1: #d2d2d2;
+  --border-2: #bdbdbd;
+  --border-glow: #d2d2d2;
+
+  --text-0: #0d0d0d;
+  --text-1: #3f3f3f;
+  --text-2: #6e6e6e;
+  --text-3: #6e6e6e;
+
+  /* Flat fills replace the old gradients (no text-on-gradient anywhere). */
+  --grad-primary: #003087;
+  --grad-primary-soft: #eef3fc;
+  --grad-border: #d2d2d2;
+  --grad-user: #eef3fc;
+  --grad-gold: #f9c74f;
+  --grad-blue: #003087;
+
+  --success: #067647;
+  --warning: #b54708;
+  --danger: #b42318;
+
+  /* Links / brand hues that legacy rules read directly. */
+  --ura-blue-bright: #0b57d0;
+  --ura-teal-light: #00756b;
+  --ura-gold-muted: #7a5b00;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.14);
+  --shadow-glow: none;
+  --shadow-gold: none;
+
+  /* Kill the glassmorphism inside the chat scope. */
+  --blur-sm: 0px;
+  --blur-md: 0px;
+  --blur-lg: 0px;
+
+  /* ---- chatv2-only tokens ---- */
+  --cv2-accent: #003087;
+  --cv2-accent-contrast: #ffffff;
+  --cv2-accent-hover: #06246b;
+  --cv2-accent-soft: #eef3fc;
+  --cv2-user-bubble: #eef3fc;
+  --cv2-user-bubble-border: #d9e4f5;
+  --cv2-danger-soft: #fee4e2;
+  --cv2-warning-soft: #fef0c7;
+  --cv2-success-soft: #dcfae6;
+  --cv2-focus: #0b57d0;
+  --cv2-rail: 300px;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  color: var(--text-1);
+  background: var(--bg-0);
+}
+
+:root[data-theme="dark"] .chatv2 {
+  --bg-0: #212121;
+  --bg-1: #171717;
+  --bg-2: #212121;
+
+  --surface-1: #2b2b2b;
+  --surface-2: #2b2b2b;
+  --surface-3: #363636;
+  --surface-4: #404040;
+  --surface-ink: #212121;
+
+  --border-0: #383838;
+  --border-1: #4d4d4d;
+  --border-2: #5c5c5c;
+  --border-glow: #4d4d4d;
+
+  --text-0: #ececec;
+  --text-1: #cdcdcd;
+  --text-2: #a6a6a6;
+  --text-3: #a6a6a6;
+
+  /* ChatGPT-dark pattern: the primary action is a light pill, dark glyph. */
+  --grad-primary: #ececec;
+  --grad-primary-soft: #2f3a4d;
+  --grad-border: #4d4d4d;
+  --grad-user: #2a3442;
+  --grad-gold: #f9c74f;
+  --grad-blue: #ececec;
+
+  --success: #47cd89;
+  --warning: #fdb022;
+  --danger: #f97066;
+
+  --ura-blue-bright: #8ab1f2;
+  --ura-teal-light: #2ec4a8;
+  --ura-gold-muted: #d4a843;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.55);
+
+  --cv2-accent: #ececec;
+  --cv2-accent-contrast: #212121;
+  --cv2-accent-hover: #ffffff;
+  --cv2-accent-soft: #2f3a4d;
+  --cv2-user-bubble: #2a3442;
+  --cv2-user-bubble-border: #364457;
+  --cv2-danger-soft: #4a211d;
+  --cv2-warning-soft: #4a3416;
+  --cv2-success-soft: #143d2b;
+  --cv2-focus: #8ab1f2;
+}
+
+/* One focus convention across the scope (replaces the legacy gold outlines,
+   which fail contrast on the white canvas). Same specificity as the legacy
+   per-component rules, later in the cascade, so it wins. */
+.chatv2 :is(button, a, input, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
+}
+
+/* Selection: neutral, no navy-glass tint. */
+.chatv2 ::selection {
+  background: var(--cv2-accent-soft);
+  color: var(--text-0);
+}
+:root[data-theme="dark"] .chatv2 ::selection {
+  background: #3a4a63;
+  color: #ffffff;
+}
