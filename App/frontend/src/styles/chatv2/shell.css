@@ -37,6 +37,11 @@
   color: var(--text-0);
 }
 
+.chatv2 .hdrv2-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
 /* Desktop-only sidebar collapse toggle; hamburger stays mobile-only via the
    legacy .sidebar-toggle-btn rule (display:none at ≥1024px). */
 .chatv2 .hdrv2-collapse {

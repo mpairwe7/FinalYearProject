@@ -35,8 +35,8 @@ import ConversationRail from '../components/ConversationRail';
 import { VoiceChat } from '../components/VoiceChat';
 import { VoiceFirstChat } from '../components/VoiceFirstChat';
 import { VoiceVisionMode } from '../components/VoiceVisionMode';
-import ThemeToggle from '../components/ThemeToggle';
-import { SparklesIcon, HeadphonesIcon, BotIcon, LoadingDots, MenuIcon, PlusIcon, TrashIcon, MicIcon, BookIcon } from '../components/Icons';
+import ChatHeader from '../components/ChatHeader';
+import { BotIcon, LoadingDots } from '../components/Icons';
 
 // ---------------------------------------------------------------------------
 // Browser Speech Recognition types
@@ -67,11 +67,11 @@ const LOCALE_OPTIONS = [
 ] as const;
 
 const STARTER_PROMPTS = [
-  'What services does URA provide?',
-  'How do I register for a TIN?',
-  'What is the current VAT rate in Uganda?',
-  'How do I file my annual tax returns?',
-];
+  { label: 'What services does URA provide?', category: 'Getting started' },
+  { label: 'How do I register for a TIN?', category: 'Registration' },
+  { label: 'What is the current VAT rate in Uganda?', category: 'Rates' },
+  { label: 'How do I file my annual tax returns?', category: 'Filing' },
+] as const;
 
 const getMediaRecorderSupportSnapshot = () => AudioRecorder.isSupported();
 const getServerMediaRecorderSupportSnapshot = () => false;
@@ -706,7 +706,8 @@ export default function Page() {
   // ---- Render ----
 
   return (
-    <div className="app-shell chatv2">
+    <>
+    <div className="app-shell chatv2" data-sidebar={railCollapsed ? 'collapsed' : 'open'}>
       {/* ── Conversation sidebar ── */}
       <ConversationRail
         open={sidebarOpen}
@@ -729,121 +730,63 @@ export default function Page() {
 
       {/* ── Main column (top bar + content) ── */}
       <div className="app-main-col">
-      <header className="top-bar">
-        <div className="top-bar-left">
-          <button className="top-bar-icon-btn sidebar-toggle-btn" onClick={() => setSidebarOpen(true)} aria-label="Open conversation history">
-            <MenuIcon />
-          </button>
-          <div className="top-bar-brand">
-            <Image
-              src="/ura-assistant-logo.svg"
-              alt="URA Assistant"
-              className="top-bar-logo-img"
-              width={28}
-              height={28}
-              priority
-            />
-            <span className="top-bar-title">URA Tax Assistant</span>
-          </div>
-        </div>
-        <div className="top-bar-right">
-          {hasStartedChat && (
-            <>
-              <button className="top-bar-icon-btn" onClick={() => createNewSession()} aria-label="New conversation" title="New chat">
-                <PlusIcon />
-              </button>
-              <button
-                className="top-bar-icon-btn top-bar-icon-btn-danger"
-                onClick={() =>
-                  setConfirmReq({
-                    title: 'Clear conversation?',
-                    message: 'All messages in the current conversation will be removed and you will return to the start screen.',
-                    confirmLabel: 'Clear',
-                    danger: true,
-                    action: () => reset(),
-                  })
-                }
-                aria-label="Clear conversation"
-                title="Clear chat"
-              >
-                <TrashIcon />
-              </button>
-            </>
-          )}
-          <button
-            className="top-bar-icon-btn"
-            onClick={() => setVoiceChatMode((v) => !v)}
-            aria-label={voiceChatMode ? 'Close voice chat' : 'Open voice chat'}
-            title="Voice-first mode"
-            style={voiceChatMode ? { color: 'var(--ura-teal, #00a88f)' } : undefined}
-          >
-            <MicIcon />
-          </button>
-          <a
-            className="top-bar-icon-btn"
-            href={BLOG_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Project blog"
-            title="Project blog"
-          >
-            <BookIcon />
-          </a>
-          <ThemeToggle />
-          <div className={`pill-sm ${speechHealth?.status === 'ready' ? 'pill-ok' : 'pill-warn'}`} aria-live="polite">
-            <HeadphonesIcon /> <span className="pill-sm-label">{healthLabel}</span>
-          </div>
-        </div>
-      </header>
+      <ChatHeader
+        hasStartedChat={hasStartedChat}
+        onOpenSidebarMobile={() => setSidebarOpen(true)}
+        onToggleRailCollapse={() => setRailCollapsed((v) => !v)}
+        onNewChat={() => createNewSession()}
+        onRequestClear={() =>
+          setConfirmReq({
+            title: 'Clear conversation?',
+            message: 'All messages in the current conversation will be removed and you will return to the start screen.',
+            confirmLabel: 'Clear',
+            danger: true,
+            action: () => reset(),
+          })
+        }
+        voiceChatOpen={voiceChatMode}
+        onToggleVoiceChat={() => setVoiceChatMode((v) => !v)}
+        blogUrl={BLOG_URL}
+        healthOk={speechHealth?.status === 'ready'}
+        healthLabel={healthLabel}
+      />
 
       <main className="app-content">
         {!hasStartedChat ? (
-          /* ── Landing state — Grok-inspired centered layout ── */
+          /* ── Landing state — input-first hierarchy (chatv2) ── */
           <div className="landing">
-            <div className="landing-brand">
-              <Image
-                src="/ura-assistant-logo.svg"
-                alt="URA Tax Assistant"
-                className="landing-hero-logo"
-                width={140}
-                height={140}
-                priority
-              />
-              <h1 className="landing-title">URA Tax Assistant</h1>
-              <p className="landing-sub">
-                Official AI-powered assistant for Uganda Revenue Authority
-              </p>
-            </div>
+            <div className="ldv2-block">
+              <div className="landing-brand">
+                <h1 className="ldv2-brand">
+                  <Image
+                    src="/ura-assistant-logo.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width={34}
+                    height={34}
+                    priority
+                  />
+                  URA Tax Assistant
+                </h1>
+                <h2 className="ldv2-headline">How can I help with your taxes?</h2>
+                <p className="landing-sub">
+                  Official AI-powered assistant for Uganda Revenue Authority
+                </p>
+              </div>
 
-            <div className="landing-composer">
-              <ChatInput {...composerProps} />
-            </div>
+              <div className="landing-composer">
+                <ChatInput {...composerProps} />
+              </div>
 
-            <div className="landing-prompts" role="group" aria-label="Suggested questions">
-              {STARTER_PROMPTS.map((p) => (
-                <button key={p} className="landing-chip" onClick={() => handleStarterPrompt(p)}>
-                  <SparklesIcon /> {p}
-                </button>
-              ))}
+              <div className="landing-prompts" role="group" aria-label="Suggested questions">
+                {STARTER_PROMPTS.map((p) => (
+                  <button key={p.label} className="landing-chip" onClick={() => handleStarterPrompt(p.label)}>
+                    <span className="ldv2-cat">{p.category}</span>
+                    <span>{p.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-
-            <a
-              className="landing-blog-link"
-              href={BLOG_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                marginTop: '1.5rem',
-                fontSize: '0.85rem',
-                color: 'var(--muted-foreground, #888)',
-                textDecoration: 'none',
-              }}
-            >
-              <BookIcon /> Read the project blog ↗
-            </a>
           </div>
         ) : (
           /* ── Chat state — full-width messages ── */
@@ -905,34 +848,40 @@ export default function Page() {
         }}
       />
 
-      {/* Voice-first overlay (Phase 23) */}
-      <VoiceChat
-        open={voiceChatMode}
-        locale={locale}
-        conversationId={activeConversationId ?? undefined}
-        onClose={() => setVoiceChatMode(false)}
-      />
-
-      {/* Voice-first primary interface (Phase 27) */}
-      {voiceFirstMode && (
-        <VoiceFirstChat
-          locale={locale}
-          onClose={() => setVoiceFirstMode(false)}
-          onOpenVision={() => {
-            setVoiceFirstMode(false);
-            setVoiceVisionMode(true);
-          }}
-        />
-      )}
-
-      {/* Voice + Vision mode (Phase 27) */}
-      {voiceVisionMode && (
-        <VoiceVisionMode
-          locale={locale}
-          onClose={() => setVoiceVisionMode(false)}
-        />
-      )}
       </div>{/* end .app-main-col */}
-    </div>
+    </div>{/* end .app-shell.chatv2 */}
+
+    {/* Overlays render OUTSIDE the .chatv2 scope so they keep the legacy
+        :root token values (the voice overlay is styled by globals.css and is
+        out of the redesign's scope). */}
+
+    {/* Voice-first overlay (Phase 23) */}
+    <VoiceChat
+      open={voiceChatMode}
+      locale={locale}
+      conversationId={activeConversationId ?? undefined}
+      onClose={() => setVoiceChatMode(false)}
+    />
+
+    {/* Voice-first primary interface (Phase 27) */}
+    {voiceFirstMode && (
+      <VoiceFirstChat
+        locale={locale}
+        onClose={() => setVoiceFirstMode(false)}
+        onOpenVision={() => {
+          setVoiceFirstMode(false);
+          setVoiceVisionMode(true);
+        }}
+      />
+    )}
+
+    {/* Voice + Vision mode (Phase 27) */}
+    {voiceVisionMode && (
+      <VoiceVisionMode
+        locale={locale}
+        onClose={() => setVoiceVisionMode(false)}
+      />
+    )}
+    </>
   );
 }
