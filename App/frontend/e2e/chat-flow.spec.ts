@@ -86,9 +86,20 @@ test.describe("Agentic chat flow", () => {
   test("language switch toggles to Luganda", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");
+    // chatv2: the language radios live inside the composer's picker overlay.
+    await page.getByRole("button", { name: /Response language/ }).click();
     const lg = page.getByRole("radio", { name: /Luganda/i });
     await lg.click();
-    await expect(lg).toHaveAttribute("aria-checked", "true");
+    // Selecting closes the picker and the trigger reflects the new locale.
+    await expect(
+      page.getByRole("button", { name: "Response language: Luganda" }),
+    ).toBeVisible();
+    // Re-open to confirm the radio state persisted.
+    await page.getByRole("button", { name: /Response language/ }).click();
+    await expect(page.getByRole("radio", { name: /Luganda/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 
   test("escalation surfaces the human-review banner", async ({ page }) => {

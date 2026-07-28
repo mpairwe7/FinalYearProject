@@ -688,12 +688,20 @@ export default function Page() {
     attachments: pendingAttachments,
     onAttachFiles: attachFiles,
     onRemoveAttachment: removeAttachment,
+    // chatv2: conversation-level controls live in the composer toolbar.
+    locale,
+    localeOptions: LOCALE_OPTIONS,
+    onLocaleChange: setLocale,
+    onVoiceModeChange: setVoiceMode,
+    voiceModeDisabled: !serverReady && !hasMediaRecorder,
+    autoNarrate,
+    onAutoNarrateChange: setAutoNarrate,
   };
 
   // ---- Render ----
 
   return (
-    <div className="app-shell">
+    <div className="app-shell chatv2">
       {/* ── Conversation sidebar ── */}
       <ConversationRail
         open={sidebarOpen}
@@ -735,20 +743,6 @@ export default function Page() {
               </button>
             </>
           )}
-          <div role="radiogroup" aria-label="Language selection" className="locale-switch">
-            {LOCALE_OPTIONS.map((opt) => (
-              <button key={opt.value} role="radio" aria-checked={locale === opt.value}
-                onClick={() => setLocale(opt.value)} className="locale-btn" data-short={opt.value.toUpperCase()}>{opt.label}</button>
-            ))}
-          </div>
-          <label className="voice-toggle" title="Voice mode: server-side ASR + TTS">
-            <input type="checkbox" checked={voiceMode} onChange={(e) => setVoiceMode(e.target.checked)} disabled={!serverReady && !hasMediaRecorder} />
-            <span className="voice-toggle-label">Voice</span>
-          </label>
-          <label className="voice-toggle" title="Auto-read replies aloud">
-            <input type="checkbox" checked={autoNarrate} onChange={(e) => setAutoNarrate(e.target.checked)} />
-            <span className="voice-toggle-label">Narrate</span>
-          </label>
           <button
             className="top-bar-icon-btn"
             onClick={() => setVoiceChatMode((v) => !v)}

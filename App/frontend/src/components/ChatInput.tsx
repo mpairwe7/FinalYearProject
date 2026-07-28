@@ -1,5 +1,6 @@
 import React, { memo, useLayoutEffect, useRef } from 'react';
 import { MicIcon, SendIcon, CloseIcon, CheckIcon, PaperclipIcon, FileIcon, LoadingDots } from './Icons';
+import LanguageMenu, { LanguageOption } from './LanguageMenu';
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENTS,
@@ -24,6 +25,15 @@ interface ChatInputProps {
   attachments?: PendingAttachment[];
   onAttachFiles?: (files: FileList) => void;
   onRemoveAttachment?: (clientId: string) => void;
+  /* chatv2 — controls relocated from the header into the composer toolbar.
+     All optional: the control renders only when its handler is provided. */
+  locale?: string;
+  localeOptions?: readonly LanguageOption[];
+  onLocaleChange?: (code: string) => void;
+  onVoiceModeChange?: (on: boolean) => void;
+  voiceModeDisabled?: boolean;
+  autoNarrate?: boolean;
+  onAutoNarrateChange?: (on: boolean) => void;
 }
 
 /** Inline waveform — 5 animated bars */
@@ -51,6 +61,13 @@ function ChatInputInner({
   attachments,
   onAttachFiles,
   onRemoveAttachment,
+  locale,
+  localeOptions,
+  onLocaleChange,
+  onVoiceModeChange,
+  voiceModeDisabled,
+  autoNarrate,
+  onAutoNarrateChange,
 }: ChatInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,11 +80,11 @@ function ChatInputInner({
     input.style.height = `${Math.min(input.scrollHeight, 144)}px`;
   }, [message]);
 
-  // ── Recording state: Grok-inspired inline waveform + cancel/confirm ──
+  // ── Recording state: in-composer waveform + cancel/confirm ──
   if (isRecording) {
     return (
       <>
-        <div className="composer composer-active-recording">
+        <div className="composer cmpv2 composer-active-recording">
           <div className="composer-rec-label">
             <span className="composer-rec-dot" aria-hidden="true" />
             Listening...
@@ -96,7 +113,7 @@ function ChatInputInner({
     );
   }
 
-  // ── Normal state ──
+  // ── Normal state: two rows — textarea, then the toolbar ──
   const showAttachments = Boolean(onAttachFiles);
   return (
     <>
@@ -126,33 +143,7 @@ function ChatInputInner({
           ))}
         </div>
       )}
-      <div className="composer">
-        {showAttachments && (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={ATTACHMENT_ACCEPT}
-              className="attachment-file-input"
-              aria-hidden="true"
-              tabIndex={-1}
-              onChange={(e) => {
-                if (e.target.files?.length) onAttachFiles?.(e.target.files);
-                e.target.value = '';
-              }}
-            />
-            <button
-              className="composer-circle-btn attach-circle-btn"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
-              aria-label="Attach a document (PDF, Word, Excel, CSV, or image)"
-              title="Attach a document"
-            >
-              <PaperclipIcon />
-            </button>
-          </>
-        )}
+      <div className="composer cmpv2">
         <textarea
           ref={inputRef}
           className="input"
@@ -169,32 +160,89 @@ function ChatInputInner({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
+              // sendMessage() no-ops while a reply streams; typing stays enabled.
               onSend();
             }
           }}
-          disabled={isLoading}
         />
-        <button
-          className={`composer-circle-btn mic-circle-btn ${speechState === 'listening' ? 'btn-recording' : ''}`}
-          onClick={onMicClick}
-          disabled={speechUnavailable || isLoading || isTransitioning}
-          aria-label={speechState === 'listening' ? 'Stop listening' : 'Start speaking'}
-        >
-          <MicIcon />
-        </button>
-        <button
-          className="composer-circle-btn send-circle-btn"
-          onClick={() => onSend()}
-          disabled={isLoading || isUploading || !message.trim()}
-          aria-label={isUploading ? 'Analysing attachment...' : 'Send message'}
-        >
-          <SendIcon />
-        </button>
+        <div className="cmpv2-bar">
+          {showAttachments && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ATTACHMENT_ACCEPT}
+                className="attachment-file-input"
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(e) => {
+                  if (e.target.files?.length) onAttachFiles?.(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                className="composer-circle-btn attach-circle-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
+                aria-label="Attach a document (PDF, Word, Excel, CSV, or image)"
+                title="Attach a document"
+              >
+                <PaperclipIcon />
+              </button>
+            </>
+          )}
+          {onLocaleChange && localeOptions && locale !== undefined && (
+            <LanguageMenu
+              locale={locale}
+              options={localeOptions}
+              onLocaleChange={onLocaleChange}
+            />
+          )}
+          {onVoiceModeChange && (
+            <label className="voice-toggle" title="Voice mode: server-side ASR + TTS">
+              <input
+                type="checkbox"
+                checked={voiceMode}
+                onChange={(e) => onVoiceModeChange(e.target.checked)}
+                disabled={voiceModeDisabled}
+              />
+              <span className="voice-toggle-label">Voice</span>
+            </label>
+          )}
+          {onAutoNarrateChange && (
+            <label className="voice-toggle" title="Auto-read replies aloud">
+              <input
+                type="checkbox"
+                checked={autoNarrate ?? false}
+                onChange={(e) => onAutoNarrateChange(e.target.checked)}
+              />
+              <span className="voice-toggle-label">Narrate</span>
+            </label>
+          )}
+          <div className="cmpv2-spacer" />
+          <button
+            className={`composer-circle-btn mic-circle-btn ${speechState === 'listening' ? 'btn-recording' : ''}`}
+            onClick={onMicClick}
+            disabled={speechUnavailable || isLoading || isTransitioning}
+            aria-label={speechState === 'listening' ? 'Stop listening' : 'Start speaking'}
+          >
+            <MicIcon />
+          </button>
+          <button
+            className="composer-circle-btn send-circle-btn"
+            onClick={() => onSend()}
+            disabled={isLoading || isUploading || !message.trim()}
+            aria-label={isUploading ? 'Analysing attachment...' : 'Send message'}
+          >
+            <SendIcon />
+          </button>
+        </div>
       </div>
       <p className="composer-hint">
         {voiceMode
           ? 'Tap mic to record, then your voice is transcribed, answered, and narrated back.'
-          : 'Press Enter to send, or tap the mic to dictate.'}
+          : 'URA Assistant can make mistakes. Verify important tax information at ura.go.ug.'}
       </p>
     </>
   );
