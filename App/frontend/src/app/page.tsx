@@ -30,6 +30,7 @@ import {
 } from '../lib/attachments';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
+import ConfirmDialog, { ConfirmRequest } from '../components/ConfirmDialog';
 import ConversationRail from '../components/ConversationRail';
 import { VoiceChat } from '../components/VoiceChat';
 import { VoiceFirstChat } from '../components/VoiceFirstChat';
@@ -132,6 +133,10 @@ export default function Page() {
 
   // Sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // chatv2 presentation state: destructive-action confirm + desktop rail collapse
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  const [railCollapsed, setRailCollapsed] = useState(false);
 
   // Document attachments awaiting the next chat turn
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -710,7 +715,16 @@ export default function Page() {
         onClose={() => setSidebarOpen(false)}
         onNewConversation={() => { createNewSession(); setSidebarOpen(false); }}
         onSelectConversation={(id) => { switchSession(id); setSidebarOpen(false); }}
-        onDeleteConversation={deleteSession}
+        onDeleteConversation={(id) => {
+          const conv = conversations.find((c) => c.id === id);
+          setConfirmReq({
+            title: 'Delete conversation?',
+            message: `"${conv?.title ?? 'This conversation'}" and its ${conv?.turns.length ?? 0} messages will be permanently deleted.`,
+            confirmLabel: 'Delete',
+            danger: true,
+            action: () => deleteSession(id),
+          });
+        }}
       />
 
       {/* ── Main column (top bar + content) ── */}
@@ -738,7 +752,20 @@ export default function Page() {
               <button className="top-bar-icon-btn" onClick={() => createNewSession()} aria-label="New conversation" title="New chat">
                 <PlusIcon />
               </button>
-              <button className="top-bar-icon-btn top-bar-icon-btn-danger" onClick={() => { reset(); }} aria-label="Clear conversation" title="Clear chat">
+              <button
+                className="top-bar-icon-btn top-bar-icon-btn-danger"
+                onClick={() =>
+                  setConfirmReq({
+                    title: 'Clear conversation?',
+                    message: 'All messages in the current conversation will be removed and you will return to the start screen.',
+                    confirmLabel: 'Clear',
+                    danger: true,
+                    action: () => reset(),
+                  })
+                }
+                aria-label="Clear conversation"
+                title="Clear chat"
+              >
                 <TrashIcon />
               </button>
             </>
@@ -867,6 +894,16 @@ export default function Page() {
           </div>
         )}
       </main>
+
+      {/* Destructive-action confirmation (chatv2) */}
+      <ConfirmDialog
+        confirm={confirmReq}
+        onClose={(run) => {
+          const req = confirmReq;
+          setConfirmReq(null);
+          if (run) req?.action();
+        }}
+      />
 
       {/* Voice-first overlay (Phase 23) */}
       <VoiceChat
