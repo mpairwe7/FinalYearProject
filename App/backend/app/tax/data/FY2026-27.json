@@ -1,0 +1,94 @@
+{
+  "fiscal_year": "FY2026-27",
+  "effective_from": "2026-07-01",
+  "effective_to": "2027-06-30",
+  "status": "provisional",
+  "currency": "UGX",
+  "verification_note": "Compiled from the Income Tax / VAT (Amendment) Acts 2026 as reported by professional-firm and press summaries in June-July 2026. Not yet reconciled line-by-line against the gazetted Acts or a URA-published rate card. Confirm figures with URA before relying on them.",
+  "rates": {
+    "vat_standard": 0.18,
+    "vat_registration_threshold_annual": 300000000,
+    "paye_bands_resident": [
+      [0, 335000, 0.0],
+      [335000, 410000, 0.1],
+      [410000, 485000, 0.25],
+      [485000, 10000000, 0.3],
+      [10000000, null, 0.4]
+    ],
+    "paye_bands_non_resident": [
+      [0, 335000, 0.1],
+      [335000, 410000, 0.2],
+      [410000, 10000000, 0.3],
+      [10000000, null, 0.4]
+    ],
+    "corporation_tax": 0.3,
+    "capital_gains_corporate": 0.3,
+    "rental_tax_individual": 0.12,
+    "rental_tax_individual_threshold": 2820000,
+    "rental_tax_company": 0.3,
+    "rental_company_expense_cap": 0.5,
+    "withholding_services": 0.06,
+    "withholding_goods": 0.06,
+    "withholding_management_fees": 0.15,
+    "withholding_dividend": 0.15,
+    "withholding_royalty": 0.15,
+    "withholding_public_entertainer": 0.06,
+    "withholding_betting_winnings": 0.15,
+    "withholding_foreign_interest": 0.05,
+    "customs_duty_common": 0.25,
+    "environmental_levy_used_clothing": 0.3
+  },
+  "legal_basis": {
+    "vat_standard": "VAT Act (Cap 349), s.78 and Schedule 3",
+    "vat_registration_threshold_annual": "VAT (Amendment) Act 2026 - registration threshold raised to UGX 300,000,000",
+    "paye_bands_resident": "Income Tax (Amendment) Act 2026, Third Schedule Part I",
+    "paye_bands_non_resident": "Income Tax Act (Cap 340), Third Schedule Part II",
+    "corporation_tax": "Income Tax Act (Cap 340), s.6 and Third Schedule Part IV",
+    "capital_gains_corporate": "Income Tax Act (Cap 340), s.18 - gains included in gross income",
+    "rental_tax_individual": "Income Tax Act (Cap 340), s.5 as amended",
+    "rental_tax_company": "Income Tax Act (Cap 340), s.22(1)(c) expense cap",
+    "withholding_services": "Income Tax Act (Cap 340), s.119",
+    "withholding_goods": "Income Tax Act (Cap 340), s.119",
+    "withholding_management_fees": "Income Tax Act (Cap 340), s.85",
+    "withholding_dividend": "Income Tax Act (Cap 340), s.118",
+    "withholding_royalty": "Income Tax (Amendment) Act 2026 - royalty rate raised to 15%, definition extended to software",
+    "withholding_public_entertainer": "Income Tax (Amendment) Act 2026 - withholding on payments to public entertainers",
+    "withholding_betting_winnings": "Income Tax (Amendment) Act 2026 - withholding on betting/gaming winnings reintroduced",
+    "withholding_foreign_interest": "Income Tax (Amendment) Act 2026 - interest paid by resident companies to non-resident lenders",
+    "customs_duty_common": "EAC Common External Tariff - finished goods band",
+    "environmental_levy_used_clothing": "Excise/environmental levy 2026 - worn clothing imports, share of CIF value"
+  },
+  "notes": {
+    "paye_bands_resident": "The monthly tax-free threshold rises from UGX 235,000 to UGX 335,000 and a 25% band is introduced between UGX 410,000 and UGX 485,000. The 30% band and the additional 10% charge above UGX 10,000,000 per month are retained; the top band is expressed here as a single 40% marginal rate.",
+    "rental_tax_individual": "Individuals may elect to file monthly provisional rental returns from FY2026-27. The rate and annual threshold are unchanged.",
+    "vat_registration_threshold_annual": "Businesses below UGX 300,000,000 annual turnover are no longer required to register, though voluntary registration remains available.",
+    "customs_duty_common": "Indicative EAC CET band for finished consumer goods. The binding rate is the tariff line for the specific HS code."
+  },
+  "carried_forward": ["paye_bands_non_resident"],
+  "sources": [
+    {
+      "id": "kpmg-ug-2026-27",
+      "title": "Uganda: Tax amendments based on 2026/2027 budget passed by Parliament",
+      "publisher": "KPMG TaxNewsFlash",
+      "url": "https://kpmg.com/us/en/taxnewsflash/news/2026/06/uganda-tax-amendments-2026-2027-budget.html"
+    },
+    {
+      "id": "pwc-ug-paye-2026",
+      "title": "Proposed pay as you earn changes and how they will impact you",
+      "publisher": "PwC Uganda",
+      "url": "https://www.pwc.com/ug/en/press-room/proposed-PAYE-changes-and-how-they-will-impact-you.html"
+    },
+    {
+      "id": "gae-ug-2026",
+      "title": "Uganda Tax Changes in 2026: Income Tax, VAT and PAYE Amendments effective 1 July 2026",
+      "publisher": "Global Advisory Experts",
+      "url": "https://globaladvisoryexperts.com/uganda-tax-changes-2026-practical-guide/"
+    },
+    {
+      "id": "lawyard-ug-paye-2026",
+      "title": "Uganda Overhauls PAYE Tax Structure",
+      "publisher": "Lawyard",
+      "url": "https://www.lawyard.org/news/uganda-overhauls-paye-tax-structure-relief-for-middle-earners-amidst-debate-on-competitiveness/"
+    }
+  ]
+}

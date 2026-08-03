@@ -119,10 +119,22 @@ for normal chat usage.
 4. **LLM Generation** — `Qwen/Qwen3-8B` via local Transformers or vLLM HTTP
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
-7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification, structured `handoff`, calibrated escalation
-8. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
+7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification (percentage **and** money-amount contradiction against the cited passage), structured `handoff`, calibrated escalation
+8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use
+9. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
+
+For a local-only document/PDF analysis and report-evaluation setup, use
+[docs/local-document-evaluation.md](docs/local-document-evaluation.md). It
+keeps OCR on a private Docker network and disables remote inference/fallback
+paths for that focused workflow; the dated implementation record is in
+[docs/traceability/document-pdf-evaluation-2026-07-21.md](docs/traceability/document-pdf-evaluation-2026-07-21.md).
+
+For local Qdrant FAQ retrieval, see
+[docs/local-faq-retrieval.md](docs/local-faq-retrieval.md). The intended
+corpus is CSV plus teacher-QA JSONL under `App/Data`; PDFs are the upstream
+source for those QA pairs, while evaluation JSONL stays out of live retrieval.
 
 #### RAG Pipeline Flow (10-stage)
 
@@ -282,21 +294,36 @@ _call_llm_agentic(max_iterations=3, deadline=90s)
   --> returns {text, tool_calls, iterations, truncated}
 ```
 
-**Tool inventory** (11 tools in `backend/app/tools/`):
+**Tool inventory** (18 tools in `backend/app/tools/`). Each declares an
+MCP `namespace`, risk tier, required consent scopes and annotation hints;
+see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 
-| Tool | Module | Description |
-|------|--------|-------------|
-| `calculate_vat` | `calculators.py` | VAT computation (FY2025-26 rates) |
-| `calculate_paye` | `calculators.py` | PAYE income tax brackets |
-| `calculate_corporation_tax` | `calculators.py` | Corporate income tax |
-| `calculate_capital_gains` | `calculators.py` | Capital gains tax |
-| `calculate_customs_duty` | `calculators.py` | Customs duty by tariff |
-| `lookup_rate` | `rates.py` | Tax rate lookup (VAT, income, excise) |
-| `list_available_rates` | `rates.py` | List all available rate tables |
-| `get_current_date` | `calendar.py` | Current date for deadline logic |
-| `get_next_deadlines` | `calendar.py` | Upcoming tax filing deadlines |
-| `search_ura_knowledge_base` | `rag_tool.py` | Semantic search (wraps hybrid retriever) |
-| `escalate_to_human` | `escalate.py` | Create escalation ticket from tool loop |
+| Tool | Module | Namespace | Description |
+|------|--------|-----------|-------------|
+| `calculate_vat` | `calculators.py` | `tax_calculator` | VAT: add to net or extract from gross |
+| `check_vat_registration` | `calculators.py` | `tax_calculator` | Compulsory-registration test against the turnover threshold |
+| `calculate_paye` | `calculators.py` | `tax_calculator` | PAYE from progressive bands, with per-band working |
+| `calculate_corporation_tax` | `calculators.py` | `tax_calculator` | Corporate income tax |
+| `calculate_capital_gains` | `calculators.py` | `tax_calculator` | Capital gains tax |
+| `calculate_customs_duty` | `calculators.py` | `tax_calculator` | Duty + VAT + used-clothing environmental levy |
+| `calculate_rental_tax` | `calculators.py` | `tax_calculator` | Rental income tax (individual / company) |
+| `calculate_withholding` | `calculators.py` | `tax_calculator` | WHT incl. royalties, entertainers, betting, foreign interest |
+| `lookup_rate` | `rates.py` | `rates` | One rate or threshold, effective-dated |
+| `list_available_rates` | `rates.py` | `rates` | Every rate for a fiscal year |
+| `compare_tax_years` | `rates.py` | `rates` | What changed between two fiscal years |
+| `get_current_date` | `calendar.py` | `calendar` | Current date for deadline logic |
+| `get_next_deadlines` | `calendar.py` | `calendar` | Upcoming tax filing deadlines |
+| `search_ura_knowledge_base` | `rag_tool.py` | `rag` | Semantic search (wraps hybrid retriever) |
+| `assess_emotional_tone` | `empathy.py` | `empathy` | Classify a message as frustration/anxiety/urgency/confusion/hardship and return tone guidance |
+| `escalate_to_human` | `escalate.py` | `core` | Create escalation ticket from tool loop |
+| `ura_account_profile` | `ura_account.py` | `ura_account` | Authenticated taxpayer profile (fail-closed) |
+| `ura_action_proposal` | `ura_actions.py` | `ura_actions` | Confirmed, idempotent URA action (fail-closed) |
+
+Every calculator takes an optional `fiscal_year` **or** `as_of` date and
+resolves the rate table in force for that period. Rates live as versioned
+JSON in `backend/app/tax/data/`, with statutory basis, sources and a
+confirmed/provisional status attached to each result — see
+[`docs/tax-rate-tables.md`](docs/tax-rate-tables.md).
 
 #### Guided Workflow Engine Flow
 
@@ -717,6 +744,24 @@ SPEECH_ENABLED=false uvicorn app.main:app --reload --port 8887
 | `COSYVOICE_DEVICE` | `cuda:0` | Device for CosyVoice2 inference |
 | `VISION_MODEL` | `Qwen/Qwen2-VL-2B-Instruct` | Vision-language model for document understanding |
 | `VISION_DEVICE` | `cuda:0` | Device for vision model inference |
+| `OCR_BACKEND` | `auto` | `auto` / `service` / `easyocr` / `disabled`; see [`docs/local-ocr.md`](docs/local-ocr.md) |
+| `OCR_SERVICE_URL` | (empty) | Local OCR sidecar URL; `auto` uses it when set |
+| `OCR_SERVICE_MAX_CONCURRENT` | `2` | Concurrent OCR-sidecar calls made by the API |
+| `OCR_SERVICE_TIMEOUT_SECONDS` | `6` | Per-page sidecar deadline; keep below document OCR budget |
+| `DOCUMENT_MAX_BYTES` | `10485760` | Maximum uploaded source file size (10 MiB) |
+| `DOCUMENT_OCR_TIMEOUT_SECONDS` | `20` | Wall-clock budget for OCR across a scanned PDF |
+| `DOCUMENT_MAX_PDF_RENDER_PIXELS` | `12000000` | Per-page raster cap before OCR |
+| `EXPORT_RATE_LIMIT` | `10/minute` | Rate limit for PDF exports |
+| `TAX_RATES_REQUIRE_CONFIRMED` | `true` in production, else `false` | Fail closed instead of quoting a rate table still marked `provisional`; see [`docs/tax-rate-tables.md`](docs/tax-rate-tables.md) |
+| `MCP_SERVER_URL_<NAMESPACE>` | (empty) | Bind an MCP namespace to a deployed server (e.g. `MCP_SERVER_URL_TAX_CALCULATOR`); unset namespaces stay in-process |
+| `MCP_SERVER_TOKEN_<NAMESPACE>` | (empty) | Bearer token for that server, sent as a header — never in the URL |
+
+See [`docs/document-processing.md`](docs/document-processing.md) for document
+upload limits, binding requirements, provenance fields, and proxy deployment
+requirements. See [`docs/mcp-architecture.md`](docs/mcp-architecture.md) for
+MCP routing, authorization and the `mcp_tax_calculator` server, and
+[`docs/tax-rate-tables.md`](docs/tax-rate-tables.md) for how fiscal rates
+are versioned, dated and sourced.
 
 ### 3. Frontend (`frontend/`)
 
@@ -1501,10 +1546,11 @@ an operator flips a flag.
 **Phase A — Tool framework + 11 starter tools** (`App/backend/app/tools/`)
 - `Tool` ABC + `ToolRegistry` with risk-tier filtering
 - Tools: `calculate_vat`, `calculate_paye`, `calculate_corporation_tax`,
-  `calculate_capital_gains`, `calculate_customs_duty` (all deterministic
-  FY2025-26 rate tables), `get_current_date`, `get_next_deadlines`,
-  `lookup_rate`, `list_available_rates`, `search_ura_knowledge_base`
-  (wraps the existing hybrid retriever), `escalate_to_human`
+  `calculate_capital_gains`, `calculate_customs_duty` (all deterministic,
+  reading effective-dated rate tables), `get_current_date`,
+  `get_next_deadlines`, `lookup_rate`, `list_available_rates`,
+  `search_ura_knowledge_base` (wraps the existing hybrid retriever),
+  `escalate_to_human`
 - Auto-registration via `__init__.py` import hook
 
 **Phase B — Qwen3 tool-calling loop** (`App/backend/app/llm.py`)

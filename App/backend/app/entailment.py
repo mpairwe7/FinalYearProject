@@ -27,25 +27,95 @@ _CONTRADICTION_PROB_MIN = float(os.getenv("ENTAILMENT_CONTRADICTION_MIN", "0.6")
 # A percentage written as "18%" or "18 percent" / "18 per cent" / "18 percentage".
 _PCT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|per\s?cent(?:age)?)")
 
+# A money amount: comma- or space-grouped ("1,500,000"), plain ("335000"), or
+# suffixed ("1.5m", "300 million").  Percentages are excluded by the caller.
+_AMOUNT_RE = re.compile(
+    r"(?:ugx|ug\s?shs?|shs|shillings?)?\s*"
+    r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)"
+    r"\s*(k|m|bn|b|thousand|million|billion)?\b",
+    re.IGNORECASE,
+)
+_AMOUNT_SUFFIX = {
+    "k": 1_000,
+    "thousand": 1_000,
+    "m": 1_000_000,
+    "million": 1_000_000,
+    "b": 1_000_000_000,
+    "bn": 1_000_000_000,
+    "billion": 1_000_000_000,
+}
+
+#: Statements *about the rule* — a wrong amount here is a factual error about
+#: the law, not an arithmetic result.  Computed totals ("PAYE = UGX 202,000")
+#: legitimately carry amounts the source passage never states, so the money
+#: contradiction check fires only for rule-shaped sentences.
+_RULE_CUE_RE = re.compile(
+    r"\b(threshold|above|below|exceed\w*|at\s+least|minimum|maximum|"
+    r"limit|register\w*|registration|band|bracket|allowance|cap(?:ped)?)\b",
+    re.IGNORECASE,
+)
+
 _model: Any = None
 _model_loaded = False
 
 
-def _percentages(text: str) -> set[str]:
+def percentages(text: str) -> set[str]:
     """Numeric values stated as percentages, e.g. {"18"} from "18%"/"18 percent"."""
     return set(_PCT_RE.findall(text.lower()))
 
 
-def numeric_contradiction(claim: str, context: str) -> bool:
-    """True when a claim percentage conflicts with the context's percentages.
+def canonical_amounts(text: str) -> set[float]:
+    """Money amounts in *text*, normalised to their numeric value.
 
-    High precision: fires only when BOTH the claim and the cited context state
-    percentages and the claim's percentages are entirely absent from the
-    context. General semantic contradiction is left to the optional NLI model.
+    ``"UGX 1,500,000"``, ``"1.5m"`` and ``"1500000"`` all yield
+    ``1500000.0``.  Without this, comma-grouped figures were tokenised
+    into ``{"1", "500", "000"}`` — junk that matched almost any passage
+    containing a grouped number, so numeric containment silently passed
+    money claims it should have caught.
     """
-    cp = _percentages(claim)
-    xp = _percentages(context)
-    return bool(cp and xp and cp.isdisjoint(xp))
+    lowered = (text or "").lower()
+    # Percentages are handled separately; drop them so "18%" is not read
+    # as the amount 18.
+    without_pct = _PCT_RE.sub(" ", lowered)
+    amounts: set[float] = set()
+    for match in _AMOUNT_RE.finditer(without_pct):
+        digits = match.group(1).replace(",", "").replace(" ", "")
+        try:
+            value = float(digits)
+        except ValueError:
+            continue
+        value *= _AMOUNT_SUFFIX.get((match.group(2) or "").lower(), 1)
+        amounts.add(value)
+    return amounts
+
+
+def numeric_contradiction(claim: str, context: str) -> bool:
+    """True when a claim's figures conflict with the cited context's.
+
+    Two high-precision rules:
+
+    *Percentages* — fires when both sides state percentages and the
+    claim's are entirely absent from the context ("VAT is 20%" against a
+    passage saying 18%).
+
+    *Money* — fires only for rule-shaped sentences (a threshold, band or
+    registration limit), where a figure the passage does not state is a
+    misstatement of the law rather than an arithmetic result.  This is
+    what catches a stale threshold after a budget moves one, which the
+    percentage rule cannot see: the FY2026-27 amendments changed the PAYE
+    tax-free threshold and the VAT registration threshold without
+    changing a single rate.
+    """
+    cp = percentages(claim)
+    xp = percentages(context)
+    if cp and xp and cp.isdisjoint(xp):
+        return True
+
+    if not _RULE_CUE_RE.search(claim):
+        return False
+    ca = canonical_amounts(claim)
+    xa = canonical_amounts(context)
+    return bool(ca and xa and ca.isdisjoint(xa))
 
 
 def _load_model() -> Any:

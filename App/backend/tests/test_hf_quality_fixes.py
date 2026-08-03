@@ -9,6 +9,7 @@ import uuid
 from unittest.mock import patch
 
 from app.calculator_router import format_rate_reply, plan_rate_lookup
+from app.tax.tables import get_table as get_table_in_force
 
 
 class PlanRateLookupTests(unittest.TestCase):
@@ -32,16 +33,26 @@ class PlanRateLookupTests(unittest.TestCase):
         self.assertIsNone(plan_rate_lookup("what is a TIN?"))
 
     def test_format_uses_real_rate_table(self) -> None:
-        from app.tools.calculators import _get_rates
+        from app.tax.tables import get_table
 
-        reply, actions = format_rate_reply(plan_rate_lookup("current VAT rate"), _get_rates())
+        # Pinned year: the figures asserted here are FY2025-26 statute.
+        fy25 = get_table("FY2025-26")
+        reply, actions = format_rate_reply(plan_rate_lookup("current VAT rate"), fy25)
         self.assertIn("18%", reply)
         self.assertIn("FY2025-26", reply)
         self.assertTrue(actions)
 
-        paye_reply, _ = format_rate_reply(plan_rate_lookup("PAYE rates"), _get_rates())
+        paye_reply, _ = format_rate_reply(plan_rate_lookup("PAYE rates"), fy25)
         self.assertIn("UGX 235,000", paye_reply)
         self.assertIn("40%", paye_reply)
+
+    def test_format_names_whichever_year_is_in_force(self) -> None:
+        current = get_table_in_force()
+        reply, _ = format_rate_reply(plan_rate_lookup("current VAT rate"), current)
+        self.assertIn(current.fiscal_year, reply)
+        # A table compiled ahead of the gazetted Act must say so in the
+        # reply itself, not only in the tool payload.
+        self.assertEqual("provisional" in reply, not current.confirmed)
 
 
 class GroundedRevisionDigitTests(unittest.TestCase):

@@ -41,6 +41,16 @@ pymupdf>=1.25.3
 python-docx>=1.1.2
 openpyxl>=3.1.5
 python-multipart>=0.0.18
+# Optional local OCR sidecar client (enabled with OCR_BACKEND=service),
+# and the transport for MCP namespaces bound to a remote server via
+# MCP_SERVER_URL_* (see App/docs/mcp-architecture.md).
+httpx>=0.28.1,<0.29
+
+# MCP tool argument/result validation against JSON Schema 2020-12
+# (app/mcp/validation.py). Previously pulled in transitively; the MCP
+# boundary now depends on it directly, with a structural fallback if it
+# is ever absent.
+jsonschema>=4.23
 
 # PDF report generation (pdf_export.py: /v1/export/* and
 # /v1/documents/{id}/report) + image-attachment decoding. Previously

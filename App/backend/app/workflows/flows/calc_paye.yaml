@@ -24,7 +24,8 @@ steps:
 
   - id: done
     question: >-
-      Those figures use the official FY2025-26 URA rate table. If your
-      salary changes, just ask me to recalculate — I'm happy to help.
+      Those figures use the official URA PAYE bands for the fiscal year
+      shown above. If your salary changes, just ask me to recalculate —
+      I'm happy to help.
     slot: ""
     validator: text

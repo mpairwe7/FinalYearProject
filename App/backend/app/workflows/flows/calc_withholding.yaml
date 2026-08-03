@@ -25,8 +25,9 @@ steps:
 
   - id: done
     question: >-
-      Those rates come from the FY2025-26 URA rate table (6% on services
-      and goods, 15% on management fees and dividends). Ask me anytime to
-      run another payment.
+      Those rates come from the URA rate table for the fiscal year shown
+      above (6% on services, goods and public entertainers; 15% on
+      management fees, dividends, royalties and betting winnings). Ask me
+      anytime to run another payment.
     slot: ""
     validator: text

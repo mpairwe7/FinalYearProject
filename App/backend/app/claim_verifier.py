@@ -12,7 +12,7 @@ import os
 import re
 from typing import Any
 
-from .entailment import is_contradicted
+from .entailment import canonical_amounts, is_contradicted, percentages
 from .text_signals import is_courtesy_sentence
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
@@ -70,7 +70,21 @@ def _tokens(text: str) -> set[str]:
 
 
 def _numbers(text: str) -> set[str]:
-    return set(re.findall(r"\d+(?:\.\d+)?%?", text.lower()))
+    """Figures in *text*, normalised so containment is meaningful.
+
+    Percentages stay as written ("18%"); money is canonicalised to its
+    value, so "UGX 1,500,000" is the single figure ``1500000.0`` rather
+    than the three fragments ``1``/``500``/``000`` a bare digit-run regex
+    produced.  Those fragments matched nearly any passage containing a
+    grouped number, which is how unsupported money claims scored as
+    supported.
+    """
+    lowered = (text or "").lower()
+    # Fixed-point, not "%g": six significant digits would collapse
+    # 1,234,567 and 1,234,568 onto the same key and call them equal.
+    figures = {f"{value:.2f}" for value in canonical_amounts(lowered)}
+    figures.update(f"{pct}%" for pct in percentages(lowered))
+    return figures
 
 
 def _split_claims(reply: str) -> list[str]:

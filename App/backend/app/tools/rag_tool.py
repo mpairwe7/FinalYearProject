@@ -103,6 +103,8 @@ class SearchKnowledgeBaseTool(Tool):
                 "required": ["query"],
             },
             risk="low",
+            namespace="rag",
+            open_world=True,
         )
 
     def execute(

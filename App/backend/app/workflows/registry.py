@@ -54,6 +54,27 @@ def _eval_condition(when: str, slots: dict[str, Any]) -> bool:
     return actual.lower() == expected.lower()
 
 
+def _interpolate_args(template: dict[str, Any], slots: dict[str, Any]) -> dict[str, Any]:
+    """Fill ``{slot}`` placeholders from *slots*, dropping unfilled ones.
+
+    An optional slot the user never filled must fall through to the
+    tool's own default.  Passing the literal ``"{residency}"`` on instead
+    used to be read as "not resident" and quietly returned non-resident
+    PAYE bands; it is now rejected by the tool's enum, which is safer but
+    still not the behaviour the flow wants.
+    """
+    args: dict[str, Any] = {}
+    for key, value in template.items():
+        if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+            filled = slots.get(value[1:-1])
+            if filled is None or filled == "":
+                continue
+            args[key] = filled
+        else:
+            args[key] = value
+    return args
+
+
 class WorkflowRegistry:
     """Global workflow registry (module-level singleton)."""
 
@@ -133,12 +154,7 @@ class WorkflowRegistry:
 
         # Tool step (no slot to fill, just dispatch)
         if step.tool and not step.slot:
-            args = dict(step.args)
-            # Interpolate slot values into args
-            for k, v in args.items():
-                if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
-                    slot_ref = v[1:-1]
-                    args[k] = session.slots.get(slot_ref, v)
+            args = _interpolate_args(step.args, session.slots)
             session.current_step_idx += 1
             return WorkflowTurn(
                 tool_call={"name": step.tool, "arguments": args},
@@ -168,10 +184,7 @@ class WorkflowRegistry:
                 continue
 
             if nxt.tool and not nxt.slot:
-                args = dict(nxt.args)
-                for k, v in args.items():
-                    if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
-                        args[k] = session.slots.get(v[1:-1], v)
+                args = _interpolate_args(nxt.args, session.slots)
                 session.current_step_idx += 1
                 return WorkflowTurn(
                     tool_call={"name": nxt.tool, "arguments": args},

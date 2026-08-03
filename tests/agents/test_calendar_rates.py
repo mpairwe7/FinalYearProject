@@ -91,7 +91,9 @@ class TestNextDeadlines:
 
 class TestLookupRate:
     def test_vat_standard(self, fresh_registry):
-        r = fresh_registry.call("lookup_rate", {"tax_type": "vat_standard"})
+        r = fresh_registry.call(
+            "lookup_rate", {"tax_type": "vat_standard", "fiscal_year": "FY2025-26"}
+        )
         assert r["ok"] is True
         assert r["rate"] == 0.18
         assert r["rate_pct"] == 18.0
@@ -126,9 +128,15 @@ class TestListAvailableRates:
         for row in r["rates"]:
             assert "tax_type" in row
             assert "display_name" in row
-            assert "rate" in row
-            assert "rate_pct" in row
-            assert 0.0 <= row["rate"] <= 1.0
+            assert "formatted" in row
+            # Rows are either a rate (0-1) or a money threshold; a threshold
+            # reported as a percentage would read as 30,000,000,000%.
+            assert row["kind"] in ("rate", "amount")
+            if row["kind"] == "rate":
+                assert 0.0 <= row["rate"] <= 1.0
+                assert "rate_pct" in row
+            else:
+                assert row["value"] > 1.0
 
     def test_vat_and_cit_present(self, fresh_registry):
         r = fresh_registry.call("list_available_rates", {})
