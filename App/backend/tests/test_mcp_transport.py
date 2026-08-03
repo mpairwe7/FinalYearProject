@@ -15,6 +15,7 @@ from app.mcp.transport import (
     build_transports,
     request_meta,
 )
+from app.mcp.validation import _fallback_errors
 from app.tools import ToolRegistry
 
 
@@ -128,6 +129,61 @@ class ArgumentValidationTests(unittest.TestCase):
         result = self.client.call_tool("calculate_moon_phase", {})
         self.assertFalse(result.ok)
         self.assertIn("calculate_vat", result.result["available_tools"])
+
+
+class FallbackValidatorTests(unittest.TestCase):
+    """The structural fallback must still be a real boundary.
+
+    ``jsonschema`` is optional, and it is genuinely absent from some
+    environments. A fallback that only counted keys would report "a lot"
+    as a valid salary, so the tightening would silently not apply
+    exactly where the dependency is missing.
+    """
+
+    _SCHEMA = {
+        "type": "object",
+        "properties": {
+            "amount": {"type": "number", "minimum": 0, "maximum": 100},
+            "mode": {"type": "string", "enum": ["add", "extract"]},
+            "note": {"type": "string", "minLength": 1},
+            "flag": {"type": "boolean"},
+        },
+        "required": ["amount"],
+        "additionalProperties": False,
+    }
+
+    def _errors(self, payload: dict[str, Any]) -> list[str]:
+        return _fallback_errors(self._SCHEMA, payload)
+
+    def test_wrong_type_is_caught(self) -> None:
+        self.assertIn("amount", self._errors({"amount": "a lot"})[0])
+
+    def test_missing_required_is_caught(self) -> None:
+        self.assertIn("required", self._errors({})[0])
+
+    def test_unknown_property_is_caught(self) -> None:
+        self.assertIn("unexpected", self._errors({"amount": 1, "bogus": 2})[0])
+
+    def test_enum_violation_is_caught(self) -> None:
+        self.assertIn("is not one of", self._errors({"amount": 1, "mode": "sideways"})[0])
+
+    def test_bounds_are_checked(self) -> None:
+        self.assertIn("minimum", self._errors({"amount": -1})[0])
+        self.assertIn("maximum", self._errors({"amount": 500})[0])
+
+    def test_bool_is_not_a_number(self) -> None:
+        # bool subclasses int, so a naive isinstance check accepts True
+        # as a salary.
+        self.assertTrue(self._errors({"amount": True}))
+
+    def test_bool_is_still_a_boolean(self) -> None:
+        self.assertEqual(self._errors({"amount": 1, "flag": True}), [])
+
+    def test_empty_string_fails_min_length(self) -> None:
+        self.assertIn("non-empty", self._errors({"amount": 1, "note": ""})[0])
+
+    def test_valid_payload_passes(self) -> None:
+        self.assertEqual(self._errors({"amount": 50, "mode": "add", "note": "ok"}), [])
 
 
 class IdempotencyTests(unittest.TestCase):

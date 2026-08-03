@@ -29,17 +29,75 @@ except ImportError:  # pragma: no cover - fallback path
     _HAVE_JSONSCHEMA = False
 
 
+#: JSON Schema primitive names → the Python types that satisfy them.
+_JSON_TYPES: dict[str, tuple[type, ...]] = {
+    "string": (str,),
+    "number": (int, float),
+    "integer": (int,),
+    "boolean": (bool,),
+    "array": (list, tuple),
+    "object": (dict,),
+}
+
+
+def _type_error(key: str, value: Any, expected: Any) -> str | None:
+    """Check one property against its declared ``type``, or ``None`` if fine."""
+    names = [expected] if isinstance(expected, str) else list(expected or [])
+    if not names:
+        return None
+    for name in names:
+        allowed = _JSON_TYPES.get(name)
+        if allowed is None:
+            return None  # unknown type keyword — do not guess
+        # bool is an int subclass; only "boolean" should accept it.
+        if isinstance(value, bool) and name != "boolean":
+            continue
+        if isinstance(value, allowed):
+            return None
+    return f"{key}: {value!r} is not of type {' or '.join(names)}"
+
+
 def _fallback_errors(schema: dict[str, Any], payload: dict[str, Any]) -> list[str]:
-    """Required-key and unknown-key check for hosts without ``jsonschema``."""
+    """Structural validation for hosts without ``jsonschema``.
+
+    Covers the mistakes a model actually makes — a missing required
+    argument, an invented one, a string where a number belongs, a value
+    outside an enum. It is not full JSON Schema, but it must be strong
+    enough that the boundary still *means* something when the optional
+    dependency is absent; a fallback that only counts keys would report
+    ``"a lot"`` as a valid salary.
+    """
     errors: list[str] = []
+    properties: dict[str, Any] = schema.get("properties", {}) or {}
+
     for key in schema.get("required", []):
         if key not in payload:
             errors.append(f"{key}: required property is missing")
+
     if schema.get("additionalProperties") is False:
-        known = set(schema.get("properties", {}))
         for key in payload:
-            if key not in known:
+            if key not in properties:
                 errors.append(f"{key}: unexpected property")
+
+    for key, value in payload.items():
+        spec = properties.get(key)
+        if not isinstance(spec, dict) or value is None:
+            continue
+        type_error = _type_error(key, value, spec.get("type"))
+        if type_error:
+            errors.append(type_error)
+            continue
+        choices = spec.get("enum")
+        if choices and value not in choices:
+            errors.append(f"{key}: {value!r} is not one of {choices}")
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            minimum, maximum = spec.get("minimum"), spec.get("maximum")
+            if minimum is not None and value < minimum:
+                errors.append(f"{key}: {value} is less than the minimum of {minimum}")
+            if maximum is not None and value > maximum:
+                errors.append(f"{key}: {value} is greater than the maximum of {maximum}")
+        if isinstance(value, str) and len(value) < (spec.get("minLength") or 0):
+            errors.append(f"{key}: {value!r} should be non-empty")
     return errors
 
 
