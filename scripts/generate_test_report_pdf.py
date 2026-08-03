@@ -412,7 +412,6 @@ def build_infra_section(story: list) -> None:
         ["Zero mutable tags in uses:", _status(True), "grep returns 0 matches"],
         ["Frontend CI test stage", _status(True), "test-frontend + a11y-audit before build"],
         ["--cov-fail-under=80", _status(True), "Present in ci-ml-pipeline.yml pytest command"],
-        ["Flutter CI workflow", _status(True), "flutter-ci.yml: analyze + test + build APK"],
         ["Container signing", _status(True), "container-sign-provenance.yml: cosign + SLSA"],
         ["OWASP ZAP DAST", _status(True), "devsecops-sast-dast.yml with .zap-rules.tsv"],
         ["Monitoring stack", _status(True), "docker-compose profile: Prometheus + Grafana + Jaeger"],

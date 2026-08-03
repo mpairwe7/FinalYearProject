@@ -427,7 +427,6 @@ jobs:
               "ml.scripts.mt.export_mt_onnx",
               "ml.scripts.mt.infer_mt",
               "ml.scripts.speech.speech_pipeline",
-              "ml.scripts.speech.export_mobile_speech",
               "ml.pipelines.evaluate_speech",
               "ml.pipelines.evaluate_mt",
               "ml.pipelines.evaluate_tts",
@@ -509,12 +508,6 @@ jobs:
           python -m ml.pipelines.evaluate_tts --dry-run
           python -m ml.pipelines.benchmark_mobile --dry-run
           python -m ml.pipelines.redteam_voice --dry-run
-
-      - name: Mobile bundle exporter (dry run)
-        run: |
-          python -m ml.scripts.speech.export_mobile_speech --dry-run || {
-            echo "::warning::Mobile speech artifacts are not present in CI; exporter wiring ran and reported unavailable artifacts."
-          }
 
       - name: Speech quality gates (soft-fail)
         run: |
@@ -1013,60 +1006,6 @@ jobs:
           fi
 
   # ============================================
-  # Stage 5c: Mobile Export Validation (Dry-Run)
-  # ============================================
-  validate-mobile-export:
-    name: Validate Mobile Export Pipeline
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: evaluate-model
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install export dependencies
-        run: uv pip install --system transformers peft torch --extra-index-url https://download.pytorch.org/whl/cpu
-
-      - name: Validate export_mobile.py syntax and imports
-        run: |
-          python -c "import ast; ast.parse(open('ml/scripts/export_mobile.py').read()); print('export_mobile.py: syntax OK')"
-
-      - name: Validate mobile config in training_config.yaml
-        run: |
-          python -c "
-          import yaml
-          with open('ml/configs/training_config.yaml') as f:
-              cfg = yaml.safe_load(f)
-          mobile = cfg.get('mobile_export', {})
-          assert mobile.get('quantization') == 'Q4_K_M', 'Missing Q4_K_M quantization'
-          assert mobile.get('base_model') == 'google/gemma-3n-E2B-it', 'Wrong base model'
-          assert mobile.get('inference_engine') == 'MediaPipe LLM Inference API', 'Wrong engine'
-          print('Mobile export config: validated')
-          "
-
-      - name: Step summary
-        run: |
-          echo "## Mobile Export Validation" >> "$GITHUB_STEP_SUMMARY"
-          echo "- export_mobile.py: syntax valid" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Mobile config: validated (Q4_K_M, MediaPipe)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Target: Gemma-2-2B-IT → GGUF INT4 (~1.5 GB)" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "For actual export, run locally with GPU:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "python ml/scripts/export_mobile.py --adapter artifacts/models/*/final --quant Q4_K_M" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-  # ============================================
   # Stage 5d: Production Gates (2026 offline mobile)
   # ============================================
   # Runs the full production-readiness check: tokenizer audit, synthetic
@@ -1078,7 +1017,7 @@ jobs:
     name: Production Gates (2026)
     runs-on: ubuntu-latest
     timeout-minutes: 12
-    needs: [evaluate-rag, validate-mobile-export]
+    needs: [evaluate-rag]
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -1433,7 +1372,7 @@ jobs:
     name: Deploy Backend API
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [build-docker, push-to-huggingface, validate-mobile-export, production-gates]
+    needs: [build-docker, push-to-huggingface, production-gates]
     if: github.ref == 'refs/heads/main'
     environment:
       name: production

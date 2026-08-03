@@ -284,18 +284,6 @@ THREAT_REGISTRY: list[dict] = [
         ],
         "status": "mitigated",
     },
-    {
-        "id": "T21",
-        "category": "Information Disclosure",
-        "description": "Mobile on-device model extraction via APK reverse engineering",
-        "owasp_llm": "LLM03",
-        "mitre_atlas": "AML.T0044",
-        "mitigation": "Quantised GGUF model (limited utility), code obfuscation, ProGuard/R8",
-        "evidence": [
-            "MobileApp/ura_chatbot/android/app/build.gradle.kts",
-        ],
-        "status": "accepted",
-    },
 ]
 
 

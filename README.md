@@ -12,7 +12,6 @@ This repository describes a CI/CD pipeline for developing and training a custome
 | [RAG Architecture](docs/RAG_ARCHITECTURE.md) | 6-phase advanced RAG pipeline design |
 | [Deployment Guide](docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
 | [Monitoring & Observability](docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
-| [Mobile Setup](docs/MOBILE_SETUP.md) | Flutter Android/iOS build, on-device LLM |
 | [Data Schema & Evaluation](docs/data-schema-and-eval.md) | Database models and evaluation criteria |
 | [Security Policy](SECURITY.md) | Secret scanning, OWASP LLM Top 10, threat model |
 
@@ -47,8 +46,6 @@ FinalYearProject/
 │   │       ├── analytics.py   # Prometheus-compatible metrics middleware
 │   │       └── database.py    # SQLite WAL analytics/feedback/session/conversation store
 │   └── frontend/         # Next.js 16 + React 19 + Zustand 5 frontend
-├── MobileApp/             # Flutter mobile application
-│   └── ura_chatbot/       # Flutter 3.41 + Riverpod + Material 3
 │       ├── lib/
 │       │   ├── core/      # Config, networking (Dio), theme, storage
 │       │   └── features/  # Chat, FAQ, Settings screens + providers
@@ -299,15 +296,7 @@ The PR Python coverage gate is currently set to a ratcheting baseline of 35% whi
 | OWASP ZAP | DAST baseline scan against the CI API target on port `8087` |
 | OSSF Scorecard | Supply chain security scoring with default-branch guard |
 
-### 8. `flutter-ci.yml` - Flutter Mobile CI
-**Triggers**: Push to `main`/`develop`/`feat/*` (MobileApp changes), PRs
-
-| Stage | Description |
-|-------|-------------|
-| Analyse & Test | `flutter analyze`, `dart format`, unit/widget tests with coverage |
-| Build Android | Release APK build with `--dart-define=API_URL` |
-
-### 9. `container-sign-provenance.yml` - Container Signing & SLSA Provenance
+### 8. `container-sign-provenance.yml` - Container Signing & SLSA Provenance
 **Triggers**: Called by other workflows after Docker push, manual dispatch
 
 | Step | Description |
@@ -388,7 +377,6 @@ The training pipeline prepares data, generates synthetic QA, and fine-tunes Gemm
 | `ml/scripts/data_augmentation.py` | Combine CSV FAQs, PDFs, Luganda data into training format |
 | `ml/scripts/teacher_qa_generation.py` | Generate synthetic QA using Llama-3.2-3B teacher |
 | `ml/scripts/fine_tune_gemma.py` | LoRA/QLoRA fine-tuning for Gemma-2-2B / Llama / T5 |
-| `ml/scripts/export_mobile.py` | Export fine-tuned Gemma-2B to GGUF INT4 for mobile inference |
 | `ml/scripts/run_training_pipeline.sh` | Full pipeline orchestrator |
 
 ### Deployment Targets
@@ -419,7 +407,6 @@ python ml/scripts/data_augmentation.py --output artifacts/training_data.jsonl
 python ml/scripts/fine_tune_gemma.py --data artifacts/training_data.jsonl --target mobile_gemma_2b
 
 # Export to GGUF for mobile (after fine-tuning)
-python ml/scripts/export_mobile.py --adapter artifacts/models/ura-gemma-2-2b-it-*/final --quant Q4_K_M
 ```
 
 See [ml/README.md](ml/README.md) for detailed documentation.
@@ -498,5 +485,4 @@ Dashboards and datasources are auto-provisioned via `monitoring/grafana/provisio
 - Review [docs/mlops-workflows.md](docs/mlops-workflows.md) for detailed configuration
 - Review [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for production deployment guide
 - Review [docs/MONITORING.md](docs/MONITORING.md) for observability setup
-- Review [docs/MOBILE_SETUP.md](docs/MOBILE_SETUP.md) for mobile app build instructions
 - Review [docs/MODEL_CARD.md](docs/MODEL_CARD.md) for EU AI Act Article 53 model card
