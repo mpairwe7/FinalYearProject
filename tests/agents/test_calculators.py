@@ -12,8 +12,10 @@ from app.tools import ToolRegistry
 # ---------------------------------------------------------------------------
 class TestVAT:
     def test_add_standard_rate(self, fresh_registry):
-        r = fresh_registry.call("calculate_vat",
-                                {"amount": 100_000, "direction": "add"})
+        r = fresh_registry.call(
+            "calculate_vat",
+            {"amount": 100_000, "direction": "add", "fiscal_year": "FY2025-26"},
+        )
         assert r["ok"] is True
         assert r["net"] == 100_000
         assert r["vat"] == 18_000
@@ -70,7 +72,12 @@ class TestPAYE:
         (15_000_000,  4_902_000.0, 0.40),
     ])
     def test_resident_progressive_bands(self, fresh_registry, gross, expected_paye, expected_band_rate):
-        r = fresh_registry.call("calculate_paye", {"monthly_gross": gross})
+        # These figures are FY2025-26 statute, so the year is named: omitting
+        # it resolves to whichever table is in force today, and FY2026-27
+        # moved the threshold to 335,000 and added a 25% band.
+        r = fresh_registry.call(
+            "calculate_paye", {"monthly_gross": gross, "fiscal_year": "FY2025-26"}
+        )
         assert r["ok"] is True
         assert r["monthly_gross"] == gross
         assert r["paye"] == expected_paye

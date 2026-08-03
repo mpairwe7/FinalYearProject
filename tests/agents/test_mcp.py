@@ -8,6 +8,7 @@ import pytest
 
 from app.mcp import MCPCallResult, MCPClient, ToolRAGSelector, get_client
 from app.mcp.client import reset_client
+from app.tools import ToolRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -85,9 +86,16 @@ class TestAvailableFor:
             user_role="ura_staff",
             granted_purposes=["ura_account_access"],
         )
-        # All 13 low/medium+staff tools should be visible (11 starter tools
-        # + rental income tax + withholding tax calculators)
-        assert len(allowed) == 13
+        # Everything except the critical write tool, which additionally
+        # needs `ura_actions` consent.  Derived from the registry rather
+        # than a literal count, which went stale every time a tool landed.
+        expected = {
+            name
+            for name in ToolRegistry.names()
+            if ToolRegistry.get(name).schema.risk != "critical"
+        }
+        assert set(allowed) == expected
+        assert "ura_action_proposal" not in allowed
 
 
 class TestCallTool:

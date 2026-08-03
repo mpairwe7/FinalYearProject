@@ -165,10 +165,19 @@ class LookupRateTool(Tool):
 
         value = table.get(tax_type)
         if value is None:
+            # Distinguish "no such tax" from "not defined in *this* year":
+            # the second is a real answer (the rate exists, just not for the
+            # period asked about) and should name the years that do define it.
             defined_in = [fy for fy in list_fiscal_years() if tax_type in get_table(fy).rates]
+            error = (
+                f"'{tax_type}' is not defined for {table.fiscal_year}; "
+                f"it applies to: {', '.join(defined_in)}"
+                if defined_in
+                else f"Unknown tax_type '{tax_type}'"
+            )
             return {
                 "ok": False,
-                "error": f"'{tax_type}' is not defined for {table.fiscal_year}",
+                "error": error,
                 "fiscal_year": table.fiscal_year,
                 "defined_in": defined_in,
                 "available": _known_scalar_keys(),
