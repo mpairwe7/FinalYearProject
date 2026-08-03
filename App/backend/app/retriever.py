@@ -24,7 +24,7 @@ import math
 import os
 import re
 import uuid
-from collections import Counter
+from collections import Counter, OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +116,52 @@ def normalize_rerank_score(logit: float) -> float:
     """
     x = max(-30.0, min(30.0, float(logit)))
     return 1.0 / (1.0 + math.exp(-x))
+
+
+#: Recent query embeddings kept for reuse within and across turns.
+_QUERY_CACHE_SIZE = int(os.getenv("RETRIEVER_QUERY_CACHE_SIZE", "256"))
+#: Characters of a passage handed to the cross-encoder.  Its own input
+#: window is shorter than this; the cap bounds the quadratic term.
+_RERANK_CHARS = int(os.getenv("RETRIEVER_RERANK_CHARS", "1200"))
+#: Jaccard overlap above which two candidates are treated as duplicates.
+_DEDUPE_THRESHOLD = float(os.getenv("RETRIEVER_DEDUPE_THRESHOLD", "0.9"))
+
+
+def _shingles(text: str) -> frozenset[str]:
+    """Word 5-grams, the usual near-duplicate signature."""
+    words = re.findall(r"\w+", (text or "").lower())
+    if len(words) < 5:
+        return frozenset(words)
+    return frozenset(" ".join(words[i : i + 5]) for i in range(len(words) - 4))
+
+
+def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop near-identical passages, keeping the best-ranked copy.
+
+    The corpus repeats the same guidance across document editions, so a
+    prefetch commonly returns several copies of one passage.  Keeping
+    them wastes reranker compute and, worse, lets one fact occupy most of
+    ``top_k`` — the model then sees three restatements instead of three
+    pieces of evidence.
+    """
+    kept: list[dict[str, Any]] = []
+    signatures: list[frozenset[str]] = []
+    for candidate in candidates:
+        text = candidate.get("text") or candidate.get("answer") or candidate.get("question", "")
+        signature = _shingles(text)
+        if not signature:
+            kept.append(candidate)
+            continue
+        duplicate = False
+        for seen in signatures:
+            overlap = len(signature & seen)
+            if overlap and overlap / min(len(signature), len(seen)) >= _DEDUPE_THRESHOLD:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(candidate)
+            signatures.append(signature)
+    return kept
 
 
 def hit_relevance(hit: dict[str, Any]) -> float | None:
@@ -260,6 +306,7 @@ class HybridRetriever:
         self._dense_model: Any = None
         self._reranker: Any = None
         self._sparse_encoder = BM25SparseEncoder()
+        self._query_vec_cache: OrderedDict[str, list[float]] = OrderedDict()
         self._ready = False
         # Disabled at init time if the loaded bm25_state is out of sync with
         # the live Qdrant vectors (P1-6) — search then runs dense-only.
@@ -481,6 +528,44 @@ class HybridRetriever:
         the circuit breaker in ``search()`` handles transient failures."""
         return self._ready and (self._client is not None or self._vectorize_mode)
 
+    def _encode_query(self, query: str) -> list[float]:
+        """Embed *query*, reusing a recent identical embedding.
+
+        A single turn embeds the same or near-identical text more than
+        once: corrective RAG re-retrieves, and the rewritten query is
+        frequently byte-identical to the original.  Query embedding is
+        pure, so a small LRU removes that repeated forward pass without
+        changing a single result.
+        """
+        cached = self._query_vec_cache.get(query)
+        if cached is not None:
+            self._query_vec_cache.move_to_end(query)
+            return cached
+        vector = self._dense_model.encode(query).tolist()
+        self._query_vec_cache[query] = vector
+        while len(self._query_vec_cache) > _QUERY_CACHE_SIZE:
+            self._query_vec_cache.popitem(last=False)
+        return vector
+
+    def _rerank(self, query: str, candidates: list[dict[str, Any]]) -> None:
+        """Score *candidates* with the cross-encoder, in place.
+
+        Passages are truncated for scoring only.  A cross-encoder is
+        quadratic in sequence length and its own input window is far
+        shorter than a full chunk, so feeding untruncated text costs
+        latency to produce a score the model derived from the head of the
+        passage anyway.
+        """
+        pairs = [
+            (query, (c.get("text") or c.get("answer") or c.get("question", ""))[:_RERANK_CHARS])
+            for c in candidates
+        ]
+        scores = self._reranker.predict(pairs)
+        for i, s in enumerate(scores):
+            candidates[i]["score_rerank"] = float(s)
+            candidates[i]["score_norm"] = normalize_rerank_score(float(s))
+        candidates.sort(key=lambda x: x.get("score_rerank", 0.0), reverse=True)
+
     def search(
         self,
         query: str,
@@ -507,7 +592,7 @@ class HybridRetriever:
         try:
             from qdrant_client import models
 
-            dense_vec = self._dense_model.encode(query).tolist()
+            dense_vec = self._encode_query(query)
             sparse_idx, sparse_val = self._sparse_encoder.encode(query)
 
             # Build optional payload filter
@@ -570,17 +655,16 @@ class HybridRetriever:
                     }
                 )
 
+            # Drop near-duplicate chunks before the expensive step.  The
+            # corpus carries the same guidance across editions, so a
+            # prefetch of 20 routinely contains several copies of one
+            # passage — they cost reranker time and then crowd genuinely
+            # different evidence out of top_k.
+            candidates = _dedupe_candidates(candidates)
+
             # Cross-encoder reranking
             if self._reranker and candidates:
-                pairs = [
-                    (query, c.get("text") or c.get("answer") or c.get("question", ""))
-                    for c in candidates
-                ]
-                scores = self._reranker.predict(pairs)
-                for i, s in enumerate(scores):
-                    candidates[i]["score_rerank"] = float(s)
-                    candidates[i]["score_norm"] = normalize_rerank_score(float(s))
-                candidates.sort(key=lambda x: x.get("score_rerank", 0.0), reverse=True)
+                self._rerank(query, candidates)
 
             self._circuit.record_success()
             self._ready = True  # ensure readiness restored on success
