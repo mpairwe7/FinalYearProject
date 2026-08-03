@@ -2747,6 +2747,11 @@ class ChatModel:
             explanation = result.get("explanation") or result.get("message") or ""
             if explanation:
                 tool_messages.append(str(explanation))
+            # A provisional rate table must caveat the guided flow too, not
+            # only the single-shot calculator fast path.
+            warning = result.get("verification_warning")
+            if warning:
+                tool_messages.append(f"_{warning}_")
             turn = WorkflowRegistry.advance(session, "")
         return turn, tool_messages
 
@@ -2797,14 +2802,14 @@ class ChatModel:
         if rate_plan is None:
             return None
         try:
-            from .tools.calculators import _get_rates  # noqa: PLC0415
+            from .tax.tables import get_table  # noqa: PLC0415
             from .tools.rates import _authority_payload  # noqa: PLC0415
 
             authority_ok, _status = _authority_payload()
             if not authority_ok:
                 logger.info("rate fast path skipped: authority manifest not fresh")
                 return None
-            reply_text, next_actions = format_rate_reply(rate_plan, _get_rates())
+            reply_text, next_actions = format_rate_reply(rate_plan, get_table())
         except Exception:
             logger.exception("rate lookup fast path failed")
             return None

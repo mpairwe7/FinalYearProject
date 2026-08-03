@@ -41,6 +41,12 @@ class UraActionProposalTool(Tool):
             },
             risk="critical",
             requires_confirmation=True,
+            namespace="ura_actions",
+            required_scopes=("ura_account_access", "ura_actions"),
+            allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
+            read_only=False,
+            destructive=True,
+            open_world=True,
         )
 
     def execute(

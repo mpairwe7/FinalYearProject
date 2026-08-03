@@ -19,7 +19,8 @@ steps:
 
   - id: done
     question: >-
-      That applies the 30% corporation tax rate from the FY2025-26 URA
-      rate table. Happy to run different figures whenever you like.
+      That applies the corporation tax rate from the URA rate table in
+      force for the fiscal year shown above. Happy to run different figures
+      whenever you like.
     slot: ""
     validator: text

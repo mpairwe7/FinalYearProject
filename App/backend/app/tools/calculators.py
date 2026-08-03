@@ -2,86 +2,217 @@
 
 All calculators are:
 
-- **Pure Python** — no network, no randomness, fully reproducible.
-- **Unit-testable** — each ``execute()`` is a pure function of its args.
-- **Version-stamped** — each result carries the FY rate table version
-  so stale knowledge is detectable downstream.
+- **Pure** — no network, no randomness, no clock beyond the fiscal year
+  the caller asked for, so a result is reproducible from its arguments.
+- **Decimal** — money arithmetic runs through :mod:`app.tax.money`, not
+  binary floats.
+- **Provenance-stamped** — every result carries the fiscal year it used,
+  whether that table is confirmed or provisional, the statutory basis
+  for each rate applied, and the sources the table was compiled from.
 
-Rate data is hard-coded for FY2025-26 as of this writing.  When URA
-updates rates, bump the table in :data:`_FY2025_26_RATES` and add a
-new table for the next year — the ``fiscal_year`` arg selects which.
+Rates themselves live in :mod:`app.tax.tables` as effective-dated JSON,
+so a new fiscal year is a data file plus a test — nothing here changes.
+Omitting ``fiscal_year`` resolves the table in force today rather than
+defaulting to a year frozen in the source, which is what let this file
+keep serving FY2025-26 figures after 1 July 2026.
 
 References:
-- Uganda Revenue Authority FY2025-26 rates
-- Income Tax Act (Cap 340), Section 6
+- Income Tax Act (Cap 340), Third Schedule
 - VAT Act (Cap 349), Schedule 3
+- Income Tax / VAT (Amendment) Acts 2026 (effective 1 July 2026)
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
+from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
+from ..tax.money import AmountError, apply_bands, marginal_band, to_decimal, to_float, to_rate
+from ..tax.tables import RateTable, RateTableError, get_table, list_fiscal_years
 from . import Tool, ToolRegistry, ToolSchema
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Rate tables (FY2025-26)
-# ---------------------------------------------------------------------------
-_FY2025_26_RATES = {
-    "version": "FY2025-26",
-    "vat_standard": 0.18,
-    # PAYE (resident individual monthly) — progressive bands in UGX
-    "paye_bands_resident": [
-        # (lower_bound, upper_bound, rate, flat_amount_below_upper)
-        (0, 235_000, 0.00, 0),
-        (235_000, 335_000, 0.10, 0),
-        (335_000, 410_000, 0.20, 10_000),
-        (410_000, 10_000_000, 0.30, 25_000),
-        # flat = 25,000 + 30% x (10,000,000 - 410,000) per ITA Third Schedule
-        (10_000_000, float("inf"), 0.40, 2_902_000),
-    ],
-    # Non-resident PAYE rates (simpler, flat brackets)
-    "paye_bands_non_resident": [
-        (0, 335_000, 0.10, 0),
-        (335_000, 410_000, 0.20, 33_500),
-        (410_000, 10_000_000, 0.30, 48_500),
-        (10_000_000, float("inf"), 0.40, 2_925_500),
-    ],
-    "corporation_tax": 0.30,
-    "capital_gains_corporate": 0.30,  # added to gross income
-    "rental_tax_individual": 0.12,  # 12% on gross rental income above 2.82M p.a.
-    "rental_tax_individual_threshold": 2_820_000,
-    "rental_tax_company": 0.30,
-    # Companies may deduct expenses up to 50% of gross rental income
-    # (Income Tax (Amendment) Act 2022, s.22(1)(c)).
-    "rental_company_expense_cap": 0.50,
-    "withholding_services": 0.06,
-    "withholding_goods": 0.06,
-    "withholding_management_fees": 0.15,
-    "customs_duty_common": 0.25,  # typical consumer goods import
-    "withholding_dividend": 0.15,
+#: MCP server that owns the calculators.
+TAX_CALCULATOR_NAMESPACE = "tax_calculator"
+
+
+class RateUnavailableError(RuntimeError):
+    """Raised when a fiscal year's table has no figure for a needed rate."""
+
+
+@dataclass
+class CalcResult:
+    """A calculator's own output plus the rate keys it consulted.
+
+    ``rate_keys`` drives the provenance block, so a result cites only the
+    statutory basis it actually relied on instead of the whole table's.
+    """
+
+    payload: dict[str, Any]
+    rate_keys: tuple[str, ...] = ()
+
+
+# Shared JSON-Schema fragments for the two arguments every calculator takes.
+_PERIOD_PARAMS: dict[str, Any] = {
+    "fiscal_year": {
+        "type": "string",
+        "description": (
+            "URA fiscal year identifier, e.g. 'FY2026-27'. Omit to use the "
+            "year in force today; pass it explicitly when the user asks "
+            "about a past period or an amended return."
+        ),
+    },
+    "as_of": {
+        "type": "string",
+        "format": "date",
+        "description": (
+            "ISO date (YYYY-MM-DD) the calculation applies to. Selects the "
+            "fiscal year in force on that date. Ignored when fiscal_year is given."
+        ),
+    },
 }
 
-_RATE_TABLES = {
-    "FY2025-26": _FY2025_26_RATES,
+
+#: Every calculator returns the same envelope: the arithmetic, an
+#: explanation, and the provenance of the rates it used.  Published as
+#: the MCP ``outputSchema`` so a client can validate structuredContent
+#: without each calculator hand-writing a schema for its own fields.
+CALCULATOR_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "ok": {"type": "boolean"},
+        "error": {"type": "string"},
+        "explanation": {"type": "string"},
+        "fiscal_year": {"type": "string"},
+        "verification_warning": {"type": "string"},
+        "rate_basis": {
+            "type": "object",
+            "properties": {
+                "fiscal_year": {"type": "string"},
+                "status": {"type": "string", "enum": ["confirmed", "provisional"]},
+                "effective_from": {"type": "string", "format": "date"},
+                "effective_to": {"type": ["string", "null"], "format": "date"},
+                "legal_basis": {"type": "object", "additionalProperties": {"type": "string"}},
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "publisher": {"type": "string"},
+                            "url": {"type": "string"},
+                        },
+                        "required": ["id", "title"],
+                    },
+                },
+            },
+            "required": ["fiscal_year", "status"],
+        },
+    },
+    "required": ["ok"],
+    "additionalProperties": True,
 }
 
 
-def _get_rates(fiscal_year: str = "FY2025-26") -> dict[str, Any]:
-    table = _RATE_TABLES.get(fiscal_year)
-    if table is None:
-        raise ValueError(
-            f"Unknown fiscal year '{fiscal_year}'. " f"Known years: {sorted(_RATE_TABLES.keys())}"
+def _schema_params(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    """Build a tool ``parameters`` schema with the shared period arguments."""
+    return {
+        "type": "object",
+        "properties": {**properties, **_PERIOD_PARAMS},
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _require_scalar(table: RateTable, key: str) -> Decimal:
+    """Fetch a scalar rate, failing closed when the fiscal year lacks it.
+
+    A rate that a given year's law does not define (say a withholding
+    category introduced in 2026, asked about for 2025) must produce an
+    error naming the years that do define it — never a fallback value.
+    """
+    value = table.get(key)
+    if value is None:
+        available = [fy for fy in list_fiscal_years() if key in get_table(fy).rates]
+        hint = f" It is defined for: {', '.join(available)}." if available else ""
+        raise RateUnavailableError(
+            f"'{key}' is not defined in the {table.fiscal_year} rate table.{hint}"
         )
-    return table
+    if not isinstance(value, int | float):
+        raise RateUnavailableError(f"'{key}' is not a scalar rate in {table.fiscal_year}")
+    return Decimal(str(value))
+
+
+def _require_bands(table: RateTable, key: str) -> list[tuple[float, float | None, float]]:
+    bands = table.get(key)
+    if not bands:
+        raise RateUnavailableError(f"'{key}' is not defined in the {table.fiscal_year} rate table")
+    return bands
+
+
+def _ugx(amount: Decimal | float) -> str:
+    return f"UGX {float(amount):,.2f}"
+
+
+class CalculatorTool(Tool):
+    """Base for the deterministic calculators.
+
+    Handles what every calculator shares — resolving the fiscal year,
+    turning argument and rate-availability failures into structured
+    ``{"ok": false, ...}`` results the model can read, and stamping
+    provenance onto the payload — so subclasses only implement the
+    arithmetic in :meth:`compute`.
+    """
+
+    def compute(self, table: RateTable, **kwargs: Any) -> CalcResult:
+        raise NotImplementedError
+
+    def execute(
+        self,
+        fiscal_year: str | None = None,
+        as_of: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        try:
+            day = _dt.date.fromisoformat(as_of) if as_of else None
+        except ValueError:
+            return {"ok": False, "error": f"as_of must be an ISO date (YYYY-MM-DD), got {as_of!r}"}
+
+        try:
+            table = get_table(fiscal_year, as_of=day)
+        except RateTableError as exc:
+            return {"ok": False, "error": str(exc), "known_fiscal_years": list_fiscal_years()}
+
+        try:
+            result = self.compute(table, **kwargs)
+        except AmountError as exc:
+            return {"ok": False, "error": str(exc)}
+        except RateUnavailableError as exc:
+            return {"ok": False, "error": str(exc), "fiscal_year": table.fiscal_year}
+
+        payload = result.payload
+        if payload.get("ok") is False:
+            return payload
+        payload["ok"] = True
+        payload["fiscal_year"] = table.fiscal_year
+        payload["rate_basis"] = table.provenance(*result.rate_keys)
+        if not table.confirmed:
+            payload["verification_warning"] = (
+                f"{table.fiscal_year} figures are provisional — "
+                f"{table.verification_note or 'confirm them with URA before relying on them.'}"
+            )
+        return payload
 
 
 # ---------------------------------------------------------------------------
-# VAT calculator
+# VAT
 # ---------------------------------------------------------------------------
-class VATCalculator(Tool):
+class VATCalculator(CalculatorTool):
     """Compute Ugandan VAT at the standard rate (18%)."""
 
     @property
@@ -95,11 +226,11 @@ class VATCalculator(Tool):
                 "price to a VAT-exclusive price. Standard rate is "
                 "18% for most goods and services."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=_schema_params(
+                {
                     "amount": {
                         "type": "number",
+                        "minimum": 0,
                         "description": "The base amount in UGX.",
                     },
                     "direction": {
@@ -114,73 +245,130 @@ class VATCalculator(Tool):
                     },
                     "rate": {
                         "type": "number",
-                        "description": "VAT rate as decimal (default 0.18).",
-                    },
-                    "fiscal_year": {
-                        "type": "string",
-                        "description": "FY identifier, e.g. 'FY2025-26'.",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": (
+                            "Override the VAT rate as a decimal fraction (e.g. 0.18). "
+                            "Only pass this for a non-standard supply."
+                        ),
                     },
                 },
-                "required": ["amount"],
-            },
+                ["amount"],
+            ),
             risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
 
-    def execute(
+    def compute(
         self,
-        amount: float,
+        table: RateTable,
+        amount: Any,
         direction: str = "add",
-        rate: float | None = None,
-        fiscal_year: str = "FY2025-26",
-    ) -> dict[str, Any]:
-        rates = _get_rates(fiscal_year)
-        if rate is None:
-            rate = float(rates["vat_standard"])
-        amount = float(amount)
-        if amount < 0:
-            return {"ok": False, "error": "amount must be non-negative"}
+        rate: Any = None,
+        **_: Any,
+    ) -> CalcResult:
+        if direction not in ("add", "extract"):
+            return CalcResult(
+                {"ok": False, "error": f"direction must be 'add' or 'extract' (got {direction!r})"}
+            )
+        net_or_gross = to_decimal(amount, field="amount")
+        vat_rate = (
+            to_rate(rate, field="rate") if rate is not None else _require_scalar(table, "vat_standard")
+        )
 
         if direction == "add":
-            vat = amount * rate
-            total = amount + vat
-            return {
-                "ok": True,
-                "direction": "add",
-                "net": round(amount, 2),
-                "rate": rate,
-                "vat": round(vat, 2),
-                "gross": round(total, 2),
-                "fiscal_year": fiscal_year,
-                "explanation": (
-                    f"VAT at {rate * 100:.0f}% on a net of "
-                    f"UGX {amount:,.2f} is UGX {vat:,.2f}, for a "
-                    f"gross of UGX {total:,.2f}."
-                ),
-            }
-        if direction == "extract":
-            net = amount / (1 + rate)
-            vat = amount - net
-            return {
-                "ok": True,
-                "direction": "extract",
-                "net": round(net, 2),
-                "rate": rate,
-                "vat": round(vat, 2),
-                "gross": round(amount, 2),
-                "fiscal_year": fiscal_year,
-                "explanation": (
-                    f"Extracting {rate * 100:.0f}% VAT from UGX "
-                    f"{amount:,.2f} gives VAT UGX {vat:,.2f} and "
-                    f"net UGX {net:,.2f}."
-                ),
-            }
-        return {"ok": False, "error": f"direction must be 'add' or 'extract' (got {direction!r})"}
+            net = net_or_gross
+            vat = net * vat_rate
+            gross = net + vat
+        else:
+            gross = net_or_gross
+            net = gross / (Decimal(1) + vat_rate)
+            vat = gross - net
+
+        explanation = (
+            f"VAT at {vat_rate * 100:.0f}% on a net of {_ugx(net)} is {_ugx(vat)}, "
+            f"for a gross of {_ugx(gross)}."
+            if direction == "add"
+            else (
+                f"Extracting {vat_rate * 100:.0f}% VAT from {_ugx(gross)} gives VAT "
+                f"{_ugx(vat)} and net {_ugx(net)}."
+            )
+        )
+        return CalcResult(
+            {
+                "direction": direction,
+                "net": to_float(net),
+                "rate": float(vat_rate),
+                "vat": to_float(vat),
+                "gross": to_float(gross),
+                "explanation": explanation,
+            },
+            rate_keys=("vat_standard",),
+        )
+
+
+class VATRegistrationCheck(CalculatorTool):
+    """Check whether a turnover crosses the VAT registration threshold."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="check_vat_registration",
+            description=(
+                "Check whether a business must register for VAT in Uganda, given its "
+                "annual turnover. The compulsory registration threshold rose from "
+                "UGX 150 million to UGX 300 million with effect from 1 July 2026, so "
+                "always state which fiscal year the answer applies to. Use when the "
+                "user asks 'do I need to register for VAT' or 'what is the VAT threshold'."
+            ),
+            parameters=_schema_params(
+                {
+                    "annual_turnover": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Total annual taxable turnover in UGX.",
+                    }
+                },
+                ["annual_turnover"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(self, table: RateTable, annual_turnover: Any, **_: Any) -> CalcResult:
+        turnover = to_decimal(annual_turnover, field="annual_turnover")
+        threshold = _require_scalar(table, "vat_registration_threshold_annual")
+        required = turnover >= threshold
+        headroom = threshold - turnover
+        explanation = (
+            f"Turnover of {_ugx(turnover)} is at or above the {table.fiscal_year} VAT "
+            f"registration threshold of {_ugx(threshold)}, so registration is compulsory."
+            if required
+            else (
+                f"Turnover of {_ugx(turnover)} is below the {table.fiscal_year} VAT "
+                f"registration threshold of {_ugx(threshold)} — {_ugx(headroom)} of "
+                f"headroom. Registration is not compulsory, but voluntary registration "
+                f"is available."
+            )
+        )
+        return CalcResult(
+            {
+                "annual_turnover": to_float(turnover),
+                "threshold": to_float(threshold),
+                "registration_required": required,
+                "headroom": to_float(headroom) if not required else 0.0,
+                "explanation": explanation,
+            },
+            rate_keys=("vat_registration_threshold_annual",),
+        )
 
 
 # ---------------------------------------------------------------------------
-# PAYE calculator
+# PAYE
 # ---------------------------------------------------------------------------
-class PAYECalculator(Tool):
+class PAYECalculator(CalculatorTool):
     """Compute monthly PAYE on employment income."""
 
     @property
@@ -194,11 +382,11 @@ class PAYECalculator(Tool):
                 "Use this when the user asks 'how much PAYE will I "
                 "pay' or 'what's my take-home pay'."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=_schema_params(
+                {
                     "monthly_gross": {
                         "type": "number",
+                        "minimum": 0,
                         "description": "Gross monthly salary in UGX, before any deductions.",
                     },
                     "residency": {
@@ -207,74 +395,65 @@ class PAYECalculator(Tool):
                         "description": "Tax residency status. Default 'resident'.",
                         "default": "resident",
                     },
-                    "fiscal_year": {
-                        "type": "string",
-                        "description": "FY identifier, e.g. 'FY2025-26'.",
-                    },
                 },
-                "required": ["monthly_gross"],
-            },
-            risk="low",
-        )
-
-    def execute(
-        self,
-        monthly_gross: float,
-        residency: str = "resident",
-        fiscal_year: str = "FY2025-26",
-    ) -> dict[str, Any]:
-        rates = _get_rates(fiscal_year)
-        bands = (
-            rates["paye_bands_resident"]
-            if residency == "resident"
-            else rates["paye_bands_non_resident"]
-        )
-        gross = float(monthly_gross)
-        if gross < 0:
-            return {"ok": False, "error": "monthly_gross must be non-negative"}
-
-        paye = 0.0
-        applied_band: tuple[float, float, float, float] | None = None
-        for lo, hi, rate, flat in bands:
-            if lo <= gross < hi:
-                marginal = (gross - lo) * rate
-                paye = flat + marginal
-                applied_band = (lo, hi, rate, flat)
-                break
-        # Edge case: gross >= final upper bound (the `hi=inf` band)
-        if applied_band is None:
-            lo, hi, rate, flat = bands[-1]
-            marginal = (gross - lo) * rate
-            paye = flat + marginal
-            applied_band = (lo, hi, rate, flat)
-
-        net = gross - paye
-        lo, hi, rate, flat = applied_band
-        return {
-            "ok": True,
-            "monthly_gross": round(gross, 2),
-            "residency": residency,
-            "paye": round(paye, 2),
-            "net_take_home": round(net, 2),
-            "fiscal_year": fiscal_year,
-            "band": {
-                "lower": lo,
-                "upper": None if hi == float("inf") else hi,
-                "marginal_rate": rate,
-                "flat_portion": flat,
-            },
-            "explanation": (
-                f"On a gross of UGX {gross:,.2f}, the applicable "
-                f"band is {rate * 100:.0f}% above UGX {lo:,.0f}. "
-                f"PAYE = UGX {paye:,.2f}, net pay = UGX {net:,.2f}."
+                ["monthly_gross"],
             ),
-        }
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        monthly_gross: Any,
+        residency: str = "resident",
+        **_: Any,
+    ) -> CalcResult:
+        if residency not in ("resident", "non_resident"):
+            return CalcResult(
+                {
+                    "ok": False,
+                    "error": f"residency must be 'resident' or 'non_resident' (got {residency!r})",
+                }
+            )
+        gross = to_decimal(monthly_gross, field="monthly_gross")
+        key = f"paye_bands_{residency}"
+        bands = _require_bands(table, key)
+
+        paye, breakdown = apply_bands(gross, bands)
+        net = gross - paye
+        lower, upper, marginal_rate = marginal_band(gross, bands)
+        effective_rate = (paye / gross) if gross > 0 else Decimal(0)
+
+        return CalcResult(
+            {
+                "monthly_gross": to_float(gross),
+                "residency": residency,
+                "paye": to_float(paye),
+                "net_take_home": to_float(net),
+                "annual_paye": to_float(paye * 12),
+                "effective_rate": round(float(effective_rate), 4),
+                "band": {
+                    "lower": lower,
+                    "upper": upper,
+                    "marginal_rate": marginal_rate,
+                },
+                "bands_applied": breakdown,
+                "explanation": (
+                    f"On a gross of {_ugx(gross)}, the applicable band is "
+                    f"{marginal_rate * 100:.0f}% above {_ugx(lower)}. "
+                    f"PAYE = {_ugx(paye)}, net pay = {_ugx(net)}."
+                ),
+            },
+            rate_keys=(key,),
+        )
 
 
 # ---------------------------------------------------------------------------
 # Corporation / Income tax
 # ---------------------------------------------------------------------------
-class CorporationTaxCalculator(Tool):
+class CorporationTaxCalculator(CalculatorTool):
     """Compute 30% corporation tax on chargeable income."""
 
     @property
@@ -288,52 +467,47 @@ class CorporationTaxCalculator(Tool):
                 "much corporation tax' or wants to estimate a company's "
                 "annual tax bill."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=_schema_params(
+                {
                     "chargeable_income": {
                         "type": "number",
-                        "description": "Annual chargeable income in UGX (gross income minus allowable deductions).",
-                    },
-                    "fiscal_year": {
-                        "type": "string",
-                        "description": "FY identifier.",
-                    },
+                        "minimum": 0,
+                        "description": (
+                            "Annual chargeable income in UGX "
+                            "(gross income minus allowable deductions)."
+                        ),
+                    }
                 },
-                "required": ["chargeable_income"],
-            },
+                ["chargeable_income"],
+            ),
             risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
 
-    def execute(
-        self,
-        chargeable_income: float,
-        fiscal_year: str = "FY2025-26",
-    ) -> dict[str, Any]:
-        rates = _get_rates(fiscal_year)
-        rate = float(rates["corporation_tax"])
-        income = float(chargeable_income)
-        if income < 0:
-            return {"ok": False, "error": "chargeable_income must be non-negative"}
+    def compute(self, table: RateTable, chargeable_income: Any, **_: Any) -> CalcResult:
+        income = to_decimal(chargeable_income, field="chargeable_income")
+        rate = _require_scalar(table, "corporation_tax")
         tax = income * rate
-        return {
-            "ok": True,
-            "chargeable_income": round(income, 2),
-            "rate": rate,
-            "tax": round(tax, 2),
-            "after_tax": round(income - tax, 2),
-            "fiscal_year": fiscal_year,
-            "explanation": (
-                f"30% corporation tax on chargeable income of "
-                f"UGX {income:,.2f} = UGX {tax:,.2f}."
-            ),
-        }
+        return CalcResult(
+            {
+                "chargeable_income": to_float(income),
+                "rate": float(rate),
+                "tax": to_float(tax),
+                "after_tax": to_float(income - tax),
+                "explanation": (
+                    f"{rate * 100:.0f}% corporation tax on chargeable income of "
+                    f"{_ugx(income)} = {_ugx(tax)}."
+                ),
+            },
+            rate_keys=("corporation_tax",),
+        )
 
 
 # ---------------------------------------------------------------------------
 # Capital gains (corporate)
 # ---------------------------------------------------------------------------
-class CapitalGainsCalculator(Tool):
+class CapitalGainsCalculator(CalculatorTool):
     """Compute CGT for a corporate entity."""
 
     @property
@@ -348,75 +522,71 @@ class CapitalGainsCalculator(Tool):
                 "the user asks 'how much CGT' or 'tax on selling "
                 "shares'."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=_schema_params(
+                {
                     "sale_price": {
                         "type": "number",
+                        "minimum": 0,
                         "description": "The price the asset was sold for (UGX).",
                     },
                     "cost_base": {
                         "type": "number",
-                        "description": "Original acquisition cost plus allowable improvements (UGX).",
-                    },
-                    "fiscal_year": {
-                        "type": "string",
-                        "description": "FY identifier.",
+                        "minimum": 0,
+                        "description": (
+                            "Original acquisition cost plus allowable improvements (UGX)."
+                        ),
                     },
                 },
-                "required": ["sale_price", "cost_base"],
-            },
+                ["sale_price", "cost_base"],
+            ),
             risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
 
-    def execute(
-        self,
-        sale_price: float,
-        cost_base: float,
-        fiscal_year: str = "FY2025-26",
-    ) -> dict[str, Any]:
-        rates = _get_rates(fiscal_year)
-        rate = float(rates["capital_gains_corporate"])
-        sale = float(sale_price)
-        cost = float(cost_base)
-        if sale < 0 or cost < 0:
-            return {"ok": False, "error": "sale_price and cost_base must be non-negative"}
+    def compute(self, table: RateTable, sale_price: Any, cost_base: Any, **_: Any) -> CalcResult:
+        sale = to_decimal(sale_price, field="sale_price")
+        cost = to_decimal(cost_base, field="cost_base")
+        rate = _require_scalar(table, "capital_gains_corporate")
         gain = sale - cost
+
         if gain <= 0:
-            return {
-                "ok": True,
-                "sale_price": round(sale, 2),
-                "cost_base": round(cost, 2),
-                "gain": round(gain, 2),
-                "tax": 0.0,
-                "fiscal_year": fiscal_year,
-                "explanation": (
-                    "No capital gain (or a loss) — no CGT is payable. "
-                    "Losses may be offsettable against future gains; "
-                    "consult URA."
-                ),
-            }
+            return CalcResult(
+                {
+                    "sale_price": to_float(sale),
+                    "cost_base": to_float(cost),
+                    "gain": to_float(gain),
+                    "tax": 0.0,
+                    "explanation": (
+                        "No capital gain (or a loss) — no CGT is payable. "
+                        "Losses may be offsettable against future gains; consult URA."
+                    ),
+                },
+                rate_keys=("capital_gains_corporate",),
+            )
+
         tax = gain * rate
-        return {
-            "ok": True,
-            "sale_price": round(sale, 2),
-            "cost_base": round(cost, 2),
-            "gain": round(gain, 2),
-            "rate": rate,
-            "tax": round(tax, 2),
-            "net_proceeds": round(sale - tax, 2),
-            "fiscal_year": fiscal_year,
-            "explanation": (
-                f"Gain of UGX {gain:,.2f} (sale UGX {sale:,.2f} minus "
-                f"cost UGX {cost:,.2f}) at 30% = UGX {tax:,.2f} CGT."
-            ),
-        }
+        return CalcResult(
+            {
+                "sale_price": to_float(sale),
+                "cost_base": to_float(cost),
+                "gain": to_float(gain),
+                "rate": float(rate),
+                "tax": to_float(tax),
+                "net_proceeds": to_float(sale - tax),
+                "explanation": (
+                    f"Gain of {_ugx(gain)} (sale {_ugx(sale)} minus cost {_ugx(cost)}) "
+                    f"at {rate * 100:.0f}% = {_ugx(tax)} CGT."
+                ),
+            },
+            rate_keys=("capital_gains_corporate",),
+        )
 
 
 # ---------------------------------------------------------------------------
 # Customs duty (simplified)
 # ---------------------------------------------------------------------------
-class CustomsDutyCalculator(Tool):
+class CustomsDutyCalculator(CalculatorTool):
     """Rough customs + VAT estimator for imported goods."""
 
     @property
@@ -424,80 +594,127 @@ class CustomsDutyCalculator(Tool):
         return ToolSchema(
             name="calculate_customs_duty",
             description=(
-                "Estimate the total import cost (customs duty + VAT) "
-                "for goods being imported into Uganda. This is a "
-                "rough estimate — the actual rate depends on the "
-                "EAC CET tariff code. Use when the user asks 'how "
-                "much will it cost to import' or wants a ballpark."
+                "Estimate the total import cost (customs duty + VAT, plus the "
+                "environmental levy on used clothing) for goods being imported "
+                "into Uganda. This is a rough estimate — the binding duty rate is "
+                "the EAC CET tariff line for the goods' HS code. Use when the user "
+                "asks 'how much will it cost to import' or wants a ballpark."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=_schema_params(
+                {
                     "cif_value": {
                         "type": "number",
-                        "description": "Cost, Insurance and Freight value in UGX (declared landed value).",
+                        "minimum": 0,
+                        "description": (
+                            "Cost, Insurance and Freight value in UGX (declared landed value)."
+                        ),
                     },
                     "duty_rate": {
                         "type": "number",
-                        "description": "Customs duty rate (e.g. 0.0 for raw materials, 0.1 for intermediate, 0.25 for finished goods). Default 0.25.",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": (
+                            "Customs duty rate as a decimal fraction (0.0 raw materials, "
+                            "0.1 intermediate, 0.25 finished goods). Defaults to the "
+                            "finished-goods band."
+                        ),
                     },
                     "include_vat": {
                         "type": "boolean",
-                        "description": "Whether to add 18% VAT on (CIF + duty). Default true.",
+                        "description": "Whether to add VAT on (CIF + duty). Default true.",
+                        "default": True,
                     },
-                    "fiscal_year": {
+                    "goods_category": {
                         "type": "string",
-                        "description": "FY identifier.",
+                        "enum": ["general", "used_clothing"],
+                        "description": (
+                            "'used_clothing' additionally applies the environmental levy "
+                            "on worn-clothing imports, charged on the CIF value."
+                        ),
+                        "default": "general",
                     },
                 },
-                "required": ["cif_value"],
-            },
+                ["cif_value"],
+            ),
             risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
 
-    def execute(
+    def compute(
         self,
-        cif_value: float,
-        duty_rate: float | None = None,
+        table: RateTable,
+        cif_value: Any,
+        duty_rate: Any = None,
         include_vat: bool = True,
-        fiscal_year: str = "FY2025-26",
-    ) -> dict[str, Any]:
-        rates = _get_rates(fiscal_year)
-        if duty_rate is None:
-            duty_rate = float(rates["customs_duty_common"])
-        cif = float(cif_value)
-        if cif < 0:
-            return {"ok": False, "error": "cif_value must be non-negative"}
+        goods_category: str = "general",
+        **_: Any,
+    ) -> CalcResult:
+        if goods_category not in ("general", "used_clothing"):
+            return CalcResult(
+                {
+                    "ok": False,
+                    "error": (
+                        f"goods_category must be 'general' or 'used_clothing' "
+                        f"(got {goods_category!r})"
+                    ),
+                }
+            )
+        cif = to_decimal(cif_value, field="cif_value")
+        keys: list[str] = ["customs_duty_common"]
+        rate = (
+            to_rate(duty_rate, field="duty_rate")
+            if duty_rate is not None
+            else _require_scalar(table, "customs_duty_common")
+        )
 
-        duty = cif * duty_rate
-        vat_base = cif + duty
-        vat = vat_base * float(rates["vat_standard"]) if include_vat else 0.0
-        total = cif + duty + vat
+        duty = cif * rate
+        levy = Decimal(0)
+        levy_rate = Decimal(0)
+        if goods_category == "used_clothing":
+            levy_rate = _require_scalar(table, "environmental_levy_used_clothing")
+            levy = cif * levy_rate
+            keys.append("environmental_levy_used_clothing")
 
-        return {
-            "ok": True,
-            "cif_value": round(cif, 2),
-            "duty_rate": duty_rate,
-            "duty": round(duty, 2),
-            "vat_included": include_vat,
-            "vat": round(vat, 2),
-            "landed_cost": round(total, 2),
-            "fiscal_year": fiscal_year,
-            "explanation": (
-                f"CIF UGX {cif:,.2f} + duty {duty_rate * 100:.0f}% "
-                f"(UGX {duty:,.2f})"
-                + (f" + 18% VAT (UGX {vat:,.2f})" if include_vat else "")
-                + f" = UGX {total:,.2f} landed cost. "
-                f"Note: actual duty depends on EAC CET tariff code — "
-                f"use URA EACCustoms for exact classification."
-            ),
-        }
+        vat_rate = Decimal(0)
+        vat = Decimal(0)
+        if include_vat:
+            vat_rate = _require_scalar(table, "vat_standard")
+            vat = (cif + duty + levy) * vat_rate
+            keys.append("vat_standard")
+
+        total = cif + duty + levy + vat
+        parts = [f"CIF {_ugx(cif)} + duty {rate * 100:.0f}% ({_ugx(duty)})"]
+        if levy > 0:
+            parts.append(f" + environmental levy {levy_rate * 100:.0f}% ({_ugx(levy)})")
+        if include_vat:
+            parts.append(f" + {vat_rate * 100:.0f}% VAT ({_ugx(vat)})")
+
+        return CalcResult(
+            {
+                "cif_value": to_float(cif),
+                "duty_rate": float(rate),
+                "duty": to_float(duty),
+                "goods_category": goods_category,
+                "environmental_levy_rate": float(levy_rate),
+                "environmental_levy": to_float(levy),
+                "vat_included": include_vat,
+                "vat": to_float(vat),
+                "landed_cost": to_float(total),
+                "explanation": (
+                    "".join(parts) + f" = {_ugx(total)} landed cost. "
+                    "Note: the binding duty rate is the EAC CET tariff line for the "
+                    "goods' HS code — use URA EACCustoms for exact classification."
+                ),
+            },
+            rate_keys=tuple(keys),
+        )
 
 
 # ---------------------------------------------------------------------------
-# Rental income tax calculator
+# Rental income tax
 # ---------------------------------------------------------------------------
-class RentalIncomeTaxCalculator(Tool):
+class RentalIncomeTaxCalculator(CalculatorTool):
     """Compute annual rental income tax for individuals or companies."""
 
     @property
@@ -512,9 +729,8 @@ class RentalIncomeTaxCalculator(Tool):
                 "rent). Use when the user asks about tax on rent they "
                 "collect from tenants."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=_schema_params(
+                {
                     "landlord_type": {
                         "type": "string",
                         "enum": ["individual", "company"],
@@ -523,98 +739,116 @@ class RentalIncomeTaxCalculator(Tool):
                     },
                     "annual_gross_rent": {
                         "type": "number",
+                        "minimum": 0,
                         "description": "Total gross rental income for the year in UGX.",
                     },
                     "allowable_expenses": {
                         "type": "number",
+                        "minimum": 0,
                         "description": (
                             "Company landlords only: deductible expenses in UGX "
                             "(capped at 50% of gross rent). Ignored for individuals."
                         ),
                         "default": 0,
                     },
-                    "fiscal_year": {
-                        "type": "string",
-                        "description": "FY identifier, e.g. 'FY2025-26'.",
-                    },
                 },
-                "required": ["annual_gross_rent"],
-            },
+                ["annual_gross_rent"],
+            ),
             risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
 
-    def execute(
+    def compute(
         self,
-        annual_gross_rent: float,
+        table: RateTable,
+        annual_gross_rent: Any,
         landlord_type: str = "individual",
-        allowable_expenses: float = 0,
-        fiscal_year: str = "FY2025-26",
-    ) -> dict[str, Any]:
-        rates = _get_rates(fiscal_year)
-        rent = float(annual_gross_rent)
-        if rent < 0:
-            return {"ok": False, "error": "annual_gross_rent must be non-negative"}
+        allowable_expenses: Any = 0,
+        **_: Any,
+    ) -> CalcResult:
+        if landlord_type not in ("individual", "company"):
+            return CalcResult(
+                {
+                    "ok": False,
+                    "error": (
+                        f"landlord_type must be 'individual' or 'company' "
+                        f"(got {landlord_type!r})"
+                    ),
+                }
+            )
+        rent = to_decimal(annual_gross_rent, field="annual_gross_rent")
 
         if landlord_type == "company":
-            cap = rates["rental_company_expense_cap"]
-            expenses = min(max(float(allowable_expenses), 0.0), rent * cap)
+            cap = _require_scalar(table, "rental_company_expense_cap")
+            rate = _require_scalar(table, "rental_tax_company")
+            expenses = min(to_decimal(allowable_expenses, field="allowable_expenses"), rent * cap)
             chargeable = rent - expenses
-            rate = rates["rental_tax_company"]
             tax = chargeable * rate
-            return {
-                "ok": True,
-                "landlord_type": landlord_type,
-                "annual_gross_rent": round(rent, 2),
-                "allowable_expenses": round(expenses, 2),
-                "chargeable_income": round(chargeable, 2),
-                "rate": rate,
-                "tax": round(tax, 2),
-                "fiscal_year": fiscal_year,
-                "explanation": (
-                    f"Company rental tax at {rate * 100:.0f}% on chargeable income of "
-                    f"UGX {chargeable:,.2f} (gross rent UGX {rent:,.2f} minus deductible "
-                    f"expenses UGX {expenses:,.2f}, capped at {cap * 100:.0f}% of gross) "
-                    f"= UGX {tax:,.2f}."
-                ),
-            }
+            return CalcResult(
+                {
+                    "landlord_type": "company",
+                    "annual_gross_rent": to_float(rent),
+                    "allowable_expenses": to_float(expenses),
+                    "chargeable_income": to_float(chargeable),
+                    "rate": float(rate),
+                    "tax": to_float(tax),
+                    "explanation": (
+                        f"Company rental tax at {rate * 100:.0f}% on chargeable income of "
+                        f"{_ugx(chargeable)} (gross rent {_ugx(rent)} minus deductible "
+                        f"expenses {_ugx(expenses)}, capped at {cap * 100:.0f}% of gross) "
+                        f"= {_ugx(tax)}."
+                    ),
+                },
+                rate_keys=("rental_tax_company", "rental_company_expense_cap"),
+            )
 
-        threshold = rates["rental_tax_individual_threshold"]
-        rate = rates["rental_tax_individual"]
-        taxable = max(rent - threshold, 0.0)
+        threshold = _require_scalar(table, "rental_tax_individual_threshold")
+        rate = _require_scalar(table, "rental_tax_individual")
+        taxable = max(rent - threshold, Decimal(0))
         tax = taxable * rate
-        return {
-            "ok": True,
-            "landlord_type": "individual",
-            "annual_gross_rent": round(rent, 2),
-            "threshold": threshold,
-            "taxable_amount": round(taxable, 2),
-            "rate": rate,
-            "tax": round(tax, 2),
-            "fiscal_year": fiscal_year,
-            "explanation": (
-                f"Individual rental tax is {rate * 100:.0f}% of gross rent above the "
-                f"UGX {threshold:,.0f} annual threshold: {rate * 100:.0f}% x "
-                f"UGX {taxable:,.2f} = UGX {tax:,.2f}."
-                if taxable > 0
-                else (
-                    f"Gross rent of UGX {rent:,.2f} is within the UGX "
-                    f"{threshold:,.0f} annual threshold, so no rental tax is due."
-                )
-            ),
-        }
+        return CalcResult(
+            {
+                "landlord_type": "individual",
+                "annual_gross_rent": to_float(rent),
+                "threshold": to_float(threshold),
+                "taxable_amount": to_float(taxable),
+                "rate": float(rate),
+                "tax": to_float(tax),
+                "explanation": (
+                    f"Individual rental tax is {rate * 100:.0f}% of gross rent above the "
+                    f"{_ugx(threshold)} annual threshold: {rate * 100:.0f}% x "
+                    f"{_ugx(taxable)} = {_ugx(tax)}."
+                    if taxable > 0
+                    else (
+                        f"Gross rent of {_ugx(rent)} is within the {_ugx(threshold)} annual "
+                        f"threshold, so no rental tax is due."
+                    )
+                ),
+            },
+            rate_keys=("rental_tax_individual", "rental_tax_individual_threshold"),
+        )
 
 
 # ---------------------------------------------------------------------------
-# Withholding tax calculator
+# Withholding tax
 # ---------------------------------------------------------------------------
-class WithholdingTaxCalculator(Tool):
+class WithholdingTaxCalculator(CalculatorTool):
     """Compute withholding tax on common payment types."""
 
-    _RATE_KEYS = {
+    #: Payment type → rate key.  A type whose key is absent from the
+    #: resolved fiscal year's table fails closed via :func:`_require_rate`,
+    #: which is how pre-2026 years reject the categories the 2026
+    #: amendments introduced.
+    _RATE_KEYS: dict[str, str] = {
         "services": "withholding_services",
         "goods": "withholding_goods",
         "management_fees": "withholding_management_fees",
         "dividend": "withholding_dividend",
+        "royalty": "withholding_royalty",
+        "public_entertainer": "withholding_public_entertainer",
+        "betting_winnings": "withholding_betting_winnings",
+        "foreign_interest": "withholding_foreign_interest",
     }
 
     @property
@@ -622,80 +856,80 @@ class WithholdingTaxCalculator(Tool):
         return ToolSchema(
             name="calculate_withholding",
             description=(
-                "Calculate withholding tax (WHT) deducted at source on a "
-                "payment in Uganda: 6% on services and goods, 15% on "
-                "management fees and dividends. Use when the user asks how "
-                "much tax is withheld from a payment, invoice, or dividend."
+                "Calculate withholding tax (WHT) deducted at source on a payment in "
+                "Uganda: 6% on services, goods and payments to public entertainers; "
+                "15% on management fees, dividends, royalties and betting winnings; "
+                "5% on interest paid to non-resident lenders. Royalty, public "
+                "entertainer, betting-winnings and foreign-interest withholding apply "
+                "from FY2026-27. Use when the user asks how much tax is withheld from "
+                "a payment, invoice, dividend or winnings."
             ),
-            parameters={
-                "type": "object",
-                "properties": {
+            parameters=_schema_params(
+                {
                     "payment_type": {
                         "type": "string",
-                        "enum": ["services", "goods", "management_fees", "dividend"],
+                        "enum": sorted(self._RATE_KEYS),
                         "description": "The kind of payment the WHT applies to.",
                     },
                     "amount": {
                         "type": "number",
+                        "minimum": 0,
                         "description": "Gross payment amount in UGX before withholding.",
                     },
-                    "fiscal_year": {
-                        "type": "string",
-                        "description": "FY identifier, e.g. 'FY2025-26'.",
-                    },
                 },
-                "required": ["payment_type", "amount"],
-            },
+                ["payment_type", "amount"],
+            ),
             risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
         )
 
-    def execute(
-        self,
-        payment_type: str,
-        amount: float,
-        fiscal_year: str = "FY2025-26",
-    ) -> dict[str, Any]:
-        rates = _get_rates(fiscal_year)
+    def compute(self, table: RateTable, payment_type: str, amount: Any, **_: Any) -> CalcResult:
         rate_key = self._RATE_KEYS.get(payment_type)
         if rate_key is None:
-            return {
-                "ok": False,
-                "error": (
-                    f"Unknown payment_type '{payment_type}'. "
-                    f"Choose one of: {', '.join(sorted(self._RATE_KEYS))}"
-                ),
-            }
-        gross = float(amount)
-        if gross < 0:
-            return {"ok": False, "error": "amount must be non-negative"}
-
-        rate = rates[rate_key]
+            return CalcResult(
+                {
+                    "ok": False,
+                    "error": (
+                        f"Unknown payment_type '{payment_type}'. "
+                        f"Choose one of: {', '.join(sorted(self._RATE_KEYS))}"
+                    ),
+                }
+            )
+        gross = to_decimal(amount, field="amount")
+        rate = _require_scalar(table, rate_key)
         wht = gross * rate
         net = gross - wht
         label = payment_type.replace("_", " ")
-        return {
-            "ok": True,
-            "payment_type": payment_type,
-            "amount": round(gross, 2),
-            "rate": rate,
-            "withholding_tax": round(wht, 2),
-            "net_payable": round(net, 2),
-            "fiscal_year": fiscal_year,
-            "explanation": (
-                f"Withholding tax on {label} at {rate * 100:.0f}% of "
-                f"UGX {gross:,.2f} is UGX {wht:,.2f}; the payee receives "
-                f"UGX {net:,.2f} net."
-            ),
-        }
+        return CalcResult(
+            {
+                "payment_type": payment_type,
+                "amount": to_float(gross),
+                "rate": float(rate),
+                "withholding_tax": to_float(wht),
+                "net_payable": to_float(net),
+                "explanation": (
+                    f"Withholding tax on {label} at {rate * 100:.0f}% of {_ugx(gross)} is "
+                    f"{_ugx(wht)}; the payee receives {_ugx(net)} net."
+                ),
+            },
+            rate_keys=(rate_key,),
+        )
 
 
 # ---------------------------------------------------------------------------
 # Register everything on import
 # ---------------------------------------------------------------------------
-ToolRegistry.register(VATCalculator())
-ToolRegistry.register(PAYECalculator())
-ToolRegistry.register(CorporationTaxCalculator())
-ToolRegistry.register(CapitalGainsCalculator())
-ToolRegistry.register(CustomsDutyCalculator())
-ToolRegistry.register(RentalIncomeTaxCalculator())
-ToolRegistry.register(WithholdingTaxCalculator())
+CALCULATOR_TOOLS: tuple[CalculatorTool, ...] = (
+    VATCalculator(),
+    VATRegistrationCheck(),
+    PAYECalculator(),
+    CorporationTaxCalculator(),
+    CapitalGainsCalculator(),
+    CustomsDutyCalculator(),
+    RentalIncomeTaxCalculator(),
+    WithholdingTaxCalculator(),
+)
+
+for _tool in CALCULATOR_TOOLS:
+    ToolRegistry.register(_tool)

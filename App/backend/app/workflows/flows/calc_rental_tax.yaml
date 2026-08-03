@@ -34,8 +34,8 @@ steps:
 
   - id: done
     question: >-
-      Those figures use the FY2025-26 URA rate table (12% above the UGX
-      2,820,000 annual threshold for individuals; 30% on chargeable income
-      for companies). Ask me anytime to recalculate.
+      Those figures use the URA rate table for the fiscal year shown above
+      (12% above the annual threshold for individuals; 30% on chargeable
+      income for companies). Ask me anytime to recalculate.
     slot: ""
     validator: text

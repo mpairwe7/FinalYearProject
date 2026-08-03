@@ -36,11 +36,21 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class ToolSchema:
-    """Structural description of a tool, exported to the LLM.
+    """Structural description of a tool, exported to the LLM and to MCP.
 
-    The ``parameters`` field must be a valid JSON Schema object —
-    Qwen2.5's chat template uses it to render the tool definition
-    into the prompt in OpenAI-function-calling format.
+    ``parameters`` must be a valid JSON Schema object — Qwen's chat
+    template renders it into the prompt in OpenAI-function-calling
+    format, and :meth:`Tool.to_mcp_tool` publishes the same object as
+    the MCP ``inputSchema``.
+
+    The authorization fields are **declarations, not conventions**.
+    Access used to be inferred from the tool's name (anything starting
+    ``ura_`` was treated as account access), which silently grants
+    everything to a tool that is named differently and cannot express
+    "this tool needs consent X but not consent Y".  ``required_scopes``
+    and ``allowed_roles`` state the requirement on the tool itself, and
+    the dispatch policy denies by default when a tool declares nothing
+    and its risk tier is above ``low``.
     """
 
     name: str
@@ -59,6 +69,40 @@ class ToolSchema:
     # the UI (writes, forms submission, etc).  The LLM must still
     # propose the call — the UI gates the actual execution.
     requires_confirmation: bool = False
+
+    # -- MCP 2026-07-28 surface ----------------------------------------
+    #: JSON Schema for the tool's ``structuredContent``.  Optional; when
+    #: present the client validates results against it before handing
+    #: them to the model, so a server that starts returning a different
+    #: shape is caught at the boundary rather than in a rendered reply.
+    output_schema: dict[str, Any] | None = None
+    #: Which MCP server owns this tool.  Routes the call to a transport.
+    namespace: str = "core"
+    #: Consent purposes the caller must hold.  Empty means none needed.
+    required_scopes: tuple[str, ...] = ()
+    #: Roles allowed to call this tool.  Empty means any role.
+    allowed_roles: tuple[str, ...] = ()
+    #: Roles that satisfy ``required_scopes`` by virtue of the role
+    #: itself — URA staff opening a ticket are acting under their own
+    #: mandate, not under an end-user consent grant.
+    scope_exempt_roles: tuple[str, ...] = ()
+    #: Tool annotations — behavioural hints clients use to build
+    #: guardrails.  Defaults describe a pure read-only function.
+    title: str = ""
+    read_only: bool = True
+    destructive: bool = False
+    idempotent: bool = True
+    open_world: bool = False
+
+    def annotations(self) -> dict[str, Any]:
+        """MCP ``annotations`` object for this tool."""
+        return {
+            "title": self.title or self.name.replace("_", " ").capitalize(),
+            "readOnlyHint": self.read_only,
+            "destructiveHint": self.destructive,
+            "idempotentHint": self.idempotent,
+            "openWorldHint": self.open_world,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +143,34 @@ class Tool(ABC):
                 "parameters": s.parameters,
             },
         }
+
+    def to_mcp_tool(self) -> dict[str, Any]:
+        """Convert to an MCP ``Tool`` descriptor (spec 2026-07-28).
+
+        Input and output schemas are plain JSON Schema 2020-12 objects.
+        The risk tier and consent scopes travel in ``_meta`` under this
+        project's reverse-DNS prefix, which is where the spec puts
+        implementation-defined metadata — gateways can authorize on it
+        without having to understand our tool names.
+        """
+        s = self.schema
+        descriptor: dict[str, Any] = {
+            "name": s.name,
+            "description": s.description,
+            "inputSchema": s.parameters,
+            "annotations": s.annotations(),
+            "_meta": {
+                "ug.go.ura.chatbot/risk": s.risk,
+                "ug.go.ura.chatbot/namespace": s.namespace,
+                "ug.go.ura.chatbot/requiredScopes": list(s.required_scopes),
+                "ug.go.ura.chatbot/allowedRoles": list(s.allowed_roles),
+                "ug.go.ura.chatbot/scopeExemptRoles": list(s.scope_exempt_roles),
+                "ug.go.ura.chatbot/requiresConfirmation": s.requires_confirmation,
+            },
+        }
+        if s.output_schema is not None:
+            descriptor["outputSchema"] = s.output_schema
+        return descriptor
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +242,21 @@ class ToolRegistry:
         if allow_risk is not None:
             tools = [t for t in tools if t.schema.risk in allow_risk]
         return [t.to_openai_spec() for t in tools]
+
+    @classmethod
+    def mcp_tools(cls, namespace: str | None = None) -> list[dict[str, Any]]:
+        """Return MCP ``Tool`` descriptors, optionally for one namespace.
+
+        This is what an MCP server's ``tools/list`` serves.
+        """
+        tools = sorted(cls._tools.values(), key=lambda t: t.schema.name)
+        if namespace is not None:
+            tools = [t for t in tools if t.schema.namespace == namespace]
+        return [t.to_mcp_tool() for t in tools]
+
+    @classmethod
+    def namespaces(cls) -> list[str]:
+        return sorted({t.schema.namespace for t in cls._tools.values()})
 
     # -- dispatch ------------------------------------------------------
     @classmethod

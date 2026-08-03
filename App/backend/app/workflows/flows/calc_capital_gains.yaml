@@ -25,7 +25,7 @@ steps:
 
   - id: done
     question: >-
-      That uses the 30% rate from the FY2025-26 URA rate table. If the
-      figures change, just ask me to recalculate.
+      That uses the corporate rate from the URA rate table for the fiscal
+      year shown above. If the figures change, just ask me to recalculate.
     slot: ""
     validator: text

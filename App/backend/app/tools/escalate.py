@@ -75,6 +75,17 @@ class EscalateToHumanTool(Tool):
                 "required": ["reason"],
             },
             risk="medium",
+            namespace="core",
+            required_scopes=("ticket_escalation",),
+            scope_exempt_roles=(
+                "verified_taxpayer",
+                "ura_staff",
+                "ura_admin",
+                "ura_auditor",
+            ),
+            read_only=False,
+            idempotent=False,
+
             # The UI should display a confirmation prompt before
             # the ticket is actually created.  For now we create
             # unconditionally but the field is set so a future UI

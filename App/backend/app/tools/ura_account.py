@@ -39,6 +39,16 @@ class UraAccountProfileTool(Tool):
                 "required": ["taxpayer_id"],
             },
             risk="high",
+            namespace="ura_account",
+            required_scopes=("ura_account_access",),
+            allowed_roles=(
+                "verified_taxpayer",
+                "ura_staff",
+                "ura_admin",
+                "ura_auditor",
+            ),
+            open_world=True,
+
         )
 
     def execute(self, taxpayer_id: str = "") -> dict[str, Any]:

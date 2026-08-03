@@ -106,6 +106,27 @@ class PlanCalculationTests(unittest.TestCase):
         self.assertTrue(plan.params["include_vat"])
 
 
+class WorkflowArgInterpolationTests(unittest.TestCase):
+    def test_unfilled_placeholders_are_dropped_not_passed_through(self) -> None:
+        from app.workflows.registry import _interpolate_args
+
+        args = _interpolate_args(
+            {"monthly_gross": "{monthly_gross}", "residency": "{residency}"},
+            {"monthly_gross": 1_500_000},
+        )
+        # A literal "{residency}" used to reach the calculator and be read
+        # as "not resident", silently returning non-resident bands.
+        self.assertEqual(args, {"monthly_gross": 1_500_000})
+
+    def test_zero_is_a_value_not_an_empty_slot(self) -> None:
+        from app.workflows.registry import _interpolate_args
+
+        args = _interpolate_args(
+            {"allowable_expenses": "{allowable_expenses}"}, {"allowable_expenses": 0}
+        )
+        self.assertEqual(args, {"allowable_expenses": 0})
+
+
 class ServiceCalculatorPathTests(unittest.TestCase):
     """End-to-end through ChatModel: instant compute + guided elicitation."""
 
@@ -152,8 +173,26 @@ class ServiceCalculatorPathTests(unittest.TestCase):
             conversation_id=thread,
         )
         self.assertEqual(second["retrieval_mode"], "workflow")
-        # 25,000 + 30% x (1,500,000 - 410,000) = 352,000
-        self.assertIn("352,000", second["reply"])
+        # The guided flow uses the fiscal year in force today, so derive
+        # the expected figure instead of pinning a year's number that
+        # goes stale the moment a new rate table lands.
+        from app.tools import ToolRegistry
+
+        expected = ToolRegistry.call("calculate_paye", {"monthly_gross": 1_500_000})
+        self.assertIn(f"{expected['paye']:,.0f}", second["reply"])
+
+    def test_guided_flow_carries_the_provisional_caveat(self) -> None:
+        from app.tax.tables import get_table
+
+        thread = str(uuid.uuid4())
+        self.model.generate_retrieval_only(
+            message="How much PAYE will I pay?", conversation_id=thread
+        )
+        reply = self.model.generate_retrieval_only(message="1.5m", conversation_id=thread)["reply"]
+        if get_table().confirmed:
+            self.assertNotIn("provisional", reply.lower())
+        else:
+            self.assertIn("provisional", reply.lower())
 
     def test_invalid_slot_answer_reprompts(self) -> None:
         thread = str(uuid.uuid4())

@@ -104,6 +104,7 @@ class CurrentDateTool(Tool):
             ),
             parameters={"type": "object", "properties": {}, "required": []},
             risk="low",
+            namespace="calendar",
         )
 
     def execute(self) -> dict[str, Any]:
@@ -160,6 +161,7 @@ class NextDeadlineTool(Tool):
                 "required": [],
             },
             risk="low",
+            namespace="calendar",
         )
 
     def execute(

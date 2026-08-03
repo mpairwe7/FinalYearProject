@@ -19,6 +19,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tax.tables import RateTable
 
 # ---------------------------------------------------------------------------
 # Amount extraction
@@ -137,6 +141,16 @@ _EXPENSE_KW_RE = re.compile(r"\b(expense\w*|repair\w*|maintenance|costs)\b", re.
 _NO_VAT_RE = re.compile(r"\b(without|excluding|no|minus)\s+vat\b", re.IGNORECASE)
 _DUTY_KW_RE = re.compile(r"\bduty\b", re.IGNORECASE)
 
+_VAT_WORD_RE = re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)
+_REGISTER_WORD_RE = re.compile(r"\bregister(?:ed|ing|ation)?\b", re.IGNORECASE)
+# Obligation cues that make "…register for VAT" a question about *this*
+# taxpayer rather than about the rule.  "What is the VAT registration
+# threshold?" carries none of them and is answered as a rate question.
+_OBLIGATION_RE = re.compile(
+    r"\b(do|does|must|should|need|needs|have|has|required|obliged|am|are|when)\b",
+    re.IGNORECASE,
+)
+
 _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     ("withholding", re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
     (
@@ -157,9 +171,24 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     ("vat", re.compile(r"\bv\.?a\.?t\.?\b", re.IGNORECASE)),
 ]
 
+# Ordered most specific first: "management fees" must beat the looser
+# "services" pattern, and the FY2026-27 categories must beat both.
 _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("management_fees", re.compile(r"\bmanagement\s+fees?\b", re.IGNORECASE)),
     ("dividend", re.compile(r"\bdividends?\b", re.IGNORECASE)),
+    ("royalty", re.compile(r"\broyalt(?:y|ies)\b", re.IGNORECASE)),
+    (
+        "public_entertainer",
+        re.compile(r"\b(public\s+)?entertainer\w*|\bartiste?s?\b|\bperformer\w*", re.IGNORECASE),
+    ),
+    (
+        "betting_winnings",
+        re.compile(r"\b(betting|gambl\w+|gaming|sports?\s*bet\w*)\b.*\bwinning\w*|\bwinning\w*\b.*\b(bet|betting|gaming)\b|\bbetting\s+winning\w*", re.IGNORECASE),
+    ),
+    (
+        "foreign_interest",
+        re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
+    ),
     ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*)\b", re.IGNORECASE)),
     ("goods", re.compile(r"\b(goods|supplies|supply)\b", re.IGNORECASE)),
 ]
@@ -173,7 +202,24 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     like "how is PAYE calculated" or "what is the VAT rate".
     """
     text = (message or "").strip()
-    if not text or not _CALC_VERB_RE.search(text) or _INFO_ONLY_RE.search(text):
+    if not text or _INFO_ONLY_RE.search(text):
+        return None
+
+    # "Must I register for VAT?" is a threshold test, not a calculation,
+    # so it is matched before the calculation-verb gate — the natural
+    # phrasing carries no "calculate"/"how much".
+    if _VAT_WORD_RE.search(text) and _REGISTER_WORD_RE.search(text):
+        turnover_amounts = extract_amounts(text)
+        if turnover_amounts or _OBLIGATION_RE.search(text):
+            params: dict[str, object] = {}
+            missing: list[str] = []
+            if len(turnover_amounts) == 1:
+                params["annual_turnover"] = turnover_amounts[0][0]
+            else:
+                missing.append("annual_turnover")
+            return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])
+
+    if not _CALC_VERB_RE.search(text):
         return None
 
     intent = next((name for name, pat in _INTENT_RES if pat.search(text)), None)
@@ -315,9 +361,29 @@ def _ugx(value: object) -> str:
     return f"UGX {float(value):,.0f}"
 
 
+def _rate_table_footer(result: dict[str, object]) -> list[str]:
+    """Closing lines naming the fiscal year, and flagging unconfirmed figures.
+
+    A provisional table (one compiled ahead of the gazetted Act) must say
+    so in the reply itself — carrying the status only in the tool payload
+    would let the user read a confident number with no caveat attached.
+    """
+    fy = result.get("fiscal_year", "")
+    basis = result.get("rate_basis") or {}
+    status = basis.get("status", "") if isinstance(basis, dict) else ""
+    lines = ["", f"Figures use the official URA {fy} rate table."]
+    if status == "provisional":
+        lines.append(
+            f"_{fy} figures are still provisional — they follow the 2026 amendment Acts "
+            "as reported, and are not yet reconciled against a URA-published rate card. "
+            "Please confirm with URA before filing on them._"
+        )
+    return lines
+
+
 def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[str]) -> str:
     """Render a calculator result as a friendly Markdown breakdown."""
-    fy = result.get("fiscal_year", "FY2025-26")
+    fy = result.get("fiscal_year", "")
     lines: list[str]
     if tool == "calculate_paye":
         band = result.get("band") or {}
@@ -363,9 +429,29 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- CIF value: {_ugx(result['cif_value'])}",
             f"- Duty at {float(result['duty_rate']) * 100:.0f}%: **{_ugx(result['duty'])}**",
         ]
+        if float(result.get("environmental_levy") or 0) > 0:
+            levy_pct = float(result.get("environmental_levy_rate") or 0) * 100
+            lines.append(
+                f"- Environmental levy at {levy_pct:.0f}% of CIF "
+                f"(used clothing): {_ugx(result['environmental_levy'])}"
+            )
         if result.get("vat_included"):
-            lines.append(f"- VAT at 18% on (CIF + duty): {_ugx(result['vat'])}")
+            lines.append(f"- VAT on (CIF + duty + levy): {_ugx(result['vat'])}")
         lines.append(f"- Estimated landed cost: **{_ugx(result['landed_cost'])}**")
+    elif tool == "check_vat_registration":
+        required = bool(result.get("registration_required"))
+        lines = [
+            f"**VAT registration check ({fy})**",
+            "",
+            f"- Annual turnover: {_ugx(result['annual_turnover'])}",
+            f"- Registration threshold: {_ugx(result['threshold'])} per year",
+            (
+                "- **Registration is compulsory** — you are at or above the threshold."
+                if required
+                else "- **Registration is not compulsory** — you are below the threshold "
+                f"(headroom {_ugx(result['headroom'])}). Voluntary registration is still available."
+            ),
+        ]
     elif tool == "calculate_rental_tax":
         if result.get("landlord_type") == "company":
             lines = [
@@ -399,7 +485,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
 
     if assumptions:
         lines += ["", "_Assumptions: " + "; ".join(assumptions) + "._"]
-    lines += ["", f"Figures use the official URA {fy} rate table."]
+    lines += _rate_table_footer(result)
     return "\n".join(lines)
 
 
@@ -420,12 +506,23 @@ class RatePlan:
 
 
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me)\b[^?]*\brates?\b"
-    r"|\brates?\s+of\b",
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me)\b[^?]*\b(rates?|thresholds?)\b"
+    r"|\b(rates?|thresholds?)\s+(of|for)\b",
     re.IGNORECASE,
 )
 
 _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
+    # "VAT threshold" is a question about the registration threshold, not
+    # about the 18% rate — so it must be matched before the generic VAT
+    # pattern below, which would otherwise answer with the standard rate.
+    (
+        RatePlan(tax_type="vat_registration_threshold_annual"),
+        re.compile(
+            r"\bv\.?a\.?t\.?\b[^?]{0,40}\b(registration|register|threshold)\b"
+            r"|\b(registration|register|threshold)\b[^?]{0,40}\bv\.?a\.?t\.?\b",
+            re.IGNORECASE,
+        ),
+    ),
     (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
     (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+band)\b", re.IGNORECASE)),
     (RatePlan(tax_type="rental_tax_company"), re.compile(r"\b(compan(?:y|ies)|business)\b.*\brent(?:al)?\b|\brent(?:al)?\b.*\b(compan(?:y|ies)|business)\b", re.IGNORECASE)),
@@ -439,6 +536,12 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
 _WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("withholding_management_fees", re.compile(r"\bmanagement\s+fees?\b", re.IGNORECASE)),
     ("withholding_dividend", re.compile(r"\bdividends?\b", re.IGNORECASE)),
+    ("withholding_royalty", re.compile(r"\broyalt(?:y|ies)\b", re.IGNORECASE)),
+    (
+        "withholding_public_entertainer",
+        re.compile(r"\b(public\s+)?entertainer\w*|\bartiste?s?\b|\bperformer\w*", re.IGNORECASE),
+    ),
+    ("withholding_betting_winnings", re.compile(r"\b(betting|gaming|gambl\w+)\b", re.IGNORECASE)),
     ("withholding_services", re.compile(r"\bservices?\b", re.IGNORECASE)),
     ("withholding_goods", re.compile(r"\bgoods\b", re.IGNORECASE)),
 ]
@@ -454,7 +557,9 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     text = (message or "").strip()
     if not text or extract_amounts(text):
         return None
-    short_ask = len(text.split()) <= 8 and re.search(r"\brates?\b", text, re.IGNORECASE)
+    short_ask = len(text.split()) <= 8 and re.search(
+        r"\b(rates?|thresholds?)\b", text, re.IGNORECASE
+    )
     if not (_RATE_ASK_RE.search(text) or short_ask):
         return None
     for plan, pattern in _RATE_TYPE_RES:
@@ -473,19 +578,29 @@ def _pct(rate: object) -> str:
     return f"{float(rate) * 100:.0f}%"
 
 
-def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, list[str]]:
-    """Render a rate answer from the FY rate table; returns (reply, next_actions)."""
-    fy = rates.get("version", "FY2025-26")
+def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]:
+    """Render a rate answer from a resolved rate table; returns (reply, next_actions).
+
+    Takes the :class:`~app.tax.tables.RateTable` rather than a bare dict so
+    the reply can name the fiscal year it read and flag a provisional one.
+    """
+    rates = table.rates
+    fy = table.fiscal_year
     footer = f"\n\nThat comes from the official URA {fy} rate table."
+    if not table.confirmed:
+        footer += (
+            f"\n\n_{fy} figures are still provisional — they follow the 2026 amendment "
+            "Acts as reported, and are not yet reconciled against a URA-published rate "
+            "card. Please confirm with URA before filing on them._"
+        )
     if plan.summary == "paye":
         bands = rates["paye_bands_resident"]
         lines = [f"**PAYE rates for resident employees ({fy}, monthly income):**", ""]
-        for lo, hi, rate, _flat in bands:  # type: ignore[misc]
-            upper = f"UGX {hi:,.0f}" if hi != float("inf") else "above"
+        for lo, hi, rate in bands:  # type: ignore[misc]
             span = (
                 f"- Above UGX {lo:,.0f}: **{_pct(rate)}** (top band)"
-                if hi == float("inf")
-                else f"- UGX {lo:,.0f} – {upper}: **{_pct(rate)}**"
+                if hi is None
+                else f"- UGX {lo:,.0f} – UGX {hi:,.0f}: **{_pct(rate)}**"
             )
             lines.append(span)
         lines.append("")
@@ -504,13 +619,23 @@ def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, li
         )
         return reply + footer, ["Calculate rental tax", "Ask how rental tax is declared"]
     if plan.summary == "withholding":
-        reply = (
-            f"**Withholding tax (WHT) rates ({fy}):**\n\n"
-            f"- Services: **{_pct(rates['withholding_services'])}**\n"
-            f"- Goods: **{_pct(rates['withholding_goods'])}**\n"
-            f"- Management fees: **{_pct(rates['withholding_management_fees'])}**\n"
-            f"- Dividends: **{_pct(rates['withholding_dividend'])}**"
-        )
+        # Driven off the table so a category the year does not define is
+        # simply absent from the list rather than reported at some other
+        # year's rate.
+        labels = [
+            ("withholding_services", "Services"),
+            ("withholding_goods", "Goods"),
+            ("withholding_management_fees", "Management fees"),
+            ("withholding_dividend", "Dividends"),
+            ("withholding_royalty", "Royalties"),
+            ("withholding_public_entertainer", "Payments to public entertainers"),
+            ("withholding_betting_winnings", "Betting winnings"),
+            ("withholding_foreign_interest", "Interest paid to non-resident lenders"),
+        ]
+        rows = [
+            f"- {label}: **{_pct(rates[key])}**" for key, label in labels if rates.get(key) is not None
+        ]
+        reply = f"**Withholding tax (WHT) rates ({fy}):**\n\n" + "\n".join(rows)
         return reply + footer, ["Calculate WHT on a payment", "Ask when WHT applies"]
 
     descriptions = {
@@ -543,6 +668,24 @@ def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, li
         "withholding_goods": "**WHT on goods is {pct}** ({fy}), withheld at source.",
         "withholding_management_fees": "**WHT on management fees is {pct}** ({fy}), withheld at source.",
         "withholding_dividend": "**WHT on dividends is {pct}** ({fy}), withheld at source.",
+        "withholding_royalty": "**WHT on royalties is {pct}** ({fy}), withheld at source.",
+        "withholding_public_entertainer": (
+            "**WHT on payments to public entertainers is {pct}** ({fy}), withheld at source."
+        ),
+        "withholding_betting_winnings": (
+            "**WHT on betting winnings is {pct}** ({fy}), withheld at source by the operator."
+        ),
+        "withholding_foreign_interest": (
+            "**WHT on interest paid to non-resident lenders is {pct}** ({fy}), withheld at source."
+        ),
+        "vat_registration_threshold_annual": (
+            "**VAT registration is compulsory once annual taxable turnover reaches "
+            "{threshold_vat}** ({fy}). Below that, registration is voluntary."
+        ),
+        "environmental_levy_used_clothing": (
+            "**The environmental levy on imported used clothing is {pct}** of the CIF "
+            "value ({fy})."
+        ),
     }
     template = descriptions.get(plan.tax_type)
     rate = rates.get(plan.tax_type)
@@ -552,6 +695,7 @@ def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, li
         pct=_pct(rate),
         fy=fy,
         threshold=f"UGX {float(rates.get('rental_tax_individual_threshold', 0)):,.0f}",
+        threshold_vat=f"UGX {float(rates.get('vat_registration_threshold_annual', 0)):,.0f}",
         cap=_pct(rates.get("rental_company_expense_cap", 0)),
     )
     actions = NEXT_ACTIONS_BY_TOOL.get(
@@ -560,12 +704,16 @@ def format_rate_reply(plan: RatePlan, rates: dict[str, object]) -> tuple[str, li
             "corporation_tax": "calculate_corporation_tax",
             "capital_gains_corporate": "calculate_capital_gains",
             "customs_duty_common": "calculate_customs_duty",
+            "environmental_levy_used_clothing": "calculate_customs_duty",
             "rental_tax_individual": "calculate_rental_tax",
             "rental_tax_company": "calculate_rental_tax",
+            "vat_registration_threshold_annual": "check_vat_registration",
         }.get(plan.tax_type, "calculate_withholding"),
         [],
     )
     return reply + footer, actions
+
+
 NEXT_ACTIONS_BY_TOOL: dict[str, list[str]] = {
     "calculate_paye": ["Calculate PAYE for a different salary", "Ask how PAYE bands work"],
     "calculate_vat": ["Calculate VAT on another amount", "Ask who must register for VAT"],
@@ -574,4 +722,8 @@ NEXT_ACTIONS_BY_TOOL: dict[str, list[str]] = {
     "calculate_customs_duty": ["Estimate duty for another import", "Ask about EAC tariff classification"],
     "calculate_rental_tax": ["Calculate for a different rent", "Ask how rental tax is declared"],
     "calculate_withholding": ["Calculate WHT on another payment", "Ask when WHT applies"],
+    "check_vat_registration": [
+        "Check another turnover figure",
+        "Ask how to register for VAT",
+    ],
 }
