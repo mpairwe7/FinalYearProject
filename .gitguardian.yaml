@@ -47,11 +47,5 @@ secret:
     # SBOM (contains package hashes)
     - '**/sbom-cyclonedx.json'
 
-    # Flutter/mobile build outputs
-    - '**/MobileApp/**/build/**'
-    - '**/*.apk'
-    - '**/*.ipa'
-    - '**/*.aab'
-
   # Do not ignore any detector types
   ignored_detectors: []

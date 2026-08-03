@@ -40,9 +40,9 @@ from pytm import (
 tm = TM("URA AI Chatbot – Threat Model")
 tm.description = (
     "MLOps-powered RAG chatbot for Uganda Revenue Authority. "
-    "Taxpayers query tax information via web/mobile frontends backed by "
+    "Taxpayers query tax information via a web frontend backed by "
     "a FastAPI service with hybrid retrieval (dense + BM25 + reranker) "
-    "over official URA documents, with offline Gemma-2B mobile inference."
+    "over official URA documents."
 )
 tm.isOrdered = True
 tm.mergeResponses = True
@@ -69,9 +69,6 @@ ml_pipeline.levels = [2]
 data_layer = Boundary("Data Layer (Persistent Storage)")
 data_layer.levels = [2]
 
-mobile_boundary = Boundary("Mobile Device (Flutter + On-device ML)")
-mobile_boundary.levels = [0]
-
 ci_cd = Boundary("CI/CD Pipeline (GitHub Actions)")
 ci_cd.levels = [2]
 
@@ -83,12 +80,6 @@ taxpayer.inBoundary = internet
 taxpayer.hasPhysicalAccess = False
 taxpayer.protocol = "HTTPS"
 taxpayer.isAdmin = False
-
-mobile_user = Actor("Mobile User")
-mobile_user.inBoundary = mobile_boundary
-mobile_user.hasPhysicalAccess = True
-mobile_user.protocol = "HTTPS"
-mobile_user.isAdmin = False
 
 admin = Actor("URA Admin / Developer")
 admin.inBoundary = internet
@@ -169,16 +160,6 @@ llm_inference = Server("LLM Inference (Qwen2.5-3B)")
 llm_inference.inBoundary = backend_container
 llm_inference.isEncrypted = False
 
-mobile_app = Server("Flutter Mobile App")
-mobile_app.inBoundary = mobile_boundary
-mobile_app.port = 0
-mobile_app.protocol = "HTTPS"
-mobile_app.OS = "Android/iOS"
-
-mobile_ml = Server("On-device Gemma-2B (GGUF)")
-mobile_ml.inBoundary = mobile_boundary
-mobile_ml.isEncrypted = False
-
 # =============================================================================
 # Datastores
 # =============================================================================
@@ -253,15 +234,6 @@ frontend_to_user = Dataflow(nextjs, taxpayer, "Chat response (HTTPS)")
 frontend_to_user.protocol = "HTTPS"
 frontend_to_user.isEncrypted = True
 frontend_to_user.sanitizesInput = True
-
-# --- Mobile → Backend ---
-mobile_to_api = Dataflow(mobile_user, fastapi, "Mobile API query (HTTPS)")
-mobile_to_api.protocol = "HTTPS"
-mobile_to_api.isEncrypted = True
-
-mobile_to_ondevice = Dataflow(mobile_user, mobile_ml, "On-device inference")
-mobile_to_ondevice.protocol = "Local"
-mobile_to_ondevice.isEncrypted = False
 
 # --- Frontend → Backend ---
 fe_to_api = Dataflow(nextjs, fastapi, "REST API call (/v1/chat)")
@@ -379,7 +351,6 @@ ci_to_docker.isEncrypted = True
 tm.assumptions = [
     "TLS 1.3 terminates at the edge load balancer; internal traffic is HTTP on Docker bridge",
     "Qdrant does not enforce authentication (trusts Docker network isolation)",
-    "Mobile on-device inference uses GGUF quantised model (no server communication)",
     "Training data sources are trusted (official URA website and handbooks)",
     "GitHub Actions runners are ephemeral and GitHub-hosted (not self-hosted)",
     "Rate limiting is enforced at the FastAPI application layer (slowapi)",

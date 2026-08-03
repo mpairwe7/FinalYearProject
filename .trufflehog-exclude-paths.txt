@@ -36,9 +36,3 @@ artifacts/
 # Environment template (contains placeholder values, not real secrets)
 \.env\.example$
 
-# Flutter/mobile build artifacts
-MobileApp/.*/build/
-MobileApp/.*/\.dart_tool/
-.*\.apk$
-.*\.ipa$
-.*\.aab$
