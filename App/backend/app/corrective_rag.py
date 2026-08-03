@@ -36,9 +36,53 @@ except ValueError:
 
 
 def _avg_score(hits: list[dict[str, Any]]) -> float:
-    """Average raw reranker/RRF score (used for improvement-delta + logging)."""
+    """Average raw reranker/RRF score — **logging only**.
+
+    Do not compare this across two retrieval calls: it falls back from an
+    unbounded cross-encoder logit (roughly -10..10) to an RRF score
+    (~1/(60+rank) ≈ 0.016), so an average over reranked hits and an
+    average over RRF-only hits are on different scales entirely.  Use
+    :func:`_ranking_key` and :func:`_improved` for decisions.
+    """
     scores = [h.get("score_rerank", h.get("score_rrf", 0.0)) for h in hits]
     return sum(scores) / max(len(scores), 1)
+
+
+def _ranking_key(hit: dict[str, Any]) -> tuple[int, float]:
+    """Sort key that never compares a reranker logit against an RRF score.
+
+    Returns ``(tier, score)``.  Reranked hits occupy tier 1 and sort by
+    calibrated relevance; RRF-only hits occupy tier 0 and sort among
+    themselves.  Merging two retrieval calls with a bare
+    ``score_rerank`` -> ``score_rrf`` fallback put every RRF-only hit
+    below every reranked hit *including* ones the cross-encoder had
+    scored as irrelevant, because -4.0 < 0.016.
+    """
+    from .retriever import hit_relevance
+
+    relevance = hit_relevance(hit)
+    if relevance is not None:
+        return (1, relevance)
+    try:
+        return (0, float(hit.get("score_rrf", 0.0)))
+    except (TypeError, ValueError):
+        return (0, 0.0)
+
+
+def _improved(final: list[dict[str, Any]], initial: list[dict[str, Any]]) -> bool:
+    """Whether *final* is better than *initial*, on a comparable scale.
+
+    Prefers calibrated relevance.  When neither set has a reranker signal
+    the comparison is not meaningful, so re-retrieval counts as an
+    improvement only if it actually returned more evidence — which is the
+    one thing that is comparable without a scorer.
+    """
+    final_rel, initial_rel = _avg_relevance(final), _avg_relevance(initial)
+    if final_rel is not None and initial_rel is not None:
+        return final_rel > initial_rel
+    if final_rel is not None and initial_rel is None:
+        return True  # gained a reranker signal where there was none
+    return len(final) > len(initial)
 
 
 def _avg_relevance(hits: list[dict[str, Any]]) -> float | None:
@@ -115,19 +159,16 @@ def corrective_retrieve(
             seen_ids.add(hit_id)
             merged.append(hit)
 
-    # Re-sort by best available score
-    merged.sort(
-        key=lambda h: h.get("score_rerank", h.get("score_rrf", 0.0)),
-        reverse=True,
-    )
+    # Re-sort on a scale that is actually comparable across the two calls.
+    merged.sort(key=_ranking_key, reverse=True)
 
     final = merged[:top_k]
-    improved = _avg_score(final) > _avg_score(initial_hits)
+    improved = _improved(final, initial_hits)
     logger.info(
-        "Corrective RAG: %s (initial=%.3f → corrected=%.3f)",
+        "Corrective RAG: %s (initial_relevance=%s → corrected=%s)",
         "improved" if improved else "no improvement",
-        _avg_score(initial_hits),
-        _avg_score(final),
+        _avg_relevance(initial_hits),
+        _avg_relevance(final),
     )
     return (final if improved else initial_hits), improved
 
