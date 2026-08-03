@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 import os
@@ -95,11 +96,26 @@ class ResolutionTests(unittest.TestCase):
 
 class StrictModeTests(unittest.TestCase):
     def test_provisional_table_fails_closed_when_confirmed_is_required(self) -> None:
-        with mock.patch.dict(os.environ, {"TAX_RATES_REQUIRE_CONFIRMED": "true"}):
+        # Every shipped table is confirmed, so the guard is exercised
+        # against a synthetic provisional year rather than a real one.
+        real = tables.get_table("FY2025-26")
+        fake = dataclasses.replace(
+            real,
+            fiscal_year="FY2099-00",
+            status=tables.STATUS_PROVISIONAL,
+            verification_note="synthetic",
+        )
+        with mock.patch.object(tables, "_tables", {**tables._all_tables(), "FY2099-00": fake}), \
+                mock.patch.dict(os.environ, {"TAX_RATES_REQUIRE_CONFIRMED": "true"}):
             tables.get_table("FY2025-26")  # confirmed — still fine
             with self.assertRaises(tables.RateTableError) as ctx:
-                tables.get_table("FY2026-27")
+                tables.get_table("FY2099-00")
         self.assertIn("provisional", str(ctx.exception))
+
+    def test_every_shipped_table_is_confirmed(self) -> None:
+        for fy in tables.list_fiscal_years():
+            with self.subTest(fiscal_year=fy):
+                self.assertTrue(tables.get_table(fy).confirmed)
 
     def test_production_requires_confirmed_by_default(self) -> None:
         with mock.patch.dict(os.environ, {"APP_ENV": "production"}, clear=False):
@@ -117,10 +133,25 @@ class ProvenanceTests(unittest.TestCase):
         basis = tables.get_table("FY2025-26").provenance("vat_standard")
         self.assertEqual(list(basis["legal_basis"]), ["vat_standard"])
 
-    def test_carried_forward_keys_are_flagged(self) -> None:
-        basis = tables.get_table("FY2026-27").provenance("paye_bands_non_resident")
-        self.assertEqual(basis["carried_forward"], ["paye_bands_non_resident"])
-        self.assertIn("confirm with URA", basis["carried_forward_note"])
+    def test_unverified_keys_are_flagged_per_figure(self) -> None:
+        # The table is confirmed as a whole; individual figures sourced
+        # from secondary reporting are still called out.
+        table = tables.get_table("FY2026-27")
+        basis = table.provenance("vat_registration_threshold_annual")
+        self.assertEqual(basis["status"], "confirmed")
+        self.assertEqual(basis["unverified"], ["vat_registration_threshold_annual"])
+        self.assertIn("not yet reconciled", basis["unverified_note"])
+
+    def test_a_verified_key_carries_no_unverified_flag(self) -> None:
+        basis = tables.get_table("FY2026-27").provenance("paye_bands_resident")
+        self.assertNotIn("unverified", basis)
+
+    def test_every_unverified_key_exists_in_the_table(self) -> None:
+        for fy in tables.list_fiscal_years():
+            table = tables.get_table(fy)
+            for key in table.unverified:
+                with self.subTest(fiscal_year=fy, key=key):
+                    self.assertIn(key, table.rates)
 
     def test_compare_reports_the_2026_changes(self) -> None:
         threshold = tables.compare(

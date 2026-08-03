@@ -186,6 +186,10 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
         re.compile(r"\b(betting|gambl\w+|gaming|sports?\s*bet\w*)\b.*\bwinning\w*|\bwinning\w*\b.*\b(bet|betting|gaming)\b|\bbetting\s+winning\w*", re.IGNORECASE),
     ),
     (
+        "telecom_commission",
+        re.compile(r"\b(telecom\w*|mobile\s*money|airtime|mobile\s*network)\b[^?]{0,40}\bcommission", re.IGNORECASE),
+    ),
+    (
         "foreign_interest",
         re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
     ),
