@@ -59,10 +59,14 @@ class CourtesySentenceTests(unittest.TestCase):
             self.assertTrue(is_courtesy_sentence(sentence), sentence)
 
     def test_every_empathy_ack_is_courtesy(self) -> None:
-        for kind in ("frustration", "anxiety", "urgency"):
+        # Every opener is prefixed to a scored reply, so it must be
+        # filtered out of faithfulness and claim verification — otherwise
+        # adding a kind silently dilutes the grounding gate.
+        for kind in ("frustration", "anxiety", "urgency", "hardship", "confusion"):
             ack = empathy_ack(kind)
-            self.assertTrue(ack)
-            self.assertTrue(is_courtesy_sentence(ack), ack)
+            with self.subTest(kind=kind):
+                self.assertTrue(ack)
+                self.assertTrue(is_courtesy_sentence(ack), ack)
 
     def test_in_answer_constants_are_fully_courtesy(self) -> None:
         # These appear INSIDE grounded, scored replies — every sentence
@@ -126,6 +130,27 @@ class DistressDetectorTests(unittest.TestCase):
         self.assertEqual(
             detect_user_distress("The filing deadline is tomorrow, please advise"),
             "urgency",
+        )
+
+    def test_hardship_detected_and_outranks_frustration(self) -> None:
+        # A frustrated message that also describes losing a business is
+        # hardship: it needs options and a person, not a fixed process.
+        self.assertEqual(
+            detect_user_distress("This is useless, I'm going to lose my business"),
+            "hardship",
+        )
+        self.assertEqual(detect_user_distress("I cannot afford to pay"), "hardship")
+
+    def test_comprehension_trouble_is_confusion_not_anxiety(self) -> None:
+        self.assertEqual(
+            detect_user_distress("I don't understand what chargeable income means"),
+            "confusion",
+        )
+
+    def test_genuine_worry_still_reads_as_anxiety(self) -> None:
+        self.assertEqual(
+            detect_user_distress("I'm worried and confused about my return"),
+            "anxiety",
         )
 
     def test_unknown_ack_kind_is_empty(self) -> None:

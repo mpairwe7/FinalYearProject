@@ -158,6 +158,7 @@ on them without understanding our tool names.
 | `rates` | `lookup_rate`, `list_available_rates`, `compare_tax_years` | low | in-process |
 | `rag` | `search_ura_knowledge_base` | low | in-process |
 | `calendar` | `get_current_date`, `get_next_deadlines` | low | in-process |
+| `empathy` | `assess_emotional_tone` | low | in-process |
 | `core` | `escalate_to_human` | medium | in-process |
 | `ura_account` | `ura_account_profile` | high | DMZ |
 | `ura_actions` | `ura_action_proposal` | critical | DMZ |

@@ -176,11 +176,13 @@ class MemoryService:
             conversation_id=conversation_id,
             summary=summary_text,
             topic_tag=_guess_topic_tag(first_user),
-            # Distress (frustration/anxiety) reads as negative; calm or
-            # merely time-pressured turns stay neutral.
+            # Distress reads as negative; calm, merely time-pressured, or
+            # simply confused turns stay neutral.  Hardship — a taxpayer
+            # who cannot pay — is the most negative of all, so it must not
+            # fall through to neutral just because it is a newer kind.
             sentiment=(
                 "negative"
-                if detect_user_distress(first_user) in ("frustration", "anxiety")
+                if detect_user_distress(first_user) in ("frustration", "anxiety", "hardship")
                 else "neutral"
             ),
             turn_count=len(turns),

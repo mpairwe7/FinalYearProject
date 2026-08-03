@@ -111,6 +111,7 @@ _COURTESY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"^(please )?try rephrasing\b",
         r"^could you( please)? (share|tell me|give me|provide|rephrase)\b",
         r"^i('d| would) be happy to help\b",
+        r"^let me put that a different way\b",
     )
 )
 
@@ -140,10 +141,34 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
+#: Financial or personal hardship.  Kept separate from frustration: a
+#: frustrated user wants the process fixed, a user in hardship needs
+#: options and usually a person.  For a revenue authority this is the
+#: signal that most needs to change how the answer is written.
+_HARDSHIP_RE = re.compile(
+    r"\b(can'?t afford|cannot afford|no money|broke|bankrupt"
+    r"|lose (my|the) (business|shop|job|home|land)|losing (my|the) (business|job)"
+    r"|shut(ting)? down|closed down|out of business"
+    r"|struggling|hardship|desperate|nothing left"
+    r"|sick|ill|hospital|died|passed away|funeral)\b"
+)
+
+#: Comprehension trouble — the explanation needs rebuilding, not
+#: reassurance.  The anxiety pattern above also matches "don't
+#: understand", so this is checked against a genuine-worry cue below.
+_CONFUSION_RE = re.compile(
+    r"\b(confus\w+|don'?t understand|do not understand|makes no sense"
+    r"|i'?m lost|unclear|complicated)\b"
+)
+
+_WORRY_RE = re.compile(r"\b(worried|worry|worrying|scared|afraid|anxious|stress\w*|panic\w*|nervous)\b")
+
 _EMPATHY_ACKS: dict[str, str] = {
     "frustration": "I'm sorry for the trouble — let's get this sorted out together.",
     "anxiety": "I understand this can feel stressful — let's take it step by step.",
     "urgency": "I know deadlines can be stressful, so here's the quickest way forward.",
+    "hardship": "I'm sorry you're going through this — let's look at what options you have.",
+    "confusion": "Let me put that a different way.",
 }
 
 _TONE_HINTS: dict[str, str] = {
@@ -158,6 +183,15 @@ _TONE_HINTS: dict[str, str] = {
     "urgency": (
         "The user is under time pressure. Begin with one short sentence "
         "acknowledging the urgency, then give the fastest path first."
+    ),
+    "hardship": (
+        "The user describes financial or personal hardship. Acknowledge it in "
+        "one sentence, answer plainly, and mention that a human officer can "
+        "discuss relief or payment arrangements."
+    ),
+    "confusion": (
+        "The user is confused rather than upset. Re-explain in shorter "
+        "sentences with one concrete example; do not add reassurance."
     ),
 }
 
@@ -204,10 +238,24 @@ def is_courtesy_sentence(sentence: str) -> bool:
 
 
 def detect_user_distress(message: str) -> str:
-    """Classify the current user message: '' | frustration | anxiety | urgency."""
+    """Classify the message: '' | frustration | anxiety | urgency | hardship | confusion.
+
+    Hardship is checked first and outranks everything: a message can read
+    as frustrated *and* describe losing a business, and the second is the
+    one that should change how the assistant answers.
+
+    Confusion is separated out of anxiety, whose pattern also matches
+    "don't understand". "I don't understand what chargeable income means"
+    wants the explanation rebuilt, not reassurance — so it is only read as
+    anxiety when a genuine worry cue is present too.
+    """
     text = _normalise(message)
     if not text:
         return ""
+    if _HARDSHIP_RE.search(text):
+        return "hardship"
+    if _CONFUSION_RE.search(text) and not _WORRY_RE.search(text):
+        return "confusion"
     if (message or "").count("!") >= 2:
         return "frustration"
     for kind, pattern in _DISTRESS_PATTERNS:

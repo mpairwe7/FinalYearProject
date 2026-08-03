@@ -119,8 +119,9 @@ for normal chat usage.
 4. **LLM Generation** — `Qwen/Qwen3-8B` via local Transformers or vLLM HTTP
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
-7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification, structured `handoff`, calibrated escalation
-8. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
+7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification (percentage **and** money-amount contradiction against the cited passage), structured `handoff`, calibrated escalation
+8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use
+9. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
 
@@ -293,7 +294,7 @@ _call_llm_agentic(max_iterations=3, deadline=90s)
   --> returns {text, tool_calls, iterations, truncated}
 ```
 
-**Tool inventory** (17 tools in `backend/app/tools/`). Each declares an
+**Tool inventory** (18 tools in `backend/app/tools/`). Each declares an
 MCP `namespace`, risk tier, required consent scopes and annotation hints;
 see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 
@@ -313,6 +314,7 @@ see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 | `get_current_date` | `calendar.py` | `calendar` | Current date for deadline logic |
 | `get_next_deadlines` | `calendar.py` | `calendar` | Upcoming tax filing deadlines |
 | `search_ura_knowledge_base` | `rag_tool.py` | `rag` | Semantic search (wraps hybrid retriever) |
+| `assess_emotional_tone` | `empathy.py` | `empathy` | Classify a message as frustration/anxiety/urgency/confusion/hardship and return tone guidance |
 | `escalate_to_human` | `escalate.py` | `core` | Create escalation ticket from tool loop |
 | `ura_account_profile` | `ura_account.py` | `ura_account` | Authenticated taxpayer profile (fail-closed) |
 | `ura_action_proposal` | `ura_actions.py` | `ura_actions` | Confirmed, idempotent URA action (fail-closed) |
