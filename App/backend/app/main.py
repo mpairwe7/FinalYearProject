@@ -1679,13 +1679,19 @@ def list_tickets_endpoint(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    priority: str | None = None,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """List escalation tickets for URA staff triage.
 
     Requires an authenticated staff/admin user, or the configured
-    operator key as a break-glass fallback. Filter by status via the
-    query string: ``?status=open``.
+    operator key as a break-glass fallback. Filter via the query
+    string: ``?status=open``, ``?priority=urgent``.
+
+    Ordered urgent-first, then oldest within a priority, so a waiting
+    taxpayer moves up the queue rather than being buried by newer
+    arrivals. Rows carry a short ``handoff`` preview but **not** the
+    transcript — fetch a single ticket for that.
     """
     if limit < 1 or limit > 500:
         raise HTTPException(status_code=400, detail="limit must be 1..500")
@@ -1693,11 +1699,14 @@ def list_tickets_endpoint(
         raise HTTPException(status_code=400, detail="offset out of range")
     if status and status not in ("open", "assigned", "resolved", "wontfix"):
         raise HTTPException(status_code=400, detail="invalid status")
+    if priority and priority not in ("low", "normal", "high", "urgent"):
+        raise HTTPException(status_code=400, detail="invalid priority")
 
-    rows = db.list_tickets(status=status, limit=limit, offset=offset)
+    rows = db.list_tickets(status=status, limit=limit, offset=offset, priority=priority)
     return {
         "count": len(rows),
         "status_filter": status or "all",
+        "priority_filter": priority or "all",
         "limit": limit,
         "offset": offset,
         "tickets": rows,
@@ -1723,7 +1732,11 @@ def get_ticket_endpoint(
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """Fetch a single ticket by id."""
+    """Fetch a single ticket, including the conversation transcript.
+
+    The transcript is the snapshot taken when the ticket was raised, so
+    it is still here after ``conversations`` has been purged.
+    """
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")

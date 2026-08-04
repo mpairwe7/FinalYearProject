@@ -23,15 +23,22 @@ class TestTicketCRUD:
         assert t["priority"] == "normal"
         assert t["reason"] == "user asked for help"
 
-    def test_list_tickets_newest_first(self, tmp_db):
+    def test_list_tickets_longest_waiting_first(self, tmp_db):
+        # The queue was newest-first, which buried a taxpayer who had
+        # been waiting under every later arrival. At equal priority the
+        # oldest now comes first; TestQueueOrdering in
+        # test_escalation_delivery.py covers the priority tier above it.
         t1 = tmp_db.create_ticket(reason="first")
         t2 = tmp_db.create_ticket(reason="second")
         t3 = tmp_db.create_ticket(reason="third")
+        conn = tmp_db._get_connection()
+        for ts, ticket in ((1000, t1), (2000, t2), (3000, t3)):
+            conn.execute("UPDATE tickets SET created_at = ? WHERE id = ?", (ts, ticket["id"]))
+        conn.commit()
         rows = tmp_db.list_tickets(status="open", limit=10)
         assert len(rows) == 3
-        # Ordered newest-first, so t3 is index 0
-        assert rows[0]["id"] == t3["id"]
-        assert rows[-1]["id"] == t1["id"]
+        assert rows[0]["id"] == t1["id"]
+        assert rows[-1]["id"] == t3["id"]
 
     def test_list_tickets_status_filter(self, tmp_db):
         t1 = tmp_db.create_ticket(reason="a")
