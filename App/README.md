@@ -121,8 +121,9 @@ for normal chat usage.
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
 7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification (percentage **and** money-amount contradiction against the cited passage), structured `handoff`, calibrated escalation
 8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use
-9. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
-10. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
+9. **Context-aware escalation** — an escalated ticket carries the whole conversation (both sides, untruncated), the taxpayer's sentiment at the point of transfer, and whether the officer should be briefed first; queued urgent-first then longest-waiting, de-duplicated per conversation, and announced over a webhook that carries triage metadata but never the transcript. See [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md)
+10. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
+11. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
 
@@ -1005,6 +1006,10 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_TOOL_USE` | Allow registered tools through the bounded agentic loop | `false` |
 | `FLAG_AGENTIC_MODE` | Enable supervisor routing for tools / specialists | `false` |
 | `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
+| `ESCALATION_WEBHOOK_URL` | POST target notified when an escalation ticket is created; unset disables delivery | _(unset)_ |
+| `ESCALATION_WEBHOOK_TOKEN` | Bearer token for that webhook, sent as a header | _(unset)_ |
+| `ESCALATION_WEBHOOK_TIMEOUT` | Webhook timeout in seconds | `5` |
+| `ESCALATION_WEBHOOK_MIN_PRIORITY` | Lowest ticket priority worth notifying | `normal` |
 | `FLAG_TOOL_RAG` | Expose only the top-k relevant tool schemas per query instead of every registered one | `false` |
 | `TOOL_RAG_TOP_K` | Tools selected when `FLAG_TOOL_RAG` is on (rails are always added) | `5` |
 | `TOOL_MAX_CALLS_PER_TURN` | Total tool dispatches allowed in one turn | `8` |

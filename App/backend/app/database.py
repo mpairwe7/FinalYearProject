@@ -217,6 +217,18 @@ def init_db() -> None:
             bot_reply      TEXT DEFAULT '',
             handoff_json   TEXT DEFAULT '{}',
             response_judge_json TEXT DEFAULT '{}',
+            -- Snapshot of the conversation at the moment of escalation.
+            -- Not a join to `conversations`: that table is purged after
+            -- CONVERSATION_TTL_DAYS (7), while a ticket can sit in the
+            -- queue far longer, so a live join would hand the officer an
+            -- empty transcript for any week-old ticket.
+            transcript_json TEXT DEFAULT '[]',
+            -- Erasure used to reach a ticket only via `conversations`,
+            -- which is purged after CONVERSATION_TTL_DAYS — so a ticket
+            -- older than that survived an NDPA erasure request while
+            -- still holding the taxpayer's transcript.  Stamping the
+            -- subject here makes erasure independent of that purge.
+            user_id        TEXT DEFAULT '',
             assignee       TEXT DEFAULT '',
             staff_note     TEXT DEFAULT '',
             created_at     REAL NOT NULL,
@@ -327,6 +339,8 @@ def init_db() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(conversation_id)")
     _ensure_column(conn, "tickets", "handoff_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "tickets", "response_judge_json", "TEXT DEFAULT '{}'")
+    _ensure_column(conn, "tickets", "transcript_json", "TEXT DEFAULT '[]'")
+    _ensure_column(conn, "tickets", "user_id", "TEXT DEFAULT ''")
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
     _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
@@ -642,6 +656,46 @@ def get_recent_turns(
     ]
 
 
+def get_conversation_transcript(
+    conversation_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Return the whole conversation, both sides, oldest first.
+
+    Distinct from :func:`get_recent_turns`, which exists to seed a prompt
+    and so returns the last few turns only.  A human officer needs the
+    conversation, not a window on it: the point of attaching it to a
+    ticket is that the taxpayer does not have to explain themselves
+    again.  Timestamps are included so the officer can see where the
+    conversation stalled.
+    """
+    if conversation_id:
+        where, key = "conversation_id = ?", conversation_id
+    elif session_id:
+        where, key = "session_id = ?", session_id
+    else:
+        return []
+    limit = max(1, min(int(limit), 1000))
+    conn = _get_connection()
+    rows = conn.execute(
+        f"""SELECT user_message, bot_reply, created_at, sources, topic_tag
+            FROM conversations WHERE {where}
+            ORDER BY created_at DESC LIMIT ?""",  # noqa: S608 - `where` is a fixed literal
+        (key, limit),
+    ).fetchall()
+    return [
+        {
+            "user_message": r["user_message"],
+            "bot_reply": r["bot_reply"],
+            "created_at": r["created_at"],
+            "sources": _json_loads(r["sources"], []),
+            "topic_tag": r["topic_tag"] or "",
+        }
+        for r in reversed(rows)
+    ]
+
+
 def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
     """Return the persisted workflow session for a conversation, if any."""
     if not conversation_id:
@@ -852,6 +906,7 @@ def _hydrate_ticket(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     ticket = dict(row)
     ticket["handoff"] = _json_loads(ticket.pop("handoff_json", "{}"), {})
     ticket["response_judge"] = _json_loads(ticket.pop("response_judge_json", "{}"), {})
+    ticket["transcript"] = _json_loads(ticket.pop("transcript_json", "[]"), [])
     return ticket
 
 
@@ -864,6 +919,8 @@ def create_ticket(
     priority: str = "normal",
     handoff: dict[str, Any] | None = None,
     response_judge: dict[str, Any] | None = None,
+    transcript: list[dict[str, Any]] | None = None,
+    user_id: str = "",
 ) -> dict[str, Any]:
     """Create a new escalation ticket and return it.
 
@@ -882,9 +939,9 @@ def create_ticket(
         conn.execute(
             """INSERT INTO tickets (id, conversation_id, session_id, status, priority,
                                     reason, user_query, bot_reply,
-                                    handoff_json, response_judge_json,
-                                    assignee, staff_note, created_at, updated_at)
-               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, '', '', ?, ?)""",
+                                    handoff_json, response_judge_json, transcript_json,
+                                    user_id, assignee, staff_note, created_at, updated_at)
+               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)""",
             (
                 ticket_id,
                 conversation_id,
@@ -895,6 +952,8 @@ def create_ticket(
                 bot_reply,
                 _json_dumps(handoff, "{}"),
                 _json_dumps(response_judge, "{}"),
+                _json_dumps(transcript, "[]"),
+                user_id,
                 now,
                 now,
             ),
@@ -912,6 +971,7 @@ def create_ticket(
         "reason": reason,
         "handoff": handoff or {},
         "response_judge": response_judge or {},
+        "transcript": transcript or [],
         "created_at": now,
     }
 
@@ -920,11 +980,15 @@ def list_tickets(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    priority: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List tickets, optionally filtered by status.
+    """List tickets, urgent first then oldest within a priority.
 
-    Ordered newest-first.  Used by the admin endpoint so staff can
-    pull the current open queue.
+    Recency ordering meant a computed priority changed nothing about
+    what an officer saw: an urgent ticket raised this morning sat below
+    a low-priority one raised at lunch. Within a priority the *oldest*
+    comes first, so a waiting taxpayer moves up rather than being buried
+    by newer arrivals.
     """
     conn = _get_connection()
     limit = max(1, min(int(limit), 500))
@@ -939,10 +1003,38 @@ def list_tickets(
     if status:
         sql += " WHERE status = ?"
         params.append(status)
-    sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    if priority:
+        sql += " AND priority = ?" if status else " WHERE priority = ?"
+        params.append(priority)
+    sql += (
+        " ORDER BY CASE priority"
+        "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
+        "   WHEN 'normal' THEN 2 ELSE 3 END,"
+        " created_at ASC LIMIT ? OFFSET ?"
+    )
     params.extend([limit, offset])
     rows = conn.execute(sql, params).fetchall()
     return [_hydrate_ticket(r) for r in rows]
+
+
+def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
+    """Return the newest unresolved ticket for *conversation_id*, if any.
+
+    A taxpayer who asks for a human three times in one conversation
+    wants one officer, not three tickets. Resolved and wontfix tickets
+    are excluded so a genuinely new problem later in the same
+    conversation still opens its own.
+    """
+    if not conversation_id:
+        return None
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT * FROM tickets
+           WHERE conversation_id = ? AND status IN ('open', 'assigned')
+           ORDER BY created_at DESC LIMIT 1""",
+        (conversation_id,),
+    ).fetchone()
+    return _hydrate_ticket(row) if row else None
 
 
 def get_ticket(ticket_id: str) -> dict[str, Any] | None:
@@ -1351,17 +1443,23 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
                 (external_id,),
             ).fetchall()
         ]
-        if conv_ids:
-            ph = ",".join("?" * len(conv_ids))
-            try:
-                cur = conn.execute(
+        # Delete by user_id AND by conversation_id: the first reaches
+        # tickets whose conversation has already been purged, the second
+        # reaches tickets raised before user_id was stamped on the row.
+        try:
+            deleted = conn.execute(
+                "DELETE FROM tickets WHERE user_id = ?", (external_id,)
+            ).rowcount
+            if conv_ids:
+                ph = ",".join("?" * len(conv_ids))
+                deleted += conn.execute(
                     f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
                     conv_ids,
-                )
-                counts["tickets"] = cur.rowcount
-            except Exception:
-                logger.exception("delete_user_cascade: tickets")
-                counts["tickets"] = -1
+                ).rowcount
+            counts["tickets"] = deleted
+        except Exception:
+            logger.exception("delete_user_cascade: tickets")
+            counts["tickets"] = -1
         try:
             cur = conn.execute("DELETE FROM conversations WHERE user_id = ?", (external_id,))
             counts["conversations"] = cur.rowcount
@@ -1436,8 +1534,20 @@ if ANALYTICS_BACKEND == "postgres":
         get_session_stats = _pg.get_session_stats  # type: ignore
         log_conversation = _pg.log_conversation  # type: ignore
         get_recent_turns = _pg.get_recent_turns  # type: ignore
+        get_conversation_transcript = _pg.get_conversation_transcript  # type: ignore
         get_conversation_stats = _pg.get_conversation_stats  # type: ignore
         export_review_feedback = _pg.export_review_feedback  # type: ignore
+        # Tickets were missing from this list, so production —  where
+        # ANALYTICS_BACKEND=postgres is mandatory — wrote every
+        # escalation to a per-replica SQLite file: invisible to an
+        # officer whose request landed on another pod, gone on restart,
+        # and referencing a conversation in a different database.
+        create_ticket = _pg.create_ticket  # type: ignore
+        list_tickets = _pg.list_tickets  # type: ignore
+        get_ticket = _pg.get_ticket  # type: ignore
+        update_ticket = _pg.update_ticket  # type: ignore
+        ticket_stats = _pg.ticket_stats  # type: ignore
+        find_open_ticket = _pg.find_open_ticket  # type: ignore
         logger.info("Analytics backend: postgres")
     except Exception:
         logger.exception("Postgres backend requested but import failed; falling back to sqlite")

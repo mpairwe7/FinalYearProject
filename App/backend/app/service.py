@@ -43,6 +43,7 @@ from . import database as db
 from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
+from .escalation_notify import notify_ticket_created
 from .agents.supervisor import (
     _FAREWELL_PHRASES,
     _GRATITUDE_PHRASES,
@@ -944,6 +945,7 @@ def _apply_output_guards(
     output_guard: Any,
     existing_handoff: dict[str, Any] | None = None,
     existing_ticket_id: str = "",
+    user_id: str = "",
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -1029,6 +1031,7 @@ def _apply_output_guards(
             priority=(handoff or {}).get("priority", "normal"),
             handoff=handoff,
             response_judge=response_judge,
+            user_id=user_id,
         )
 
     return {
@@ -1227,6 +1230,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                     output_guard=_output_guard,
                     existing_handoff=result.get("handoff"),
                     existing_ticket_id=result.get("ticket_id", ""),
+                    user_id=user_id or "",
                 )
                 full_reply = guard["reply"]
                 if guard["revised"]:
@@ -1376,6 +1380,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 output_guard=_output_guard,
                 existing_handoff=result.get("handoff"),
                 existing_ticket_id=result.get("ticket_id", ""),
+                user_id=user_id or "",
             )
             full_reply = guard["reply"]
             faith = guard["faithfulness"]
@@ -2532,6 +2537,28 @@ class ChatModel:
             "revised_reply": revised_reply,
         }
 
+    @staticmethod
+    def _escalation_transcript(
+        conversation_id: str,
+        session_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Snapshot the conversation for the officer handling this ticket.
+
+        Taken at escalation time rather than joined on read.  ``conversations``
+        is purged after ``CONVERSATION_TTL_DAYS`` (7) while a ticket can sit in
+        the queue far longer, so a live join would show an officer an empty
+        transcript for any week-old ticket — exactly the case where the
+        taxpayer has been waiting and least wants to start over.
+        """
+        try:
+            return db.get_conversation_transcript(
+                conversation_id=conversation_id or None,
+                session_id=session_id or None,
+            )
+        except Exception:
+            logger.exception("failed to snapshot transcript for escalation")
+            return []
+
     def _maybe_create_ticket(
         self,
         *,
@@ -2543,6 +2570,7 @@ class ChatModel:
         priority: str = "normal",
         handoff: dict[str, Any] | None = None,
         response_judge: dict[str, Any] | None = None,
+        user_id: str = "",
     ) -> str:
         """Persist a structured escalation ticket when the queue is enabled."""
         if not flags.is_enabled("ticket_queue"):
@@ -2551,6 +2579,38 @@ class ChatModel:
             final_decision = str((response_judge or {}).get("final_decision", "")).lower()
             if final_decision != "escalate":
                 return ""
+
+        # The turn being escalated is not in `conversations` yet — it is
+        # logged by the caller after generate() returns — so append it to
+        # the snapshot rather than leaving the officer without the very
+        # message that triggered the handoff.
+        transcript = self._escalation_transcript(conversation_id, session_id)
+        transcript.append(
+            {
+                "user_message": self.redact_for_storage(user_query),
+                "bot_reply": self.redact_for_storage(bot_reply),
+                "created_at": time.time(),
+                "sources": [],
+                "topic_tag": "escalated",
+            }
+        )
+
+        # One conversation, one officer.  Without this a taxpayer who
+        # asks for a human three times opens three tickets, and three
+        # officers each start the conversation from the beginning.
+        try:
+            existing = db.find_open_ticket(conversation_id)
+        except Exception:
+            logger.exception("open-ticket lookup failed; creating a new ticket")
+            existing = None
+        if existing:
+            ticket_id = str(existing.get("id", ""))
+            logger.info("escalation reuses open ticket %s", ticket_id)
+            if handoff is not None and ticket_id:
+                handoff["ticket_id"] = ticket_id
+                handoff["reused_existing_ticket"] = True
+            return ticket_id
+
         try:
             ticket = db.create_ticket(
                 reason=reason,
@@ -2561,14 +2621,38 @@ class ChatModel:
                 priority=priority,
                 handoff=handoff,
                 response_judge=response_judge,
+                transcript=transcript,
+                user_id=user_id,
             )
             ticket_id = ticket.get("id", "")
             if handoff is not None and ticket_id:
                 handoff["ticket_id"] = ticket_id
-            return ticket_id
         except Exception:
-            logger.exception("failed to persist escalation ticket")
+            # The taxpayer is about to be told a human will follow up.
+            # Say so loudly enough that someone notices nobody will:
+            # `error` rather than `exception`-and-swallow, and a flag on
+            # the handoff so the caller can degrade honestly instead of
+            # promising a ticket that does not exist.
+            logger.exception(
+                "ESCALATION LOST: ticket persistence failed for conversation %s (reason=%s)",
+                conversation_id or "?",
+                reason[:80],
+            )
+            if handoff is not None:
+                handoff["ticket_persisted"] = False
+                handoff["delivery_warning"] = (
+                    "This escalation could not be queued — contact the taxpayer "
+                    "through the channels listed rather than waiting for a ticket."
+                )
             return ""
+
+        # Announce it.  A ticket nobody is told about is a queue entry,
+        # not a handoff.  Never blocks the reply and never raises.
+        try:
+            notify_ticket_created(ticket)
+        except Exception:
+            logger.warning("escalation notification dispatch failed", exc_info=True)
+        return ticket_id
 
     def _persist_personalization_turn(
         self,
@@ -2665,11 +2749,28 @@ class ChatModel:
         if topic == "account_specific" and priority == "normal":
             priority = "high"
 
+        # The officer's context now travels on the ticket as a full
+        # transcript (see _escalation_transcript). This stays as a short
+        # at-a-glance preview for the queue list, where shipping every
+        # conversation would be wasteful — it is no longer the only
+        # thing a human receives.
         redacted_context = [
             self.redact_for_storage(turn.get("user_message", ""))[:180]
             for turn in (conversation_history or [])[-2:]
             if turn.get("user_message")
         ]
+
+        # Sentiment at the point of transfer. A handoff that arrives
+        # without it makes the officer rediscover the taxpayer's state
+        # from scratch, and decides nothing about how to open. Reuses
+        # the same classifier the reply paths use, so the ticket cannot
+        # disagree with the tone the bot just used.
+        distress = detect_user_distress(message)
+        turn_count = len(conversation_history or []) + 1
+        # Warm transfer = brief the officer before they engage. Reserved
+        # for the states where opening cold makes things worse: hardship,
+        # anger, and a taxpayer who has already repeated themselves.
+        warm = bool(distress in ("hardship", "frustration", "anxiety") or turn_count >= 4)
         sources = []
         for hit in (hits or [])[:3]:
             source = str(hit.get("source", "")).strip()
@@ -2693,6 +2794,14 @@ class ChatModel:
             "required_details": self._handoff_required_details(topic),
             "recent_context": redacted_context,
             "sources_reviewed": sources,
+            "sentiment": distress or "neutral",
+            "transfer_style": "warm" if warm else "cold",
+            "turns_before_handoff": turn_count,
+            "opening_guidance": (
+                empathy_ack(distress)
+                if distress
+                else "Answer directly; the taxpayer is not distressed."
+            ),
             "contact_channels": [
                 "https://ura.go.ug",
                 "0800 117 000 / 0800 217 000",
@@ -3546,6 +3655,7 @@ class ChatModel:
                         priority=(handoff or {}).get("priority", "normal"),
                         handoff=handoff,
                         response_judge=response_judge,
+                        user_id=user_id or "",
                     )
                     if ticket_id:
                         trace_ctx["ticket_id"] = ticket_id
@@ -3819,6 +3929,7 @@ class ChatModel:
                     priority=(handoff or {}).get("priority", "normal"),
                     handoff=handoff,
                     response_judge=response_judge,
+                    user_id=user_id or "",
                 )
                 abstained = {
                     "reply": reply,
@@ -4099,6 +4210,7 @@ class ChatModel:
                 priority=(handoff or {}).get("priority", "normal"),
                 handoff=handoff,
                 response_judge=response_judge,
+                user_id=user_id or "",
             )
             if ticket_id:
                 trace_ctx["ticket_id"] = ticket_id
@@ -4494,6 +4606,7 @@ class ChatModel:
                     priority=(handoff or {}).get("priority", "normal"),
                     handoff=handoff,
                     response_judge=response_judge,
+                    user_id=user_id or "",
                 )
                 return {
                     "reply": reply,
@@ -4694,6 +4807,7 @@ class ChatModel:
                 priority=(handoff or {}).get("priority", "normal"),
                 handoff=handoff,
                 response_judge=response_judge,
+                user_id=user_id or "",
             )
             return {
                 "reply": reply,
@@ -4766,6 +4880,7 @@ class ChatModel:
             priority=(handoff or {}).get("priority", "normal"),
             handoff=handoff,
             response_judge=response_judge,
+            user_id=user_id or "",
         )
 
         return {
