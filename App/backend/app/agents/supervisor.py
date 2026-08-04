@@ -106,6 +106,43 @@ _CALC_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
     ),
 ]
 
+# Learning intents — "explain VAT", "how does PAYE work". These share
+# vocabulary with the calculators ("what is VAT" vs "what is the VAT on
+# 5 million"), so the guards below decide which. Every guard *defers*:
+# a query carrying an amount, a rate word or a temporal word is handed
+# to the existing calculator / rate / calendar patterns untouched, so
+# adding this route cannot change where any prior query went.
+_LEARN_INTENT = re.compile(
+    r"\b(explain|teach|learn|understand(?:ing)?|"
+    r"what\s+(?:is|are|does)|what'?s\s+(?:a|an|the)?\s*\w*\s*mean|"
+    r"how\s+(?:does|do)\b.*\bwork|difference\s+between|meaning\s+of|"
+    r"tell\s+me\s+about|walk\s+me\s+through)\b",
+    re.IGNORECASE,
+)
+_LEARN_TOPIC = re.compile(
+    r"\b(vat|v\.a\.t|paye|tin|withholding|wht|"
+    r"tax\s+brackets?|tax\s+bands?|progressive|marginal|"
+    r"rental\s+tax|corporation\s+tax|corporate\s+tax|company\s+tax|"
+    r"capital\s+gains?|customs|import\s+duty|landed\s+cost|"
+    r"fiscal\s+year|tax\s+year|filing|taxation|tax)\b",
+    re.IGNORECASE,
+)
+#: A figure in the query means the user wants arithmetic, not a concept.
+#: Bare digits count, and so do the ways people write amounts in words.
+_AMOUNT_CUE = re.compile(
+    r"\d|\b(million|billion|thousand|ugx|shillings?)\b",
+    re.IGNORECASE,
+)
+#: "What is the VAT rate" is a rate lookup; the rate table answers it.
+_RATE_CUE = re.compile(r"\b(rates?|percentages?|percent|%)\b", re.IGNORECASE)
+#: "Tell me about the current fiscal year" is a calendar question.
+_TEMPORAL_CUE = re.compile(
+    r"\b(today|tomorrow|current|now|this\s+(?:month|year|quarter)|"
+    r"deadline|due|next)\b",
+    re.IGNORECASE,
+)
+
+
 # Temporal intents — anything relative to "now", "today", "this year".
 # Requires the calendar tool for a correct answer.
 _TEMPORAL_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
@@ -298,6 +335,26 @@ class Supervisor:
                 reason=f"too short ({len(words)} word(s))",
                 confidence=0.9,
                 clarification_question=CLARIFICATION_PROMPT,
+            )
+
+        # 2b. Learning intents → the education tool.  Checked before the
+        #     calculators because "what is VAT?" matches the VAT
+        #     calculator's pattern but carries no amount for it to work
+        #     with; the guards hand anything numeric, rate-shaped or
+        #     time-shaped straight back to the routes below.
+        if (
+            _LEARN_INTENT.search(q)
+            and _LEARN_TOPIC.search(q)
+            and not _AMOUNT_CUE.search(q)
+            and not _RATE_CUE.search(q)
+            and not _TEMPORAL_CUE.search(q)
+        ):
+            logger.info("supervisor: TOOLS (education) query=%r", q[:60])
+            return RouteDecision(
+                route=AgentRoute.TOOLS,
+                reason="Learning intent on a tax concept",
+                confidence=0.86,
+                suggested_tools=["explain_tax_concept", "search_ura_knowledge_base"],
             )
 
         # 3. Calculation intents → tool route with calculator whitelist

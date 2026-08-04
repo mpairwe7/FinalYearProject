@@ -108,6 +108,53 @@ class TestToolsRoute_Rates:
 
 
 # ---------------------------------------------------------------------------
+# TOOLS route — learning intents
+# ---------------------------------------------------------------------------
+class TestToolsRoute_Education:
+    @pytest.mark.parametrize("query", [
+        "What is VAT?",
+        "How does VAT work?",
+        "Explain PAYE to me",
+        "Teach me about withholding tax",
+        "I don't understand tax brackets",
+        "What is a TIN?",
+        "Walk me through capital gains",
+        "Tell me about rental tax",
+        "Difference between marginal and effective tax",
+        # Previously pinned as RAG defaults — nothing better existed then.
+        "Explain withholding tax for services",
+        "Tell me about VAT",
+    ])
+    def test_learning_queries_reach_the_education_tool(self, query):
+        d = supervisor.classify(query)
+        assert d.route == AgentRoute.TOOLS, f"{query} → {d.route.value}"
+        assert "explain_tax_concept" in d.suggested_tools
+
+    @pytest.mark.parametrize("query", [
+        # An amount means arithmetic, not a concept.  "What is VAT" and
+        # "What is the VAT on 5 million" differ only by the figure.
+        "What is the VAT on 5 million?",
+        "Calculate VAT for 100k",
+        "How much PAYE will I pay on a 3 million salary?",
+        # A rate word belongs to the rate table.
+        "What is the current corporation tax rate?",
+        "What's the applicable VAT rate?",
+        # A time word belongs to the calendar tools.
+        "Tell me about the current fiscal year",
+        "When is my next filing deadline?",
+    ])
+    def test_education_defers_rather_than_stealing(self, query):
+        d = supervisor.classify(query)
+        assert "explain_tax_concept" not in d.suggested_tools, (
+            f"{query} was claimed by the education route"
+        )
+
+    def test_learning_queries_still_seed_the_knowledge_base(self):
+        d = supervisor.classify("Explain PAYE to me")
+        assert "search_ura_knowledge_base" in d.suggested_tools
+
+
+# ---------------------------------------------------------------------------
 # CUSTOMS_SPECIALIST route
 # ---------------------------------------------------------------------------
 class TestCustomsSpecialist:
@@ -196,11 +243,14 @@ class TestClarify:
 class TestRAGDefault:
     @pytest.mark.parametrize("query", [
         "How do I register a business with URA?",
-        "Explain withholding tax for services",
+        # "What is X" only becomes a lesson when X is a concept the
+        # curriculum teaches; EFRIS is not, so retrieval still answers it.
         "What is EFRIS?",
-        "Tell me about VAT",
         "Who qualifies for a tax exemption?",
         "Describe the process for filing an annual return",
+        # "Explain withholding tax for services" and "Tell me about VAT"
+        # used to live here because nothing better existed. They now go
+        # to the education tool — see TestToolsRoute_Education.
     ])
     def test_factual_queries_fall_through_to_rag(self, query):
         d = supervisor.classify(query)

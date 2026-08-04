@@ -69,7 +69,7 @@ absent.
 ## Tool RAG on the live path
 
 `ToolRAGSelector` had a single caller — a graph node nothing invokes —
-so every agentic turn pasted all 18 registered schemas (~4.5 k tokens)
+so every agentic turn pasted every registered schema (~4.5 k tokens)
 into the prompt regardless of the query. `llm._select_tools_for_query`
 now consults it whenever `FLAG_TOOL_RAG` is on, exposing the top
 `TOOL_RAG_TOP_K` (default 5) tools plus the mandatory rails
