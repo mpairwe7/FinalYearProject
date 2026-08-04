@@ -26,6 +26,11 @@ from .state import AgentGraphState, GraphOutcome
 
 logger = logging.getLogger(__name__)
 
+#: Faithfulness below this sends the RAG path back through retrieval once.
+#: Matches ``CORRECTIVE_RAG_THRESHOLD_NORM`` — the same [0,1] scale, and
+#: the same judgement about what "weakly grounded" means.
+REFLECT_FAITHFULNESS_FLOOR = 0.50
+
 
 # ---------------------------------------------------------------------------
 # Nodes
@@ -118,27 +123,78 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
     return NodeResult(next_node="synthesize")
 
 
-def node_act(state: AgentGraphState) -> NodeResult:
-    """Dispatch the tool calls in state.plan via the MCP client.
+#: Parameter names a free-text query can legitimately be bound to.
+_QUERY_ARG_NAMES = frozenset({"query", "question", "text", "message"})
 
-    This node is **Phase 15 Lite** — it just calls every tool the
-    supervisor suggested.  Phase 15 full replaces it with a real
-    ReAct loop where the LLM picks tools mid-generation.
+
+def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] | None:
+    """Fill a tool's required arguments from graph state, or ``None``.
+
+    Driven by the tool's own JSON Schema rather than a hardcoded name
+    list, so a new tool needs no change here.  Only two bindings are
+    honest at this layer: a tool with no required parameters can be
+    called as-is, and a required free-text parameter is the user's
+    query.  Anything else — ``amount``, ``tax_type`` — is a value the
+    graph would have to invent, so it returns ``None`` and the caller
+    skips the tool.
+    """
+    from ...tools import ToolRegistry
+
+    tool = ToolRegistry.get(tool_name)
+    if tool is None:
+        return None
+    required = list((tool.schema.parameters or {}).get("required", []))
+    if not required:
+        return {}
+    query = state.rewritten_query or state.query
+    bound: dict[str, object] = {}
+    for param in required:
+        if param in _QUERY_ARG_NAMES and query:
+            bound[param] = query
+        else:
+            return None
+    return bound
+
+
+def node_act(state: AgentGraphState) -> NodeResult:
+    """Dispatch the plan's tool calls under the turn's spend budget.
+
+    Two things this node must not do.  It must not call a tool with
+    arguments it does not have — ``calculate_vat({})`` fails schema
+    validation, and an error dict in ``observations`` is what
+    ``node_synthesize`` would otherwise hand the user as an answer.  And
+    it must not let a long plan turn into a tool storm: every dispatch
+    goes through :class:`ToolCallBudget`, which caps the turn, caps any
+    one tool, and serves a repeat from its memo instead of re-executing.
     """
     client = get_client()
     state.iterations += 1
     for tool_name in state.plan:
-        # Empty args — Phase 15 full fills these from the LLM tool_call
-        # parser.  In Phase 15 Lite we rely on tool default kwargs.
+        arguments = bind_arguments(tool_name, state)
+        if arguments is None:
+            state.skipped_tools.append(
+                {"name": tool_name, "reason": "required arguments unavailable"}
+            )
+            logger.info("graph: skipped %s — required arguments unavailable", tool_name)
+            continue
+
+        decision = state.budget.admit(tool_name, arguments, iteration=state.iterations)
+        if not decision.should_dispatch:
+            state.skipped_tools.append({"name": tool_name, "reason": decision.reason})
+            if decision.result is not None:
+                state.observations.append(decision.result)
+            continue
+
         result = client.call_tool(
             tool_name,
-            {},
+            arguments,
             tenant_id=state.tenant_id,
             user_id=state.user_id,
             user_role=state.role,
             granted_purposes=state.granted_purposes,
             iteration=state.iterations,
         )
+        state.budget.record(tool_name, arguments, result.result)
         state.tool_calls.append(
             {
                 "call_id": result.call_id,
@@ -161,7 +217,12 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
     scaffold* — the actual LLM call still lives in service.py
     for now.
     """
-    if not state.hits and not state.observations:
+    # A failed tool call is not evidence.  Synthesising over the whole
+    # observation list would put "amount: required property is missing"
+    # in front of the user as if it were an answer.
+    usable = [obs for obs in state.observations if isinstance(obs, dict) and obs.get("ok", True)]
+
+    if not state.hits and not usable:
         state.reply = ABSTENTION_REPLY
         state.outcome = GraphOutcome.ABSTAINED
         return NodeResult(next_node="respond", outcome=GraphOutcome.ABSTAINED)
@@ -171,22 +232,36 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
     if state.hits:
         best = state.hits[0]
         state.reply = best.get("answer") or best.get("text", "")
-    elif state.observations:
-        # Stitch tool observations into a brief summary — placeholder
+    elif usable:
+        # Stitch tool observations into a brief summary — placeholder.
+        # Only prose keys are used: a raw dict repr is not an answer, and
+        # showing one is worse than abstaining.
         parts = []
-        for obs in state.observations[:3]:
-            expl = obs.get("explanation") or obs.get("message") or str(obs)[:200]
-            parts.append(expl)
+        for obs in usable[:3]:
+            for key in ("explanation", "summary", "message", "human_readable", "answer"):
+                value = obs.get(key)
+                if isinstance(value, str) and value.strip():
+                    parts.append(value)
+                    break
         state.reply = "\n".join(parts)
+
+    if not state.reply:
+        state.reply = ABSTENTION_REPLY
+        state.outcome = GraphOutcome.ABSTAINED
+        return NodeResult(next_node="respond", outcome=GraphOutcome.ABSTAINED)
 
     return NodeResult(next_node="reflect")
 
 
 def node_reflect(state: AgentGraphState) -> NodeResult:
-    """Grounding check + one-shot Reflexion loop.
+    """Grounding check plus a bounded re-retrieval loop.
 
-    Simplified for Phase 15 Lite — Phase 15 full adds LLM-based
-    self-critique and regenerate-with-hint logic.
+    Computing faithfulness and then responding regardless is a metric,
+    not a reflection.  A weakly-grounded reply goes back through
+    retrieval once with an expanded query; ``max_reflections`` bounds
+    that, so the loop cannot become the retrieval thrash it exists to
+    correct.  Re-retrieval only helps the RAG path — a tool answer is
+    grounded in its own computation, not in passages.
     """
     from ...retriever import HybridRetriever
 
@@ -195,6 +270,23 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
         state.faithfulness = HybridRetriever.compute_faithfulness(state.reply, contexts)
 
     state.reflect_count += 1
+
+    if (
+        state.faithfulness is not None
+        and state.faithfulness < REFLECT_FAITHFULNESS_FLOOR
+        and state.reflect_count <= state.max_reflections
+    ):
+        from ...corrective_rag import _expand_query
+
+        expanded = _expand_query(state.rewritten_query or state.query)
+        state.reflections.append(
+            f"faithfulness={state.faithfulness:.2f} below "
+            f"{REFLECT_FAITHFULNESS_FLOOR:.2f}; re-retrieving with an expanded query"
+        )
+        if expanded != (state.rewritten_query or state.query):
+            state.rewritten_query = expanded
+            return NodeResult(next_node="retrieve", note="reflexion re-retrieval")
+
     return NodeResult(next_node="respond")
 
 

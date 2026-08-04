@@ -46,6 +46,7 @@ import time
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Callable
 
+from .agents.loop_control import ToolCallBudget
 from .guardrails import scan_retrieved_text
 
 if TYPE_CHECKING:
@@ -69,6 +70,13 @@ LLM_SERIALIZE_LOCAL_GENERATION = os.getenv(
     "LLM_SERIALIZE_LOCAL_GENERATION",
     "true",
 ).lower() not in ("0", "false", "no", "off")
+
+# Agentic loop ceilings.  ``max_iterations`` bounds generation rounds;
+# these bound what one round may spend — see app/agents/loop_control.py.
+TOOL_RAG_TOP_K = int(os.getenv("TOOL_RAG_TOP_K", "5"))
+TOOL_MAX_CALLS_PER_TURN = int(os.getenv("TOOL_MAX_CALLS_PER_TURN", "8"))
+TOOL_MAX_CALLS_PER_ITERATION = int(os.getenv("TOOL_MAX_CALLS_PER_ITERATION", "4"))
+TOOL_MAX_CALLS_PER_TOOL = int(os.getenv("TOOL_MAX_CALLS_PER_TOOL", "3"))
 
 # LoRA adapters — per-language fine-tuned adapters for multilingual support.
 # Set LORA_ADAPTER_PATH for single-language mode (backward-compatible), or
@@ -1052,6 +1060,39 @@ def _build_tool_messages(
     return messages
 
 
+def _select_tools_for_query(query: str, eligible_names: list[str]) -> list[str]:
+    """Narrow the exposed tool set for *query* when Tool RAG is enabled.
+
+    Pasting all 18 registered schemas costs ~4.5k tokens of every agentic
+    prompt and dilutes selection accuracy.  ``FLAG_TOOL_RAG`` swaps that
+    for the top-k relevant tools plus the mandatory rails.  With the flag
+    off — the default — the full eligible set is exposed unchanged, and a
+    selector failure falls back the same way: an agent with too many
+    tools still works, one with none does not.
+    """
+    from .flags import flags  # noqa: PLC0415
+
+    if not flags.is_enabled("tool_rag") or not eligible_names:
+        return eligible_names
+
+    from .mcp.tool_rag import ToolRAGSelector  # noqa: PLC0415
+
+    try:
+        selection = ToolRAGSelector().select(query, eligible_names, k=TOOL_RAG_TOP_K)
+    except Exception:
+        logger.warning("Tool RAG selection failed; exposing all eligible tools", exc_info=True)
+        return eligible_names
+    if not selection.tool_names:
+        return eligible_names
+    logger.info(
+        "Tool RAG: %d/%d tools exposed (%s)",
+        len(selection.tool_names),
+        len(eligible_names),
+        selection.fallback_reason or "scored",
+    )
+    return list(selection.tool_names)
+
+
 def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     query: str,
     passages: list[dict[str, Any]] | None = None,
@@ -1130,19 +1171,16 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
             granted_purposes=granted_purposes or [],
         )
     )
-    if tool_names:
-        scoped_names = [n for n in tool_names if n in eligible_names]
-        tool_specs = [
-            ToolRegistry.get(n).to_openai_spec()
-            for n in scoped_names
-            if ToolRegistry.get(n) is not None
-        ]
-    else:
-        tool_specs = [
-            ToolRegistry.get(n).to_openai_spec()
-            for n in sorted(eligible_names)
-            if ToolRegistry.get(n) is not None
-        ]
+    scoped_names = (
+        [n for n in tool_names if n in eligible_names]
+        if tool_names
+        else _select_tools_for_query(query, sorted(eligible_names))
+    )
+    tool_specs = [
+        ToolRegistry.get(n).to_openai_spec()
+        for n in scoped_names
+        if ToolRegistry.get(n) is not None
+    ]
 
     if not tool_specs:
         logger.warning("generate_with_tools: no tools available, falling back to generate()")
@@ -1167,6 +1205,11 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     tool_calls_made: list[dict[str, Any]] = []
     last_response = ""
     truncated = False
+    budget = ToolCallBudget(
+        max_total_calls=TOOL_MAX_CALLS_PER_TURN,
+        max_calls_per_iteration=TOOL_MAX_CALLS_PER_ITERATION,
+        max_calls_per_tool=TOOL_MAX_CALLS_PER_TOOL,
+    )
 
     def _emit(event: dict[str, Any]) -> None:
         if event_callback is None:
@@ -1208,6 +1251,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 "tool_calls": tool_calls_made,
                 "iterations": iteration + 1,
                 "truncated": False,
+                "tool_budget": budget.stats(),
             }
 
         try:
@@ -1245,6 +1289,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     "iterations": iteration + 1,
                     "truncated": False,
                     "tool_call_count": len(tool_calls_made),
+                    "tool_budget": budget.stats(),
                 }
             )
             # Terminal: no more tool calls — return the text
@@ -1253,6 +1298,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 "tool_calls": tool_calls_made,
                 "iterations": iteration + 1,
                 "truncated": False,
+                "tool_budget": budget.stats(),
             }
 
         # Dispatch each parsed tool call and feed the results back
@@ -1270,31 +1316,51 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 }
             )
             call_t0 = time.perf_counter()
-            try:
-                result_obj = client.call_tool(
-                    pc["name"],
-                    pc.get("arguments", {}),
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    user_role=user_role,
-                    granted_purposes=granted_purposes or [],
-                    iteration=iteration,
-                )
-                result = result_obj.result
-                ok = bool(getattr(result_obj, "ok", True))
-            except Exception as exc:
-                logger.exception("tool dispatch raised for %s", pc.get("name"))
+            decision = budget.admit(
+                pc["name"], pc.get("arguments", {}), iteration=iteration
+            )
+            if not decision.should_dispatch:
+                # Repeat or over-budget: the model gets an answer either
+                # way, so it can move on instead of retrying blindly.
+                result = decision.result or {}
+                ok = bool(result.get("ok", True))
                 _emit(
                     {
-                        "type": "tool_call.error",
+                        "type": "tool_call.skipped",
                         "call_id": call_id,
                         "name": pc["name"],
-                        "error": str(exc),
-                        "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
+                        "admission": decision.admission.value,
+                        "reason": decision.reason,
+                        "iteration": iteration,
                     }
                 )
-                result = {"ok": False, "error": str(exc)}
-                ok = False
+            else:
+                try:
+                    result_obj = client.call_tool(
+                        pc["name"],
+                        pc.get("arguments", {}),
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        user_role=user_role,
+                        granted_purposes=granted_purposes or [],
+                        iteration=iteration,
+                    )
+                    result = result_obj.result
+                    ok = bool(getattr(result_obj, "ok", True))
+                except Exception as exc:
+                    logger.exception("tool dispatch raised for %s", pc.get("name"))
+                    _emit(
+                        {
+                            "type": "tool_call.error",
+                            "call_id": call_id,
+                            "name": pc["name"],
+                            "error": str(exc),
+                            "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
+                        }
+                    )
+                    result = {"ok": False, "error": str(exc)}
+                    ok = False
+                budget.record(pc["name"], pc.get("arguments", {}), result)
             elapsed_ms = (time.perf_counter() - call_t0) * 1000
             # Phase 4: HITL hook — tools with requires_confirmation=True
             # return ``submitted=False`` plus a ``proposal`` struct on the
@@ -1351,7 +1417,9 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     "role": "tool",
                     "name": pc["name"],
                     "tool_call_id": call_id,
-                    "content": _json.dumps(result)[:2000],  # cap for safety
+                    # Structural compaction — a byte-sliced payload is
+                    # invalid JSON and drops by position, not salience.
+                    "content": budget.compact(result),
                 }
             )
 
@@ -1368,9 +1436,9 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     # Max iterations exhausted — return whatever the last generation produced
     truncated = True
     logger.warning(
-        "generate_with_tools: max_iterations=%d reached (calls made: %d)",
+        "generate_with_tools: max_iterations=%d reached (budget: %s)",
         max_iterations,
-        len(tool_calls_made),
+        budget.stats(),
     )
     _emit(
         {
@@ -1378,6 +1446,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
             "iterations": max_iterations,
             "truncated": True,
             "tool_call_count": len(tool_calls_made),
+            "tool_budget": budget.stats(),
         }
     )
     return {
@@ -1386,6 +1455,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         "tool_calls": tool_calls_made,
         "iterations": max_iterations,
         "truncated": truncated,
+        "tool_budget": budget.stats(),
     }
 
 

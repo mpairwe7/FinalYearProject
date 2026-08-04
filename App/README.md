@@ -283,16 +283,23 @@ Supervisor.classify(query)
   --> force_agentic=True, force_tool_whitelist from supervisor
 
 _call_llm_agentic(max_iterations=3, deadline=90s)
+  --> tool schemas narrowed by Tool RAG when FLAG_TOOL_RAG is on
   --> llm_module.generate_with_tools(messages, tool_schemas)
-      Loop (bounded):
+      Loop (bounded by iterations AND by spend):
         LLM proposes tool_call(name, args)
-        --> ToolRegistry.call(name, args)   # validated I/O
-        --> result appended to conversation
+        --> ToolCallBudget.admit(name, args)  # ceilings + duplicate memo
+        --> ToolRegistry.call(name, args)     # validated I/O
+        --> compact_observation(result)       # valid JSON, salience-ordered
         --> next iteration
       Exit: no more tool_calls OR max_iterations hit
   --> circuit breaker wraps entire loop
-  --> returns {text, tool_calls, iterations, truncated}
+  --> returns {text, tool_calls, iterations, truncated, tool_budget}
 ```
+
+Iteration count bounds how often the model generates, not how much each
+generation spends — see [`docs/agentic-loop.md`](docs/agentic-loop.md)
+for the per-turn ceilings, duplicate-call suppression and observation
+compaction that bound the rest.
 
 **Tool inventory** (18 tools in `backend/app/tools/`). Each declares an
 MCP `namespace`, risk tier, required consent scopes and annotation hints;
@@ -991,6 +998,11 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_TOOL_USE` | Allow registered tools through the bounded agentic loop | `false` |
 | `FLAG_AGENTIC_MODE` | Enable supervisor routing for tools / specialists | `false` |
 | `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
+| `FLAG_TOOL_RAG` | Expose only the top-k relevant tool schemas per query instead of all 18 | `false` |
+| `TOOL_RAG_TOP_K` | Tools selected when `FLAG_TOOL_RAG` is on (rails are always added) | `5` |
+| `TOOL_MAX_CALLS_PER_TURN` | Total tool dispatches allowed in one turn | `8` |
+| `TOOL_MAX_CALLS_PER_ITERATION` | Fan-out ceiling for a single generation round | `4` |
+| `TOOL_MAX_CALLS_PER_TOOL` | How often one tool may run in a turn | `3` |
 | `FLAG_AUTH_REQUIRED` | Reject unauthenticated private `/v1/*` routes | `false` |
 | `FLAG_WORKFLOWS` | YAML-driven durable multi-step workflow guides | `true` |
 | `FLAG_HANDOFF_SUMMARIES` | Structured human handoff packets + escalation metadata | `true` |
