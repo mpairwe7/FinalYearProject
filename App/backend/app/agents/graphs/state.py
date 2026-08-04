@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from ..loop_control import ToolCallBudget
+
 
 class GraphOutcome(str, Enum):
     """Terminal outcomes the graph can produce."""
@@ -50,6 +52,12 @@ class AgentGraphState:
     # -- Act / Observe --
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     observations: list[dict[str, Any]] = field(default_factory=list)
+    #: Tools the plan named but ``node_act`` did not dispatch, with why —
+    #: unfillable arguments, or a spend ceiling.
+    skipped_tools: list[dict[str, Any]] = field(default_factory=list)
+    #: Per-turn tool spend ceilings and duplicate-call memo.  Excluded
+    #: from ``repr`` because state is logged on every graph transition.
+    budget: ToolCallBudget = field(default_factory=ToolCallBudget, repr=False)
     iterations: int = 0
     max_iterations: int = 3
 
@@ -88,10 +96,12 @@ class AgentGraphState:
             "role": self.role,
             "plan_steps": len(self.plan),
             "tool_calls": len(self.tool_calls),
+            "skipped_tools": len(self.skipped_tools),
             "hits": len(self.hits),
             "iterations": self.iterations,
             "reflect_count": self.reflect_count,
             "outcome": self.outcome.value,
             "faithfulness": self.faithfulness,
             "reply_len": len(self.reply),
+            "budget": self.budget.stats(),
         }
