@@ -178,6 +178,66 @@ class FigureProvenanceTests(unittest.TestCase):
         self.assertGreater(float(marginal.rstrip("%")), float(effective.rstrip("%")))
 
 
+class SurvivesTheAgentLoopTests(unittest.TestCase):
+    """A lesson has to reach the model through the tool loop intact.
+
+    A lesson payload is roughly twice the default observation budget, so
+    ``compact_observation`` will drop keys from it on every agentic turn.
+    Whichever keys it drops is what the learner does not get — and the
+    first version of the priority list dropped precisely the teaching
+    machinery, leaving an explanation with no question attached.
+    """
+
+    def _compacted(self, topic: str = "progressive_taxation", **kw: object) -> dict:
+        import json
+
+        from app.agents.loop_control import compact_observation
+
+        payload = ToolRegistry.get("explain_tax_concept").execute(topic=topic, **kw)
+        return json.loads(compact_observation(payload))
+
+    def test_a_lesson_exceeds_the_default_budget(self) -> None:
+        # If this ever stops being true the tests below stop testing
+        # anything, so assert the premise rather than assume it.
+        import json
+
+        from app.agents.loop_control import DEFAULT_OBSERVATION_BUDGET_CHARS
+
+        payload = ToolRegistry.get("explain_tax_concept").execute(topic="progressive_taxation")
+        raw = json.dumps(payload, default=str, ensure_ascii=False)
+        self.assertGreater(len(raw), DEFAULT_OBSERVATION_BUDGET_CHARS)
+
+    def test_the_check_question_survives_compaction(self) -> None:
+        kept = self._compacted()
+        self.assertTrue(kept.get("check_question"))
+        self.assertTrue(kept.get("instruction"))
+        self.assertTrue(kept.get("answer_withheld"))
+
+    def test_the_worked_example_survives_compaction_whole(self) -> None:
+        full = ToolRegistry.get("explain_tax_concept").execute(topic="progressive_taxation")
+        kept = self._compacted()
+        self.assertIn("worked_example", kept)
+        self.assertEqual(
+            len(kept["worked_example"]["steps"]),
+            len(full["worked_example"]["steps"]),
+        )
+
+    def test_the_misconceptions_survive_compaction(self) -> None:
+        self.assertTrue(self._compacted().get("common_mistakes"))
+
+    def test_the_verification_warning_is_never_compacted_away(self) -> None:
+        # A lesson taught from a provisional table must carry its caveat.
+        full = ToolRegistry.get("explain_tax_concept").execute(topic="vat")
+        if full.get("verification_warning"):
+            self.assertTrue(self._compacted("vat").get("verification_warning"))
+
+    def test_the_withheld_answer_stays_withheld_through_compaction(self) -> None:
+        answer = ToolRegistry.get("explain_tax_concept").execute(
+            topic="progressive_taxation", reveal_answer=True
+        )["check_answer"]
+        self.assertNotIn(answer, str(self._compacted()))
+
+
 class ToolContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tool = ToolRegistry.get("explain_tax_concept")

@@ -153,6 +153,27 @@ class TestToolsRoute_Education:
         d = supervisor.classify("Explain PAYE to me")
         assert "search_ura_knowledge_base" in d.suggested_tools
 
+    def test_what_does_x_mean_is_covered_without_an_ambiguous_branch(self):
+        # The "what's a X mean" alternative was removed as a ReDoS
+        # source; "what does" already covers the phrasing.
+        d = supervisor.classify("What does VAT mean?")
+        assert "explain_tax_concept" in d.suggested_tools
+
+    def test_classification_is_linear_in_query_length(self):
+        """Routing runs on raw user input, so it must not backtrack.
+
+        The removed ``what'?s\\s+(?:a|an|the)?\\s*\\w*\\s*mean`` branch let
+        a run of spaces be split between quantifiers in exponentially
+        many ways: 2,000 spaces did not finish in two minutes.
+        """
+        import time
+
+        hostile = "what's " + " " * 20_000 + "vat"
+        start = time.perf_counter()
+        supervisor.classify(hostile)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 1.0, f"classify took {elapsed:.1f}s on a 20k-space query"
+
 
 # ---------------------------------------------------------------------------
 # CUSTOMS_SPECIALIST route

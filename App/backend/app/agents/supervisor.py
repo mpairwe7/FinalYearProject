@@ -112,9 +112,17 @@ _CALC_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
 # a query carrying an amount, a rate word or a temporal word is handed
 # to the existing calculator / rate / calendar patterns untouched, so
 # adding this route cannot change where any prior query went.
+#
+# Every alternative below is anchored on literal words with a single
+# ``\s+`` between them.  An optional group next to ``\s*`` — the shape
+# ``what'?s\s+(?:a|an|the)?\s*\w*\s*mean`` — lets a run of spaces be
+# split between quantifiers in exponentially many ways, and this regex
+# runs on raw user input on every request.  "What does X mean" is
+# already covered by the ``what\s+(?:is|are|does)`` alternative, so the
+# ambiguous branch bought nothing.
 _LEARN_INTENT = re.compile(
     r"\b(explain|teach|learn|understand(?:ing)?|"
-    r"what\s+(?:is|are|does)|what'?s\s+(?:a|an|the)?\s*\w*\s*mean|"
+    r"what\s+(?:is|are|does)|"
     r"how\s+(?:does|do)\b.*\bwork|difference\s+between|meaning\s+of|"
     r"tell\s+me\s+about|walk\s+me\s+through)\b",
     re.IGNORECASE,
@@ -229,6 +237,22 @@ _ESCALATE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
 ]
 
+#: Characters of a query the ``.*``-bearing patterns are allowed to see.
+#:
+#: The calculator and rate patterns use ``.*`` and lookaheads, which
+#: rescan from every start position — quadratic in the subject length.
+#: Measured on the calculator set: a 20,000-space query takes 6.8
+#: seconds, which is a request worker stalled by one message. A routing
+#: decision never needs more than the opening of a question, and a
+#: multi-kilobyte "query" is not one.
+#:
+#: The escalation, greeting, temporal and customs patterns are plain
+#: alternations with no ``.*``, so they stay linear and keep matching the
+#: **whole** query — "I want to speak to a human" must still escalate
+#: however far into a long message it appears.
+_MAX_PATTERN_CHARS = 1000
+
+
 # Clarification triggers — queries too short or vague to answer.
 _CLARIFY_MIN_WORDS = 2
 _CLARIFY_STOP_WORDS = {
@@ -297,6 +321,10 @@ class Supervisor:
             )
 
         words = q.split()
+        # Subject for the ``.*``-bearing patterns only — see
+        # _MAX_PATTERN_CHARS.  Escalation and the other linear
+        # patterns below still match against the full query.
+        probe = q[:_MAX_PATTERN_CHARS]
 
         # 1. Check for explicit escalation triggers FIRST — they take
         #    precedence over any other intent.
@@ -343,13 +371,16 @@ class Supervisor:
         #     with; the guards hand anything numeric, rate-shaped or
         #     time-shaped straight back to the routes below.
         if (
-            _LEARN_INTENT.search(q)
-            and _LEARN_TOPIC.search(q)
-            and not _AMOUNT_CUE.search(q)
-            and not _RATE_CUE.search(q)
-            and not _TEMPORAL_CUE.search(q)
+            _LEARN_INTENT.search(probe)
+            and _LEARN_TOPIC.search(probe)
+            and not _AMOUNT_CUE.search(probe)
+            and not _RATE_CUE.search(probe)
+            and not _TEMPORAL_CUE.search(probe)
         ):
-            logger.info("supervisor: TOOLS (education) query=%r", q[:60])
+            # Log the decision, not the query — every other branch here
+            # logs the pattern that fired, and user text in a log line is
+            # a log-injection sink.
+            logger.info("supervisor: TOOLS (education) words=%d", len(words))
             return RouteDecision(
                 route=AgentRoute.TOOLS,
                 reason="Learning intent on a tax concept",
@@ -359,7 +390,7 @@ class Supervisor:
 
         # 3. Calculation intents → tool route with calculator whitelist
         for pat, reason, tools in _CALC_PATTERNS:
-            if pat.search(q):
+            if pat.search(probe):
                 logger.info("supervisor: TOOLS (calc) pattern=%r", pat.pattern[:40])
                 return RouteDecision(
                     route=AgentRoute.TOOLS,
@@ -381,7 +412,7 @@ class Supervisor:
 
         # 5. Rate-lookup intents → tool route with lookup_rate whitelist
         for pat, reason, tools in _RATE_PATTERNS:
-            if pat.search(q):
+            if pat.search(probe):
                 logger.info("supervisor: TOOLS (rate) pattern=%r", pat.pattern[:40])
                 return RouteDecision(
                     route=AgentRoute.TOOLS,

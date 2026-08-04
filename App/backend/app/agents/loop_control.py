@@ -73,6 +73,17 @@ _PRIORITY_KEYS: tuple[str, ...] = (
     "effective_from",
     "legal_basis",
     "verification_warning",
+    # A lesson's payload is several times the default budget, and its
+    # teaching machinery is the part with no fallback: an answer the
+    # model can still summarise loses little, a check question that was
+    # dropped is a question never asked.  These outrank the provenance
+    # block for that reason.
+    "check_question",
+    "answer_withheld",
+    "instruction",
+    "worked_example",
+    "common_mistakes",
+    "title",
     "citations",
     "sources",
 )

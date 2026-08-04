@@ -147,6 +147,21 @@ The whitelist is `["explain_tax_concept", "search_ura_knowledge_base"]`,
 so retrieval stays available in the same turn for anything the
 curriculum does not cover.
 
+## Reaching the model intact
+
+A lesson payload is roughly twice `DEFAULT_OBSERVATION_BUDGET_CHARS`, so
+`compact_observation` drops keys from it on every agentic turn. Whatever
+it drops is what the learner does not get — and the first version of the
+priority list in `agents/loop_control.py` dropped exactly the teaching
+machinery, leaving an explanation with no question attached.
+
+`check_question`, `answer_withheld`, `instruction`, `worked_example` and
+`common_mistakes` are therefore ranked above the provenance block in
+`_PRIORITY_KEYS`. An answer the model can still summarise loses little; a
+check question that was dropped is a question never asked.
+`SurvivesTheAgentLoopTests` pins this, including that the withheld
+answer does not reappear through compaction.
+
 ## Adding a concept
 
 1. Append a `Concept` to `_CONCEPTS` in `app/tools/education.py`.
