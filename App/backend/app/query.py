@@ -44,6 +44,14 @@ _SW_MARKERS = re.compile(
 # ---------------------------------------------------------------------------
 # Domain abbreviation expansion
 # ---------------------------------------------------------------------------
+# Expansions keep the acronym in parentheses on purpose.  Retrieval is
+# hybrid: the dense side matches the spelled-out phrase, the sparse
+# (BM25) side matches whichever surface form the corpus actually uses.
+# Replacing "WHT" with "Withholding Tax" trades one exact match for
+# another and loses BM25 recall on every document that writes the
+# acronym — which URA guidance routinely does.  BM25 tokenisation
+# strips the brackets, so "Withholding Tax (WHT)" indexes as
+# ['withholding', 'tax', 'wht'] and both forms hit.
 _ABBREVIATIONS: dict[str, str] = {
     "tin": "Taxpayer Identification Number (TIN)",
     "vat": "Value Added Tax (VAT)",
@@ -54,9 +62,10 @@ _ABBREVIATIONS: dict[str, str] = {
     "trep": "Tax Registration Expansion Project (TREP)",
     "cit": "Corporate Income Tax (CIT)",
     "pit": "Personal Income Tax (PIT)",
-    "whit": "Withholding Tax",
-    "etax": "e-Tax portal",
-    "efiling": "electronic filing",
+    "wht": "Withholding Tax (WHT)",
+    "whit": "Withholding Tax (WHT)",
+    "etax": "e-Tax portal (eTax)",
+    "efiling": "electronic filing (eFiling)",
     "kcca": "Kampala Capital City Authority (KCCA)",
     "nssf": "National Social Security Fund (NSSF)",
     "ugx": "Ugandan Shillings (UGX)",
