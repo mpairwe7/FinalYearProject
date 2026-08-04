@@ -69,7 +69,16 @@ class PAYEFY2025Tests(unittest.TestCase):
 
 
 class PAYEFY2026Tests(unittest.TestCase):
-    """FY2026-27 bands: threshold up to 335k, new 25% band 410k-485k."""
+    """FY2026-27 bands, from Schedule 4 Part I as substituted by the 2026 Act.
+
+    The Act states ANNUAL chargeable income; these are the monthly
+    equivalents. Two cumulative figures appear verbatim in the Act's own
+    table and are asserted below as an independent check that the
+    annual-to-monthly conversion is right:
+
+        UGX   180,000 of tax at   4,920,000 annual (= 410,000/month)
+        UGX   405,000 of tax at   5,820,000 annual (= 485,000/month)
+    """
 
     def _paye(self, gross: float, **kwargs) -> dict:
         return ToolRegistry.call(
@@ -79,27 +88,101 @@ class PAYEFY2026Tests(unittest.TestCase):
     def test_raised_threshold_is_tax_free(self) -> None:
         self.assertEqual(self._paye(335_000)["paye"], 0.0)
 
-    def test_ten_percent_band_starts_at_new_threshold(self) -> None:
-        self.assertEqual(self._paye(400_000)["paye"], 6_500.0)  # 10% x 65,000
+    def test_twenty_percent_band_starts_at_the_new_threshold(self) -> None:
+        # Schedule 4 Part I: 20% of the excess over 4,020,000 annual.
+        # Secondary summaries reported this band as 10%; the Act says 20%.
+        self.assertEqual(self._paye(400_000)["paye"], 13_000.0)  # 20% x 65,000
+
+    def test_annual_cumulative_at_the_second_boundary_matches_the_act(self) -> None:
+        result = self._paye(410_000)
+        self.assertEqual(result["annual_paye"], 180_000.0)
 
     def test_new_twenty_five_percent_band(self) -> None:
-        # 10% x 75,000 = 7,500, then 25% x 40,000 = 10,000
+        # 20% x 75,000 = 15,000, then 25% x 40,000 = 10,000
         result = self._paye(450_000)
-        self.assertEqual(result["paye"], 17_500.0)
+        self.assertEqual(result["paye"], 25_000.0)
         self.assertEqual(result["band"]["marginal_rate"], 0.25)
 
+    def test_annual_cumulative_at_the_third_boundary_matches_the_act(self) -> None:
+        result = self._paye(485_000)
+        self.assertEqual(result["annual_paye"], 405_000.0)
+
     def test_thirty_percent_band_resumes_above_485k(self) -> None:
-        # 7,500 + 25% x 75,000 = 26,250, then 30% x 15,000 = 4,500
-        self.assertEqual(self._paye(500_000)["paye"], 30_750.0)
+        # 15,000 + 25% x 75,000 = 33,750, then 30% x 15,000 = 4,500
+        self.assertEqual(self._paye(500_000)["paye"], 38_250.0)
 
-    def test_provisional_table_warns(self) -> None:
+    def test_top_band_adds_the_additional_ten_percent(self) -> None:
+        # Above 120,000,000 annual (10,000,000 monthly) the Act adds a
+        # further 10%, giving an effective 40% marginal rate.
+        self.assertEqual(self._paye(12_000_000)["band"]["marginal_rate"], 0.4)
+
+    def test_confirmed_table_does_not_caveat_a_verified_figure(self) -> None:
         result = self._paye(1_000_000)
-        self.assertEqual(result["rate_basis"]["status"], "provisional")
-        self.assertIn("provisional", result["verification_warning"])
+        self.assertEqual(result["rate_basis"]["status"], "confirmed")
+        self.assertNotIn("verification_warning", result)
 
-    def test_non_resident_bands_are_flagged_as_carried_forward(self) -> None:
+    def test_result_cites_the_amending_act(self) -> None:
+        basis = self._paye(1_000_000)["rate_basis"]["legal_basis"]
+        self.assertIn("Income Tax (Amendment) Act 2026", basis["paye_bands_resident"])
+
+    def test_non_resident_bands_were_not_amended(self) -> None:
+        # The Act substitutes only Part I, which applies to residents, so
+        # Part II continues to apply and is not a stale carry-forward.
         result = self._paye(12_000_000, residency="non_resident")
-        self.assertIn("paye_bands_non_resident", result["rate_basis"]["carried_forward"])
+        self.assertEqual(result["paye"], 3_725_500.0)
+        self.assertNotIn("carried_forward", result["rate_basis"])
+        self.assertIn("not amended", result["rate_basis"]["legal_basis"]["paye_bands_non_resident"])
+
+
+class UnverifiedFigureTests(unittest.TestCase):
+    """A confirmed table can still hold a figure from a secondary source."""
+
+    def test_an_unverified_figure_is_caveated(self) -> None:
+        result = ToolRegistry.call(
+            "check_vat_registration",
+            {"annual_turnover": 400_000_000, "fiscal_year": FY26},
+        )
+        self.assertTrue(result["ok"])
+        self.assertIn("vat_registration_threshold_annual", result["rate_basis"]["unverified"])
+        self.assertIn("not yet reconciled", result["verification_warning"])
+
+    def test_a_verified_figure_in_the_same_table_is_not_caveated(self) -> None:
+        result = ToolRegistry.call(
+            "calculate_withholding",
+            {"payment_type": "public_entertainer", "amount": 1_000_000, "fiscal_year": FY26},
+        )
+        self.assertNotIn("verification_warning", result)
+        self.assertNotIn("unverified", result["rate_basis"])
+
+
+class WithholdingFY2026Act(unittest.TestCase):
+    """Rates introduced by the 2026 Act, each traced to its Schedule 4 Part."""
+
+    def test_rates_match_the_act(self) -> None:
+        for payment_type, rate in (
+            ("public_entertainer", 0.06),   # Part XVI, s.135B
+            ("betting_winnings", 0.15),     # Part XI, s.131
+            ("telecom_commission", 0.10),   # Part XIII, s.133
+            ("non_business_asset", 0.06),   # Part X item 4, s.130(3)
+            ("foreign_interest", 0.05),     # Part 2 para 2A, s.82(5)
+        ):
+            with self.subTest(payment_type=payment_type):
+                result = ToolRegistry.call(
+                    "calculate_withholding",
+                    {"payment_type": payment_type, "amount": 1_000_000, "fiscal_year": FY26},
+                )
+                self.assertTrue(result["ok"], result.get("error"))
+                self.assertEqual(result["rate"], rate)
+
+    def test_new_categories_fail_closed_for_the_previous_year(self) -> None:
+        for payment_type in ("telecom_commission", "non_business_asset"):
+            with self.subTest(payment_type=payment_type):
+                result = ToolRegistry.call(
+                    "calculate_withholding",
+                    {"payment_type": payment_type, "amount": 1_000, "fiscal_year": FY25},
+                )
+                self.assertFalse(result["ok"])
+                self.assertIn(FY26, result["error"])
 
 
 class FiscalYearResolutionTests(unittest.TestCase):
