@@ -1063,7 +1063,7 @@ def _build_tool_messages(
 def _select_tools_for_query(query: str, eligible_names: list[str]) -> list[str]:
     """Narrow the exposed tool set for *query* when Tool RAG is enabled.
 
-    Pasting all 18 registered schemas costs ~4.5k tokens of every agentic
+    Pasting every registered schema costs ~4.5k tokens of every agentic
     prompt and dilutes selection accuracy.  ``FLAG_TOOL_RAG`` swaps that
     for the top-k relevant tools plus the mandatory rails.  With the flag
     off — the default — the full eligible set is exposed unchanged, and a

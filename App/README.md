@@ -121,7 +121,8 @@ for normal chat usage.
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
 7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification (percentage **and** money-amount contradiction against the cited passage), structured `handoff`, calibrated escalation
 8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use
-9. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
+9. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
+10. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
 
@@ -301,7 +302,7 @@ generation spends — see [`docs/agentic-loop.md`](docs/agentic-loop.md)
 for the per-turn ceilings, duplicate-call suppression and observation
 compaction that bound the rest.
 
-**Tool inventory** (18 tools in `backend/app/tools/`). Each declares an
+**Tool inventory** (19 tools in `backend/app/tools/`). Each declares an
 MCP `namespace`, risk tier, required consent scopes and annotation hints;
 see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 
@@ -322,9 +323,15 @@ see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 | `get_next_deadlines` | `calendar.py` | `calendar` | Upcoming tax filing deadlines |
 | `search_ura_knowledge_base` | `rag_tool.py` | `rag` | Semantic search (wraps hybrid retriever) |
 | `assess_emotional_tone` | `empathy.py` | `empathy` | Classify a message as frustration/anxiety/urgency/confusion/hardship and return tone guidance |
+| `explain_tax_concept` | `education.py` | `education` | Teach a concept: scaffolded explanation, worked example computed from the live rate tables, misconceptions, check question |
+
 | `escalate_to_human` | `escalate.py` | `core` | Create escalation ticket from tool loop |
 | `ura_account_profile` | `ura_account.py` | `ura_account` | Authenticated taxpayer profile (fail-closed) |
 | `ura_action_proposal` | `ura_actions.py` | `ura_actions` | Confirmed, idempotent URA action (fail-closed) |
+
+`explain_tax_concept` teaches rather than answers — see
+[`docs/tax-education.md`](docs/tax-education.md) for the scaffolding model
+and how its worked examples stay tied to the rate tables.
 
 Every calculator takes an optional `fiscal_year` **or** `as_of` date and
 resolves the rate table in force for that period. Rates live as versioned
@@ -998,7 +1005,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_TOOL_USE` | Allow registered tools through the bounded agentic loop | `false` |
 | `FLAG_AGENTIC_MODE` | Enable supervisor routing for tools / specialists | `false` |
 | `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
-| `FLAG_TOOL_RAG` | Expose only the top-k relevant tool schemas per query instead of all 18 | `false` |
+| `FLAG_TOOL_RAG` | Expose only the top-k relevant tool schemas per query instead of every registered one | `false` |
 | `TOOL_RAG_TOP_K` | Tools selected when `FLAG_TOOL_RAG` is on (rails are always added) | `5` |
 | `TOOL_MAX_CALLS_PER_TURN` | Total tool dispatches allowed in one turn | `8` |
 | `TOOL_MAX_CALLS_PER_ITERATION` | Fan-out ceiling for a single generation round | `4` |
