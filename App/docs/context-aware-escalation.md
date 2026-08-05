@@ -183,16 +183,35 @@ moving the ticket off `open`; leaving it open is not a response.
 ticket left over a holiday weekend would otherwise make the whole queue
 look broken.
 
+## The staff queue
+
+`/admin/tickets` (Next.js) renders the queue the backend orders —
+urgent first, then longest-waiting — with the waiting time on every row
+and the SLA strip showing what is still unanswered.
+
+Selecting a ticket shows **the whole transcript, unedited**. Summarising
+it in the UI would put back exactly the problem the feature removes.
+
+Two inputs, deliberately separate:
+
+| Field | Goes to | Seen by |
+| --- | --- | --- |
+| Reply to the taxpayer | `officer_reply` | The taxpayer, on their next turn |
+| Internal note | `staff_note` | Staff only |
+
+Merging them into one "notes" box would be a privacy incident waiting
+to happen, so the tests assert each control writes to its own field.
+
+A warm transfer is flagged with its opening guidance, so an officer sees
+the taxpayer's state before they make contact rather than discovering it
+mid-call.
+
 ## Still open
 
 - **Officer-visible unredaction** — needs a consent and audit design,
   not just code. Deliberately out of scope.
-- **Staff dashboard UI.** The `/admin/tickets` Next.js route from Phase
-  18 is not built; the queue, transcript and reply all exist as API
-  only. `useTicketQueue` / `useTicketStats` hooks already exist in the
-  frontend for the analytics page.
 - **Real-time push.** Ticket arrival notifies a webhook, not the staff
-  UI over WebSocket.
+  UI over WebSocket. The queue polls every 20 s instead.
 - **No assignment routing.** `topic` is computed but not used to route;
   `assignee` is still set by hand.
 - **Wider backend gap.** Consent, users, profiles, workflow sessions and
