@@ -103,7 +103,7 @@ def tmp_db(monkeypatch: pytest.MonkeyPatch):
 # ---------------------------------------------------------------------------
 # Clean tool registry per-test — prevents tests from leaking
 # registrations into each other.  Re-imports the tools package after
-# clearing to restore the canonical 11 tools.
+# clearing to restore the full registry.
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def fresh_registry():
@@ -111,16 +111,23 @@ def fresh_registry():
     from app.tools import ToolRegistry
 
     ToolRegistry.clear()
-    # Re-import all starter tool modules to re-register them
+    # Re-register every tool module, derived from the auto-import block
+    # in app/tools/__init__.py rather than a hand-kept list. The list
+    # had drifted to five of nine modules, so a test using this fixture
+    # saw a registry missing education, empathy and the URA tools —
+    # and a golden-set case naming one of them failed for the wrong
+    # reason.
     import importlib
-    for modname in (
-        "app.tools.calculators",
-        "app.tools.calendar",
-        "app.tools.rates",
-        "app.tools.rag_tool",
-        "app.tools.escalate",
-    ):
-        importlib.reload(importlib.import_module(modname))
+    import re
+    from pathlib import Path
+
+    import app.tools as tools_pkg
+
+    source = Path(tools_pkg.__file__).read_text()
+    modules = re.findall(r"^from \. import (\w+) as _", source, re.M)
+    assert modules, "no tool auto-imports found in app/tools/__init__.py"
+    for modname in modules:
+        importlib.reload(importlib.import_module(f"app.tools.{modname}"))
     yield ToolRegistry
 
 
