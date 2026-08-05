@@ -52,14 +52,26 @@ class TestToolsRoute_Calculators:
         assert d.confidence >= 0.85
 
     @pytest.mark.parametrize("query", [
-        # Known rule-based misses: wording that reverses the trigger-noun
-        # order falls through to RAG.  Fine — still gets a good answer,
-        # just through the factual retrieval path rather than tool calls.
-        "What's my take-home pay on a 2M salary?",
+        # A figure with no tax type named. Guessing which calculator the
+        # taxpayer means would be worse than retrieving guidance.
+        "I earn 3 million, what do I pay",
     ])
-    def test_edge_case_queries_fall_through_to_rag(self, query):
+    def test_a_figure_without_a_tax_type_falls_through_to_rag(self, query):
         d = supervisor.classify(query)
         assert d.route == AgentRoute.RAG
+
+    @pytest.mark.parametrize("query", [
+        # These used to be pinned as acceptable misses, on the reasoning
+        # that RAG "still gets a good answer". It does not: the model
+        # answers a numeric tax question from memory, which is the one
+        # thing the deterministic calculators exist to prevent. Now
+        # routed on amount + intent — see test_supervisor_amount_intent.
+        "What's my take-home pay on a 2M salary?",
+        "VAT on 500000",
+    ])
+    def test_reversed_word_order_now_reaches_the_calculators(self, query):
+        d = supervisor.classify(query)
+        assert d.route == AgentRoute.TOOLS
 
     def test_suggested_tools_include_calculator(self):
         d = supervisor.classify("How much VAT on UGX 50k?")

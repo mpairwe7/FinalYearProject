@@ -198,6 +198,40 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+#: Calculator intent -> the tool that answers it.  Used by the
+#: supervisor to route; :func:`plan_calculation` maps the same intents
+#: to a full plan with parameters.
+INTENT_TOOLS: dict[str, str] = {
+    "withholding": "calculate_withholding",
+    "paye": "calculate_paye",
+    "rental": "calculate_rental_tax",
+    "capital_gains": "calculate_capital_gains",
+    "corporation": "calculate_corporation_tax",
+    "customs": "calculate_customs_duty",
+    "vat": "calculate_vat",
+}
+
+
+def detect_calculator_intent(message: str) -> str | None:
+    """Which calculator a message is about, ignoring whether it asks to compute.
+
+    Split out so the supervisor can route on intent without inheriting
+    :func:`plan_calculation`'s calculation-verb gate. The two want
+    different things: plan_calculation *executes* a calculation and is
+    conservative for that reason, while routing only decides which tools
+    to offer — and the tool loop still gets to not use them.
+    """
+    text = (message or "").strip()
+    if not text or _INFO_ONLY_RE.search(text):
+        return None
+    return next((name for name, pat in _INTENT_RES if pat.search(text)), None)
+
+
+def has_money_amount(message: str) -> bool:
+    """Whether the message carries a figure a calculator could act on."""
+    return bool(extract_amounts(message or ""))
+
+
 def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     """Map a chat message to a calculator plan, or None when not a calc ask.
 
@@ -226,7 +260,7 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     if not _CALC_VERB_RE.search(text):
         return None
 
-    intent = next((name for name, pat in _INTENT_RES if pat.search(text)), None)
+    intent = detect_calculator_intent(text)
     if intent is None:
         return None
 
