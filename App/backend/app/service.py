@@ -2692,6 +2692,13 @@ class ChatModel:
             notify_ticket_created(ticket)
         except Exception:
             logger.warning("escalation notification dispatch failed", exc_info=True)
+        try:
+            # Straight to any staff watching the queue, on every replica.
+            from .ticket_events import build_event, publish  # noqa: PLC0415
+
+            publish(build_event(ticket))
+        except Exception:
+            logger.warning("ticket event publish failed", exc_info=True)
         return ticket_id
 
     def _persist_personalization_turn(

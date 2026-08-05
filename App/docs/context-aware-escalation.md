@@ -230,12 +230,35 @@ A warm transfer is flagged with its opening guidance, so an officer sees
 the taxpayer's state before they make contact rather than discovering it
 mid-call.
 
+## Live events
+
+`WS /v1/admin/tickets/stream` pushes escalations to staff as they
+arrive. Staff roles only, read-only, and `?team=customs` narrows it to
+one queue. The client sends nothing — a socket that only ever receives
+cannot be used to reach the ticket store.
+
+The event carries the same triage metadata as the webhook and **no
+transcript**: it fans out to every connected staff socket, which is the
+wrong shape for a taxpayer's tax affairs. The officer fetches the
+conversation through the authenticated admin API.
+
+**It works across replicas.** A WebSocket lives on one pod while tickets
+are created on whichever pod served the taxpayer, so an in-process hub
+alone would show an officer only the tickets that happened to land
+beside them — the per-replica failure the rest of this work removed.
+Each pod publishes to a Postgres `LISTEN`/`NOTIFY` channel and fans out
+to its own sockets. On SQLite, single-node by definition, the local hub
+is the whole story and is correct.
+
+Per-socket queues are bounded: a slow client drops its oldest events
+rather than growing memory, and a reconnect re-reads the queue view
+anyway.
+
 ## Still open
 
 - **Officer-visible unredaction** — needs a consent and audit design,
   not just code. Deliberately out of scope.
-- **Real-time push.** Ticket arrival notifies a webhook, not the staff
-  UI over WebSocket. The queue polls every 20 s instead.
+
 - **No skills-based assignment within a team.** Routing puts a ticket
   in front of the right team; picking the individual officer is still
   manual.

@@ -1306,6 +1306,19 @@ async def voice_chat_stream_ws_v2(websocket: WebSocket) -> None:
     await voice_stream_ws_v2(websocket, app)
 
 
+@app.websocket("/v1/admin/tickets/stream")
+async def admin_ticket_stream_ws(websocket: WebSocket) -> None:
+    """Live escalation events for staff.
+
+    Read-only and staff-only; carries triage metadata, never a
+    transcript. ``?team=customs`` narrows it to one queue. See
+    ``ticket_ws.py``.
+    """
+    from .ticket_ws import ticket_stream_ws
+
+    await ticket_stream_ws(websocket)
+
+
 @app.websocket("/v2/chat/stream")
 async def chat_stream_ws_v2(websocket: WebSocket) -> None:
     """V2 WebSocket — persistent text chat with agentic event surface.
