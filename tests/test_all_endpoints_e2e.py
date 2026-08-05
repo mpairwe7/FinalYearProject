@@ -109,6 +109,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/authority/status"),
     ("GET", "/v1/admin/tickets"),
     ("GET", "/v1/admin/tickets/stats"),
+    ("GET", "/v1/admin/tickets/sla"),
     ("GET", "/v1/admin/tickets/{ticket_id}"),
     ("PATCH", "/v1/admin/tickets/{ticket_id}"),
     ("GET", "/v1/admin/voice_audit"),
@@ -176,6 +177,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/authority/status"): "test_api_endpoints.AdminEndpoints",
     ("GET", "/v1/admin/tickets"): "test_api_endpoints.AdminEndpoints",
     ("GET", "/v1/admin/tickets/stats"): "test_api_endpoints.AdminEndpoints",
+    ("GET", "/v1/admin/tickets/sla"): "test_escalation_roundtrip.TestSLA",
     ("GET", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status",
     ("PATCH", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status + test_patch_ticket_noop_400",
     ("GET", "/v1/admin/voice_audit"): "test_api_endpoints.AdminEndpoints",
@@ -334,10 +336,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (51 HTTP + 3 WS)."""
+    """Lock the surface size so additions are deliberate (52 HTTP + 3 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 51, f"expected 51 HTTP endpoints, found {len(http)}"
+    assert len(http) == 52, f"expected 52 HTTP endpoints, found {len(http)}"
     assert len(ws) == 3, f"expected 3 WS endpoints, found {len(ws)}"
 
 

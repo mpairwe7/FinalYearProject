@@ -1726,6 +1726,22 @@ def ticket_stats_endpoint(
     return db.ticket_stats(days=days)
 
 
+@app.get("/v1/admin/tickets/sla", tags=["admin"])
+def ticket_sla_endpoint(
+    request: Request,
+    days: int = 30,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """Time-to-first-response and time-to-resolution for the queue.
+
+    Medians, not means: one ticket left over a holiday weekend would
+    otherwise make the whole queue look broken.
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be 1..365")
+    return db.sla_stats(days=days)
+
+
 @app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
 def get_ticket_endpoint(
     request: Request,
@@ -1751,15 +1767,23 @@ def update_ticket_endpoint(
     assignee: str | None = None,
     staff_note: str | None = None,
     priority: str | None = None,
+    officer_reply: str | None = None,
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """Update a ticket's status/assignee/note/priority."""
+    """Update a ticket's status/assignee/note/priority/reply.
+
+    ``officer_reply`` is shown to the **taxpayer** when they next open
+    the conversation; ``staff_note`` stays internal. They are separate
+    fields on purpose — an officer's candid note is not something the
+    taxpayer should ever read.
+    """
     ok = db.update_ticket(
         ticket_id,
         status=status,
         assignee=assignee,
         staff_note=staff_note,
         priority=priority,
+        officer_reply=officer_reply,
     )
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")

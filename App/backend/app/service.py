@@ -2559,6 +2559,42 @@ class ChatModel:
             logger.exception("failed to snapshot transcript for escalation")
             return []
 
+    @staticmethod
+    def _deliver_officer_reply(conversation_id: str) -> str:
+        """Return an undelivered officer reply for this conversation.
+
+        Closes the loop escalation left open: the taxpayer was told a
+        human would follow up, and until now the officer's answer sat in
+        a queue the taxpayer could not see. Marking delivery *after*
+        composing the text means a failure re-delivers rather than
+        silently dropping it — being told twice is a far smaller harm
+        than never being told.
+
+        Never raises: a broken ticket store must not take out the chat.
+        """
+        if not conversation_id:
+            return ""
+        try:
+            pending = db.pending_officer_reply(conversation_id)
+        except Exception:
+            logger.exception("officer-reply lookup failed")
+            return ""
+        if not pending or not pending.get("officer_reply"):
+            return ""
+
+        officer = str(pending.get("assignee") or "").strip()
+        lead = (
+            f"A URA officer ({officer}) has replied to your case:"
+            if officer
+            else "A URA officer has replied to your case:"
+        )
+        text = f"{lead}\n\n{pending['officer_reply']}"
+        try:
+            db.mark_reply_delivered(str(pending.get("id", "")))
+        except Exception:
+            logger.exception("failed to mark officer reply delivered; it will re-deliver")
+        return text
+
     def _maybe_create_ticket(
         self,
         *,
@@ -3473,6 +3509,33 @@ class ChatModel:
                     trace_ctx=trace_ctx,
                 )
                 return calc_result
+
+            # 1a1. A human answered. Deliver it before anything else —
+            #      the taxpayer was told someone would follow up, and the
+            #      officer's answer outranks anything the bot would say.
+            officer_note = self._deliver_officer_reply(thread_id)
+            if officer_note:
+                delivered = {
+                    "reply": officer_note,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "officer_reply",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "human_officer",
+                    "next_actions": self._default_next_actions(agent_role="human_officer"),
+                }
+                self._audit_turn(
+                    message=message,
+                    result=delivered,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return delivered
 
             # 1a2. Greeting detection — always active, independent of agentic_mode
             _q_lower = message.strip().lower().strip("!.?,")

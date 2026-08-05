@@ -128,11 +128,46 @@ for erasure to find.
 exists in `postgres.py` and takes the same arguments, so neither can
 recur quietly.
 
+## The round trip (Phase 18)
+
+Escalation used to be one-way: the officer resolved the ticket and
+nothing went back. The taxpayer had been told a human would follow up,
+and the answer sat in a queue only staff could see.
+
+`PATCH /v1/admin/tickets/{id}` now accepts `officer_reply`. It is a
+**separate field from `staff_note`** on purpose — `staff_note` stays
+internal, and an officer's candid note ("caller obstructive, refer to
+audit") reaching the taxpayer would be a serious incident. A test
+asserts the note cannot leak into the delivered payload.
+
+When the taxpayer next opens the conversation, `generate()` delivers the
+reply before anything else — ahead of greeting detection and retrieval,
+because a human's answer outranks anything the bot would say. Delivery is
+marked *after* the text is composed, so a failure re-delivers rather than
+silently dropping it: being told twice is a far smaller harm than never
+being told.
+
+### SLA
+
+`first_response_at` and `resolved_at` are stamped on the ticket when they
+happen, not computed on read, so they survive later edits. First response
+means the first real officer touch — assignment, a note, a reply, or
+moving the ticket off `open`; leaving it open is not a response.
+
+`GET /v1/admin/tickets/sla?days=30` reports **medians**, not means: one
+ticket left over a holiday weekend would otherwise make the whole queue
+look broken.
+
 ## Still open
 
 - **Officer-visible unredaction** — needs a consent and audit design,
   not just code. Deliberately out of scope.
-- **No round trip.** Resolving a ticket does not reach the taxpayer.
+- **Staff dashboard UI.** The `/admin/tickets` Next.js route from Phase
+  18 is not built; the queue, transcript and reply all exist as API
+  only. `useTicketQueue` / `useTicketStats` hooks already exist in the
+  frontend for the analytics page.
+- **Real-time push.** Ticket arrival notifies a webhook, not the staff
+  UI over WebSocket.
 - **No assignment routing.** `topic` is computed but not used to route;
   `assignee` is still set by hand.
 - **Wider backend gap.** Consent, users, profiles, workflow sessions and
