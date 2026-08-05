@@ -128,6 +128,31 @@ for erasure to find.
 exists in `postgres.py` and takes the same arguments, so neither can
 recur quietly.
 
+Signature parity turned out not to be enough. `postgres.get_ticket`
+selects an explicit column list, and that list had drifted from the
+table it queries — the `tickets` DDL grew `user_id` and the SELECT did
+not, so on the backend production mandates the field silently vanished
+from every ticket dict. A signature check cannot see inside a SQL
+string. `TestTicketColumnParity` compares the declared columns against
+the declared SELECT lists and needs no database to do it;
+`TestLiveBackendRoundTrip` executes the real SQL when `POSTGRES_DSN` is
+set.
+
+### Verifying against a real Postgres
+
+The unit suites use SQLite. To exercise the backend production actually
+runs:
+
+```bash
+docker run -d --name ura-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=ura \
+  -p 55432:5432 postgres:16.6-alpine
+POSTGRES_DSN="postgresql://postgres:pw@localhost:55432/ura" \
+  python -m pytest tests/agents/test_backend_column_parity.py
+```
+
+Worth doing for any change touching `postgres.py`: the `user_id` defect
+above passed every SQLite test and every signature check.
+
 ## The round trip (Phase 18)
 
 Escalation used to be one-way: the officer resolved the ticket and
