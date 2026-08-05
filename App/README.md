@@ -1286,14 +1286,20 @@ changed and why.
   A stale claim here is what let tickets, conversation logging and the
   whole consent surface silently diverge.
 
-> **Known gap.** The memory (`user_facts`, `episodic_summaries`) and
-> audit (`audit_events`, `audit_anchors`) tables have no Postgres
-> mirror, and 23 call sites in `memory/`, `audit/` and `voice_consent.py`
-> reach `database._get_connection()` directly, bypassing the dispatch
-> entirely. Those remain per-replica on Postgres deployments — which
-> also means the hash-chained audit ledger cannot be verified across
-> pods, and the data-subject export/erasure helpers cannot be mirrored
-> until they are.
+- **Backend-agnostic query seam.** `database.query_one`, `query_all`,
+  `execute` and `execute_script` run on whichever backend is live —
+  callers write `?` placeholders and get dicts back; the Postgres path
+  rewrites the placeholders and reuses the pool. Modules that own their
+  own tables use this instead of reaching for a raw connection, so one
+  implementation of each query serves both backends.
+
+> **Known gap (narrowing).** The audit ledger now runs on the seam and
+> is verified against a real Postgres, including tamper detection.
+> Still bypassing it: `memory/semantic.py`, `memory/episodic.py` and
+> `voice_consent.py` (16 call sites), so `user_facts` and
+> `episodic_summaries` remain per-replica on Postgres deployments — and
+> `export_user_data`, `delete_user_cascade` and `export_eval_samples`
+> cannot be mirrored until they are.
 - `backend/app/database.py` — dispatch block at the bottom re-binds
   the public names to `postgres.*` when `ANALYTICS_BACKEND=postgres`.
   SQLite remains the zero-config default for single-node deploys;

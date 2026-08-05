@@ -63,6 +63,103 @@ def _get_connection() -> sqlite3.Connection:
     return conn
 
 
+# ---------------------------------------------------------------------------
+# Backend-agnostic query helpers
+#
+# Modules that own their own tables — the audit ledger, semantic and
+# episodic memory, voice consent — reached ``_get_connection()`` directly
+# and wrote SQLite SQL against it.  That bypasses the dispatch block
+# entirely, so on Postgres deployments those tables stayed on a
+# per-replica file no matter what the backend setting said.  The audit
+# ledger is the sharp case: a hash chain split across pods cannot be
+# verified, which is the one thing it exists to do.
+#
+# These helpers are the seam.  Callers write ``?`` placeholders and get
+# dicts back; the Postgres path rewrites the placeholders and reuses the
+# pool.  One implementation of each query, whichever backend is live.
+# ---------------------------------------------------------------------------
+def _pg_module() -> Any | None:
+    """The postgres module when it is the active backend, else ``None``."""
+    if ANALYTICS_BACKEND != "postgres":
+        return None
+    try:
+        from . import postgres as _pg
+    except Exception:  # pragma: no cover - import guarded at dispatch too
+        return None
+    return _pg if _pg._get_pool() is not None else None
+
+
+def _to_pg_placeholders(sql: str) -> str:
+    """Rewrite ``?`` placeholders to ``%s``.
+
+    Only bare ``?`` is used as a placeholder in this codebase; a literal
+    question mark inside a quoted string would need escaping, and none
+    of the call sites have one.  :func:`test_sql_portability` asserts
+    that stays true.
+    """
+    return sql.replace("?", "%s")
+
+
+def query_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    """Run a SELECT and return rows as dicts, on whichever backend is live."""
+    pg = _pg_module()
+    if pg is None:
+        rows = _get_connection().execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+    pool = pg._get_pool()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(_to_pg_placeholders(sql), params)
+        columns = [d[0] for d in cur.description or []]
+        return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
+
+
+def query_one(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+    rows = query_all(sql, params)
+    return rows[0] if rows else None
+
+
+def execute(sql: str, params: tuple[Any, ...] = ()) -> int:
+    """Run a write and return the affected row count, committing."""
+    pg = _pg_module()
+    if pg is None:
+        conn = _get_connection()
+        try:
+            cur = conn.execute(sql, params)
+            conn.commit()
+            return cur.rowcount
+        except Exception:
+            conn.rollback()
+            raise
+    pool = pg._get_pool()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(_to_pg_placeholders(sql), params)
+            affected = cur.rowcount
+        conn.commit()
+    return affected
+
+
+def execute_script(sql: str) -> None:
+    """Run a multi-statement DDL script (schema bootstrap).
+
+    SQLite needs ``executescript``; psycopg accepts several statements in
+    one ``execute``.  Types differ between the dialects, so a caller with
+    backend-specific DDL should pass the portable subset — INTEGER, TEXT
+    and REAL/DOUBLE PRECISION all parse on both.
+    """
+    pg = _pg_module()
+    if pg is None:
+        conn = _get_connection()
+        conn.executescript(sql)
+        conn.commit()
+        return
+    pool = pg._get_pool()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        conn.commit()
+
+
 def _ensure_column(
     conn: sqlite3.Connection,
     table: str,
