@@ -173,52 +173,67 @@ class NextDeadlineTool(Tool):
         limit = max(1, min(int(limit), 10))
         within_days = max(1, min(int(within_days), 365))
         today = _dt.date.today()
-        horizon = today + _dt.timedelta(days=within_days)
-
-        candidates: list[dict[str, Any]] = []
-        # Produce a rolling list of deadline dates from today through the horizon,
-        # advancing the year when a deadline has already passed in the current year.
-        years = {today.year, today.year + 1}
-        for y in sorted(years):
-            for month, day, name, desc, sc in _RECURRING_DEADLINES:
-                try:
-                    dl = _dt.date(y, month, day)
-                except ValueError:
-                    continue
-                if dl < today or dl > horizon:
-                    continue
-                if scope not in ("all", sc) and sc != "all":
-                    continue
-                candidates.append(
-                    {
-                        "date": dl.isoformat(),
-                        "days_away": (dl - today).days,
-                        "name": name,
-                        "description": desc,
-                        "scope": sc,
-                    }
-                )
-
-        candidates.sort(key=lambda c: c["date"])
-        # Deduplicate by date+name when the same deadline appears in both years
-        # (shouldn't happen but be safe)
-        seen: set[tuple[str, str]] = set()
-        unique: list[dict[str, Any]] = []
-        for c in candidates:
-            key = (c["date"], c["name"])
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(c)
-
+        unique = upcoming_deadlines(within_days=within_days, scope=scope, today=today)
         return {
             "ok": True,
             "today": today.isoformat(),
-            "horizon": horizon.isoformat(),
+            "horizon": (today + _dt.timedelta(days=within_days)).isoformat(),
             "scope": scope,
             "count": len(unique[:limit]),
             "deadlines": unique[:limit],
         }
+
+
+def upcoming_deadlines(
+    within_days: int = 90,
+    scope: str = "all",
+    today: _dt.date | None = None,
+) -> list[dict[str, Any]]:
+    """Deadlines falling within *within_days* of *today*, soonest first.
+
+    Extracted from :class:`NextDeadlineTool` so the reminder selector
+    can reuse it rather than grow a second copy of the recurrence rules,
+    and so *today* can be injected — the tool hardcoded
+    ``date.today()``, which made every date-dependent assertion about it
+    depend on the day the suite happened to run.
+    """
+    today = today or _dt.date.today()
+    within_days = max(1, min(int(within_days), 365))
+    horizon = today + _dt.timedelta(days=within_days)
+
+    candidates: list[dict[str, Any]] = []
+    # Roll forward into next year so a December run still sees January.
+    for year in sorted({today.year, today.year + 1}):
+        for month, day, name, desc, sc in _RECURRING_DEADLINES:
+            try:
+                due = _dt.date(year, month, day)
+            except ValueError:
+                continue
+            if due < today or due > horizon:
+                continue
+            if scope not in ("all", sc) and sc != "all":
+                continue
+            candidates.append(
+                {
+                    "date": due.isoformat(),
+                    "days_away": (due - today).days,
+                    "days_until": (due - today).days,
+                    "name": name,
+                    "description": desc,
+                    "scope": sc,
+                }
+            )
+
+    candidates.sort(key=lambda c: c["date"])
+    seen: set[tuple[str, str]] = set()
+    unique: list[dict[str, Any]] = []
+    for candidate in candidates:
+        key = (candidate["date"], candidate["name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
 
 
 ToolRegistry.register(CurrentDateTool())
