@@ -1639,7 +1639,11 @@ an operator flips a flag.
   - `GET /v1/admin/tickets/stats?days=30`
   - `GET /v1/admin/tickets/{id}` — detail view, includes the full
     conversation transcript captured when the ticket was raised
-  - `PATCH /v1/admin/tickets/{id}` (status / assignee / note / priority)
+  - `GET /v1/admin/tickets/sla?days=30` — median time-to-first-response
+    and time-to-resolution
+  - `PATCH /v1/admin/tickets/{id}` (status / assignee / note / priority /
+    `officer_reply`). `officer_reply` is delivered to the **taxpayer** on
+    their next turn; `staff_note` stays internal
 - `ticket_id` surfaced in `ChatResponse` so the frontend can show
   "ticket 1234abcd" to the user
 

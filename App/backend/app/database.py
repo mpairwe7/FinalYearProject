@@ -229,6 +229,16 @@ def init_db() -> None:
             -- still holding the taxpayer's transcript.  Stamping the
             -- subject here makes erasure independent of that purge.
             user_id        TEXT DEFAULT '',
+            -- Phase 18 round trip: what the officer wants the taxpayer
+            -- to see, and whether they have seen it.  Without this the
+            -- escalation loop is one-way — a resolved ticket never
+            -- reaches the person who raised it.
+            officer_reply  TEXT DEFAULT '',
+            reply_at       REAL DEFAULT 0,
+            reply_delivered_at REAL DEFAULT 0,
+            -- SLA: first officer touch, and resolution.
+            first_response_at  REAL DEFAULT 0,
+            resolved_at        REAL DEFAULT 0,
             assignee       TEXT DEFAULT '',
             staff_note     TEXT DEFAULT '',
             created_at     REAL NOT NULL,
@@ -341,6 +351,11 @@ def init_db() -> None:
     _ensure_column(conn, "tickets", "response_judge_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "tickets", "transcript_json", "TEXT DEFAULT '[]'")
     _ensure_column(conn, "tickets", "user_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "tickets", "officer_reply", "TEXT DEFAULT ''")
+    _ensure_column(conn, "tickets", "reply_at", "REAL DEFAULT 0")
+    _ensure_column(conn, "tickets", "reply_delivered_at", "REAL DEFAULT 0")
+    _ensure_column(conn, "tickets", "first_response_at", "REAL DEFAULT 0")
+    _ensure_column(conn, "tickets", "resolved_at", "REAL DEFAULT 0")
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
     _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
@@ -1017,6 +1032,91 @@ def list_tickets(
     return [_hydrate_ticket(r) for r in rows]
 
 
+def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
+    """An officer reply for this conversation the taxpayer has not seen.
+
+    Closes the loop the escalation pipeline left open: a resolved ticket
+    used to reach nobody. The taxpayer is told a human will follow up,
+    so when they come back the follow-up should be waiting rather than
+    sitting in a queue they cannot see.
+    """
+    if not conversation_id:
+        return None
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT id, officer_reply, reply_at, assignee, status FROM tickets
+           WHERE conversation_id = ?
+             AND officer_reply != ''
+             AND reply_delivered_at = 0
+           ORDER BY reply_at ASC LIMIT 1""",
+        (conversation_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def mark_reply_delivered(ticket_id: str) -> bool:
+    """Record that the taxpayer has been shown the officer's reply.
+
+    Separate from writing the reply so a delivery failure re-delivers
+    instead of silently dropping it — the taxpayer seeing it twice is a
+    far smaller harm than never seeing it.
+    """
+    if not ticket_id:
+        return False
+    conn = _get_connection()
+    try:
+        cur = conn.execute(
+            "UPDATE tickets SET reply_delivered_at = ? WHERE id = ? AND reply_delivered_at = 0",
+            (time.time(), ticket_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception:
+        logger.exception("failed to mark officer reply delivered")
+        conn.rollback()
+        return False
+
+
+def sla_stats(days: int = 30) -> dict[str, Any]:
+    """Time-to-first-response and time-to-resolution over *days*.
+
+    Medians rather than means: one ticket left open over a holiday
+    weekend would otherwise make the whole queue look broken.
+    """
+    conn = _get_connection()
+    cutoff = time.time() - (days * 86400)
+    rows = conn.execute(
+        """SELECT created_at, first_response_at, resolved_at, priority
+           FROM tickets WHERE created_at >= ?""",
+        (cutoff,),
+    ).fetchall()
+
+    def _median(values: list[float]) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2:
+            return round(ordered[mid], 1)
+        return round((ordered[mid - 1] + ordered[mid]) / 2, 1)
+
+    response = [
+        r["first_response_at"] - r["created_at"]
+        for r in rows
+        if r["first_response_at"]
+    ]
+    resolution = [r["resolved_at"] - r["created_at"] for r in rows if r["resolved_at"]]
+    return {
+        "period_days": days,
+        "tickets": len(rows),
+        "responded": len(response),
+        "resolved": len(resolution),
+        "awaiting_first_response": sum(1 for r in rows if not r["first_response_at"]),
+        "median_response_seconds": _median(response),
+        "median_resolution_seconds": _median(resolution),
+    }
+
+
 def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
     """Return the newest unresolved ticket for *conversation_id*, if any.
 
@@ -1052,11 +1152,43 @@ def update_ticket(
     assignee: str | None = None,
     staff_note: str | None = None,
     priority: str | None = None,
+    officer_reply: str | None = None,
 ) -> bool:
-    """Update mutable ticket fields.  Returns True if a row was touched."""
+    """Update mutable ticket fields.  Returns True if a row was touched.
+
+    ``officer_reply`` is what the taxpayer will actually be shown when
+    they next open the conversation — distinct from ``staff_note``,
+    which stays internal.  Keeping them separate matters: an officer
+    writing "caller is being obstructive, escalate to audit" into a
+    field the taxpayer can read would be a serious incident.
+
+    SLA stamps (``first_response_at``, ``resolved_at``) are set here
+    rather than computed on read, so they survive later edits and cannot
+    drift if the definition of "responded" changes.
+    """
     conn = _get_connection()
     sets: list[str] = []
     params: list[Any] = []
+    now = time.time()
+    existing = get_ticket(ticket_id)
+    if existing is None:
+        return False
+    # First officer touch — assignment, a note, a reply, or moving it off
+    # 'open'. Whichever happens first is the response time.
+    is_touch = any(
+        v is not None for v in (assignee, staff_note, officer_reply)
+    ) or (status is not None and status != "open")
+    if is_touch and not existing.get("first_response_at"):
+        sets.append("first_response_at = ?")
+        params.append(now)
+    if status in ("resolved", "wontfix") and not existing.get("resolved_at"):
+        sets.append("resolved_at = ?")
+        params.append(now)
+    if officer_reply is not None:
+        sets.append("officer_reply = ?")
+        params.append(officer_reply[:4000])
+        sets.append("reply_at = ?")
+        params.append(now)
     if status is not None:
         if status not in ("open", "assigned", "resolved", "wontfix"):
             return False
@@ -1076,7 +1208,7 @@ def update_ticket(
     if not sets:
         return False
     sets.append("updated_at = ?")
-    params.append(time.time())
+    params.append(now)
     params.append(ticket_id)
     try:
         cursor = conn.execute(
@@ -1548,6 +1680,9 @@ if ANALYTICS_BACKEND == "postgres":
         update_ticket = _pg.update_ticket  # type: ignore
         ticket_stats = _pg.ticket_stats  # type: ignore
         find_open_ticket = _pg.find_open_ticket  # type: ignore
+        pending_officer_reply = _pg.pending_officer_reply  # type: ignore
+        mark_reply_delivered = _pg.mark_reply_delivered  # type: ignore
+        sla_stats = _pg.sla_stats  # type: ignore
         logger.info("Analytics backend: postgres")
     except Exception:
         logger.exception("Postgres backend requested but import failed; falling back to sqlite")

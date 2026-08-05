@@ -144,6 +144,11 @@ def init_db() -> None:
         response_judge_json TEXT DEFAULT '{}',
         transcript_json     TEXT DEFAULT '[]',
         user_id             TEXT DEFAULT '',
+        officer_reply       TEXT DEFAULT '',
+        reply_at            DOUBLE PRECISION DEFAULT 0,
+        reply_delivered_at  DOUBLE PRECISION DEFAULT 0,
+        first_response_at   DOUBLE PRECISION DEFAULT 0,
+        resolved_at         DOUBLE PRECISION DEFAULT 0,
         assignee            TEXT DEFAULT '',
         staff_note          TEXT DEFAULT '',
         created_at          DOUBLE PRECISION NOT NULL,
@@ -172,6 +177,14 @@ def init_db() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript_json TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            for _col, _ddl in (
+                ("officer_reply", "TEXT DEFAULT ''"),
+                ("reply_at", "DOUBLE PRECISION DEFAULT 0"),
+                ("reply_delivered_at", "DOUBLE PRECISION DEFAULT 0"),
+                ("first_response_at", "DOUBLE PRECISION DEFAULT 0"),
+                ("resolved_at", "DOUBLE PRECISION DEFAULT 0"),
+            ):
+                cur.execute(f"ALTER TABLE tickets ADD COLUMN IF NOT EXISTS {_col} {_ddl}")
             cur.execute(
                 "UPDATE conversations SET conversation_id = id WHERE conversation_id IS NULL OR conversation_id = ''"
             )
@@ -572,7 +585,8 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
 _TICKET_COLUMNS = (
     "id, conversation_id, session_id, status, priority, reason, "
     "user_query, bot_reply, handoff_json, response_judge_json, "
-    "assignee, staff_note, created_at, updated_at"
+    "assignee, staff_note, created_at, updated_at, "
+    "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at"
 )
 #: Detail view — the transcript is the point of the ticket.
 _TICKET_COLUMNS_FULL = _TICKET_COLUMNS + ", transcript_json"
@@ -717,12 +731,31 @@ def update_ticket(
     assignee: str | None = None,
     staff_note: str | None = None,
     priority: str | None = None,
+    officer_reply: str | None = None,
 ) -> bool:
     pool = _get_pool()
     if pool is None:
         return False
     sets: list[str] = []
     params: list[Any] = []
+    now = time.time()
+    existing = get_ticket(ticket_id)
+    if existing is None:
+        return False
+    is_touch = any(v is not None for v in (assignee, staff_note, officer_reply)) or (
+        status is not None and status != "open"
+    )
+    if is_touch and not existing.get("first_response_at"):
+        sets.append("first_response_at = %s")
+        params.append(now)
+    if status in ("resolved", "wontfix") and not existing.get("resolved_at"):
+        sets.append("resolved_at = %s")
+        params.append(now)
+    if officer_reply is not None:
+        sets.append("officer_reply = %s")
+        params.append(officer_reply[:4000])
+        sets.append("reply_at = %s")
+        params.append(now)
     if status is not None:
         sets.append("status = %s")
         params.append(status)
@@ -738,7 +771,7 @@ def update_ticket(
     if not sets:
         return False
     sets.append("updated_at = %s")
-    params.extend([time.time(), ticket_id])
+    params.extend([now, ticket_id])
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(f"UPDATE tickets SET {', '.join(sets)} WHERE id = %s", params)
@@ -819,3 +852,86 @@ def get_conversation_transcript(
         }
         for r in reversed(rows)
     ]
+
+
+def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
+    """Postgres mirror of :func:`database.pending_officer_reply`."""
+    pool = _get_pool()
+    if pool is None or not conversation_id:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, officer_reply, reply_at, assignee, status FROM tickets
+               WHERE conversation_id = %s AND officer_reply != ''
+                 AND reply_delivered_at = 0
+               ORDER BY reply_at ASC LIMIT 1""",
+            (conversation_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return dict(
+        zip(("id", "officer_reply", "reply_at", "assignee", "status"), row, strict=True)
+    )
+
+
+def mark_reply_delivered(ticket_id: str) -> bool:
+    """Postgres mirror of :func:`database.mark_reply_delivered`."""
+    pool = _get_pool()
+    if pool is None or not ticket_id:
+        return False
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE tickets SET reply_delivered_at = %s "
+                "WHERE id = %s AND reply_delivered_at = 0",
+                (time.time(), ticket_id),
+            )
+            touched = cur.rowcount > 0
+        conn.commit()
+    return touched
+
+
+def sla_stats(days: int = 30) -> dict[str, Any]:
+    """Postgres mirror of :func:`database.sla_stats`."""
+    pool = _get_pool()
+    empty = {
+        "period_days": days,
+        "tickets": 0,
+        "responded": 0,
+        "resolved": 0,
+        "awaiting_first_response": 0,
+        "median_response_seconds": None,
+        "median_resolution_seconds": None,
+    }
+    if pool is None:
+        return empty
+    cutoff = time.time() - (days * 86400)
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT created_at, first_response_at, resolved_at FROM tickets "
+            "WHERE created_at >= %s",
+            (cutoff,),
+        )
+        rows = cur.fetchall()
+
+    def _median(values: list[float]) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2:
+            return round(ordered[mid], 1)
+        return round((ordered[mid - 1] + ordered[mid]) / 2, 1)
+
+    response = [r[1] - r[0] for r in rows if r[1]]
+    resolution = [r[2] - r[0] for r in rows if r[2]]
+    return {
+        "period_days": days,
+        "tickets": len(rows),
+        "responded": len(response),
+        "resolved": len(resolution),
+        "awaiting_first_response": sum(1 for r in rows if not r[1]),
+        "median_response_seconds": _median(response),
+        "median_resolution_seconds": _median(resolution),
+    }
