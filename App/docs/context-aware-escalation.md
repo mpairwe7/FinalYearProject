@@ -183,6 +183,30 @@ moving the ticket off `open`; leaving it open is not a response.
 ticket left over a holiday weekend would otherwise make the whole queue
 look broken.
 
+## Routing
+
+`_handoff_topic` has classified every escalation since the handoff
+packet existed, and nothing acted on it — customs disputes sat next to
+TIN registrations and officers triaged by reading each row.
+
+Tickets now carry a `team`, mapped from the topic at escalation time:
+
+| Topic | Team |
+| --- | --- |
+| `objection_or_dispute` | `disputes` |
+| `account_specific` | `taxpayer_accounts` |
+| `customs` | `customs` |
+| `registration` | `registration` |
+| `general_tax_support` | `general` |
+
+Override any of them with `ESCALATION_TEAM_<TOPIC>` so a deployment
+matches its own org chart without a code change. A topic the map has not
+caught up with goes to `general` rather than nowhere.
+
+`GET /v1/admin/tickets?team=customs` filters the queue, and the response
+carries the team list in effect so the UI does not hardcode an org
+chart.
+
 ## The staff queue
 
 `/admin/tickets` (Next.js) renders the queue the backend orders —
@@ -212,8 +236,9 @@ mid-call.
   not just code. Deliberately out of scope.
 - **Real-time push.** Ticket arrival notifies a webhook, not the staff
   UI over WebSocket. The queue polls every 20 s instead.
-- **No assignment routing.** `topic` is computed but not used to route;
-  `assignee` is still set by hand.
+- **No skills-based assignment within a team.** Routing puts a ticket
+  in front of the right team; picking the individual officer is still
+  manual.
 - **Wider backend gap.** Consent, users, profiles, workflow sessions and
   the data-subject export/erasure helpers still have no Postgres mirror
   — the same class of bug as the two above, outside this feature's

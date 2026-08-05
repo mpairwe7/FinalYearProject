@@ -50,10 +50,15 @@ export function useTicketQueue(status = "open", limit = 8) {
  * escalation that has been waiting is the thing an officer most needs
  * to see. The backend orders urgent-first, then longest-waiting.
  */
-export function useTicketQueueFull(status = "open", priority = "", limit = 50) {
+export function useTicketQueueFull(
+  status = "open",
+  priority = "",
+  team = "",
+  limit = 50,
+) {
   return useQuery({
-    queryKey: ["ticketQueueFull", status, priority, limit],
-    queryFn: () => analyticsApi.tickets(status, limit, priority),
+    queryKey: ["ticketQueueFull", status, priority, team, limit],
+    queryFn: () => analyticsApi.tickets(status, limit, priority, team),
     staleTime: 10_000,
     gcTime: 5 * 60_000,
     refetchInterval: 20_000,

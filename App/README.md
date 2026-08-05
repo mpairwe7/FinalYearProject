@@ -1046,6 +1046,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `ESCALATION_WEBHOOK_TOKEN` | Bearer token for that webhook, sent as a header | _(unset)_ |
 | `ESCALATION_WEBHOOK_TIMEOUT` | Webhook timeout in seconds | `5` |
 | `ESCALATION_WEBHOOK_MIN_PRIORITY` | Lowest ticket priority worth notifying | `normal` |
+| `ESCALATION_TEAM_<TOPIC>` | Override the team that owns a handoff topic, e.g. `ESCALATION_TEAM_CUSTOMS=border-ops` | per-topic defaults |
 | `FLAG_TOOL_RAG` | Expose only the top-k relevant tool schemas per query instead of every registered one | `false` |
 | `TOOL_RAG_TOP_K` | Tools selected when `FLAG_TOOL_RAG` is on (rails are always added) | `5` |
 | `TOOL_MAX_CALLS_PER_TURN` | Total tool dispatches allowed in one turn | `8` |

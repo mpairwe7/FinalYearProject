@@ -326,6 +326,10 @@ def init_db() -> None:
             -- still holding the taxpayer's transcript.  Stamping the
             -- subject here makes erasure independent of that purge.
             user_id        TEXT DEFAULT '',
+            -- Which team owns this escalation.  `_handoff_topic` already
+            -- classified every ticket; nothing acted on it, so officers
+            -- triaged a mixed queue by reading each row.
+            team           TEXT DEFAULT '',
             -- Phase 18 round trip: what the officer wants the taxpayer
             -- to see, and whether they have seen it.  Without this the
             -- escalation loop is one-way — a resolved ticket never
@@ -453,6 +457,7 @@ def init_db() -> None:
     _ensure_column(conn, "tickets", "reply_delivered_at", "REAL DEFAULT 0")
     _ensure_column(conn, "tickets", "first_response_at", "REAL DEFAULT 0")
     _ensure_column(conn, "tickets", "resolved_at", "REAL DEFAULT 0")
+    _ensure_column(conn, "tickets", "team", "TEXT DEFAULT ''")
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
     _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
@@ -1031,6 +1036,7 @@ def create_ticket(
     response_judge: dict[str, Any] | None = None,
     transcript: list[dict[str, Any]] | None = None,
     user_id: str = "",
+    team: str = "",
 ) -> dict[str, Any]:
     """Create a new escalation ticket and return it.
 
@@ -1050,8 +1056,9 @@ def create_ticket(
             """INSERT INTO tickets (id, conversation_id, session_id, status, priority,
                                     reason, user_query, bot_reply,
                                     handoff_json, response_judge_json, transcript_json,
-                                    user_id, assignee, staff_note, created_at, updated_at)
-               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)""",
+                                    user_id, team, assignee, staff_note,
+                                    created_at, updated_at)
+               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)""",
             (
                 ticket_id,
                 conversation_id,
@@ -1064,6 +1071,7 @@ def create_ticket(
                 _json_dumps(response_judge, "{}"),
                 _json_dumps(transcript, "[]"),
                 user_id,
+                team,
                 now,
                 now,
             ),
@@ -1082,6 +1090,7 @@ def create_ticket(
         "handoff": handoff or {},
         "response_judge": response_judge or {},
         "transcript": transcript or [],
+        "team": team,
         "created_at": now,
     }
 
@@ -1091,6 +1100,7 @@ def list_tickets(
     limit: int = 50,
     offset: int = 0,
     priority: str | None = None,
+    team: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tickets, urgent first then oldest within a priority.
 
@@ -1104,9 +1114,15 @@ def list_tickets(
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
     sql = (
+        # Queue view — every column except transcript_json, which the
+        # detail view carries.  A column added to the table but not to
+        # this list vanishes from every queue row; see
+        # TestTicketColumnParity, which now checks both backends.
         "SELECT id, conversation_id, session_id, status, priority, reason, "
         "       user_query, bot_reply, handoff_json, response_judge_json, "
-        "       assignee, staff_note, created_at, updated_at "
+        "       assignee, staff_note, created_at, updated_at, user_id, team, "
+        "       officer_reply, reply_at, reply_delivered_at, "
+        "       first_response_at, resolved_at "
         "FROM tickets"
     )
     params: list[Any] = []
@@ -1114,8 +1130,11 @@ def list_tickets(
         sql += " WHERE status = ?"
         params.append(status)
     if priority:
-        sql += " AND priority = ?" if status else " WHERE priority = ?"
+        sql += " AND priority = ?" if (status or params) else " WHERE priority = ?"
         params.append(priority)
+    if team:
+        sql += " AND team = ?" if (status or params) else " WHERE team = ?"
+        params.append(team)
     sql += (
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"

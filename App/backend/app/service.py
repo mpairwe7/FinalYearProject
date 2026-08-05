@@ -43,7 +43,7 @@ from . import database as db
 from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
-from .escalation_notify import notify_ticket_created
+from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.supervisor import (
     _FAREWELL_PHRASES,
     _GRATITUDE_PHRASES,
@@ -2659,6 +2659,10 @@ class ChatModel:
                 response_judge=response_judge,
                 transcript=transcript,
                 user_id=user_id,
+                # Route on the topic the handoff packet already
+                # classified, so an officer sees their own queue rather
+                # than triaging a mixed one by reading every row.
+                team=team_for_topic(str((handoff or {}).get("topic", ""))),
             )
             ticket_id = ticket.get("id", "")
             if handoff is not None and ticket_id:

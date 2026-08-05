@@ -30,6 +30,7 @@ from .analytics import AnalyticsMiddleware, metrics
 from .authority import authority_required, get_authority_status
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
 from .auth.models import ConsentGrantRequest, ConsentWithdrawRequest, ProfileUpdateRequest
+from .escalation_notify import known_teams
 from .models import (
     AnalyticsDashboard,
     AnalyticsEvent,
@@ -1680,6 +1681,7 @@ def list_tickets_endpoint(
     limit: int = 50,
     offset: int = 0,
     priority: str | None = None,
+    team: str | None = None,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """List escalation tickets for URA staff triage.
@@ -1702,11 +1704,15 @@ def list_tickets_endpoint(
     if priority and priority not in ("low", "normal", "high", "urgent"):
         raise HTTPException(status_code=400, detail="invalid priority")
 
-    rows = db.list_tickets(status=status, limit=limit, offset=offset, priority=priority)
+    rows = db.list_tickets(
+        status=status, limit=limit, offset=offset, priority=priority, team=team
+    )
     return {
         "count": len(rows),
         "status_filter": status or "all",
         "priority_filter": priority or "all",
+        "team_filter": team or "all",
+        "teams": known_teams(),
         "limit": limit,
         "offset": offset,
         "tickets": rows,

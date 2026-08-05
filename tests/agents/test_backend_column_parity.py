@@ -98,6 +98,45 @@ class TestTicketColumnParity:
             assert column in declared, f"conversations.{column} missing on Postgres"
 
 
+class TestSqliteQueueColumnParity:
+    """SQLite's queue view has an explicit column list too.
+
+    The Postgres check above was written after `get_ticket` silently
+    dropped `user_id`. The same shape exists in `database.list_tickets`,
+    and adding `team` to the table promptly reproduced the bug there —
+    a KeyError the moment anything read the new column.
+    """
+
+    def test_the_queue_select_covers_the_table(self, tmp_db):
+        columns = {
+            row["name"]
+            for row in tmp_db._get_connection().execute("PRAGMA table_info(tickets)")
+        }
+        created = tmp_db.create_ticket(reason="probe")
+        row = tmp_db.list_tickets()[0]
+        # transcript_json is held back on purpose; everything else must
+        # survive into the queue row.
+        missing = sorted(
+            column
+            for column in columns
+            if column not in {"transcript_json", "handoff_json", "response_judge_json"}
+            and column not in row
+        )
+        assert not missing, (
+            f"tickets columns absent from list_tickets: {missing}. "
+            "A column added to the table but not the SELECT vanishes "
+            "from every queue row."
+        )
+        assert row["id"] == created["id"]
+
+    def test_the_detail_view_returns_everything(self, tmp_db):
+        created = tmp_db.create_ticket(reason="probe", team="customs")
+        detail = tmp_db.get_ticket(created["id"])
+        assert detail is not None
+        assert detail["team"] == "customs"
+        assert "transcript" in detail
+
+
 @pytest.mark.skipif(
     not os.getenv("POSTGRES_DSN"),
     reason="set POSTGRES_DSN to run the live backend round-trip",
