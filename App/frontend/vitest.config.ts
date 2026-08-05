@@ -1,8 +1,16 @@
+import path from "node:path";
+
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
+  // Next.js resolves "@/..." from tsconfig `paths`; vitest does not read
+  // those, so any module importing through the alias was untestable —
+  // which is why services/analyticsApi.ts had no unit tests.
+  resolve: {
+    alias: { "@": path.resolve(__dirname, "./src") },
+  },
   test: {
     globals: true,
     environment: "jsdom",

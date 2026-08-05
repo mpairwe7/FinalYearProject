@@ -1683,6 +1683,10 @@ an operator flips a flag.
   - `PATCH /v1/admin/tickets/{id}` (status / assignee / note / priority /
     `officer_reply`). `officer_reply` is delivered to the **taxpayer** on
     their next turn; `staff_note` stays internal
+- Staff UI at `/admin/tickets` (Next.js) — the queue in backend order
+  (urgent first, then longest-waiting), the full transcript per ticket,
+  and separate controls for the taxpayer-facing reply and the internal
+  note
 - `ticket_id` surfaced in `ChatResponse` so the frontend can show
   "ticket 1234abcd" to the user
 
