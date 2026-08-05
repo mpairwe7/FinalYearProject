@@ -125,6 +125,46 @@ class TestNoModuleBypassesTheSeam:
         )
 
 
+class TestEveryPublicFunctionReachesTheProductionBackend:
+    """No public function may be SQLite-only.
+
+    A function reaches Postgres one of two ways: the dispatch block
+    re-binds it to a mirror, or it is written against the seam and works
+    on both unchanged. Anything that does neither silently writes to a
+    per-replica file in production — which is how tickets, conversation
+    logging, the consent surface, the audit ledger, memory and the voice
+    audit log all ended up invisible there.
+    """
+
+    def test_no_function_is_stranded_on_sqlite(self):
+        import inspect
+
+        from app import postgres as pg
+
+        source = Path(db.__file__).read_text()
+        dispatched = set(re.findall(r"^\s+(\w+) = _pg\.", source, re.M))
+        seam = {"query_all", "query_one", "execute", "execute_script"}
+        stranded = []
+        for name, obj in vars(db).items():
+            if name.startswith("_") or not inspect.isfunction(obj):
+                continue
+            if getattr(obj, "__module__", "") != "app.database":
+                continue
+            if name in dispatched or name in seam or hasattr(pg, name):
+                continue
+            body = inspect.getsource(obj)
+            # Written against the seam counts: it works on both backends
+            # unchanged, which is better than a second copy.
+            if any(f"{helper}(" in body for helper in seam):
+                continue
+            if "_get_connection()" in body:
+                stranded.append(name)
+        assert not stranded, (
+            f"SQLite-only in production: {stranded}. Either dispatch a "
+            "Postgres mirror or write it against the seam."
+        )
+
+
 class TestAuditUsesTheSeam:
     def test_the_ledger_no_longer_reaches_for_a_raw_connection(self):
         for name in ("audit/ledger.py", "audit/verifier.py"):
@@ -235,6 +275,47 @@ class TestAuditOnPostgres:
         )
         assert len(episodic.list_for_user(user)) == 1
         assert episodic.delete_for_user(user) == 1
+
+    def test_subject_access_and_erasure_work_on_postgres(self):
+        """UDPA export and erasure, end to end on the production backend."""
+        db.init_db()
+        sub = f"sub-{os.getpid()}"
+        conversation = f"c-{os.getpid()}"
+        user = db.upsert_user(sub, email="x@y.com")
+        db.upsert_user_profile(user["id"], {"taxpayer_type": "individual"})
+        db.grant_consent(user["id"], "personalization", "v1")
+        db.log_conversation(
+            session_id="s",
+            conversation_id=conversation,
+            user_message="q",
+            bot_reply="a",
+            contexts='["ctx"]',
+            user_id=sub,
+        )
+        transcript = db.get_conversation_transcript(conversation_id=conversation)
+        db.create_ticket(
+            reason="human requested",
+            conversation_id=conversation,
+            transcript=transcript,
+            user_id=sub,
+        )
+
+        exported = db.export_user_data(user["id"], external_id=sub)
+        assert exported["user"] and exported["profile"]
+        assert len(exported["consents"]) == 1
+        assert len(exported["conversations"]) == 1
+        assert len(exported["tickets"]) == 1
+
+        counts = db.delete_user_cascade(user["id"], external_id=sub)
+        assert counts["users"] == 1
+        assert counts["tickets"] >= 1
+        assert counts["conversations"] == 1
+
+        after = db.export_user_data(user["id"], external_id=sub)
+        assert after["user"] is None
+        assert after["consents"] == []
+        assert after["conversations"] == []
+        assert after["tickets"] == []
 
     def test_merkle_anchoring_works(self):
         from app.audit.ledger import AuditLedger

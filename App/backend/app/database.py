@@ -981,9 +981,8 @@ def export_eval_samples(days: int = 30, limit: int = 200) -> list[dict[str, Any]
     rows carry the actual top-k retrieved passages, letting the eval harness
     score faithfulness against real context instead of the answer itself.
     """
-    conn = _get_connection()
     cutoff = time.time() - (days * 86400)
-    rows = conn.execute(
+    return query_all(
         """SELECT user_message AS user_query, bot_reply, contexts, created_at
            FROM conversations
            WHERE created_at >= ?
@@ -991,8 +990,7 @@ def export_eval_samples(days: int = 30, limit: int = 200) -> list[dict[str, Any]
              AND contexts NOT IN ('', '[]')
            ORDER BY created_at DESC LIMIT ?""",
         (cutoff, limit),
-    ).fetchall()
-    return [dict(r) for r in rows]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1616,27 +1614,20 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
     escalation tickets, linked by ``conversation_id``) are returned under it.
     ``facts`` is filled by the caller from the memory service.
     """
-    conn = _get_connection()
     conversations: list[dict[str, Any]] = []
     tickets: list[dict[str, Any]] = []
     if external_id:
-        conversations = [
-            dict(r)
-            for r in conn.execute(
-                "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
-                (external_id,),
-            ).fetchall()
-        ]
+        conversations = query_all(
+            "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
+            (external_id,),
+        )
         conv_ids = [c["conversation_id"] for c in conversations if c.get("conversation_id")]
         if conv_ids:
             ph = ",".join("?" * len(conv_ids))
-            tickets = [
-                dict(r)
-                for r in conn.execute(
-                    f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
-                    conv_ids,
-                ).fetchall()
-            ]
+            tickets = query_all(
+                f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                tuple(conv_ids),
+            )
     return {
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
@@ -1659,39 +1650,37 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
     escalation tickets, linked by ``conversation_id``) are erased under it. Memory
     facts are erased by the caller via the memory service.
     """
-    conn = _get_connection()
     counts: dict[str, int] = {}
 
     # External-id-keyed: chat history + the escalation tickets linked to it.
     if external_id:
         conv_ids = [
             r["conversation_id"]
-            for r in conn.execute(
+            for r in query_all(
                 "SELECT conversation_id FROM conversations "
                 "WHERE user_id = ? AND conversation_id IS NOT NULL",
                 (external_id,),
-            ).fetchall()
+            )
         ]
         # Delete by user_id AND by conversation_id: the first reaches
         # tickets whose conversation has already been purged, the second
         # reaches tickets raised before user_id was stamped on the row.
         try:
-            deleted = conn.execute(
-                "DELETE FROM tickets WHERE user_id = ?", (external_id,)
-            ).rowcount
+            deleted = execute("DELETE FROM tickets WHERE user_id = ?", (external_id,))
             if conv_ids:
                 ph = ",".join("?" * len(conv_ids))
-                deleted += conn.execute(
+                deleted += execute(
                     f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
-                    conv_ids,
-                ).rowcount
+                    tuple(conv_ids),
+                )
             counts["tickets"] = deleted
         except Exception:
             logger.exception("delete_user_cascade: tickets")
             counts["tickets"] = -1
         try:
-            cur = conn.execute("DELETE FROM conversations WHERE user_id = ?", (external_id,))
-            counts["conversations"] = cur.rowcount
+            counts["conversations"] = execute(
+                "DELETE FROM conversations WHERE user_id = ?", (external_id,)
+            )
         except Exception:
             logger.exception("delete_user_cascade: conversations")
             counts["conversations"] = -1
@@ -1699,15 +1688,13 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
     # Internal-UUID-keyed: identity, profile, consent receipts.
     for table, col in (("consent_receipts", "user_id"), ("user_profiles", "user_id"), ("users", "id")):
         try:
-            cursor = conn.execute(
+            counts[table] = execute(
                 f"DELETE FROM {table} WHERE {col} = ?",  # noqa: S608 — hardcoded list
                 (user_id,),
             )
-            counts[table] = cursor.rowcount
         except Exception:
             logger.exception("delete_user_cascade: %s", table)
             counts[table] = -1
-    conn.commit()
     return counts
 
 

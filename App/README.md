@@ -1299,10 +1299,18 @@ changed and why.
   `test_backend_shim.py` fails if any module under `app/` reaches for
   `_get_connection()` again.
 
-> **Remaining.** `export_user_data`, `delete_user_cascade` and
-> `export_eval_samples` are still SQLite-only. They cascade across every
-> user-data table, so they are the last step rather than the first —
-> tracked as Phase C.
+  **Every public function reaches the production backend.** A function
+  gets there one of two ways: the dispatch block re-binds it to a
+  Postgres mirror, or it is written against the seam and runs on both
+  unchanged. `export_user_data`, `delete_user_cascade` and
+  `export_eval_samples` take the second route — one implementation, no
+  mirror to drift. `test_backend_shim.py` fails if any public function
+  does neither.
+
+UDPA subject access and erasure are verified end to end on Postgres:
+export returns the user, profile, consents, conversations and tickets;
+erasure removes all of them; and a post-erasure export comes back
+empty.
 - `backend/app/database.py` — dispatch block at the bottom re-binds
   the public names to `postgres.*` when `ANALYTICS_BACKEND=postgres`.
   SQLite remains the zero-config default for single-node deploys;
