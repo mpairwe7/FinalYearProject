@@ -87,6 +87,44 @@ class TestShimOnSqlite:
         assert db.query_all("SELECT reason FROM tickets")  # table still there
 
 
+#: Every module that owns its own tables and once bypassed the dispatch.
+_MIGRATED_MODULES = (
+    "audit/ledger.py",
+    "audit/verifier.py",
+    "memory/semantic.py",
+    "memory/episodic.py",
+    "voice_consent.py",
+)
+
+
+class TestNoModuleBypassesTheSeam:
+    def test_the_whole_app_is_free_of_raw_connection_reaches(self):
+        """23 call sites once went straight to SQLite. None may return.
+
+        A module that grabs ``_get_connection()`` writes to a
+        per-replica file no matter what ANALYTICS_BACKEND says — which
+        is how the audit ledger, memory and voice audit all ended up
+        invisible on the backend production runs.
+        """
+        app_dir = Path(db.__file__).parent
+        offenders = []
+        for path in app_dir.rglob("*.py"):
+            if path.name == "database.py":
+                continue  # defines it
+            if "_get_connection()" in path.read_text():
+                offenders.append(str(path.relative_to(app_dir)))
+        assert not offenders, f"modules bypassing the backend seam: {offenders}"
+
+    @pytest.mark.parametrize("name", _MIGRATED_MODULES)
+    def test_no_question_mark_inside_a_string_literal(self, name):
+        source = (Path(db.__file__).parent / name).read_text()
+        offenders = [lit for lit in re.findall(r"'[^'\n]*'", source) if "?" in lit]
+        assert not offenders, (
+            f"{name}: '?' inside a SQL string literal would be rewritten "
+            f"as a placeholder: {offenders}"
+        )
+
+
 class TestAuditUsesTheSeam:
     def test_the_ledger_no_longer_reaches_for_a_raw_connection(self):
         for name in ("audit/ledger.py", "audit/verifier.py"):
@@ -152,6 +190,51 @@ class TestAuditOnPostgres:
         )
         report = verify_chain(tenant_id=tenant)
         assert not report.valid, "a tampered payload went undetected on Postgres"
+
+    def test_memory_and_voice_audit_work_on_postgres(self):
+        import time as _time
+
+        from app.memory.episodic import EpisodicMemory, EpisodicSummary
+        from app.memory.semantic import SemanticMemory, UserFact
+
+        db.init_db()
+        user = f"u-{os.getpid()}"
+        semantic = SemanticMemory()
+        fact_id = semantic.write(
+            UserFact(
+                fact_id="",
+                user_id=user,
+                tenant_id="default",
+                category="profile",
+                subject="user",
+                predicate="industry",
+                object_value="retail",
+                confidence=0.9,
+                extracted_at=0,
+            )
+        )
+        assert fact_id
+        assert len(semantic.read(user)) == 1
+        assert semantic.supersede(fact_id, "next")
+        assert semantic.read(user) == []
+        assert semantic.forget_user(user) >= 0
+
+        episodic = EpisodicMemory()
+        assert episodic.write(
+            EpisodicSummary(
+                summary_id="",
+                user_id=user,
+                tenant_id="default",
+                conversation_id="c1",
+                summary="asked about VAT",
+                topic_tag="vat",
+                sentiment="neutral",
+                turn_count=3,
+                created_at=_time.time(),
+            )
+        )
+        assert len(episodic.list_for_user(user)) == 1
+        assert episodic.delete_for_user(user) == 1
 
     def test_merkle_anchoring_works(self):
         from app.audit.ledger import AuditLedger

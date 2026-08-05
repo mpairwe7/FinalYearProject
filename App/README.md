@@ -1293,13 +1293,16 @@ changed and why.
   own tables use this instead of reaching for a raw connection, so one
   implementation of each query serves both backends.
 
-> **Known gap (narrowing).** The audit ledger now runs on the seam and
-> is verified against a real Postgres, including tamper detection.
-> Still bypassing it: `memory/semantic.py`, `memory/episodic.py` and
-> `voice_consent.py` (16 call sites), so `user_facts` and
-> `episodic_summaries` remain per-replica on Postgres deployments — and
-> `export_user_data`, `delete_user_cascade` and `export_eval_samples`
-> cannot be mirrored until they are.
+  **No module bypasses it.** The audit ledger, semantic and episodic
+  memory and the voice audit log all run on the seam and are verified
+  against a real Postgres — the ledger including tamper detection.
+  `test_backend_shim.py` fails if any module under `app/` reaches for
+  `_get_connection()` again.
+
+> **Remaining.** `export_user_data`, `delete_user_cascade` and
+> `export_eval_samples` are still SQLite-only. They cascade across every
+> user-data table, so they are the last step rather than the first —
+> tracked as Phase C.
 - `backend/app/database.py` — dispatch block at the bottom re-binds
   the public names to `postgres.*` when `ANALYTICS_BACKEND=postgres`.
   SQLite remains the zero-config default for single-node deploys;
