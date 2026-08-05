@@ -129,7 +129,7 @@ for normal chat usage.
 **Current request pipeline:**
 1. **Auth + request context** — fail-closed private/admin guards, optional RS256/JWKS OIDC verification, durable `conversation_id` thread handling
 2. **Supervisor routing** — routes turns into greetings, standard RAG, guided workflows, clarification, or human escalation
-3. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker
+3. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker. `top_k` is a ceiling, not a quota: passages the reranker scored as irrelevant are dropped rather than padded into the prompt, since a weak passage beside a strong one is what lets a model synthesise a claim neither supports. Acronym expansion keeps **both** surface forms (`WHT` → `Withholding Tax (WHT)`) so the sparse side still matches documents that write it short
 4. **LLM Generation** — `Qwen/Qwen3-8B` via local Transformers or vLLM HTTP
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
@@ -227,7 +227,9 @@ Source: `service.py::generate()` (lines 992-1677). Every `/v1/chat` and
                     |  2. Hybrid Retrieval          |
                     |  Qdrant dense (bge-m3 1024d)  |
                     |  + BM25 sparse + RRF fusion   |
+                    |  + near-duplicate collapse    |
                     |  + cross-encoder reranking    |
+                    |  + context floor (drop tail)  |
                     +--------------+--------------+
                                    |
                     +--------------v--------------+
@@ -1004,6 +1006,11 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | **Retrieval** | | |
 | `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` |
 | `DENSE_MODEL` | Embedding model | `BAAI/bge-m3` |
+| `RETRIEVER_CONTEXT_FLOOR` | Calibrated relevance below which a passage is not passed to the model. Must stay below `ABSTENTION_THRESHOLD_NORM` — this trims a result set, it does not decide whether to answer | `0.20` |
+| `RETRIEVER_CONTEXT_RELATIVE_DROP` | Also drop passages this far below the best hit | `0.45` |
+| `RETRIEVER_DEDUPE_THRESHOLD` | Shingle-Jaccard above which two candidates are near-duplicates | `0.9` |
+| `RETRIEVER_RERANK_CHARS` | Passage characters fed to the cross-encoder | `1200` |
+| `RETRIEVER_QUERY_CACHE_SIZE` | Query embeddings kept for reuse | `256` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
