@@ -23,6 +23,11 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from ..calculator_router import (
+    INTENT_TOOLS,
+    detect_calculator_intent,
+    has_money_amount,
+)
 from ..text_signals import CLARIFICATION_PROMPT
 from .state import AgentRoute, RouteDecision
 
@@ -397,6 +402,30 @@ class Supervisor:
                     reason=reason,
                     confidence=0.92,
                     suggested_tools=tools + ["search_ura_knowledge_base"],
+                )
+
+        # 3b. A figure plus a calculator intent is a calculation ask,
+        #     whatever the word order.  The patterns above need a trigger
+        #     verb *before* the noun, so "what's my take-home pay on a 2M
+        #     salary" and "VAT on 500000" fell through to plain RAG — the
+        #     model then answered a numeric question from memory, which
+        #     is the one thing the calculators exist to prevent.
+        #
+        #     Detection is reused from calculator_router rather than
+        #     re-implemented; it already parses "2M"/"1.5m"/"1,000,000"
+        #     and excludes informational asks like "how is PAYE
+        #     calculated". Confidence sits below the explicit patterns
+        #     because the intent is inferred from shape, not stated.
+        calc_intent = detect_calculator_intent(q)
+        if calc_intent and has_money_amount(q):
+            tool = INTENT_TOOLS.get(calc_intent)
+            if tool:
+                logger.info("supervisor: TOOLS (amount+intent) intent=%s", calc_intent)
+                return RouteDecision(
+                    route=AgentRoute.TOOLS,
+                    reason=f"{calc_intent} calculation intent (amount present)",
+                    confidence=0.8,
+                    suggested_tools=[tool, "lookup_rate", "search_ura_knowledge_base"],
                 )
 
         # 4. Temporal intents → tool route with calendar tools

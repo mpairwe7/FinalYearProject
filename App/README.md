@@ -128,7 +128,7 @@ for normal chat usage.
 
 **Current request pipeline:**
 1. **Auth + request context** — fail-closed private/admin guards, optional RS256/JWKS OIDC verification, durable `conversation_id` thread handling
-2. **Supervisor routing** — routes turns into greetings, standard RAG, guided workflows, clarification, or human escalation
+2. **Supervisor routing** — routes turns into greetings, standard RAG, guided workflows, clarification, or human escalation. A message carrying a money amount **and** a calculator intent reaches the calculators whatever the word order (`"VAT on 500000"`, `"take-home pay on a 2M salary"`), so a numeric tax question is not answered from the model's memory
 3. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker. `top_k` is a ceiling, not a quota: passages the reranker scored as irrelevant are dropped rather than padded into the prompt, since a weak passage beside a strong one is what lets a model synthesise a claim neither supports. Acronym expansion keeps **both** surface forms (`WHT` → `Withholding Tax (WHT)`) so the sparse side still matches documents that write it short
 4. **LLM Generation** — `Qwen/Qwen3-8B` via local Transformers or vLLM HTTP
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
