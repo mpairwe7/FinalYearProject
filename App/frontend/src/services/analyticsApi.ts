@@ -81,6 +81,8 @@ export interface TicketQueueItem {
   bot_reply: string;
   created_at: number;
   updated_at: number;
+  /** Owning team, routed from the handoff topic at escalation time. */
+  team?: string;
   handoff?: {
     summary?: string;
     topic?: string;
@@ -158,6 +160,9 @@ export interface TicketQueueResponse {
   count: number;
   status_filter: string;
   priority_filter?: string;
+  team_filter?: string;
+  /** Team names in effect, so the UI does not hardcode the org chart. */
+  teams?: string[];
   limit: number;
   offset: number;
   tickets: TicketQueueItem[];
@@ -192,10 +197,11 @@ export const analyticsApi = {
   dashboard: (days = 30) => fetchJson<DashboardData>(`/v1/analytics/dashboard?days=${days}`),
   feedbackSummary: (days = 30) => fetchJson<FeedbackSummary>(`/v1/feedback/summary?days=${days}`),
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
-  tickets: (status = "open", limit = 8, priority = "") =>
+  tickets: (status = "open", limit = 8, priority = "", team = "") =>
     fetchJson<TicketQueueResponse>(
       `/v1/admin/tickets?status=${encodeURIComponent(status)}&limit=${limit}&offset=0` +
-        (priority ? `&priority=${encodeURIComponent(priority)}` : ""),
+        (priority ? `&priority=${encodeURIComponent(priority)}` : "") +
+        (team ? `&team=${encodeURIComponent(team)}` : ""),
     ),
   ticket: (id: string) => fetchJson<TicketDetail>(`/v1/admin/tickets/${encodeURIComponent(id)}`),
   ticketSla: (days = 30) => fetchJson<TicketSla>(`/v1/admin/tickets/sla?days=${days}`),

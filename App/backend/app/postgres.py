@@ -144,6 +144,7 @@ def init_db() -> None:
         response_judge_json TEXT DEFAULT '{}',
         transcript_json     TEXT DEFAULT '[]',
         user_id             TEXT DEFAULT '',
+        team                TEXT DEFAULT '',
         officer_reply       TEXT DEFAULT '',
         reply_at            DOUBLE PRECISION DEFAULT 0,
         reply_delivered_at  DOUBLE PRECISION DEFAULT 0,
@@ -244,6 +245,7 @@ def init_db() -> None:
                 ("reply_delivered_at", "DOUBLE PRECISION DEFAULT 0"),
                 ("first_response_at", "DOUBLE PRECISION DEFAULT 0"),
                 ("resolved_at", "DOUBLE PRECISION DEFAULT 0"),
+                ("team", "TEXT DEFAULT ''"),
             ):
                 cur.execute(f"ALTER TABLE tickets ADD COLUMN IF NOT EXISTS {_col} {_ddl}")
             cur.execute(
@@ -646,7 +648,7 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
 _TICKET_COLUMNS = (
     "id, conversation_id, session_id, status, priority, reason, "
     "user_query, bot_reply, handoff_json, response_judge_json, "
-    "assignee, staff_note, created_at, updated_at, user_id, "
+    "assignee, staff_note, created_at, updated_at, user_id, team, "
     "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at"
 )
 #: Detail view — the transcript is the point of the ticket.
@@ -682,6 +684,7 @@ def create_ticket(
     response_judge: dict[str, Any] | None = None,
     transcript: list[dict[str, Any]] | None = None,
     user_id: str = "",
+    team: str = "",
 ) -> dict[str, Any]:
     if priority not in ("low", "normal", "high", "urgent"):
         logger.warning("create_ticket: invalid priority %r -> 'normal'", priority)
@@ -697,8 +700,9 @@ def create_ticket(
                 """INSERT INTO tickets (id, conversation_id, session_id, status, priority,
                                         reason, user_query, bot_reply,
                                         handoff_json, response_judge_json, transcript_json,
-                                        user_id, assignee, staff_note, created_at, updated_at)
-                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s)""",
+                                        user_id, team, assignee, staff_note,
+                                        created_at, updated_at)
+                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s)""",
                 (
                     ticket_id,
                     conversation_id,
@@ -711,6 +715,7 @@ def create_ticket(
                     json.dumps(response_judge or {}),
                     json.dumps(transcript or []),
                     user_id,
+                    team,
                     now,
                     now,
                 ),
@@ -725,6 +730,7 @@ def create_ticket(
         "handoff": handoff or {},
         "response_judge": response_judge or {},
         "transcript": transcript or [],
+        "team": team,
         "created_at": now,
     }
 
@@ -734,6 +740,7 @@ def list_tickets(
     limit: int = 50,
     offset: int = 0,
     priority: str | None = None,
+    team: str | None = None,
 ) -> list[dict[str, Any]]:
     pool = _get_pool()
     if pool is None:
@@ -746,8 +753,11 @@ def list_tickets(
         sql += " WHERE status = %s"
         params.append(status)
     if priority:
-        sql += " AND priority = %s" if status else " WHERE priority = %s"
+        sql += " AND priority = %s" if (status or params) else " WHERE priority = %s"
         params.append(priority)
+    if team:
+        sql += " AND team = %s" if (status or params) else " WHERE team = %s"
+        params.append(team)
     sql += (
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"

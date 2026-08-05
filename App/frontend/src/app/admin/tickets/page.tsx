@@ -66,6 +66,7 @@ function TicketRow({
       <span className="ticket-row-main">
         <span className="ticket-row-reason">{ticket.reason || "escalation"}</span>
         <span className="ticket-row-meta">
+          {ticket.team ? <span>{ticket.team.replace(/_/g, " ")}</span> : null}
           {handoff.topic ? <span>{handoff.topic.replace(/_/g, " ")}</span> : null}
           {ticket.status !== "open" ? <span>{ticket.status}</span> : null}
         </span>
@@ -263,11 +264,14 @@ function TicketDetailPanel({ ticketId }: { ticketId: string }) {
 export default function StaffTicketQueue() {
   const [status, setStatus] = useState<string>("open");
   const [priority, setPriority] = useState<string>("");
+  const [team, setTeam] = useState<string>("");
   const [selected, setSelected] = useState<string | null>(null);
-  const { data: queue, isLoading, error } = useTicketQueueFull(status, priority);
+  const { data: queue, isLoading, error } = useTicketQueueFull(status, priority, team);
   const { data: sla } = useTicketSla(30);
 
   const tickets = queue?.tickets ?? [];
+  // Team names come from the server so the UI does not hardcode an org chart.
+  const teams = queue?.teams ?? [];
 
   return (
     <main className="tickets-page">
@@ -328,6 +332,28 @@ export default function StaffTicketQueue() {
             {value}
           </button>
         ))}
+        {teams.length > 0 ? (
+          <>
+            <span className="filter-sep" />
+            <button
+              type="button"
+              className={`filter ${team === "" ? "is-active" : ""}`}
+              onClick={() => setTeam("")}
+            >
+              all teams
+            </button>
+            {teams.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`filter ${team === value ? "is-active" : ""}`}
+                onClick={() => setTeam(value)}
+              >
+                {value.replace(/_/g, " ")}
+              </button>
+            ))}
+          </>
+        ) : null}
       </div>
 
       <div className="tickets-body">

@@ -66,6 +66,7 @@ describe("StaffTicketQueue", () => {
       status_filter: "open",
       limit: 50,
       offset: 0,
+      teams: ["customs", "disputes", "general"],
       tickets: [TICKET],
     });
     vi.spyOn(analyticsApi, "ticket").mockResolvedValue(DETAIL);
@@ -168,8 +169,25 @@ describe("StaffTicketQueue", () => {
     await screen.findByText(/User explicitly asked for a human/);
     fireEvent.click(screen.getByRole("button", { name: "urgent" }));
     await waitFor(() =>
-      expect(analyticsApi.tickets).toHaveBeenCalledWith("open", 50, "urgent"),
+      expect(analyticsApi.tickets).toHaveBeenCalledWith("open", 50, "urgent", ""),
     );
+  });
+
+  it("filters the queue by team", async () => {
+    renderPage();
+    await screen.findByText(/User explicitly asked for a human/);
+    fireEvent.click(await screen.findByRole("button", { name: "disputes" }));
+    await waitFor(() =>
+      expect(analyticsApi.tickets).toHaveBeenCalledWith("open", 50, "", "disputes"),
+    );
+  });
+
+  it("takes the team list from the server, not a hardcoded org chart", async () => {
+    renderPage();
+    // Rendered from the response's `teams`, so a deployment that renames
+    // a team does not need a frontend change.
+    expect(await screen.findByRole("button", { name: "customs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "all teams" })).toBeInTheDocument();
   });
 
   it("says so plainly when nothing is waiting", async () => {
@@ -178,6 +196,7 @@ describe("StaffTicketQueue", () => {
       status_filter: "open",
       limit: 50,
       offset: 0,
+      teams: [],
       tickets: [],
     });
     renderPage();

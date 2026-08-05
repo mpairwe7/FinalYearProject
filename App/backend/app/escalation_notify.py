@@ -47,8 +47,49 @@ _TIMEOUT_S = float(os.getenv("ESCALATION_WEBHOOK_TIMEOUT", "5"))
 #: Keys allowed out of the building.  An allowlist rather than a
 #: blocklist: a field added to the ticket later must be opted in
 #: deliberately, not leak because nobody remembered to exclude it.
-_NOTIFY_FIELDS = ("id", "priority", "status", "reason", "conversation_id", "created_at")
+_NOTIFY_FIELDS = (
+    "id",
+    "priority",
+    "status",
+    "reason",
+    "conversation_id",
+    "created_at",
+    "team",
+)
 _HANDOFF_FIELDS = ("topic", "sentiment", "transfer_style", "turns_before_handoff", "summary")
+
+
+#: Which team owns each handoff topic.  ``_handoff_topic`` already
+#: classifies every escalation; nothing acted on it, so an officer
+#: watching the queue saw customs disputes next to TIN registrations and
+#: had to triage by reading. Overridable per topic with
+#: ``ESCALATION_TEAM_<TOPIC>`` so a deployment can match its own org
+#: chart without a code change.
+_DEFAULT_TEAMS: dict[str, str] = {
+    "objection_or_dispute": "disputes",
+    "account_specific": "taxpayer_accounts",
+    "customs": "customs",
+    "registration": "registration",
+    "general_tax_support": "general",
+}
+
+#: Where a topic we do not recognise goes.  Never drop a ticket on the
+#: floor because the classifier returned something new.
+FALLBACK_TEAM = "general"
+
+
+def team_for_topic(topic: str) -> str:
+    """Team that should pick up an escalation classified as *topic*."""
+    key = (topic or "").strip().lower()
+    override = os.getenv(f"ESCALATION_TEAM_{key.upper()}", "").strip()
+    if override:
+        return override
+    return _DEFAULT_TEAMS.get(key, FALLBACK_TEAM)
+
+
+def known_teams() -> list[str]:
+    """Distinct team names in effect, for the admin filter."""
+    return sorted({team_for_topic(topic) for topic in _DEFAULT_TEAMS} | {FALLBACK_TEAM})
 
 
 def _webhook_url() -> str:
