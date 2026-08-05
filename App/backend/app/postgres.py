@@ -585,7 +585,7 @@ def export_review_feedback(days: int = 30) -> list[dict[str, Any]]:
 _TICKET_COLUMNS = (
     "id, conversation_id, session_id, status, priority, reason, "
     "user_query, bot_reply, handoff_json, response_judge_json, "
-    "assignee, staff_note, created_at, updated_at, "
+    "assignee, staff_note, created_at, updated_at, user_id, "
     "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at"
 )
 #: Detail view — the transcript is the point of the ticket.
