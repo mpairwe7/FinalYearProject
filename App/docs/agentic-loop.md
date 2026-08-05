@@ -123,3 +123,33 @@ for real traffic, or the router is planning tools it cannot use.
 
 The graph exposes the same dict under `budget` in
 `AgentGraphState.to_summary()`.
+
+
+## Per-specialist prompts
+
+The supervisor has routed to `tax_specialist`, `customs_specialist` and
+`tool_specialist` since Phase 15. Until Phase 19 that changed which
+tools were offered and the `agent_role` string in the response — and
+nothing about the instructions the model received. A "customs
+specialist" that has never been told it is one is a label.
+
+`agents/prompts.py` maps a role to an extra system fragment, appended
+**after** the shared prompt so every specialist keeps the base
+grounding, abstention and citation rules. That ordering is deliberate: a
+specialist must not be able to talk its way out of the safety
+instructions by having a longer, more specific prompt. A test asserts
+`SYSTEM_PROMPT` survives for every role.
+
+| Role | Adds |
+| --- | --- |
+| `tax_specialist` | Never state a rate from memory; name the fiscal year; pass on verification warnings |
+| `customs_specialist` | Duty is on CIF not invoice; VAT sits on the duty-inclusive value; no single customs rate |
+| `tool_specialist` | Use the tools rather than your own arithmetic; ask for one missing input rather than assuming |
+
+Non-specialist roles — greeting, clarification, escalation triage — get
+the base prompt unchanged. A greeting does not need a domain persona,
+and appending one spends tokens to make the reply worse.
+
+Fragments are kept under ~1 kB and a test enforces it: they cost tokens
+on every turn of a tool-calling loop, and a long persona preamble crowds
+out the passages and tool results the answer actually depends on.

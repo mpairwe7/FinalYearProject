@@ -829,6 +829,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     granted_purposes: list[str] | None = None,
     deadline_s: float = LLM_DEADLINE_SECONDS * 2,
     event_callback: Callable[[dict[str, Any]], None] | None = None,
+    agent_role: str = "",
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -864,6 +865,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         user_role=user_role,
         granted_purposes=granted_purposes or [],
         event_callback=event_callback,
+        agent_role=agent_role,
     )
     try:
         result = future.result(timeout=deadline_s)
@@ -4069,6 +4071,10 @@ class ChatModel:
                                 user_id=user_id or "",
                                 user_role=user_role,
                                 granted_purposes=granted_purposes or [],
+                                # The supervisor already decided which
+                                # specialist this is; give it the
+                                # instructions that go with the label.
+                                agent_role=agent_role,
                             )
                         reply = agentic.get("text", "")
                         if agentic.get("tool_calls"):
