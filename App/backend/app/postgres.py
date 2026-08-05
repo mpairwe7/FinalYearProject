@@ -155,6 +155,64 @@ def init_db() -> None:
         updated_at          DOUBLE PRECISION NOT NULL
     );
 
+
+    -- Identity, tenancy and consent.  These were absent entirely, so on
+    -- the backend production mandates every one of them resolved to a
+    -- per-replica SQLite file: a user who withdrew consent on one pod
+    -- was still processed as consenting on every other, erasure reached
+    -- one pod's rows, and subject-access returned a fraction of the data.
+    CREATE TABLE IF NOT EXISTS tenants (
+        id            TEXT PRIMARY KEY,
+        display_name  TEXT NOT NULL,
+        created_at    DOUBLE PRECISION NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+        id            TEXT PRIMARY KEY,
+        tenant_id     TEXT NOT NULL DEFAULT 'default',
+        external_id   TEXT NOT NULL,
+        email         TEXT DEFAULT '',
+        role          TEXT NOT NULL DEFAULT 'public'
+                      CHECK(role IN ('public','verified_taxpayer','ura_staff','ura_admin','ura_auditor')),
+        created_at    DOUBLE PRECISION NOT NULL,
+        last_seen_at  DOUBLE PRECISION NOT NULL,
+        UNIQUE(tenant_id, external_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS user_profiles (
+        user_id              TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        taxpayer_type        TEXT DEFAULT 'unknown',
+        industry             TEXT DEFAULT '',
+        primary_language     TEXT DEFAULT 'en',
+        detail_level         TEXT DEFAULT 'intermediate',
+        registered_tax_types TEXT DEFAULT '[]',
+        fiscal_year          TEXT DEFAULT 'FY2025-26',
+        display_name         TEXT DEFAULT '',
+        updated_at           DOUBLE PRECISION NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS consent_receipts (
+        receipt_id    TEXT PRIMARY KEY,
+        user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        purpose       TEXT NOT NULL,
+        version       TEXT NOT NULL,
+        granted_at    DOUBLE PRECISION NOT NULL,
+        withdrawn_at  DOUBLE PRECISION,
+        legal_basis   TEXT DEFAULT 'consent'
+    );
+
+    CREATE TABLE IF NOT EXISTS workflow_sessions (
+        conversation_id  TEXT PRIMARY KEY,
+        workflow_id      TEXT NOT NULL,
+        status           TEXT NOT NULL DEFAULT 'active'
+                         CHECK(status IN ('active','completed','cancelled')),
+        current_step_idx INTEGER NOT NULL DEFAULT 0,
+        slots_json       TEXT DEFAULT '{}',
+        last_prompt      TEXT DEFAULT '',
+        created_at       DOUBLE PRECISION NOT NULL,
+        updated_at       DOUBLE PRECISION NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_feedback_message      ON feedback(message_id);
     CREATE INDEX IF NOT EXISTS idx_feedback_created      ON feedback(created_at);
     CREATE INDEX IF NOT EXISTS idx_events_type           ON analytics_events(event_type);
@@ -167,6 +225,9 @@ def init_db() -> None:
     CREATE INDEX IF NOT EXISTS idx_tickets_status        ON tickets(status);
     CREATE INDEX IF NOT EXISTS idx_tickets_created       ON tickets(created_at);
     CREATE INDEX IF NOT EXISTS idx_tickets_conversation  ON tickets(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_users_external        ON users(tenant_id, external_id);
+    CREATE INDEX IF NOT EXISTS idx_consent_user          ON consent_receipts(user_id, purpose);
+    CREATE INDEX IF NOT EXISTS idx_consent_active        ON consent_receipts(user_id, withdrawn_at);
     """
 
     with pool.connection() as conn:
@@ -935,3 +996,362 @@ def sla_stats(days: int = 30) -> dict[str, Any]:
         "median_response_seconds": _median(response),
         "median_resolution_seconds": _median(resolution),
     }
+
+
+# ---------------------------------------------------------------------------
+# Identity, profiles and consent
+#
+# Absent from this module entirely until now, so the dispatch block left
+# them on SQLite while production runs Postgres.  The consent functions
+# are the serious ones: `has_active_consent` gates memory injection and
+# voice recording, and `withdraw_consent` is a legal instruction. On a
+# per-replica store a withdrawal reaches one pod and every other keeps
+# processing the taxpayer as consenting.
+# ---------------------------------------------------------------------------
+_USER_COLUMNS = "id, tenant_id, external_id, email, role, created_at, last_seen_at"
+_PROFILE_COLUMNS = (
+    "user_id, taxpayer_type, industry, primary_language, detail_level, "
+    "registered_tax_types, fiscal_year, display_name, updated_at"
+)
+_CONSENT_COLUMNS = (
+    "receipt_id, user_id, purpose, version, granted_at, withdrawn_at, legal_basis"
+)
+_WORKFLOW_COLUMNS = (
+    "conversation_id, workflow_id, status, current_step_idx, slots_json, "
+    "last_prompt, created_at, updated_at"
+)
+
+
+def _as_dict(columns: str, row: tuple[Any, ...] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return dict(zip(columns.replace(" ", "").split(","), row, strict=True))
+
+
+def upsert_user(
+    external_id: str,
+    tenant_id: str = "default",
+    email: str = "",
+    role: str = "public",
+) -> dict[str, Any]:
+    pool = _get_pool()
+    if pool is None:
+        raise RuntimeError("postgres unavailable")
+    now = time.time()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_USER_COLUMNS} FROM users "
+                "WHERE tenant_id = %s AND external_id = %s",
+                (tenant_id, external_id),
+            )
+            existing = _as_dict(_USER_COLUMNS, cur.fetchone())
+            if existing is not None:
+                merged_email = email or existing["email"]
+                merged_role = role or existing["role"]
+                cur.execute(
+                    "UPDATE users SET last_seen_at = %s, email = %s, role = %s WHERE id = %s",
+                    (now, merged_email, merged_role, existing["id"]),
+                )
+                conn.commit()
+                return {**existing, "email": merged_email, "role": merged_role,
+                        "last_seen_at": now}
+            user_id = str(uuid.uuid4())
+            cur.execute(
+                f"INSERT INTO users ({_USER_COLUMNS}) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (user_id, tenant_id, external_id, email, role, now, now),
+            )
+        conn.commit()
+    return {
+        "id": user_id,
+        "tenant_id": tenant_id,
+        "external_id": external_id,
+        "email": email,
+        "role": role,
+        "created_at": now,
+        "last_seen_at": now,
+    }
+
+
+def get_user(user_id: str) -> dict[str, Any] | None:
+    pool = _get_pool()
+    if pool is None:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id = %s", (user_id,))
+        return _as_dict(_USER_COLUMNS, cur.fetchone())
+
+
+def get_user_profile(user_id: str) -> dict[str, Any] | None:
+    pool = _get_pool()
+    if pool is None:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {_PROFILE_COLUMNS} FROM user_profiles WHERE user_id = %s",
+            (user_id,),
+        )
+        profile = _as_dict(_PROFILE_COLUMNS, cur.fetchone())
+    if profile is None:
+        return None
+    profile["registered_tax_types"] = _loads(profile.get("registered_tax_types"), [])
+    return profile
+
+
+def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    """Create or patch a profile row.  Mirrors the SQLite allow-list."""
+    pool = _get_pool()
+    if pool is None:
+        raise RuntimeError("postgres unavailable")
+    allowed = {
+        "taxpayer_type",
+        "industry",
+        "primary_language",
+        "detail_level",
+        "registered_tax_types",
+        "fiscal_year",
+        "display_name",
+    }
+    updates = {k: v for k, v in updates.items() if k in allowed}
+    if isinstance(updates.get("registered_tax_types"), list):
+        updates["registered_tax_types"] = json.dumps(updates["registered_tax_types"])
+    now = time.time()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM user_profiles WHERE user_id = %s", (user_id,))
+            exists = cur.fetchone() is not None
+            if not exists:
+                defaults = {
+                    "taxpayer_type": "unknown",
+                    "industry": "",
+                    "primary_language": "en",
+                    "detail_level": "intermediate",
+                    "registered_tax_types": "[]",
+                    "fiscal_year": "FY2025-26",
+                    "display_name": "",
+                }
+                defaults.update(updates)
+                cur.execute(
+                    f"INSERT INTO user_profiles ({_PROFILE_COLUMNS}) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        user_id,
+                        defaults["taxpayer_type"],
+                        defaults["industry"],
+                        defaults["primary_language"],
+                        defaults["detail_level"],
+                        defaults["registered_tax_types"],
+                        defaults["fiscal_year"],
+                        defaults["display_name"],
+                        now,
+                    ),
+                )
+            elif updates:
+                sets = ", ".join(f"{k} = %s" for k in updates) + ", updated_at = %s"
+                cur.execute(
+                    f"UPDATE user_profiles SET {sets} WHERE user_id = %s",  # noqa: S608
+                    [*updates.values(), now, user_id],
+                )
+        conn.commit()
+    return get_user_profile(user_id) or {}
+
+
+def grant_consent(
+    user_id: str,
+    purpose: str,
+    version: str,
+    legal_basis: str = "consent",
+) -> dict[str, Any]:
+    pool = _get_pool()
+    if pool is None:
+        raise RuntimeError("postgres unavailable")
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "
+                "WHERE user_id = %s AND purpose = %s AND version = %s "
+                "AND withdrawn_at IS NULL",
+                (user_id, purpose, version),
+            )
+            existing = _as_dict(_CONSENT_COLUMNS, cur.fetchone())
+            if existing is not None:
+                return existing
+            receipt_id = str(uuid.uuid4())
+            now = time.time()
+            cur.execute(
+                f"INSERT INTO consent_receipts ({_CONSENT_COLUMNS}) "
+                "VALUES (%s,%s,%s,%s,%s,NULL,%s)",
+                (receipt_id, user_id, purpose, version, now, legal_basis),
+            )
+        conn.commit()
+    return {
+        "receipt_id": receipt_id,
+        "user_id": user_id,
+        "purpose": purpose,
+        "version": version,
+        "granted_at": now,
+        "withdrawn_at": None,
+        "legal_basis": legal_basis,
+    }
+
+
+def withdraw_consent(user_id: str, purpose: str) -> int:
+    pool = _get_pool()
+    if pool is None:
+        return 0
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE consent_receipts SET withdrawn_at = %s "
+                "WHERE user_id = %s AND purpose = %s AND withdrawn_at IS NULL",
+                (time.time(), user_id, purpose),
+            )
+            touched = cur.rowcount
+        conn.commit()
+    return touched
+
+
+def get_active_consents(user_id: str) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "
+            "WHERE user_id = %s AND withdrawn_at IS NULL ORDER BY granted_at DESC",
+            (user_id,),
+        )
+        rows = cur.fetchall()
+    return [d for r in rows if (d := _as_dict(_CONSENT_COLUMNS, r)) is not None]
+
+
+def _resolve_internal_user_id(external_id: str, tenant_id: str = "default") -> str | None:
+    pool = _get_pool()
+    if pool is None or not external_id:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM users WHERE tenant_id = %s AND external_id = %s",
+            (tenant_id, external_id),
+        )
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def has_active_consent(user_id: str, purpose: str, tenant_id: str = "default") -> bool:
+    """Mirrors the SQLite bridge: accepts the internal UUID or the OIDC ``sub``.
+
+    Receipts are keyed by internal id while the chat/voice runtime holds
+    only ``sub``; without the second lookup every authenticated user
+    reads as having refused consent.
+    """
+    if not user_id:
+        return False
+    pool = _get_pool()
+    if pool is None:
+        return False
+    sql = (
+        "SELECT 1 FROM consent_receipts "
+        "WHERE user_id = %s AND purpose = %s AND withdrawn_at IS NULL LIMIT 1"
+    )
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (user_id, purpose))
+        if cur.fetchone() is not None:
+            return True
+    internal_id = _resolve_internal_user_id(user_id, tenant_id)
+    if internal_id and internal_id != user_id:
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, (internal_id, purpose))
+            return cur.fetchone() is not None
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Workflow sessions
+#
+# Multi-turn slot filling (TIN registration, VAT filing) keyed by
+# conversation.  On a per-replica store a taxpayer half-way through a
+# registration hits a different pod and the flow restarts from nothing.
+# ---------------------------------------------------------------------------
+def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
+    pool = _get_pool()
+    if pool is None or not conversation_id:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s",
+            (conversation_id,),
+        )
+        row = _as_dict(_WORKFLOW_COLUMNS, cur.fetchone())
+    if row is None:
+        return None
+    slots = _loads(row.pop("slots_json", "{}"), {})
+    return {
+        "conversation_id": row["conversation_id"],
+        "workflow_id": row["workflow_id"],
+        "status": row["status"],
+        "current_step_idx": int(row["current_step_idx"] or 0),
+        "slots": slots if isinstance(slots, dict) else {},
+        "last_prompt": row["last_prompt"] or "",
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def upsert_workflow_session(
+    conversation_id: str,
+    workflow_id: str,
+    current_step_idx: int,
+    slots: dict[str, Any] | None = None,
+    *,
+    status: str = "active",
+    last_prompt: str = "",
+) -> None:
+    pool = _get_pool()
+    if pool is None or not conversation_id or not workflow_id:
+        return
+    if status not in {"active", "completed", "cancelled"}:
+        status = "active"
+    now = time.time()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""INSERT INTO workflow_sessions ({_WORKFLOW_COLUMNS})
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (conversation_id) DO UPDATE SET
+                      workflow_id = EXCLUDED.workflow_id,
+                      status = EXCLUDED.status,
+                      current_step_idx = EXCLUDED.current_step_idx,
+                      slots_json = EXCLUDED.slots_json,
+                      last_prompt = EXCLUDED.last_prompt,
+                      updated_at = EXCLUDED.updated_at""",
+                (
+                    conversation_id,
+                    workflow_id,
+                    status,
+                    max(0, int(current_step_idx)),
+                    json.dumps(slots or {}, ensure_ascii=True),
+                    last_prompt[:2000],
+                    now,
+                    now,
+                ),
+            )
+        conn.commit()
+
+
+def complete_workflow_session(conversation_id: str, *, status: str = "completed") -> bool:
+    pool = _get_pool()
+    if pool is None or not conversation_id:
+        return False
+    if status not in {"completed", "cancelled"}:
+        status = "completed"
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE workflow_sessions SET status = %s, updated_at = %s "
+                "WHERE conversation_id = %s",
+                (status, time.time(), conversation_id),
+            )
+            touched = cur.rowcount > 0
+        conn.commit()
+    return touched

@@ -1683,6 +1683,20 @@ if ANALYTICS_BACKEND == "postgres":
         pending_officer_reply = _pg.pending_officer_reply  # type: ignore
         mark_reply_delivered = _pg.mark_reply_delivered  # type: ignore
         sla_stats = _pg.sla_stats  # type: ignore
+        # Identity, consent and workflow state.  Left on SQLite these
+        # are per-replica: a consent withdrawal reaches one pod while
+        # every other keeps processing the taxpayer as consenting.
+        upsert_user = _pg.upsert_user  # type: ignore
+        get_user = _pg.get_user  # type: ignore
+        get_user_profile = _pg.get_user_profile  # type: ignore
+        upsert_user_profile = _pg.upsert_user_profile  # type: ignore
+        grant_consent = _pg.grant_consent  # type: ignore
+        withdraw_consent = _pg.withdraw_consent  # type: ignore
+        get_active_consents = _pg.get_active_consents  # type: ignore
+        has_active_consent = _pg.has_active_consent  # type: ignore
+        get_workflow_session = _pg.get_workflow_session  # type: ignore
+        upsert_workflow_session = _pg.upsert_workflow_session  # type: ignore
+        complete_workflow_session = _pg.complete_workflow_session  # type: ignore
         logger.info("Analytics backend: postgres")
     except Exception:
         logger.exception("Postgres backend requested but import failed; falling back to sqlite")

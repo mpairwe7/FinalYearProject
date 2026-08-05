@@ -1272,13 +1272,28 @@ changed and why.
 
 - New `backend/app/postgres.py` — psycopg3 + `psycopg_pool`
   implementation mirroring the functions listed in the dispatch block
-  at the bottom of `database.py` (20 of 34 public functions; consent,
-  users, profiles, workflow sessions and the data-subject helpers are
-  **not** mirrored and still resolve to SQLite even when
-  `ANALYTICS_BACKEND=postgres`). Schema is identical for what is
-  mirrored. `TestBackendParity` asserts every dispatched name exists in
-  both modules and takes the same arguments — a stale claim here is
-  what let tickets and conversation logging silently diverge.
+  at the bottom of `database.py` (34 of 37 public functions). Identity,
+  consent, profiles, workflow sessions and tickets are all mirrored.
+  **Still SQLite-only:** `export_user_data`, `delete_user_cascade` and
+  `export_eval_samples`, because they cascade through memory and audit
+  tables that are not mirrored yet — see the note below. Schema is
+  identical for what is mirrored.
+- `TestBackendParity` asserts every dispatched name exists in both
+  modules and takes the same arguments; `TestTicketColumnParity`
+  compares the declared columns against the declared SELECT lists; and
+  `TestBackendsAgree` runs the same identity/consent/workflow sequence
+  against both backends and compares the results (needs `POSTGRES_DSN`).
+  A stale claim here is what let tickets, conversation logging and the
+  whole consent surface silently diverge.
+
+> **Known gap.** The memory (`user_facts`, `episodic_summaries`) and
+> audit (`audit_events`, `audit_anchors`) tables have no Postgres
+> mirror, and 23 call sites in `memory/`, `audit/` and `voice_consent.py`
+> reach `database._get_connection()` directly, bypassing the dispatch
+> entirely. Those remain per-replica on Postgres deployments — which
+> also means the hash-chained audit ledger cannot be verified across
+> pods, and the data-subject export/erasure helpers cannot be mirrored
+> until they are.
 - `backend/app/database.py` — dispatch block at the bottom re-binds
   the public names to `postgres.*` when `ANALYTICS_BACKEND=postgres`.
   SQLite remains the zero-config default for single-node deploys;
