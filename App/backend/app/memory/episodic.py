@@ -66,8 +66,7 @@ class EpisodicMemory:
     def _init_schema(self) -> None:
         from .. import database as db
 
-        conn = db._get_connection()
-        conn.executescript(
+        db.execute_script(
             """
             CREATE TABLE IF NOT EXISTS episodic_summaries (
                 summary_id      TEXT PRIMARY KEY,
@@ -78,7 +77,7 @@ class EpisodicMemory:
                 topic_tag       TEXT DEFAULT '',
                 sentiment       TEXT DEFAULT 'neutral',
                 turn_count      INTEGER DEFAULT 0,
-                created_at      REAL NOT NULL
+                created_at      DOUBLE PRECISION NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_episodic_user
                 ON episodic_summaries(user_id);
@@ -88,26 +87,22 @@ class EpisodicMemory:
                 ON episodic_summaries(user_id, topic_tag);
             """
         )
-        conn.commit()
 
     def write(self, summary: EpisodicSummary) -> str:
         from .. import database as db
 
         if not summary.summary_id:
             summary.summary_id = str(uuid.uuid4())
-        conn = db._get_connection()
         try:
-            conn.execute(
+            db.execute(
                 """INSERT INTO episodic_summaries
                    (summary_id, user_id, tenant_id, conversation_id,
                     summary, topic_tag, sentiment, turn_count, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                summary.to_row(),
+                tuple(summary.to_row()),
             )
-            conn.commit()
         except Exception:
             logger.exception("episodic write failed")
-            conn.rollback()
             raise
         return summary.summary_id
 
@@ -120,7 +115,6 @@ class EpisodicMemory:
     ) -> list[dict[str, Any]]:
         from .. import database as db
 
-        conn = db._get_connection()
         cutoff = time.time() - (since_days * 86400)
         sql = "SELECT * FROM episodic_summaries " "WHERE user_id = ? AND created_at >= ?"
         params: list[Any] = [user_id, cutoff]
@@ -129,40 +123,29 @@ class EpisodicMemory:
             params.append(topic_tag)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
-        rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        return db.query_all(sql, tuple(params))
 
     def delete_for_user(self, user_id: str) -> int:
         """Forget cascade — delete every summary for this user."""
         from .. import database as db
 
-        conn = db._get_connection()
         try:
-            cursor = conn.execute(
-                "DELETE FROM episodic_summaries WHERE user_id = ?",
-                (user_id,),
+            return db.execute(
+                "DELETE FROM episodic_summaries WHERE user_id = ?", (user_id,)
             )
-            conn.commit()
-            return cursor.rowcount
         except Exception:
             logger.exception("episodic delete failed")
-            conn.rollback()
             return 0
 
     def cleanup_expired(self) -> int:
         """TTL enforcement — called from the nightly worker."""
         from .. import database as db
 
-        conn = db._get_connection()
         cutoff = time.time() - (EPISODIC_TTL_DAYS * 86400)
         try:
-            cursor = conn.execute(
-                "DELETE FROM episodic_summaries WHERE created_at < ?",
-                (cutoff,),
+            return db.execute(
+                "DELETE FROM episodic_summaries WHERE created_at < ?", (cutoff,)
             )
-            conn.commit()
-            return cursor.rowcount
         except Exception:
             logger.exception("episodic cleanup failed")
-            conn.rollback()
             return 0
