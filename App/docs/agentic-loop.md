@@ -153,3 +153,41 @@ and appending one spends tokens to make the reply worse.
 Fragments are kept under ~1 kB and a test enforces it: they cost tokens
 on every turn of a tool-calling loop, and a long persona preamble crowds
 out the passages and tool results the answer actually depends on.
+
+
+## Routing eval
+
+Unit tests assert individual cases. They cannot tell you the supervisor
+gets 70% of natural calculation phrasings wrong, because a case nobody
+wrote a test for is invisible — which is how seven of ten ordinary ways
+of asking for a tax figure ended up on the retrieval path, answered from
+the model's memory. That was found by hand-probing the router, which
+nobody will remember to redo.
+
+`agents/eval_routing.py` scores the supervisor against a labelled set
+and reports a **rate plus the cases it got wrong by name**:
+
+```bash
+python -m app.agents.eval_routing        # non-zero exit on any miss
+```
+
+```
+ura_routing_accuracy 1.0000
+ura_routing_misses 0
+ura_routing_accuracy_by_route{route="tools"} 1.0000
+```
+
+A case counts as correct only if the route matches **and** the expected
+tool is offered — routing to the right path while omitting the tool that
+answers the question is a miss the route alone would hide.
+
+The suite checks the eval can actually *fail* (an eval that cannot
+report a miss is decoration), that every route has at least one case (a
+route with none is a blind spot by construction), that no golden case
+names a tool that does not exist, and that accuracy stays at or above
+0.95. The floor rather than an equality is deliberate: adding a hard
+case that currently fails should be possible without breaking the
+build.
+
+**Add a case here whenever a route is reported wrong.** That is what
+turns a one-off bug report into a permanent check.
