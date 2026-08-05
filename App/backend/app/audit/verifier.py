@@ -64,14 +64,13 @@ def verify_chain(tenant_id: str = "default") -> VerificationReport:
 
     report = VerificationReport(tenant_id=tenant_id)
 
-    conn = db._get_connection()
-    rows = conn.execute(
+    rows = db.query_all(
         """SELECT seq, event_id, payload, prev_hash, payload_hash, row_hash
            FROM audit_events
            WHERE tenant_id = ?
            ORDER BY seq ASC""",
         (tenant_id,),
-    ).fetchall()
+    )
 
     prev_row_hash = GENESIS_HASH
     for row in rows:

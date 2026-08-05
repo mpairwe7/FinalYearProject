@@ -86,8 +86,7 @@ class AuditLedger:
     def _init_schema(self) -> None:
         from .. import database as db
 
-        conn = db._get_connection()
-        conn.executescript(
+        db.execute_script(
             """
             CREATE TABLE IF NOT EXISTS audit_events (
                 event_id     TEXT PRIMARY KEY,
@@ -95,7 +94,7 @@ class AuditLedger:
                 tenant_id    TEXT NOT NULL DEFAULT 'default',
                 user_id      TEXT DEFAULT '',
                 payload      TEXT NOT NULL,
-                ts           REAL NOT NULL,
+                ts           DOUBLE PRECISION NOT NULL,
                 seq          INTEGER NOT NULL,
                 prev_hash    TEXT NOT NULL,
                 payload_hash TEXT NOT NULL,
@@ -112,13 +111,12 @@ class AuditLedger:
                 first_seq    INTEGER NOT NULL,
                 last_seq     INTEGER NOT NULL,
                 merkle_root  TEXT NOT NULL,
-                created_at   REAL NOT NULL
+                created_at   DOUBLE PRECISION NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_audit_anchors_created
                 ON audit_anchors(created_at);
             """
         )
-        conn.commit()
 
     # -- Append --------------------------------------------------------
     def append(
@@ -137,16 +135,15 @@ class AuditLedger:
         from .. import database as db
 
         with self._lock:
-            conn = db._get_connection()
             # Last row for this tenant (or global if tenant-scoped chains
             # aren't used yet).  We chain per-tenant so tenants can be
             # verified independently.
-            row = conn.execute(
+            row = db.query_one(
                 """SELECT seq, row_hash FROM audit_events
                    WHERE tenant_id = ?
                    ORDER BY seq DESC LIMIT 1""",
                 (tenant_id,),
-            ).fetchone()
+            )
 
             prev_hash = row["row_hash"] if row else GENESIS_HASH
             seq = (row["seq"] + 1) if row else 1
@@ -165,17 +162,15 @@ class AuditLedger:
             event.row_hash = sha256_hex(prev_hash + event.payload_hash)
 
             try:
-                conn.execute(
+                db.execute(
                     """INSERT INTO audit_events
                        (event_id, event_type, tenant_id, user_id, payload,
                         ts, seq, prev_hash, payload_hash, row_hash)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    event.to_row(),
+                    tuple(event.to_row()),
                 )
-                conn.commit()
             except Exception:
                 logger.exception("audit append failed")
-                conn.rollback()
                 raise
             return event
 
@@ -189,7 +184,6 @@ class AuditLedger:
     ) -> list[dict[str, Any]]:
         from .. import database as db
 
-        conn = db._get_connection()
         sql = "SELECT * FROM audit_events WHERE tenant_id = ? AND seq > ?"
         params: list[Any] = [tenant_id, since_seq]
         if user_id is not None:
@@ -197,10 +191,9 @@ class AuditLedger:
             params.append(user_id)
         sql += " ORDER BY seq ASC LIMIT ?"
         params.append(limit)
-        rows = conn.execute(sql, params).fetchall()
+        rows = db.query_all(sql, tuple(params))
         out: list[dict[str, Any]] = []
-        for r in rows:
-            d = dict(r)
+        for d in rows:
             try:
                 d["payload"] = json.loads(d["payload"])
             except Exception:
@@ -211,24 +204,22 @@ class AuditLedger:
     def count(self, tenant_id: str = "default") -> int:
         from .. import database as db
 
-        conn = db._get_connection()
-        row = conn.execute(
-            "SELECT COUNT(*) as n FROM audit_events WHERE tenant_id = ?",
+        row = db.query_one(
+            "SELECT COUNT(*) AS n FROM audit_events WHERE tenant_id = ?",
             (tenant_id,),
-        ).fetchone()
+        )
         return int(row["n"] if row else 0)
 
     def last_row_hash(self, tenant_id: str = "default") -> str:
         from .. import database as db
 
-        conn = db._get_connection()
-        row = conn.execute(
+        row = db.query_one(
             """SELECT row_hash FROM audit_events
                WHERE tenant_id = ?
                ORDER BY seq DESC LIMIT 1""",
             (tenant_id,),
-        ).fetchone()
-        return row["row_hash"] if row else GENESIS_HASH
+        )
+        return str(row["row_hash"]) if row else GENESIS_HASH
 
     # -- Erasure tombstone (UDPA-compliant) ---------------------------
     def erasure_tombstone(
@@ -266,13 +257,12 @@ class AuditLedger:
         """
         from .. import database as db
 
-        conn = db._get_connection()
-        rows = conn.execute(
+        rows = db.query_all(
             """SELECT payload_hash FROM audit_events
                WHERE tenant_id = ? AND seq BETWEEN ? AND ?
                ORDER BY seq ASC""",
             (tenant_id, first_seq, last_seq),
-        ).fetchall()
+        )
         leaves = [r["payload_hash"] for r in rows]
         root = compute_merkle_root(leaves)
         anchor = {
@@ -284,7 +274,7 @@ class AuditLedger:
             "created_at": time.time(),
         }
         try:
-            conn.execute(
+            db.execute(
                 """INSERT INTO audit_anchors
                    (anchor_id, tenant_id, first_seq, last_seq, merkle_root, created_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
@@ -297,10 +287,8 @@ class AuditLedger:
                     anchor["created_at"],
                 ),
             )
-            conn.commit()
         except Exception:
             logger.exception("anchor_range failed")
-            conn.rollback()
             raise
         return anchor
 
