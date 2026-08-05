@@ -1,8 +1,9 @@
 """Pydantic v2 request/response models for the URA Chatbot API."""
 
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -346,17 +347,54 @@ class VoiceAuditEntry(BaseModel):
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
+class ExportMessage(BaseModel):
+    """One bounded conversation record suitable for a PDF export."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant", "system"] = "user"
+    content: str = Field(..., min_length=1, max_length=6_000)
+    timestamp: str = Field("", max_length=64)
+
+
 class ExportConversationRequest(BaseModel):
-    messages: list[dict] = Field(
-        ..., min_length=1, description="List of {role, content, timestamp} dicts"
+    messages: list[ExportMessage] = Field(
+        ..., min_length=1, max_length=50, description="Bounded conversation messages"
     )
-    title: str = Field("Conversation Report", max_length=200)
-    session_id: str = Field("", max_length=64)
+    title: str = Field("Conversation Report", min_length=1, max_length=120)
+    session_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$")
+
+    @model_validator(mode="after")
+    def _total_content_is_bounded(self) -> "ExportConversationRequest":
+        if sum(len(message.content) for message in self.messages) > 30_000:
+            raise ValueError("Conversation export content exceeds the 30,000-character limit")
+        return self
+
+
+class TaxSummaryItem(BaseModel):
+    """One line in a tax summary; Decimal avoids float-formatting failures."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(..., min_length=1, max_length=160)
+    amount: Decimal = Field(..., ge=Decimal("-1000000000000000"), le=Decimal("1000000000000000"))
+
+
+class TaxCalculation(BaseModel):
+    """Strict, bounded input contract for a generated tax-summary PDF."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[TaxSummaryItem] = Field(default_factory=list, max_length=100)
+    total: Decimal = Field(
+        Decimal("0"), ge=Decimal("-1000000000000000"), le=Decimal("1000000000000000")
+    )
+    notes: str = Field("", max_length=4_000)
 
 
 class ExportTaxSummaryRequest(BaseModel):
-    calculation: dict = Field(..., description="Tax calculation with items[] and total")
-    taxpayer_ref: str = Field("", max_length=50)
+    calculation: TaxCalculation = Field(..., description="Bounded tax calculation with items and total")
+    taxpayer_ref: str = Field("", max_length=50, pattern=r"^[a-zA-Z0-9_./-]*$")
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +409,28 @@ class DocumentFields(BaseModel):
     references: list[str] = Field(
         default_factory=list, description="URA reference/assessment numbers found"
     )
+
+
+class DocumentProvenance(BaseModel):
+    """Evidence and processing metadata for a document analysis result."""
+
+    source_sha256: str = Field("", description="SHA-256 of the uploaded source bytes")
+    extraction_method: str = Field("", description="pdf_text | pdf_ocr | image_ocr | docx | xlsx | csv | text")
+    ocr_backend: str = Field("", description="service | easyocr | pytesseract | disabled | unavailable")
+    ocr_status: str = Field("not_used", description="ready | unavailable | disabled | timed_out | failed")
+    ocr_page_numbers: list[int] = Field(default_factory=list)
+    ocr_regions: int = Field(0, ge=0)
+    ocr_mean_confidence: float | None = Field(None, ge=0.0, le=1.0)
+
+
+class DocumentFieldEvidence(BaseModel):
+    """A bounded source pointer for one extracted field value."""
+
+    value: str
+    source: str = Field("extracted_text", description="pdf_text | ocr | image_ocr | table | text")
+    page: int | None = Field(None, ge=1)
+    box: list[list[float]] = Field(default_factory=list, description="OCR quadrilateral when available")
+    confidence: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class DocumentTableSummary(BaseModel):
@@ -399,9 +459,17 @@ class DocumentAnalysisResponse(BaseModel):
             "filing_form | invoice | generic"
         ),
     )
-    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Classification confidence")
+    confidence: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Keyword-heuristic match score; not a calibrated probability",
+    )
+    classification_method: str = Field("keyword_heuristic")
     matched_keywords: list[str] = Field(default_factory=list)
     fields: DocumentFields = Field(default_factory=DocumentFields)
+    field_evidence: dict[str, list[DocumentFieldEvidence]] = Field(default_factory=dict)
+    provenance: DocumentProvenance = Field(default_factory=DocumentProvenance)
     tables: list[DocumentTableSummary] = Field(default_factory=list)
     text_preview: str = Field("", description="First characters of the extracted text")
     truncated: bool = Field(False, description="Whether extracted text was truncated")

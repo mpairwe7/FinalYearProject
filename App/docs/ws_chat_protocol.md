@@ -187,6 +187,19 @@ the same `sources` / `citations` payload that today appears in `metadata`.
  "result_summary": "VAT = 900,000 UGX", "elapsed_ms": 18}
 ```
 
+### `response.tool_call.skipped`
+
+Emitted instead of `started`/`completed` when the turn's spend budget
+declines a call — see `docs/agentic-loop.md`. `admission` is `repeat`
+(an identical call already ran this turn; the earlier result is reused)
+or `denied` (a ceiling was hit). Nothing was dispatched either way.
+
+```json
+{"type": "response.tool_call.skipped",
+ "call_id": "tc_03", "name": "lookup_rate",
+ "admission": "repeat", "reason": "duplicate call", "iteration": 2}
+```
+
 ### `response.tool_call.confirmation_required` *(Phase 4)*
 
 ```json

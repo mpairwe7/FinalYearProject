@@ -105,6 +105,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         supervisor \
         ca-certificates \
         curl \
+        fonts-dejavu-core \
         libgomp1 \
         tini \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \

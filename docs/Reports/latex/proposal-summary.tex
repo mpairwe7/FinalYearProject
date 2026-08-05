@@ -1,0 +1,299 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Packages ----------
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[english]{babel}
+\usepackage{microtype}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{parskip}
+\usepackage[colorlinks=true,linkcolor=uranavy,urlcolor=uranavy,citecolor=uranavy]{hyperref}
+
+% ---------- Colours ----------
+\definecolor{uranavy}{RGB}{7,45,84}
+\definecolor{uragold}{RGB}{176,141,55}
+\definecolor{rulegray}{RGB}{160,160,160}
+
+% ---------- Section styling ----------
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{uranavy}}
+  {\thesection.}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.6em}{0.9em}
+
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{uranavy}}
+  {\thesubsection}{0.5em}{}
+\titlespacing*{\subsection}{0pt}{1.2em}{0.5em}
+
+\titleformat{name=\subsection,numberless}
+  {\normalfont\large\bfseries\color{uranavy}}
+  {}{0em}{}
+\titlespacing*{name=\subsection,numberless}{0pt}{1.2em}{0.5em}
+
+% ---------- Headers / footers ----------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{rulegray}\leaders\hrule height \headrulewidth\hfill}}
+\fancyhead[L]{\small\textcolor{uranavy}{URA AI Intelligent Assistant --- Proposal Summary}}
+\fancyhead[R]{\small\thepage}
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \renewcommand{\headrulewidth}{0pt}
+  \fancyfoot[C]{\small\thepage}
+}
+
+\setlength{\parskip}{0.6em}
+\setlength{\parindent}{0pt}
+
+\newcommand{\reporttitle}{Proposal Summary}
+
+\begin{document}
+
+% ================= TITLE PAGE =================
+\begin{titlepage}
+\pagestyle{empty}
+\begin{center}
+\includegraphics[width=1.7in]{makerere-logo.png}\\[0.9cm]
+
+{\Large\bfseries P\,R\,O\,P\,O\,S\,A\,L\quad{}S\,U\,M\,M\,A\,R\,Y}\\[1cm]
+
+{\LARGE\bfseries\color{uranavy} CONVERSATIONAL AI INTELLIGENT\\[0.35em] ASSISTANT FOR CUSTOMER SERVICE}\\[0.5cm]
+{\Large\bfseries (THE URA CHATBOT)}\\[1.3cm]
+
+{\large\bfseries COLLEGE OF COMPUTING AND INFORMATION TECHNOLOGY}\\[0.3em]
+{\large\bfseries DEPARTMENT OF NETWORKS}\\[0.3em]
+{\large\bfseries SCHOOL OF COMPUTING AND INFORMATICS TECHNOLOGY}\\[1.3cm]
+
+\begin{minipage}{0.8\textwidth}
+\centering
+A Proposal Summary Submitted to the Uganda Revenue Authority, Office of the Deputy Commissioner General, URA Tower, 16\textsuperscript{th} Floor
+\end{minipage}\\[0.7cm]
+
+{\bfseries Prepared for the Uganda Revenue Authority}\\[0.9cm]
+
+Submitted by:\\[0.5cm]
+
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{cl}
+\toprule
+\textbf{\#} & \textbf{Name} \\
+\midrule
+1 & MPAIRWE LAUBEN \\
+2 & RWEMERA DAVID \\
+3 & OKWEL EDGAR MARK \\
+4 & OLOWO OMONDI PHILLY \\
+\bottomrule
+\end{tabular}
+
+\vfill
+{\small Makerere University \textbullet\ \today}
+\end{center}
+\end{titlepage}
+
+\clearpage
+\setcounter{page}{1}
+
+% ================= 1. THE PROBLEM =================
+\section{The Problem}
+
+The Uganda Revenue Authority is being asked to serve a taxpayer base that has doubled in three years, from 2.62 million in FY 2021/22 to 5.25 million by June 2025.\footnote{Registered-taxpayer figures as reported in \textit{Daily Monitor}, ``Large tax register, but very few pay,'' and \textit{New Vision}, ``Over 2.7 million registered taxpayers didn't contribute any revenue last financial year,'' April 2026, both citing Auditor General Edward Akol's report to Parliament for FY2024/25.} Government has since sharpened that ambition: on 2 July 2026, Finance Minister Henry Musasizi told URA leadership that ``the strategic direction of URA is consistent with government's ambition of raising the tax-to-GDP ratio from the current 14.2\% to 20\%.''\footnote{Henry Musasizi, Minister of Finance, at a strategy meeting with URA leadership, 2 July 2026; reported in \textit{CEO East Africa}, ``A Tall Order? New Finance Minister Wants URA to Increase Tax-to-GDP Ratio from 14\% to 20\% by 2030.''} The channels through which taxpayers seek guidance have not grown with them. They remain manual, bound to office hours, and dominated by the same routine questions answered thousands of times over.
+
+Every new registrant arrives with questions, TIN registration, PAYE, VAT, EFRIS, customs clearance, filing deadlines, and nearly every one of them requires a human agent. Officers spend their days answering the same questions repeatedly, and even a short wait of a few minutes is enough to discourage a taxpayer from going further. The result is a service that works, but leaks: questions unasked, obligations misunderstood, and taxpayers who give up before they get an answer.
+
+The size of that gap is measurable, and the cost of it is not only operational but fiscal. A nationally representative Afrobarometer survey found that 76 per cent of Ugandans report difficulty finding out what taxes they owe, and 83 per cent find it hard to access information on how tax revenue is spent.\footnote{Afrobarometer Dispatch No.\ 886, ``Most Ugandans struggle to access information on taxes they owe and how revenues are used,'' 18 October 2024.} According to the Auditor General, of the 5.25 million taxpayers on URA's register as of June 2025, only 2.52 million, about 48 per cent, remitted any tax during the year, leaving roughly 2.73 million people on the register but not yet contributing.\footnote{Auditor General Edward Akol's report to Parliament for FY2024/25, as reported in \textit{Daily Monitor} and \textit{New Vision}, April 2026 (see note above).} Recent experience with digital rollouts such as EFRIS showed how expensive a knowledge gap becomes. Commissioner General John Musinguzi himself acknowledged that EFRIS ``initially intimidated some taxpayers'' and that its phased rollout ``faced resistance,'' before URA began waiving penalties under a presidential directive of 7 May 2024 and running dedicated training sessions to close the gap.\footnote{John Musinguzi, Commissioner General, URA, quoted via the Government of Uganda Information Hub, ``URA commences waiving of EFRIS penalties,'' 28 May 2024.} Where taxpayers do not understand a system or an obligation, resistance and non-compliance follow.
+
+Language sits at the centre of the problem. Uganda is home to over forty living languages,\footnote{Ethnologue count of 44 living languages of Uganda (41 indigenous, 3 non-indigenous), as reported in ``Languages of Uganda,'' Wikipedia, citing Ethnologue.} and the 2024 National Population and Housing Census found Uganda's literacy rate at 74 per cent, meaning roughly one adult in four cannot comfortably read or write.\footnote{Uganda Bureau of Statistics, National Population and Housing Census 2024 Main Report: 74\% of the population literate overall (77\% male, 72\% female; 73.7\% among adults aged 18+).} Support that exists only in written English, and only during working hours, structurally excludes a large share of the very citizens URA is working hardest to bring into the tax base.
+
+This is not a staffing problem that more agents can solve. Adding officers scales cost in a straight line and reach barely at all. It is a reach problem, and it requires a different kind of channel.
+
+% ================= 2. THE SOLUTION =================
+\section{The Solution}
+
+The URA AI Intelligent Assistant is a conversational AI assistant that a taxpayer can simply open and talk to. The taxpayer types or speaks a question in everyday language, in the language they are most comfortable in; the assistant understands what is being asked and replies with a clear, plain-language answer drawn strictly from official URA information and knowledge base. It is already built, deployed and working as a prototype. URA is not being asked to evaluate an idea on paper.
+
+\begin{longtable}{@{}>{\bfseries\raggedright}p{4cm} p{10.7cm}@{}}
+\toprule
+\textbf{Capability} & \textbf{What it does, and why it matters} \\
+\midrule
+\endhead
+Accurate answers from URA's own knowledge base &
+Every response is generated strictly based from URA's official documentation, knowledge base and information, never from general internet content or foreign tax law. The assistant handles any type of question a taxpayer brings, routine or complex, and answers it more completely than a brief human exchange usually allows. It never tires of the question asked for the ten-thousandth time. \\[0.6em]
+
+The taxpayer's own language &
+Engineered to extend to Uganda's other major languages as it is implemented, in text and in voice. A trader in Arua can ask a question in their own language and receive the answer back in it. \\[0.6em]
+
+Voice, in both directions &
+Speech-to-text lets a taxpayer who cannot easily write simply speak the question; text-to-speech reads the answer back aloud. This single capability reaches citizens written channels have never served: taxpayers with limited literacy, the elderly, persons with visual impairment, and busy traders who would rather speak than type. \\[0.6em]
+
+Cited answers &
+Every response shows the taxpayer where it came from, so the answer can be checked against URA's own published material rather than taken on trust. \\[0.6em]
+
+Internal confidence indicator &
+A colour-coded confidence signal, visible to URA, flags where the assistant is certain and where it is not, so answer quality is monitored continuously rather than assumed, and weak areas are found before a taxpayer finds them. \\[0.6em]
+
+Escalation that carries context &
+Where a case is genuinely complex, or the taxpayer is not satisfied, the AI assistant opens a ticket for a human officer and passes the full conversation across. The officer reaches out already knowing who the taxpayer is, what was asked and what has been said: no repetition, no starting over. \\[0.6em]
+
+Available on every channel &
+Delivered as an API and integrated across the website, the URA app, WhatsApp and email, with no installation required. Wherever a taxpayer already is, they reach the same assistant and receive the same official answer, at any hour of any day. \\
+\bottomrule
+\end{longtable}
+
+\subsection*{We are not replacing your officers}
+
+The AI Intelligent Assistant is not a replacement for URA's people, and we do not propose it as one. What changes for an officer is not whether they are needed, but what they spend their time on: objections, audits, disputes and hardship cases, the situations where experience and discretion actually matter. And because every escalation arrives with the full conversation attached, the officer starts the call already informed.
+
+\subsection*{The next step: AI for URA's internal work}
+
+Once the assistant is serving taxpayers, the same foundation turns inward. We will extend the model to read and analyse large documents and datasets, long filings, case records, bulk returns, and surface what matters in a fraction of the time manual review takes. From that analysis it will generate tailored reports for URA's own officers: drafted, structured and written to the purpose asked of it.
+
+The target is the concurrent, repetitive internal work that quietly absorbs hours across every department: reading, summarising, cross-checking, assembling and reformatting information, none of which is the work URA hired its people to do. The same trusted AI that answers a taxpayer's question about VAT can read a case file and draft the memo about it. This is where what started as a taxpayer-facing assistant becomes an internal capability for the whole Authority.
+
+\subsection*{Proven, not proposed}
+
+What URA is being shown is not a design document. The AI Intelligent Assistant has been built, deployed and independently evaluated as a prototype, and put through rigorous accuracy and security testing, including deliberate attempts to mislead it into giving wrong guidance and to misuse it. It was engineered to recognised international standards for information security and for the management of AI systems, and to Uganda's Data Protection and Privacy Act, 2019. The remaining work is to optimise it against URA's full body of official material and knowledge base, validate it with URA's own experts, and harden it for national scale, not to find out whether the idea works.
+
+% ================= 3. THE VALUE TO URA =================
+\section{The Value to URA}
+
+\subsection*{Built around how taxpayers already reach URA}
+
+This proposal is not asking URA to replace what already works. A taxpayer with a question today has established doors that already carry real volume: the toll-free contact centre (0800~117~000 / 0800~217~000), a WhatsApp line (0772~140~000), email support, a network of Domestic Taxes Offices and One Stop Centres for walk-in service, and the URA web portal and social media pages.\footnote{URA's own published contact channels, \url{https://ura.go.ug/en/service-office-locations/}, accessed July 2026.} Each of those channels carries a real, structural cost: a call centre queue, the time and fare to travel to a service centre and wait to be seen, or a web and social presence that can publish information but cannot hold a back-and-forth conversation about one taxpayer's specific question. The AI Intelligent Assistant is designed to sit in front of and alongside these channels, not to compete with or dismantle them, so that each one is freed to do what it does best. Notably, URA's own back-office use of AI today is limited to risk-profiling and fraud detection inside the ASYCUDA customs system; no taxpayer-facing conversational assistant yet exists, so this proposal fills a gap rather than duplicating an existing capability.
+
+Embedded on the web portal and reachable through the same messaging channels taxpayers already use, the assistant becomes the first line of contact: answering the routine, repetitive share of enquiries immediately, in the taxpayer's own language, before a call is queued or a trip is made. Where a question is genuinely complex, escalation still routes to the contact centre or the service counter, but with the full conversation already attached, so the officer who picks it up is not starting from zero. The improvement in customer experience this produces is not confined to the taxpayer:
+
+\begin{itemize}[topsep=0.3em, itemsep=0.3em]
+  \item \textbf{Taxpayers} reach a correct answer in minutes instead of a queue, in the channel and language they already use, at any hour.
+  \item \textbf{Frontline and call-centre officers} are relieved of the same routine questions asked thousands of times over, freeing their time for the objections, disputes and hardship cases that need a person, and reducing the burnout that comes with repetitive front-line work.
+  \item \textbf{URA management} gains something the existing channels cannot offer today: a continuous, auditable record of what is being asked, where confidence is low, and which topics are driving call and walk-in volume, evidence that can directly inform staffing, training and service-channel investment decisions.
+  \item \textbf{Tax agents and intermediaries}, who transact with URA repeatedly on behalf of many clients, get the same instant, cited answers rather than standing in the same queues as the general public, cutting the time they spend per client and improving the experience URA delivers to the professionals who represent a large share of the taxpayer base.
+\end{itemize}
+
+The assistant's credibility rests on this fit with what URA has already built: it is designed to extend the reach of the contact centre and service counters URA has invested in, not to ask the Authority to start its customer service model over.
+
+\subsection*{Instant service, and an operational process that scales}
+
+The AI assistant delivers informational service instantly and continuously. A taxpayer with a question at ten o'clock on a Sunday night receives a complete, correct answer immediately rather than waiting for Monday morning. Round-the-clock capacity arrives without overtime and without additional headcount, and it does not degrade during filing season: the assistant handles the thousandth query of the hour exactly as well as the first. Every taxpayer, in every district, receives the same consistent official answer.
+
+\subsection*{A direct, instant source of information --- and it is URA's own}
+
+Taxpayers already ask artificial intelligence about Ugandan tax. They do it today, using general-purpose tools that were never built for Uganda, that blend Ugandan rules with foreign tax law, and that route their questions to servers abroad. The question is not whether taxpayers will get AI answers about their obligations. It is whether those answers come from URA. This gives the taxpayer a direct, immediate channel to information that is official, cited and verifiable, carrying the Authority's own name, and it displaces the unofficial sources currently occupying that space.
+
+\subsection*{Taxpayer education at scale}
+
+Most non-compliance is confusion rather than defiance. URA's education programmes reach taxpayers where and when the Authority can deliver them; the assistant reaches every taxpayer, at the moment the question actually arises, in the language they think in. It turns statute and procedure into plain-language conversation and lets a taxpayer educate themselves without reading a single line of legislation or book. For an Authority whose taxpayers report, in independently published national survey data, that access to clear tax information is one of their biggest obstacles,\footnote{Afrobarometer Dispatch No.\ 886, October 2024 (see note above): 76\% struggle to find out what taxes they owe, 83\% struggle to access information on how revenues are spent.} this is education infrastructure that scales at effectively no additional cost per taxpayer, and it works quietly, continuously, alongside every campaign URA already runs.
+
+\subsection*{Reach into taxpayers no written channel has served}
+
+Voice and local languages bring in the roughly one adult in four for whom reading is a barrier, rural taxpayers far from any service centre, and persons with visual impairment. A basic smartphone becomes a URA help desk. These are not marginal populations: they sit squarely inside the 2.7 million registered taxpayers who are not yet contributing.
+
+\subsection*{AI that URA builds, owns and hosts itself}
+
+Most institutions adopting artificial intelligence today do so by renting it. They connect to an external provider, send their information out to it, and depend on a company they do not control for a capability they cannot inspect. For a revenue authority holding the financial records of five million citizens, that arrangement carries a cost that appears on no invoice.
+
+This project takes the other path. The AI Intelligent Assistant is built in Uganda, trained on URA's own material, and hosted on URA's own infrastructure, in line with the Data Protection and Privacy Act, 2019. No taxpayer information is sent to an external AI provider. No third party sits between the Authority and its clients. Nothing about how the system reaches its answers is hidden from URA, and no vendor can change its terms, raise its price, or withdraw the service.
+
+What URA acquires is therefore not a subscription but a capability, one the Authority owns outright, can inspect, can extend, and can point at any problem it chooses. It also establishes something URA does not have today: a proven internal foundation for artificial intelligence, and the institutional experience of running one. Every AI initiative the Authority undertakes afterwards becomes faster and cheaper because this one was done first, and done in-house.
+
+\subsection*{A record of what taxpayers were told}
+
+When guidance is given over a telephone line or across a counter, no record of it survives. URA cannot review at scale what its taxpayers were actually told, cannot find where guidance is going wrong, and cannot demonstrate afterwards what was said. Every answer the AI assistant gives is logged, cited to its source and carries a confidence score. That gives the Authority something it does not have today: a complete, auditable record of the guidance issued in its name, and a continuous view of which topics confuse taxpayers most, which is precisely the intelligence that should be directing URA's education campaigns and its guidance notes.
+
+\subsection*{The compliance arithmetic}
+
+Against a register of 5.25 million taxpayers, of whom fewer than half actively pay, even a single percentage point of improvement in voluntary compliance is worth many multiples of what this system costs to build and run. The assistant does not have to transform URA's revenue position to justify itself many times over. It needs only to answer correctly, in the taxpayer's own language and at the moment the question arises, a fraction of the questions that today go unasked.
+
+\subsection*{Where this puts URA}
+
+Kenya has moved first. In April 2026, the Kenya Revenue Authority launched ``Shuru,'' a WhatsApp-based AI assistant that lets taxpayers file returns, generate e-invoices, make payments and check compliance status, escalating to a human agent where needed.\footnote{Kenya Revenue Authority's ``Shuru'' WhatsApp assistant, launched 2 April 2026 by Commissioner General Humphrey Wattanga, targeting up to 22.6 million potential taxpayers; reported in \textit{Tuko.co.ke}, ``KRA Introduces WhatsApp Tax Filing Service for Kenyans: `No New Apps'.''} Rwanda and Tanzania's revenue authorities have publicly discussed AI adoption at conferences and in leadership statements, but neither has deployed a comparable taxpayer-facing tool.\footnote{Rwanda Revenue Authority conference on digital tax administration, and Tanzania Revenue Authority Commissioner General Yusuph Mwenda's public remarks on AI, reported in \textit{Daily News} (Tanzania), ``EAC tax authorities embrace AI to modernise revenue systems.''} Kenya's system, so far as is publicly known, is a text-only WhatsApp channel. It does not answer by voice, and there is no public indication it works in Kenya's own local languages or that it is self-hosted rather than run through an external platform. Uganda's opportunity is not to be first in the region, Kenya already is, but to be the first to do it by voice, in Uganda's own languages, and on infrastructure URA owns outright rather than rents.
+
+% ================= 4. NEXT STEP & TERMS =================
+\section{Next Step \& Terms}
+
+The URA AI Intelligent Assistant exists, it is deployed, and it works as a prototype. We would welcome the chance to show it to you rather than describe it. Seeing the assistant answer a real taxpayer question, by voice, in Luganda, drawn from URA's own material and citing where the answer came from, will make the case far better than this document can.
+
+We respectfully request a working session to demonstrate the system live to your team, at whatever time is convenient to the Authority. The full proposal, covering implementation, testing, security, ownership and terms, is ready and will be provided on request.
+
+% ================= 5. TERMS AND CONDITIONS =================
+\section{Terms and Conditions of Engagement}
+
+The following terms govern the proposed engagement between the project team and the Uganda Revenue Authority. They are offered in the spirit of transparency and fairness, and are open to negotiation at the working session requested above.
+
+\subsection{Access to URA Data and Systems}
+
+The current prototype was built and evaluated using publicly available URA documentation, published FAQs, and content from the URA website. To optimise the system for national deployment, the team will require structured access to URA's internal knowledge base, policy documents, procedural manuals, training materials, and any other authoritative content the Authority uses to guide its officers and taxpayers.
+
+This access will be governed by a formal data sharing agreement to be executed before any internal data is shared. All URA data accessed during development will be used exclusively for the purpose of training, indexing, and testing the AI assistant. No URA data will be copied to external servers, shared with third parties, or retained by the team beyond the agreed engagement period. The data sharing agreement will be drafted in full compliance with Uganda's Data Protection and Privacy Act, 2019.
+
+Where integration with URA's internal systems, such as the taxpayer registry, the EFRIS platform, or the URA portal, is required, the team will work under the direct supervision of URA's IT department and will follow all of the Authority's existing security and access control protocols.
+
+\subsection{Infrastructure and Computational Resources}
+
+The system as currently deployed runs on GPU-enabled cloud infrastructure, which is necessary to serve the language model at the response speeds taxpayers expect. For a national deployment serving URA's full taxpayer base of over five million registered taxpayers, significantly more computational capacity will be required than the team has access to independently.
+
+As part of this engagement, the team requests that URA provide or facilitate access to the following categories of resource for the duration of the development and deployment phase:
+
+\begin{itemize}[topsep=0.2em, itemsep=0.2em]
+  \item GPU-enabled servers or cloud compute sufficient to run and retrain the language model at production scale.
+  \item Adequate memory and storage for the full URA document corpus, the vector database, conversation logs, and analytics.
+  \item A staging environment that mirrors the production infrastructure for testing before any release goes live.
+  \item Network access to the relevant URA internal systems under the supervision of URA IT staff.
+\end{itemize}
+
+These resources remain URA property throughout and after the engagement. The team will work within whatever infrastructure governance policies the Authority already applies to its technology projects.
+
+\subsection{Onboarding of the Project Team}
+
+To deliver a system of this nature to national scale within a realistic timeframe and to the quality standard URA requires, the team requests to be formally onboarded by URA as specialist contractors for a period of two years from the date of engagement.
+
+During this period, the team members will work embedded within URA's IT and customer service departments as critical mission staff. They will collaborate directly with URA's own technical officers, subject matter experts, and frontline customer service staff to ensure the system reflects the Authority's actual operational reality rather than an external view of it. This arrangement means URA retains full visibility and control over every aspect of development, and the team's institutional knowledge of the system transfers continuously to URA's own staff throughout the engagement rather than only at the end of it.
+
+The onboarding terms, including reporting lines, working arrangements, confidentiality obligations, and the scope of the team's access and responsibilities, will be set out in a formal contractor agreement to be agreed before the engagement begins. All team members will undergo whatever security vetting and onboarding procedures URA applies to contractors handling sensitive data.
+
+At the conclusion of the two-year engagement period, URA will have a fully trained internal team capable of operating, maintaining, and extending the system independently. The handover plan for that transition will be agreed at the outset and tracked throughout the engagement.
+
+\subsection{Intellectual Property Transfer}
+
+The prototype AI Intelligent Assistant, including all source code, trained model weights, fine-tuning datasets, pipeline architecture, documentation, and associated technical artefacts, was developed independently by the project team as a final year academic project at Makerere University, under the academic supervision of the School of Computing and Informatics Technology.
+
+In consideration of the development fee described below, the team agrees to transfer full ownership of all intellectual property comprising the system to the Uganda Revenue Authority upon execution of the engagement agreement. From that point, URA will own the system outright, with no ongoing licence fees, royalties, or dependency on the team for continued access to the codebase or model weights. URA will be free to use, modify, extend, audit, and redeploy the system for any purpose within the Authority's mandate, without restriction.
+
+The intellectual property transfer will be documented in a formal assignment agreement to be reviewed by legal counsel on both sides before signing. The assignment will cover all components of the system in their current form as well as any improvements developed during the two-year engagement period.
+
+\subsection{Development Fee}
+
+In recognition of the substantial work already completed in designing, building, training, evaluating, securing, and documenting the AI Intelligent Assistant to prototype stage, the team requests a one-time development fee to be agreed between the parties prior to signing the engagement agreement.
+
+This fee covers the cost of the work already done, the intellectual property transfer described above, and the team's commitment to an exclusive two-year engagement with URA during which the system will be developed to full production scale. It does not cover the ongoing salary costs of the team during the two-year engagement period, which will be agreed separately as part of the contractor onboarding terms, nor does it cover the infrastructure costs described in Section~5.2, which URA will provide directly.
+
+The team is open to the fee being structured in a way that works for URA's procurement processes, whether as a lump sum on signing, a milestone-based payment tied to agreed delivery points, or a combination of both. A detailed breakdown of the work completed to date, along with the team's basis for the proposed fee, will be provided at the working session or on request in advance of it.
+
+\subsection{Confidentiality}
+
+From the date of first engagement, all URA information shared with the team, whether data, systems access, internal processes, or strategic plans, will be treated as strictly confidential. The team will execute whatever non-disclosure agreement URA requires before any confidential information is shared. This obligation survives the end of the engagement period indefinitely.
+
+\subsection{Governing Law}
+
+This engagement and all agreements arising from it will be governed by the laws of the Republic of Uganda. Any disputes will be resolved through the mechanisms agreed between the parties at the time of contracting.
+
+\vspace{1.5cm}
+\noindent\hrulefill
+\vspace{0.8cm}
+
+\begin{center}
+Submitted with respect:\\[0.6em]
+{\bfseries Mpairwe Lauben \textbullet\ Rwemera David \textbullet\ Okwel Edgar Mark \textbullet\ Olowo Omondi Philly}\\[0.6em]
+School of Computing and Informatics Technology, Makerere University\\[0.3em]
+Academic Supervisor: Dr. Muwonge Benard, \href{mailto:bmuwonge@cit.ac.ug}{bmuwonge@cit.ac.ug}
+\end{center}
+
+\end{document}

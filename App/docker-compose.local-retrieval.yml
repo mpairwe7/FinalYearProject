@@ -1,0 +1,39 @@
+# Local FAQ retrieval and Qdrant profile.
+#
+# Uses only files under App/Data and App/Model, and publishes Qdrant on the
+# loopback interface for local inspection. Combine with the base stack:
+#   docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+#     up -d --build redis qdrant api
+services:
+  qdrant:
+    ports:
+      - "127.0.0.1:${LOCAL_QDRANT_PORT:-6333}:6333"
+
+  api:
+    environment:
+      DATA_DIR: /app/Data/dataset
+      FAQ_JSONL_DIR: /app/Data/faq_jsonl
+      TEACHER_QA_DIR: /app/Data/teacher_qa
+      BM25_STATE_PATH: /app/Model/bm25_state.json
+      QDRANT_URL: http://qdrant:6333
+      # Keep the legacy collection intact while this validated JSONL corpus is
+      # promoted locally. The application profile queries this collection only.
+      QDRANT_COLLECTION: ura_knowledge_base_jsonl
+      QDRANT_ENABLED: "true"
+      LLM_ENABLED: "false"
+      SPEECH_ENABLED: "false"
+      HF_HUB_OFFLINE: "1"
+      DENSE_FALLBACK_BACKEND: ""
+      LLM_FALLBACK_BACKEND: ""
+      FLAG_CLOUDFLARE_FALLBACK: "false"
+      STT_FALLBACK_BACKEND: ""
+      TTS_FALLBACK_BACKEND: ""
+      TRANSLATE_FALLBACK_BACKEND: ""
+      SUNBIRD_API_TOKEN: ""
+      SUNBIRD_FALLBACK_API_TOKEN: ""
+      OTEL_ENABLED: "false"
+    volumes:
+      - ./Data/dataset:/app/Data/dataset:ro
+      - ./Data/faq_jsonl:/app/Data/faq_jsonl:ro
+      - ./Data/teacher_qa:/app/Data/teacher_qa:ro
+      - ./Model:/app/Model

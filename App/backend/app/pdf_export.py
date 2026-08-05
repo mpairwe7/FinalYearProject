@@ -34,34 +34,48 @@ class _URAReport(FPDF):
 
     def __init__(self, title: str = "URA Tax Assistant Report"):
         super().__init__()
-        self._title = title
         self.set_auto_page_break(auto=True, margin=20)
         self._font_name = self._setup_font()
+        self._title = self.render_text(title)
 
     def _setup_font(self) -> str:
-        """Load NotoSans for full Unicode support (African language diacritics).
-        Falls back to Helvetica if the TTF is not bundled."""
+        """Load a bundled/system Unicode font, with a safe core-font fallback."""
         font_dir = Path(__file__).parent / "fonts"
-        noto_regular = font_dir / "NotoSans-Regular.ttf"
-        noto_bold = font_dir / "NotoSans-Bold.ttf"
+        regular_candidates = (
+            font_dir / "NotoSans-Regular.ttf",
+            Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        )
+        bold_candidates = (
+            font_dir / "NotoSans-Bold.ttf",
+            Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        )
+        regular = next((path for path in regular_candidates if path.exists()), None)
+        bold = next((path for path in bold_candidates if path.exists()), regular)
+        if regular is not None:
+            # fpdf2 requires each style to be registered. Reusing regular/bold
+            # files for italic styles is preferable to an export-time failure.
+            self.add_font("URASans", "", str(regular))
+            self.add_font("URASans", "B", str(bold or regular))
+            self.add_font("URASans", "I", str(regular))
+            self.add_font("URASans", "BI", str(bold or regular))
+            self.set_font("URASans", size=10)
+            return "URASans"
 
-        if noto_regular.exists():
-            self.add_font("NotoSans", "", str(noto_regular), uni=True)
-            if noto_bold.exists():
-                self.add_font("NotoSans", "B", str(noto_bold), uni=True)
-            else:
-                self.add_font("NotoSans", "B", str(noto_regular), uni=True)
-            self.set_font("NotoSans", size=10)
-            return "NotoSans"
-        else:
-            log.warning(
-                "NotoSans font not found at %s — falling back to Helvetica. "
-                "African language diacritics may not render correctly. "
-                "Download NotoSans-Regular.ttf from Google Fonts.",
-                font_dir,
-            )
-            self.set_font("Helvetica", size=10)
-            return "Helvetica"
+        log.warning(
+            "No Unicode PDF font is installed; falling back to safe Latin-1 replacement. "
+            "Bundle NotoSans-Regular.ttf and NotoSans-Bold.ttf for full rendering."
+        )
+        self.set_font("Helvetica", size=10)
+        return "Helvetica"
+
+    def render_text(self, value: Any) -> str:
+        """Avoid 500s when a deployment lacks the bundled Unicode font."""
+        text = str(value)
+        if self._font_name == "Helvetica":
+            return text.encode("latin-1", errors="replace").decode("latin-1")
+        return text
 
     def header(self):
         # Navy bar.
@@ -71,7 +85,7 @@ class _URAReport(FPDF):
         self.set_text_color(*_WHITE)
         self.set_font(self._font_name, "B", 12)
         self.set_y(3)
-        self.cell(0, 10, self._title, align="C")
+        self.cell(0, 10, self.render_text(self._title), align="C")
         # Gold accent line.
         self.set_draw_color(*_URA_GOLD)
         self.set_line_width(0.8)
@@ -108,9 +122,9 @@ def generate_conversation_pdf(
     pdf.add_page()
 
     if session_id:
-        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_font(pdf._font_name, "I", 8)
         pdf.set_text_color(*_DARK_GRAY)
-        pdf.cell(0, 5, f"Session: {session_id}", ln=True)
+        pdf.cell(0, 5, _safe_text(pdf, f"Session: {session_id}"), ln=True)
         pdf.ln(3)
 
     for msg in messages:
@@ -121,12 +135,12 @@ def generate_conversation_pdf(
         is_user = role == "user"
 
         # Role label.
-        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_font(pdf._font_name, "B", 9)
         pdf.set_text_color(*_URA_NAVY if is_user else _URA_GOLD)
         label = "You" if is_user else "URA Assistant"
         if timestamp:
             label += f"  ({timestamp})"
-        pdf.cell(0, 5, label, ln=True)
+        pdf.cell(0, 5, _safe_text(pdf, label), ln=True)
 
         # Message body.
         if is_user:
@@ -134,14 +148,14 @@ def generate_conversation_pdf(
         else:
             pdf.set_fill_color(245, 248, 255)
 
-        pdf.set_font("Helvetica", size=10)
+        pdf.set_font(pdf._font_name, size=10)
         pdf.set_text_color(*_DARK_GRAY)
 
         # Multi-cell for wrapping.
         x = pdf.get_x()
         pdf.get_y()
         pdf.set_x(x + 5)
-        pdf.multi_cell(180, 5, content, fill=True)
+        pdf.multi_cell(180, 5, _safe_text(pdf, content), fill=True)
         pdf.ln(4)
 
     buf = io.BytesIO()
@@ -166,27 +180,27 @@ def generate_tax_summary_pdf(
 
     # Taxpayer reference.
     if taxpayer_ref:
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font(pdf._font_name, "B", 10)
         pdf.set_text_color(*_URA_NAVY)
-        pdf.cell(0, 6, f"Reference: {taxpayer_ref}", ln=True)
+        pdf.cell(0, 6, _safe_text(pdf, f"Reference: {taxpayer_ref}"), ln=True)
         pdf.ln(3)
 
     # Summary table.
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font(pdf._font_name, "B", 10)
     pdf.set_text_color(*_WHITE)
     pdf.set_fill_color(*_URA_NAVY)
     pdf.cell(95, 8, "Item", border=1, fill=True)
     pdf.cell(95, 8, "Amount (UGX)", border=1, fill=True, align="R")
     pdf.ln()
 
-    pdf.set_font("Helvetica", size=10)
+    pdf.set_font(pdf._font_name, size=10)
     pdf.set_text_color(*_DARK_GRAY)
 
     items = calculation.get("items", [])
     for i, item in enumerate(items):
         bg = _LIGHT_GRAY if i % 2 == 0 else _WHITE
         pdf.set_fill_color(*bg)
-        pdf.cell(95, 7, str(item.get("label", "")), border=1, fill=True)
+        pdf.cell(95, 7, _safe_text(pdf, item.get("label", "")), border=1, fill=True)
         pdf.cell(
             95,
             7,
@@ -199,7 +213,7 @@ def generate_tax_summary_pdf(
 
     # Total row.
     total = calculation.get("total", 0)
-    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_font(pdf._font_name, "B", 11)
     pdf.set_fill_color(*_URA_GOLD)
     pdf.set_text_color(*_WHITE)
     pdf.cell(95, 9, "TOTAL", border=1, fill=True)
@@ -209,13 +223,13 @@ def generate_tax_summary_pdf(
     # Notes.
     notes = calculation.get("notes", "")
     if notes:
-        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_font(pdf._font_name, "I", 9)
         pdf.set_text_color(*_DARK_GRAY)
-        pdf.multi_cell(0, 5, f"Notes: {notes}")
+        pdf.multi_cell(0, 5, _safe_text(pdf, f"Notes: {notes}"))
 
     # Disclaimer.
     pdf.ln(8)
-    pdf.set_font("Helvetica", "I", 7)
+    pdf.set_font(pdf._font_name, "I", 7)
     pdf.set_text_color(120, 120, 120)
     pdf.multi_cell(
         0,
@@ -242,13 +256,11 @@ def _safe_text(pdf: _URAReport, text: str) -> str:
     NotoSans is not bundled the Helvetica core font only covers latin-1,
     and fpdf2 raises on unmappable characters.
     """
-    if pdf._font_name == "Helvetica":
-        return text.encode("latin-1", errors="replace").decode("latin-1")
-    return text
+    return pdf.render_text(text)
 
 
 def _section_heading(pdf: _URAReport, label: str) -> None:
-    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_font(pdf._font_name, "B", 11)
     pdf.set_text_color(*_URA_NAVY)
     pdf.cell(0, 7, label, ln=True)
     pdf.set_draw_color(*_URA_GOLD)
@@ -271,10 +283,10 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
     size_kb = int(analysis.get("size_bytes", 0)) / 1024
 
     # Document metadata.
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font(pdf._font_name, "B", 10)
     pdf.set_text_color(*_URA_NAVY)
     pdf.cell(0, 6, _safe_text(pdf, f"File: {filename}"), ln=True)
-    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_font(pdf._font_name, "I", 8)
     pdf.set_text_color(*_DARK_GRAY)
     analyzed_at = analysis.get("analyzed_at")
     when = (
@@ -293,17 +305,17 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
 
     # Classification.
     _section_heading(pdf, "Classification")
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font(pdf._font_name, "B", 10)
     pdf.set_fill_color(*_URA_NAVY)
     pdf.set_text_color(*_WHITE)
     badge = f"  {doc_type_label}  "
     pdf.cell(pdf.get_string_width(badge) + 4, 7, badge, fill=True)
-    pdf.set_font("Helvetica", size=9)
+    pdf.set_font(pdf._font_name, size=9)
     pdf.set_text_color(*_DARK_GRAY)
-    pdf.cell(0, 7, f"   Confidence: {confidence:.0%}", ln=True)
+    pdf.cell(0, 7, f"   Heuristic match score: {confidence:.0%} (not calibrated)", ln=True)
     keywords = analysis.get("matched_keywords") or []
     if keywords:
-        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_font(pdf._font_name, "I", 8)
         pdf.cell(
             0,
             5,
@@ -312,36 +324,78 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
         )
     pdf.ln(4)
 
+    # Evidence metadata lets a reader distinguish text-layer extraction from
+    # scanned-page OCR and verify the precise source version used for analysis.
+    provenance = analysis.get("provenance") or {}
+    source_hash = str(provenance.get("source_sha256", ""))
+    extraction_method = str(provenance.get("extraction_method", ""))
+    ocr_status = str(provenance.get("ocr_status", "not_used"))
+    if source_hash or extraction_method:
+        _section_heading(pdf, "Evidence & Processing")
+        pdf.set_font(pdf._font_name, size=8)
+        pdf.set_text_color(*_DARK_GRAY)
+        printable_hash = " ".join(
+            source_hash[index : index + 8] for index in range(0, len(source_hash), 8)
+        )
+        evidence_lines = [
+            f"Source SHA-256: {printable_hash or 'not recorded'}",
+            f"Extraction: {extraction_method or 'not recorded'}",
+        ]
+        if ocr_status != "not_used":
+            pages = provenance.get("ocr_page_numbers") or []
+            confidence_text = provenance.get("ocr_mean_confidence")
+            suffix = f"; pages: {', '.join(str(p) for p in pages)}" if pages else ""
+            if confidence_text is not None:
+                suffix += f"; mean region score: {float(confidence_text):.0%}"
+            evidence_lines.append(
+                f"OCR: {provenance.get('ocr_backend', 'unknown')} / {ocr_status}{suffix}"
+            )
+        for line in evidence_lines:
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(pdf.epw, 4, _safe_text(pdf, line))
+        pdf.ln(3)
+
     # Extracted fields table.
     fields: dict[str, Any] = analysis.get("fields") or {}
+    field_evidence: dict[str, Any] = analysis.get("field_evidence") or {}
     field_rows = [
-        ("TIN numbers", fields.get("tins") or []),
-        ("Amounts", fields.get("amounts") or []),
-        ("Dates", fields.get("dates") or []),
-        ("Reference numbers", fields.get("references") or []),
+        ("tins", "TIN numbers", fields.get("tins") or []),
+        ("amounts", "Amounts", fields.get("amounts") or []),
+        ("dates", "Dates", fields.get("dates") or []),
+        ("references", "Reference numbers", fields.get("references") or []),
     ]
-    if any(values for _, values in field_rows):
+    if any(values for _, _, values in field_rows):
         _section_heading(pdf, "Extracted Fields")
-        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_font(pdf._font_name, "B", 9)
         pdf.set_text_color(*_WHITE)
         pdf.set_fill_color(*_URA_NAVY)
         pdf.cell(50, 7, "Field", border=1, fill=True)
         pdf.cell(140, 7, "Values", border=1, fill=True)
         pdf.ln()
-        pdf.set_font("Helvetica", size=9)
+        pdf.set_font(pdf._font_name, size=9)
         pdf.set_text_color(*_DARK_GRAY)
         shade = 0
-        for label, values in field_rows:
+        for key, label, values in field_rows:
             if not values:
                 continue
             bg = _LIGHT_GRAY if shade % 2 == 0 else _WHITE
             shade += 1
             pdf.set_fill_color(*bg)
             pdf.cell(50, 7, label, border=1, fill=True)
+            evidence_by_value = {
+                str(item.get("value", "")): item
+                for item in field_evidence.get(key, [])
+                if isinstance(item, dict)
+            }
+            rendered_values = []
+            for value in values[:8]:
+                source = evidence_by_value.get(str(value), {})
+                page = source.get("page")
+                rendered_values.append(f"{value} [p. {page}]" if page else str(value))
             pdf.cell(
                 140,
                 7,
-                _safe_text(pdf, ", ".join(str(v) for v in values[:8])[:110]),
+                _safe_text(pdf, ", ".join(rendered_values)[:110]),
                 border=1,
                 fill=True,
             )
@@ -352,14 +406,14 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
     tables = analysis.get("tables") or []
     if tables:
         _section_heading(pdf, "Tables & Sheets")
-        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_font(pdf._font_name, "B", 9)
         pdf.set_text_color(*_WHITE)
         pdf.set_fill_color(*_URA_NAVY)
         pdf.cell(50, 7, "Name", border=1, fill=True)
         pdf.cell(30, 7, "Rows x Cols", border=1, fill=True, align="C")
         pdf.cell(110, 7, "Numeric column totals", border=1, fill=True)
         pdf.ln()
-        pdf.set_font("Helvetica", size=8)
+        pdf.set_font(pdf._font_name, size=8)
         pdf.set_text_color(*_DARK_GRAY)
         for i, table in enumerate(tables[:8]):
             bg = _LIGHT_GRAY if i % 2 == 0 else _WHITE
@@ -385,7 +439,7 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
     summary = str(analysis.get("summary", "")).strip()
     if summary:
         _section_heading(pdf, "Analysis Summary")
-        pdf.set_font("Helvetica", size=10)
+        pdf.set_font(pdf._font_name, size=10)
         pdf.set_text_color(*_DARK_GRAY)
         pdf.multi_cell(0, 5, _safe_text(pdf, summary))
         pdf.ln(4)
@@ -406,7 +460,7 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
     # Warnings.
     warnings = analysis.get("warnings") or []
     if warnings:
-        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_font(pdf._font_name, "I", 8)
         pdf.set_text_color(*_URA_GOLD)
         for warning in warnings[:5]:
             pdf.multi_cell(0, 4, _safe_text(pdf, f"! {warning}"))
@@ -414,7 +468,7 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
 
     # Disclaimer.
     pdf.ln(4)
-    pdf.set_font("Helvetica", "I", 7)
+    pdf.set_font(pdf._font_name, "I", 7)
     pdf.set_text_color(120, 120, 120)
     pdf.multi_cell(
         0,

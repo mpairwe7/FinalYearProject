@@ -53,9 +53,9 @@ RECEIPT_TEXT = (
 )
 
 
-def _analyze_receipt(session_id: str = "") -> documents.DocumentRecord:
+def _analyze_receipt(session_id: str = "", user_id: str = "") -> documents.DocumentRecord:
     return documents.analyze_document(
-        RECEIPT_TEXT.encode(), "receipt.txt", "text/plain", session_id=session_id
+        RECEIPT_TEXT.encode(), "receipt.txt", "text/plain", session_id=session_id, user_id=user_id
     )
 
 
@@ -93,6 +93,10 @@ class TextAnalysisTest(_RegistryIsolation):
         self.assertTrue(record.fields["references"])
         self.assertIn("receipt", record.summary.lower())
         self.assertRegex(record.doc_id, r"^[a-f0-9]{32}$")
+        self.assertEqual(record.meta["classification_method"], "keyword_heuristic")
+        self.assertRegex(record.meta["source_sha256"], r"^[a-f0-9]{64}$")
+        self.assertEqual(record.field_evidence["tins"][0]["value"], "1001234567")
+        self.assertEqual(record.field_evidence["tins"][0]["source"], "text")
 
     def test_empty_and_oversized_rejected(self):
         with self.assertRaises(ValueError):
@@ -106,6 +110,10 @@ class TextAnalysisTest(_RegistryIsolation):
             documents.analyze_document(b"MZ", "tool.exe", "application/octet-stream")
         with self.assertRaises(documents.UnsupportedDocumentError):
             documents.analyze_document(b"\xd0\xcf", "old.xls")
+
+    def test_content_signature_must_match_extension(self):
+        with self.assertRaises(documents.UnsupportedDocumentError):
+            documents.analyze_document(b"not a PDF", "claim.pdf", "application/pdf")
 
     def test_text_truncation_flagged(self):
         with mock.patch.object(documents, "_MAX_TEXT_CHARS", 50):
@@ -190,6 +198,35 @@ class PdfAnalysisTest(_RegistryIsolation):
         self.assertEqual(record.meta.get("page_count"), 1)
         self.assertIn("1005556667", record.fields["tins"])
 
+    def test_scanned_pdf_retains_ocr_field_evidence(self):
+        import fitz
+        from app.vision.ocr import OCRResult
+
+        doc = fitz.open()
+        doc.new_page()
+        data = doc.tobytes()
+        doc.close()
+        result = OCRResult(
+            items=[
+                {
+                    "text": "TIN: 1005556667",
+                    "box": [[1, 2], [30, 2], [30, 12], [1, 12]],
+                    "confidence": 0.91,
+                }
+            ],
+            backend="service",
+            status="ready",
+        )
+
+        with mock.patch.object(documents, "extract_ocr_result", return_value=result):
+            record = documents.analyze_document(data, "scan.pdf", "application/pdf")
+
+        evidence = record.field_evidence["tins"][0]
+        self.assertEqual(record.meta["extraction_method"], "pdf_ocr")
+        self.assertEqual(evidence["source"], "ocr")
+        self.assertEqual(evidence["page"], 1)
+        self.assertEqual(evidence["box"], [[1.0, 2.0], [30.0, 2.0], [30.0, 12.0], [1.0, 12.0]])
+
 
 # ---------------------------------------------------------------------------
 # Registry + chat grounding passages
@@ -200,13 +237,17 @@ class RegistryTest(_RegistryIsolation):
         self.assertIs(documents.get_document(record.doc_id, session_id="sess-1"), record)
         self.assertIsNone(documents.get_document(record.doc_id, session_id="sess-2"))
         self.assertIsNone(documents.get_document(record.doc_id))
-        # Unbound records (no session at upload) are fetchable by anyone
-        # holding the unguessable id.
+        # Legacy unbound records must not become bearer-accessible by id.
         loose = _analyze_receipt()
-        self.assertIs(documents.get_document(loose.doc_id, session_id="sess-9"), loose)
+        self.assertIsNone(documents.get_document(loose.doc_id, session_id="sess-9"))
+
+    def test_get_document_enforces_authenticated_owner(self):
+        record = _analyze_receipt(user_id="user-a")
+        self.assertIs(documents.get_document(record.doc_id, user_id="user-a"), record)
+        self.assertIsNone(documents.get_document(record.doc_id, user_id="user-b"))
 
     def test_ttl_expiry(self):
-        record = _analyze_receipt()
+        record = _analyze_receipt(session_id="expired")
         record.created_at -= documents.DOCUMENT_TTL_SECONDS + 5
         # Age the spool mirror too (both copies must expire together).
         documents._spool_write(record)
@@ -243,10 +284,10 @@ class RegistryTest(_RegistryIsolation):
         self.assertIsNone(documents.get_document(first.doc_id))
 
     def test_resolve_attachments_drops_missing_dedupes_and_caps(self):
-        records = [_analyze_receipt() for _ in range(4)]
+        records = [_analyze_receipt(session_id="resolve") for _ in range(4)]
         ids = [r.doc_id for r in records]
         resolved = documents.resolve_attachments(
-            [ids[0], ids[0], "f" * 32, *ids[1:]]
+            [ids[0], ids[0], "f" * 32, *ids[1:]], session_id="resolve"
         )
         self.assertEqual(len(resolved), documents.MAX_ATTACHMENTS_PER_TURN)
         self.assertEqual(resolved[0].doc_id, ids[0])
@@ -350,10 +391,12 @@ def _client() -> TestClient:
 )
 class DocumentEndpointsTest(_RegistryIsolation):
     def _upload(self, client: TestClient, name="receipt.txt", data=None, headers=None):
+        request_headers = {"X-Session-ID": "document-test"}
+        request_headers.update(headers or {})
         return client.post(
             "/v1/documents/analyze",
             files={"file": (name, data or RECEIPT_TEXT.encode(), "text/plain")},
-            headers=headers or {},
+            headers=request_headers,
         )
 
     def test_analyze_happy_path(self):
@@ -376,7 +419,18 @@ class DocumentEndpointsTest(_RegistryIsolation):
         self.assertEqual(r.status_code, 413)
 
     def test_analyze_missing_file_422(self):
-        r = _client().post("/v1/documents/analyze", data={"note": "no file"})
+        r = _client().post(
+            "/v1/documents/analyze",
+            data={"note": "no file"},
+            headers={"X-Session-ID": "document-test"},
+        )
+        self.assertEqual(r.status_code, 422)
+
+    def test_analyze_requires_document_binding(self):
+        r = _client().post(
+            "/v1/documents/analyze",
+            files={"file": ("receipt.txt", RECEIPT_TEXT.encode(), "text/plain")},
+        )
         self.assertEqual(r.status_code, 422)
 
     @unittest.skipUnless(_has("fpdf"), "fpdf2 not installed")

@@ -63,6 +63,36 @@ class FAQIntentBindingTests(unittest.TestCase):
             _filter_unbound_faq_hits("Tell me about quantum computing", hits), []
         )
 
+    def test_one_term_definition_does_not_authorise_topic_adjacent_faqs(self) -> None:
+        faqs = {
+            "vat": [
+                {
+                    "question": "What is VAT?",
+                    "answer": "VAT is a consumption tax.",
+                    "source": "ura_vat_faqs.csv",
+                },
+                {
+                    "question": "Is EFRIS optional for non-VAT taxpayers?",
+                    "answer": "Non-VAT taxpayers may adopt EFRIS.",
+                    "source": "ura_efris_faqs.csv",
+                },
+            ]
+        }
+        with mock.patch("app.service._get_bm25_encoder", return_value=None):
+            hits = _simple_search("What is VAT?", faqs)
+        self.assertEqual([hit["question"] for hit in hits], ["What is VAT?"])
+
+    def test_jsonl_faq_hit_uses_the_same_intent_filter(self) -> None:
+        hits = [
+            {
+                "doc_type": "faq_jsonl",
+                "source": "ura_efris_faqs.csv",
+                "question": "Is EFRIS optional for non-VAT taxpayers?",
+                "answer": "Non-VAT taxpayers may adopt EFRIS.",
+            }
+        ]
+        self.assertEqual(_filter_unbound_faq_hits("What is VAT?", hits), [])
+
 
 class FAQSafetyRegressionTests(unittest.TestCase):
     def test_decimal_facts_are_verified_as_one_claim(self) -> None:

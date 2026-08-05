@@ -448,7 +448,13 @@ async def lifespan(app: FastAPI):
 # is fine for a single-worker dev server but will NOT correctly enforce a
 # shared limit across workers or Kubernetes replicas.
 _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
+_EXPORT_RATE_LIMIT = os.getenv("EXPORT_RATE_LIMIT", "10/minute")
+_DOCUMENT_RATE_LIMIT = os.getenv("DOCUMENT_RATE_LIMIT", "10/minute")
 _SLOWAPI_STORAGE_URI = os.getenv("SLOWAPI_STORAGE_URI", "")
+_DOCUMENT_MULTIPART_OVERHEAD_BYTES = int(
+    os.getenv("DOCUMENT_MULTIPART_OVERHEAD_BYTES", str(512 * 1024))
+)
+_DOCUMENT_UPLOAD_CHUNK_BYTES = 64 * 1024
 
 _limiter_kwargs: dict = {"key_func": get_remote_address, "default_limits": []}
 if _SLOWAPI_STORAGE_URI:
@@ -487,6 +493,43 @@ def get_speech_model(request: Request) -> SpeechModel:
             detail="Speech pipeline disabled or failed to initialise (set SPEECH_ENABLED=true)",
         )
     return speech
+
+
+def _reject_oversized_document_request(request: Request) -> None:
+    """Fail before multipart parsing when a client provides an oversized body."""
+    raw_length = request.headers.get("content-length")
+    if not raw_length:
+        return
+    try:
+        content_length = int(raw_length)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length header") from None
+    if content_length < 0:
+        raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+    max_request_bytes = documents.MAX_FILE_BYTES + _DOCUMENT_MULTIPART_OVERHEAD_BYTES
+    if content_length > max_request_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Request exceeds the {max_request_bytes // (1024 * 1024)} MiB document upload limit",
+        )
+
+
+async def _read_document_upload_bounded(upload: Any) -> bytes:
+    """Read an upload in chunks, enforcing the byte limit before a full copy exists."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(_DOCUMENT_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > documents.MAX_FILE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds the {documents.MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +629,9 @@ def chat(
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
 
-    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
+    attachments = documents.resolve_attachments(
+        body.attachment_ids, session_id=session_id, user_id=ctx.user_id
+    )
     result = model.generate(
         message=body.message,
         conversation_id=body.conversation_id,
@@ -674,7 +719,9 @@ async def chat_stream(
 
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
-    attachments = documents.resolve_attachments(body.attachment_ids, session_id=session_id)
+    attachments = documents.resolve_attachments(
+        body.attachment_ids, session_id=session_id, user_id=ctx.user_id
+    )
 
     async def event_generator():
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
@@ -894,17 +941,25 @@ async def translate_text(
 
 
 @app.post("/v1/export/conversation", tags=["export"])
+@limiter.limit(_EXPORT_RATE_LIMIT)
 def export_conversation(
+    request: Request,
     body: ExportConversationRequest,
     _ctx: AuthContext = Depends(optional_user),
 ) -> Response:
     """Export a conversation as a branded PDF."""
     from .pdf_export import generate_conversation_pdf
 
+    started = time.perf_counter()
     pdf_bytes = generate_conversation_pdf(
-        body.messages,
+        [message.model_dump() for message in body.messages],
         title=body.title,
         session_id=body.session_id,
+    )
+    metrics.inc("pdf_exports_total", labels={"kind": "conversation"})
+    metrics.observe("pdf_export_bytes", len(pdf_bytes), labels={"kind": "conversation"})
+    metrics.observe(
+        "pdf_export_duration_ms", (time.perf_counter() - started) * 1000, labels={"kind": "conversation"}
     )
     return Response(
         content=pdf_bytes,
@@ -916,16 +971,24 @@ def export_conversation(
 
 
 @app.post("/v1/export/tax-summary", tags=["export"])
+@limiter.limit(_EXPORT_RATE_LIMIT)
 def export_tax_summary(
+    request: Request,
     body: ExportTaxSummaryRequest,
     _ctx: AuthContext = Depends(current_user),
 ) -> Response:
     """Export a tax calculation summary as a branded PDF."""
     from .pdf_export import generate_tax_summary_pdf
 
+    started = time.perf_counter()
     pdf_bytes = generate_tax_summary_pdf(
-        body.calculation,
+        body.calculation.model_dump(),
         taxpayer_ref=body.taxpayer_ref,
+    )
+    metrics.inc("pdf_exports_total", labels={"kind": "tax_summary"})
+    metrics.observe("pdf_export_bytes", len(pdf_bytes), labels={"kind": "tax_summary"})
+    metrics.observe(
+        "pdf_export_duration_ms", (time.perf_counter() - started) * 1000, labels={"kind": "tax_summary"}
     )
     return Response(
         content=pdf_bytes,
@@ -946,7 +1009,7 @@ def export_tax_summary(
     response_model=DocumentAnalysisResponse,
     tags=["documents"],
 )
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(_DOCUMENT_RATE_LIMIT)
 async def analyze_uploaded_document(
     request: Request,
     ctx: AuthContext = Depends(optional_user),
@@ -964,12 +1027,28 @@ async def analyze_uploaded_document(
     """
     import asyncio
 
-    form = await request.form()
-    upload = form.get("file")
+    _reject_oversized_document_request(request)
+    session_id = request.headers.get("X-Session-ID", "")
+    if not session_id and not ctx.user_id:
+        raise HTTPException(
+            status_code=422,
+            detail="X-Session-ID or an authenticated identity is required for document uploads",
+        )
+    try:
+        form = await request.form(
+            max_files=1,
+            max_fields=8,
+            max_part_size=documents.MAX_FILE_BYTES,
+        )
+    except Exception as err:
+        logger.info("Document multipart parsing rejected: %s", err)
+        raise HTTPException(status_code=422, detail="Invalid or oversized multipart document upload") from err
+    uploads = form.getlist("file")
+    upload = uploads[0] if len(uploads) == 1 else None
     if upload is None or isinstance(upload, str):
         raise HTTPException(status_code=422, detail="Missing 'file' part in form data")
 
-    data = await upload.read()
+    data = await _read_document_upload_bounded(upload)
     if not data:
         raise HTTPException(status_code=422, detail="Empty file")
     if len(data) > documents.MAX_FILE_BYTES:
@@ -978,7 +1057,7 @@ async def analyze_uploaded_document(
             detail=f"File exceeds the {documents.MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
         )
 
-    session_id = request.headers.get("X-Session-ID", "")
+    started = time.perf_counter()
     try:
         record = await asyncio.to_thread(
             documents.analyze_document,
@@ -992,13 +1071,20 @@ async def analyze_uploaded_document(
         raise HTTPException(status_code=415, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
+    finally:
+        metrics.observe("document_analysis_duration_ms", (time.perf_counter() - started) * 1000)
 
     metrics.inc("documents_analyzed_total")
+    ocr_status = str(record.meta.get("ocr_status", "not_used"))
+    ocr_backend = str(record.meta.get("ocr_backend", "not_used"))
+    metrics.inc("document_ocr_total", labels={"backend": ocr_backend, "status": ocr_status})
+    if record.meta.get("ocr_regions"):
+        metrics.observe("document_ocr_regions", float(record.meta["ocr_regions"]))
     return DocumentAnalysisResponse(**record.to_response_payload())
 
 
 @app.get("/v1/documents/{document_id}/report", tags=["documents"])
-@limiter.limit(_RATE_LIMIT)
+@limiter.limit(_DOCUMENT_RATE_LIMIT)
 def document_report(
     request: Request,
     document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
@@ -1006,7 +1092,9 @@ def document_report(
 ) -> Response:
     """Download the branded PDF analysis report for an analysed document."""
     record = documents.get_document(
-        document_id, session_id=request.headers.get("X-Session-ID", "")
+        document_id,
+        session_id=request.headers.get("X-Session-ID", ""),
+        user_id=_ctx.user_id,
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Document not found or expired")
@@ -1015,7 +1103,13 @@ def document_report(
     # on a runtime without fpdf2.
     from .pdf_export import generate_document_report_pdf
 
+    started = time.perf_counter()
     pdf_bytes = generate_document_report_pdf(record.to_report_payload())
+    metrics.inc("pdf_exports_total", labels={"kind": "document_report"})
+    metrics.observe("pdf_export_bytes", len(pdf_bytes), labels={"kind": "document_report"})
+    metrics.observe(
+        "pdf_export_duration_ms", (time.perf_counter() - started) * 1000, labels={"kind": "document_report"}
+    )
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -1434,14 +1528,25 @@ def trigger_indexing(
     """
     _require_ops_key(request)
 
-    from .indexer import DATA_DIR, PDF_DIR, build_index, ingest_csvs, ingest_pdfs
+    from .faq_corpus import CorpusValidationError
+    from .indexer import (
+        DATA_DIR,
+        FAQ_JSONL_DIR,
+        TEACHER_QA_DIR,
+        build_index,
+        ingest_faq_jsonls,
+        ingest_teacher_qa_jsonls,
+    )
 
-    documents: list[dict] = []
-    documents.extend(ingest_csvs(DATA_DIR))
-    documents.extend(ingest_pdfs(PDF_DIR))
+    try:
+        documents: list[dict] = []
+        documents.extend(ingest_faq_jsonls(DATA_DIR, FAQ_JSONL_DIR))
+        documents.extend(ingest_teacher_qa_jsonls(TEACHER_QA_DIR))
+    except CorpusValidationError as exc:
+        raise HTTPException(status_code=422, detail=f"Vector corpus validation failed: {exc}") from exc
 
     if not documents:
-        raise HTTPException(status_code=404, detail="No documents found to index")
+        raise HTTPException(status_code=404, detail="No FAQ or teacher-QA JSONL documents found to index")
 
     stats = build_index(documents, recreate=True)
 

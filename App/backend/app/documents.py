@@ -26,6 +26,7 @@ Endpoints (see ``main.py``):
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -35,6 +36,7 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -43,6 +45,7 @@ from typing import Any
 from .vision.document_classifier import classify_document
 from .vision.ocr import (
     clean_ocr_text,
+    extract_ocr_result,
     extract_dates,
     extract_reference_numbers,
     extract_tin_numbers,
@@ -70,6 +73,15 @@ _MAX_FIELD_ITEMS = 10
 _PASSAGE_CHAR_BUDGET = 6_000
 _SCANNED_PDF_TEXT_THRESHOLD = 40
 _OCR_PDF_PAGES = 3
+_MAX_ARCHIVE_ENTRIES = int(os.getenv("DOCUMENT_MAX_ARCHIVE_ENTRIES", "1000"))
+_MAX_ARCHIVE_UNCOMPRESSED_BYTES = int(
+    os.getenv("DOCUMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES", str(50 * 1024 * 1024))
+)
+_MAX_ARCHIVE_COMPRESSION_RATIO = float(os.getenv("DOCUMENT_MAX_ARCHIVE_COMPRESSION_RATIO", "100"))
+_MAX_IMAGE_PIXELS = int(os.getenv("DOCUMENT_MAX_IMAGE_PIXELS", "20_000_000"))
+_MAX_PDF_RENDER_PIXELS = int(os.getenv("DOCUMENT_MAX_PDF_RENDER_PIXELS", "12_000_000"))
+_OCR_DOCUMENT_TIMEOUT_SECONDS = float(os.getenv("DOCUMENT_OCR_TIMEOUT_SECONDS", "20"))
+_MAX_OCR_EVIDENCE_REGIONS = int(os.getenv("DOCUMENT_MAX_OCR_EVIDENCE_REGIONS", "200"))
 
 SUPPORTED_EXTENSIONS = (
     ".pdf",
@@ -134,6 +146,58 @@ class UnsupportedDocumentError(ValueError):
     """Raised when the uploaded file type has no extractor."""
 
 
+def _validate_zip_container(data: bytes, kind: str) -> None:
+    """Reject malformed or expansion-prone Office containers before parsing."""
+    if not zipfile.is_zipfile(io.BytesIO(data)):
+        raise UnsupportedDocumentError(f"The .{kind} file is not a valid Office document.")
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            infos = archive.infolist()
+            if len(infos) > _MAX_ARCHIVE_ENTRIES:
+                raise UnsupportedDocumentError("The Office document contains too many archive entries.")
+            total_uncompressed = sum(info.file_size for info in infos)
+            if total_uncompressed > _MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                raise UnsupportedDocumentError("The Office document expands beyond the processing limit.")
+            for info in infos:
+                if info.file_size and info.compress_size:
+                    ratio = info.file_size / info.compress_size
+                    if ratio > _MAX_ARCHIVE_COMPRESSION_RATIO:
+                        raise UnsupportedDocumentError("The Office document has an unsafe compression ratio.")
+            names = set(archive.namelist())
+    except zipfile.BadZipFile as err:
+        raise UnsupportedDocumentError(f"The .{kind} file is not a valid Office document.") from err
+
+    required_prefix = "word/" if kind == "docx" else "xl/"
+    if "[Content_Types].xml" not in names or not any(name.startswith(required_prefix) for name in names):
+        raise UnsupportedDocumentError(f"The file content does not match the .{kind} extension.")
+
+
+def _validate_document_content(data: bytes, kind: str) -> None:
+    """Perform cheap, content-based validation before third-party parsers run."""
+    if kind == "pdf":
+        if b"%PDF-" not in data[:1024]:
+            raise UnsupportedDocumentError("The file content does not match the .pdf extension.")
+        return
+    if kind in {"docx", "xlsx"}:
+        _validate_zip_container(data, kind)
+        return
+    if kind != "image":
+        return
+    try:
+        from PIL import Image  # type: ignore[import-untyped]
+
+        with Image.open(io.BytesIO(data)) as image:
+            if image.width * image.height > _MAX_IMAGE_PIXELS:
+                raise UnsupportedDocumentError(
+                    f"Image exceeds the {_MAX_IMAGE_PIXELS:,}-pixel processing limit."
+                )
+            image.verify()
+    except UnsupportedDocumentError:
+        raise
+    except Exception as err:
+        raise UnsupportedDocumentError("The file content is not a valid supported image.") from err
+
+
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -190,6 +254,21 @@ class DocumentRecord:
     created_at: float
     session_id: str = ""
     user_id: str = ""
+    field_evidence: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+    def _provenance_payload(self) -> dict[str, Any]:
+        """Expose bounded evidence metadata without retaining source file bytes."""
+        return {
+            "source_sha256": str(self.meta.get("source_sha256", "")),
+            "extraction_method": str(self.meta.get("extraction_method", self.kind)),
+            "ocr_backend": str(self.meta.get("ocr_backend", "")),
+            "ocr_status": str(self.meta.get("ocr_status", "not_used")),
+            "ocr_page_numbers": [
+                int(page) for page in self.meta.get("ocr_page_numbers", []) if isinstance(page, int)
+            ],
+            "ocr_regions": int(self.meta.get("ocr_regions", 0) or 0),
+            "ocr_mean_confidence": self.meta.get("ocr_mean_confidence"),
+        }
 
     def to_response_payload(self) -> dict[str, Any]:
         """Shape consumed by ``DocumentAnalysisResponse`` in models.py."""
@@ -200,8 +279,11 @@ class DocumentRecord:
             "size_bytes": self.size_bytes,
             "doc_type": self.doc_type,
             "confidence": self.confidence,
+            "classification_method": str(self.meta.get("classification_method", "keyword_heuristic")),
             "matched_keywords": self.matched_keywords,
             "fields": dict(self.fields),
+            "field_evidence": dict(self.field_evidence),
+            "provenance": self._provenance_payload(),
             "tables": [t.to_payload() for t in self.tables],
             "text_preview": self.text[:600],
             "truncated": self.truncated,
@@ -222,8 +304,11 @@ class DocumentRecord:
             "doc_type": self.doc_type,
             "doc_type_label": _DOC_TYPE_LABELS.get(self.doc_type, "Document"),
             "confidence": self.confidence,
+            "classification_method": str(self.meta.get("classification_method", "keyword_heuristic")),
             "matched_keywords": self.matched_keywords,
             "fields": dict(self.fields),
+            "field_evidence": dict(self.field_evidence),
+            "provenance": self._provenance_payload(),
             "tables": [t.to_payload() for t in self.tables],
             "meta": dict(self.meta),
             "text": self.text,
@@ -356,44 +441,125 @@ def _extract_pdf(data: bytes) -> _Extraction:
         for i in range(min(page_count, _MAX_PDF_PAGES)):
             parts.append(doc[i].get_text("text"))
         text = "\n".join(parts).strip()
+        out.meta["extraction_method"] = "pdf_text"
 
         # Scanned PDF: no embedded text layer — OCR the first few pages.
         if len(text) < _SCANNED_PDF_TEXT_THRESHOLD and page_count > 0:
-            ocr_text = _ocr_pdf_pages(doc)
+            ocr_text, ocr_meta, ocr_warnings = _ocr_pdf_pages(doc)
+            out.meta.update(ocr_meta)
+            out.warnings.extend(ocr_warnings)
             if ocr_text:
                 text = ocr_text
                 out.meta["ocr_used"] = True
+                out.meta["extraction_method"] = "pdf_ocr"
             else:
-                out.warnings.append(
-                    "This looks like a scanned PDF with no text layer, and no OCR "
-                    "engine is available — little or no text could be extracted."
-                )
+                status = str(ocr_meta.get("ocr_status", "unavailable"))
+                if status == "ready":
+                    out.warnings.append(
+                        "This scanned PDF was processed by OCR, but no readable text was found."
+                    )
+                elif status == "disabled":
+                    out.warnings.append("OCR is disabled, so this scanned PDF could not be read.")
+                else:
+                    out.warnings.append(
+                        "This looks like a scanned PDF with no text layer, and OCR is unavailable — "
+                        "little or no text could be extracted."
+                    )
         out.text = text
     finally:
         doc.close()
     return out
 
 
-def _ocr_pdf_pages(doc: Any) -> str:
-    """Rasterise the first pages of a scanned PDF and OCR them (best effort)."""
+def _ocr_pdf_pages(doc: Any) -> tuple[str, dict[str, Any], list[str]]:
+    """OCR bounded PDF pages while retaining backend/status provenance."""
     try:
+        import fitz  # type: ignore[import-untyped]
         import numpy as np
         from PIL import Image  # type: ignore[import-untyped]
-
-        from .vision.ocr import extract_text as _ocr_extract_text
     except ImportError:
-        return ""
-    parts = []
-    try:
-        for i in range(min(doc.page_count, _OCR_PDF_PAGES)):
-            pix = doc[i].get_pixmap(dpi=150)
-            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-            page_text = _ocr_extract_text(np.array(img))
-            if page_text:
-                parts.append(page_text)
-    except Exception:
-        logger.warning("Scanned-PDF OCR failed", exc_info=True)
-    return clean_ocr_text(" ".join(parts)) if parts else ""
+        return "", {"ocr_status": "unavailable", "ocr_backend": "unavailable"}, [
+            "OCR dependencies are not installed."
+        ]
+
+    parts: list[str] = []
+    page_numbers: list[int] = []
+    confidences: list[float] = []
+    warnings: list[str] = []
+    metadata: dict[str, Any] = {
+        "ocr_status": "unavailable",
+        "ocr_backend": "unavailable",
+        "ocr_page_numbers": page_numbers,
+        "ocr_regions": 0,
+        "ocr_evidence": [],
+    }
+    deadline = time.monotonic() + max(0.1, _OCR_DOCUMENT_TIMEOUT_SECONDS)
+
+    for i in range(min(doc.page_count, _OCR_PDF_PAGES)):
+        if time.monotonic() >= deadline:
+            warnings.append("OCR stopped after reaching the document processing time limit.")
+            metadata["ocr_status"] = "timed_out"
+            break
+        try:
+            page = doc[i]
+            rect = page.rect
+            page_area = max(1.0, rect.width * rect.height)
+            scale = 150 / 72
+            if page_area * scale * scale > _MAX_PDF_RENDER_PIXELS:
+                scale = (_MAX_PDF_RENDER_PIXELS / page_area) ** 0.5
+                warnings.append(f"OCR page {i + 1} was downscaled to stay within the pixel limit.")
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            if pix.width * pix.height > _MAX_PDF_RENDER_PIXELS:
+                warnings.append(f"OCR skipped page {i + 1}: rendered image exceeds the pixel limit.")
+                continue
+            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            result = extract_ocr_result(np.asarray(image))
+            metadata["ocr_backend"] = result.backend
+            metadata["ocr_status"] = result.status
+            if result.used_fallback:
+                metadata["ocr_used_fallback"] = True
+            if result.detail:
+                metadata["ocr_detail"] = result.detail
+            if result.status != "ready":
+                break
+            metadata["ocr_regions"] = int(metadata["ocr_regions"]) + len(result.items)
+            evidence = metadata["ocr_evidence"]
+            for item in result.items:
+                if len(evidence) >= _MAX_OCR_EVIDENCE_REGIONS:
+                    break
+                raw_box = item.get("box")
+                try:
+                    box = [
+                        [round(float(point[0]), 1), round(float(point[1]), 1)]
+                        for point in raw_box
+                    ]
+                except (IndexError, TypeError, ValueError):
+                    box = []
+                evidence.append(
+                    {
+                        "page": i + 1,
+                        "text": str(item.get("text", ""))[:200],
+                        "box": box,
+                        "confidence": float(item.get("confidence", 0.0)),
+                    }
+                )
+            confidences.extend(
+                float(item["confidence"])
+                for item in result.items
+                if isinstance(item.get("confidence"), (int, float))
+            )
+            if result.text:
+                parts.append(result.text)
+                page_numbers.append(i + 1)
+        except Exception:
+            logger.warning("Scanned-PDF OCR failed for page %d", i + 1, exc_info=True)
+            warnings.append(f"OCR failed while processing page {i + 1}.")
+            metadata["ocr_status"] = "failed"
+            break
+
+    if confidences:
+        metadata["ocr_mean_confidence"] = round(sum(confidences) / len(confidences), 3)
+    return clean_ocr_text(" ".join(parts)) if parts else "", metadata, warnings
 
 
 def _extract_docx(data: bytes) -> _Extraction:
@@ -503,25 +669,41 @@ def _extract_image(data: bytes) -> _Extraction:
         out.warnings.append("The image could not be decoded.")
         return out
 
-    from .vision.ocr import extract_text as _ocr_extract_text
-
-    text = _ocr_extract_text(np.array(rgb))
+    result = extract_ocr_result(np.array(rgb))
+    out.meta["ocr_backend"] = result.backend
+    out.meta["ocr_status"] = result.status
+    if result.detail:
+        out.meta["ocr_detail"] = result.detail
+    if result.used_fallback:
+        out.meta["ocr_used_fallback"] = True
+    if result.items:
+        confidences = [float(item["confidence"]) for item in result.items]
+        out.meta["ocr_regions"] = len(result.items)
+        out.meta["ocr_mean_confidence"] = round(sum(confidences) / len(confidences), 3)
+    text = result.text
     if not text:
         # Same ad-hoc fallback the voice+vision endpoint uses.
         try:
             import pytesseract  # type: ignore[import-untyped]
 
             text = pytesseract.image_to_string(rgb, lang="eng")
+            if text.strip():
+                out.meta["ocr_backend"] = "pytesseract"
+                out.meta["ocr_status"] = "ready"
+                out.meta["ocr_used_fallback"] = True
         except Exception:
             text = ""
     if text.strip():
         out.text = clean_ocr_text(text)
         out.meta["ocr_used"] = True
+        out.meta["extraction_method"] = "image_ocr"
     else:
-        out.warnings.append(
-            "No text could be extracted from this image (no OCR engine available "
-            "or the image has no readable text)."
-        )
+        if result.status == "ready":
+            out.warnings.append("OCR completed but no readable text was found in this image.")
+        else:
+            out.warnings.append(
+                "No text could be extracted because the OCR backend is unavailable."
+            )
     return out
 
 
@@ -619,6 +801,47 @@ def _build_summary(
     return " ".join(sentences)
 
 
+def _field_evidence(
+    fields: dict[str, list[str]],
+    metadata: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    """Attach field values to bounded OCR regions when a textual match exists."""
+    raw_regions = metadata.get("ocr_evidence") or []
+    regions = [region for region in raw_regions if isinstance(region, dict)]
+    extraction_method = str(metadata.get("extraction_method", "extracted_text"))
+    source = "ocr" if extraction_method in {"pdf_ocr", "image_ocr"} else extraction_method
+
+    def normalise(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]+", "", str(value).lower())
+
+    evidence: dict[str, list[dict[str, Any]]] = {}
+    for key, values in fields.items():
+        entries: list[dict[str, Any]] = []
+        for value in values:
+            item: dict[str, Any] = {"value": value, "source": source}
+            wanted = normalise(value)
+            match = next(
+                (
+                    region
+                    for region in regions
+                    if wanted and wanted in normalise(region.get("text", ""))
+                ),
+                None,
+            )
+            if match is not None:
+                item.update(
+                    {
+                        "source": "ocr",
+                        "page": match.get("page"),
+                        "box": match.get("box") or [],
+                        "confidence": match.get("confidence"),
+                    }
+                )
+            entries.append(item)
+        evidence[key] = entries
+    return evidence
+
+
 def analyze_document(
     data: bytes,
     filename: str,
@@ -638,7 +861,11 @@ def analyze_document(
         raise ValueError(f"File exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MB limit.")
 
     kind = detect_kind(filename, content_type)
+    _validate_document_content(data, kind)
     extraction = _EXTRACTORS[kind](data)
+    extraction.meta.setdefault("extraction_method", kind)
+    extraction.meta["source_sha256"] = hashlib.sha256(data).hexdigest()
+    extraction.meta["classification_method"] = "keyword_heuristic"
 
     text = re.sub(r"\n{3,}", "\n\n", extraction.text or "").strip()
     truncated = len(text) > _MAX_TEXT_CHARS
@@ -655,6 +882,7 @@ def analyze_document(
         "dates": extract_dates(text)[:_MAX_FIELD_ITEMS],
         "references": extract_reference_numbers(text)[:_MAX_FIELD_ITEMS],
     }
+    field_evidence = _field_evidence(fields, extraction.meta)
     summary = _build_summary(
         kind,
         classification.doc_type.value,
@@ -676,6 +904,7 @@ def analyze_document(
         text=text,
         truncated=truncated,
         fields=fields,
+        field_evidence=field_evidence,
         tables=extraction.tables,
         meta=extraction.meta,
         summary=summary,
@@ -805,8 +1034,13 @@ def _purge_expired_locked() -> None:
         del _registry[k]
 
 
-def get_document(doc_id: str, *, session_id: str = "") -> DocumentRecord | None:
-    """Fetch a live document; enforces the session binding set at upload."""
+def get_document(
+    doc_id: str,
+    *,
+    session_id: str = "",
+    user_id: str = "",
+) -> DocumentRecord | None:
+    """Fetch a live document only for its authenticated owner/session binding."""
     with _registry_lock:
         _purge_expired_locked()
         record = _registry.get(doc_id)
@@ -821,7 +1055,12 @@ def get_document(doc_id: str, *, session_id: str = "") -> DocumentRecord | None:
                 _registry.move_to_end(record.doc_id)
     if record is None:
         return None
+    if not record.session_id and not record.user_id:
+        # Legacy unbound entries must not become bearer-accessible by doc id.
+        return None
     if record.session_id and record.session_id != (session_id or ""):
+        return None
+    if record.user_id and record.user_id != (user_id or ""):
         return None
     return record
 
@@ -830,6 +1069,7 @@ def resolve_attachments(
     attachment_ids: list[str] | None,
     *,
     session_id: str = "",
+    user_id: str = "",
 ) -> list[DocumentRecord]:
     """Resolve chat ``attachment_ids`` to live records (missing ids dropped)."""
     records: list[DocumentRecord] = []
@@ -838,7 +1078,7 @@ def resolve_attachments(
         if doc_id in seen or len(records) >= MAX_ATTACHMENTS_PER_TURN:
             continue
         seen.add(doc_id)
-        record = get_document(doc_id, session_id=session_id)
+        record = get_document(doc_id, session_id=session_id, user_id=user_id)
         if record is not None:
             records.append(record)
     return records
