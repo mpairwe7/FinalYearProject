@@ -4,13 +4,13 @@
   "effective_to": "2027-06-30",
   "status": "provisional",
   "currency": "UGX",
-  "verification_note": "Compiled from the Income Tax / VAT (Amendment) Acts 2026 as reported by professional-firm and press summaries in June-July 2026. Not yet reconciled line-by-line against the gazetted Acts or a URA-published rate card. Confirm figures with URA before relying on them.",
+  "verification_note": "Compiled from the Income Tax / VAT (Amendment) Acts 2026 as reported by professional-firm and press summaries in June-July 2026. Not yet reconciled line-by-line against the gazetted Acts or a URA-published rate card. Secondary sources conflict on the second PAYE band (10% vs 20%) and on the VAT registration threshold (UGX 250m at Bill stage vs UGX 300m as passed); both are recorded at the figure the enacted-Act summaries and the published worked examples support. Confirm figures with URA before relying on them.",
   "rates": {
     "vat_standard": 0.18,
     "vat_registration_threshold_annual": 300000000,
     "paye_bands_resident": [
       [0, 335000, 0.0],
-      [335000, 410000, 0.1],
+      [335000, 410000, 0.2],
       [410000, 485000, 0.25],
       [485000, 10000000, 0.3],
       [10000000, null, 0.4]
@@ -21,6 +21,7 @@
       [410000, 10000000, 0.3],
       [10000000, null, 0.4]
     ],
+    "nssf_employee_contribution": 0.05,
     "corporation_tax": 0.3,
     "capital_gains_corporate": 0.3,
     "rental_tax_individual": 0.12,
@@ -43,6 +44,7 @@
     "vat_registration_threshold_annual": "VAT (Amendment) Act 2026 - registration threshold raised to UGX 300,000,000",
     "paye_bands_resident": "Income Tax (Amendment) Act 2026, Third Schedule Part I",
     "paye_bands_non_resident": "Income Tax Act (Cap 340), Third Schedule Part II",
+    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE.",
     "corporation_tax": "Income Tax Act (Cap 340), s.6 and Third Schedule Part IV",
     "capital_gains_corporate": "Income Tax Act (Cap 340), s.18 - gains included in gross income",
     "rental_tax_individual": "Income Tax Act (Cap 340), s.5 as amended",
@@ -59,7 +61,7 @@
     "environmental_levy_used_clothing": "Excise/environmental levy 2026 - worn clothing imports, share of CIF value"
   },
   "notes": {
-    "paye_bands_resident": "The monthly tax-free threshold rises from UGX 235,000 to UGX 335,000 and a 25% band is introduced between UGX 410,000 and UGX 485,000. The 30% band and the additional 10% charge above UGX 10,000,000 per month are retained; the top band is expressed here as a single 40% marginal rate.",
+    "paye_bands_resident": "The monthly tax-free threshold rises from UGX 235,000 to UGX 335,000 and a 25% band is introduced between UGX 410,000 and UGX 485,000. The 20% band on UGX 335,000-410,000 is unchanged from FY2025-26; the 30% band and the additional 10% charge above UGX 10,000,000 per month are retained, and the top band is expressed here as a single 40% marginal rate. Secondary summaries disagreed on the second band, some reporting 10%. It is recorded as 20% because both statutory-style restatements of the Third Schedule corroborate it: the cumulative-tax figure quoted for the next band, 'UGX 180,000 plus 25% of the excess', is exactly 20% x (4,920,000 - 4,020,000) annual, and the published worked example of UGX 1,900,000 gross reproduces the quoted PAYE of UGX 458,250 only at 20% (at 10% it gives 450,750).",
     "rental_tax_individual": "Individuals may elect to file monthly provisional rental returns from FY2026-27. The rate and annual threshold are unchanged.",
     "vat_registration_threshold_annual": "Businesses below UGX 300,000,000 annual turnover are no longer required to register, though voluntary registration remains available.",
     "customs_duty_common": "Indicative EAC CET band for finished consumer goods. The binding rate is the tariff line for the specific HS code."
@@ -89,6 +91,12 @@
       "title": "Uganda Overhauls PAYE Tax Structure",
       "publisher": "Lawyard",
       "url": "https://www.lawyard.org/news/uganda-overhauls-paye-tax-structure-relief-for-middle-earners-amidst-debate-on-competitiveness/"
+    },
+    {
+      "id": "independent-ug-paye-2026",
+      "title": "New PAYE tax commencing next week (worked example: UGX 1,900,000 gross -> UGX 458,250 PAYE)",
+      "publisher": "The Independent (Uganda)",
+      "url": "https://www.independent.co.ug/new-paye-tax-commencing-next-week/"
     }
   ]
 }

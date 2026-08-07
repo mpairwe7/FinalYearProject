@@ -361,6 +361,18 @@ def _ugx(value: object) -> str:
     return f"UGX {float(value):,.0f}"
 
 
+#: Caveat printed under any figure read from a provisional table.  Named
+#: no fiscal year and no Act: the previous wording hardcoded "the 2026
+#: amendment Acts", which would have kept claiming 2026 provenance under
+#: FY2027-28 figures.  The table's own ``verification_note`` carries the
+#: year-specific detail and travels in ``rate_basis`` for the audit trail.
+PROVISIONAL_CAVEAT = (
+    "_{fy} figures are provisional — compiled from the amendment Acts as reported "
+    "and not yet reconciled against a URA-published rate card. Please confirm with "
+    "URA before filing on them._"
+)
+
+
 def _rate_table_footer(result: dict[str, object]) -> list[str]:
     """Closing lines naming the fiscal year, and flagging unconfirmed figures.
 
@@ -373,11 +385,7 @@ def _rate_table_footer(result: dict[str, object]) -> list[str]:
     status = basis.get("status", "") if isinstance(basis, dict) else ""
     lines = ["", f"Figures use the official URA {fy} rate table."]
     if status == "provisional":
-        lines.append(
-            f"_{fy} figures are still provisional — they follow the 2026 amendment Acts "
-            "as reported, and are not yet reconciled against a URA-published rate card. "
-            "Please confirm with URA before filing on them._"
-        )
+        lines.append(PROVISIONAL_CAVEAT.format(fy=fy))
     return lines
 
 
@@ -394,9 +402,15 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             "",
             f"- Gross monthly salary: {_ugx(result['monthly_gross'])}",
             f"- PAYE due: **{_ugx(result['paye'])}** per month",
+        ]
+        if result.get("nssf_included"):
+            lines.append(f"- NSSF employee contribution: {_ugx(result['nssf_employee'])}")
+        lines += [
             f"- Net take-home: **{_ugx(result['net_take_home'])}**",
             f"- Band applied: {float(band.get('marginal_rate', 0)) * 100:.0f}% marginal ({band_span})",
         ]
+        if result.get("deductions_note"):
+            lines.append(f"- _{result['deductions_note']}_")
     elif tool == "calculate_vat":
         lines = [
             f"**VAT calculation ({fy})**",
@@ -588,11 +602,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
     fy = table.fiscal_year
     footer = f"\n\nThat comes from the official URA {fy} rate table."
     if not table.confirmed:
-        footer += (
-            f"\n\n_{fy} figures are still provisional — they follow the 2026 amendment "
-            "Acts as reported, and are not yet reconciled against a URA-published rate "
-            "card. Please confirm with URA before filing on them._"
-        )
+        footer += "\n\n" + PROVISIONAL_CAVEAT.format(fy=fy)
     if plan.summary == "paye":
         bands = rates["paye_bands_resident"]
         lines = [f"**PAYE rates for resident employees ({fy}, monthly income):**", ""]
@@ -604,7 +614,15 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             )
             lines.append(span)
         lines.append("")
-        lines.append("Non-resident employees are taxed from 10% on the first band.")
+        # Read off the table rather than stated inline: a hardcoded rate
+        # here would keep printing last year's figure after the data file
+        # moved on, which is the failure this module exists to avoid.
+        non_resident = rates.get("paye_bands_non_resident")
+        if non_resident:
+            lines.append(
+                f"Non-resident employees are taxed from {_pct(non_resident[0][2])} "
+                "on the first band."
+            )
         return "\n".join(lines) + footer, [
             "Calculate PAYE for a salary",
             "Ask how PAYE bands work",

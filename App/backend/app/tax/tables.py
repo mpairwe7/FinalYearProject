@@ -296,6 +296,39 @@ def list_fiscal_years() -> list[str]:
     return sorted(_all_tables(), key=lambda fy: _all_tables()[fy].effective_from)
 
 
+# -- structure, not figures -------------------------------------------------
+# Naming a rate key, or naming the years that define it, discloses no
+# figure, so these deliberately do **not** go through :func:`get_table`
+# and are never blocked by ``TAX_RATES_REQUIRE_CONFIRMED``.  They exist
+# because routing that gating through the value accessor made building a
+# tool's ``enum`` — which happens at import time — raise on any
+# deployment holding a provisional table, taking the process down before
+# it could serve the confirmed years it *did* have.
+
+
+def known_rate_keys() -> list[str]:
+    """Every scalar rate key defined by any loaded table, sorted."""
+    keys: set[str] = set()
+    for table in _all_tables().values():
+        keys.update(
+            key
+            for key, value in table.rates.items()
+            if isinstance(value, int | float) and not isinstance(value, bool)
+        )
+    return sorted(keys)
+
+
+def fiscal_years_defining(key: str) -> list[str]:
+    """Fiscal years whose table defines *key*, oldest first.
+
+    Answers "that rate exists, just not for the year you asked about" —
+    which is a real answer, and one a provisional table must still be
+    able to give.
+    """
+    tables = _all_tables()
+    return [fy for fy in list_fiscal_years() if key in tables[fy].rates]
+
+
 def latest_fiscal_year() -> str:
     return list_fiscal_years()[-1]
 

@@ -17,7 +17,14 @@ import datetime as _dt
 from typing import Any
 
 from ..authority import authority_required, get_authority_status
-from ..tax.tables import RateTable, RateTableError, get_table, list_fiscal_years
+from ..tax.tables import (
+    RateTable,
+    RateTableError,
+    fiscal_years_defining,
+    get_table,
+    known_rate_keys,
+    list_fiscal_years,
+)
 from . import Tool, ToolRegistry, ToolSchema
 
 #: Human labels for the scalar rates.  Keys absent here are humanised
@@ -26,6 +33,7 @@ from . import Tool, ToolRegistry, ToolSchema
 _DISPLAY_NAMES: dict[str, str] = {
     "vat_standard": "VAT (standard rate)",
     "vat_registration_threshold_annual": "VAT registration threshold (annual turnover)",
+    "nssf_employee_contribution": "NSSF employee contribution (social security, not a tax)",
     "corporation_tax": "Corporation tax",
     "capital_gains_corporate": "Capital gains tax (corporate)",
     "rental_tax_individual": "Rental tax (individual)",
@@ -100,13 +108,14 @@ def _resolve(fiscal_year: str | None, as_of: str | None) -> RateTable:
 
 
 def _known_scalar_keys() -> list[str]:
-    """Every scalar key defined by any loaded fiscal year."""
-    keys: set[str] = set()
-    for fy in list_fiscal_years():
-        for key, value in get_table(fy).rates.items():
-            if isinstance(value, int | float) and not isinstance(value, bool):
-                keys.add(key)
-    return sorted(keys)
+    """Every scalar key defined by any loaded fiscal year.
+
+    Reads the tables' structure rather than calling :func:`get_table`,
+    because this runs while the tool's schema is being built at import
+    time: gating it on confirmed rates made a deployment holding a
+    provisional table fail to start instead of failing the one lookup.
+    """
+    return known_rate_keys()
 
 
 class LookupRateTool(Tool):
@@ -168,7 +177,7 @@ class LookupRateTool(Tool):
             # Distinguish "no such tax" from "not defined in *this* year":
             # the second is a real answer (the rate exists, just not for the
             # period asked about) and should name the years that do define it.
-            defined_in = [fy for fy in list_fiscal_years() if tax_type in get_table(fy).rates]
+            defined_in = fiscal_years_defining(tax_type)
             error = (
                 f"'{tax_type}' is not defined for {table.fiscal_year}; "
                 f"it applies to: {', '.join(defined_in)}"

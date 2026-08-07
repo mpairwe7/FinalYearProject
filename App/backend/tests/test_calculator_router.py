@@ -206,5 +206,62 @@ class ServiceCalculatorPathTests(unittest.TestCase):
         self.assertIn("one amount", retry["reply"].lower())
 
 
+class ReplyReadsTheTableTests(unittest.TestCase):
+    """No tax figure or Act name may be hardcoded in the reply layer.
+
+    A rate written into a format string keeps printing after the data
+    file moves on, which is exactly the drift the versioned tables were
+    introduced to remove — so the reply text is asserted against the
+    table rather than against a literal.
+    """
+
+    def test_non_resident_line_tracks_the_table(self) -> None:
+        from app.calculator_router import RatePlan, format_rate_reply
+        from app.tax.tables import get_table
+
+        table = get_table("FY2026-27")
+        reply, _actions = format_rate_reply(RatePlan(summary="paye"), table)
+        first_rate = table["paye_bands_non_resident"][0][2]
+        self.assertIn(f"Non-resident employees are taxed from {first_rate * 100:.0f}%", reply)
+
+    def test_resident_bands_are_listed_at_the_tables_rates(self) -> None:
+        from app.calculator_router import RatePlan, format_rate_reply
+        from app.tax.tables import get_table
+
+        table = get_table("FY2026-27")
+        reply, _actions = format_rate_reply(RatePlan(summary="paye"), table)
+        for lower, _upper, rate in table["paye_bands_resident"]:
+            with self.subTest(band=lower):
+                self.assertIn(f"**{rate * 100:.0f}%**", reply)
+
+    def test_provisional_caveat_names_no_fiscal_year_specific_act(self) -> None:
+        from app.calculator_router import PROVISIONAL_CAVEAT
+
+        self.assertNotIn("2026", PROVISIONAL_CAVEAT)
+        self.assertIn("{fy}", PROVISIONAL_CAVEAT)
+
+    def test_paye_reply_states_what_was_not_deducted(self) -> None:
+        from app.calculator_router import format_calc_reply
+        from app.tools import ToolRegistry
+
+        result = ToolRegistry.call(
+            "calculate_paye", {"monthly_gross": 1_000_000, "fiscal_year": "FY2026-27"}
+        )
+        reply = format_calc_reply("calculate_paye", result, [])
+        self.assertIn("net of PAYE only", reply)
+        self.assertNotIn("NSSF employee contribution:", reply)
+
+    def test_paye_reply_shows_nssf_when_it_was_deducted(self) -> None:
+        from app.calculator_router import format_calc_reply
+        from app.tools import ToolRegistry
+
+        result = ToolRegistry.call(
+            "calculate_paye",
+            {"monthly_gross": 1_000_000, "fiscal_year": "FY2026-27", "include_nssf": True},
+        )
+        reply = format_calc_reply("calculate_paye", result, [])
+        self.assertIn("NSSF employee contribution: UGX 50,000", reply)
+
+
 if __name__ == "__main__":
     unittest.main()

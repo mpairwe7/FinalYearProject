@@ -112,6 +112,53 @@ class StrictModeTests(unittest.TestCase):
             self.assertFalse(tables.require_confirmed())
 
 
+class MetadataIsNotAFigureTests(unittest.TestCase):
+    """Enumerating what exists must never be gated on confirmed rates.
+
+    ``lookup_rate`` builds its ``tax_type`` enum from every key any table
+    defines, and that happens while the module is being imported.  Routing
+    it through :func:`get_table` meant a deployment holding a provisional
+    table raised during import of ``app.tools`` and the process never
+    started — a whole-service outage caused by a caveat on one year.
+    """
+
+    def _require_confirmed(self):
+        return mock.patch.dict(
+            os.environ, {"TAX_RATES_REQUIRE_CONFIRMED": "true"}, clear=False
+        )
+
+    def test_known_rate_keys_survive_a_confirmed_only_deployment(self) -> None:
+        with self._require_confirmed():
+            keys = tables.known_rate_keys()
+        self.assertIn("vat_standard", keys)
+        # Defined only by the provisional FY2026-27 table.
+        self.assertIn("withholding_royalty", keys)
+
+    def test_fiscal_years_defining_survives_a_confirmed_only_deployment(self) -> None:
+        with self._require_confirmed():
+            self.assertEqual(
+                tables.fiscal_years_defining("withholding_royalty"), ["FY2026-27"]
+            )
+
+    def test_known_rate_keys_excludes_band_lists(self) -> None:
+        self.assertNotIn("paye_bands_resident", tables.known_rate_keys())
+
+    def test_quoting_a_provisional_figure_still_fails_closed(self) -> None:
+        with self._require_confirmed(), self.assertRaises(tables.RateTableError):
+            tables.get_table("FY2026-27")
+
+    def test_tool_registry_imports_under_production_defaults(self) -> None:
+        """The regression itself: importing the tools must not raise."""
+        import importlib  # noqa: PLC0415
+
+        with mock.patch.dict(os.environ, {"APP_ENV": "production"}, clear=False):
+            os.environ.pop("TAX_RATES_REQUIRE_CONFIRMED", None)
+            self.assertTrue(tables.require_confirmed())
+            module = importlib.import_module("app.tools.rates")
+            importlib.reload(module)
+        self.assertIn("lookup_rate", module.ToolRegistry.names())
+
+
 class ProvenanceTests(unittest.TestCase):
     def test_provenance_cites_only_the_keys_used(self) -> None:
         basis = tables.get_table("FY2025-26").provenance("vat_standard")
