@@ -8,19 +8,54 @@
     "vat_standard": 0.18,
     "vat_registration_threshold_annual": 150000000,
     "paye_bands_resident": [
-      [0, 235000, 0.0],
-      [235000, 335000, 0.1],
-      [335000, 410000, 0.2],
-      [410000, 10000000, 0.3],
-      [10000000, null, 0.4]
+      [
+        0,
+        235000,
+        0.0
+      ],
+      [
+        235000,
+        335000,
+        0.1
+      ],
+      [
+        335000,
+        410000,
+        0.2
+      ],
+      [
+        410000,
+        10000000,
+        0.3
+      ],
+      [
+        10000000,
+        null,
+        0.4
+      ]
     ],
     "paye_bands_non_resident": [
-      [0, 335000, 0.1],
-      [335000, 410000, 0.2],
-      [410000, 10000000, 0.3],
-      [10000000, null, 0.4]
+      [
+        0,
+        335000,
+        0.1
+      ],
+      [
+        335000,
+        410000,
+        0.2
+      ],
+      [
+        410000,
+        10000000,
+        0.3
+      ],
+      [
+        10000000,
+        null,
+        0.4
+      ]
     ],
-    "nssf_employee_contribution": 0.05,
     "corporation_tax": 0.3,
     "capital_gains_corporate": 0.3,
     "rental_tax_individual": 0.12,
@@ -32,14 +67,14 @@
     "withholding_management_fees": 0.15,
     "withholding_dividend": 0.15,
     "customs_duty_common": 0.25,
-    "environmental_levy_used_clothing": 0.15
+    "environmental_levy_used_clothing": 0.15,
+    "nssf_employee_contribution": 0.05
   },
   "legal_basis": {
     "vat_standard": "VAT Act (Cap 349), s.78 and Schedule 3",
     "vat_registration_threshold_annual": "VAT Act (Cap 349), s.7 registration threshold",
     "paye_bands_resident": "Income Tax Act (Cap 340), Third Schedule Part I",
     "paye_bands_non_resident": "Income Tax Act (Cap 340), Third Schedule Part II",
-    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE.",
     "corporation_tax": "Income Tax Act (Cap 340), s.6 and Third Schedule Part IV",
     "capital_gains_corporate": "Income Tax Act (Cap 340), s.18 - gains included in gross income",
     "rental_tax_individual": "Income Tax Act (Cap 340), s.5 as amended by the Income Tax (Amendment) Act 2022",
@@ -49,7 +84,8 @@
     "withholding_management_fees": "Income Tax Act (Cap 340), s.85",
     "withholding_dividend": "Income Tax Act (Cap 340), s.118",
     "customs_duty_common": "EAC Common External Tariff - finished goods band",
-    "environmental_levy_used_clothing": "Environmental levy on worn clothing imports, share of CIF value"
+    "environmental_levy_used_clothing": "Environmental levy on worn clothing imports, share of CIF value",
+    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE."
   },
   "notes": {
     "paye_bands_resident": "The top band is the 30% band plus the additional 10% charge on chargeable income above UGX 10,000,000 per month, expressed here as a single 40% marginal rate.",

@@ -75,6 +75,13 @@ class RateTable:
     legal_basis: dict[str, str] = field(default_factory=dict)
     notes: dict[str, str] = field(default_factory=dict)
     carried_forward: tuple[str, ...] = ()
+    #: Keys whose figure has not been reconciled against primary
+    #: legislative text, even when the table as a whole is confirmed.
+    #: Verification is per figure: an Act can settle the PAYE bands
+    #: while a levy in a different Act is still only press-reported,
+    #: and a table-wide flag would either overstate the second or
+    #: understate the first.
+    unverified: tuple[str, ...] = ()
     sources: tuple[SourceRef, ...] = ()
     verification_note: str = ""
 
@@ -118,6 +125,13 @@ class RateTable:
         notes = {k: self.notes[k] for k in keys if k in self.notes}
         if notes:
             payload["notes"] = notes
+        unverified = [k for k in keys if k in self.unverified]
+        if unverified:
+            payload["unverified"] = unverified
+            payload["unverified_note"] = (
+                "These figures are not yet reconciled against the primary legislative "
+                "text; confirm them with URA before relying on them."
+            )
         carried = [k for k in keys if k in self.carried_forward]
         if carried:
             payload["carried_forward"] = carried
@@ -234,6 +248,7 @@ def _load_table(path: Path) -> RateTable:
         legal_basis={str(k): str(v) for k, v in (raw.get("legal_basis") or {}).items()},
         notes={str(k): str(v) for k, v in (raw.get("notes") or {}).items()},
         carried_forward=tuple(str(k) for k in (raw.get("carried_forward") or [])),
+        unverified=tuple(str(k) for k in (raw.get("unverified") or [])),
         sources=sources,
         verification_note=str(raw.get("verification_note", "")),
     )

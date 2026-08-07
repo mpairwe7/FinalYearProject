@@ -206,11 +206,22 @@ class CalculatorTool(Tool):
             return payload
         payload["ok"] = True
         payload["fiscal_year"] = table.fiscal_year
-        payload["rate_basis"] = table.provenance(*result.rate_keys)
+        basis = table.provenance(*result.rate_keys)
+        payload["rate_basis"] = basis
         if not table.confirmed:
             payload["verification_warning"] = (
                 f"{table.fiscal_year} figures are provisional — "
                 f"{table.verification_note or 'confirm them with URA before relying on them.'}"
+            )
+        elif basis.get("unverified"):
+            # The table is confirmed, but this particular calculation used a
+            # figure that is not yet reconciled against the primary text.
+            # Caveating the whole table instead would train users to ignore
+            # the caveat on the figures that are settled.
+            payload["verification_warning"] = (
+                f"{table.fiscal_year} is confirmed, but "
+                f"{', '.join(basis['unverified'])} is not yet reconciled against the "
+                f"primary legislative text — confirm it with URA."
             )
         return payload
 
@@ -898,6 +909,8 @@ class WithholdingTaxCalculator(CalculatorTool):
         "public_entertainer": "withholding_public_entertainer",
         "betting_winnings": "withholding_betting_winnings",
         "foreign_interest": "withholding_foreign_interest",
+        "telecom_commission": "withholding_telecom_commission",
+        "non_business_asset": "withholding_non_business_asset",
     }
 
     @property
@@ -908,10 +921,12 @@ class WithholdingTaxCalculator(CalculatorTool):
                 "Calculate withholding tax (WHT) deducted at source on a payment in "
                 "Uganda: 6% on services, goods and payments to public entertainers; "
                 "15% on management fees, dividends, royalties and betting winnings; "
-                "5% on interest paid to non-resident lenders. Royalty, public "
-                "entertainer, betting-winnings and foreign-interest withholding apply "
-                "from FY2026-27. Use when the user asks how much tax is withheld from "
-                "a payment, invoice, dividend or winnings."
+                "10% on telecommunications and mobile-money commissions; "
+                "5% on debenture interest paid to non-resident lenders. Public "
+                "entertainer, betting-winnings, telecom-commission, non-business-asset "
+                "and debenture-interest withholding apply from FY2026-27. Use when the "
+                "user asks how much tax is withheld from a payment, invoice, dividend, "
+                "commission or winnings."
             ),
             parameters=_schema_params(
                 {

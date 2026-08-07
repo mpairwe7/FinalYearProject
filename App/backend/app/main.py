@@ -30,6 +30,7 @@ from .analytics import AnalyticsMiddleware, metrics
 from .authority import authority_required, get_authority_status
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
 from .auth.models import ConsentGrantRequest, ConsentWithdrawRequest, ProfileUpdateRequest
+from .escalation_notify import known_teams
 from .models import (
     AnalyticsDashboard,
     AnalyticsEvent,
@@ -1399,6 +1400,19 @@ async def voice_chat_stream_ws_v2(websocket: WebSocket) -> None:
     await voice_stream_ws_v2(websocket, app)
 
 
+@app.websocket("/v1/admin/tickets/stream")
+async def admin_ticket_stream_ws(websocket: WebSocket) -> None:
+    """Live escalation events for staff.
+
+    Read-only and staff-only; carries triage metadata, never a
+    transcript. ``?team=customs`` narrows it to one queue. See
+    ``ticket_ws.py``.
+    """
+    from .ticket_ws import ticket_stream_ws
+
+    await ticket_stream_ws(websocket)
+
+
 @app.websocket("/v2/chat/stream")
 async def chat_stream_ws_v2(websocket: WebSocket) -> None:
     """V2 WebSocket — persistent text chat with agentic event surface.
@@ -1784,13 +1798,20 @@ def list_tickets_endpoint(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    priority: str | None = None,
+    team: str | None = None,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """List escalation tickets for URA staff triage.
 
     Requires an authenticated staff/admin user, or the configured
-    operator key as a break-glass fallback. Filter by status via the
-    query string: ``?status=open``.
+    operator key as a break-glass fallback. Filter via the query
+    string: ``?status=open``, ``?priority=urgent``.
+
+    Ordered urgent-first, then oldest within a priority, so a waiting
+    taxpayer moves up the queue rather than being buried by newer
+    arrivals. Rows carry a short ``handoff`` preview but **not** the
+    transcript — fetch a single ticket for that.
     """
     if limit < 1 or limit > 500:
         raise HTTPException(status_code=400, detail="limit must be 1..500")
@@ -1798,11 +1819,18 @@ def list_tickets_endpoint(
         raise HTTPException(status_code=400, detail="offset out of range")
     if status and status not in ("open", "assigned", "resolved", "wontfix"):
         raise HTTPException(status_code=400, detail="invalid status")
+    if priority and priority not in ("low", "normal", "high", "urgent"):
+        raise HTTPException(status_code=400, detail="invalid priority")
 
-    rows = db.list_tickets(status=status, limit=limit, offset=offset)
+    rows = db.list_tickets(
+        status=status, limit=limit, offset=offset, priority=priority, team=team
+    )
     return {
         "count": len(rows),
         "status_filter": status or "all",
+        "priority_filter": priority or "all",
+        "team_filter": team or "all",
+        "teams": known_teams(),
         "limit": limit,
         "offset": offset,
         "tickets": rows,
@@ -1822,13 +1850,33 @@ def ticket_stats_endpoint(
     return db.ticket_stats(days=days)
 
 
+@app.get("/v1/admin/tickets/sla", tags=["admin"])
+def ticket_sla_endpoint(
+    request: Request,
+    days: int = 30,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """Time-to-first-response and time-to-resolution for the queue.
+
+    Medians, not means: one ticket left over a holiday weekend would
+    otherwise make the whole queue look broken.
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be 1..365")
+    return db.sla_stats(days=days)
+
+
 @app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
 def get_ticket_endpoint(
     request: Request,
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """Fetch a single ticket by id."""
+    """Fetch a single ticket, including the conversation transcript.
+
+    The transcript is the snapshot taken when the ticket was raised, so
+    it is still here after ``conversations`` has been purged.
+    """
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
@@ -1843,15 +1891,23 @@ def update_ticket_endpoint(
     assignee: str | None = None,
     staff_note: str | None = None,
     priority: str | None = None,
+    officer_reply: str | None = None,
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """Update a ticket's status/assignee/note/priority."""
+    """Update a ticket's status/assignee/note/priority/reply.
+
+    ``officer_reply`` is shown to the **taxpayer** when they next open
+    the conversation; ``staff_note`` stays internal. They are separate
+    fields on purpose — an officer's candid note is not something the
+    taxpayer should ever read.
+    """
     ok = db.update_ticket(
         ticket_id,
         status=status,
         assignee=assignee,
         staff_note=staff_note,
         priority=priority,
+        officer_reply=officer_reply,
     )
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")

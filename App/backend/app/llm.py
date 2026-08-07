@@ -47,6 +47,7 @@ from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Callable
 
 from .agents.loop_control import ToolCallBudget
+from .agents.prompts import specialist_prompt
 from .guardrails import scan_retrieved_text
 
 if TYPE_CHECKING:
@@ -996,13 +997,14 @@ def _strip_tool_calls(text: str) -> str:
     return _TOOL_CALL_RE.sub("", text).strip()
 
 
-def _build_tool_messages(
+def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     query: str,
     passages: list[dict[str, Any]] | None,
     conversation_history: list[dict[str, str]] | None,
     locale: str,
     personalization_context: str = "",
     tone_hint: str = "",
+    agent_role: str = "",
 ) -> list[dict[str, str]]:
     """Build the initial message list for a tool-calling request.
 
@@ -1012,6 +1014,13 @@ def _build_tool_messages(
        ``search_ura_knowledge_base`` itself during the loop.
     """
     system_content = SYSTEM_PROMPT + TOOL_USE_PROMPT_SUFFIX
+    # The supervisor routed this turn to a specialist; until now that
+    # changed the tool whitelist and nothing about the instructions.
+    # Appended after the base prompt so a specialist cannot talk its way
+    # out of the grounding and abstention rules by being more specific.
+    specialist = specialist_prompt(agent_role)
+    if specialist:
+        system_content += f"\n\n{specialist}"
     if personalization_context:
         system_content += (
             "\n\n## Consent-granted personalization context\n"
@@ -1063,7 +1072,7 @@ def _build_tool_messages(
 def _select_tools_for_query(query: str, eligible_names: list[str]) -> list[str]:
     """Narrow the exposed tool set for *query* when Tool RAG is enabled.
 
-    Pasting all 18 registered schemas costs ~4.5k tokens of every agentic
+    Pasting every registered schema costs ~4.5k tokens of every agentic
     prompt and dilutes selection accuracy.  ``FLAG_TOOL_RAG`` swaps that
     for the top-k relevant tools plus the mandatory rails.  With the flag
     off — the default — the full eligible set is exposed unchanged, and a
@@ -1107,6 +1116,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     user_role: str = "public",
     granted_purposes: list[str] | None = None,
     event_callback: "Callable[[dict[str, Any]], None] | None" = None,
+    agent_role: str = "",
 ) -> dict[str, Any]:
     """Run a bounded tool-calling loop with the local Qwen3 model.
 
@@ -1153,6 +1163,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 locale,
                 personalization_context=personalization_context,
                 tone_hint=tone_hint,
+                agent_role=agent_role,
             )
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
@@ -1201,6 +1212,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         locale,
         personalization_context=personalization_context,
         tone_hint=tone_hint,
+        agent_role=agent_role,
     )
     tool_calls_made: list[dict[str, Any]] = []
     last_response = ""

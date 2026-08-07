@@ -186,12 +186,50 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
         re.compile(r"\b(betting|gambl\w+|gaming|sports?\s*bet\w*)\b.*\bwinning\w*|\bwinning\w*\b.*\b(bet|betting|gaming)\b|\bbetting\s+winning\w*", re.IGNORECASE),
     ),
     (
+        "telecom_commission",
+        re.compile(r"\b(telecom\w*|mobile\s*money|airtime|mobile\s*network)\b[^?]{0,40}\bcommission", re.IGNORECASE),
+    ),
+    (
         "foreign_interest",
         re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
     ),
     ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*)\b", re.IGNORECASE)),
     ("goods", re.compile(r"\b(goods|supplies|supply)\b", re.IGNORECASE)),
 ]
+
+
+#: Calculator intent -> the tool that answers it.  Used by the
+#: supervisor to route; :func:`plan_calculation` maps the same intents
+#: to a full plan with parameters.
+INTENT_TOOLS: dict[str, str] = {
+    "withholding": "calculate_withholding",
+    "paye": "calculate_paye",
+    "rental": "calculate_rental_tax",
+    "capital_gains": "calculate_capital_gains",
+    "corporation": "calculate_corporation_tax",
+    "customs": "calculate_customs_duty",
+    "vat": "calculate_vat",
+}
+
+
+def detect_calculator_intent(message: str) -> str | None:
+    """Which calculator a message is about, ignoring whether it asks to compute.
+
+    Split out so the supervisor can route on intent without inheriting
+    :func:`plan_calculation`'s calculation-verb gate. The two want
+    different things: plan_calculation *executes* a calculation and is
+    conservative for that reason, while routing only decides which tools
+    to offer — and the tool loop still gets to not use them.
+    """
+    text = (message or "").strip()
+    if not text or _INFO_ONLY_RE.search(text):
+        return None
+    return next((name for name, pat in _INTENT_RES if pat.search(text)), None)
+
+
+def has_money_amount(message: str) -> bool:
+    """Whether the message carries a figure a calculator could act on."""
+    return bool(extract_amounts(message or ""))
 
 
 def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
@@ -222,7 +260,24 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     if not _CALC_VERB_RE.search(text):
         return None
 
-    intent = next((name for name, pat in _INTENT_RES if pat.search(text)), None)
+    # "Must I register for VAT?" is a threshold test, not a calculation,
+    # so it is matched before the calculation-verb gate — the natural
+    # phrasing carries no "calculate"/"how much".
+    if _VAT_WORD_RE.search(text) and _REGISTER_WORD_RE.search(text):
+        turnover_amounts = extract_amounts(text)
+        if turnover_amounts or _OBLIGATION_RE.search(text):
+            params: dict[str, object] = {}
+            missing: list[str] = []
+            if len(turnover_amounts) == 1:
+                params["annual_turnover"] = turnover_amounts[0][0]
+            else:
+                missing.append("annual_turnover")
+            return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])
+
+    if not _CALC_VERB_RE.search(text):
+        return None
+
+    intent = detect_calculator_intent(text)
     if intent is None:
         return None
 

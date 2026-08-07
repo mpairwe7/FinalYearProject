@@ -52,14 +52,26 @@ class TestToolsRoute_Calculators:
         assert d.confidence >= 0.85
 
     @pytest.mark.parametrize("query", [
-        # Known rule-based misses: wording that reverses the trigger-noun
-        # order falls through to RAG.  Fine — still gets a good answer,
-        # just through the factual retrieval path rather than tool calls.
-        "What's my take-home pay on a 2M salary?",
+        # A figure with no tax type named. Guessing which calculator the
+        # taxpayer means would be worse than retrieving guidance.
+        "I earn 3 million, what do I pay",
     ])
-    def test_edge_case_queries_fall_through_to_rag(self, query):
+    def test_a_figure_without_a_tax_type_falls_through_to_rag(self, query):
         d = supervisor.classify(query)
         assert d.route == AgentRoute.RAG
+
+    @pytest.mark.parametrize("query", [
+        # These used to be pinned as acceptable misses, on the reasoning
+        # that RAG "still gets a good answer". It does not: the model
+        # answers a numeric tax question from memory, which is the one
+        # thing the deterministic calculators exist to prevent. Now
+        # routed on amount + intent — see test_supervisor_amount_intent.
+        "What's my take-home pay on a 2M salary?",
+        "VAT on 500000",
+    ])
+    def test_reversed_word_order_now_reaches_the_calculators(self, query):
+        d = supervisor.classify(query)
+        assert d.route == AgentRoute.TOOLS
 
     def test_suggested_tools_include_calculator(self):
         d = supervisor.classify("How much VAT on UGX 50k?")
@@ -105,6 +117,74 @@ class TestToolsRoute_Rates:
     def test_rate_queries_route_to_tools(self, query):
         d = supervisor.classify(query)
         assert d.route == AgentRoute.TOOLS, f"{query} → {d.route.value}"
+
+
+# ---------------------------------------------------------------------------
+# TOOLS route — learning intents
+# ---------------------------------------------------------------------------
+class TestToolsRoute_Education:
+    @pytest.mark.parametrize("query", [
+        "What is VAT?",
+        "How does VAT work?",
+        "Explain PAYE to me",
+        "Teach me about withholding tax",
+        "I don't understand tax brackets",
+        "What is a TIN?",
+        "Walk me through capital gains",
+        "Tell me about rental tax",
+        "Difference between marginal and effective tax",
+        # Previously pinned as RAG defaults — nothing better existed then.
+        "Explain withholding tax for services",
+        "Tell me about VAT",
+    ])
+    def test_learning_queries_reach_the_education_tool(self, query):
+        d = supervisor.classify(query)
+        assert d.route == AgentRoute.TOOLS, f"{query} → {d.route.value}"
+        assert "explain_tax_concept" in d.suggested_tools
+
+    @pytest.mark.parametrize("query", [
+        # An amount means arithmetic, not a concept.  "What is VAT" and
+        # "What is the VAT on 5 million" differ only by the figure.
+        "What is the VAT on 5 million?",
+        "Calculate VAT for 100k",
+        "How much PAYE will I pay on a 3 million salary?",
+        # A rate word belongs to the rate table.
+        "What is the current corporation tax rate?",
+        "What's the applicable VAT rate?",
+        # A time word belongs to the calendar tools.
+        "Tell me about the current fiscal year",
+        "When is my next filing deadline?",
+    ])
+    def test_education_defers_rather_than_stealing(self, query):
+        d = supervisor.classify(query)
+        assert "explain_tax_concept" not in d.suggested_tools, (
+            f"{query} was claimed by the education route"
+        )
+
+    def test_learning_queries_still_seed_the_knowledge_base(self):
+        d = supervisor.classify("Explain PAYE to me")
+        assert "search_ura_knowledge_base" in d.suggested_tools
+
+    def test_what_does_x_mean_is_covered_without_an_ambiguous_branch(self):
+        # The "what's a X mean" alternative was removed as a ReDoS
+        # source; "what does" already covers the phrasing.
+        d = supervisor.classify("What does VAT mean?")
+        assert "explain_tax_concept" in d.suggested_tools
+
+    def test_classification_is_linear_in_query_length(self):
+        """Routing runs on raw user input, so it must not backtrack.
+
+        The removed ``what'?s\\s+(?:a|an|the)?\\s*\\w*\\s*mean`` branch let
+        a run of spaces be split between quantifiers in exponentially
+        many ways: 2,000 spaces did not finish in two minutes.
+        """
+        import time
+
+        hostile = "what's " + " " * 20_000 + "vat"
+        start = time.perf_counter()
+        supervisor.classify(hostile)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 1.0, f"classify took {elapsed:.1f}s on a 20k-space query"
 
 
 # ---------------------------------------------------------------------------
@@ -196,11 +276,14 @@ class TestClarify:
 class TestRAGDefault:
     @pytest.mark.parametrize("query", [
         "How do I register a business with URA?",
-        "Explain withholding tax for services",
+        # "What is X" only becomes a lesson when X is a concept the
+        # curriculum teaches; EFRIS is not, so retrieval still answers it.
         "What is EFRIS?",
-        "Tell me about VAT",
         "Who qualifies for a tax exemption?",
         "Describe the process for filing an annual return",
+        # "Explain withholding tax for services" and "Tell me about VAT"
+        # used to live here because nothing better existed. They now go
+        # to the education tool — see TestToolsRoute_Education.
     ])
     def test_factual_queries_fall_through_to_rag(self, query):
         d = supervisor.classify(query)

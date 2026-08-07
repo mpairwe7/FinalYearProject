@@ -82,8 +82,7 @@ def init_voice_consent_schema() -> None:
     try:
         from . import database as db
 
-        conn = db._get_connection()
-        conn.executescript(
+        db.execute_script(
             """
             CREATE TABLE IF NOT EXISTS voice_audit_log (
                 id              TEXT PRIMARY KEY,
@@ -93,7 +92,7 @@ def init_voice_consent_schema() -> None:
                 metadata_json   TEXT DEFAULT '{}',
                 audio_hash      TEXT DEFAULT '',
                 tenant_id       TEXT DEFAULT 'default',
-                created_at      REAL NOT NULL
+                created_at      DOUBLE PRECISION NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_voice_audit_session
                 ON voice_audit_log(session_id);
@@ -204,8 +203,7 @@ def log_voice_event(
     try:
         from . import database as db
 
-        conn = db._get_connection()
-        conn.execute(
+        db.execute(
             """
             INSERT INTO voice_audit_log
                 (id, user_id, session_id, event_type, metadata_json,
@@ -214,7 +212,6 @@ def log_voice_event(
             """,
             (row_id, user_id, session_id, event_type, meta_json, audio_hash, tenant_id, now),
         )
-        conn.commit()
     except Exception:
         logger.exception("Failed to write voice audit event")
         return None
@@ -261,7 +258,6 @@ def get_voice_audit_log(
     try:
         from . import database as db
 
-        conn = db._get_connection()
         clauses: list[str] = []
         params: list = []
 
@@ -286,17 +282,17 @@ def get_voice_audit_log(
         """
         params.append(limit)
 
-        rows = conn.execute(query, params).fetchall()
+        rows = db.query_all(query, tuple(params))
         return [
             {
-                "id": r[0],
-                "user_id": r[1],
-                "session_id": r[2],
-                "event_type": r[3],
-                "metadata": json.loads(r[4] or "{}"),
-                "audio_hash": r[5],
-                "tenant_id": r[6],
-                "created_at": r[7],
+                "id": r["id"],
+                "user_id": r["user_id"],
+                "session_id": r["session_id"],
+                "event_type": r["event_type"],
+                "metadata": json.loads(r["metadata_json"] or "{}"),
+                "audio_hash": r["audio_hash"],
+                "tenant_id": r["tenant_id"],
+                "created_at": r["created_at"],
             }
             for r in rows
         ]
@@ -310,42 +306,42 @@ def voice_audit_stats(days: int = 30) -> dict:
     try:
         from . import database as db
 
-        conn = db._get_connection()
         cutoff = time.time() - (days * 86400)
 
-        total = conn.execute(
-            "SELECT COUNT(*) FROM voice_audit_log WHERE created_at >= ?",
+        total_row = db.query_one(
+            "SELECT COUNT(*) AS n FROM voice_audit_log WHERE created_at >= ?",
             (cutoff,),
-        ).fetchone()[0]
+        )
+        total = int(total_row["n"]) if total_row else 0
 
-        by_type = conn.execute(
+        by_type = db.query_all(
             """
-            SELECT event_type, COUNT(*)
+            SELECT event_type, COUNT(*) AS n
             FROM voice_audit_log
             WHERE created_at >= ?
             GROUP BY event_type
             ORDER BY COUNT(*) DESC
             """,
             (cutoff,),
-        ).fetchall()
+        )
 
-        unique_sessions = conn.execute(
-            "SELECT COUNT(DISTINCT session_id) FROM voice_audit_log WHERE created_at >= ?",
+        sessions_row = db.query_one(
+            "SELECT COUNT(DISTINCT session_id) AS n FROM voice_audit_log "
+            "WHERE created_at >= ?",
             (cutoff,),
-        ).fetchone()[0]
-
-        unique_users = conn.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM voice_audit_log "
+        )
+        users_row = db.query_one(
+            "SELECT COUNT(DISTINCT user_id) AS n FROM voice_audit_log "
             "WHERE created_at >= ? AND user_id != ''",
             (cutoff,),
-        ).fetchone()[0]
+        )
 
         return {
             "period_days": days,
             "total_events": total,
-            "unique_sessions": unique_sessions,
-            "unique_users": unique_users,
-            "events_by_type": {r[0]: r[1] for r in by_type},
+            "unique_sessions": int(sessions_row["n"]) if sessions_row else 0,
+            "unique_users": int(users_row["n"]) if users_row else 0,
+            "events_by_type": {r["event_type"]: r["n"] for r in by_type},
         }
     except Exception:
         logger.exception("Failed to compute voice audit stats")
@@ -366,15 +362,12 @@ def cleanup_expired_voice_data() -> dict[str, int]:
     try:
         from . import database as db
 
-        conn = db._get_connection()
         cutoff = time.time() - (retention_policy.analytics_ttl_days * 86400)
 
-        cursor = conn.execute(
+        deleted["audit_entries"] = db.execute(
             "DELETE FROM voice_audit_log WHERE created_at < ?",
             (cutoff,),
         )
-        deleted["audit_entries"] = cursor.rowcount
-        conn.commit()
 
         if deleted["audit_entries"] > 0:
             logger.info("Voice retention cleanup: deleted %d audit entries", deleted["audit_entries"])

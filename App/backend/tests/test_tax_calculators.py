@@ -69,12 +69,15 @@ class PAYEFY2025Tests(unittest.TestCase):
 
 
 class PAYEFY2026Tests(unittest.TestCase):
-    """FY2026-27 bands: threshold up to 335k, new 25% band 410k-485k.
+    """FY2026-27 bands, from Schedule 4 Part I as substituted by the 2026 Act.
 
-    The 20% band on 335k-410k carries over from FY2025-26 unchanged.
-    Secondary summaries of the 2026 Act disagreed and several reported
-    10%; these figures follow the two restatements that are internally
-    checkable — see the ``paye_bands_resident`` note in the data file.
+    The Act states ANNUAL chargeable income; these are the monthly
+    equivalents. Two cumulative figures appear verbatim in the Act's own
+    table and are asserted below as an independent check that the
+    annual-to-monthly conversion is right:
+
+        UGX   180,000 of tax at   4,920,000 annual (= 410,000/month)
+        UGX   405,000 of tax at   5,820,000 annual (= 485,000/month)
     """
 
     def _paye(self, gross: float, **kwargs) -> dict:
@@ -85,8 +88,14 @@ class PAYEFY2026Tests(unittest.TestCase):
     def test_raised_threshold_is_tax_free(self) -> None:
         self.assertEqual(self._paye(335_000)["paye"], 0.0)
 
-    def test_twenty_percent_band_starts_at_new_threshold(self) -> None:
+    def test_twenty_percent_band_starts_at_the_new_threshold(self) -> None:
+        # Schedule 4 Part I: 20% of the excess over 4,020,000 annual.
+        # Secondary summaries reported this band as 10%; the Act says 20%.
         self.assertEqual(self._paye(400_000)["paye"], 13_000.0)  # 20% x 65,000
+
+    def test_annual_cumulative_at_the_second_boundary_matches_the_act(self) -> None:
+        result = self._paye(410_000)
+        self.assertEqual(result["annual_paye"], 180_000.0)
 
     def test_new_twenty_five_percent_band(self) -> None:
         # 20% x 75,000 = 15,000, then 25% x 40,000 = 10,000
@@ -94,76 +103,86 @@ class PAYEFY2026Tests(unittest.TestCase):
         self.assertEqual(result["paye"], 25_000.0)
         self.assertEqual(result["band"]["marginal_rate"], 0.25)
 
+    def test_annual_cumulative_at_the_third_boundary_matches_the_act(self) -> None:
+        result = self._paye(485_000)
+        self.assertEqual(result["annual_paye"], 405_000.0)
+
     def test_thirty_percent_band_resumes_above_485k(self) -> None:
         # 15,000 + 25% x 75,000 = 33,750, then 30% x 15,000 = 4,500
         self.assertEqual(self._paye(500_000)["paye"], 38_250.0)
 
-    def test_matches_the_published_worked_example(self) -> None:
-        """URA-reported worked example: 1,900,000 gross -> 458,250 PAYE.
+    def test_top_band_adds_the_additional_ten_percent(self) -> None:
+        # Above 120,000,000 annual (10,000,000 monthly) the Act adds a
+        # further 10%, giving an effective 40% marginal rate.
+        self.assertEqual(self._paye(12_000_000)["band"]["marginal_rate"], 0.4)
 
-        This is the check that decides the disputed second band. At the
-        10% several outlets reported, the same salary yields 450,750, so
-        a regression to 10% cannot pass silently.
-        """
-        self.assertEqual(self._paye(1_900_000)["paye"], 458_250.0)
-
-    def test_cumulative_tax_at_the_25_percent_floor_is_180k_annual(self) -> None:
-        # The Third Schedule restatement reads "UGX 180,000 plus 25% of
-        # the excess" at the 4,920,000 annual boundary.  180,000/12 =
-        # 15,000 is exactly the cumulative monthly tax at 410,000.
-        self.assertEqual(self._paye(410_000)["annual_paye"], 180_000.0)
-
-    def test_provisional_table_warns(self) -> None:
+    def test_confirmed_table_does_not_caveat_a_verified_figure(self) -> None:
         result = self._paye(1_000_000)
-        self.assertEqual(result["rate_basis"]["status"], "provisional")
-        self.assertIn("provisional", result["verification_warning"])
+        self.assertEqual(result["rate_basis"]["status"], "confirmed")
+        self.assertNotIn("verification_warning", result)
 
-    def test_non_resident_bands_are_flagged_as_carried_forward(self) -> None:
+    def test_result_cites_the_amending_act(self) -> None:
+        basis = self._paye(1_000_000)["rate_basis"]["legal_basis"]
+        self.assertIn("Income Tax (Amendment) Act 2026", basis["paye_bands_resident"])
+
+    def test_non_resident_bands_were_not_amended(self) -> None:
+        # The Act substitutes only Part I, which applies to residents, so
+        # Part II continues to apply and is not a stale carry-forward.
         result = self._paye(12_000_000, residency="non_resident")
-        self.assertIn("paye_bands_non_resident", result["rate_basis"]["carried_forward"])
+        self.assertEqual(result["paye"], 3_725_500.0)
+        self.assertNotIn("carried_forward", result["rate_basis"])
+        self.assertIn("not amended", result["rate_basis"]["legal_basis"]["paye_bands_non_resident"])
 
 
-class TakeHomePayTests(unittest.TestCase):
-    """`net_take_home` must not be read as a payslip figure it is not.
+class UnverifiedFigureTests(unittest.TestCase):
+    """A confirmed table can still hold a figure from a secondary source."""
 
-    PAYE alone leaves the employee's 5% NSSF contribution in the number,
-    so a reply labelled "take-home" overstated actual pay for every
-    formal-sector employee who asked.
-    """
-
-    def _paye(self, gross: float, **kwargs) -> dict:
-        return ToolRegistry.call(
-            "calculate_paye", {"monthly_gross": gross, "fiscal_year": FY26, **kwargs}
+    def test_an_unverified_figure_is_caveated(self) -> None:
+        result = ToolRegistry.call(
+            "check_vat_registration",
+            {"annual_turnover": 400_000_000, "fiscal_year": FY26},
         )
+        self.assertTrue(result["ok"])
+        self.assertIn("vat_registration_threshold_annual", result["rate_basis"]["unverified"])
+        self.assertIn("not yet reconciled", result["verification_warning"])
 
-    def test_paye_only_is_the_default_and_says_so(self) -> None:
-        result = self._paye(1_000_000)
-        self.assertFalse(result["nssf_included"])
-        self.assertEqual(result["nssf_employee"], 0.0)
-        self.assertEqual(result["net_take_home"], 1_000_000 - result["paye"])
-        self.assertIn("net of PAYE only", result["deductions_note"])
-
-    def test_nssf_is_deducted_after_paye_not_before(self) -> None:
-        gross = 1_000_000.0
-        without = self._paye(gross)
-        with_nssf = self._paye(gross, include_nssf=True)
-        # NSSF changes take-home but must not change the tax: the
-        # employee's own contribution is not deductible against
-        # employment income.
-        self.assertEqual(with_nssf["paye"], without["paye"])
-        self.assertEqual(with_nssf["nssf_employee"], 50_000.0)  # 5% x 1,000,000
-        self.assertEqual(
-            with_nssf["net_take_home"], gross - without["paye"] - 50_000.0
+    def test_a_verified_figure_in_the_same_table_is_not_caveated(self) -> None:
+        result = ToolRegistry.call(
+            "calculate_withholding",
+            {"payment_type": "public_entertainer", "amount": 1_000_000, "fiscal_year": FY26},
         )
+        self.assertNotIn("verification_warning", result)
+        self.assertNotIn("unverified", result["rate_basis"])
 
-    def test_nssf_contribution_is_cited_in_the_provenance(self) -> None:
-        basis = self._paye(1_000_000, include_nssf=True)["rate_basis"]
-        self.assertIn("nssf_employee_contribution", basis["legal_basis"])
-        self.assertIn("not a URA tax", basis["legal_basis"]["nssf_employee_contribution"])
 
-    def test_paye_only_result_omits_the_nssf_basis(self) -> None:
-        basis = self._paye(1_000_000)["rate_basis"]
-        self.assertNotIn("nssf_employee_contribution", basis.get("legal_basis", {}))
+class WithholdingFY2026Act(unittest.TestCase):
+    """Rates introduced by the 2026 Act, each traced to its Schedule 4 Part."""
+
+    def test_rates_match_the_act(self) -> None:
+        for payment_type, rate in (
+            ("public_entertainer", 0.06),   # Part XVI, s.135B
+            ("betting_winnings", 0.15),     # Part XI, s.131
+            ("telecom_commission", 0.10),   # Part XIII, s.133
+            ("non_business_asset", 0.06),   # Part X item 4, s.130(3)
+            ("foreign_interest", 0.05),     # Part 2 para 2A, s.82(5)
+        ):
+            with self.subTest(payment_type=payment_type):
+                result = ToolRegistry.call(
+                    "calculate_withholding",
+                    {"payment_type": payment_type, "amount": 1_000_000, "fiscal_year": FY26},
+                )
+                self.assertTrue(result["ok"], result.get("error"))
+                self.assertEqual(result["rate"], rate)
+
+    def test_new_categories_fail_closed_for_the_previous_year(self) -> None:
+        for payment_type in ("telecom_commission", "non_business_asset"):
+            with self.subTest(payment_type=payment_type):
+                result = ToolRegistry.call(
+                    "calculate_withholding",
+                    {"payment_type": payment_type, "amount": 1_000, "fiscal_year": FY25},
+                )
+                self.assertFalse(result["ok"])
+                self.assertIn(FY26, result["error"])
 
 
 class FiscalYearResolutionTests(unittest.TestCase):
@@ -391,3 +410,46 @@ class CapitalGainsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TakeHomePayTests(unittest.TestCase):
+    """`net_take_home` must not be read as a payslip figure it is not.
+
+    PAYE alone leaves the employee's 5% NSSF contribution in the number,
+    so a reply labelled "take-home" overstated actual pay for every
+    formal-sector employee who asked.
+    """
+
+    def _paye(self, gross: float, **kwargs) -> dict:
+        return ToolRegistry.call(
+            "calculate_paye", {"monthly_gross": gross, "fiscal_year": FY26, **kwargs}
+        )
+
+    def test_paye_only_is_the_default_and_says_so(self) -> None:
+        result = self._paye(1_000_000)
+        self.assertFalse(result["nssf_included"])
+        self.assertEqual(result["nssf_employee"], 0.0)
+        self.assertEqual(result["net_take_home"], 1_000_000 - result["paye"])
+        self.assertIn("net of PAYE only", result["deductions_note"])
+
+    def test_nssf_is_deducted_after_paye_not_before(self) -> None:
+        gross = 1_000_000.0
+        without = self._paye(gross)
+        with_nssf = self._paye(gross, include_nssf=True)
+        # NSSF changes take-home but must not change the tax: the
+        # employee's own contribution is not deductible against
+        # employment income.
+        self.assertEqual(with_nssf["paye"], without["paye"])
+        self.assertEqual(with_nssf["nssf_employee"], 50_000.0)  # 5% x 1,000,000
+        self.assertEqual(
+            with_nssf["net_take_home"], gross - without["paye"] - 50_000.0
+        )
+
+    def test_nssf_contribution_is_cited_in_the_provenance(self) -> None:
+        basis = self._paye(1_000_000, include_nssf=True)["rate_basis"]
+        self.assertIn("nssf_employee_contribution", basis["legal_basis"])
+        self.assertIn("not a URA tax", basis["legal_basis"]["nssf_employee_contribution"])
+
+    def test_paye_only_result_omits_the_nssf_basis(self) -> None:
+        basis = self._paye(1_000_000)["rate_basis"]
+        self.assertNotIn("nssf_employee_contribution", basis.get("legal_basis", {}))

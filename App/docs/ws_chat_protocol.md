@@ -296,3 +296,34 @@ shape from `voice_ws_v2`:
   endpoints). `auth_required=true` enforces a JWT.
 * Production validation (Phase 6) refuses to start the server when
   `FLAG_WS_CHAT=true` and `FLAG_AUTH_REQUIRED=false` in `APP_ENV=production`.
+
+
+---
+
+## `WS /v1/admin/tickets/stream` — staff escalation events
+
+A separate socket from the chat protocol above. Staff roles only
+(`ura_staff`, `ura_admin`, `ura_auditor`); anything else is closed with
+`4403` before the handshake completes. Missing or invalid auth closes
+with `4401`.
+
+Read-only: the client sends nothing.
+
+```json
+{"type": "subscribed", "team": "customs"}
+```
+
+```json
+{"type": "escalation.created", "id": "tkt-1", "priority": "urgent",
+ "status": "open", "team": "customs", "reason": "...",
+ "topic": "objection_or_dispute", "sentiment": "frustration",
+ "transfer_style": "warm", "created_at": 1754400000.0}
+```
+
+```json
+{"type": "ping"}
+```
+
+`?team=customs` filters to one queue. The payload never contains the
+transcript, `user_query`, `bot_reply` or `staff_note` — fetch the ticket
+through `GET /v1/admin/tickets/{id}` for those.

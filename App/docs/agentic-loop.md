@@ -69,7 +69,7 @@ absent.
 ## Tool RAG on the live path
 
 `ToolRAGSelector` had a single caller — a graph node nothing invokes —
-so every agentic turn pasted all 18 registered schemas (~4.5 k tokens)
+so every agentic turn pasted every registered schema (~4.5 k tokens)
 into the prompt regardless of the query. `llm._select_tools_for_query`
 now consults it whenever `FLAG_TOOL_RAG` is on, exposing the top
 `TOOL_RAG_TOP_K` (default 5) tools plus the mandatory rails
@@ -123,3 +123,71 @@ for real traffic, or the router is planning tools it cannot use.
 
 The graph exposes the same dict under `budget` in
 `AgentGraphState.to_summary()`.
+
+
+## Per-specialist prompts
+
+The supervisor has routed to `tax_specialist`, `customs_specialist` and
+`tool_specialist` since Phase 15. Until Phase 19 that changed which
+tools were offered and the `agent_role` string in the response — and
+nothing about the instructions the model received. A "customs
+specialist" that has never been told it is one is a label.
+
+`agents/prompts.py` maps a role to an extra system fragment, appended
+**after** the shared prompt so every specialist keeps the base
+grounding, abstention and citation rules. That ordering is deliberate: a
+specialist must not be able to talk its way out of the safety
+instructions by having a longer, more specific prompt. A test asserts
+`SYSTEM_PROMPT` survives for every role.
+
+| Role | Adds |
+| --- | --- |
+| `tax_specialist` | Never state a rate from memory; name the fiscal year; pass on verification warnings |
+| `customs_specialist` | Duty is on CIF not invoice; VAT sits on the duty-inclusive value; no single customs rate |
+| `tool_specialist` | Use the tools rather than your own arithmetic; ask for one missing input rather than assuming |
+
+Non-specialist roles — greeting, clarification, escalation triage — get
+the base prompt unchanged. A greeting does not need a domain persona,
+and appending one spends tokens to make the reply worse.
+
+Fragments are kept under ~1 kB and a test enforces it: they cost tokens
+on every turn of a tool-calling loop, and a long persona preamble crowds
+out the passages and tool results the answer actually depends on.
+
+
+## Routing eval
+
+Unit tests assert individual cases. They cannot tell you the supervisor
+gets 70% of natural calculation phrasings wrong, because a case nobody
+wrote a test for is invisible — which is how seven of ten ordinary ways
+of asking for a tax figure ended up on the retrieval path, answered from
+the model's memory. That was found by hand-probing the router, which
+nobody will remember to redo.
+
+`agents/eval_routing.py` scores the supervisor against a labelled set
+and reports a **rate plus the cases it got wrong by name**:
+
+```bash
+python -m app.agents.eval_routing        # non-zero exit on any miss
+```
+
+```
+ura_routing_accuracy 1.0000
+ura_routing_misses 0
+ura_routing_accuracy_by_route{route="tools"} 1.0000
+```
+
+A case counts as correct only if the route matches **and** the expected
+tool is offered — routing to the right path while omitting the tool that
+answers the question is a miss the route alone would hide.
+
+The suite checks the eval can actually *fail* (an eval that cannot
+report a miss is decoration), that every route has at least one case (a
+route with none is a blind spot by construction), that no golden case
+names a tool that does not exist, and that accuracy stays at or above
+0.95. The floor rather than an equality is deliberate: adding a hard
+case that currently fails should be possible without breaking the
+build.
+
+**Add a case here whenever a route is reported wrong.** That is what
+turns a one-off bug report into a permanent check.

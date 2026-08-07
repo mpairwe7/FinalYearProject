@@ -43,6 +43,7 @@ from . import database as db
 from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
+from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.supervisor import (
     _FAREWELL_PHRASES,
     _GRATITUDE_PHRASES,
@@ -828,6 +829,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     granted_purposes: list[str] | None = None,
     deadline_s: float = LLM_DEADLINE_SECONDS * 2,
     event_callback: Callable[[dict[str, Any]], None] | None = None,
+    agent_role: str = "",
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -863,6 +865,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         user_role=user_role,
         granted_purposes=granted_purposes or [],
         event_callback=event_callback,
+        agent_role=agent_role,
     )
     try:
         result = future.result(timeout=deadline_s)
@@ -944,6 +947,7 @@ def _apply_output_guards(
     output_guard: Any,
     existing_handoff: dict[str, Any] | None = None,
     existing_ticket_id: str = "",
+    user_id: str = "",
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -1029,6 +1033,7 @@ def _apply_output_guards(
             priority=(handoff or {}).get("priority", "normal"),
             handoff=handoff,
             response_judge=response_judge,
+            user_id=user_id,
         )
 
     return {
@@ -1227,6 +1232,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                     output_guard=_output_guard,
                     existing_handoff=result.get("handoff"),
                     existing_ticket_id=result.get("ticket_id", ""),
+                    user_id=user_id or "",
                 )
                 full_reply = guard["reply"]
                 if guard["revised"]:
@@ -1376,6 +1382,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 output_guard=_output_guard,
                 existing_handoff=result.get("handoff"),
                 existing_ticket_id=result.get("ticket_id", ""),
+                user_id=user_id or "",
             )
             full_reply = guard["reply"]
             faith = guard["faithfulness"]
@@ -2566,6 +2573,64 @@ class ChatModel:
             "revised_reply": revised_reply,
         }
 
+    @staticmethod
+    def _escalation_transcript(
+        conversation_id: str,
+        session_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Snapshot the conversation for the officer handling this ticket.
+
+        Taken at escalation time rather than joined on read.  ``conversations``
+        is purged after ``CONVERSATION_TTL_DAYS`` (7) while a ticket can sit in
+        the queue far longer, so a live join would show an officer an empty
+        transcript for any week-old ticket — exactly the case where the
+        taxpayer has been waiting and least wants to start over.
+        """
+        try:
+            return db.get_conversation_transcript(
+                conversation_id=conversation_id or None,
+                session_id=session_id or None,
+            )
+        except Exception:
+            logger.exception("failed to snapshot transcript for escalation")
+            return []
+
+    @staticmethod
+    def _deliver_officer_reply(conversation_id: str) -> str:
+        """Return an undelivered officer reply for this conversation.
+
+        Closes the loop escalation left open: the taxpayer was told a
+        human would follow up, and until now the officer's answer sat in
+        a queue the taxpayer could not see. Marking delivery *after*
+        composing the text means a failure re-delivers rather than
+        silently dropping it — being told twice is a far smaller harm
+        than never being told.
+
+        Never raises: a broken ticket store must not take out the chat.
+        """
+        if not conversation_id:
+            return ""
+        try:
+            pending = db.pending_officer_reply(conversation_id)
+        except Exception:
+            logger.exception("officer-reply lookup failed")
+            return ""
+        if not pending or not pending.get("officer_reply"):
+            return ""
+
+        officer = str(pending.get("assignee") or "").strip()
+        lead = (
+            f"A URA officer ({officer}) has replied to your case:"
+            if officer
+            else "A URA officer has replied to your case:"
+        )
+        text = f"{lead}\n\n{pending['officer_reply']}"
+        try:
+            db.mark_reply_delivered(str(pending.get("id", "")))
+        except Exception:
+            logger.exception("failed to mark officer reply delivered; it will re-deliver")
+        return text
+
     def _maybe_create_ticket(
         self,
         *,
@@ -2577,6 +2642,7 @@ class ChatModel:
         priority: str = "normal",
         handoff: dict[str, Any] | None = None,
         response_judge: dict[str, Any] | None = None,
+        user_id: str = "",
     ) -> str:
         """Persist a structured escalation ticket when the queue is enabled."""
         if not flags.is_enabled("ticket_queue"):
@@ -2585,6 +2651,38 @@ class ChatModel:
             final_decision = str((response_judge or {}).get("final_decision", "")).lower()
             if final_decision != "escalate":
                 return ""
+
+        # The turn being escalated is not in `conversations` yet — it is
+        # logged by the caller after generate() returns — so append it to
+        # the snapshot rather than leaving the officer without the very
+        # message that triggered the handoff.
+        transcript = self._escalation_transcript(conversation_id, session_id)
+        transcript.append(
+            {
+                "user_message": self.redact_for_storage(user_query),
+                "bot_reply": self.redact_for_storage(bot_reply),
+                "created_at": time.time(),
+                "sources": [],
+                "topic_tag": "escalated",
+            }
+        )
+
+        # One conversation, one officer.  Without this a taxpayer who
+        # asks for a human three times opens three tickets, and three
+        # officers each start the conversation from the beginning.
+        try:
+            existing = db.find_open_ticket(conversation_id)
+        except Exception:
+            logger.exception("open-ticket lookup failed; creating a new ticket")
+            existing = None
+        if existing:
+            ticket_id = str(existing.get("id", ""))
+            logger.info("escalation reuses open ticket %s", ticket_id)
+            if handoff is not None and ticket_id:
+                handoff["ticket_id"] = ticket_id
+                handoff["reused_existing_ticket"] = True
+            return ticket_id
+
         try:
             ticket = db.create_ticket(
                 reason=reason,
@@ -2595,14 +2693,49 @@ class ChatModel:
                 priority=priority,
                 handoff=handoff,
                 response_judge=response_judge,
+                transcript=transcript,
+                user_id=user_id,
+                # Route on the topic the handoff packet already
+                # classified, so an officer sees their own queue rather
+                # than triaging a mixed one by reading every row.
+                team=team_for_topic(str((handoff or {}).get("topic", ""))),
             )
             ticket_id = ticket.get("id", "")
             if handoff is not None and ticket_id:
                 handoff["ticket_id"] = ticket_id
-            return ticket_id
         except Exception:
-            logger.exception("failed to persist escalation ticket")
+            # The taxpayer is about to be told a human will follow up.
+            # Say so loudly enough that someone notices nobody will:
+            # `error` rather than `exception`-and-swallow, and a flag on
+            # the handoff so the caller can degrade honestly instead of
+            # promising a ticket that does not exist.
+            logger.exception(
+                "ESCALATION LOST: ticket persistence failed for conversation %s (reason=%s)",
+                conversation_id or "?",
+                reason[:80],
+            )
+            if handoff is not None:
+                handoff["ticket_persisted"] = False
+                handoff["delivery_warning"] = (
+                    "This escalation could not be queued — contact the taxpayer "
+                    "through the channels listed rather than waiting for a ticket."
+                )
             return ""
+
+        # Announce it.  A ticket nobody is told about is a queue entry,
+        # not a handoff.  Never blocks the reply and never raises.
+        try:
+            notify_ticket_created(ticket)
+        except Exception:
+            logger.warning("escalation notification dispatch failed", exc_info=True)
+        try:
+            # Straight to any staff watching the queue, on every replica.
+            from .ticket_events import build_event, publish  # noqa: PLC0415
+
+            publish(build_event(ticket))
+        except Exception:
+            logger.warning("ticket event publish failed", exc_info=True)
+        return ticket_id
 
     def _persist_personalization_turn(
         self,
@@ -2699,11 +2832,28 @@ class ChatModel:
         if topic == "account_specific" and priority == "normal":
             priority = "high"
 
+        # The officer's context now travels on the ticket as a full
+        # transcript (see _escalation_transcript). This stays as a short
+        # at-a-glance preview for the queue list, where shipping every
+        # conversation would be wasteful — it is no longer the only
+        # thing a human receives.
         redacted_context = [
             self.redact_for_storage(turn.get("user_message", ""))[:180]
             for turn in (conversation_history or [])[-2:]
             if turn.get("user_message")
         ]
+
+        # Sentiment at the point of transfer. A handoff that arrives
+        # without it makes the officer rediscover the taxpayer's state
+        # from scratch, and decides nothing about how to open. Reuses
+        # the same classifier the reply paths use, so the ticket cannot
+        # disagree with the tone the bot just used.
+        distress = detect_user_distress(message)
+        turn_count = len(conversation_history or []) + 1
+        # Warm transfer = brief the officer before they engage. Reserved
+        # for the states where opening cold makes things worse: hardship,
+        # anger, and a taxpayer who has already repeated themselves.
+        warm = bool(distress in ("hardship", "frustration", "anxiety") or turn_count >= 4)
         sources = []
         for hit in (hits or [])[:3]:
             source = str(hit.get("source", "")).strip()
@@ -2727,6 +2877,14 @@ class ChatModel:
             "required_details": self._handoff_required_details(topic),
             "recent_context": redacted_context,
             "sources_reviewed": sources,
+            "sentiment": distress or "neutral",
+            "transfer_style": "warm" if warm else "cold",
+            "turns_before_handoff": turn_count,
+            "opening_guidance": (
+                empathy_ack(distress)
+                if distress
+                else "Answer directly; the taxpayer is not distressed."
+            ),
             "contact_channels": [
                 "https://ura.go.ug",
                 "0800 117 000 / 0800 217 000",
@@ -3399,6 +3557,33 @@ class ChatModel:
                 )
                 return calc_result
 
+            # 1a1. A human answered. Deliver it before anything else —
+            #      the taxpayer was told someone would follow up, and the
+            #      officer's answer outranks anything the bot would say.
+            officer_note = self._deliver_officer_reply(thread_id)
+            if officer_note:
+                delivered = {
+                    "reply": officer_note,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "officer_reply",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "human_officer",
+                    "next_actions": self._default_next_actions(agent_role="human_officer"),
+                }
+                self._audit_turn(
+                    message=message,
+                    result=delivered,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return delivered
+
             # 1a2. Greeting detection — always active, independent of agentic_mode
             _q_lower = message.strip().lower().strip("!.?,")
             _q_words = message.strip().split()
@@ -3580,6 +3765,7 @@ class ChatModel:
                         priority=(handoff or {}).get("priority", "normal"),
                         handoff=handoff,
                         response_judge=response_judge,
+                        user_id=user_id or "",
                     )
                     if ticket_id:
                         trace_ctx["ticket_id"] = ticket_id
@@ -3853,6 +4039,7 @@ class ChatModel:
                     priority=(handoff or {}).get("priority", "normal"),
                     handoff=handoff,
                     response_judge=response_judge,
+                    user_id=user_id or "",
                 )
                 abstained = {
                     "reply": reply,
@@ -3918,6 +4105,10 @@ class ChatModel:
                                 user_id=user_id or "",
                                 user_role=user_role,
                                 granted_purposes=granted_purposes or [],
+                                # The supervisor already decided which
+                                # specialist this is; give it the
+                                # instructions that go with the label.
+                                agent_role=agent_role,
                             )
                         reply = agentic.get("text", "")
                         if agentic.get("tool_calls"):
@@ -4133,6 +4324,7 @@ class ChatModel:
                 priority=(handoff or {}).get("priority", "normal"),
                 handoff=handoff,
                 response_judge=response_judge,
+                user_id=user_id or "",
             )
             if ticket_id:
                 trace_ctx["ticket_id"] = ticket_id
@@ -4528,6 +4720,7 @@ class ChatModel:
                     priority=(handoff or {}).get("priority", "normal"),
                     handoff=handoff,
                     response_judge=response_judge,
+                    user_id=user_id or "",
                 )
                 return {
                     "reply": reply,
@@ -4728,6 +4921,7 @@ class ChatModel:
                 priority=(handoff or {}).get("priority", "normal"),
                 handoff=handoff,
                 response_judge=response_judge,
+                user_id=user_id or "",
             )
             return {
                 "reply": reply,
@@ -4800,6 +4994,7 @@ class ChatModel:
             priority=(handoff or {}).get("priority", "normal"),
             handoff=handoff,
             response_judge=response_judge,
+            user_id=user_id or "",
         )
 
         return {

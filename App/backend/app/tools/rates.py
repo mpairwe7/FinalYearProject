@@ -47,7 +47,9 @@ _DISPLAY_NAMES: dict[str, str] = {
     "withholding_royalty": "WHT on royalties",
     "withholding_public_entertainer": "WHT on payments to public entertainers",
     "withholding_betting_winnings": "WHT on betting winnings",
-    "withholding_foreign_interest": "WHT on interest to non-resident lenders",
+    "withholding_foreign_interest": "WHT on debenture interest to non-resident lenders",
+    "withholding_telecom_commission": "WHT on telecom / mobile-money commissions",
+    "withholding_non_business_asset": "WHT on purchase of a non-business asset",
     "customs_duty_common": "Customs duty (common finished goods)",
     "environmental_levy_used_clothing": "Environmental levy (used clothing imports)",
 }

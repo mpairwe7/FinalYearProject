@@ -42,7 +42,6 @@ omit = [
     "*/__pycache__/*",
     "ml/scripts/data_augmentation.py",
     "ml/scripts/fine_tune_gemma.py",
-    "ml/scripts/export_mobile.py",
     "ml/scripts/export_tpu_ready_data.py",
     "ml/scripts/teacher_qa_generation.py",
     "ml/scripts/train_quality_classifier.py",

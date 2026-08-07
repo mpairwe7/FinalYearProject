@@ -23,6 +23,11 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from ..calculator_router import (
+    INTENT_TOOLS,
+    detect_calculator_intent,
+    has_money_amount,
+)
 from ..text_signals import CLARIFICATION_PROMPT
 from .state import AgentRoute, RouteDecision
 
@@ -105,6 +110,51 @@ _CALC_PATTERNS: list[tuple[re.Pattern[str], str, list[str]]] = [
         ["calculate_withholding", "lookup_rate"],
     ),
 ]
+
+# Learning intents — "explain VAT", "how does PAYE work". These share
+# vocabulary with the calculators ("what is VAT" vs "what is the VAT on
+# 5 million"), so the guards below decide which. Every guard *defers*:
+# a query carrying an amount, a rate word or a temporal word is handed
+# to the existing calculator / rate / calendar patterns untouched, so
+# adding this route cannot change where any prior query went.
+#
+# Every alternative below is anchored on literal words with a single
+# ``\s+`` between them.  An optional group next to ``\s*`` — the shape
+# ``what'?s\s+(?:a|an|the)?\s*\w*\s*mean`` — lets a run of spaces be
+# split between quantifiers in exponentially many ways, and this regex
+# runs on raw user input on every request.  "What does X mean" is
+# already covered by the ``what\s+(?:is|are|does)`` alternative, so the
+# ambiguous branch bought nothing.
+_LEARN_INTENT = re.compile(
+    r"\b(explain|teach|learn|understand(?:ing)?|"
+    r"what\s+(?:is|are|does)|"
+    r"how\s+(?:does|do)\b.*\bwork|difference\s+between|meaning\s+of|"
+    r"tell\s+me\s+about|walk\s+me\s+through)\b",
+    re.IGNORECASE,
+)
+_LEARN_TOPIC = re.compile(
+    r"\b(vat|v\.a\.t|paye|tin|withholding|wht|"
+    r"tax\s+brackets?|tax\s+bands?|progressive|marginal|"
+    r"rental\s+tax|corporation\s+tax|corporate\s+tax|company\s+tax|"
+    r"capital\s+gains?|customs|import\s+duty|landed\s+cost|"
+    r"fiscal\s+year|tax\s+year|filing|taxation|tax)\b",
+    re.IGNORECASE,
+)
+#: A figure in the query means the user wants arithmetic, not a concept.
+#: Bare digits count, and so do the ways people write amounts in words.
+_AMOUNT_CUE = re.compile(
+    r"\d|\b(million|billion|thousand|ugx|shillings?)\b",
+    re.IGNORECASE,
+)
+#: "What is the VAT rate" is a rate lookup; the rate table answers it.
+_RATE_CUE = re.compile(r"\b(rates?|percentages?|percent|%)\b", re.IGNORECASE)
+#: "Tell me about the current fiscal year" is a calendar question.
+_TEMPORAL_CUE = re.compile(
+    r"\b(today|tomorrow|current|now|this\s+(?:month|year|quarter)|"
+    r"deadline|due|next)\b",
+    re.IGNORECASE,
+)
+
 
 # Temporal intents — anything relative to "now", "today", "this year".
 # Requires the calendar tool for a correct answer.
@@ -192,6 +242,22 @@ _ESCALATE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
 ]
 
+#: Characters of a query the ``.*``-bearing patterns are allowed to see.
+#:
+#: The calculator and rate patterns use ``.*`` and lookaheads, which
+#: rescan from every start position — quadratic in the subject length.
+#: Measured on the calculator set: a 20,000-space query takes 6.8
+#: seconds, which is a request worker stalled by one message. A routing
+#: decision never needs more than the opening of a question, and a
+#: multi-kilobyte "query" is not one.
+#:
+#: The escalation, greeting, temporal and customs patterns are plain
+#: alternations with no ``.*``, so they stay linear and keep matching the
+#: **whole** query — "I want to speak to a human" must still escalate
+#: however far into a long message it appears.
+_MAX_PATTERN_CHARS = 1000
+
+
 # Clarification triggers — queries too short or vague to answer.
 _CLARIFY_MIN_WORDS = 2
 _CLARIFY_STOP_WORDS = {
@@ -260,6 +326,10 @@ class Supervisor:
             )
 
         words = q.split()
+        # Subject for the ``.*``-bearing patterns only — see
+        # _MAX_PATTERN_CHARS.  Escalation and the other linear
+        # patterns below still match against the full query.
+        probe = q[:_MAX_PATTERN_CHARS]
 
         # 1. Check for explicit escalation triggers FIRST — they take
         #    precedence over any other intent.
@@ -300,15 +370,62 @@ class Supervisor:
                 clarification_question=CLARIFICATION_PROMPT,
             )
 
+        # 2b. Learning intents → the education tool.  Checked before the
+        #     calculators because "what is VAT?" matches the VAT
+        #     calculator's pattern but carries no amount for it to work
+        #     with; the guards hand anything numeric, rate-shaped or
+        #     time-shaped straight back to the routes below.
+        if (
+            _LEARN_INTENT.search(probe)
+            and _LEARN_TOPIC.search(probe)
+            and not _AMOUNT_CUE.search(probe)
+            and not _RATE_CUE.search(probe)
+            and not _TEMPORAL_CUE.search(probe)
+        ):
+            # Log the decision, not the query — every other branch here
+            # logs the pattern that fired, and user text in a log line is
+            # a log-injection sink.
+            logger.info("supervisor: TOOLS (education) words=%d", len(words))
+            return RouteDecision(
+                route=AgentRoute.TOOLS,
+                reason="Learning intent on a tax concept",
+                confidence=0.86,
+                suggested_tools=["explain_tax_concept", "search_ura_knowledge_base"],
+            )
+
         # 3. Calculation intents → tool route with calculator whitelist
         for pat, reason, tools in _CALC_PATTERNS:
-            if pat.search(q):
+            if pat.search(probe):
                 logger.info("supervisor: TOOLS (calc) pattern=%r", pat.pattern[:40])
                 return RouteDecision(
                     route=AgentRoute.TOOLS,
                     reason=reason,
                     confidence=0.92,
                     suggested_tools=tools + ["search_ura_knowledge_base"],
+                )
+
+        # 3b. A figure plus a calculator intent is a calculation ask,
+        #     whatever the word order.  The patterns above need a trigger
+        #     verb *before* the noun, so "what's my take-home pay on a 2M
+        #     salary" and "VAT on 500000" fell through to plain RAG — the
+        #     model then answered a numeric question from memory, which
+        #     is the one thing the calculators exist to prevent.
+        #
+        #     Detection is reused from calculator_router rather than
+        #     re-implemented; it already parses "2M"/"1.5m"/"1,000,000"
+        #     and excludes informational asks like "how is PAYE
+        #     calculated". Confidence sits below the explicit patterns
+        #     because the intent is inferred from shape, not stated.
+        calc_intent = detect_calculator_intent(q)
+        if calc_intent and has_money_amount(q):
+            tool = INTENT_TOOLS.get(calc_intent)
+            if tool:
+                logger.info("supervisor: TOOLS (amount+intent) intent=%s", calc_intent)
+                return RouteDecision(
+                    route=AgentRoute.TOOLS,
+                    reason=f"{calc_intent} calculation intent (amount present)",
+                    confidence=0.8,
+                    suggested_tools=[tool, "lookup_rate", "search_ura_knowledge_base"],
                 )
 
         # 4. Temporal intents → tool route with calendar tools
@@ -324,7 +441,7 @@ class Supervisor:
 
         # 5. Rate-lookup intents → tool route with lookup_rate whitelist
         for pat, reason, tools in _RATE_PATTERNS:
-            if pat.search(q):
+            if pat.search(probe):
                 logger.info("supervisor: TOOLS (rate) pattern=%r", pat.pattern[:40])
                 return RouteDecision(
                     route=AgentRoute.TOOLS,

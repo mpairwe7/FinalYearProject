@@ -188,6 +188,74 @@ def hit_relevance(hit: dict[str, Any]) -> float | None:
     return None
 
 
+#: Calibrated relevance below which a passage is not worth showing the
+#: model.  Deliberately under ``ABSTENTION_THRESHOLD_NORM`` (0.30): this
+#: prunes the tail of an answerable result set, it does not decide
+#: whether to answer — that stays :meth:`OutputGuard.should_abstain`'s job.
+_CONTEXT_FLOOR = float(os.getenv("RETRIEVER_CONTEXT_FLOOR", "0.20"))
+
+#: Also drop anything this far below the best hit.  A result set like
+#: [0.85, 0.04, 0.03] has an obvious cliff; the absolute floor alone
+#: would keep a 0.25 hit sitting under a 0.95 one, which is noise in
+#: context that reads as corroboration.
+_CONTEXT_RELATIVE_DROP = float(os.getenv("RETRIEVER_CONTEXT_RELATIVE_DROP", "0.45"))
+
+
+def prune_context(
+    hits: list[dict[str, Any]],
+    *,
+    floor: float | None = None,
+    relative_drop: float | None = None,
+) -> list[dict[str, Any]]:
+    """Drop trailing hits the reranker already judged irrelevant.
+
+    The system decided *whether* to answer from the best hit
+    (``should_abstain`` uses ``max``), then handed the model **every**
+    hit.  A set scored [0.85, 0.04, 0.03, 0.02] passes that gate and
+    three passages at ~3% relevance still arrive as context.  Irrelevant
+    passages next to a relevant one are not harmless padding: they are
+    what lets a model combine two chunks that are about different things
+    and produce a claim supported by neither.
+
+    Two rules, both conservative:
+
+    * an absolute floor, set *below* the abstention threshold so this
+      only ever trims a result set that was already good enough to
+      answer from;
+    * a relative cut, because a hit can clear the floor and still be
+      far below the best one.
+
+    The top hit is always kept — starving the model of context is a
+    worse failure than one weak passage, and abstention is decided
+    elsewhere.  When no reranker signal is available (RRF-only or
+    keyword fallback) this is a no-op: gating on an incomparable score
+    is the exact mistake :func:`hit_relevance` exists to prevent.
+    """
+    if len(hits) <= 1:
+        return hits
+    floor = _CONTEXT_FLOOR if floor is None else floor
+    relative_drop = _CONTEXT_RELATIVE_DROP if relative_drop is None else relative_drop
+
+    scored = [(h, hit_relevance(h)) for h in hits]
+    if any(rel is None for _, rel in scored):
+        return hits  # degraded mode — no calibrated scale to threshold against
+
+    best = max(rel for _, rel in scored if rel is not None)
+    cutoff = max(floor, best - relative_drop)
+    kept = [h for h, rel in scored if rel is not None and rel >= cutoff]
+    if not kept:
+        kept = [scored[0][0]]
+    if len(kept) < len(hits):
+        logger.info(
+            "context pruned: %d/%d passages kept (best=%.2f cutoff=%.2f)",
+            len(kept),
+            len(hits),
+            best,
+            cutoff,
+        )
+    return kept
+
+
 # ---------------------------------------------------------------------------
 # BM25 sparse encoder
 # ---------------------------------------------------------------------------
@@ -668,7 +736,9 @@ class HybridRetriever:
 
             self._circuit.record_success()
             self._ready = True  # ensure readiness restored on success
-            return candidates[:top_k]
+            # top_k is a ceiling, not a quota: returning four passages
+            # when only one is relevant pads the prompt with noise.
+            return prune_context(candidates[:top_k])
 
         except Exception:
             self._circuit.record_failure()

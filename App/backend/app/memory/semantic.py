@@ -78,8 +78,7 @@ class SemanticMemory:
     def _init_schema(self) -> None:
         from .. import database as db
 
-        conn = db._get_connection()
-        conn.executescript(
+        db.execute_script(
             """
             CREATE TABLE IF NOT EXISTS user_facts (
                 fact_id          TEXT PRIMARY KEY,
@@ -89,8 +88,8 @@ class SemanticMemory:
                 subject          TEXT NOT NULL DEFAULT 'user',
                 predicate        TEXT NOT NULL,
                 object_value     TEXT NOT NULL,
-                confidence       REAL NOT NULL DEFAULT 0.5,
-                extracted_at     REAL NOT NULL,
+                confidence       DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+                extracted_at     DOUBLE PRECISION NOT NULL,
                 conversation_id  TEXT DEFAULT '',
                 turn_id          TEXT DEFAULT '',
                 extractor_model  TEXT DEFAULT '',
@@ -104,7 +103,6 @@ class SemanticMemory:
                 ON user_facts(extracted_at);
             """
         )
-        conn.commit()
 
     # -- Writes --------------------------------------------------------
     def write(self, fact: UserFact) -> str:
@@ -114,20 +112,17 @@ class SemanticMemory:
             fact.fact_id = str(uuid.uuid4())
         if fact.extracted_at == 0:
             fact.extracted_at = time.time()
-        conn = db._get_connection()
         try:
-            conn.execute(
+            db.execute(
                 """INSERT INTO user_facts
                    (fact_id, user_id, tenant_id, category, subject,
                     predicate, object_value, confidence, extracted_at,
                     conversation_id, turn_id, extractor_model, superseded_by)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                fact.to_row(),
+                tuple(fact.to_row()),
             )
-            conn.commit()
         except Exception:
             logger.exception("semantic write failed")
-            conn.rollback()
             raise
         return fact.fact_id
 
@@ -138,17 +133,13 @@ class SemanticMemory:
         """Mark *old_fact_id* as superseded by *new_fact_id*."""
         from .. import database as db
 
-        conn = db._get_connection()
         try:
-            cursor = conn.execute(
+            return db.execute(
                 "UPDATE user_facts SET superseded_by = ? WHERE fact_id = ?",
                 (new_fact_id, old_fact_id),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+            ) > 0
         except Exception:
             logger.exception("semantic supersede failed")
-            conn.rollback()
             return False
 
     # -- Reads ---------------------------------------------------------
@@ -164,7 +155,6 @@ class SemanticMemory:
         """Return active facts above the decay floor."""
         from .. import database as db
 
-        conn = db._get_connection()
         sql = "SELECT * FROM user_facts WHERE user_id = ?"
         params: list[Any] = [user_id]
         if category:
@@ -175,11 +165,10 @@ class SemanticMemory:
         sql += " ORDER BY extracted_at DESC LIMIT ?"
         params.append(max(1, limit * 3))  # overfetch, we'll filter by decay
 
-        rows = conn.execute(sql, params).fetchall()
+        rows = db.query_all(sql, tuple(params))
         now = time.time()
         results: list[UserFact] = []
-        for r in rows:
-            row = dict(r)
+        for row in rows:
             decayed = compute_decayed_confidence(
                 original_confidence=row["confidence"],
                 category=row["category"],
@@ -216,31 +205,17 @@ class SemanticMemory:
         """Delete every fact for this user (UDPA right-to-erasure)."""
         from .. import database as db
 
-        conn = db._get_connection()
         try:
-            cursor = conn.execute(
-                "DELETE FROM user_facts WHERE user_id = ?",
-                (user_id,),
-            )
-            conn.commit()
-            return cursor.rowcount
+            return db.execute("DELETE FROM user_facts WHERE user_id = ?", (user_id,))
         except Exception:
             logger.exception("semantic forget failed")
-            conn.rollback()
             return 0
 
     def forget_fact(self, fact_id: str) -> bool:
         from .. import database as db
 
-        conn = db._get_connection()
         try:
-            cursor = conn.execute(
-                "DELETE FROM user_facts WHERE fact_id = ?",
-                (fact_id,),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+            return db.execute("DELETE FROM user_facts WHERE fact_id = ?", (fact_id,)) > 0
         except Exception:
             logger.exception("semantic forget_fact failed")
-            conn.rollback()
             return False

@@ -139,65 +139,6 @@ python ml/pipelines/evaluate.py --model-path Model --output-dir Results
 python ml/pipelines/quality_gates.py
 ```
 
-## Mobile Offline Model (Gemma-2B GGUF)
-
-The mobile app runs a quantized Gemma-2-2B-IT model on-device via MediaPipe LLM Inference API, with automatic fallback to the remote API when the model is not bundled or the device is too constrained.
-
-### Full Pipeline
-
-```bash
-# 1. Prepare training data (CSV FAQs + PDFs + Luganda + teacher QA)
-python ml/scripts/data_augmentation.py \
-  --csv-dir Data/dataset \
-  --pdf-dir Data/pdfs \
-  --luganda-dir Data/TTT \
-  --output artifacts/training_data.jsonl
-
-# 2. Fine-tune Gemma-2B with QLoRA (requires GPU, ~16 GB VRAM)
-python ml/scripts/fine_tune_gemma.py \
-  --data artifacts/training_data.jsonl \
-  --target mobile_gemma_2b \
-  --output artifacts/models/ura-gemma-2b
-
-# 3. Export to GGUF Q4_K_M (~1.5 GB) — requires llama.cpp
-python ml/scripts/export_mobile.py \
-  --adapter artifacts/models/ura-gemma-2b/final \
-  --quant Q4_K_M \
-  --output artifacts/mobile/
-
-# 4. Bundle into Android APK
-cp artifacts/mobile/ura-gemma-2b-q4_k_m.gguf \
-   MobileApp/ura_chatbot/android/app/src/main/assets/models/
-
-# 5. For iOS, add the GGUF to the Xcode project bundle resources
-```
-
-### Architecture
-
-```
-Flutter App <-> MethodChannel <-> Kotlin/Swift <-> MediaPipe LLM Inference <-> GGUF
-  (Dart)        (Platform Bridge)   (Native)        (Android 12+/iOS 16+)     (Q4_K_M)
-```
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `ml/scripts/data_augmentation.py` | Multi-source training data preparation |
-| `ml/scripts/fine_tune_gemma.py` | QLoRA fine-tuning (mobile_gemma_2b target) |
-| `ml/scripts/export_mobile.py` | Merge + GGUF convert + quantize + validate |
-| `ml/scripts/teacher_qa_generation.py` | Synthetic QA from PDFs (teacher model) |
-| `MobileApp/.../on_device_llm.dart` | Flutter inference layer + API fallback |
-| `MobileApp/.../MainActivity.kt` | Android MediaPipe bridge |
-| `MobileApp/.../AppDelegate.swift` | iOS MediaPipe bridge |
-| `ml/configs/training_config.yaml` | Mobile export config (Q4_K_M, MediaPipe) |
-
-### Device Requirements
-
-- **Android**: API 24+, 6+ GB RAM, ~1.5 GB storage
-- **iOS**: iOS 16+, iPhone 12+ recommended
-- Model auto-downloads from assets on first launch
-
 ## 🐳 Docker
 
 ```bash

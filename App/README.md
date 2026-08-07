@@ -2,6 +2,20 @@
 
 This directory contains all application components for the URA Chatbot project.
 
+## Design docs
+
+Deeper contracts live in `docs/`. Read these before changing the
+behaviour they describe.
+
+| Doc | Covers |
+| --- | --- |
+| [`docs/mcp-architecture.md`](docs/mcp-architecture.md) | MCP spec 2026-07-28 surface, transports, tool authorization |
+| [`docs/tax-rate-tables.md`](docs/tax-rate-tables.md) | Effective-dated rate tables, provenance, adding a fiscal year |
+| [`docs/agentic-loop.md`](docs/agentic-loop.md) | Per-turn tool budgets, duplicate suppression, observation compaction |
+| [`docs/tax-education.md`](docs/tax-education.md) | Fading scaffolding, retrieval practice, keeping worked examples tied to the rate tables |
+| [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md) | Transcript handoff, sentiment, delivery, queue integrity, privacy constraints |
+| [`docs/ws_chat_protocol.md`](docs/ws_chat_protocol.md) | `/v2/chat/stream` WebSocket frames and the agentic event surface |
+
 ## Directory Structure
 
 ```
@@ -17,9 +31,9 @@ App/
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
 │   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── flags.py         # Feature flag registry (31 flags)
+│   │   ├── flags.py         # Feature flag registry (38 flags)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
-│   │   ├── tools/           # 11 tools (calculators, rates, calendar, RAG, escalate)
+│   │   ├── tools/           # 19 tools (calculators, rates, calendar, RAG, education, empathy, escalate)
 │   │   ├── workflows/       # YAML-driven slot-filling engine + TIN registration
 │   │   ├── memory/          # Episodic + semantic + working memory
 │   │   ├── guardrails.py    # OWASP LLM Top 10 guards + abstention
@@ -114,14 +128,16 @@ for normal chat usage.
 
 **Current request pipeline:**
 1. **Auth + request context** — fail-closed private/admin guards, optional RS256/JWKS OIDC verification, durable `conversation_id` thread handling
-2. **Supervisor routing** — routes turns into greetings, standard RAG, guided workflows, clarification, or human escalation
-3. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker
+2. **Supervisor routing** — routes turns into greetings, standard RAG, guided workflows, clarification, or human escalation. A message carrying a money amount **and** a calculator intent reaches the calculators whatever the word order (`"VAT on 500000"`, `"take-home pay on a 2M salary"`), so a numeric tax question is not answered from the model's memory
+3. **Hybrid Retrieval** — Qdrant dense + BM25 sparse RRF + cross-encoder reranking + circuit breaker. `top_k` is a ceiling, not a quota: passages the reranker scored as irrelevant are dropped rather than padded into the prompt, since a weak passage beside a strong one is what lets a model synthesise a claim neither supports. Acronym expansion keeps **both** surface forms (`WHT` → `Withholding Tax (WHT)`) so the sparse side still matches documents that write it short
 4. **LLM Generation** — `Qwen/Qwen3-8B` via local Transformers or vLLM HTTP
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
 7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification (percentage **and** money-amount contradiction against the cited passage), structured `handoff`, calibrated escalation
 8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use
-9. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
+9. **Context-aware escalation** — an escalated ticket carries the whole conversation (both sides, untruncated), the taxpayer's sentiment at the point of transfer, and whether the officer should be briefed first; queued urgent-first then longest-waiting, de-duplicated per conversation, and announced over a webhook that carries triage metadata but never the transcript. See [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md)
+10. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
+11. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
 
 ### Backend Architecture & Request Flows
 
@@ -211,7 +227,9 @@ Source: `service.py::generate()` (lines 992-1677). Every `/v1/chat` and
                     |  2. Hybrid Retrieval          |
                     |  Qdrant dense (bge-m3 1024d)  |
                     |  + BM25 sparse + RRF fusion   |
+                    |  + near-duplicate collapse    |
                     |  + cross-encoder reranking    |
+                    |  + context floor (drop tail)  |
                     +--------------+--------------+
                                    |
                     +--------------v--------------+
@@ -301,7 +319,7 @@ generation spends — see [`docs/agentic-loop.md`](docs/agentic-loop.md)
 for the per-turn ceilings, duplicate-call suppression and observation
 compaction that bound the rest.
 
-**Tool inventory** (18 tools in `backend/app/tools/`). Each declares an
+**Tool inventory** (19 tools in `backend/app/tools/`). Each declares an
 MCP `namespace`, risk tier, required consent scopes and annotation hints;
 see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 
@@ -322,9 +340,15 @@ see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 | `get_next_deadlines` | `calendar.py` | `calendar` | Upcoming tax filing deadlines |
 | `search_ura_knowledge_base` | `rag_tool.py` | `rag` | Semantic search (wraps hybrid retriever) |
 | `assess_emotional_tone` | `empathy.py` | `empathy` | Classify a message as frustration/anxiety/urgency/confusion/hardship and return tone guidance |
+| `explain_tax_concept` | `education.py` | `education` | Teach a concept: scaffolded explanation, worked example computed from the live rate tables, misconceptions, check question |
+
 | `escalate_to_human` | `escalate.py` | `core` | Create escalation ticket from tool loop |
 | `ura_account_profile` | `ura_account.py` | `ura_account` | Authenticated taxpayer profile (fail-closed) |
 | `ura_action_proposal` | `ura_actions.py` | `ura_actions` | Confirmed, idempotent URA action (fail-closed) |
+
+`explain_tax_concept` teaches rather than answers — see
+[`docs/tax-education.md`](docs/tax-education.md) for the scaffolding model
+and how its worked examples stay tied to the rate tables.
 
 Every calculator takes an optional `fiscal_year` **or** `as_of` date and
 resolves the rate table in force for that period. Rates live as versioned
@@ -580,19 +604,34 @@ Escalation triggers when any of these conditions are met:
   --> _build_handoff_packet():
       - topic: classified from query content
       - priority: normal / high (based on signals)
+      - sentiment: taxpayer's state at the point of transfer
+      - transfer_style: warm (brief the officer first) or cold
+      - turns_before_handoff: how long they had been going
       - required_details: context-specific info needed
       - contact_channels: phone, WhatsApp, web portal
-      - conversation_context: PII-redacted recent turns
+      - recent_context: short preview for the queue list
       - source_list: retrieved passages with metadata
 
   --> _maybe_create_ticket() (if FLAG_TICKET_QUEUE=true):
-      - db.create_ticket(reason, handoff_packet, response_judge)
+      - reuses an open ticket for the same conversation if one exists
+      - snapshots the FULL conversation onto the ticket (both sides,
+        untruncated) — not a join, because `conversations` is purged
+        after CONVERSATION_TTL_DAYS while a ticket has no TTL
+      - db.create_ticket(..., transcript=..., user_id=...)
+      - notify_ticket_created() posts a webhook: triage metadata only,
+        never the transcript
+      - on failure: handoff.ticket_persisted=false + delivery_warning,
+        logged as ESCALATION LOST
       - ticket_id[:8] surfaced in ChatResponse
 
+  See docs/context-aware-escalation.md for the full contract.
+
 Admin endpoints for ticket management:
-  GET  /v1/admin/tickets?status=open&limit=50
+  GET  /v1/admin/tickets?status=open&priority=urgent&limit=50
+       queue view — urgent first, then longest-waiting; no transcript
   GET  /v1/admin/tickets/stats?days=30
   GET  /v1/admin/tickets/{id}
+       detail view — includes the full conversation transcript
   PATCH /v1/admin/tickets/{id}  (status/assignee/note/priority)
 ```
 
@@ -970,6 +1009,11 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | **Contradiction grounding** | | |
 | `ENTAILMENT_MODEL` | 3-way NLI cross-encoder, labels `[contradiction, entailment, neutral]`. Unset falls back to numeric-only, which misses semantic reversals ("optional" vs "compulsory", "annually" vs "monthly") | `cross-encoder/nli-deberta-v3-small` |
 | `ENTAILMENT_CONTRADICTION_MIN` | Min contradiction probability to flag a claim | `0.6` |
+| `RETRIEVER_CONTEXT_FLOOR` | Calibrated relevance below which a passage is not passed to the model. Must stay below `ABSTENTION_THRESHOLD_NORM` — this trims a result set, it does not decide whether to answer | `0.20` |
+| `RETRIEVER_CONTEXT_RELATIVE_DROP` | Also drop passages this far below the best hit | `0.45` |
+| `RETRIEVER_DEDUPE_THRESHOLD` | Shingle-Jaccard above which two candidates are near-duplicates | `0.9` |
+| `RETRIEVER_RERANK_CHARS` | Passage characters fed to the cross-encoder | `1200` |
+| `RETRIEVER_QUERY_CACHE_SIZE` | Query embeddings kept for reuse | `256` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
@@ -1001,7 +1045,12 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_TOOL_USE` | Allow registered tools through the bounded agentic loop | `false` |
 | `FLAG_AGENTIC_MODE` | Enable supervisor routing for tools / specialists | `false` |
 | `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
-| `FLAG_TOOL_RAG` | Expose only the top-k relevant tool schemas per query instead of all 18 | `false` |
+| `ESCALATION_WEBHOOK_URL` | POST target notified when an escalation ticket is created; unset disables delivery | _(unset)_ |
+| `ESCALATION_WEBHOOK_TOKEN` | Bearer token for that webhook, sent as a header | _(unset)_ |
+| `ESCALATION_WEBHOOK_TIMEOUT` | Webhook timeout in seconds | `5` |
+| `ESCALATION_WEBHOOK_MIN_PRIORITY` | Lowest ticket priority worth notifying | `normal` |
+| `ESCALATION_TEAM_<TOPIC>` | Override the team that owns a handoff topic, e.g. `ESCALATION_TEAM_CUSTOMS=border-ops` | per-topic defaults |
+| `FLAG_TOOL_RAG` | Expose only the top-k relevant tool schemas per query instead of every registered one | `false` |
 | `TOOL_RAG_TOP_K` | Tools selected when `FLAG_TOOL_RAG` is on (rails are always added) | `5` |
 | `TOOL_MAX_CALLS_PER_TURN` | Total tool dispatches allowed in one turn | `8` |
 | `TOOL_MAX_CALLS_PER_ITERATION` | Fan-out ceiling for a single generation round | `4` |
@@ -1225,9 +1274,47 @@ changed and why.
 
 **Phase 8 — Postgres analytics backend (opt-in)**
 
-- New `backend/app/postgres.py` — full psycopg3 + `psycopg_pool`
-  implementation mirroring every public function in `database.py`.
-  Schema is intentionally identical.
+- New `backend/app/postgres.py` — psycopg3 + `psycopg_pool`
+  implementation mirroring the functions listed in the dispatch block
+  at the bottom of `database.py` (34 of 37 public functions). Identity,
+  consent, profiles, workflow sessions and tickets are all mirrored.
+  **Still SQLite-only:** `export_user_data`, `delete_user_cascade` and
+  `export_eval_samples`, because they cascade through memory and audit
+  tables that are not mirrored yet — see the note below. Schema is
+  identical for what is mirrored.
+- `TestBackendParity` asserts every dispatched name exists in both
+  modules and takes the same arguments; `TestTicketColumnParity`
+  compares the declared columns against the declared SELECT lists; and
+  `TestBackendsAgree` runs the same identity/consent/workflow sequence
+  against both backends and compares the results (needs `POSTGRES_DSN`).
+  A stale claim here is what let tickets, conversation logging and the
+  whole consent surface silently diverge.
+
+- **Backend-agnostic query seam.** `database.query_one`, `query_all`,
+  `execute` and `execute_script` run on whichever backend is live —
+  callers write `?` placeholders and get dicts back; the Postgres path
+  rewrites the placeholders and reuses the pool. Modules that own their
+  own tables use this instead of reaching for a raw connection, so one
+  implementation of each query serves both backends.
+
+  **No module bypasses it.** The audit ledger, semantic and episodic
+  memory and the voice audit log all run on the seam and are verified
+  against a real Postgres — the ledger including tamper detection.
+  `test_backend_shim.py` fails if any module under `app/` reaches for
+  `_get_connection()` again.
+
+  **Every public function reaches the production backend.** A function
+  gets there one of two ways: the dispatch block re-binds it to a
+  Postgres mirror, or it is written against the seam and runs on both
+  unchanged. `export_user_data`, `delete_user_cascade` and
+  `export_eval_samples` take the second route — one implementation, no
+  mirror to drift. `test_backend_shim.py` fails if any public function
+  does neither.
+
+UDPA subject access and erasure are verified end to end on Postgres:
+export returns the user, profile, consents, conversations and tickets;
+erasure removes all of them; and a post-erasure export comes back
+empty.
 - `backend/app/database.py` — dispatch block at the bottom re-binds
   the public names to `postgres.*` when `ANALYTICS_BACKEND=postgres`.
   SQLite remains the zero-config default for single-node deploys;
@@ -1590,10 +1677,20 @@ an operator flips a flag.
 - `escalate_to_human` tool creates tickets from within the LLM loop
 - Supervisor `ESCALATE` route creates tickets when `FLAG_TICKET_QUEUE=true`
 - Admin REST endpoints:
-  - `GET /v1/admin/tickets?status=open&limit=50`
+  - `GET /v1/admin/tickets?status=open&priority=urgent&limit=50` — queue
+    view, ordered urgent-first then longest-waiting; omits the transcript
   - `GET /v1/admin/tickets/stats?days=30`
-  - `GET /v1/admin/tickets/{id}`
-  - `PATCH /v1/admin/tickets/{id}` (status / assignee / note / priority)
+  - `GET /v1/admin/tickets/{id}` — detail view, includes the full
+    conversation transcript captured when the ticket was raised
+  - `GET /v1/admin/tickets/sla?days=30` — median time-to-first-response
+    and time-to-resolution
+  - `PATCH /v1/admin/tickets/{id}` (status / assignee / note / priority /
+    `officer_reply`). `officer_reply` is delivered to the **taxpayer** on
+    their next turn; `staff_note` stays internal
+- Staff UI at `/admin/tickets` (Next.js) — the queue in backend order
+  (urgent first, then longest-waiting), the full transcript per ticket,
+  and separate controls for the taxpayer-facing reply and the internal
+  note
 - `ticket_id` surfaced in `ChatResponse` so the frontend can show
   "ticket 1234abcd" to the user
 

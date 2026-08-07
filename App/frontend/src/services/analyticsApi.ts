@@ -81,12 +81,23 @@ export interface TicketQueueItem {
   bot_reply: string;
   created_at: number;
   updated_at: number;
+  /** Owning team, routed from the handoff topic at escalation time. */
+  team?: string;
   handoff?: {
     summary?: string;
     topic?: string;
     priority?: string;
     required_details?: string[];
     sources_reviewed?: string[];
+    /** Taxpayer's state at the point of transfer. */
+    sentiment?: string;
+    /** "warm" = brief the officer before they engage; "cold" = go ahead. */
+    transfer_style?: string;
+    turns_before_handoff?: number;
+    opening_guidance?: string;
+    /** False when the ticket could not be persisted — treat as unqueued. */
+    ticket_persisted?: boolean;
+    delivery_warning?: string;
   };
   response_judge?: {
     decision?: string;
@@ -97,9 +108,61 @@ export interface TicketQueueItem {
   };
 }
 
+/** One turn of the conversation captured when the ticket was raised. */
+export interface TicketTranscriptTurn {
+  user_message: string;
+  bot_reply: string;
+  created_at: number;
+  sources?: string[];
+  topic_tag?: string;
+}
+
+/**
+ * A single ticket with everything an officer needs to act.
+ *
+ * The transcript is the snapshot taken at escalation, not a live join —
+ * `conversations` is purged after CONVERSATION_TTL_DAYS while a ticket
+ * has no TTL, so the queue's oldest entries would otherwise arrive with
+ * nothing attached.
+ */
+export interface TicketDetail extends TicketQueueItem {
+  transcript?: TicketTranscriptTurn[];
+  /** Shown to the taxpayer on their next turn. Distinct from staff_note. */
+  officer_reply?: string;
+  /** Internal. Never reaches the taxpayer. */
+  staff_note?: string;
+  assignee?: string;
+  session_id?: string;
+  first_response_at?: number;
+  resolved_at?: number;
+  reply_delivered_at?: number;
+}
+
+export interface TicketSla {
+  period_days: number;
+  tickets: number;
+  responded: number;
+  resolved: number;
+  awaiting_first_response: number;
+  median_response_seconds: number | null;
+  median_resolution_seconds: number | null;
+}
+
+export interface TicketPatch {
+  status?: string;
+  assignee?: string;
+  staff_note?: string;
+  priority?: string;
+  officer_reply?: string;
+}
+
 export interface TicketQueueResponse {
   count: number;
   status_filter: string;
+  priority_filter?: string;
+  team_filter?: string;
+  /** Team names in effect, so the UI does not hardcode the org chart. */
+  teams?: string[];
   limit: number;
   offset: number;
   tickets: TicketQueueItem[];
@@ -134,9 +197,26 @@ export const analyticsApi = {
   dashboard: (days = 30) => fetchJson<DashboardData>(`/v1/analytics/dashboard?days=${days}`),
   feedbackSummary: (days = 30) => fetchJson<FeedbackSummary>(`/v1/feedback/summary?days=${days}`),
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
-  tickets: (status = "open", limit = 8) =>
+  tickets: (status = "open", limit = 8, priority = "", team = "") =>
     fetchJson<TicketQueueResponse>(
-      `/v1/admin/tickets?status=${encodeURIComponent(status)}&limit=${limit}&offset=0`,
+      `/v1/admin/tickets?status=${encodeURIComponent(status)}&limit=${limit}&offset=0` +
+        (priority ? `&priority=${encodeURIComponent(priority)}` : "") +
+        (team ? `&team=${encodeURIComponent(team)}` : ""),
     ),
+  ticket: (id: string) => fetchJson<TicketDetail>(`/v1/admin/tickets/${encodeURIComponent(id)}`),
+  ticketSla: (days = 30) => fetchJson<TicketSla>(`/v1/admin/tickets/sla?days=${days}`),
+  updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
+    // The backend takes these as query parameters, not a JSON body.
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    const res = await fetch(
+      `${BASE}/v1/admin/tickets/${encodeURIComponent(id)}?${params.toString()}`,
+      { method: "PATCH", headers: authHeaders(), signal: AbortSignal.timeout(15000) },
+    );
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+  },
   metrics: () => fetch(`${BASE}/metrics`, { headers: authHeaders() }).then((r) => r.text()),
 };
