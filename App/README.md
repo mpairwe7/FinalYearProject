@@ -967,6 +967,9 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | **Retrieval** | | |
 | `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` |
 | `DENSE_MODEL` | Embedding model | `BAAI/bge-m3` |
+| **Contradiction grounding** | | |
+| `ENTAILMENT_MODEL` | 3-way NLI cross-encoder, labels `[contradiction, entailment, neutral]`. Unset falls back to numeric-only, which misses semantic reversals ("optional" vs "compulsory", "annually" vs "monthly") | `cross-encoder/nli-deberta-v3-small` |
+| `ENTAILMENT_CONTRADICTION_MIN` | Min contradiction probability to flag a claim | `0.6` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
