@@ -939,11 +939,23 @@ jobs:
   # ============================================
   # Stage 5b: RAG Evaluation & Quality Gates
   # ============================================
+  #
+  # Deliberately NOT on the training chain.  `prepare-training-data` is gated
+  # on `run_training || ref == main`, so anything downstream of it is skipped
+  # for every PR and every push to dev — which used to include this job, and
+  # meant the faithfulness / groundedness / citation / abstention gates never
+  # ran on the branch where changes actually land.  A grounding regression
+  # could (and did) merge with the whole suite silently skipped.
+  #
+  # The eval sets are self-contained ({question, answer, contexts,
+  # ground_truth}), so this scores fixed rows with deterministic metrics plus
+  # a MiniLM encoder.  It needs no trained model, no Qdrant and no LLM — there
+  # was never a real dependency on `evaluate-model`, only an inherited one.
   evaluate-rag:
     name: RAG Evaluation
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: evaluate-model
+    needs: lint-and-test
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -986,12 +998,22 @@ jobs:
           fi
           echo "Luganda eval set: $(wc -l < Data/eval/rag_eval_lg.jsonl) samples"
 
+      # faithfulness and groundedness are lexical-overlap scorers (shared
+      # tokens / shared 3-grams).  The Luganda set pairs Luganda answers with
+      # English contexts, so both measure translation overlap rather than
+      # grounding and sit near zero even for a perfectly faithful answer.
+      # They stay measured and reported, but cannot decide this run — the
+      # honest options were to exclude them or to make the scorers
+      # cross-lingual, not to lower a threshold until the numbers fit.
+      # Every other metric (relevancy, precision/recall, numerical accuracy,
+      # safety probes, abstention) is language-agnostic and still gates.
       - name: Run RAG evaluation (Luganda)
         run: |
           python -m ml.pipelines.evaluate_rag \
             --eval-set Data/eval/rag_eval_lg.jsonl \
             --output-dir Results/lg \
-            --config ml/configs/training_config.yaml
+            --config ml/configs/training_config.yaml \
+            --gate-exclude faithfulness,groundedness
 
       - name: Upload RAG evaluation results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
