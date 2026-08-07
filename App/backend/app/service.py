@@ -1675,6 +1675,13 @@ _FAQ_TERM_ALIASES = {
 }
 _FAQ_MATCH_MIN = float(os.getenv("FAQ_MATCH_MIN", "0.58"))
 _FAQ_MATCH_RELATIVE = float(os.getenv("FAQ_MATCH_RELATIVE", "0.82"))
+# Minimum share of an FAQ question's own terms that the query must account for
+# before a fully-contained query counts as being about that FAQ's subject.
+_FAQ_SUBJECT_FOCUS_MIN = float(os.getenv("FAQ_SUBJECT_FOCUS_MIN", "0.34"))
+# Canonical FAQ rows reach the retriever as ``csv`` from the in-memory loader
+# and as ``faq_jsonl`` from the indexed corpus.  Both must pass the same
+# intent-binding gate; listing only one silently exempts the other.
+_FAQ_DOC_TYPES = {"csv", "faq_jsonl"}
 
 
 def _faq_terms(text: str) -> set[str]:
@@ -1696,11 +1703,19 @@ def _faq_terms(text: str) -> set[str]:
 def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     """Score whether an FAQ row is bound to *query*, independently of BM25.
 
-    The score combines coverage in the full Q&A with coverage in the FAQ's
-    question.  Requiring both prevents a generic answer paragraph from making
-    an unrelated row look relevant.  Deadline questions also need temporal
-    evidence; otherwise a topic-only hit such as "capital gains" can be
-    mistaken for a filing deadline answer.
+    The score combines coverage in the full Q&A with how well the FAQ's own
+    question balances against the query.  Requiring both prevents a generic
+    answer paragraph from making an unrelated row look relevant.  Deadline
+    questions also need temporal evidence; otherwise a topic-only hit such as
+    "capital gains" can be mistaken for a filing deadline answer.
+
+    The question term is an F1, not plain coverage, because coverage alone
+    cannot separate rows once a short query is fully covered.  "What is VAT?"
+    is wholly contained in "Is EFRIS optional for non-VAT taxpayers?", so both
+    that row and the real definition scored 1.0 and the relative cutoff had
+    nothing to work with.  Weighing precision alongside recall demotes a row
+    whose question is far broader than what was asked, and is a no-op when the
+    two agree.
     """
     query_terms = _faq_terms(query)
     if not query_terms:
@@ -1718,8 +1733,27 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
         return 0.0
 
     body_coverage = len(query_terms & body_terms) / len(query_terms)
-    question_coverage = len(query_terms & question_terms) / len(query_terms)
-    score = (0.55 * body_coverage) + (0.45 * question_coverage)
+    matched = len(query_terms & question_terms)
+    question_recall = matched / len(query_terms)
+    question_precision = matched / len(question_terms) if question_terms else 0.0
+
+    # Subject focus is an intent too.  A query wholly contained in a much
+    # broader question is topic-adjacent, not answered by it: "What is VAT?"
+    # sits inside "Is EFRIS optional for non-VAT taxpayers?", which is about
+    # EFRIS.  Containment alone maxes out every coverage signal, so this is
+    # gated rather than merely down-weighted.  The bar stays low so that a
+    # short query against a legitimately more specific question — "VAT
+    # registration" against "When is VAT registration compulsory for a
+    # manufacturer?" — is still answered.
+    if question_recall == 1.0 and question_precision < _FAQ_SUBJECT_FOCUS_MIN:
+        return 0.0
+    if question_recall + question_precision:
+        question_fit = (
+            2 * question_recall * question_precision / (question_recall + question_precision)
+        )
+    else:
+        question_fit = 0.0
+    score = (0.55 * body_coverage) + (0.45 * question_fit)
     return round(score, 4)
 
 
@@ -1917,7 +1951,7 @@ def _filter_unbound_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dic
     faq_rows = [
         h
         for h in hits
-        if str(h.get("doc_type", "")).lower() == "csv"
+        if str(h.get("doc_type", "")).lower() in _FAQ_DOC_TYPES
         and str(h.get("source", "")).lower().startswith("ura_")
         and str(h.get("source", "")).lower().endswith("_faqs.csv")
     ]

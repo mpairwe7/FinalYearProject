@@ -518,7 +518,7 @@ def test_export_tax_summary_pdf():
         r = _client().post(
             "/v1/export/tax-summary",
             headers=_bearer(USER),
-            json={"calculation": {"items": [{"name": "VAT", "amount": 100}], "total": 100}},
+            json={"calculation": {"items": [{"label": "VAT", "amount": 100}], "total": 100}},
         )
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
