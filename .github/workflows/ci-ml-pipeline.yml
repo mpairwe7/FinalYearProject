@@ -967,6 +967,23 @@ jobs:
         run: |
           uv pip install --system numpy pyyaml sentence-transformers torch --extra-index-url https://download.pytorch.org/whl/cpu
 
+      # answer_relevancy embeds with MiniLM. Now that this job runs on every
+      # PR rather than only on main, pulling that model fresh each time drew
+      # HTTP 429s from the Hub, and huggingface_hub retried until the job hit
+      # its 20-minute timeout — a rate limit reported as a failed quality
+      # gate. Cache the weights (same key as the classifier job, which
+      # already does this) and authenticate when a token is configured;
+      # authenticated pulls get a far higher limit.
+      - name: Cache Hugging Face embedder
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cache/huggingface/hub
+            ~/huggingface_cache
+          key: hf-minilm-${{ runner.os }}-${{ env.PYTHON_VERSION }}-v1
+          restore-keys: |
+            hf-minilm-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
       - name: Verify RAG evaluation set exists
         run: |
           if [ ! -f Data/eval/rag_eval.jsonl ]; then
@@ -976,6 +993,8 @@ jobs:
           echo "Eval set: $(wc -l < Data/eval/rag_eval.jsonl) samples"
 
       - name: Run RAG evaluation (English)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir -p Results
           python -m ml.pipelines.evaluate_rag \
@@ -1001,6 +1020,8 @@ jobs:
       # Every other metric (relevancy, precision/recall, numerical accuracy,
       # safety probes, abstention) is language-agnostic and still gates.
       - name: Run RAG evaluation (Luganda)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -m ml.pipelines.evaluate_rag \
             --eval-set Data/eval/rag_eval_lg.jsonl \
