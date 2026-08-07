@@ -8,17 +8,53 @@
     "vat_standard": 0.18,
     "vat_registration_threshold_annual": 300000000,
     "paye_bands_resident": [
-      [0, 335000, 0.0],
-      [335000, 410000, 0.2],
-      [410000, 485000, 0.25],
-      [485000, 10000000, 0.3],
-      [10000000, null, 0.4]
+      [
+        0,
+        335000,
+        0.0
+      ],
+      [
+        335000,
+        410000,
+        0.2
+      ],
+      [
+        410000,
+        485000,
+        0.25
+      ],
+      [
+        485000,
+        10000000,
+        0.3
+      ],
+      [
+        10000000,
+        null,
+        0.4
+      ]
     ],
     "paye_bands_non_resident": [
-      [0, 335000, 0.1],
-      [335000, 410000, 0.2],
-      [410000, 10000000, 0.3],
-      [10000000, null, 0.4]
+      [
+        0,
+        335000,
+        0.1
+      ],
+      [
+        335000,
+        410000,
+        0.2
+      ],
+      [
+        410000,
+        10000000,
+        0.3
+      ],
+      [
+        10000000,
+        null,
+        0.4
+      ]
     ],
     "corporation_tax": 0.3,
     "capital_gains_corporate": 0.3,
@@ -37,7 +73,8 @@
     "withholding_telecom_commission": 0.1,
     "withholding_non_business_asset": 0.06,
     "customs_duty_common": 0.25,
-    "environmental_levy_used_clothing": 0.3
+    "environmental_levy_used_clothing": 0.3,
+    "nssf_employee_contribution": 0.05
   },
   "unverified": [
     "vat_registration_threshold_annual",
@@ -66,7 +103,8 @@
     "withholding_telecom_commission": "Income Tax (Amendment) Act 2026, s.20(e) substituting Schedule 4 Part XIII (s.133)",
     "withholding_non_business_asset": "Income Tax (Amendment) Act 2026, s.13 inserting s.130(3); Schedule 4 Part X item 4",
     "customs_duty_common": "EAC Common External Tariff - finished goods band",
-    "environmental_levy_used_clothing": "Excise Duty (Amendment) Act 2026 - worn clothing imports, share of CIF value"
+    "environmental_levy_used_clothing": "Excise Duty (Amendment) Act 2026 - worn clothing imports, share of CIF value",
+    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE."
   },
   "notes": {
     "paye_bands_resident": "Schedule 4 Part I states ANNUAL chargeable income; these are the monthly equivalents (annual divided by 12). The Act's table is: nil up to UGX 4,020,000; 20% of the excess over 4,020,000 up to 4,920,000; UGX 180,000 plus 25% of the excess over 4,920,000 up to 5,820,000; UGX 405,000 plus 30% of the excess over 5,820,000 up to 120,000,000; above 120,000,000 the same plus an additional 10% of the excess over 120,000,000. The top band is expressed here as a single 40% marginal rate.",

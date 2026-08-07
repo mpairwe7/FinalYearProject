@@ -1,19 +1,18 @@
-"""Document indexing pipeline for the Qdrant vector store.
+"""JSONL-first indexing pipeline for the local Qdrant vector store.
 
-Ingests PDFs (via pymupdf4llm) and FAQ CSVs, chunks them, computes
-dense + BM25 sparse embeddings, and upserts into a Qdrant collection.
-Designed to run as a CLI or be triggered via the ``POST /v1/index`` API.
+Exports every curated FAQ CSV to canonical JSONL, normalises teacher-QA JSONL
+generated from PDFs, computes dense + BM25 sparse embeddings, and upserts the
+resulting vector documents. PDFs and evaluation/red-team JSONL are excluded.
 
 Usage:
-    python -m App.backend.app.indexer                # full reindex
-    python -m App.backend.app.indexer --csvs-only    # FAQ CSVs only
-    python -m App.backend.app.indexer --pdfs-only    # PDFs only
-    python -m App.backend.app.indexer --recreate     # drop + rebuild collection
+    python -m app.indexer --export-faq-jsonl         # refresh canonical FAQ JSONL
+    python -m app.indexer --recreate                 # FAQ JSONL + teacher-QA JSONL
+    python -m app.indexer --faq-jsonl-only            # FAQ JSONL only
+    python -m app.indexer --teacher-qa-only           # teacher-QA JSONL only
 """
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 import os
@@ -36,11 +35,19 @@ CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "120"))
 BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "64"))
 
-from ._root import PROJECT_ROOT as _PROJECT_ROOT
-DATA_DIR = Path(os.getenv("DATA_DIR", str(_PROJECT_ROOT / "Data" / "dataset")))
-PDF_DIR = Path(os.getenv("PDF_DIR", str(_PROJECT_ROOT / "Data" / "pdfs")))
+from ._root import APP_DATA_ROOT as _APP_DATA_ROOT
+from .faq_corpus import (
+    CorpusValidationError,
+    export_faq_csvs_to_jsonl,
+    ingest_faq_jsonls,
+    ingest_teacher_qa_jsonls,
+)
+
+DATA_DIR = Path(os.getenv("DATA_DIR", str(_APP_DATA_ROOT / "dataset")))
+FAQ_JSONL_DIR = Path(os.getenv("FAQ_JSONL_DIR", str(_APP_DATA_ROOT / "faq_jsonl")))
+TEACHER_QA_DIR = Path(os.getenv("TEACHER_QA_DIR", str(_APP_DATA_ROOT / "teacher_qa")))
 BM25_STATE_PATH = Path(
-    os.getenv("BM25_STATE_PATH", str(_PROJECT_ROOT / "Model" / "bm25_state.json"))
+    os.getenv("BM25_STATE_PATH", str(_APP_DATA_ROOT.parent / "Model" / "bm25_state.json"))
 )
 
 
@@ -84,10 +91,14 @@ def _chunk_text(
 
 
 # ---------------------------------------------------------------------------
-# Ingestors
+# Legacy PDF source helper
 # ---------------------------------------------------------------------------
 def ingest_pdfs(pdf_dir: Path) -> list[dict[str, Any]]:
-    """Extract and chunk text from PDF files using pymupdf4llm."""
+    """Extract PDF chunks for offline teacher-QA generation only.
+
+    This helper is intentionally not called by the Qdrant indexing CLI or
+    ``POST /v1/index``.  Teacher-QA JSONL is the only PDF-derived vector input.
+    """
     documents: list[dict[str, Any]] = []
     if not pdf_dir.is_dir():
         logger.warning("PDF directory not found: %s", pdf_dir)
@@ -136,44 +147,6 @@ def ingest_pdfs(pdf_dir: Path) -> list[dict[str, Any]]:
             logger.info("Ingested %s: %d chunks", pdf_path.name, chunk_idx)
         except Exception:
             logger.exception("Failed to ingest %s", pdf_path.name)
-
-    return documents
-
-
-def ingest_csvs(csv_dir: Path) -> list[dict[str, Any]]:
-    """Load FAQ CSVs as individual Q&A documents."""
-    documents: list[dict[str, Any]] = []
-    if not csv_dir.is_dir():
-        logger.warning("CSV directory not found: %s", csv_dir)
-        return documents
-
-    for csv_path in sorted(csv_dir.glob("ura_*_faqs.csv")):
-        count = 0
-        try:
-            with open(csv_path, newline="", encoding="utf-8") as fh:
-                reader = csv.DictReader(fh)
-                for row_idx, row in enumerate(reader):
-                    q = (row.get("question") or row.get("Question") or "").strip()
-                    a = (row.get("answer") or row.get("Answer") or "").strip()
-                    if q and a:
-                        tag = csv_path.stem.replace("ura_", "").replace("_faqs", "")
-                        documents.append(
-                            {
-                                "text": f"Question: {q}\nAnswer: {a}",
-                                "source": csv_path.name,
-                                "chunk_id": f"{csv_path.stem}_row_{row_idx}",
-                                "page": "",
-                                "section": tag.replace("_", " ").title(),
-                                "doc_type": "csv",
-                                "question": q,
-                                "answer": a,
-                                "tag": tag,
-                            }
-                        )
-                        count += 1
-            logger.info("Ingested %s: %d entries", csv_path.name, count)
-        except Exception:
-            logger.exception("Failed to ingest %s", csv_path.name)
 
     return documents
 
@@ -284,8 +257,10 @@ def build_index(
         "collection": QDRANT_COLLECTION,
         "total_documents": len(documents),
         "total_upserted": total_upserted,
-        "pdf_documents": sum(1 for d in documents if d["doc_type"] == "pdf"),
-        "csv_documents": sum(1 for d in documents if d["doc_type"] == "csv"),
+        "faq_jsonl_documents": sum(1 for d in documents if d["doc_type"] == "faq_jsonl"),
+        "teacher_qa_jsonl_documents": sum(
+            1 for d in documents if d["doc_type"] == "teacher_qa_jsonl"
+        ),
     }
     logger.info("Indexing complete: %s", stats)
     return stats
@@ -302,24 +277,38 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    parser = argparse.ArgumentParser(description="Index documents into Qdrant")
-    parser.add_argument("--pdfs-only", action="store_true")
-    parser.add_argument("--csvs-only", action="store_true")
+    parser = argparse.ArgumentParser(description="Index validated FAQ and teacher-QA JSONL into Qdrant")
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument("--faq-jsonl-only", action="store_true")
+    source_group.add_argument("--teacher-qa-only", action="store_true")
+    parser.add_argument("--export-faq-jsonl", action="store_true")
     parser.add_argument("--recreate", action="store_true", help="Drop and recreate collection")
     parser.add_argument("--csv-dir", type=str, default=str(DATA_DIR))
-    parser.add_argument("--pdf-dir", type=str, default=str(PDF_DIR))
+    parser.add_argument("--faq-jsonl-dir", type=str, default=str(FAQ_JSONL_DIR))
+    parser.add_argument("--teacher-qa-dir", type=str, default=str(TEACHER_QA_DIR))
     args = parser.parse_args()
 
-    documents: list[dict[str, Any]] = []
+    csv_dir = Path(args.csv_dir)
+    faq_jsonl_dir = Path(args.faq_jsonl_dir)
+    teacher_qa_dir = Path(args.teacher_qa_dir)
+    if args.export_faq_jsonl:
+        stats = export_faq_csvs_to_jsonl(csv_dir, faq_jsonl_dir)
+        logger.info("FAQ JSONL export complete: %s", stats)
+        return
 
-    if not args.pdfs_only:
-        documents.extend(ingest_csvs(Path(args.csv_dir)))
-    if not args.csvs_only:
-        documents.extend(ingest_pdfs(Path(args.pdf_dir)))
+    try:
+        documents: list[dict[str, Any]] = []
+        if not args.teacher_qa_only:
+            documents.extend(ingest_faq_jsonls(csv_dir, faq_jsonl_dir))
+        if not args.faq_jsonl_only:
+            documents.extend(ingest_teacher_qa_jsonls(teacher_qa_dir))
+    except CorpusValidationError as exc:
+        logger.error("Corpus validation failed: %s", exc)
+        raise SystemExit(2) from exc
 
     if not documents:
-        logger.error("No documents to index")
-        return
+        logger.error("No FAQ or teacher-QA JSONL documents to index")
+        raise SystemExit(2)
 
     build_index(documents, recreate=args.recreate)
 

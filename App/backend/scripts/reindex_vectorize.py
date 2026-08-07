@@ -34,7 +34,14 @@ from pathlib import Path
 # Make `app` importable when run from App/backend/scripts/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.indexer import DATA_DIR, PDF_DIR, ingest_csvs, ingest_pdfs  # noqa: E402
+from app.faq_corpus import CorpusValidationError  # noqa: E402
+from app.indexer import (  # noqa: E402
+    DATA_DIR,
+    FAQ_JSONL_DIR,
+    TEACHER_QA_DIR,
+    ingest_faq_jsonls,
+    ingest_teacher_qa_jsonls,
+)
 from app.providers import config as cfg  # noqa: E402
 from app.providers import gateway as gw  # noqa: E402
 from app.retriever import deterministic_point_id  # noqa: E402
@@ -44,9 +51,19 @@ WRANGLER = os.getenv("WRANGLER_BIN", "wrangler")
 
 
 def load_documents() -> list[dict]:
-    docs = ingest_csvs(DATA_DIR) + ingest_pdfs(PDF_DIR)
+    """Load the same JSONL corpus the Qdrant indexer uses.
+
+    Vectorize and Qdrant must be built from one source of truth, otherwise the
+    retriever's dense fallback answers from a corpus the primary index no
+    longer contains.  PDFs and FAQ CSVs are deliberately not read directly —
+    they reach the index only as validated FAQ / teacher-QA JSONL.
+    """
+    try:
+        docs = ingest_faq_jsonls(DATA_DIR, FAQ_JSONL_DIR) + ingest_teacher_qa_jsonls(TEACHER_QA_DIR)
+    except CorpusValidationError as exc:
+        sys.exit(f"Corpus validation failed: {exc}")
     if not docs:
-        sys.exit(f"No documents found under {DATA_DIR} / {PDF_DIR}")
+        sys.exit(f"No documents found under {FAQ_JSONL_DIR} / {TEACHER_QA_DIR}")
     return docs
 
 

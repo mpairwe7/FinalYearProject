@@ -15,3 +15,21 @@ def _resolve() -> Path:
 
 
 PROJECT_ROOT = _resolve()
+
+
+def _resolve_app_data_root() -> Path:
+    """Resolve the repository-local corpus location for FAQ retrieval.
+
+    A source checkout has an ``App`` directory beneath the project root,
+    whereas the container runtime places its application assets directly in
+    ``/app``. This preserves a single local-data convention in both layouts.
+    """
+    configured = os.getenv("APP_DATA_ROOT")
+    if configured:
+        return Path(configured).resolve()
+    if (PROJECT_ROOT / "App").is_dir():
+        return (PROJECT_ROOT / "App" / "Data").resolve()
+    return (PROJECT_ROOT / "Data").resolve()
+
+
+APP_DATA_ROOT = _resolve_app_data_root()

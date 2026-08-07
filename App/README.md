@@ -1006,6 +1006,9 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | **Retrieval** | | |
 | `QDRANT_URL` | Qdrant server URL | `http://localhost:6333` |
 | `DENSE_MODEL` | Embedding model | `BAAI/bge-m3` |
+| **Contradiction grounding** | | |
+| `ENTAILMENT_MODEL` | 3-way NLI cross-encoder, labels `[contradiction, entailment, neutral]`. Unset falls back to numeric-only, which misses semantic reversals ("optional" vs "compulsory", "annually" vs "monthly") | `cross-encoder/nli-deberta-v3-small` |
+| `ENTAILMENT_CONTRADICTION_MIN` | Min contradiction probability to flag a claim | `0.6` |
 | `RETRIEVER_CONTEXT_FLOOR` | Calibrated relevance below which a passage is not passed to the model. Must stay below `ABSTENTION_THRESHOLD_NORM` — this trims a result set, it does not decide whether to answer | `0.20` |
 | `RETRIEVER_CONTEXT_RELATIVE_DROP` | Also drop passages this far below the best hit | `0.45` |
 | `RETRIEVER_DEDUPE_THRESHOLD` | Shingle-Jaccard above which two candidates are near-duplicates | `0.9` |

@@ -56,9 +56,9 @@ DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
 RETRIEVER_DENSE_DEVICE = os.getenv("RETRIEVER_DENSE_DEVICE", "cpu")
 RERANKER_DEVICE = os.getenv("RERANKER_DEVICE", RETRIEVER_DENSE_DEVICE)
-from ._root import PROJECT_ROOT as _PROJECT_ROOT
+from ._root import APP_DATA_ROOT as _APP_DATA_ROOT
 BM25_STATE_PATH = Path(
-    os.getenv("BM25_STATE_PATH", str(_PROJECT_ROOT / "Model" / "bm25_state.json"))
+    os.getenv("BM25_STATE_PATH", str(_APP_DATA_ROOT.parent / "Model" / "bm25_state.json"))
 )
 
 # Fixed namespace so re-indexing identical content yields identical point ids

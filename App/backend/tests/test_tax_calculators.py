@@ -410,3 +410,46 @@ class CapitalGainsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TakeHomePayTests(unittest.TestCase):
+    """`net_take_home` must not be read as a payslip figure it is not.
+
+    PAYE alone leaves the employee's 5% NSSF contribution in the number,
+    so a reply labelled "take-home" overstated actual pay for every
+    formal-sector employee who asked.
+    """
+
+    def _paye(self, gross: float, **kwargs) -> dict:
+        return ToolRegistry.call(
+            "calculate_paye", {"monthly_gross": gross, "fiscal_year": FY26, **kwargs}
+        )
+
+    def test_paye_only_is_the_default_and_says_so(self) -> None:
+        result = self._paye(1_000_000)
+        self.assertFalse(result["nssf_included"])
+        self.assertEqual(result["nssf_employee"], 0.0)
+        self.assertEqual(result["net_take_home"], 1_000_000 - result["paye"])
+        self.assertIn("net of PAYE only", result["deductions_note"])
+
+    def test_nssf_is_deducted_after_paye_not_before(self) -> None:
+        gross = 1_000_000.0
+        without = self._paye(gross)
+        with_nssf = self._paye(gross, include_nssf=True)
+        # NSSF changes take-home but must not change the tax: the
+        # employee's own contribution is not deductible against
+        # employment income.
+        self.assertEqual(with_nssf["paye"], without["paye"])
+        self.assertEqual(with_nssf["nssf_employee"], 50_000.0)  # 5% x 1,000,000
+        self.assertEqual(
+            with_nssf["net_take_home"], gross - without["paye"] - 50_000.0
+        )
+
+    def test_nssf_contribution_is_cited_in_the_provenance(self) -> None:
+        basis = self._paye(1_000_000, include_nssf=True)["rate_basis"]
+        self.assertIn("nssf_employee_contribution", basis["legal_basis"])
+        self.assertIn("not a URA tax", basis["legal_basis"]["nssf_employee_contribution"])
+
+    def test_paye_only_result_omits_the_nssf_basis(self) -> None:
+        basis = self._paye(1_000_000)["rate_basis"]
+        self.assertNotIn("nssf_employee_contribution", basis.get("legal_basis", {}))

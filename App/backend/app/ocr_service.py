@@ -1,0 +1,155 @@
+"""Local OCR sidecar for document-processing development.
+
+The main API can set ``OCR_BACKEND=service`` and call this process over the
+private Docker network.  Keeping EasyOCR and its model cache here mirrors the
+BP workflow engine's local-service boundary: the API process stays responsive,
+OCR has independent health checks and resource limits, and the response keeps
+word geometry plus recognition confidence.
+
+This service is intentionally internal-only.  ``docker-compose.ocr.yml``
+binds it to loopback for local diagnostics; do not expose it through a public
+reverse proxy.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+import os
+import threading
+import asyncio
+from typing import Any
+
+import numpy as np
+from fastapi import FastAPI, HTTPException, Request
+from PIL import Image, UnidentifiedImageError  # type: ignore[import-untyped]
+from pydantic import BaseModel, Field
+from .vision.ocr import OCRUnavailableError, extract_text_with_boxes_local, local_ocr_status
+
+logger = logging.getLogger(__name__)
+
+MAX_INPUT_BYTES = int(os.getenv("OCR_SERVICE_MAX_BYTES", str(12 * 1024 * 1024)))
+MAX_IMAGE_PIXELS = int(os.getenv("OCR_SERVICE_MAX_PIXELS", str(20_000_000)))
+OCR_MAX_CONCURRENT = max(1, int(os.getenv("OCR_INFERENCE_MAX_CONCURRENT", "1")))
+_ocr_slots = threading.BoundedSemaphore(OCR_MAX_CONCURRENT)
+
+app = FastAPI(title="URA Local OCR", version="1.0.0", docs_url=None, redoc_url=None)
+
+
+class OCRItemResponse(BaseModel):
+    text: str
+    box: list[list[float]] = Field(default_factory=list)
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+
+
+class OCRResponse(BaseModel):
+    items: list[OCRItemResponse] = Field(default_factory=list)
+    backend: str = "easyocr"
+
+
+def _run_local_ocr(image: np.ndarray) -> list[dict[str, Any]]:
+    """Keep blocking EasyOCR inference off the sidecar event loop."""
+    with _ocr_slots:
+        return extract_text_with_boxes_local(image)
+
+
+async def _read_body_bounded(request: Request) -> bytes:
+    """Consume a raw-image request without first buffering an unbounded body."""
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_INPUT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"OCR input exceeds the {MAX_INPUT_BYTES // (1024 * 1024)} MiB limit",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _decode_image(data: bytes) -> np.ndarray:
+    """Decode a bounded image body without writing user data to disk."""
+    try:
+        with Image.open(io.BytesIO(data)) as opened:
+            width, height = opened.size
+            if width * height > MAX_IMAGE_PIXELS:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Image exceeds the {MAX_IMAGE_PIXELS:,}-pixel OCR limit",
+                )
+            image = opened.convert("RGB")
+            image.load()
+            return np.asarray(image)
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError) as err:
+        raise HTTPException(status_code=422, detail="OCR input is not a valid image") from err
+
+
+def _normalise_item(item: dict[str, Any]) -> OCRItemResponse | None:
+    text = str(item.get("text", "")).strip()
+    raw_box = item.get("box")
+    if not text or not isinstance(raw_box, list):
+        return None
+    try:
+        box = [[float(point[0]), float(point[1])] for point in raw_box]
+        confidence = min(1.0, max(0.0, float(item.get("confidence", 0.0))))
+    except (IndexError, TypeError, ValueError):
+        return None
+    return OCRItemResponse(text=text, box=box, confidence=confidence)
+
+
+@app.get("/health")
+def health() -> dict[str, Any]:
+    """Liveness endpoint. Use ``/ready`` before sending OCR traffic."""
+    return {
+        "status": "alive",
+        "backend": "easyocr",
+        "max_input_bytes": MAX_INPUT_BYTES,
+        "max_image_pixels": MAX_IMAGE_PIXELS,
+        "ready": local_ocr_status(warmup=False)["ready"],
+    }
+
+
+@app.get("/ready")
+def ready() -> dict[str, Any]:
+    """Readiness probe that warms and verifies the EasyOCR model."""
+    status = local_ocr_status(warmup=True)
+    if not status["ready"]:
+        raise HTTPException(status_code=503, detail="EasyOCR model is unavailable")
+    return {"status": "ready", **status}
+
+
+@app.post("/v1/ocr", response_model=OCRResponse)
+async def ocr_image(request: Request) -> OCRResponse:
+    """Recognise text from one image and return text, quadrilaterals, confidence."""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_INPUT_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"OCR input exceeds the {MAX_INPUT_BYTES // (1024 * 1024)} MiB limit",
+                )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length header") from None
+
+    data = await _read_body_bounded(request)
+    if not data:
+        raise HTTPException(status_code=422, detail="OCR input is empty")
+    if len(data) > MAX_INPUT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"OCR input exceeds the {MAX_INPUT_BYTES // (1024 * 1024)} MiB limit",
+        )
+
+    image = _decode_image(data)
+    try:
+        raw_items = await asyncio.to_thread(_run_local_ocr, image)
+    except OCRUnavailableError as err:
+        logger.warning("OCR request rejected: %s", err)
+        raise HTTPException(status_code=503, detail=str(err)) from err
+    items = [item for raw in raw_items if (item := _normalise_item(raw))]
+    logger.info("local OCR completed: pixels=%d items=%d", image.shape[0] * image.shape[1], len(items))
+    return OCRResponse(items=items)

@@ -31,7 +31,13 @@ from decimal import Decimal
 from typing import Any
 
 from ..tax.money import AmountError, apply_bands, marginal_band, to_decimal, to_float, to_rate
-from ..tax.tables import RateTable, RateTableError, get_table, list_fiscal_years
+from ..tax.tables import (
+    RateTable,
+    RateTableError,
+    fiscal_years_defining,
+    get_table,
+    list_fiscal_years,
+)
 from . import Tool, ToolRegistry, ToolSchema
 
 logger = logging.getLogger(__name__)
@@ -138,7 +144,7 @@ def _require_scalar(table: RateTable, key: str) -> Decimal:
     """
     value = table.get(key)
     if value is None:
-        available = [fy for fy in list_fiscal_years() if key in get_table(fy).rates]
+        available = fiscal_years_defining(key)
         hint = f" It is defined for: {', '.join(available)}." if available else ""
         raise RateUnavailableError(
             f"'{key}' is not defined in the {table.fiscal_year} rate table.{hint}"
@@ -390,8 +396,10 @@ class PAYECalculator(CalculatorTool):
                 "Calculate monthly PAYE (Pay As You Earn) for a "
                 "Ugandan employee from their gross monthly salary. "
                 "Uses progressive bands per the Income Tax Act. "
-                "Use this when the user asks 'how much PAYE will I "
-                "pay' or 'what's my take-home pay'."
+                "Use this when the user asks 'how much PAYE will I pay'. "
+                "For 'what's my take-home pay', pass include_nssf=true so the "
+                "employee's 5% NSSF contribution is deducted too — PAYE alone "
+                "overstates what actually reaches the employee's account."
             ),
             parameters=_schema_params(
                 {
@@ -406,6 +414,16 @@ class PAYECalculator(CalculatorTool):
                         "description": "Tax residency status. Default 'resident'.",
                         "default": "resident",
                     },
+                    "include_nssf": {
+                        "type": "boolean",
+                        "description": (
+                            "Also deduct the employee's standard NSSF contribution "
+                            "(5% of gross) to give actual take-home pay. NSSF is a "
+                            "social-security contribution, not a URA tax, and is not "
+                            "deductible before PAYE. Default false (PAYE only)."
+                        ),
+                        "default": False,
+                    },
                 },
                 ["monthly_gross"],
             ),
@@ -419,6 +437,7 @@ class PAYECalculator(CalculatorTool):
         table: RateTable,
         monthly_gross: Any,
         residency: str = "resident",
+        include_nssf: bool = False,
         **_: Any,
     ) -> CalcResult:
         if residency not in ("resident", "non_resident"):
@@ -433,15 +452,44 @@ class PAYECalculator(CalculatorTool):
         bands = _require_bands(table, key)
 
         paye, breakdown = apply_bands(gross, bands)
-        net = gross - paye
         lower, upper, marginal_rate = marginal_band(gross, bands)
         effective_rate = (paye / gross) if gross > 0 else Decimal(0)
+
+        # NSSF comes out of pay *after* PAYE: the employee's own
+        # contribution is not a deduction against employment income, so
+        # it changes take-home without changing the tax.
+        keys = [key]
+        nssf_rate = Decimal(0)
+        nssf = Decimal(0)
+        if include_nssf:
+            nssf_rate = _require_scalar(table, "nssf_employee_contribution")
+            nssf = gross * nssf_rate
+            keys.append("nssf_employee_contribution")
+        net = gross - paye - nssf
+
+        deducted = f"PAYE {_ugx(paye)}"
+        if include_nssf:
+            deducted += f" and NSSF {_ugx(nssf)} ({nssf_rate * 100:.0f}%)"
+        # Naming what was *not* deducted matters as much as the total:
+        # a figure labelled "take-home" that silently omits a deduction
+        # is read as final and reconciled against a payslip that differs.
+        caveat = (
+            "Local Service Tax and any voluntary deductions are not included."
+            if include_nssf
+            else (
+                "This is net of PAYE only — NSSF (5%), Local Service Tax and any "
+                "voluntary deductions still come off. Ask again with NSSF included "
+                "for a closer take-home figure."
+            )
+        )
 
         return CalcResult(
             {
                 "monthly_gross": to_float(gross),
                 "residency": residency,
                 "paye": to_float(paye),
+                "nssf_included": include_nssf,
+                "nssf_employee": to_float(nssf),
                 "net_take_home": to_float(net),
                 "annual_paye": to_float(paye * 12),
                 "effective_rate": round(float(effective_rate), 4),
@@ -451,13 +499,14 @@ class PAYECalculator(CalculatorTool):
                     "marginal_rate": marginal_rate,
                 },
                 "bands_applied": breakdown,
+                "deductions_note": caveat,
                 "explanation": (
                     f"On a gross of {_ugx(gross)}, the applicable band is "
                     f"{marginal_rate * 100:.0f}% above {_ugx(lower)}. "
-                    f"PAYE = {_ugx(paye)}, net pay = {_ugx(net)}."
+                    f"After {deducted}, net pay = {_ugx(net)}. {caveat}"
                 ),
             },
-            rate_keys=(key,),
+            rate_keys=tuple(keys),
         )
 
 

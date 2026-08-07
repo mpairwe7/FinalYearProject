@@ -119,3 +119,9 @@ Data/common_voice_*
 # Runtime analytics databases (conversation logs — privacy: never commit).
 # Created by the backend and by pytest runs at the repo root and App/backend.
 data_store/
+
+# Vendored CosyVoice checkout. It was once committed as a gitlink with no
+# .gitmodules entry, which made `actions/checkout` fail outright ("No url
+# found for submodule path 'CosyVoice'") and took every browser E2E job with
+# it. Ignored so a local clone here cannot be staged again.
+CosyVoice/

@@ -491,9 +491,16 @@ def evaluate_rag(eval_data: list[dict[str, Any]]) -> dict[str, Any]:
 def check_rag_quality_gates(
     metrics: dict[str, Any],
     gates: dict[str, float],
+    exclude: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Compare RAG metrics against quality thresholds."""
-    results: dict[str, Any] = {"passed": True, "checks": []}
+    """Compare RAG metrics against quality thresholds.
+
+    Metrics named in *exclude* are still measured and still reported, but do
+    not decide the outcome.  They are marked ``gated: False`` so an excluded
+    metric is visible in the artefact rather than quietly absent.
+    """
+    exclude = exclude or set()
+    results: dict[str, Any] = {"passed": True, "checks": [], "excluded": sorted(exclude)}
 
     checks = [
         ("faithfulness", gates.get("min_faithfulness", 0.6)),
@@ -511,10 +518,17 @@ def check_rag_quality_gates(
     for name, threshold in checks:
         value = metrics.get(name, {}).get("mean", 0.0)
         passed = value >= threshold
+        gated = name not in exclude
         results["checks"].append(
-            {"name": name, "value": value, "threshold": threshold, "passed": passed}
+            {
+                "name": name,
+                "value": value,
+                "threshold": threshold,
+                "passed": passed,
+                "gated": gated,
+            }
         )
-        if not passed:
+        if not passed and gated:
             results["passed"] = False
 
     return results
@@ -619,6 +633,16 @@ def main() -> None:
         action="store_true",
         help="Exit non-zero if the champion-challenger comparison fails.",
     )
+    parser.add_argument(
+        "--gate-exclude",
+        type=str,
+        default="",
+        help="Comma-separated metrics to report but not gate on. For eval "
+        "sets whose answers and contexts are in different languages, the "
+        "lexical-overlap metrics (faithfulness, groundedness) measure "
+        "translation overlap rather than grounding and must be excluded "
+        "rather than silently thresholded down.",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -669,12 +693,16 @@ def main() -> None:
             config = yaml.safe_load(f)
         rag_gates = config.get("rag_quality_gates", {})
 
-    gate_results = check_rag_quality_gates(metrics, rag_gates)
+    gate_exclude = {n.strip() for n in args.gate_exclude.split(",") if n.strip()}
+    gate_results = check_rag_quality_gates(metrics, rag_gates, exclude=gate_exclude)
 
     print("\nRAG Quality Gates:")
     print("-" * 50)
     for check in gate_results["checks"]:
-        status = "PASS" if check["passed"] else "FAIL"
+        if not check["gated"]:
+            status = "REPORT-ONLY"
+        else:
+            status = "PASS" if check["passed"] else "FAIL"
         print(f"  {check['name']:25s} {check['value']:.4f} >= {check['threshold']:.4f}  {status}")
 
     with open(output_dir / "rag_quality_gates.json", "w") as f:
