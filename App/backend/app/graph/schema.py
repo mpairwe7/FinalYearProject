@@ -33,8 +33,6 @@ class NodeKind(str, Enum):
     PROVISION = "provision"
     #: A fiscal year, so "as at" questions are a traversal.
     FISCAL_YEAR = "fiscal_year"
-    #: A duty or obligation that follows from the above.
-    OBLIGATION = "obligation"
 
 
 class EdgeKind(str, Enum):
@@ -59,8 +57,6 @@ class EdgeKind(str, Enum):
     #: it as an edge is the point: it currently lives as a sentence in
     #: a prompt the model may or may not honour.
     COMPUTED_ON = "computed_on"
-    #: TaxType → Obligation. What the taxpayer must actually do.
-    REQUIRES = "requires"
 
 
 @dataclass(frozen=True)
@@ -164,10 +160,6 @@ def provision_id(text: str) -> str:
 
 def fiscal_year_id(fy: str) -> str:
     return f"fy:{fy}"
-
-
-def obligation_id(name: str) -> str:
-    return f"obligation:{name}"
 
 
 def parse_fiscal_year_start(fy: str) -> _dt.date | None:

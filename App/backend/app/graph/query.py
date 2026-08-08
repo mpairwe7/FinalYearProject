@@ -164,7 +164,6 @@ _COMPARISON_RE = re.compile(
 )
 
 _FY_RE = re.compile(r"\bFY\s?(\d{4})[-/]?(\d{2,4})?\b", re.I)
-_YEAR_RE = re.compile(r"\b(20\d{2})\b")
 
 
 def link_entities(query: str) -> dict[str, Any]:
