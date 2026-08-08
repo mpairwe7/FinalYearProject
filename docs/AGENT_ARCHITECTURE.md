@@ -195,17 +195,45 @@ so they're easy to read and test.  This means a few query shapes
 fall through to their second-best route instead of the most
 specific match:
 
-| Query | Ideal | Actual | Why it's still fine |
-|---|---|---|---|
-| `"What's my take-home pay on a 2M salary?"` | `TOOLS` (PAYE calc) | `RAG` | PAYE pattern requires `how much/calculate` before the noun; `what's` doesn't match |
-| `"How much customs duty on a 5m CIF?"` | `TOOLS` (customs calc) | `CUSTOMS_SPECIALIST` | Customs specialist has `calculate_customs_duty` in its whitelist anyway — still calls the tool |
-| `"What are the current PAYE percentages?"` | `TOOLS` (rate lookup) | `RAG` | Plural `what are` doesn't match `what(?:'s| is)`; RAG returns cited passages |
-| `"I sold my shares, what's the CGT?"` | `TOOLS` (CGT calc) | `ESCALATE` | `my shares` fires the account-specific escalation guard |
+Re-measured **2026-08-08** against the live supervisor. Two of the four
+rows this table used to carry are no longer true — the amount-first fix
+(#219) closed them — which is why the table now records what the router
+actually does rather than what it did:
 
-All four still produce correct answers — just through a different
-path.  Upgrading the supervisor to an LLM-based classifier (the
-`_try_llm_fallback` stub hook in `supervisor.py`) would close these
-gaps at the cost of ~300 ms latency per request.
+| Query | Ideal | Actual | Note |
+|---|---|---|---|
+| `"What's my take-home pay on a 2M salary?"` | `TOOLS` (PAYE calc) | ✅ `TOOLS` → `calculate_paye` | **Fixed in #219.** The amount-plus-intent path catches it regardless of word order. |
+| `"How much customs duty on a 5m CIF?"` | `TOOLS` (customs calc) | ✅ `TOOLS` → `calculate_customs_duty` | Matches the customs calculation pattern before the specialist check. |
+| `"What are the current PAYE percentages?"` | `TOOLS` (rate lookup) | `RAG` | Plural `what are` doesn't match `what(?:'s\| is)`; RAG returns cited passages. |
+| `"I sold my shares, what's the CGT?"` | `TOOLS` (CGT calc) | `RAG` | `my shares` is *not* in the account-specific escalation guard (`my tin\|filing\|return\|account\|balance`), and the CGT pattern needs the phrase "capital gains". |
+
+Both remaining rows still produce correct, cited answers — just through
+retrieval rather than a calculator.
+
+The LLM classifier that would close them landed in #230 as
+`agents/tiebreak.py`, behind `FLAG_SUPERVISOR_LLM_TIEBREAK` (default
+off). Its blast radius is measured, not assumed:
+
+- It fires **only below `SUPERVISOR_LLM_THRESHOLD`** (default 0.70).
+  Rule confidences run 0.6 (fall-through) → 0.78 (customs) → 0.92
+  (calculation) → 0.95 (escalation) → 1.0 (greeting), so at the default
+  the model sees the fall-through cases and nothing else. On the English
+  golden set that is **5 of 36 cases (14%)**; the other 31 never reach a
+  model.
+- It **cannot override an escalation, a greeting, or blocked input**, and
+  it cannot *choose* `ESCALATE` — raising a ticket on a vague question
+  would send routine traffic to staff.
+- It **fails open**. No model, a timeout, unparseable output, or an
+  invented route name all return the rule decision unchanged; a
+  classifier that can break routing is worse than no classifier.
+- A changed decision carries `confidence=0.65`, below every matched-rule
+  confidence, so an inferred route never outranks a stated one — which
+  matters because tier selection reads that number.
+- Classifications are cached on the normalized query (case, whitespace,
+  trailing punctuation), bounded at 512 entries.
+
+The supervisor stays pure Python on the default path: the module is
+imported lazily inside the flag check, so a closed flag costs nothing.
 
 ### Adding a new route — the 2-step recipe
 
@@ -548,16 +576,19 @@ integrations haven't been built yet:
 | G2 — User profile | 🟢 **Landed in Phase 14** — `users` + `user_profiles` + `consent_receipts` tables + /v1/me/* endpoints. |
 | G5 — Long-term memory | 🟢 **Landed in Phase 16** — three-tier (working + episodic + semantic) with consent-gated retrieval + temporal decay. |
 | G8 — Audit ledger | 🟢 **Landed in Phase 21 subset** — hash-chained `audit_events` + Merkle anchoring + `verify_chain` CLI. |
-| G13 — Document uploads | ⚪ `/v1/upload` + `mcp_document_parser`.  Qwen2.5-VL integration for image + table parsing.  Phase 18. |
+| G13 — Document uploads | 🟢 **Landed (#222)** — `POST /v1/documents/analyze` + `GET /v1/documents/{id}/report`, backed by `documents.py`, `ocr_service.py` and `vision/`. |
 | G14 — Notifications | ⚪ Scheduler for deadline reminders via email / SMS / in-app.  Phase 20 (scaffolded). |
-| G22 — Specialist prompts | 🟡 The supervisor routes to `TAX_SPECIALIST` and `CUSTOMS_SPECIALIST` today, but both still use the base `SYSTEM_PROMPT`.  A later commit adds `agents/prompts/*.yaml`. |
-| G32 — HITL staff UI | 🟡 Admin ticket endpoints exist + Phase 14 auth landed, but no Next.js `/admin/tickets` page to work the queue yet.  Phase 19. |
+| G16 — Knowledge graph | 🟡 **Measurement landed (#227)** — `agents/eval_multihop.py` holds the 12-case multi-hop golden set, tied to the live rate tables.  The graph itself is not built; `FLAG_TAX_GRAPH` / `FLAG_GRAPH_FUSION` are registered and off. |
+| G18 — Multilingual | 🟡 **Routing landed (#224)** — locale-keyed supervisor tables (`agents/patterns/`), Luganda 23/23 with `FLAG_MULTILINGUAL_ROUTING` on.  Retrieval is still English-indexed. |
+| G21 — Self-correction | 🟢 **Landed (#226, #229)** — `agents/evaluator.py` recomputes money answers deterministically; a rejected figure gets one budgeted revision that is told the recomputed number, and the revision is re-verified before it is published.  A revision that does not fix the figure is discarded and the escalation stands. |
+| G22 — Specialist prompts | 🟢 **Landed (#218)** — `agents/prompts.py` gives `tax_specialist`, `customs_specialist` and `tool_specialist` their own instructions, appended to the shared base prompt so safety rules stay first. |
+| G26 — A/B testing | 🟡 **Targeting landed (#223)** — `flags.py` carries percentage / cohort / allowlist rollout with stable bucketing.  The variant is not yet persisted per conversation. |
+| G32 — HITL staff UI | 🟢 **Landed (#215)** — `App/frontend/src/app/admin/tickets/page.tsx`, with live escalation events pushed to staff (#217). |
 
-The remaining gaps (G12 URA DMZ, G13 uploads, G14 notifications,
-G22 specialist prompts, G32 staff UI) are all scaffolded with
-README files under `backend/app/mcp/servers/`,
-`backend/app/workflows/`, and `backend/app/scheduler/` so
-follow-up PRs have clear landing spots.
+The remaining gaps (G12 URA DMZ, G14 notifications, and the graph half
+of G16) are scaffolded with README files under
+`backend/app/mcp/servers/`, `backend/app/workflows/`, and
+`backend/app/scheduler/` so follow-up PRs have clear landing spots.
 
 ---
 

@@ -311,7 +311,9 @@ from . import calendar as _calendar  # noqa: E402, F401
 from . import education as _education  # noqa: E402, F401
 from . import empathy as _empathy  # noqa: E402, F401
 from . import escalate as _escalate  # noqa: E402, F401
+from . import graph_tools as _graph_tools  # noqa: E402, F401
 from . import rag_tool as _rag_tool  # noqa: E402, F401
+from . import tasks as _tasks  # noqa: E402, F401
 from . import rates as _rates  # noqa: E402, F401
 from . import ura_account as _ura_account  # noqa: E402, F401
 from . import ura_actions as _ura_actions  # noqa: E402, F401

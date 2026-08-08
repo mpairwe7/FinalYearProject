@@ -42,6 +42,7 @@ def node_route(state: AgentGraphState) -> NodeResult:
     decision = _supervisor.classify(
         state.rewritten_query or state.query,
         has_conversation_history=False,
+        locale=state.locale,
     )
 
     if decision.route == AgentRoute.CLARIFY:

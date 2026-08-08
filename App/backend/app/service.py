@@ -43,13 +43,19 @@ from . import database as db
 from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
+from .agents.evaluator import RevisionBudget, evaluate
+from .analytics import metrics
 from .escalation_notify import notify_ticket_created, team_for_topic
-from .agents.supervisor import (
+from .agents.patterns.en import (
     _FAREWELL_PHRASES,
     _GRATITUDE_PHRASES,
     _GREETING_PHRASES,
     _GREETING_WORDS,
 )
+# Tier selection is pure policy over the supervisor's decision — no cloud
+# SDK, no key, no network — so unlike the rest of ``providers`` it is safe
+# to import at module scope.
+from .providers.routing import log_tier, select_tier
 from .cache import create_cache
 from .calculator_router import (
     NEXT_ACTIONS_BY_TOOL,
@@ -2300,6 +2306,101 @@ class ChatModel:
         out["reply"] = self._finalize_reply(str(out.get("reply", "")))
         return out
 
+    @staticmethod
+    def _recompute_for_verification(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Re-run a calculator through MCP for the numeric verifier.
+
+        Deliberately goes through :class:`app.mcp.MCPClient` rather than
+        calling the calculator directly: the verification must exercise
+        the same routing, authorization and validation the agent's own
+        call did, or it is checking a different code path than the one
+        that produced the answer.
+
+        Runs as ``public`` with no consent grants — every calculator is
+        ``read_only`` and ``low`` risk, so verification cannot reach a
+        tool the taxpayer's own turn could not.
+        """
+        from .mcp import get_client
+
+        result = get_client().call_tool(tool, arguments, user_role="public")
+        payload = getattr(result, "result", None)
+        return payload if isinstance(payload, dict) else {"ok": False}
+
+    @staticmethod
+    def _escalate_on_numeric_mismatch(
+        verification: dict[str, Any] | None,
+        escalate: bool,
+        reason: str,
+    ) -> tuple[bool, str]:
+        """Escalate when a figure disagrees with its own calculator.
+
+        Only on a *confirmed* mismatch. A check that could not run —
+        the question was not a calculation, an input was missing, the
+        transport was down — leaves the answer exactly as it was;
+        treating "unverified" as "wrong" would escalate most of the
+        traffic and teach staff to ignore the queue.
+        """
+        if not verification:
+            return escalate, reason
+        if "numerically_consistent" in (verification.get("failures") or []):
+            return True, "Stated figure disagrees with the calculator that produced it"
+        return escalate, reason
+
+    @staticmethod
+    def _graph_hits(query: str) -> list[dict[str, Any]]:
+        """Statutory graph claims as a retrieval hit, or nothing.
+
+        **Not RRF fusion**, despite what the architecture proposal said.
+        The graph is projected from the effective-dated rate tables, not
+        from the passage corpus, so its claims have no passage ids to
+        rank against — there is nothing for reciprocal rank fusion to
+        fuse. Once prose provisions are extracted from the crawl and
+        linked to chunk ids, a genuine third RRF leg becomes possible;
+        pretending this is one would misdescribe where the answer came
+        from.
+
+        What it is instead is the pattern already used next door by
+        ``_priority_faq_hits``: a high-authority source injected ahead
+        of the retrieved passages. The authority claim is stronger here
+        than for the FAQ hits — every figure carries its Act, its
+        section and its fiscal year, and an unreconciled figure carries
+        that mark too — so an answer built on it can be checked rather
+        than trusted.
+
+        Returns at most one hit. The claims for one question belong in
+        one passage: split across several, the reranker can keep the
+        rate and drop the threshold that gates it, which is the exact
+        join the graph exists to preserve.
+        """
+        if not flags.is_enabled("graph_fusion") or not flags.is_enabled("tax_graph"):
+            return []
+        try:
+            from .graph.shadow import graph_answer_for
+
+            rendered = graph_answer_for(query)
+        except Exception:
+            # A retrieval leg must never take down the turn.
+            logger.warning("graph leg unavailable", exc_info=True)
+            return []
+        if not rendered.strip():
+            return []
+        return [
+            {
+                "text": (
+                    "Statutory rate positions (from the effective-dated URA "
+                    "rate tables, with the Act behind each figure):\n" + rendered
+                ),
+                "question": "",
+                "answer": rendered,
+                "source": "URA rate tables (statutory graph)",
+                "chunk_id": "",
+                "page": "",
+                "section": "statutory-graph",
+                "doc_type": "graph",
+                "score_rrf": 0.0,
+            }
+        ]
+
     def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:
         """Inject high-precision FAQ hits for common procedures that reranking can miss."""
         if not _TIN_REGISTRATION_QUERY_RE.search(query):
@@ -3672,6 +3773,7 @@ class ChatModel:
                     route_decision = supervisor.classify(
                         rewritten,
                         has_conversation_history=bool(conversation_history),
+                        locale=locale,
                     )
                 trace_ctx["agent_route"] = route_decision.route.value
                 trace_ctx["agent_route_confidence"] = (
@@ -3685,6 +3787,24 @@ class ChatModel:
                     route_decision.confidence,
                     route_decision.reason,
                 )
+
+                # Capability tier for this turn.  The route decision is
+                # already made and costs nothing extra to reuse, so the
+                # tier is selected here and carried on the trace whether
+                # or not the flag is on — off, it reports T1, which is
+                # what the single configured model has always been.
+                tier_decision = select_tier(
+                    route_decision.route.value,
+                    confidence=route_decision.confidence,
+                    tool_count=len(route_decision.suggested_tools),
+                    locale=locale,
+                    escalation_reason=route_decision.reason,
+                    distress=detect_user_distress(rewritten) or "",
+                    enabled=flags.is_enabled("model_tiering"),
+                )
+                trace_ctx["model_tier"] = tier_decision.tier.value
+                trace_ctx["model_tier_reason"] = tier_decision.reason
+                log_tier("chat", tier_decision)
 
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
                 if route_decision.route == AgentRoute.GREET:
@@ -3893,6 +4013,14 @@ class ChatModel:
                 )
                 priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
                 seen_texts = {h.get("text", "")[:80] for h in hits}
+                # Graph claims go in first: they carry the statutory
+                # basis and the fiscal year, so where they and a passage
+                # disagree the passage is the one that is out of date.
+                for h in self._graph_hits(retrieval_query):
+                    if h.get("text", "")[:80] not in seen_texts:
+                        hits.insert(0, h)
+                        seen_texts.add(h.get("text", "")[:80])
+                        retrieval_mode = "graph"
                 for h in priority_hits:
                     if h.get("text", "")[:80] not in seen_texts:
                         hits.insert(0, h)
@@ -4245,8 +4373,117 @@ class ChatModel:
                     if reflect_fired:
                         trace_ctx["self_reflected"] = True
 
+            # 7c. Deterministic verification of money answers.
+            #
+            #     Self-reflection above is a model grading its own output
+            #     against a faithfulness score; it catches ungrounded
+            #     prose and misses arithmetic. Whether a figure is right
+            #     is not a judgement call, so this re-derives it through
+            #     the same calculator the agent would have used and
+            #     compares it against what the reply actually printed.
+            #     No model, no tokens — and it can reject on its own.
+            if flags.is_enabled("evaluator_optimizer") and reply:
+                with trace_stage("numeric_verification", timings=timings):
+                    verdict = evaluate(
+                        rewritten,
+                        reply,
+                        call_tool=self._recompute_for_verification,
+                        faithfulness=faithfulness_score,
+                    )
+                trace_ctx["numeric_verification"] = {
+                    "accepted": verdict.accepted,
+                    "failures": verdict.failures(),
+                    "unverified": list(verdict.unverified),
+                }
+                if not verdict.numerically_consistent:
+                    # A figure that disagrees with its own calculator is
+                    # the one error a taxpayer will act on.
+                    logger.warning(
+                        "numeric verification rejected the reply: %s",
+                        verdict.detail.get("money", {}).get("reason", ""),
+                    )
+                    metrics.inc("numeric_verification_rejected_total")
+
+                    # 7d. One bounded revision.
+                    #
+                    #     The evaluator knows the right figure — it just
+                    #     recomputed it — so the revision is told what to
+                    #     state rather than asked to think again. That is
+                    #     the difference between an optimizer and a retry:
+                    #     a critique the reviser has to interpret is a
+                    #     second chance to get it wrong.
+                    #
+                    #     Budgeted at one, on money-bearing turns only.
+                    #     Unbounded critique-revise is a cost incident
+                    #     with a quality story attached.
+                    budget = RevisionBudget()
+                    allowed, why = budget.may_revise(
+                        carries_money=True, escalation_bound=False
+                    )
+                    if allowed and self._llm_available:
+                        with trace_stage("numeric_revision", timings=timings):
+                            revised = _call_llm_with_deadline(
+                                query=(
+                                    f"{verdict.revision_note}\n\n"
+                                    f"Rewrite the answer below so it states that "
+                                    f"figure, keeping its citations and its "
+                                    f"structure. Change nothing else.\n\n"
+                                    f"Answer:\n{reply}\n\n"
+                                    f"Question: {rewritten}"
+                                ),
+                                passages=hits,
+                                conversation_history=conversation_history or None,
+                                locale=locale,
+                                personalization_context=(personalization or {}).get(
+                                    "prompt_context", ""
+                                ),
+                                tone_hint=tone_hint,
+                            )
+                            budget.spend()
+                        if revised:
+                            candidate = self._output_guard.sanitize(
+                                self._output_guard.redact_pii(revised)
+                            )
+                            candidate = self._output_guard.check_prompt_leakage(
+                                candidate
+                            ).sanitized_text
+                            # Re-verify. A revision that did not fix the
+                            # figure must not be published just because it
+                            # is newer — the budget is spent either way,
+                            # so the only question is which text is right.
+                            recheck = evaluate(
+                                rewritten,
+                                candidate,
+                                call_tool=self._recompute_for_verification,
+                                faithfulness=faithfulness_score,
+                            )
+                            trace_ctx["numeric_revision"] = {
+                                "attempted": True,
+                                "fixed": recheck.numerically_consistent,
+                            }
+                            if recheck.numerically_consistent:
+                                reply = candidate
+                                verdict = recheck
+                                trace_ctx["numeric_verification"] = {
+                                    "accepted": recheck.accepted,
+                                    "failures": recheck.failures(),
+                                    "unverified": list(recheck.unverified),
+                                }
+                                metrics.inc("numeric_revision_fixed_total")
+                            else:
+                                metrics.inc("numeric_revision_failed_total")
+                    else:
+                        trace_ctx["numeric_revision"] = {
+                            "attempted": False,
+                            "reason": why if not allowed else "llm unavailable",
+                        }
+
             # 8. Escalation check
             escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
+            if flags.is_enabled("evaluator_optimizer") and not escalate:
+                escalate, esc_reason = self._escalate_on_numeric_mismatch(
+                    trace_ctx.get("numeric_verification"), escalate, esc_reason
+                )
             claim_report = None
             # An extractive fallback is copied from the selected cited FAQ
             # answer, so lexical claim verification would incorrectly label
@@ -4673,6 +4910,7 @@ class ChatModel:
             route_decision = supervisor.classify(
                 rewritten,
                 has_conversation_history=bool(conversation_history),
+                locale=locale,
             )
             if route_decision.route == AgentRoute.CLARIFY:
                 return {
@@ -4809,6 +5047,11 @@ class ChatModel:
             top_k=2,
             binding_query=binding_query,
         )
+        # Graph claims first — same reasoning as the SSE path above.
+        graph_hits = self._graph_hits(retrieval_query)
+        if graph_hits:
+            hits = graph_hits + hits
+            retrieval_mode = "graph"
         priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
         for h in priority_hits:

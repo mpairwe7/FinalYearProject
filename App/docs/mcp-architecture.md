@@ -155,11 +155,14 @@ on them without understanding our tool names.
 | Namespace | Tools | Risk | Deployment |
 |---|---|---|---|
 | `tax_calculator` | 8 calculators | low | 🟢 standalone server available |
+| `education` | `explain_tax_concept` | low | in-process |
 | `rates` | `lookup_rate`, `list_available_rates`, `compare_tax_years` | low | in-process |
 | `rag` | `search_ura_knowledge_base` | low | in-process |
 | `calendar` | `get_current_date`, `get_next_deadlines` | low | in-process |
 | `empathy` | `assess_emotional_tone` | low | in-process |
+| `tax_graph` | `graph_resolve_rate`, `graph_rate_history`, `graph_effective_on` | low | in-process (embedded) |
 | `core` | `escalate_to_human` | medium | in-process |
+| `tasks` | `task_create`, `task_get`, `task_cancel` | medium | in-process, Postgres/SQLite-backed |
 | `ura_account` | `ura_account_profile` | high | DMZ |
 | `ura_actions` | `ura_action_proposal` | critical | DMZ |
 
@@ -205,6 +208,45 @@ address.
   `HttpTransport` surfaces `resultType: "input_required"` verbatim with
   its `elicitations` and `requestState`, so a caller can elicit and
   replay instead of treating it as a failure.
+
+## Long-running work (`tasks`)
+
+The stateless core has a consequence: work that outlives one request
+cannot hold a connection, and cannot be remembered in a worker's memory
+either, because the poll that asks about it may reach a different
+replica. So a long call returns a **task id** and the caller polls it.
+
+```
+task_create(kind, args, idempotency_key) → {task_id, status: "pending"}
+task_get(task_id)                        → {status, progress, result?, error?}
+task_cancel(task_id)                     → {…, cancelled: bool}
+```
+
+State lives in `mcp_tasks`, through the same backend-agnostic helpers
+the audit ledger uses, so it is one table whichever backend is live.
+
+Three properties the table enforces rather than hopes for:
+
+- **Idempotency on creation.** `UNIQUE(tenant_id, idempotency_key)`, and
+  `create_task` both checks first *and* recovers from the constraint
+  violation — two replicas can pass the check at the same instant, so
+  the index is what actually stops a retried filing acting twice.
+- **Unkeyed tasks do not collide.** The key defaults to `NULL`, not
+  `''`: both SQLite and Postgres treat NULLs as distinct in a UNIQUE
+  index, whereas `''` would allow exactly one keyless task per tenant.
+- **Terminal states are final.** `succeeded`, `failed` and `cancelled`
+  cannot be moved out of, so a late worker cannot overwrite a
+  cancellation the taxpayer has already been told about.
+
+Reads are scoped by tenant in the `WHERE` clause rather than checked
+afterwards, and a task belonging to another tenant returns the same
+`no such task` as one that does not exist — distinguishing them would
+confirm the id exists elsewhere.
+
+`kind` is a closed set (`document_ocr`, `filing_submission`,
+`graph_rebuild`, `bundle_export`). An open one would let a model invent
+work nothing knows how to run, leaving the row at `pending` for ever
+with no worker and no error.
 
 ## Extending
 

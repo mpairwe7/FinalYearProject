@@ -31,7 +31,7 @@ App/
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
 │   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── flags.py         # Feature flag registry (38 flags)
+│   │   ├── flags.py         # Feature flag registry (45 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 19 tools (calculators, rates, calendar, RAG, education, empathy, escalate)
 │   │   ├── workflows/       # YAML-driven slot-filling engine + TIN registration
