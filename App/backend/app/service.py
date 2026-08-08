@@ -2346,6 +2346,61 @@ class ChatModel:
             return True, "Stated figure disagrees with the calculator that produced it"
         return escalate, reason
 
+    @staticmethod
+    def _graph_hits(query: str) -> list[dict[str, Any]]:
+        """Statutory graph claims as a retrieval hit, or nothing.
+
+        **Not RRF fusion**, despite what the architecture proposal said.
+        The graph is projected from the effective-dated rate tables, not
+        from the passage corpus, so its claims have no passage ids to
+        rank against — there is nothing for reciprocal rank fusion to
+        fuse. Once prose provisions are extracted from the crawl and
+        linked to chunk ids, a genuine third RRF leg becomes possible;
+        pretending this is one would misdescribe where the answer came
+        from.
+
+        What it is instead is the pattern already used next door by
+        ``_priority_faq_hits``: a high-authority source injected ahead
+        of the retrieved passages. The authority claim is stronger here
+        than for the FAQ hits — every figure carries its Act, its
+        section and its fiscal year, and an unreconciled figure carries
+        that mark too — so an answer built on it can be checked rather
+        than trusted.
+
+        Returns at most one hit. The claims for one question belong in
+        one passage: split across several, the reranker can keep the
+        rate and drop the threshold that gates it, which is the exact
+        join the graph exists to preserve.
+        """
+        if not flags.is_enabled("graph_fusion") or not flags.is_enabled("tax_graph"):
+            return []
+        try:
+            from .graph.shadow import graph_answer_for
+
+            rendered = graph_answer_for(query)
+        except Exception:
+            # A retrieval leg must never take down the turn.
+            logger.warning("graph leg unavailable", exc_info=True)
+            return []
+        if not rendered.strip():
+            return []
+        return [
+            {
+                "text": (
+                    "Statutory rate positions (from the effective-dated URA "
+                    "rate tables, with the Act behind each figure):\n" + rendered
+                ),
+                "question": "",
+                "answer": rendered,
+                "source": "URA rate tables (statutory graph)",
+                "chunk_id": "",
+                "page": "",
+                "section": "statutory-graph",
+                "doc_type": "graph",
+                "score_rrf": 0.0,
+            }
+        ]
+
     def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:
         """Inject high-precision FAQ hits for common procedures that reranking can miss."""
         if not _TIN_REGISTRATION_QUERY_RE.search(query):
@@ -3958,6 +4013,14 @@ class ChatModel:
                 )
                 priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
                 seen_texts = {h.get("text", "")[:80] for h in hits}
+                # Graph claims go in first: they carry the statutory
+                # basis and the fiscal year, so where they and a passage
+                # disagree the passage is the one that is out of date.
+                for h in self._graph_hits(retrieval_query):
+                    if h.get("text", "")[:80] not in seen_texts:
+                        hits.insert(0, h)
+                        seen_texts.add(h.get("text", "")[:80])
+                        retrieval_mode = "graph"
                 for h in priority_hits:
                     if h.get("text", "")[:80] not in seen_texts:
                         hits.insert(0, h)
@@ -4984,6 +5047,11 @@ class ChatModel:
             top_k=2,
             binding_query=binding_query,
         )
+        # Graph claims first — same reasoning as the SSE path above.
+        graph_hits = self._graph_hits(retrieval_query)
+        if graph_hits:
+            hits = graph_hits + hits
+            retrieval_mode = "graph"
         priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
         for h in priority_hits:

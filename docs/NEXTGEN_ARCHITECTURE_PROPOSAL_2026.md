@@ -816,22 +816,86 @@ new flags off and with them on.
 | **C** — multilingual routing | ✅ **Done** | `app/agents/patterns/` (`en` verbatim + `lg`/`nyn`/`ach`), locale plumbed through service, graph and voice planner. Luganda golden set **23/23**; English holds **36/36**. `locale_gate()` refuses non-corpus-backed locales. 28 tests. |
 | **A** — model tiering | ✅ **Done** | `ModelTier`/`MODEL_SLOTS`/`select_tier()` in `providers/routing.py`, keyed on the existing `RouteDecision`. Promotion-only; T1 pinned for adapter-bound locales; T3 budget cap. Wired into the service trace + `model_tier_total`. 32 tests. |
 | **D** — numeric verification | ✅ **Done** | `app/agents/evaluator.py`: typed `Verdict`, `RevisionBudget`, deterministic recomputation through the MCP client. A rejected figure now gets **one budgeted revision** told the recomputed number, re-verified before publishing; a revision that does not fix it is discarded and the escalation stands. 52 tests. |
-| **B** — knowledge graph | 🟡 **Measurement only** | `app/agents/eval_multihop.py`: 12-case golden set across 6 join kinds and 2 fiscal years, tied to the live rate tables so a rate change breaks it. Harness + baseline discrimination tests. 22 tests. **The graph itself is not built.** |
+| **B** — knowledge graph | 🟢 **Built** | `app/graph/` — 87 nodes, 153 edges projected from the effective-dated rate tables. `tax_graph` MCP namespace (3 tools). Shadow scoring + an authoritative-source retrieval leg behind `FLAG_GRAPH_FUSION`. 51 tests. **Two departures from this proposal — see below.** |
 | **Tiebreak** — supervisor LLM fallback | ✅ **Done** | `app/agents/tiebreak.py` replaces the documented no-op. Fires only below `SUPERVISOR_LLM_THRESHOLD` (0.70) — **5 of 36 golden-set cases**; cannot override or choose `ESCALATE`; fails open on every error path; cached on the normalized query. 32 tests. |
+
+### Where the build departed from this proposal
+
+Two of §3.6's decisions did not survive contact with the code. Both are
+recorded here rather than quietly amended, because a proposal that is
+retro-fitted to match what was built stops being reviewable.
+
+**1. Not Kùzu — no database at all.** §3.6 chose embedded Kùzu. The
+graph is *curated, not derived*: it is a projection of the rate tables,
+which puts it at **87 nodes and 153 edges**, serialising to well under a
+megabyte of JSON. Kùzu would add a native wheel to a slim Crane Cloud
+image and to a mobile bundle already capped at 800 MB, in exchange for
+query planning over a dataset that traverses fully in microseconds. The
+default backend is therefore a plain adjacency index over a versioned
+JSON document — zero dependencies, byte-identical rebuilds, and it drops
+into the offline bundle as one small file.
+
+What was kept is the part that mattered: `GraphStore` is a `Protocol`,
+matching the backend-agnostic seam the audit ledger and Postgres mirror
+already use here. When the graph outgrows this — millions of extracted
+provisions — a Kùzu backend implements the same interface and no caller
+changes. `stats()` and a bounded-traversal test make that a measurement
+rather than a guess.
+
+**2. Not RRF fusion — authoritative-source injection.** §3.6 described a
+third RRF leg. The graph is projected from the rate tables, not from the
+passage corpus, so its claims carry no passage ids: there is nothing for
+reciprocal rank fusion to fuse. Calling it RRF would misdescribe where
+an answer came from.
+
+What it does instead follows `_priority_faq_hits`, already next door: a
+high-authority source injected ahead of the retrieved passages. The
+authority claim is stronger here — every figure carries its Act, its
+section and its fiscal year, and an unreconciled figure keeps that
+mark. A genuine third RRF leg becomes possible once prose provisions
+are extracted from the crawl and linked to chunk ids.
+
+**3. Built from the rate tables, not from LLM extraction.** §3.6 put T3
+extraction over the daily crawl first. That was backwards: this
+repository already holds a curated, effective-dated, provenance-carrying
+dataset in `app/tax/data/FY*.json` — the same one the calculators answer
+from and the golden set is pinned to. Projecting it gives real
+multi-hop capability with **zero hallucination surface**, and a test
+asserts every node still matches its table. Extraction over prose
+belongs after that, behind human review.
 
 ### What Gap B still needs
 
-The golden set landed first on purpose — the graph's benefit is a hypothesis
-until something measures it, and the set now exists to test it. Remaining:
+### Measured result, and why `graph_fusion` should stay closed
 
-1. Run the harness against the live retrieval pipeline to record the **flat
-   baseline** (needs a running backend with the index; the harness takes any
-   `question -> answer` callable).
-2. Kùzu schema + ingestion from the daily `ura.go.ug` crawl.
-3. `tax_graph` MCP namespace (4 tools).
-4. Shadow-mode scoring behind `FLAG_TAX_GRAPH`.
-5. RRF fusion behind `FLAG_GRAPH_FUSION`, opened **only** if shadow precision
-   clears the ≥75% gate.
+| Set | Score | What it is worth |
+|---|---|---|
+| Flat-retrieval baseline | **0 / 12 (0%)** | A headline-rate answer of the shape retrieval produces. Fails every case. |
+| Authored golden set | **12 / 12 (100%)** | **Weak evidence.** Committed in #227 *before* any graph code — the strongest available protection against overfitting — but I then tuned the graph against it. A set its author has iterated on measures the tuning, not the capability. |
+| Held-out set, run once | **6 / 8 (75%)** | **The honest number.** Eight questions written after the graph was built, run once, never tuned against. Both misses shared one root cause — the entity linker required the noun "withholding" and missed *"what do I withhold"* and *"what is deducted"*, which is how taxpayers actually phrase it. |
+
+The gate in §7.2 was ≥75% shadow precision. The honest number sits
+**exactly on it, on eight cases** — which is not enough to open a flag
+that lets the graph reach a taxpayer's answer.
+
+**Recommendation: keep `FLAG_GRAPH_FUSION` closed.** Expand the
+multi-hop set with genuinely unseen taxpayer questions — ideally drawn
+from real traffic rather than authored — and re-measure. `FLAG_TAX_GRAPH`
+can open to a staff cohort first: those three tools are read-only,
+explicitly called, and their output is visibly attributed, so a wrong
+claim is inspectable rather than laundered into prose.
+
+### What Gap B still needs
+
+1. **Expand the golden set from real traffic.** The current 12 are
+   authored; the number that matters comes from questions nobody wrote
+   for the test.
+2. Record the flat baseline against a **live index** rather than the
+   keyword-shaped stand-in used here.
+3. Prose provisions extracted from the daily `ura.go.ug` crawl, behind
+   the human review queue — and linked to chunk ids, which is what makes
+   a genuine third RRF leg possible.
+4. Then, and only then, `FLAG_GRAPH_FUSION`.
 
 ### Findings from implementation
 
