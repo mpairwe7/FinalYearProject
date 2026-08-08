@@ -50,6 +50,10 @@ from .agents.patterns.en import (
     _GREETING_PHRASES,
     _GREETING_WORDS,
 )
+# Tier selection is pure policy over the supervisor's decision — no cloud
+# SDK, no key, no network — so unlike the rest of ``providers`` it is safe
+# to import at module scope.
+from .providers.routing import log_tier, select_tier
 from .cache import create_cache
 from .calculator_router import (
     NEXT_ACTIONS_BY_TOOL,
@@ -3686,6 +3690,24 @@ class ChatModel:
                     route_decision.confidence,
                     route_decision.reason,
                 )
+
+                # Capability tier for this turn.  The route decision is
+                # already made and costs nothing extra to reuse, so the
+                # tier is selected here and carried on the trace whether
+                # or not the flag is on — off, it reports T1, which is
+                # what the single configured model has always been.
+                tier_decision = select_tier(
+                    route_decision.route.value,
+                    confidence=route_decision.confidence,
+                    tool_count=len(route_decision.suggested_tools),
+                    locale=locale,
+                    escalation_reason=route_decision.reason,
+                    distress=detect_user_distress(rewritten) or "",
+                    enabled=flags.is_enabled("model_tiering"),
+                )
+                trace_ctx["model_tier"] = tier_decision.tier.value
+                trace_ctx["model_tier_reason"] = tier_decision.reason
+                log_tier("chat", tier_decision)
 
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
                 if route_decision.route == AgentRoute.GREET:
