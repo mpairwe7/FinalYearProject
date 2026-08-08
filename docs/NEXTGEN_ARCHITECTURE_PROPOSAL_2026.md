@@ -177,8 +177,8 @@ Proposed additions:
 
 | Namespace | Tools | Risk | Deployment | Rationale |
 |---|---|---|---|---|
-| **`tax_graph`** | `graph_lookup_provision`, `graph_trace_obligation`, `graph_explain_interaction`, `graph_effective_on` | low | in-process (embedded Kùzu) | Multi-hop statutory reasoning; ships inside the offline bundle |
-| **`tasks`** | `task_create`, `task_get`, `task_cancel` | medium | in-process, Postgres-backed | Long-running work: filing submission, OCR batches, graph extraction |
+| **`tax_graph`** ✅ | `graph_resolve_rate`, `graph_rate_history`, `graph_effective_on` | low | in-process (embedded, no DB) | **Built** — three tools, not four; see "Where the build departed". Multi-hop statutory reasoning; ships inside the offline bundle |
+| **`tasks`** ✅ | `task_create`, `task_get`, `task_cancel` | medium | in-process, Postgres/SQLite-backed | **Built.** Long-running work: filing submission, OCR batches, graph rebuild, bundle export |
 | **`ura_customs`** | `lookup_hs_code`, `tariff_line_for`, `declaration_status` | high | DMZ, separate server | Different data owner (Customs directorate); separate audit boundary |
 
 **Deployment principle.** A namespace moves out of process when it has a
@@ -818,6 +818,7 @@ new flags off and with them on.
 | **D** — numeric verification | ✅ **Done** | `app/agents/evaluator.py`: typed `Verdict`, `RevisionBudget`, deterministic recomputation through the MCP client. A rejected figure now gets **one budgeted revision** told the recomputed number, re-verified before publishing; a revision that does not fix it is discarded and the escalation stands. 52 tests. |
 | **B** — knowledge graph | 🟢 **Built** | `app/graph/` — 87 nodes, 153 edges projected from the effective-dated rate tables. `tax_graph` MCP namespace (3 tools). Shadow scoring + an authoritative-source retrieval leg behind `FLAG_GRAPH_FUSION`. 51 tests. **Two departures from this proposal — see below.** |
 | **Tiebreak** — supervisor LLM fallback | ✅ **Done** | `app/agents/tiebreak.py` replaces the documented no-op. Fires only below `SUPERVISOR_LLM_THRESHOLD` (0.70) — **5 of 36 golden-set cases**; cannot override or choose `ESCALATE`; fails open on every error path; cached on the normalized query. 32 tests. |
+| **Tasks** — long-running MCP work | ✅ **Done** | `tasks` namespace (3 tools) over a durable `mcp_tasks` table. Tenant-scoped idempotency enforced by a UNIQUE index, not just a pre-check; terminal states final; cross-tenant reads return "no such task". 25 tests. |
 
 ### Where the build departed from this proposal
 

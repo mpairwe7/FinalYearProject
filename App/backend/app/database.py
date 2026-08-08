@@ -394,6 +394,40 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_episodic_topic
             ON episodic_summaries(user_id, topic_tag);
 
+        -- Long-running MCP work.  The 2026-07-28 protocol is stateless —
+        -- no session, any request may land on any replica — so work that
+        -- outlives one request cannot hold a connection and must be
+        -- addressable by id from anywhere.  That is what this table is:
+        -- the state a `tasks/get` poll reads, not a job queue.
+        CREATE TABLE IF NOT EXISTS mcp_tasks (
+            id             TEXT PRIMARY KEY,
+            tenant_id      TEXT NOT NULL DEFAULT 'default',
+            user_id        TEXT DEFAULT '',
+            kind           TEXT NOT NULL,
+            status         TEXT NOT NULL
+                           CHECK(status IN ('pending','running','succeeded','failed','cancelled'))
+                           DEFAULT 'pending',
+            progress       REAL NOT NULL DEFAULT 0.0,
+            args_json      TEXT DEFAULT '{}',
+            result_json    TEXT DEFAULT '{}',
+            error          TEXT DEFAULT '',
+            -- Tenant-scoped, matching the MCP client's replay cache: a
+            -- retried submission must return the first task rather than
+            -- start a second, and two tenants must never collide on the
+            -- same caller-chosen key.
+            --
+            -- NULL, not '', when the caller supplies no key. Both SQLite
+            -- and Postgres treat NULLs as distinct in a UNIQUE index, so
+            -- unkeyed tasks coexist; an empty string would make them all
+            -- collide on ('default','') and allow exactly one per tenant.
+            idempotency_key TEXT DEFAULT NULL,
+            created_at     REAL NOT NULL,
+            updated_at     REAL NOT NULL,
+            UNIQUE(tenant_id, idempotency_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mcp_tasks_status
+            ON mcp_tasks(tenant_id, status, created_at);
+
         CREATE TABLE IF NOT EXISTS audit_events (
             event_id     TEXT PRIMARY KEY,
             event_type   TEXT NOT NULL,
@@ -1249,6 +1283,169 @@ def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
         (conversation_id,),
     ).fetchone()
     return _hydrate_ticket(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Long-running MCP tasks
+# ---------------------------------------------------------------------------
+#: Statuses a task can no longer move out of.
+TASK_TERMINAL = ("succeeded", "failed", "cancelled")
+
+
+def create_task(
+    kind: str,
+    args: dict[str, Any] | None = None,
+    *,
+    tenant_id: str = "default",
+    user_id: str = "",
+    idempotency_key: str = "",
+) -> dict[str, Any]:
+    """Create a task, or return the existing one for *idempotency_key*.
+
+    Returning the existing task rather than raising is the whole point:
+    a retried filing submission must observe the first attempt, not
+    start a second. The check is a read before the insert *and* a
+    recovery on the unique-constraint violation, because two replicas
+    can pass the read at the same time — the index is what actually
+    enforces it.
+    """
+    key = idempotency_key.strip() or None
+    if key:
+        existing = query_one(
+            "SELECT * FROM mcp_tasks WHERE tenant_id = ? AND idempotency_key = ?",
+            (tenant_id, key),
+        )
+        if existing:
+            return _task_row(existing, replayed=True)
+
+    task_id = str(uuid.uuid4())
+    now = time.time()
+    try:
+        execute(
+            """INSERT INTO mcp_tasks (id, tenant_id, user_id, kind, status, progress,
+                                      args_json, idempotency_key, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'pending', 0.0, ?, ?, ?, ?)""",
+            (task_id, tenant_id, user_id, kind, json.dumps(args or {}), key, now, now),
+        )
+    except Exception:
+        # Lost the race on the unique index — the winner's task is the
+        # answer, and it is the same answer this call would have given.
+        if key:
+            existing = query_one(
+                "SELECT * FROM mcp_tasks WHERE tenant_id = ? AND idempotency_key = ?",
+                (tenant_id, key),
+            )
+            if existing:
+                return _task_row(existing, replayed=True)
+        raise
+    return _task_row(
+        query_one("SELECT * FROM mcp_tasks WHERE id = ?", (task_id,)) or {}
+    )
+
+
+def get_task(task_id: str, *, tenant_id: str = "default") -> dict[str, Any] | None:
+    """Fetch a task, scoped to its tenant.
+
+    The tenant is part of the lookup, not a check afterwards: a task id
+    is a bearer token to whoever holds it, and cross-tenant reads are
+    the failure mode that matters here.
+    """
+    row = query_one(
+        "SELECT * FROM mcp_tasks WHERE id = ? AND tenant_id = ?", (task_id, tenant_id)
+    )
+    return _task_row(row) if row else None
+
+
+def update_task(
+    task_id: str,
+    *,
+    tenant_id: str = "default",
+    status: str | None = None,
+    progress: float | None = None,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> dict[str, Any] | None:
+    """Advance a task. Terminal states are final.
+
+    A task that has already succeeded, failed or been cancelled cannot
+    be moved again — otherwise a late worker could overwrite a
+    cancellation the taxpayer already saw acted on.
+    """
+    current = get_task(task_id, tenant_id=tenant_id)
+    if current is None:
+        return None
+    if current["status"] in TASK_TERMINAL:
+        return current
+
+    sets, params = ["updated_at = ?"], [time.time()]
+    if status is not None:
+        sets.append("status = ?")
+        params.append(status)
+    if progress is not None:
+        sets.append("progress = ?")
+        params.append(max(0.0, min(1.0, float(progress))))
+    if result is not None:
+        sets.append("result_json = ?")
+        params.append(json.dumps(result))
+    if error is not None:
+        sets.append("error = ?")
+        params.append(error)
+    params.extend([task_id, tenant_id])
+    execute(
+        f"UPDATE mcp_tasks SET {', '.join(sets)} WHERE id = ? AND tenant_id = ?",
+        tuple(params),
+    )
+    return get_task(task_id, tenant_id=tenant_id)
+
+
+def cancel_task(task_id: str, *, tenant_id: str = "default") -> dict[str, Any] | None:
+    """Cancel a task that has not already finished."""
+    return update_task(task_id, tenant_id=tenant_id, status="cancelled")
+
+
+def list_tasks(
+    *, tenant_id: str = "default", status: str = "", limit: int = 50
+) -> list[dict[str, Any]]:
+    """Recent tasks for a tenant, newest first."""
+    limit = max(1, min(int(limit), 200))
+    if status:
+        rows = query_all(
+            """SELECT * FROM mcp_tasks WHERE tenant_id = ? AND status = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (tenant_id, status, limit),
+        )
+    else:
+        rows = query_all(
+            "SELECT * FROM mcp_tasks WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
+            (tenant_id, limit),
+        )
+    return [_task_row(r) for r in rows]
+
+
+def _task_row(row: dict[str, Any], *, replayed: bool = False) -> dict[str, Any]:
+    """Normalise a DB row into the shape the MCP tool returns."""
+    if not row:
+        return {}
+    out = {
+        "task_id": row.get("id", ""),
+        "kind": row.get("kind", ""),
+        "status": row.get("status", "pending"),
+        "progress": float(row.get("progress") or 0.0),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+    for field, target in (("args_json", "args"), ("result_json", "result")):
+        raw = row.get(field) or "{}"
+        try:
+            out[target] = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except (ValueError, TypeError):
+            out[target] = {}
+    if row.get("error"):
+        out["error"] = row["error"]
+    if replayed:
+        out["replayed"] = True
+    return out
+
 
 
 def get_ticket(ticket_id: str) -> dict[str, Any] | None:
