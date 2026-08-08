@@ -45,6 +45,21 @@ for loc, cases in GOLDEN_SETS.items():
 ../../.venv/bin/python -m pytest tests/ -q 2>&1 | tail -1
 ```
 
+**Run the suite with the new flags ON as well as off.** Flags default to off,
+so a green suite proves only that the change is inert. Turning them on is what
+catches behaviour that exists only when the feature is live:
+
+```bash
+FLAG_MULTILINGUAL_ROUTING=true FLAG_MODEL_TIERING=true \
+FLAG_EVALUATOR_OPTIMIZER=true FLAG_SUPERVISOR_LLM_TIEBREAK=true \
+  ../../.venv/bin/python -m pytest tests/ -q 2>&1 | tail -3
+```
+
+Watch the **runtime**, not only the pass count. A suite that jumps from 37s to
+229s is telling you something reached the network or loaded a model that should
+not have — that is exactly how the LLM tiebreak was caught breaking
+`run_routing_eval`'s documented "deterministic and offline" guarantee.
+
 Add a probe for whatever the change touched — rate tables via
 `app.tax.tables.list_fiscal_years()`, MCP protocol version from
 `app/mcp/`, model ids from `app/providers/routing.py`.

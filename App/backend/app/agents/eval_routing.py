@@ -212,7 +212,11 @@ def run_routing_eval(
     correct = 0
 
     for query, expected_route, expected_tool in cases:
-        decision = supervisor.classify(query, locale=locale)
+        # Rules only. This harness measures rule coverage and claims to
+        # be deterministic and offline — both stop being true the moment
+        # the LLM tiebreak can fire, which it does on exactly the
+        # fall-through cases this set is meant to pin.
+        decision = supervisor.classify(query, locale=locale, allow_tiebreak=False)
         bucket = by_route.setdefault(expected_route.value, {"total": 0, "correct": 0})
         bucket["total"] += 1
 

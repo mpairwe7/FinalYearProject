@@ -179,7 +179,7 @@ class DistributionTests(unittest.TestCase):
     def _tiers_over_golden_set(self) -> list[ModelTier]:
         tiers = []
         for query, _route, _tool in GOLDEN_SET:
-            decision = supervisor.classify(query)
+            decision = supervisor.classify(query, allow_tiebreak=False)
             tiers.append(
                 select_tier(
                     decision.route.value,
@@ -217,7 +217,7 @@ class SupervisorIntegrationTests(unittest.TestCase):
     def test_luganda_escalation_routes_and_pins(self) -> None:
         """End to end: Phase 1 routes it, Phase 2 keeps it on its adapter."""
         with mock.patch.dict(os.environ, {"FLAG_MULTILINGUAL_ROUTING": "true"}):
-            route = supervisor.classify("Njagala okwogera n'omuntu", locale="lg")
+            route = supervisor.classify("Njagala okwogera n'omuntu", locale="lg", allow_tiebreak=False)
         decision = select_tier(
             route.route.value, escalation_reason=route.reason, locale="lg"
         )

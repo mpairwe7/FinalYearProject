@@ -99,6 +99,8 @@ class Supervisor:
         query: str,
         has_conversation_history: bool = False,
         locale: str = "en",
+        *,
+        allow_tiebreak: bool = True,
     ) -> RouteDecision:
         """Return a :class:`RouteDecision` for *query*.
 
@@ -109,6 +111,12 @@ class Supervisor:
         *locale* selects the pattern tables.  It defaults to English and
         falls back to English for any locale without tables, so every
         existing caller keeps its current behaviour.
+
+        *allow_tiebreak* is the escape hatch for callers that must stay
+        offline — the routing eval measures rule coverage and says it is
+        deterministic, which stops being true the moment a model can be
+        consulted.  Set it False and the decision is pure rules however
+        the flag is set.
         """
         q = (query or "").strip()
         if not q:
@@ -263,11 +271,27 @@ class Supervisor:
             )
 
         # 7. Default: factual URA question → RAG path (existing pipeline)
-        return RouteDecision(
+        fallthrough = RouteDecision(
             route=AgentRoute.RAG,
             reason="default factual query",
             confidence=0.6,
         )
+        if not allow_tiebreak:
+            return fallthrough
+        return self._maybe_tiebreak(q, fallthrough)
+
+    def _maybe_tiebreak(self, query: str, decision: RouteDecision) -> RouteDecision:
+        """Ask a model when the rules were unsure, if the flag allows it.
+
+        Imported lazily and behind the flag so the default path stays
+        what it has always been: pure Python, no network, no model load.
+        A closed flag must not cost an import.
+        """
+        if decision.confidence >= 0.7 or not flags.is_enabled("supervisor_llm_tiebreak"):
+            return decision
+        from .tiebreak import refine
+
+        return refine(query, decision)
 
     def describe(self, locale: str = "en") -> dict[str, int]:
         """Return counts of registered patterns for introspection."""

@@ -815,8 +815,9 @@ new flags off and with them on.
 | **E** — cohort-addressable flags | ✅ **Done** | `Rollout` (percent / cohort / allowlist), SHA-256 bucketing, `FLAG_<N>_PERCENT\|_COHORTS\|_ALLOWLIST` env ramp, `variant_for()`, `describe()`. `is_enabled(name)` unchanged for all ~60 call sites. 31 tests. |
 | **C** — multilingual routing | ✅ **Done** | `app/agents/patterns/` (`en` verbatim + `lg`/`nyn`/`ach`), locale plumbed through service, graph and voice planner. Luganda golden set **23/23**; English holds **36/36**. `locale_gate()` refuses non-corpus-backed locales. 28 tests. |
 | **A** — model tiering | ✅ **Done** | `ModelTier`/`MODEL_SLOTS`/`select_tier()` in `providers/routing.py`, keyed on the existing `RouteDecision`. Promotion-only; T1 pinned for adapter-bound locales; T3 budget cap. Wired into the service trace + `model_tier_total`. 32 tests. |
-| **D** — numeric verification | ✅ **Done** | `app/agents/evaluator.py`: typed `Verdict`, `RevisionBudget`, deterministic recomputation through the MCP client, escalation on confirmed mismatch. Wired into the grounding stage. 44 tests. |
+| **D** — numeric verification | ✅ **Done** | `app/agents/evaluator.py`: typed `Verdict`, `RevisionBudget`, deterministic recomputation through the MCP client. A rejected figure now gets **one budgeted revision** told the recomputed number, re-verified before publishing; a revision that does not fix it is discarded and the escalation stands. 52 tests. |
 | **B** — knowledge graph | 🟡 **Measurement only** | `app/agents/eval_multihop.py`: 12-case golden set across 6 join kinds and 2 fiscal years, tied to the live rate tables so a rate change breaks it. Harness + baseline discrimination tests. 22 tests. **The graph itself is not built.** |
+| **Tiebreak** — supervisor LLM fallback | ✅ **Done** | `app/agents/tiebreak.py` replaces the documented no-op. Fires only below `SUPERVISOR_LLM_THRESHOLD` (0.70) — **5 of 36 golden-set cases**; cannot override or choose `ESCALATE`; fails open on every error path; cached on the normalized query. 32 tests. |
 
 ### What Gap B still needs
 
@@ -853,6 +854,14 @@ Four things the code disagreed with, or added to, the proposal above:
 - **`known_rate_keys()` lists scalars only**; the PAYE bands are lists. The
   golden-set consistency check validates against the table for the year each
   question is *about*, which also catches a key that exists in a different year.
+- **Enabling the tiebreak silently broke the routing eval's offline guarantee.**
+  `run_routing_eval` documents itself as "deterministic and offline" and runs in
+  CI on every change. With `FLAG_SUPERVISOR_LLM_TIEBREAK` on, its fall-through
+  cases each attempted a real model load — the backend suite went from 37s to
+  **229s**, and the accuracy it reported would no longer have been a property of
+  the rules at all. `classify()` gained an `allow_tiebreak` escape hatch and the
+  harness passes `False`. Found only by running the suite with every flag on,
+  which is now part of the verification routine rather than a spot check.
 
 ---
 

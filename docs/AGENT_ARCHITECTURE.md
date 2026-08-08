@@ -210,12 +210,30 @@ actually does rather than what it did:
 Both remaining rows still produce correct, cited answers — just through
 retrieval rather than a calculator.
 
-The LLM classifier that would close them is **not implemented**:
-`Supervisor.classify` is pure rules, and the `SUPERVISOR_LLM_THRESHOLD`
-fallback described in the module docstring is a documented no-op with no
-function behind it. It is registered as `FLAG_SUPERVISOR_LLM_TIEBREAK`
-(default off) and costs ~300 ms per invocation when built, so it should
-fire only on the low-confidence slice rather than on every request.
+The LLM classifier that would close them landed in #230 as
+`agents/tiebreak.py`, behind `FLAG_SUPERVISOR_LLM_TIEBREAK` (default
+off). Its blast radius is measured, not assumed:
+
+- It fires **only below `SUPERVISOR_LLM_THRESHOLD`** (default 0.70).
+  Rule confidences run 0.6 (fall-through) → 0.78 (customs) → 0.92
+  (calculation) → 0.95 (escalation) → 1.0 (greeting), so at the default
+  the model sees the fall-through cases and nothing else. On the English
+  golden set that is **5 of 36 cases (14%)**; the other 31 never reach a
+  model.
+- It **cannot override an escalation, a greeting, or blocked input**, and
+  it cannot *choose* `ESCALATE` — raising a ticket on a vague question
+  would send routine traffic to staff.
+- It **fails open**. No model, a timeout, unparseable output, or an
+  invented route name all return the rule decision unchanged; a
+  classifier that can break routing is worse than no classifier.
+- A changed decision carries `confidence=0.65`, below every matched-rule
+  confidence, so an inferred route never outranks a stated one — which
+  matters because tier selection reads that number.
+- Classifications are cached on the normalized query (case, whitespace,
+  trailing punctuation), bounded at 512 entries.
+
+The supervisor stays pure Python on the default path: the module is
+imported lazily inside the flag check, so a closed flag costs nothing.
 
 ### Adding a new route — the 2-step recipe
 
@@ -562,7 +580,7 @@ integrations haven't been built yet:
 | G14 — Notifications | ⚪ Scheduler for deadline reminders via email / SMS / in-app.  Phase 20 (scaffolded). |
 | G16 — Knowledge graph | 🟡 **Measurement landed (#227)** — `agents/eval_multihop.py` holds the 12-case multi-hop golden set, tied to the live rate tables.  The graph itself is not built; `FLAG_TAX_GRAPH` / `FLAG_GRAPH_FUSION` are registered and off. |
 | G18 — Multilingual | 🟡 **Routing landed (#224)** — locale-keyed supervisor tables (`agents/patterns/`), Luganda 23/23 with `FLAG_MULTILINGUAL_ROUTING` on.  Retrieval is still English-indexed. |
-| G21 — Self-correction | 🟡 **Verification landed (#226)** — `agents/evaluator.py` recomputes money answers deterministically and escalates a confirmed mismatch.  `RevisionBudget` exists but nothing calls it yet. |
+| G21 — Self-correction | 🟢 **Landed (#226, #229)** — `agents/evaluator.py` recomputes money answers deterministically; a rejected figure gets one budgeted revision that is told the recomputed number, and the revision is re-verified before it is published.  A revision that does not fix the figure is discarded and the escalation stands. |
 | G22 — Specialist prompts | 🟢 **Landed (#218)** — `agents/prompts.py` gives `tax_specialist`, `customs_specialist` and `tool_specialist` their own instructions, appended to the shared base prompt so safety rules stay first. |
 | G26 — A/B testing | 🟡 **Targeting landed (#223)** — `flags.py` carries percentage / cohort / allowlist rollout with stable bucketing.  The variant is not yet persisted per conversation. |
 | G32 — HITL staff UI | 🟢 **Landed (#215)** — `App/frontend/src/app/admin/tickets/page.tsx`, with live escalation events pushed to staff (#217). |

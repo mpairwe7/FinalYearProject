@@ -59,7 +59,9 @@ class EnglishIsUnchangedTests(unittest.TestCase):
         with _multilingual_on():
             for query, expected, _tool in GOLDEN_SET:
                 self.assertEqual(
-                    supervisor.classify(query, locale="lg").route, expected, query
+                    supervisor.classify(query, locale="lg", allow_tiebreak=False).route,
+                    expected,
+                    query,
                 )
 
     def test_unknown_locale_falls_back_to_english(self) -> None:
@@ -79,12 +81,16 @@ class FlagGateTests(unittest.TestCase):
     def test_flag_off_classifies_luganda_against_english(self) -> None:
         """Off, the locale argument must have no effect at all."""
         with mock.patch.dict(os.environ, {"FLAG_MULTILINGUAL_ROUTING": "false"}):
-            decision = supervisor.classify("Njagala okwogera n'omuntu", locale="lg")
+            decision = supervisor.classify(
+                "Njagala okwogera n'omuntu", locale="lg", allow_tiebreak=False
+            )
         self.assertEqual(decision.route, AgentRoute.RAG)
 
     def test_flag_on_routes_luganda(self) -> None:
         with _multilingual_on():
-            decision = supervisor.classify("Njagala okwogera n'omuntu", locale="lg")
+            decision = supervisor.classify(
+                "Njagala okwogera n'omuntu", locale="lg", allow_tiebreak=False
+            )
         self.assertEqual(decision.route, AgentRoute.ESCALATE)
 
 
@@ -104,7 +110,7 @@ class LugandaRoutingTests(unittest.TestCase):
                 "Njagala omuntu annyambe",
             ):
                 self.assertEqual(
-                    supervisor.classify(query, locale="lg").route,
+                    supervisor.classify(query, locale="lg", allow_tiebreak=False).route,
                     AgentRoute.ESCALATE,
                     query,
                 )
@@ -112,14 +118,18 @@ class LugandaRoutingTests(unittest.TestCase):
     def test_objection_escalates(self) -> None:
         with _multilingual_on():
             decision = supervisor.classify(
-                "Nkola ntya okuwakanya assessment y'omusolo?", locale="lg"
+                "Nkola ntya okuwakanya assessment y'omusolo?",
+                locale="lg",
+                allow_tiebreak=False,
             )
         self.assertEqual(decision.route, AgentRoute.ESCALATE)
 
     def test_meka_without_an_amount_is_a_rate_lookup(self) -> None:
         """"How much is VAT" has nothing for a calculator to calculate."""
         with _multilingual_on():
-            decision = supervisor.classify("Omusolo gwa VAT gw'ameka mu Uganda?", locale="lg")
+            decision = supervisor.classify(
+                "Omusolo gwa VAT gw'ameka mu Uganda?", locale="lg", allow_tiebreak=False
+            )
         self.assertEqual(decision.route, AgentRoute.TOOLS)
         self.assertIn("lookup_rate", decision.suggested_tools)
         self.assertNotIn("calculate_vat", decision.suggested_tools)
@@ -127,7 +137,7 @@ class LugandaRoutingTests(unittest.TestCase):
     def test_meka_with_an_amount_is_a_calculation(self) -> None:
         """And this one is routed by the pre-existing numeric path."""
         with _multilingual_on():
-            decision = supervisor.classify("VAT ku 500000 y'emeka?", locale="lg")
+            decision = supervisor.classify("VAT ku 500000 y'emeka?", locale="lg", allow_tiebreak=False)
         self.assertEqual(decision.route, AgentRoute.TOOLS)
         self.assertIn("calculate_vat", decision.suggested_tools)
 
@@ -138,7 +148,7 @@ class LugandaRoutingTests(unittest.TestCase):
         keys on the English tax noun, so this already routed under the
         English tables alone.
         """
-        decision = supervisor.classify("VAT ku 500000 y'emeka?", locale="en")
+        decision = supervisor.classify("VAT ku 500000 y'emeka?", locale="en", allow_tiebreak=False)
         self.assertEqual(decision.route, AgentRoute.TOOLS)
         self.assertIn("calculate_vat", decision.suggested_tools)
 
@@ -154,25 +164,29 @@ class LugandaRoutingTests(unittest.TestCase):
                 "Bwe nsazaamu obutaggya return y'omusolo, kiki ekibaawo?",
             ):
                 self.assertEqual(
-                    supervisor.classify(query, locale="lg").route, AgentRoute.RAG, query
+                    supervisor.classify(query, locale="lg", allow_tiebreak=False).route,
+                    AgentRoute.RAG,
+                    query,
                 )
 
     def test_postposed_kye_ki_is_a_learning_intent(self) -> None:
         with _multilingual_on():
-            decision = supervisor.classify("Withholding tax kye ki?", locale="lg")
+            decision = supervisor.classify("Withholding tax kye ki?", locale="lg", allow_tiebreak=False)
         self.assertEqual(decision.route, AgentRoute.TOOLS)
         self.assertIn("explain_tax_concept", decision.suggested_tools)
 
     def test_bare_ki_asks_for_clarification_not_a_greeting(self) -> None:
         with _multilingual_on():
-            decision = supervisor.classify("ki", locale="lg")
+            decision = supervisor.classify("ki", locale="lg", allow_tiebreak=False)
         self.assertEqual(decision.route, AgentRoute.CLARIFY)
 
     def test_luganda_greetings(self) -> None:
         with _multilingual_on():
             for query in ("oli otya", "wasuze otya", "gyebale"):
                 self.assertEqual(
-                    supervisor.classify(query, locale="lg").route, AgentRoute.GREET, query
+                        supervisor.classify(query, locale="lg", allow_tiebreak=False).route,
+                    AgentRoute.GREET,
+                    query,
                 )
 
     def test_obudde_is_not_a_date_question(self) -> None:
@@ -180,7 +194,7 @@ class LugandaRoutingTests(unittest.TestCase):
         with _multilingual_on():
             decision = supervisor.classify(
                 "Kiki ekibaawo bw'osasula omusolo nga wayiise obudde?", locale="lg"
-            )
+            , allow_tiebreak=False)
         self.assertNotIn("get_current_date", decision.suggested_tools)
 
 
@@ -213,7 +227,7 @@ class CorpusCoverageTests(unittest.TestCase):
                     continue
                 question = json.loads(line)["question"]
                 self.assertEqual(
-                    supervisor.classify(question, locale="lg").route,
+                    supervisor.classify(question, locale="lg", allow_tiebreak=False).route,
                     expected[question],
                     question,
                 )
@@ -253,7 +267,9 @@ class AcholiCollisionTests(unittest.TestCase):
         the locale least able to notice the answer is off-topic.
         """
         with _multilingual_on():
-            decision = supervisor.classify("How do I get a TIN?", locale="ach")
+            decision = supervisor.classify(
+                "How do I get a TIN?", locale="ach", allow_tiebreak=False
+            )
         self.assertNotIn("get_current_date", decision.suggested_tools)
 
 
