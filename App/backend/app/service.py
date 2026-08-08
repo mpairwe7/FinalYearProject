@@ -43,6 +43,8 @@ from . import database as db
 from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
+from .agents.evaluator import evaluate
+from .analytics import metrics
 from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.patterns.en import (
     _FAREWELL_PHRASES,
@@ -2304,6 +2306,46 @@ class ChatModel:
         out["reply"] = self._finalize_reply(str(out.get("reply", "")))
         return out
 
+    @staticmethod
+    def _recompute_for_verification(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Re-run a calculator through MCP for the numeric verifier.
+
+        Deliberately goes through :class:`app.mcp.MCPClient` rather than
+        calling the calculator directly: the verification must exercise
+        the same routing, authorization and validation the agent's own
+        call did, or it is checking a different code path than the one
+        that produced the answer.
+
+        Runs as ``public`` with no consent grants — every calculator is
+        ``read_only`` and ``low`` risk, so verification cannot reach a
+        tool the taxpayer's own turn could not.
+        """
+        from .mcp import get_client
+
+        result = get_client().call_tool(tool, arguments, user_role="public")
+        payload = getattr(result, "result", None)
+        return payload if isinstance(payload, dict) else {"ok": False}
+
+    @staticmethod
+    def _escalate_on_numeric_mismatch(
+        verification: dict[str, Any] | None,
+        escalate: bool,
+        reason: str,
+    ) -> tuple[bool, str]:
+        """Escalate when a figure disagrees with its own calculator.
+
+        Only on a *confirmed* mismatch. A check that could not run —
+        the question was not a calculation, an input was missing, the
+        transport was down — leaves the answer exactly as it was;
+        treating "unverified" as "wrong" would escalate most of the
+        traffic and teach staff to ignore the queue.
+        """
+        if not verification:
+            return escalate, reason
+        if "numerically_consistent" in (verification.get("failures") or []):
+            return True, "Stated figure disagrees with the calculator that produced it"
+        return escalate, reason
+
     def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:
         """Inject high-precision FAQ hits for common procedures that reranking can miss."""
         if not _TIN_REGISTRATION_QUERY_RE.search(query):
@@ -4268,8 +4310,44 @@ class ChatModel:
                     if reflect_fired:
                         trace_ctx["self_reflected"] = True
 
+            # 7c. Deterministic verification of money answers.
+            #
+            #     Self-reflection above is a model grading its own output
+            #     against a faithfulness score; it catches ungrounded
+            #     prose and misses arithmetic. Whether a figure is right
+            #     is not a judgement call, so this re-derives it through
+            #     the same calculator the agent would have used and
+            #     compares it against what the reply actually printed.
+            #     No model, no tokens — and it can reject on its own.
+            if flags.is_enabled("evaluator_optimizer") and reply:
+                with trace_stage("numeric_verification", timings=timings):
+                    verdict = evaluate(
+                        rewritten,
+                        reply,
+                        call_tool=self._recompute_for_verification,
+                        faithfulness=faithfulness_score,
+                    )
+                trace_ctx["numeric_verification"] = {
+                    "accepted": verdict.accepted,
+                    "failures": verdict.failures(),
+                    "unverified": list(verdict.unverified),
+                }
+                if not verdict.numerically_consistent:
+                    # A figure that disagrees with its own calculator is
+                    # the one error a taxpayer will act on. Escalate
+                    # rather than print it.
+                    logger.warning(
+                        "numeric verification rejected the reply: %s",
+                        verdict.detail.get("money", {}).get("reason", ""),
+                    )
+                    metrics.inc("numeric_verification_rejected_total")
+
             # 8. Escalation check
             escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
+            if flags.is_enabled("evaluator_optimizer") and not escalate:
+                escalate, esc_reason = self._escalate_on_numeric_mismatch(
+                    trace_ctx.get("numeric_verification"), escalate, esc_reason
+                )
             claim_report = None
             # An extractive fallback is copied from the selected cited FAQ
             # answer, so lexical claim verification would incorrectly label
