@@ -44,7 +44,7 @@ from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
 from .escalation_notify import notify_ticket_created, team_for_topic
-from .agents.supervisor import (
+from .agents.patterns.en import (
     _FAREWELL_PHRASES,
     _GRATITUDE_PHRASES,
     _GREETING_PHRASES,
@@ -3672,6 +3672,7 @@ class ChatModel:
                     route_decision = supervisor.classify(
                         rewritten,
                         has_conversation_history=bool(conversation_history),
+                        locale=locale,
                     )
                 trace_ctx["agent_route"] = route_decision.route.value
                 trace_ctx["agent_route_confidence"] = (
@@ -4673,6 +4674,7 @@ class ChatModel:
             route_decision = supervisor.classify(
                 rewritten,
                 has_conversation_history=bool(conversation_history),
+                locale=locale,
             )
             if route_decision.route == AgentRoute.CLARIFY:
                 return {

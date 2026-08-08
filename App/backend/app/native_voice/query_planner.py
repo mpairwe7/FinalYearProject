@@ -128,7 +128,7 @@ class QueryPlanner:
         # Supervisor classification (rule-based, < 1ms)
         from ..agents.state import AgentRoute
 
-        decision = self._supervisor.classify(text, has_conversation_history)
+        decision = self._supervisor.classify(text, has_conversation_history, locale=locale)
 
         if decision.route == AgentRoute.GREET and decision.confidence >= 0.85:
             return PathDecision(
