@@ -1,27 +1,42 @@
-"""Tiny env-backed feature flag registry.
+"""Env-backed feature flag registry with cohort-addressable rollout.
 
 2026 production pattern: feature flags let you roll out risky changes
-behind a switch without redeploying.  This module is deliberately
-*tiny* — it reads ``FLAG_*`` env vars into a registry on import, and
-exposes an ``is_enabled()`` helper that callers can use in hot paths.
+behind a switch without redeploying.  The core is deliberately *tiny* —
+it reads ``FLAG_*`` env vars into a registry on import, and exposes an
+``is_enabled()`` helper that callers can use in hot paths.
 
-For advanced use cases (per-user rollout, percentage splits, kill
-switches) wire an OpenFeature provider (Flagsmith, Unleash, LaunchDarkly)
-into ``_provider`` — the public API does not change.
+A boolean flag can only ship a change to *everyone* or to *no one*.
+That is not a rollout, and it is the thing that blocks piloting a
+change on 1% of traffic and expanding on evidence.  :class:`Rollout`
+adds the three addressing modes that matter — a percentage of subjects,
+named cohorts, and an explicit allowlist — while ``is_enabled(name)``
+keeps working unchanged for every existing caller.
 
 Usage::
 
     from .flags import flags
 
     if flags.is_enabled("self_reflect"):
-        ...  # new behaviour
+        ...                                  # global switch, as before
+
+    if flags.is_enabled("model_tiering", subject=user_id):
+        ...                                  # 5% of users, stably bucketed
+
+    if flags.is_enabled("tax_graph", subject=user_id, cohorts={"ura_staff"}):
+        ...                                  # staff first, then a percentage
+
+Ramping does not need a deploy.  ``FLAG_<NAME>_PERCENT``,
+``FLAG_<NAME>_COHORTS`` and ``FLAG_<NAME>_ALLOWLIST`` override whatever
+the registry declares, so 1% → 5% → 25% is an environment change on the
+running replicas.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 _PRODUCTION_ON_FLAGS = {
@@ -31,12 +46,64 @@ _PRODUCTION_ON_FLAGS = {
     "voice_consent",
 }
 
+#: Bucket resolution.  10,000 buckets gives percentages one decimal
+#: place, which is what a 0.5% canary needs.
+_BUCKETS = 10_000
+
+
+@dataclass(frozen=True)
+class Rollout:
+    """Who a flag is on for, when it is not simply on for everyone.
+
+    The three modes are checked in order of decreasing specificity —
+    allowlist, then cohort, then percentage — so naming a subject
+    explicitly always beats the dice.
+    """
+
+    #: Share of subjects, 0.0–100.0.  Bucketing is stable: a subject
+    #: stays on the same side of the split for the life of the flag.
+    percent: float = 0.0
+    #: Cohort labels (roles, tenants, "internal") that get the flag
+    #: regardless of their bucket.
+    cohorts: frozenset[str] = field(default_factory=frozenset)
+    #: Individual subject ids that get the flag regardless of bucket.
+    #: For smoke-testing in production against known accounts.
+    allowlist: frozenset[str] = field(default_factory=frozenset)
+
+    def is_addressed(self) -> bool:
+        """True if this rollout targets anyone at all."""
+        return bool(self.percent > 0 or self.cohorts or self.allowlist)
+
+
+def _bucket_of(flag_name: str, subject: str) -> int:
+    """Stable bucket in ``[0, _BUCKETS)`` for *subject* under *flag_name*.
+
+    Two properties this needs, and one trap it avoids.
+
+    **Stable across processes.**  Python's built-in ``hash()`` is salted
+    per interpreter (``PYTHONHASHSEED``), so it would put the same user
+    in different buckets on different replicas — the user would see the
+    feature flicker on and off depending on which pod served them.
+    SHA-256 is the same everywhere, forever.
+
+    **Independent per flag.**  The flag name is mixed into the digest so
+    a subject's bucket is uncorrelated across flags.  Hashing the
+    subject alone would put the same unlucky 1% into the leading edge of
+    *every* experiment, which correlates their results and makes each
+    one unmeasurable.
+    """
+    digest = hashlib.sha256(f"{flag_name}:{subject}".encode()).digest()
+    return int.from_bytes(digest[:8], "big") % _BUCKETS
+
 
 @dataclass(frozen=True)
 class Flag:
     name: str
     default: bool = False
     description: str = ""
+    #: Optional targeting.  ``None`` means the flag is global — its
+    #: value comes from the env var or the default, exactly as before.
+    rollout: Rollout | None = None
 
 
 # Canonical registry.  Add a new entry here (do not read env directly in
@@ -219,20 +286,136 @@ _REGISTRY: dict[str, Flag] = {
             "and adds an agentic event surface (tool_call.*, retrieval.*, "
             "response.cancel). SSE endpoint /v1/chat/stream stays unchanged.",
         ),
+        # Phase 30 (2026) — next-generation architecture increments.
+        # All default off and all subject-addressable, so each lands on a
+        # cohort before it lands on taxpayers.  See
+        # docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md §7.2 for the order
+        # these are meant to open in and the gate for each.
+        Flag(
+            "multilingual_routing",
+            False,
+            "Classify with locale-specific supervisor patterns (lg/nyn/ach) "
+            "instead of the English tables alone. Unknown locales still fall "
+            "back to English, so this cannot change an English decision.",
+        ),
+        Flag(
+            "supervisor_llm_tiebreak",
+            False,
+            "Ask a small model for a second opinion when rule confidence is "
+            "below SUPERVISOR_LLM_THRESHOLD, instead of accepting the "
+            "low-confidence rule decision.",
+        ),
+        Flag(
+            "model_tiering",
+            False,
+            "Select the generation model per turn from the supervisor's route "
+            "decision (T0 none / T1 8B / T2 30B-A3B / T3 235B-A22B) instead of "
+            "sending every query to the single configured model.",
+        ),
+        Flag(
+            "evaluator_optimizer",
+            False,
+            "Verify money-bearing answers by deterministic recomputation and "
+            "allow at most one bounded revision. Replaces the single "
+            "faithfulness-floor reflection pass on those turns.",
+        ),
+        Flag(
+            "tax_graph",
+            False,
+            "Load the effective-dated statutory knowledge graph and expose the "
+            "tax_graph MCP namespace. Read-only: does not affect retrieval "
+            "until graph_fusion is also on.",
+        ),
+        Flag(
+            "graph_fusion",
+            False,
+            "Fuse the graph retrieval leg into RRF alongside dense and BM25. "
+            "Requires tax_graph. Off means the graph is scored in shadow mode "
+            "without reaching any answer.",
+        ),
+        Flag(
+            "mcp_tasks",
+            False,
+            "Expose the tasks MCP namespace for long-running work "
+            "(filing submission, OCR batches, graph extraction) with durable "
+            "state and task.progress events over the WebSocket transport.",
+        ),
     ]
 }
+
+
+def _env_rollout(name: str, declared: Rollout | None) -> Rollout | None:
+    """Merge ``FLAG_<NAME>_*`` env overrides over the declared rollout.
+
+    Ramping a rollout must not require a deploy — that is most of the
+    point of having one.  An unset variable leaves the declared value
+    alone, so a registry rollout is the floor and the environment moves
+    it.
+    """
+    upper = name.upper()
+    raw_pct = os.getenv(f"FLAG_{upper}_PERCENT")
+    raw_cohorts = os.getenv(f"FLAG_{upper}_COHORTS")
+    raw_allow = os.getenv(f"FLAG_{upper}_ALLOWLIST")
+    if raw_pct is None and raw_cohorts is None and raw_allow is None:
+        return declared
+
+    base = declared or Rollout()
+    percent = base.percent
+    if raw_pct is not None:
+        try:
+            percent = max(0.0, min(100.0, float(raw_pct.strip().rstrip("%"))))
+        except ValueError:
+            # A malformed percentage must not silently mean 100%.  Keep
+            # the declared value and make the typo visible.
+            logger.warning("flag %s: bad FLAG_%s_PERCENT=%r, ignoring", name, upper, raw_pct)
+
+    def _split(raw: str | None, fallback: frozenset[str]) -> frozenset[str]:
+        if raw is None:
+            return fallback
+        return frozenset(p.strip() for p in raw.split(",") if p.strip())
+
+    return Rollout(
+        percent=percent,
+        cohorts=_split(raw_cohorts, base.cohorts),
+        allowlist=_split(raw_allow, base.allowlist),
+    )
 
 
 class FeatureFlags:
     def __init__(self) -> None:
         self._overrides: dict[str, bool] = {}
+        #: Flags already warned about for an unsubjected rollout check,
+        #: so a hot-path caller logs once rather than once per request.
+        self._warned_no_subject: set[str] = set()
 
-    def is_enabled(self, name: str) -> bool:
-        """Return True if the named flag is enabled.
+    def is_enabled(
+        self,
+        name: str,
+        *,
+        subject: str | None = None,
+        cohorts: frozenset[str] | set[str] | None = None,
+    ) -> bool:
+        """Return True if the named flag is enabled for this caller.
 
-        Resolution order: in-memory override > ``FLAG_<NAME>`` env var >
-        registry default.  Unknown flag names return False and log a
-        warning so typos surface quickly.
+        Resolution order, most decisive first:
+
+        1. **in-memory override** — the admin API and the kill switch;
+           beats everything, including a rollout, because it is how an
+           operator stops a bad release right now.
+        2. **``FLAG_<NAME>`` env var** — an explicit operator decision
+           for the whole replica, so it means *everyone*, not a share.
+        3. **production-on** — the safety flags that must not be a
+           percentage of anything.
+        4. **rollout** — allowlist, then cohort, then stable bucket.
+        5. **registry default**.
+
+        *subject* is the identity the percentage is bucketed on (a user
+        or tenant id).  Omitting it on a percentage-addressed flag falls
+        through to the default and logs once: a rollout that cannot see
+        who is asking has nothing to bucket.
+
+        Unknown flag names return False and log a warning so typos
+        surface quickly.
         """
         if name in self._overrides:
             return self._overrides[name]
@@ -246,7 +429,63 @@ class FeatureFlags:
         if os.getenv("APP_ENV", "development").lower() == "production":
             if name in _PRODUCTION_ON_FLAGS:
                 return True
+
+        rollout = _env_rollout(name, flag.rollout)
+        if rollout is not None and rollout.is_addressed():
+            decided = self._resolve_rollout(name, rollout, subject, cohorts)
+            if decided is not None:
+                return decided
+
         return flag.default
+
+    def _resolve_rollout(
+        self,
+        name: str,
+        rollout: Rollout,
+        subject: str | None,
+        cohorts: frozenset[str] | set[str] | None,
+    ) -> bool | None:
+        """Apply *rollout*, or return None to fall through to the default.
+
+        Returning None rather than False matters: a subject who is not
+        in the rollout should get the flag's *default*, which for a
+        production-on flag is True.  Collapsing "not targeted" into
+        "off" would let adding a 5% rollout silently disable a flag for
+        the other 95%.
+        """
+        if subject and subject in rollout.allowlist:
+            return True
+        if cohorts and rollout.cohorts and (set(cohorts) & rollout.cohorts):
+            return True
+        if rollout.percent <= 0:
+            return None
+        if not subject:
+            if name not in self._warned_no_subject:
+                self._warned_no_subject.add(name)
+                logger.warning(
+                    "flag %s has a percentage rollout but was checked without a "
+                    "subject — falling back to the default",
+                    name,
+                )
+            return None
+        if _bucket_of(name, subject) < rollout.percent * (_BUCKETS / 100):
+            return True
+        return None
+
+    def variant_for(
+        self,
+        name: str,
+        subject: str | None = None,
+        cohorts: frozenset[str] | set[str] | None = None,
+    ) -> str:
+        """Label this resolution for analytics: ``"on"`` or ``"off"``.
+
+        Experiments are only measurable if each conversation records
+        which side of the split served it.  Callers log this alongside
+        the turn so :mod:`app.evaluation` can report per variant instead
+        of averaging the two together.
+        """
+        return "on" if self.is_enabled(name, subject=subject, cohorts=cohorts) else "off"
 
     def set(self, name: str, enabled: bool) -> None:
         """Programmatic override (e.g. from an admin API).
@@ -262,7 +501,34 @@ class FeatureFlags:
         self._overrides.pop(name, None)
 
     def all(self) -> dict[str, bool]:
+        """Global resolution of every flag, with no subject.
+
+        A percentage-addressed flag reports its default here — this is
+        an introspection view of the replica, not of any one user.
+        """
         return {n: self.is_enabled(n) for n in _REGISTRY}
+
+    def describe(self, name: str) -> dict[str, object]:
+        """Registry entry plus effective rollout, for the admin surface."""
+        flag = _REGISTRY.get(name)
+        if flag is None:
+            raise KeyError(name)
+        rollout = _env_rollout(name, flag.rollout)
+        return {
+            "name": flag.name,
+            "default": flag.default,
+            "description": flag.description,
+            "overridden": name in self._overrides,
+            "rollout": (
+                {
+                    "percent": rollout.percent,
+                    "cohorts": sorted(rollout.cohorts),
+                    "allowlist_size": len(rollout.allowlist),
+                }
+                if rollout is not None and rollout.is_addressed()
+                else None
+            ),
+        }
 
 
 flags = FeatureFlags()
