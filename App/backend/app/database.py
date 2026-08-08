@@ -1377,23 +1377,39 @@ def update_task(
     if current["status"] in TASK_TERMINAL:
         return current
 
-    sets, params = ["updated_at = ?"], [time.time()]
-    if status is not None:
-        sets.append("status = ?")
-        params.append(status)
-    if progress is not None:
-        sets.append("progress = ?")
-        params.append(max(0.0, min(1.0, float(progress))))
-    if result is not None:
-        sets.append("result_json = ?")
-        params.append(json.dumps(result))
-    if error is not None:
-        sets.append("error = ?")
-        params.append(error)
-    params.extend([task_id, tenant_id])
+    # Every column is written every time, with the current value standing
+    # in for anything the caller did not pass. The SQL is therefore a
+    # constant.
+    #
+    # Assembling a SET list and joining it is the obvious way to write a
+    # partial update, and it is what this did first — but the resulting
+    # f-string reads as a SQL-injection sink to Bandit and CodeQL no
+    # matter that every fragment is a literal from three lines above.
+    # `providers.routing` already settled this argument for the codebase:
+    # prefer the shape static analysis can *prove* safe over the one that
+    # needs a reviewer to accept an argument about taint. The row is
+    # already loaded for the terminal-state check, so merging costs
+    # nothing.
+    new_status = current["status"] if status is None else status
+    new_progress = (
+        current["progress"] if progress is None else max(0.0, min(1.0, float(progress)))
+    )
+    new_result = current.get("result") or {} if result is None else result
+    new_error = current.get("error", "") if error is None else error
+
     execute(
-        f"UPDATE mcp_tasks SET {', '.join(sets)} WHERE id = ? AND tenant_id = ?",
-        tuple(params),
+        """UPDATE mcp_tasks
+              SET updated_at = ?, status = ?, progress = ?, result_json = ?, error = ?
+            WHERE id = ? AND tenant_id = ?""",
+        (
+            time.time(),
+            new_status,
+            new_progress,
+            json.dumps(new_result),
+            new_error,
+            task_id,
+            tenant_id,
+        ),
     )
     return get_task(task_id, tenant_id=tenant_id)
 
