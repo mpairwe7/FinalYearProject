@@ -132,6 +132,22 @@ class ProjectionFidelityTests(unittest.TestCase):
         for kind in ("applies_to", "supersedes", "imposed_by", "computed_on", "gates"):
             self.assertGreater(summary["by_edge_kind"].get(kind, 0), 0, kind)
 
+    def test_every_declared_node_kind_is_actually_built(self) -> None:
+        """The schema promises a closed vocabulary; keep it honest.
+
+        A kind declared but never created reads to a reviewer as a
+        capability the graph has. `OBLIGATION` sat in the enum unbuilt
+        until a verification sweep found it — the suite passed over it,
+        because nothing notices an enum member nobody constructs.
+        """
+        unbuilt = [k.value for k in NodeKind if not self.store.by_kind(k)]
+        self.assertEqual(unbuilt, [], f"declared but never built: {unbuilt}")
+
+    def test_every_declared_edge_kind_is_actually_built(self) -> None:
+        built = {e["kind"] for e in self.store.to_dict()["edges"]}
+        unbuilt = [k.value for k in EdgeKind if k.value not in built]
+        self.assertEqual(unbuilt, [], f"declared but never built: {unbuilt}")
+
 
 class StoreTests(unittest.TestCase):
     def _store(self) -> InMemoryGraphStore:

@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 #: the rate tables treat as current.
 DEFAULT_FY = "FY2026-27"
 
+#: Accuracy the graph must reach before ``FLAG_GRAPH_FUSION`` may open.
+#: Set in docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md §7.2.
+FUSION_GATE = 0.75
+
 
 def render(answer: Any) -> str:
     """Flatten a :class:`~app.graph.query.GraphAnswer` into scoreable text.
@@ -103,3 +107,33 @@ def score() -> dict[str, Any]:
 
     report = run_multihop_eval(graph_answer_for)
     return report.to_dict()
+
+
+def main() -> int:  # pragma: no cover - CLI
+    """Print the shadow score; non-zero exit below the fusion gate.
+
+    Reachable as ``python -m app.graph.shadow``, mirroring
+    ``app.agents.eval_routing``. This is the number the decision to open
+    ``FLAG_GRAPH_FUSION`` rests on, so it needs to be runnable by whoever
+    is making that decision rather than only from a test.
+    """
+    import json
+
+    report = score()
+    print(json.dumps(report, indent=2))
+    for miss in report.get("misses", []):
+        print(f"  MISS {miss}")
+    accuracy = report.get("accuracy", 0.0)
+    print(f"\naccuracy {accuracy:.0%} against a {FUSION_GATE:.0%} gate")
+    if accuracy < FUSION_GATE:
+        print("BELOW GATE — FLAG_GRAPH_FUSION must stay closed.")
+        return 1
+    print(
+        "At or above the gate on the authored set. That set has been tuned\n"
+        "against; expand it with unseen questions before opening fusion."
+    )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
