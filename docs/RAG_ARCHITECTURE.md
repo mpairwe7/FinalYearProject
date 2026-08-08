@@ -251,7 +251,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (18 flags, env-backed)
+├── flags.py             # Feature flag registry (45 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -461,6 +461,42 @@ All major subsystems are behind feature flags for progressive rollout:
 | `voice_enabled` | off | Mobile voice features |
 | `voice_streaming` | off | WebSocket streaming voice chat (VAD + barge-in) |
 | `voice_consent` | off | Enforce voice-specific consent checks |
+| `multilingual_routing` | off | Locale-specific supervisor patterns (lg/nyn/ach) |
+| `supervisor_llm_tiebreak` | off | Small-model second opinion on low-confidence routing |
+| `model_tiering` | off | Per-turn model tier (T0/T1/T2/T3) from the route decision |
+| `evaluator_optimizer` | off | Deterministic recomputation of money answers |
+| `tax_graph` | off | Load the statutory knowledge graph + `tax_graph` namespace |
+| `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
+| `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
+
+The table above lists the flags that gate a subsystem; `flags.py` holds
+**45** in total, including the per-phase switches for voice, offline and
+quantization. `flags.all()` is the authoritative list.
+
+### Addressable rollout
+
+A flag is not only on or off. `Rollout` targets a share of subjects, named
+cohorts, or an explicit allowlist, so a change can be piloted on 1% of traffic
+and widened on evidence:
+
+```python
+flags.is_enabled("model_tiering", subject=user_id)                  # percentage
+flags.is_enabled("tax_graph", subject=user_id, cohorts={"ura_staff"})
+```
+
+Bucketing is a SHA-256 of `flag_name:subject` — stable across replicas (unlike
+`hash()`, which is salted per interpreter) and uncorrelated between flags, so
+the same users do not lead every experiment. Ramping needs no deploy:
+
+```bash
+FLAG_MODEL_TIERING_PERCENT=25
+FLAG_TAX_GRAPH_COHORTS=ura_staff,internal
+FLAG_TAX_GRAPH_ALLOWLIST=tin-1001,tin-1002
+```
+
+A subject the rollout does not target falls through to the flag's **default**,
+not to off — otherwise adding a 5% rollout would silently disable the flag for
+the other 95%. `variant_for()` labels each resolution for per-variant reporting.
 
 ## Configuration Reference
 
