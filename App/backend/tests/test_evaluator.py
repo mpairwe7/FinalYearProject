@@ -388,3 +388,77 @@ class ServiceWiringTests(unittest.TestCase):
             "",
         )
         self.assertFalse(escalate)
+
+
+class RevisionWiringTests(unittest.TestCase):
+    """The revision path: budgeted, instructed, and re-verified.
+
+    The property that matters most is the last one. A revision that did
+    not fix the figure must not be published just because it is newer —
+    the budget is spent either way, so the only open question is which
+    of the two texts is right.
+    """
+
+    QUERY = "How much VAT on UGX 500,000?"
+
+    def test_the_revision_note_carries_the_recomputed_figure(self) -> None:
+        """An optimizer tells the reviser the answer; a retry does not."""
+        tool = _Recorder({"ok": True, "vat_amount": 90000.0})
+        verdict = evaluate(self.QUERY, "It is UGX 75,000. [1]", call_tool=tool)
+        self.assertIn("90,000", verdict.revision_note)
+        self.assertIn("calculate_vat", verdict.revision_note)
+
+    def test_a_revision_that_fixes_the_figure_re_verifies_clean(self) -> None:
+        tool = _Recorder({"ok": True, "vat_amount": 90000.0})
+        bad = evaluate(self.QUERY, "It is UGX 75,000. [1]", call_tool=tool)
+        self.assertFalse(bad.numerically_consistent)
+        good = evaluate(self.QUERY, "It is UGX 90,000. [1]", call_tool=tool)
+        self.assertTrue(good.numerically_consistent)
+        self.assertEqual(good.revision_note, "")
+
+    def test_a_revision_that_does_not_fix_it_still_fails(self) -> None:
+        """Newer text is not better text."""
+        tool = _Recorder({"ok": True, "vat_amount": 90000.0})
+        still_wrong = evaluate(self.QUERY, "Sorry — it is UGX 80,000. [1]", call_tool=tool)
+        self.assertFalse(still_wrong.numerically_consistent)
+
+    def test_only_one_revision_is_ever_affordable(self) -> None:
+        budget = RevisionBudget()
+        first, _ = budget.may_revise(carries_money=True, escalation_bound=False)
+        budget.spend()
+        second, why = budget.may_revise(carries_money=True, escalation_bound=False)
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertIn("budget spent", why)
+
+    def test_a_verified_answer_never_enters_the_revision_path(self) -> None:
+        tool = _Recorder({"ok": True, "vat_amount": 90000.0})
+        verdict = evaluate(self.QUERY, "It is UGX 90,000. [1]", call_tool=tool)
+        self.assertTrue(verdict.numerically_consistent)
+        self.assertEqual(verdict.revision_note, "")
+
+    def test_an_unverifiable_answer_never_enters_the_revision_path(self) -> None:
+        """Revising what could not be checked spends budget for nothing."""
+        tool = _Recorder({"ok": True})
+        verdict = evaluate("What is a TIN?", "A TIN identifies a taxpayer. [1]", call_tool=tool)
+        self.assertTrue(verdict.numerically_consistent)
+        self.assertIn("numerically_consistent", verdict.unverified)
+
+    def test_service_still_escalates_when_the_revision_fails(self) -> None:
+        """The escalation rule reads the post-revision verdict."""
+        from app.service import ChatModel
+
+        escalate, reason = ChatModel._escalate_on_numeric_mismatch(
+            {"accepted": False, "failures": ["numerically_consistent"], "unverified": []},
+            False,
+            "",
+        )
+        self.assertTrue(escalate)
+
+    def test_service_does_not_escalate_when_the_revision_succeeded(self) -> None:
+        from app.service import ChatModel
+
+        escalate, _reason = ChatModel._escalate_on_numeric_mismatch(
+            {"accepted": True, "failures": [], "unverified": []}, False, ""
+        )
+        self.assertFalse(escalate)

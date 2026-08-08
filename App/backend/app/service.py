@@ -43,7 +43,7 @@ from . import database as db
 from . import documents as documents_module
 from . import llm as llm_module
 from .agents import AgentRoute, supervisor
-from .agents.evaluator import evaluate
+from .agents.evaluator import RevisionBudget, evaluate
 from .analytics import metrics
 from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.patterns.en import (
@@ -4334,13 +4334,86 @@ class ChatModel:
                 }
                 if not verdict.numerically_consistent:
                     # A figure that disagrees with its own calculator is
-                    # the one error a taxpayer will act on. Escalate
-                    # rather than print it.
+                    # the one error a taxpayer will act on.
                     logger.warning(
                         "numeric verification rejected the reply: %s",
                         verdict.detail.get("money", {}).get("reason", ""),
                     )
                     metrics.inc("numeric_verification_rejected_total")
+
+                    # 7d. One bounded revision.
+                    #
+                    #     The evaluator knows the right figure — it just
+                    #     recomputed it — so the revision is told what to
+                    #     state rather than asked to think again. That is
+                    #     the difference between an optimizer and a retry:
+                    #     a critique the reviser has to interpret is a
+                    #     second chance to get it wrong.
+                    #
+                    #     Budgeted at one, on money-bearing turns only.
+                    #     Unbounded critique-revise is a cost incident
+                    #     with a quality story attached.
+                    budget = RevisionBudget()
+                    allowed, why = budget.may_revise(
+                        carries_money=True, escalation_bound=False
+                    )
+                    if allowed and self._llm_available:
+                        with trace_stage("numeric_revision", timings=timings):
+                            revised = _call_llm_with_deadline(
+                                query=(
+                                    f"{verdict.revision_note}\n\n"
+                                    f"Rewrite the answer below so it states that "
+                                    f"figure, keeping its citations and its "
+                                    f"structure. Change nothing else.\n\n"
+                                    f"Answer:\n{reply}\n\n"
+                                    f"Question: {rewritten}"
+                                ),
+                                passages=hits,
+                                conversation_history=conversation_history or None,
+                                locale=locale,
+                                personalization_context=(personalization or {}).get(
+                                    "prompt_context", ""
+                                ),
+                                tone_hint=tone_hint,
+                            )
+                            budget.spend()
+                        if revised:
+                            candidate = self._output_guard.sanitize(
+                                self._output_guard.redact_pii(revised)
+                            )
+                            candidate = self._output_guard.check_prompt_leakage(
+                                candidate
+                            ).sanitized_text
+                            # Re-verify. A revision that did not fix the
+                            # figure must not be published just because it
+                            # is newer — the budget is spent either way,
+                            # so the only question is which text is right.
+                            recheck = evaluate(
+                                rewritten,
+                                candidate,
+                                call_tool=self._recompute_for_verification,
+                                faithfulness=faithfulness_score,
+                            )
+                            trace_ctx["numeric_revision"] = {
+                                "attempted": True,
+                                "fixed": recheck.numerically_consistent,
+                            }
+                            if recheck.numerically_consistent:
+                                reply = candidate
+                                verdict = recheck
+                                trace_ctx["numeric_verification"] = {
+                                    "accepted": recheck.accepted,
+                                    "failures": recheck.failures(),
+                                    "unverified": list(recheck.unverified),
+                                }
+                                metrics.inc("numeric_revision_fixed_total")
+                            else:
+                                metrics.inc("numeric_revision_failed_total")
+                    else:
+                        trace_ctx["numeric_revision"] = {
+                            "attempted": False,
+                            "reason": why if not allowed else "llm unavailable",
+                        }
 
             # 8. Escalation check
             escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
