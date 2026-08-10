@@ -9,7 +9,7 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-8f1c1fc carries PRs #234 + #235 together:
+# image. sha-f03006b carries PRs #234 + #235 + #238:
 #
 #   * Speech now honours all five locales the picker offers. The same
 #     two-entry {"en","lg"} language map had been copy-pasted into three
@@ -24,7 +24,13 @@
 #   * The one corpus file that could never be indexed (ura_faqs.csv — the
 #     loader's glob requires a topic segment it lacks) had its 18 unique
 #     AEOI rows merged into the existing exchange_of_information tag.
-FROM landwind/ura-chatbot:sha-8f1c1fc
+#   * The mobile composer no longer clips its send button. Two causes: a
+#     44px min-width from the touch-target pass overflowed the row, and
+#     underneath that the toolbar already overflowed by 9px because the
+#     Voice and Narrate toggles were spending 173px of a 370px row on
+#     padding. Verified on a Pixel 7 with both the narrowest ("EN") and
+#     widest ("NYN") locale codes.
+FROM landwind/ura-chatbot:sha-f03006b
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
