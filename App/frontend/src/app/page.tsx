@@ -530,6 +530,14 @@ export default function Page() {
               try { const p = JSON.parse(data); meta = { ...meta, ...p }; if (p.conversation_id) sessionIdRef.current = p.conversation_id; updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason })); } catch {}
               evt = 'token'; continue;
             }
+            if (evt === 'agent_trace') {
+              // Buffered retrieval/iteration/tool-call trace, emitted just before
+              // `grounding` (see chat_stream in main.py). Nothing in this UI
+              // visualizes it yet; without this case it fell through to the
+              // token branch below and the raw JSON trace was appended straight
+              // into the visible reply, right where the citation marker sits.
+              evt = 'token'; continue;
+            }
             if (data || evt === 'token') {
               pending += data || '\n';
               if (raf === null) {
