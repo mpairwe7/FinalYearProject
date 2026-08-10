@@ -9,17 +9,15 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-13663b9 = the first push to `main` since project inception
-# (PR #226 reconciled main's disconnected initial-scaffold history with
-# dev, which had carried all 639 commits of real development on its own
-# until now) — so this single bump carries everything dev has shipped
-# since sha-0f6b273 (PR #164), most notably the chatv2 redesign, the
-# multilingual routing/statutory-graph/model-tiering architecture (#223),
-# and this session's 5-locale language switching + voice UI theming fix
-# (#225). This file had also drifted behind what was actually live: the
-# Space's own Dockerfile had already been bumped by hand past this repo's
-# copy, to sha-c4c08d6 (PR #174) — this bump supersedes that drift too.
-FROM landwind/ura-chatbot:sha-13663b9
+# image. sha-c48fe98 = PR #228: the nginx SSE-streaming location block was
+# missing the `rewrite ^/api/(.*)$ /$1 break;` line every sibling /api/*
+# block has, so /api/v1/chat/stream reached the backend unrewritten and
+# 404'd on every single request — confirmed via a live 10-question
+# regression pass against this Space before the fix. The frontend's
+# fallback to non-streaming /api/v1/chat covered for it (every message
+# still got answered), but real token-by-token streaming never actually
+# ran in production until this bump.
+FROM landwind/ura-chatbot:sha-c48fe98
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
