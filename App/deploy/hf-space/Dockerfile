@@ -9,15 +9,14 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-c48fe98 = PR #228: the nginx SSE-streaming location block was
-# missing the `rewrite ^/api/(.*)$ /$1 break;` line every sibling /api/*
-# block has, so /api/v1/chat/stream reached the backend unrewritten and
-# 404'd on every single request — confirmed via a live 10-question
-# regression pass against this Space before the fix. The frontend's
-# fallback to non-streaming /api/v1/chat covered for it (every message
-# still got answered), but real token-by-token streaming never actually
-# ran in production until this bump.
-FROM landwind/ura-chatbot:sha-c48fe98
+# image. sha-0b53911 = PR #230: fixing the nginx 404 above (sha-c48fe98)
+# let streaming actually reach the frontend's SSE parser for the first
+# time in production, which exposed a second, previously-latent bug in
+# the same motion — the parser had no case for the `agent_trace` event
+# (buffered retrieval/tool-call trace, emitted just before `grounding`),
+# so it fell through to the token branch and rendered raw internal JSON
+# inline in the reply. Confirmed live on sha-c48fe98 before this fix.
+FROM landwind/ura-chatbot:sha-0b53911
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
