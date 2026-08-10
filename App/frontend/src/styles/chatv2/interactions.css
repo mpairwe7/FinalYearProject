@@ -64,26 +64,77 @@
  *    coarse pointers only, so the desktop layout keeps its tighter rhythm.
  * ------------------------------------------------------------------------- */
 @media (pointer: coarse) {
+  /* Height is free: growing a control vertically cannot overflow a row, so it
+     is applied broadly. */
   .chatv2 button,
   .chatv2 [role="button"],
-  .chatv2 a[role="menuitem"],
-  .chatv2 .top-bar-icon-btn,
-  .chatv2 .composer-circle-btn,
-  .chatv2 .cmpv2-lang-btn {
-    min-width: 44px;
+  .chatv2 a[role="menuitem"] {
     min-height: 44px;
   }
 
-  /* Toolbar sits on one row inside the composer; let it wrap rather than
-     overflow once the buttons grow. */
-  .chatv2 .cmpv2-bar {
-    flex-wrap: wrap;
-    row-gap: 2px;
+  /* Width is applied only where there is room for it.
+     The composer toolbar is deliberately excluded. It packs attach + language +
+     two labelled toggles + mic + send onto one row; forcing 44px on each
+     overflowed a 412px phone and wrapped the send button onto a line of its
+     own. Those controls are already 38x44 after the rule above, which clears
+     WCAG 2.2 §2.5.8 (24px) comfortably, and the send button carries its own
+     44x44 from composer.css. */
+  .chatv2 .top-bar-icon-btn {
+    min-width: 44px;
   }
 
   /* Conversation rows get a comfortable strike area. */
   .chatv2 .rail-item {
     min-height: 48px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 2b. Composer toolbar fit (pre-existing bug).
+ *
+ * On a 412px phone the toolbar's contents measure 387px against 378px of
+ * available width — a 9px overflow that pushed the send button past the
+ * composer's right edge, clipping the single most important control in the
+ * app. Reproduced with these coarse-pointer rules disabled, so this predates
+ * them; it was simply never visible until the row was examined directly.
+ *
+ * Reclaimed from inter-item gap rather than by hiding the "Voice"/"Narrate"
+ * labels: those labels are the controls' accessible names, and dropping to
+ * icon-only would trade a layout bug for an a11y one.
+ * ------------------------------------------------------------------------- */
+@media (max-width: 480px) {
+  .chatv2 .cmpv2-bar {
+    gap: 1px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  /* The language trigger reserves 62px for a code that is only ever 2-3
+     characters; let it size to content on the narrowest screens. */
+  .chatv2 .cmpv2-bar .cmpv2-lang-btn {
+    min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  /* Voice (81px) + Narrate (92px) were together consuming 173px of a 370px
+     row — nearly half of it, on padding rather than content. */
+  .chatv2 .cmpv2-bar .voice-toggle {
+    padding-left: 3px;
+    padding-right: 3px;
+    gap: 3px;
+  }
+  .chatv2 .cmpv2-bar .send-circle-btn {
+    margin-left: 0;
+  }
+  /* Safety net: the locale code is 2-3 characters ("EN" vs "NYN"), so the row
+     width is not fixed. If a future locale or a narrower device still
+     overflows, scroll rather than clip — a control the user cannot reach is
+     the one failure mode worth ruling out entirely. */
+  .chatv2 .cmpv2-bar {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .chatv2 .cmpv2-bar::-webkit-scrollbar {
+    display: none;
   }
 }
 
