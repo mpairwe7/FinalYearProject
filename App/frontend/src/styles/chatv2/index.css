@@ -6,3 +6,6 @@
 @import "./composer.css";
 @import "./messages.css";
 @import "./overlays.css";
+/* Last: re-opens the shell so globals.css's gradient mesh shows through, while
+   keeping every text-bearing surface opaque. Must stay last to win. */
+@import "./canvas.css";
