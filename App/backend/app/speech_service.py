@@ -1304,8 +1304,19 @@ class SpeechModel:
             try:
                 from . import sunbird
                 if sunbird.is_available():
-                    src_code = {"en": "eng", "lg": "lug"}.get(source_lang, source_lang)
-                    tgt_code = {"en": "eng", "lg": "lug"}.get(target_lang, target_lang)
+                    # Same inline-map defect as the STT path had: this knew only
+                    # en/lg and passed everything else through unmapped, so
+                    # Swahili went out as "sw" rather than "swa". Runyankole and
+                    # Acholi only worked because their locale code happens to
+                    # equal their Sunbird code. Use the canonical table so that
+                    # is intentional rather than luck.
+                    #
+                    # Swahili still won't translate here — Sunbird's translate
+                    # endpoint covers English + five Ugandan languages only (see
+                    # TRANSLATION_LANGUAGES) — but it now declines with the right
+                    # code and falls through to Gemini/Workers AI/prompted.
+                    src_code = sunbird.LOCALE_TO_SUNBIRD.get(source_lang, source_lang)
+                    tgt_code = sunbird.LOCALE_TO_SUNBIRD.get(target_lang, target_lang)
                     result = sunbird.translate(text, src_code, tgt_code)
                     if result:
                         return _res(result, "sunbird_cloud")

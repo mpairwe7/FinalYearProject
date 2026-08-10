@@ -1,0 +1,177 @@
+/* =============================================================================
+ * chatv2 — interaction feel, tuned for mobile.
+ *
+ * Visual identity (the URA gradient mesh, navy/gold accents) is unchanged; this
+ * file only changes how the surface *responds* to touch, adopting the patterns
+ * that make Grok / modern native chat apps feel immediate on a phone:
+ *
+ *   1. every tappable thing acknowledges the press instantly
+ *   2. motion uses spring-like easing rather than linear ramps
+ *   3. nothing smaller than a finger
+ *   4. scrolling is contained and momentum-y, and never rubber-bands the page
+ *
+ * All of it is CSS. No component rewrites, so the existing behaviour contracts
+ * (and the e2e selectors that assert them) are untouched.
+ * ========================================================================== */
+
+.chatv2 {
+  /* One spring curve for the whole surface. Slight overshoot on settle is what
+     reads as "physical" rather than "animated"; 180ms keeps it responsive on a
+     low-end Android where anything longer feels like lag. */
+  --cv2-spring: cubic-bezier(0.34, 1.35, 0.64, 1);
+  --cv2-tap: 140ms;
+}
+
+/* ---------------------------------------------------------------------------
+ * 1. Press feedback. A tap with no acknowledgement is the single biggest
+ *    "this is a website, not an app" tell on mobile. The grey flash Android
+ *    paints by default is worse than nothing, so it is replaced rather than
+ *    merely removed.
+ * ------------------------------------------------------------------------- */
+.chatv2 button,
+.chatv2 [role="button"],
+.chatv2 .landing-chip,
+.chatv2 .rail-item {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* kills the 300ms double-tap-zoom delay */
+  transition:
+    transform var(--cv2-tap) var(--cv2-spring),
+    background-color var(--cv2-tap) ease,
+    border-color var(--cv2-tap) ease,
+    opacity var(--cv2-tap) ease;
+}
+
+/* Scale down on press. Kept subtle on large targets and stronger on small ones
+   so the feedback is proportionally visible either way. */
+.chatv2 button:active:not(:disabled),
+.chatv2 [role="button"]:active {
+  transform: scale(0.96);
+}
+.chatv2 .landing-chip:active,
+.chatv2 .rail-item:active {
+  transform: scale(0.985);
+}
+/* The send button is the highest-frequency tap in the app — give it a slightly
+   deeper press so it reads as the primary action. */
+.chatv2 .cmpv2-bar .send-circle-btn:active:not(:disabled) {
+  transform: scale(0.90);
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Touch targets. WCAG 2.2 §2.5.8 sets 24px as the floor; native mobile
+ *    guidance is 44px, and this audience is often on cheap capacitive screens
+ *    where the effective hit area is worse than the spec area. Enforce 44 on
+ *    coarse pointers only, so the desktop layout keeps its tighter rhythm.
+ * ------------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  .chatv2 button,
+  .chatv2 [role="button"],
+  .chatv2 a[role="menuitem"],
+  .chatv2 .top-bar-icon-btn,
+  .chatv2 .composer-circle-btn,
+  .chatv2 .cmpv2-lang-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Toolbar sits on one row inside the composer; let it wrap rather than
+     overflow once the buttons grow. */
+  .chatv2 .cmpv2-bar {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  /* Conversation rows get a comfortable strike area. */
+  .chatv2 .rail-item {
+    min-height: 48px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. Scrolling. Contain the transcript so a flick at its end doesn't bounce
+ *    the whole page (the effect that makes a web chat feel "loose"), and keep
+ *    momentum on iOS.
+ * ------------------------------------------------------------------------- */
+.chatv2 .message-list,
+.chatv2 .conversation-rail .rail-list,
+.chatv2 .lmv2-list {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* iOS zooms the viewport when a focused input is under 16px. The composer is
+   already 16px on mobile; this stops Safari from *also* re-flowing type on
+   orientation change. */
+.chatv2 {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. Entry motion. New messages settle in rather than appearing — the cue that
+ *    tells a reader something arrived without them having to re-scan.
+ * ------------------------------------------------------------------------- */
+@keyframes cv2-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.chatv2 .message-list > article:last-of-type {
+  animation: cv2-message-in 220ms var(--cv2-spring) both;
+}
+
+/* Overlays rise from slightly below on touch devices, matching the sheet
+   gesture users expect there, instead of scaling from centre. */
+@media (pointer: coarse) {
+  @keyframes cv2-sheet-in {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .chatv2 .lmv2,
+  .chatv2 .dlgv2 {
+    animation: cv2-sheet-in 200ms var(--cv2-spring) both;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 5. Reduced motion. Everything above is decorative; honour the preference by
+ *    removing movement while keeping the state changes that carry meaning
+ *    (colour, opacity) so nothing becomes less legible.
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 button,
+  .chatv2 [role="button"],
+  .chatv2 .landing-chip,
+  .chatv2 .rail-item {
+    transition: background-color var(--cv2-tap) ease, border-color var(--cv2-tap) ease;
+  }
+  .chatv2 button:active:not(:disabled),
+  .chatv2 [role="button"]:active,
+  .chatv2 .landing-chip:active,
+  .chatv2 .rail-item:active,
+  .chatv2 .cmpv2-bar .send-circle-btn:active:not(:disabled) {
+    transform: none;
+  }
+  .chatv2 .message-list > article:last-of-type,
+  .chatv2 .lmv2,
+  .chatv2 .dlgv2 {
+    animation: none;
+  }
+  .chatv2 .message-list,
+  .chatv2 .conversation-rail .rail-list,
+  .chatv2 .lmv2-list {
+    scroll-behavior: auto;
+  }
+}

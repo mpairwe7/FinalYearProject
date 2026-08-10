@@ -59,7 +59,16 @@ TTS_SPEAKERS: dict[str, int] = {
     "en": 246,    # fallback English
 }
 
-# Languages supported for translation (Sunbird NLLB-based)
+# Languages supported for TRANSLATION (Sunbird NLLB-based): English plus the
+# five Ugandan languages their production translate endpoint is trained on —
+# Acholi, Ateso, Luganda, Lugbara, Runyankole.
+#
+# "swa" is deliberately absent. Swahili appears in Sunbird's SALT *dataset* and
+# has a TTS speaker (see TTS_SPEAKERS), which makes it look like an oversight —
+# it is not. The translate endpoint does not serve Swahili, so adding it here
+# would turn today's graceful "unsupported, fall through to the next backend"
+# into a live API error. Swahili translation is handled by the Gemini / Workers
+# AI / prompted tiers in speech_service.translate instead.
 TRANSLATION_LANGUAGES = {"eng", "lug", "nyn", "ach", "teo", "lgg"}
 
 # Sunbird code → URA locale (reverse mapping)
