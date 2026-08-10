@@ -146,6 +146,7 @@ WHISPER_DEVICE=cpu
 WHISPER_ADAPTER_LG=/app/adapters/whisper-lg
 WHISPER_ADAPTER_SW=/app/adapters/whisper-sw
 WHISPER_ADAPTER_NYN=/app/adapters/whisper-nyn
+WHISPER_ADAPTER_ACH=/app/adapters/whisper-ach
 ```
 
 > Never commit `.env` to version control. The repo `.gitignore` already excludes it.
