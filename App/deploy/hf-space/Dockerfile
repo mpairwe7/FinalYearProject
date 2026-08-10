@@ -9,14 +9,16 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-0b53911 = PR #230: fixing the nginx 404 above (sha-c48fe98)
-# let streaming actually reach the frontend's SSE parser for the first
-# time in production, which exposed a second, previously-latent bug in
-# the same motion — the parser had no case for the `agent_trace` event
-# (buffered retrieval/tool-call trace, emitted just before `grounding`),
-# so it fell through to the token branch and rendered raw internal JSON
-# inline in the reply. Confirmed live on sha-c48fe98 before this fix.
-FROM landwind/ura-chatbot:sha-0b53911
+# image. sha-2104a8e = PR #232: adds a "What services does URA provide?"
+# FAQ entry (Data/dataset/ura_about_ura_faqs.csv) — that's the first
+# starter prompt on the landing page, and no document in the corpus
+# answered it (confirmed live: no_retrieval_results -> escalation
+# fallback), independent of the separate infra outage also affecting
+# this Space (Cloudflare embed-relay 500 via Crane Cloud; VLLM DNS
+# failure). _load_faq_data (service.py) reads every CSV under DATA_DIR
+# fresh at ChatModel startup, so this image's first boot picks it up —
+# no separate indexing step for this deployment's BM25 path.
+FROM landwind/ura-chatbot:sha-2104a8e
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
