@@ -1,0 +1,42 @@
+name: Download HuggingFace Luganda Corpus
+description: Download Luganda-English parallel corpus from HuggingFace datasets
+
+inputs:
+  hf-token:
+    description: HuggingFace API token
+    required: true
+  output-dir:
+    description: Directory to save the corpus (a TTT/ subfolder is created)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install HuggingFace dependencies
+      shell: bash
+      run: uv pip install --system --quiet huggingface_hub[cli] datasets pandas
+
+    - name: Download Luganda-English parallel corpus
+      shell: bash
+      env:
+        HF_TOKEN: ${{ inputs.hf-token }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        huggingface-cli login --token "$HF_TOKEN"
+        python3 << 'PYEOF'
+        import os
+        from datasets import load_dataset
+        import pandas as pd
+
+        output_dir = os.path.join(os.environ["OUTPUT_DIR"], "TTT")
+        os.makedirs(output_dir, exist_ok=True)
+
+        ds = load_dataset("kambale/luganda-english-parallel-corpus")
+        df = pd.DataFrame({
+            "english": ds["train"]["english"],
+            "luganda": ds["train"]["luganda"],
+        })
+        out_path = os.path.join(output_dir, "luganda_parallel.csv")
+        df.to_csv(out_path, index=False)
+        print(f"::notice::Luganda-English corpus saved: {df.shape[0]} pairs -> {out_path}")
+        PYEOF

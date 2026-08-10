@@ -1,0 +1,132 @@
+# =============================================================================
+# URA Chatbot - Git Ignore
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+/lib/
+/lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+test_env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ML Artifacts (generated, not tracked)
+artifacts/
+mlruns/
+
+# Model files (large, use DVC or HF Hub)
+Model/*.joblib
+Model/*.pth
+Model/*.pt
+Model/*.onnx
+Model/*.tflite
+Model/faiss_index/
+
+# On-device LLM weights (too large for Git, distribute via release/HF Hub)
+*.gguf
+
+# Results (regenerated)
+Results/metrics/*.json
+Results/plots/*.png
+Results/plots/*.pdf
+Results/reports/*.json
+Results/reports/*.csv
+
+# Node.js
+node_modules/
+.npm
+.pnp
+.pnp.js
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kaggle
+ml/kaggle/*.ipynb
+ml/kaggle/kernel-metadata.json
+
+# Secrets (NEVER COMMIT)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+kaggle.json
+
+# Secret scanning tool caches & reports
+.ggshield_cache/
+gitleaks-report.json
+gitleaks-report.sarif
+
+# Threat model generated output
+threat-model/output/
+
+# Test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+coverage.xml
+
+# Temporary
+tmp/
+temp/
+*.tmp
+ci-ml-pipeline.yml
+# Ignore .claude *contents* rather than the directory itself — git cannot
+# re-include a path inside an excluded directory, and project skills are
+# shared workflow definitions that belong in review. settings.local.json
+# stays ignored.
+.claude/*
+!.claude/skills/
+Data/common_voice_*
+
+# Runtime analytics databases (conversation logs — privacy: never commit).
+# Created by the backend and by pytest runs at the repo root and App/backend.
+data_store/
+
+# Vendored CosyVoice checkout. It was once committed as a gitlink with no
+# .gitmodules entry, which made `actions/checkout` fail outright ("No url
+# found for submodule path 'CosyVoice'") and took every browser E2E job with
+# it. Ignored so a local clone here cannot be staged again.
+CosyVoice/

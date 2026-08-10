@@ -1,0 +1,81 @@
+id: objection_or_dispute
+name: Objection or Dispute
+version: "1"
+description: >
+  Collect the minimum details needed to prepare a URA objection or
+  assessment dispute handoff.
+requires_auth: false
+
+trigger_phrases:
+  - "object to an assessment"
+  - "file an objection"
+  - "tax objection"
+  - "dispute an assessment"
+  - "appeal a tax assessment"
+  - "my assessment is wrong"
+  - "how do i object"
+
+steps:
+  - id: collect_reference
+    question: >
+      What is the assessment, objection, or notice reference number?
+    slot: reference_number
+    validator: text
+
+  - id: collect_tax_type
+    question: >
+      Which tax type is involved: **VAT**, **PAYE**, **corporation tax**,
+      **withholding tax**, **customs**, or **other**?
+    slot: tax_type
+    validator: "enum[vat,paye,corporation tax,withholding tax,customs,other]"
+
+  - id: collect_period
+    question: >
+      Which filing period, transaction date, or customs entry period does
+      the dispute relate to?
+    slot: filing_period
+    validator: text
+
+  - id: collect_grounds
+    question: >
+      In one sentence, what is the main reason you believe the assessment
+      or decision is incorrect?
+    slot: objection_grounds
+    validator: text
+
+  - id: collect_documents
+    question: >
+      Do you already have the supporting notices, correspondence, or
+      schedules you want URA to review? (yes/no)
+    slot: documents_ready
+    validator: boolean
+
+  - id: collect_deadline
+    question: >
+      Are you still within the objection deadline stated on the notice? (yes/no)
+    slot: within_deadline
+    validator: boolean
+
+  - id: deadline_warning
+    question: >
+      This looks time-sensitive. If the stated deadline has passed or is close,
+      contact URA immediately and prepare a complete supporting bundle for staff review.
+    when: "within_deadline == False"
+    slot: ""
+    validator: text
+
+  - id: documents_warning
+    question: >
+      Before you lodge the objection, gather the notice, computations, and any
+      supporting evidence that explains the disputed amount or decision.
+    when: "documents_ready == False"
+    slot: ""
+    validator: text
+
+  - id: summary
+    question: >
+      Next step: lodge the objection through the URA portal or with a URA officer
+      using the reference number, tax period, clear grounds, and supporting evidence.
+      Keep every acknowledgement and follow-up reference for the case.
+    slot: ""
+    validator: text

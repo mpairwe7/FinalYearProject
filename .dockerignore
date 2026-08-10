@@ -1,0 +1,48 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite
+
+# Environment
+.env
+.env.*
+*.log
+
+# IDEs
+.idea/
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Node.js
+node_modules/
+dist/
+build/
+.next/
+
+# Project specific
+artifacts/
+Model/
+Results/
+Notebooks/
+Data/pdfs/
+Data/lgaudio/
+Data/TTT/
+
+# OS
+.DS_Store
+
+# App folders to exclude (use specific COPY in Dockerfile)
+App/frontend/node_modules/
+App/frontend/.next/
+App/backend/__pycache__/
+
+# Documentation
+docs/
+*.md
+!README.md

@@ -1,0 +1,85 @@
+# Daily URA website crawl for new content and PDFs.
+# Lightweight — no GPU. Commits new data to Data/crawl/ and Data/pdfs/.
+name: Scheduled URA Crawl
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # Daily at 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      max_pages:
+        description: 'Maximum pages to crawl'
+        default: '200'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scheduled-crawl
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  crawl:
+    name: Crawl ura.go.ug
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install crawler deps
+        run: pip install requests beautifulsoup4 pydantic ftfy
+
+      - name: Run crawler
+        run: |
+          python -c "
+          from ml.scripts.data_aug.crawler import CrawlConfig, crawl_ura
+          from pathlib import Path
+          import logging
+          logging.basicConfig(level=logging.INFO)
+          cfg = CrawlConfig(
+              max_pages=${{ inputs.max_pages || '200' }},
+              rate_limit_s=2.0,
+              pdf_output_dir=Path('Data/pdfs'),
+              crawl_output_dir=Path('Data/crawl'),
+          )
+          pages = list(crawl_ura(cfg))
+          print(f'Crawled {len(pages)} pages')
+          "
+
+      - name: Check for new content
+        id: check
+        run: |
+          NEW_FILES=$(git status --porcelain Data/crawl/ Data/pdfs/ | wc -l)
+          echo "new_files=$NEW_FILES" >> "$GITHUB_OUTPUT"
+          echo "Found $NEW_FILES new/modified files"
+
+      - name: Commit new content
+        if: steps.check.outputs.new_files != '0'
+        run: |
+          git config user.name "URA Crawler Bot"
+          git config user.email "crawler@ura-chatbot.example"
+          git add Data/crawl/ Data/pdfs/
+          git commit -m "chore(data): crawl ura.go.ug $(date +%Y-%m-%d)
+
+          New pages: $(git diff --cached --name-only Data/crawl/pages/ | wc -l)
+          New PDFs: $(git diff --cached --name-only Data/pdfs/ | wc -l)"
+          git push
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## URA Crawl Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- New files: ${{ steps.check.outputs.new_files }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Crawl state: Data/crawl/crawl_state.json" >> "$GITHUB_STEP_SUMMARY"

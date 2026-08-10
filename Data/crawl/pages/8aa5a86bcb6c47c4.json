@@ -1,0 +1,50 @@
+{
+  "url": "https://ura.go.ug/ac/small-business/",
+  "title": "Biashara ndogo ni nini - Uganda Revenue Authority",
+  "text": "\n| Jumla ya mauzo ambayo haizidi ShU milioni 10 | Hakuna kodi | Hakuna kodi |\n| --- | --- | --- |\n| JUMLA YA MAUZO KWA MWAKA | KODI AMBAYO INAFAA KULIPWA |  |\n|  | Ambayo iko na rekodi | Ambayo haina rekodi |\n| Jumla ya mauzo ambayo inazidi ShU milioni 10 na ambayo haizidi ShU milioni 30 | 0.4% kwa jumla ya mauzo kwa mwaka ambayo inazidi ShU milioni 10 | ShU 80,000 |\n| Jumla ya mauzo ambayo inazidi ShU milioni 30 na ambayo haizidi milioni 50 | ShU 80,000 nauinaongeza/unajumuisha 0.5% kwa jumla ya mauzo ambayo inazidi ShU milioni 30 | ShU 200,000 |\n| Jumla ya mauzo ambayo inazidi ShU milioni 50 na ambayo hayazidi ShU 80 | ShU 180,000 unaongeza/unajumuisha 0.6% ya jumla ya mauzo kwa mwaka ambayo inazidi ShU milioni 50 | ShU 400,000 |\n| Jumla ya mauzo ambayo inazidi ShU milioni 80 na ambayo haizidi milioni 150 | ShU 360,000 unaongeza/unajumuisha 0.7% kwa jumla ya mauzo kwa mwaka ambayo yanazidi milioni 80 | ShU 900,000 |\n",
+  "content_hash": "8aa5a86bcb6c47c4",
+  "timestamp": "2026-07-24T06:41:57Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Jumla ya mauzo ambayo haizidi ShU milioni 10",
+        "Hakuna kodi",
+        "Hakuna kodi"
+      ],
+      "rows": [
+        [
+          "JUMLA YA MAUZO KWA MWAKA",
+          "KODI AMBAYO INAFAA KULIPWA",
+          ""
+        ],
+        [
+          "",
+          "Ambayo iko na rekodi",
+          "Ambayo haina rekodi"
+        ],
+        [
+          "Jumla ya mauzo ambayo inazidi ShU milioni 10 na ambayo haizidi ShU milioni 30",
+          "0.4% kwa jumla ya mauzo kwa mwaka ambayo inazidi ShU milioni 10",
+          "ShU 80,000"
+        ],
+        [
+          "Jumla ya mauzo ambayo inazidi ShU milioni 30 na ambayo haizidi milioni 50",
+          "ShU 80,000 nauinaongeza/unajumuisha 0.5% kwa jumla ya mauzo ambayo inazidi ShU milioni 30",
+          "ShU 200,000"
+        ],
+        [
+          "Jumla ya mauzo ambayo inazidi ShU milioni 50 na ambayo hayazidi ShU 80",
+          "ShU 180,000 unaongeza/unajumuisha 0.6% ya jumla ya mauzo kwa mwaka ambayo inazidi ShU milioni 50",
+          "ShU 400,000"
+        ],
+        [
+          "Jumla ya mauzo ambayo inazidi ShU milioni 80 na ambayo haizidi milioni 150",
+          "ShU 360,000 unaongeza/unajumuisha 0.7% kwa jumla ya mauzo kwa mwaka ambayo yanazidi milioni 80",
+          "ShU 900,000"
+        ]
+      ],
+      "row_count": 6
+    }
+  ]
+}

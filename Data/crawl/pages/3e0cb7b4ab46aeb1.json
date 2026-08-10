@@ -1,0 +1,42 @@
+{
+  "url": "https://ura.go.ug/en/advance-tax-on-the-transport-sector/",
+  "title": "Advance Tax on the Transport Sector - Uganda Revenue Authority",
+  "text": "\n| SN | Type of vehicle | Amount (in UGX)  per tonne or passenger per year |\n| --- | --- | --- |\n| 1. | Goods vehicles above 2 tonnes | 50,000 per tonne |\n| 2. | Trailers | 50,000 per tonne |\n| 3. | Passenger vehicles (PSVs) | 20,000 per passenger |\n| 4. | Buses | 20,000 per passenger |\n",
+  "content_hash": "3e0cb7b4ab46aeb1",
+  "timestamp": "2026-05-14T07:03:12Z",
+  "discovered_pdfs": [
+    "https://ura.go.ug/wp-content/uploads/2024/01/Advance-Tax-on-Transport-ENGLISH-2024-25.pdf"
+  ],
+  "tables": [
+    {
+      "headers": [
+        "SN",
+        "Type of vehicle",
+        "Amount (in UGX)  per tonne or passenger per year"
+      ],
+      "rows": [
+        [
+          "1.",
+          "Goods vehicles above 2 tonnes",
+          "50,000 per tonne"
+        ],
+        [
+          "2.",
+          "Trailers",
+          "50,000 per tonne"
+        ],
+        [
+          "3.",
+          "Passenger vehicles (PSVs)",
+          "20,000 per passenger"
+        ],
+        [
+          "4.",
+          "Buses",
+          "20,000 per passenger"
+        ]
+      ],
+      "row_count": 4
+    }
+  ]
+}

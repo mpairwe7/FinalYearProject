@@ -1,0 +1,165 @@
+{
+  "url": "https://ura.go.ug/en/domestic-taxes/tin-application/",
+  "title": "Get a TIN - Uganda Revenue Authority",
+  "text": "\n| Individual | Non-individuals |\n| --- | --- |\n| National ID or any other two identifications (Passport, Employees ID or Voter’s card, Driver’s Licence, work permit, Village ID, current bank statements, VISA) Certificate of registration (in case of a business) | Certificate of Incorporation Company Form 20 |\n\n| SN | Individual type | Documents required |\n| --- | --- | --- |\n| 1 | 18 years and above & Ugandan Citizen | ·         National ID ( Mandatory ) ·         NSSF Card ·         Driving Permit ·         Employee’s Id ·         Voter’s Card ·         Passport ·         Village Identity Card ·         Financial Card ·         Current Bank Statement (Past 90 days) |\n| 2 | Minor | A copy of the Legal/Court document of guardianship |\n| 3 | Non-Citizens of Uganda | ·         Passport ( Mandatory ) ·         Visa ·         Work permit(M) ·         Refugee ID (M for refugees) |\n| 4 | Diplomats | ·         Diplomatic Foreign Affairs ID ·         Letter from the Ministry of Foreign Affairs In addition to non-citizen requirements |\n| 5 | Business Name | Business Name Registration Certificate (in case of a sole proprietorship) In addition to individual identification documents |\n\n| SN | Sub-entity type | Documents required (M- Mandatory, O- Optional) |  |\n| --- | --- | --- | --- |\n| 1 | Company | Private Company | Certificate of Incorporation (M) Company form 20 (M) |\n| Public Company | Certificate of Incorporation (O) Memorandum between Government and Entity (M) |  |  |\n| Foreign Company | Certificate of Registration (M) Company form 19 (M) Company form 21 (M) |  |  |\n| 2 | Partnership | General Partnership | Certificate of Registration (M) Statement of Particulars (M) Partnership deed (O) |\n| Limited Liability Partnership | Certificate of Registration (M) Statement of Particulars (M) Memorandum and Articles of Association(M) |  |  |\n| 3 | International and Diplomatic Organizations | Diplomatic Mission | Letter from Permanent Secretary Ministry of Foreign Affairs (M) |\n| International Organizations | Letter from current Respective Head of Mission (M) |  |  |\n| 4 | Government entities | Ministry | Letter from line ministry(M) |\n| Parastatal /Agency/Authority | Act of Parliament (M) |  |  |\n| Government funded project | Letter from line ministry(M) Act of Parliament (O) |  |  |\n| Government Schools/ Government aided Schools | Gazette (M) Letter from Ministry of Education (M) |  |  |\n| Government Universities | Act of Parliament (M) |  |  |\n| 5 | Local Authority | ·         City Council ·         City Division Council ·         District Council ·         Municipal Council ·         Municipal Division ·         Council ·         Sub County Council ·         Town Council | Act of Parliament (M) Statutory Instrument(M) |\n| 6 | Other Entity types | Club, Society or Associations | Certificate of Registration (M) Club Constitution (O) |\n| Estate or Trust | Certificate of registration (M) Trust deed (O) |  |  |\n| NGO | NGO Certificate (M) Constitution Certificate of Registration (O) |  |  |\n",
+  "content_hash": "e0f570984a4480fd",
+  "timestamp": "2026-07-24T06:35:03Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Individual",
+        "Non-individuals"
+      ],
+      "rows": [
+        [
+          "National ID or any other two identifications (Passport, Employees ID or Voter’s card, Driver’s Licence, work permit, Village ID, current bank statements, VISA) Certificate of registration (in case of a business)",
+          "Certificate of Incorporation Company Form 20"
+        ]
+      ],
+      "row_count": 1
+    },
+    {
+      "headers": [
+        "SN",
+        "Individual type",
+        "Documents required"
+      ],
+      "rows": [
+        [
+          "1",
+          "18 years and above & Ugandan Citizen",
+          "·         National ID ( Mandatory ) ·         NSSF Card ·         Driving Permit ·         Employee’s Id ·         Voter’s Card ·         Passport ·         Village Identity Card ·         Financial Card ·         Current Bank Statement (Past 90 days)"
+        ],
+        [
+          "2",
+          "Minor",
+          "A copy of the Legal/Court document of guardianship"
+        ],
+        [
+          "3",
+          "Non-Citizens of Uganda",
+          "·         Passport ( Mandatory ) ·         Visa ·         Work permit(M) ·         Refugee ID (M for refugees)"
+        ],
+        [
+          "4",
+          "Diplomats",
+          "·         Diplomatic Foreign Affairs ID ·         Letter from the Ministry of Foreign Affairs In addition to non-citizen requirements"
+        ],
+        [
+          "5",
+          "Business Name",
+          "Business Name Registration Certificate (in case of a sole proprietorship) In addition to individual identification documents"
+        ]
+      ],
+      "row_count": 5
+    },
+    {
+      "headers": [
+        "SN",
+        "Sub-entity type",
+        "Documents required (M- Mandatory, O- Optional)",
+        ""
+      ],
+      "rows": [
+        [
+          "1",
+          "Company",
+          "Private Company",
+          "Certificate of Incorporation (M) Company form 20 (M)"
+        ],
+        [
+          "Public Company",
+          "Certificate of Incorporation (O) Memorandum between Government and Entity (M)",
+          "",
+          ""
+        ],
+        [
+          "Foreign Company",
+          "Certificate of Registration (M) Company form 19 (M) Company form 21 (M)",
+          "",
+          ""
+        ],
+        [
+          "2",
+          "Partnership",
+          "General Partnership",
+          "Certificate of Registration (M) Statement of Particulars (M) Partnership deed (O)"
+        ],
+        [
+          "Limited Liability Partnership",
+          "Certificate of Registration (M) Statement of Particulars (M) Memorandum and Articles of Association(M)",
+          "",
+          ""
+        ],
+        [
+          "3",
+          "International and Diplomatic Organizations",
+          "Diplomatic Mission",
+          "Letter from Permanent Secretary Ministry of Foreign Affairs (M)"
+        ],
+        [
+          "International Organizations",
+          "Letter from current Respective Head of Mission (M)",
+          "",
+          ""
+        ],
+        [
+          "4",
+          "Government entities",
+          "Ministry",
+          "Letter from line ministry(M)"
+        ],
+        [
+          "Parastatal /Agency/Authority",
+          "Act of Parliament (M)",
+          "",
+          ""
+        ],
+        [
+          "Government funded project",
+          "Letter from line ministry(M) Act of Parliament (O)",
+          "",
+          ""
+        ],
+        [
+          "Government Schools/ Government aided Schools",
+          "Gazette (M) Letter from Ministry of Education (M)",
+          "",
+          ""
+        ],
+        [
+          "Government Universities",
+          "Act of Parliament (M)",
+          "",
+          ""
+        ],
+        [
+          "5",
+          "Local Authority",
+          "·         City Council ·         City Division Council ·         District Council ·         Municipal Council ·         Municipal Division ·         Council ·         Sub County Council ·         Town Council",
+          "Act of Parliament (M) Statutory Instrument(M)"
+        ],
+        [
+          "6",
+          "Other Entity types",
+          "Club, Society or Associations",
+          "Certificate of Registration (M) Club Constitution (O)"
+        ],
+        [
+          "Estate or Trust",
+          "Certificate of registration (M) Trust deed (O)",
+          "",
+          ""
+        ],
+        [
+          "NGO",
+          "NGO Certificate (M) Constitution Certificate of Registration (O)",
+          "",
+          ""
+        ]
+      ],
+      "row_count": 16
+    }
+  ]
+}

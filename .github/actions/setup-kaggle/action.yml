@@ -1,0 +1,43 @@
+name: Setup Kaggle CLI
+description: Install and configure Kaggle CLI with API credentials
+
+inputs:
+  kaggle-username:
+    description: Kaggle username
+    required: true
+  kaggle-key:
+    description: Kaggle API key
+    required: true
+  extra-packages:
+    description: Additional pip packages to install (space-separated)
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install Kaggle CLI
+      shell: bash
+      env:
+        EXTRA_PACKAGES: ${{ inputs.extra-packages }}
+      run: |
+        uv pip install --system --quiet kaggle
+        if [ -n "$EXTRA_PACKAGES" ]; then
+          uv pip install --system --quiet $EXTRA_PACKAGES
+        fi
+
+    - name: Configure Kaggle credentials
+      shell: bash
+      env:
+        KAGGLE_USERNAME: ${{ inputs.kaggle-username }}
+        KAGGLE_KEY: ${{ inputs.kaggle-key }}
+      run: |
+        mkdir -p ~/.kaggle
+        python3 -c "
+        import json, os
+        creds = {'username': os.environ['KAGGLE_USERNAME'], 'key': os.environ['KAGGLE_KEY']}
+        with open(os.path.expanduser('~/.kaggle/kaggle.json'), 'w') as f:
+            json.dump(creds, f)
+        "
+        chmod 600 ~/.kaggle/kaggle.json
+        echo "::notice::Kaggle CLI configured for ${{ inputs.kaggle-username }}"

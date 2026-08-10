@@ -1,0 +1,27 @@
+{
+  "url": "https://ura.go.ug/en/choose-agents/?agent_type=dt_agents",
+  "title": "Choose a Tax Agent - Uganda Revenue Authority",
+  "text": "\n| TIN Number | Agent Name | License Issue Date | License Expiry Date |\n| --- | --- | --- | --- |\n| TIN Number | Agent Name | License Issue Date | License Expiry Date |\n",
+  "content_hash": "adf72929ccf24cc6",
+  "timestamp": "2026-05-14T06:57:39Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "TIN Number",
+        "Agent Name",
+        "License Issue Date",
+        "License Expiry Date"
+      ],
+      "rows": [
+        [
+          "TIN Number",
+          "Agent Name",
+          "License Issue Date",
+          "License Expiry Date"
+        ]
+      ],
+      "row_count": 1
+    }
+  ]
+}

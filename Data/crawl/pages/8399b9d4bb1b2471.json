@@ -1,0 +1,37 @@
+{
+  "url": "https://ura.go.ug/lg/ennyingiza-okuva-mu-kukozesebwa/",
+  "title": "Ennyingiza Okuva Mu Kukozesebwa - Ekitongole ekivunaanyizibwa ku musolo mu Uganda",
+  "text": "\n| Ennyingiza (Omusaala) buli mwezi | Omuwendogwómusolo |\n| --- | --- |\n| Bw’oba toyingiza ssente zisukka mu Ushs. 235,000 | Toggibwako musolo gwonna |\n| Bw’oba ofuna Ushs. 235,000 nga tosukka Ushs. 335,000 | Ebitundu kkumi ku buli kukumi (10%) eby’omuwendo ogusukka mu Shs. 235,000. |\n| Bw’oba ofuna Ushs. 335,000 nga tosukka Ushs. 410,000 | Omutwalo gumu (10,000) n’ogattako n’ebitundu abiri ku buli kikumi (20%) ky’omuwendo ogusukka mu Ushs. 335,000 |\n| Okusukka mu Ushs. 410,000 | (a)  Ushs. 25,000 n’ogattako ebitundu asatu ku buli kikumi (30%) eky’omuwendo ogusukka mu Ushs. 410,000. Ne (b)  Omusaala gw’omuntu bwe guba nga gusukka mu bukadde ekkumi (10,000,000), ennyongereza y’ebitundu kkumi ku buli kikumi (10%) ky’omuwendo omusaala kyegusoba mu bukadde ekkumi (10,000,000) |\n",
+  "content_hash": "8399b9d4bb1b2471",
+  "timestamp": "2026-07-24T06:42:44Z",
+  "discovered_pdfs": [
+    "https://ura.go.ug/storage/2024/08/Employment-Income-English-2023-24.pdf"
+  ],
+  "tables": [
+    {
+      "headers": [
+        "Ennyingiza (Omusaala) buli mwezi",
+        "Omuwendogwómusolo"
+      ],
+      "rows": [
+        [
+          "Bw’oba toyingiza ssente zisukka mu Ushs. 235,000",
+          "Toggibwako musolo gwonna"
+        ],
+        [
+          "Bw’oba ofuna Ushs. 235,000 nga tosukka Ushs. 335,000",
+          "Ebitundu kkumi ku buli kukumi (10%) eby’omuwendo ogusukka mu Shs. 235,000."
+        ],
+        [
+          "Bw’oba ofuna Ushs. 335,000 nga tosukka Ushs. 410,000",
+          "Omutwalo gumu (10,000) n’ogattako n’ebitundu abiri ku buli kikumi (20%) ky’omuwendo ogusukka mu Ushs. 335,000"
+        ],
+        [
+          "Okusukka mu Ushs. 410,000",
+          "(a)  Ushs. 25,000 n’ogattako ebitundu asatu ku buli kikumi (30%) eky’omuwendo ogusukka mu Ushs. 410,000. Ne (b)  Omusaala gw’omuntu bwe guba nga gusukka mu bukadde ekkumi (10,000,000), ennyongereza y’ebitundu kkumi ku buli kikumi (10%) ky’omuwendo omusaala kyegusoba mu bukadde ekkumi (10,000,000)"
+        ]
+      ],
+      "row_count": 4
+    }
+  ]
+}

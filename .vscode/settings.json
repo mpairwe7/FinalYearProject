@@ -1,0 +1,5 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:venv",
+    "chat.planAgent.defaultModel": "GPT-5.4 (copilot)",
+    "chat.exploreAgent.defaultModel": "GPT-5.4 (copilot)"
+}

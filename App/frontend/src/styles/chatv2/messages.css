@@ -1,0 +1,370 @@
+/* =============================================================================
+ * chatv2 — transcript + landing. Legacy markup/classes retained (the e2e suite
+ * targets .message-row-user/.message-row-assistant, the landing heading and
+ * chips); this file restyles them and adds the loading-stage skeleton.
+ * ========================================================================== */
+
+/* No ghost watermark, no scroll mask — clean flat canvas. */
+.chatv2 .chat-area::before {
+  display: none;
+}
+.chatv2 .message-list {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * Rows + bubbles
+ * ------------------------------------------------------------------------- */
+/* User: right-aligned tinted bubble, no avatar (approved look) at all widths */
+.chatv2 .message-row-user {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0;
+}
+.chatv2 .message-row-user .avatar {
+  display: none;
+}
+.chatv2 .bubble.user {
+  background: var(--cv2-user-bubble);
+  border: 1px solid var(--cv2-user-bubble-border);
+  border-radius: 16px;
+  border-bottom-right-radius: 6px;
+  color: var(--text-0);
+  box-shadow: none;
+  max-width: min(78%, 640px);
+}
+
+/* Assistant: brand roundel + flowing text (no box) */
+.chatv2 .message-row-assistant {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+}
+.chatv2 .avatar.assistant {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #003087;
+  border-color: transparent;
+  color: #f9c74f;
+  box-shadow: none;
+}
+@media (max-width: 720px) {
+  /* Legacy hides both avatars on mobile; keep the assistant roundel hidden
+     there for parity with today's compact layout. */
+  .chatv2 .message-row-assistant {
+    display: flex;
+  }
+  .chatv2 .message-row-assistant .avatar {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Message actions: always readable on the latest reply, faint elsewhere
+ * (replaces the legacy fully-hidden-until-hover behavior).
+ * ------------------------------------------------------------------------- */
+.chatv2 .bubble-actions {
+  opacity: 0.35;
+}
+.chatv2 .message-list > article:last-of-type .bubble-actions,
+.chatv2 .message-row:hover .bubble-actions,
+.chatv2 .message-row:focus-within .bubble-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .chatv2 .bubble-actions {
+    opacity: 1;
+  }
+}
+
+.chatv2 .listen-btn,
+.chatv2 .copy-btn {
+  min-height: 32px;
+  padding: 0.3rem 0.7rem;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 8px;
+  color: var(--text-1);
+}
+.chatv2 .listen-btn:hover:not(:disabled),
+.chatv2 .copy-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border-1);
+  color: var(--text-0);
+  transform: none;
+}
+.chatv2 .listen-btn-active {
+  background: var(--cv2-accent);
+  border-color: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+  box-shadow: none;
+}
+.chatv2 .listen-btn-active:hover:not(:disabled) {
+  background: var(--cv2-accent-hover);
+  color: var(--cv2-accent-contrast);
+}
+.chatv2 .copy-btn.copied {
+  background: var(--cv2-success-soft);
+  border-color: var(--success);
+  color: var(--success);
+}
+.chatv2 .feedback-btn {
+  border-radius: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Citations: quiet link-style summary instead of the gold pill.
+ * ------------------------------------------------------------------------- */
+.chatv2 .citations summary {
+  min-height: 36px;
+  padding: 0.3rem 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--ura-blue-bright);
+  font-size: 0.82rem;
+}
+.chatv2 .citations summary:hover {
+  background: var(--surface-2);
+  color: var(--ura-blue-bright);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chatv2 .citations ol {
+  background: var(--bg-1);
+  border-color: var(--border-0);
+}
+
+/* Grounding badge (moved out of the summary by ChatMessage.tsx) */
+.chatv2 .grounding-row {
+  margin-top: 10px;
+  display: flex;
+}
+.chatv2 .grounding-badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.chatv2 .grounding-badge.grounding-ok {
+  background: var(--cv2-success-soft);
+  color: var(--success);
+}
+.chatv2 .grounding-badge.grounding-warn {
+  background: var(--cv2-warning-soft);
+  color: var(--warning);
+}
+
+/* Escalation reads as a warning (amber), not an error. role=alert unchanged. */
+.chatv2 .escalation-banner {
+  background: var(--cv2-warning-soft);
+  border: 1px solid var(--warning);
+  color: var(--text-0);
+}
+.chatv2 .escalation-contacts {
+  color: var(--text-1);
+}
+
+/* Markdown bits with hardcoded dark-glass literals */
+.chatv2 .md-code-block {
+  background: var(--surface-1);
+  border-color: var(--border-0);
+}
+.chatv2 .md-inline-code {
+  background: var(--cv2-accent-soft);
+  border-color: transparent;
+  color: var(--ura-blue-bright);
+}
+.chatv2 .md-table-wrap {
+  background: var(--bg-0);
+}
+.chatv2 .md-table th {
+  background: var(--bg-1);
+  color: var(--text-0);
+}
+.chatv2 .md-cite-ref {
+  color: var(--ura-gold-muted);
+  background: var(--surface-1);
+  border-color: var(--border-1);
+}
+
+/* ---------------------------------------------------------------------------
+ * Loading stage (pre-first-token) + streaming caret
+ * ------------------------------------------------------------------------- */
+.chatv2 .stagev2 {
+  padding: 2px 0 4px;
+}
+.chatv2 .stagev2-label {
+  display: inline-block;
+  font-size: 13.5px;
+  color: var(--text-2);
+  animation: cv2-stage-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cv2-stage-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.chatv2 .stagev2-skl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 420px;
+}
+.chatv2 .stagev2-skl span {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: cv2-shimmer 1.4s linear infinite;
+}
+.chatv2 .stagev2-skl span:last-child {
+  width: 62%;
+}
+@keyframes cv2-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Blinking caret at the tail of the streaming reply (gated by .is-streaming
+   on the message list; attaches to the last markdown block). */
+.chatv2 .message-list.is-streaming > article:last-of-type .md-body > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: var(--text-0);
+  border-radius: 1.5px;
+  animation: cv2-caret 0.9s steps(2, start) infinite;
+}
+@keyframes cv2-caret {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* Scroll-to-latest: flat pill (replaces gold-on-dark-glass) */
+.chatv2 .scroll-to-latest {
+  background: var(--bg-0);
+  border: 1px solid var(--border-1);
+  color: var(--text-0);
+  box-shadow: var(--shadow-lg);
+  font-weight: 600;
+}
+.chatv2 .scroll-to-latest:hover {
+  background: var(--surface-2);
+  border-color: var(--border-1);
+}
+
+/* ---------------------------------------------------------------------------
+ * Landing — input-first hierarchy (small brand h1, question h2, composer,
+ * categorized chips). Legacy classes stay for the e2e/smoke text queries.
+ * ------------------------------------------------------------------------- */
+.chatv2 .landing {
+  justify-content: flex-start;
+  gap: 0;
+  overflow-y: auto;
+}
+.chatv2 .ldv2-block {
+  width: min(720px, 100%);
+  margin-top: max(40px, 14vh);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.chatv2 .ldv2-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.chatv2 .ldv2-brand img {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+.chatv2 .ldv2-headline {
+  margin: 0 0 8px;
+  font-size: clamp(22px, 3.2vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-align: center;
+  color: var(--text-0);
+}
+.chatv2 .landing .landing-sub {
+  margin: 0 0 22px;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: center;
+}
+.chatv2 .landing-composer {
+  animation: none;
+}
+.chatv2 .landing-brand {
+  animation: none;
+}
+.chatv2 .landing-prompts {
+  margin-top: 14px;
+  gap: 10px;
+  animation: none;
+}
+.chatv2 .landing-chip {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 12px 14px;
+  min-height: 62px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 12px;
+  color: var(--text-0);
+  font-size: 13.5px;
+}
+.chatv2 .landing-chip:hover {
+  background: var(--bg-1);
+  border-color: var(--border-1);
+  color: var(--text-0);
+  transform: none;
+  box-shadow: none;
+}
+.chatv2 .ldv2-cat {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ura-gold-muted);
+}
+@media (max-width: 640px) {
+  .chatv2 .landing-prompts {
+    grid-template-columns: 1fr;
+  }
+  .chatv2 .ldv2-block {
+    margin-top: max(24px, 8vh);
+  }
+}
+@media (max-height: 600px) {
+  .chatv2 .ldv2-block {
+    margin-top: 20px;
+  }
+}

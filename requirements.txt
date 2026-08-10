@@ -1,0 +1,99 @@
+# Core API backend
+fastapi==0.135.3
+uvicorn[standard]==0.30.1
+pydantic==2.13.0
+slowapi>=0.1.9
+limits[redis]>=3.13
+sse-starlette>=2.0.0
+httpx>=0.28.1,<0.29
+
+# Data / modeling stack for notebooks (CSV/PDF RAG + tagging + TTS)
+pandas>=1.5,<4.0
+numpy==1.26.4
+sentence-transformers==3.4.1
+langchain==1.2.15
+langchain-community==0.4.1
+langchain-core>=1.3.2,<2.0.0
+langchain-text-splitters==1.1.2
+langchain-qdrant==1.1.0
+qdrant-client>=1.17.1,<2.0.0
+datasets==3.3.2
+evaluate==0.4.6
+transformers==4.48.3
+accelerate==1.13.0
+torch>=2.6.0
+huggingface-hub==0.27.1
+sentencepiece==0.2.1
+kagglehub==0.3.12
+openpyxl==3.1.5
+
+# Hybrid retrieval (BM25 sparse + cross-encoder reranking)
+rank-bm25==0.2.2
+
+# PDF ingestion + generation
+pymupdf4llm==1.27.2.3
+pymupdf==1.27.2.3
+fpdf2>=2.8.7
+
+# Web crawling
+beautifulsoup4>=4.12.0
+
+# Text-to-Speech (legacy — kept for notebooks only, not production path)
+TTS==0.21.3; python_version < '3.12'
+gTTS>=2.5.0; python_version >= '3.12'
+pydub==0.25.1
+
+# ----------------------------------------------------------------------------
+# Speech pipeline (2026 production — Luganda/English ASR + MT + TTS)
+# ----------------------------------------------------------------------------
+# Fine-tuning stack (explicitly pinned — previously imported but missing)
+peft>=0.14.0
+trl>=0.12.0
+bitsandbytes>=0.43.0; sys_platform == 'linux'
+# ONNX export + quantisation
+optimum[onnxruntime]>=1.24.0
+onnxruntime>=1.20.0
+# Unified on-device audio runtime (ASR + VAD + TTS + lang-ID)
+sherpa-onnx>=1.11.0
+# ASR eval
+jiwer>=3.0.0
+# Audio I/O for eval + training pipelines
+librosa>=0.10.0
+soundfile>=0.12.0
+# Streaming voice activity detection
+silero-vad>=6.2.1
+# Language identification (code-switching routing)
+lingua-language-detector>=2.0.0
+# Optional: reference-free MT quality (uncomment when adopting)
+# unbabel-comet>=2.2.0
+# Optional: Luganda phoneme G2P via espnet TTS frontend
+# espnet-tts-frontend>=0.0.4
+
+# Data Ingestion & Augmentation
+datasketch==1.10.0
+pyarrow==18.1.0
+pandera==0.30.1
+ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
+
+# Fine-tuning evaluation
+rouge-score==0.1.2
+nltk==3.9.3
+sacrebleu==2.6.0
+
+# Visualization & reporting
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Cross-encoder reranking (included in sentence-transformers)
+# sentence-transformers already listed above
+
+# OpenTelemetry GenAI observability (opt-in via OTEL_ENABLED=true)
+opentelemetry-api>=1.27.0
+opentelemetry-sdk>=1.27.0
+opentelemetry-exporter-otlp-proto-grpc>=1.27.0
+
+# RAG evaluation (CI/CD pipeline)
+ragas>=0.2.0
+
+# Threat Model as Code (STRIDE DFDs + threat generation)
+pytm>=1.3.0

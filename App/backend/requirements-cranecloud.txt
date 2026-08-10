@@ -1,0 +1,87 @@
+# Crane Cloud requirements — slim CPU profile.
+#
+# Crane Cloud RENU pods are CPU-only with ~4-8 GB RAM, so the heavy
+# torch / transformers / sentence-transformers / bitsandbytes stack from
+# requirements.txt is intentionally OMITTED.  The app's import sites for
+# those packages are all `try/except ImportError`-guarded — the runtime
+# degrades to BM25 keyword retrieval and the LLM dispatches through a
+# remote backend (`LLM_BACKEND=vllm` against an external endpoint).
+#
+# To run the local-GPU stack instead, use App/backend/requirements.txt.
+
+# Core API
+fastapi>=0.115.0,<0.116
+uvicorn[standard]>=0.32.0,<0.35
+pydantic>=2.10.0,<2.12
+
+# Rate limiting + cache (Redis optional, falls back to in-process)
+slowapi>=0.1.9
+limits[redis]>=3.13
+redis>=5.0.0
+psycopg[binary]>=3.2.0
+psycopg-pool>=3.2.0
+
+# Data loading
+pandas>=2.2
+numpy>=1.26,<3
+
+# Document attachment analysis (POST /v1/documents/analyze) — pure-Python
+# (plus lxml wheel) extractors for DOCX/XLSX, PyMuPDF for PDF text, and
+# multipart form parsing for the upload endpoint. Import sites are lazy +
+# ImportError-guarded, so omitting any of these only degrades that format.
+python-docx>=1.1.2
+openpyxl>=3.1.5
+python-multipart>=0.0.18
+# Optional local OCR sidecar client (enabled only when OCR_BACKEND=service),
+# and the transport for MCP namespaces bound to a remote server.
+httpx>=0.28.1,<0.29
+# MCP tool argument/result validation (app/mcp/validation.py); falls back
+# to a structural check if absent.
+jsonschema>=4.23
+pymupdf>=1.25.3
+# PDF report generation (pdf_export.py: /v1/export/* and
+# /v1/documents/{id}/report). fpdf2 was never declared, so every PDF-export
+# endpoint 500'd on this image — live-verified on the HF Space 2026-07-18.
+# Pillow enables image-attachment decode (OCR engines stay optional).
+fpdf2>=2.8
+Pillow>=10.4
+
+# SSE streaming
+sse-starlette>=2.0.0
+
+# Qdrant client kept so QDRANT_ENABLED=true is a future-flag toggle.
+# Without QDRANT_URL set, HybridRetriever falls back to keyword search.
+qdrant-client>=1.13,<2
+
+# Misc utilities used outside the LLM path
+cryptography>=44.0.0
+lingua-language-detector>=2.0.0
+
+# OpenTelemetry (opt-in)
+opentelemetry-api>=1.29.0
+opentelemetry-sdk>=1.29.0
+opentelemetry-exporter-otlp-proto-grpc>=1.29.0
+
+# Phase 29 — WebSocket text-chat tests need this on the server side too
+# for the test runtime (the runtime endpoint itself uses Starlette's
+# native WebSocket which has no separate dependency).
+websockets>=12.0
+
+# Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK).
+# Restore hybrid retrieval (Workers AI bge-m3 + Vectorize), LLM/STT/translation
+# resilience, and R2 durability on this CPU-only tier. httpx is already present
+# (via fastapi / qdrant-client); only these two are new. boto3 is used only by
+# the R2 client (lazy-imported), so it does not bloat cold-start.
+pydantic-settings>=2.5.0
+boto3>=1.34.0
+
+# DNS-over-HTTPS resolver (doh_resolver.py) — RENU pods have no working upstream
+# DNS; this resolves external hostnames via 1.1.1.1 over TCP/443 when USE_DOH=true.
+dnspython>=2.6.0
+
+# Cloud neural TTS — edge-tts (Microsoft neural voices) for English and other
+# non-Luganda speech. Pure-Python + aiohttp (a few MB), so it fits this slim
+# CPU image where the Piper/sherpa stack is omitted. Without it the TTS chain
+# falls through to Sunbird's non-English voice for English (poor quality). The
+# English voice is configurable via SPEECH_EN_EDGE_VOICE (default en-US-AriaNeural).
+edge-tts>=7.0,<8

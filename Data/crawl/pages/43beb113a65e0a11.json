@@ -1,0 +1,81 @@
+{
+  "url": "https://ura.go.ug/ac/buk-cing-matidi-me-efris/",
+  "title": "BUK CING MATIDI ME EFRIS - Uganda Revenue Authority",
+  "text": "\n| lagony | Wel labongo VAT | Ret me VAT | Wel VAT | Wel ki VAT iye |\n| --- | --- | --- | --- | --- |\n| Wil | 1,000/= | 18% | 180/= | 1,180/= |\n| cat | 1,500/= | 18% | 270/= | 1,770/= |\n\n| Kodi biacara | Yoo me tic ki EFRIS | Kit ma tiyo kwede |\n| --- | --- | --- |\n| Kodi biacara | Yoo me tic ki EFRIS | Kit ma tiyo kwede |\n| Dukan / Lucatwil madongo ma woto awoto / lucat ma cato cat  i ko yoo | APP ME EFRIS (ma kidiyo ki i cim cing) | Gam App man ki I Appstore nyo Playstore ci i ket obed i cimi. Ter app man wek orwate ki jami me cato wil ma megi nyo tic cing ma in itimo ci i cak tic kwede me coyo e-invoice. Man tiyo ki intanet ento bene romo tic labongo intanet pi nino ma pe kato 5. |\n| Kompiuta me cing Electronic Fiscal Device’ (EFD) | EFD obedo kompiuta ma tidi ma make icing calo cim ma ki tiyo kwede me cato wil. Tye ki cictim me cato wil iye (POS) ki bene lagwok rekod me cato wil Sales Data Controller (SDC) ma no kikubu ki la nywa ricit ki ‘ invoice ’ me cato wil. En tye ki lagwok rekod man ma cwalo kwede ki ngec bot URA ka cato wil mo keken otime. Kimito ni lucat wil weny gi owil EFD. |  |\n| Dukan ma cato cat irwom madongo ki matinotino | Software ma kiketo bedo ( Client Application) iwang kompiuta ma iwi meca: | Man ki romo keto ne bedo i kompiuta ma iyero ikin tablet, laptop nyo kompiuta ma iwi meca ni. Ma iromo tic me kwede me cat i dukan. Gam ki i websit pa URA https://ura.go.ug/en/efris/efris-login/ ite coc me e-invoicing menu me downloads ikom link me EFRIS. Tiyo ki intanet ento bene romo tic labongo intanet pi kare ma pe kato nino-5. |\n| Web potol pa URA | Ti ki http://ura.go.ug me oo iyi website pa URA kama inongo iye link me EFRIS ma yabi yo ma weko ibedo ki kero me coyo e-recit ki e-invoices . Man tye pi lucul mucoro ma gi peke ki cictim me jogo cente, dak cato wil gi pwod pe oo luwil ma romo 100 nino ki nino,ki bene itum pa mwaka cato wil gi ducu pe kato UGX 2 bilion. |  |\n| Biacara ma tye ki cictim me akaunting i kompiuta gi | Ki kubu cictim ki cictim | Kitiyo ki API application programming interface me kubu cictim ma lacat wil tye ka tic kwede ni, ki EFRIS wek obed ki kero me coyo e-recit ki e-invoices. Man rwate ki biacara ma cato wil gi tye kawot irwom ma lamal dak bene ki tiyo ki cictim me akaunting (macalo. ERP ki POS). |\n| Gang moo/ kapiko moo | ‘Electronic Dispenser Controller’ (EDC) | Man ki yubu pi gang mo ki kapiko mo keken. EDC pire kene kubu ngec me moo ma ki piko I EFD wek obed ki kero me coyo recit pi wang cawa meno ma ki cato ki moo. |\n",
+  "content_hash": "43beb113a65e0a11",
+  "timestamp": "2026-07-24T06:43:15Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "lagony",
+        "Wel labongo VAT",
+        "Ret me VAT",
+        "Wel VAT",
+        "Wel ki VAT iye"
+      ],
+      "rows": [
+        [
+          "Wil",
+          "1,000/=",
+          "18%",
+          "180/=",
+          "1,180/="
+        ],
+        [
+          "cat",
+          "1,500/=",
+          "18%",
+          "270/=",
+          "1,770/="
+        ]
+      ],
+      "row_count": 2
+    },
+    {
+      "headers": [
+        "Kodi biacara",
+        "Yoo me tic ki EFRIS",
+        "Kit ma tiyo kwede"
+      ],
+      "rows": [
+        [
+          "Kodi biacara",
+          "Yoo me tic ki EFRIS",
+          "Kit ma tiyo kwede"
+        ],
+        [
+          "Dukan / Lucatwil madongo ma woto awoto / lucat ma cato cat  i ko yoo",
+          "APP ME EFRIS (ma kidiyo ki i cim cing)",
+          "Gam App man ki I Appstore nyo Playstore ci i ket obed i cimi. Ter app man wek orwate ki jami me cato wil ma megi nyo tic cing ma in itimo ci i cak tic kwede me coyo e-invoice. Man tiyo ki intanet ento bene romo tic labongo intanet pi nino ma pe kato 5."
+        ],
+        [
+          "Kompiuta me cing Electronic Fiscal Device’ (EFD)",
+          "EFD obedo kompiuta ma tidi ma make icing calo cim ma ki tiyo kwede me cato wil. Tye ki cictim me cato wil iye (POS) ki bene lagwok rekod me cato wil Sales Data Controller (SDC) ma no kikubu ki la nywa ricit ki ‘ invoice ’ me cato wil. En tye ki lagwok rekod man ma cwalo kwede ki ngec bot URA ka cato wil mo keken otime. Kimito ni lucat wil weny gi owil EFD.",
+          ""
+        ],
+        [
+          "Dukan ma cato cat irwom madongo ki matinotino",
+          "Software ma kiketo bedo ( Client Application) iwang kompiuta ma iwi meca:",
+          "Man ki romo keto ne bedo i kompiuta ma iyero ikin tablet, laptop nyo kompiuta ma iwi meca ni. Ma iromo tic me kwede me cat i dukan. Gam ki i websit pa URA https://ura.go.ug/en/efris/efris-login/ ite coc me e-invoicing menu me downloads ikom link me EFRIS. Tiyo ki intanet ento bene romo tic labongo intanet pi kare ma pe kato nino-5."
+        ],
+        [
+          "Web potol pa URA",
+          "Ti ki http://ura.go.ug me oo iyi website pa URA kama inongo iye link me EFRIS ma yabi yo ma weko ibedo ki kero me coyo e-recit ki e-invoices . Man tye pi lucul mucoro ma gi peke ki cictim me jogo cente, dak cato wil gi pwod pe oo luwil ma romo 100 nino ki nino,ki bene itum pa mwaka cato wil gi ducu pe kato UGX 2 bilion.",
+          ""
+        ],
+        [
+          "Biacara ma tye ki cictim me akaunting i kompiuta gi",
+          "Ki kubu cictim ki cictim",
+          "Kitiyo ki API application programming interface me kubu cictim ma lacat wil tye ka tic kwede ni, ki EFRIS wek obed ki kero me coyo e-recit ki e-invoices. Man rwate ki biacara ma cato wil gi tye kawot irwom ma lamal dak bene ki tiyo ki cictim me akaunting (macalo. ERP ki POS)."
+        ],
+        [
+          "Gang moo/ kapiko moo",
+          "‘Electronic Dispenser Controller’ (EDC)",
+          "Man ki yubu pi gang mo ki kapiko mo keken. EDC pire kene kubu ngec me moo ma ki piko I EFD wek obed ki kero me coyo recit pi wang cawa meno ma ki cato ki moo."
+        ]
+      ],
+      "row_count": 7
+    }
+  ]
+}

@@ -1,0 +1,296 @@
+/* =============================================================================
+ * chatv2 — two-row composer: textarea on top, toolbar inside the same
+ * container below (attach · language · Voice · Narrate · spacer · mic · send).
+ * Keeps the legacy `.composer` class (the a11y e2e waits on it) plus legacy
+ * chip / recording / circle-button classes so their behavior contract holds.
+ * ========================================================================== */
+
+.chatv2 .composer.cmpv2 {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  background: var(--bg-0);
+  border: 1px solid var(--border-1);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.chatv2 .composer.cmpv2:focus-within {
+  border-color: var(--cv2-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cv2-focus) 18%, transparent);
+}
+/* The container shows focus; the textarea must not draw a second ring. */
+.chatv2 .cmpv2 .input:focus,
+.chatv2 .cmpv2 .input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.chatv2 .cmpv2 .input {
+  width: 100%;
+  flex: none;
+  min-height: 24px;
+  max-height: 200px;
+  padding: 13px 16px 4px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-0);
+}
+.chatv2 .cmpv2 .input::placeholder {
+  color: var(--text-2);
+}
+
+.chatv2 .cmpv2-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 8px;
+  min-width: 0;
+}
+.chatv2 .cmpv2-spacer {
+  flex: 1;
+}
+
+/* Toolbar icon buttons reuse the legacy circle classes (44px, token-tinted).
+   Slightly smaller inside the toolbar row. */
+.chatv2 .cmpv2-bar .composer-circle-btn {
+  width: 38px;
+  height: 38px;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 8px;
+}
+.chatv2 .cmpv2-bar .composer-circle-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+/* Send: solid accent, 44px round, AA glyph (navy/white light, light/dark dark). */
+.chatv2 .cmpv2-bar .send-circle-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+  box-shadow: none;
+  margin-left: 4px;
+}
+.chatv2 .cmpv2-bar .send-circle-btn:hover:not(:disabled) {
+  background: var(--cv2-accent-hover);
+  color: var(--cv2-accent-contrast);
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+.chatv2 .cmpv2-bar .send-circle-btn:disabled {
+  opacity: 0.35;
+}
+
+/* Mic keeps its legacy recording pulse via .btn-recording. */
+.chatv2 .cmpv2-bar .mic-circle-btn {
+  border-radius: 50%;
+}
+
+/* Voice / Narrate: same checkbox semantics as the old header (role=checkbox,
+   accessible names "Voice"/"Narrate"), restyled as quiet toolbar toggles. */
+.chatv2 .cmpv2-bar .voice-toggle {
+  min-height: 38px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.chatv2 .cmpv2-bar .voice-toggle:hover {
+  background: var(--surface-2);
+  border-color: transparent;
+  color: var(--text-0);
+}
+.chatv2 .cmpv2-bar .voice-toggle:has(input:checked) {
+  background: var(--cv2-accent-soft);
+  color: var(--text-0);
+}
+.chatv2 .cmpv2-bar .voice-toggle input[type="checkbox"] {
+  accent-color: var(--cv2-accent);
+}
+/* Disabled: dim only the checkbox glyph, never the label — a 0.45 opacity on
+   the whole toggle drops the label to ~2.35:1 on white and fails axe AA. */
+.chatv2 .cmpv2-bar .voice-toggle:has(input:disabled) {
+  cursor: not-allowed;
+}
+.chatv2 .cmpv2-bar .voice-toggle input[type="checkbox"]:disabled {
+  opacity: 0.5;
+}
+
+/* Language trigger */
+.chatv2 .cmpv2-lang {
+  position: relative;
+}
+.chatv2 .cmpv2-lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 62px;
+  height: 38px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.chatv2 .cmpv2-lang-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+/* ---------------------------------------------------------------------------
+ * Recording state (legacy markup, red treatment per the approved design).
+ * ------------------------------------------------------------------------- */
+.chatv2 .composer.cmpv2.composer-active-recording {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 68px;
+  padding: 8px 10px;
+  border-color: var(--danger);
+  box-shadow: none;
+}
+.chatv2 .composer-rec-label {
+  color: var(--text-1);
+  font-size: 13.5px;
+}
+.chatv2 .composer-rec-dot {
+  background: var(--danger);
+}
+.chatv2 .composer-rec-controls {
+  background: transparent;
+}
+.chatv2 .composer-waveform span {
+  background: var(--danger);
+  opacity: 0.75;
+}
+.chatv2 .composer-rec-confirm {
+  background: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+  box-shadow: none;
+}
+.chatv2 .composer-rec-confirm:hover {
+  background: var(--cv2-accent-hover);
+  box-shadow: none;
+}
+.chatv2 .composer-rec-cancel:hover {
+  background: var(--cv2-danger-soft);
+  color: var(--danger);
+}
+
+/* ---------------------------------------------------------------------------
+ * Attachment chips (legacy classes; token re-tint + light polish).
+ * ------------------------------------------------------------------------- */
+.chatv2 .attachment-chip {
+  background: var(--surface-1);
+  border-color: var(--border-0);
+  border-radius: 999px;
+}
+.chatv2 .attachment-chip > svg {
+  color: var(--text-2);
+}
+.chatv2 .attachment-chip-error {
+  border-color: var(--danger);
+}
+.chatv2 .attachment-chip-error .attachment-meta {
+  color: var(--danger);
+}
+
+.chatv2 .composer-hint {
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+/* ---------------------------------------------------------------------------
+ * Toolbar tooltips (data-tip attribute) — a custom-styled label that replaces
+ * the native browser title tooltip on icon-only buttons: consistent across
+ * platforms, on-brand, and themeable, where title="" renders as an OS-default
+ * box after an inconsistent delay.
+ * ------------------------------------------------------------------------- */
+.chatv2 [data-tip] {
+  position: relative;
+}
+.chatv2 [data-tip]:hover::after,
+.chatv2 [data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--text-0);
+  color: var(--bg-0);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+  animation: cv2-tip-in 120ms ease 350ms both;
+}
+@keyframes cv2-tip-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(2px);
+  }
+}
+/* Touch browsers can latch :hover after a tap, which would leave the tooltip
+   stuck open until the next unrelated tap — keep it a hover/keyboard-only
+   affordance there. */
+@media (hover: none) {
+  .chatv2 [data-tip]:hover::after {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 [data-tip]:hover::after,
+  .chatv2 [data-tip]:focus-visible::after {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Dock — desktop sticky; ≤720px keeps the legacy fixed, keyboard-aware dock
+ * (fed by --keyboard-inset / --chat-dock-height from page.tsx), re-tinted.
+ * ------------------------------------------------------------------------- */
+.chatv2 .chat-dock {
+  background: linear-gradient(to top, var(--bg-0) 60%, transparent);
+}
+@media (max-width: 720px) {
+  .chatv2 .chat-dock .composer.cmpv2 {
+    border-radius: 20px;
+    padding: 0;
+    min-height: 0;
+  }
+  .chatv2 .chat-dock {
+    background: linear-gradient(
+      to top,
+      var(--bg-0) 0%,
+      color-mix(in srgb, var(--bg-0) 88%, transparent) 58%,
+      transparent 100%
+    );
+  }
+  .chatv2 .cmpv2 .input {
+    font-size: 16px; /* prevents iOS zoom-on-focus */
+    max-height: 118px;
+  }
+  .chatv2 .cmpv2-bar {
+    padding: 2px 6px 6px;
+  }
+  /* Recording panel keeps its row layout on mobile. */
+  .chatv2 .composer.cmpv2.composer-active-recording {
+    border-radius: 20px;
+  }
+}

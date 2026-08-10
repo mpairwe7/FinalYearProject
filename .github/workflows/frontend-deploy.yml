@@ -1,0 +1,342 @@
+# Frontend CI/CD Pipeline - Docker Deployment
+#
+# Security scanning supplemented by dedicated workflows:
+#   - security-trivy.yml      → container image scanning, SBOM, license compliance
+#   - devsecops-sast-dast.yml → Semgrep SAST (TypeScript/React), Checkov IaC, ZAP DAST
+name: Frontend CI/CD
+
+on:
+  push:
+    branches: [main, dev, develop]
+    paths:
+      - 'App/frontend/**'
+      - '.github/workflows/frontend-deploy.yml'
+  pull_request:
+    branches: [main, dev, develop]
+    paths:
+      - 'App/frontend/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+concurrency:
+  group: frontend-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  BUN_VERSION: '1.3.12'
+  DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE_FRONTEND || 'landwind/ura-chatbot-frontend' }}
+
+jobs:
+  # ============================================
+  # Stage 1: Lint and Type Check
+  # ============================================
+  lint-frontend:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ./App/frontend
+        run: bun install --frozen-lockfile
+
+      - name: Run ESLint
+        working-directory: ./App/frontend
+        run: bun run lint
+
+      - name: Type check
+        working-directory: ./App/frontend
+        run: bun run tsc --noEmit
+
+  # ============================================
+  # Stage 2: Test
+  # ============================================
+  test-frontend:
+    name: Unit & Component Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint-frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ./App/frontend
+        run: bun install --frozen-lockfile
+
+      - name: Run Vitest unit & component tests
+        working-directory: ./App/frontend
+        run: bun run test -- --reporter=verbose
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-coverage
+          path: App/frontend/coverage/
+          retention-days: 30
+
+  # ============================================
+  # Stage 2b: Accessibility audit (axe-core + Lighthouse CI)
+  # ============================================
+  a11y-audit:
+    name: Accessibility Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint-frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node (for Lighthouse)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ./App/frontend
+        run: bun install --frozen-lockfile
+
+      - name: Build for a11y audit
+        working-directory: ./App/frontend
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8087
+        run: bun run build
+
+      - name: Start frontend server
+        working-directory: ./App/frontend
+        run: bun run start &
+        env:
+          PORT: 3000
+
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000 > /dev/null 2>&1 && break
+            sleep 1
+          done
+
+      - name: Run Lighthouse CI
+        uses: treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18 # v12
+        with:
+          urls: http://localhost:3000
+          configPath: ./App/frontend/lighthouserc.json
+          uploadArtifacts: true
+
+  # ============================================
+  # Stage 3: Build
+  # ============================================
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test-frontend, a11y-audit]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ./App/frontend
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        working-directory: ./App/frontend
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:8087' }}
+        run: bun run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-build
+          path: App/frontend/.next/
+
+  # ============================================
+  # Stage 4: Build & Push Docker Image
+  # ============================================
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-frontend
+    if: github.event_name != 'pull_request'
+    outputs:
+      published: ${{ steps.docker_mode.outputs.publish }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+
+      - name: Resolve Docker publish mode
+        id: docker_mode
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "local_tag=ura-chatbot-frontend:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "DockerHub credentials are not configured; building and scanning local image only."
+          fi
+
+      - name: Login to DockerHub
+        if: steps.docker_mode.outputs.publish == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build local Docker image
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: ./App/frontend
+          file: ./App/frontend/Dockerfile
+          push: false
+          load: true
+          tags: ${{ steps.docker_mode.outputs.local_tag }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:8087' }}
+
+      - name: Push DockerHub tags
+        if: steps.docker_mode.outputs.publish == 'true'
+        env:
+          LOCAL_IMAGE: ${{ steps.docker_mode.outputs.local_tag }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            docker tag "$LOCAL_IMAGE" "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"
+
+      - name: Trivy vulnerability scan (SARIF)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ steps.docker_mode.outputs.local_tag }}
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-frontend.sarif
+          trivy-config: trivy.yaml
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always() && hashFiles('trivy-frontend.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend-pipeline
+
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ steps.docker_mode.outputs.local_tag }}
+          format: cyclonedx
+          output: sbom-frontend-pipeline.cdx.json
+
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-frontend-pipeline-results
+          path: |
+            trivy-frontend.sarif
+            sbom-frontend-pipeline.cdx.json
+          retention-days: 90
+
+      - name: Step summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "## Frontend Docker Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: \`${{ env.DOCKER_IMAGE }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Local scan image: \`${{ steps.docker_mode.outputs.local_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- DockerHub publish: \`${{ steps.docker_mode.outputs.publish }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.docker_mode.outputs.publish }}" == "true" ]]; then
+            echo "- Published tags:" >> "$GITHUB_STEP_SUMMARY"
+            while IFS= read -r tag; do
+              [[ -n "$tag" ]] || continue
+              echo "  - \`$tag\`" >> "$GITHUB_STEP_SUMMARY"
+            done <<< "$TAGS"
+          else
+            echo "- Published tags: skipped because DockerHub credentials are not configured" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 5: Deploy Production
+  # ============================================
+  deploy-production:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build-docker
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.build-docker.outputs.published == 'true'
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Deploy frontend container
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          API_HOST: ${{ secrets.API_HOST }}
+        run: |
+          echo "Deploying $DOCKER_IMAGE:latest to production"
+          # Add deployment commands here (e.g., SSH, kubectl, docker-compose)
+          # ssh -i "$DEPLOY_KEY" user@"$API_HOST" "docker pull $DOCKER_IMAGE:latest && docker-compose up -d frontend"
+
+      - name: Step summary
+        run: |
+          echo "## Frontend Production Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: \`${{ env.DOCKER_IMAGE }}:latest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"

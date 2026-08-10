@@ -1,0 +1,73 @@
+# =============================================================================
+# Bandit Configuration — Python Security Linter
+# URA AI Chatbot (2026)
+#
+# Reference: https://bandit.readthedocs.io/en/latest/config.html
+# =============================================================================
+
+# Directories to exclude from scanning
+exclude_dirs:
+  - tests
+  - test_env
+  - Data
+  - Results
+  - Notebooks
+  - .git
+  - __pycache__
+  - node_modules
+  - .next
+
+# Test plugins to skip (with justification)
+skips:
+  # B101: assert used — acceptable in test/validation code, not in prod paths
+  - B101
+  # B603: subprocess without shell — we use subprocess.run with list args (safe)
+  # Keep enabled — don't skip B603
+
+# Test plugins to explicitly include (high-value for ML/API projects)
+tests:
+  - B102   # exec used
+  - B103   # set_bad_file_permissions
+  - B104   # hardcoded_bind_all_interfaces
+  - B105   # hardcoded_password_string
+  - B106   # hardcoded_password_funcarg
+  - B107   # hardcoded_password_default
+  - B108   # hardcoded_tmp_directory
+  - B110   # try_except_pass
+  - B112   # try_except_continue
+  - B201   # flask_debug_true
+  - B301   # pickle
+  - B302   # marshal
+  - B303   # insecure md5/sha1 hashing
+  - B306   # mktemp_q
+  - B307   # eval
+  - B308   # mark_safe (Django)
+  - B310   # urllib_urlopen
+  - B311   # random (not cryptographic)
+  - B312   # telnet
+  - B313   # xml_bad_cElementTree
+  - B314   # xml_bad_ElementTree
+  - B320   # xml_bad_lxml
+  - B323   # unverified_context (SSL)
+  - B324   # hashlib_insecure
+  - B501   # request_with_no_cert_validation
+  - B502   # ssl_with_bad_version
+  - B503   # ssl_with_bad_defaults
+  - B504   # ssl_with_no_version
+  - B505   # weak_cryptographic_key
+  - B506   # yaml_load
+  - B507   # ssh_no_host_key_verification
+  - B508   # snmp_insecure_version
+  - B509   # snmp_weak_crypto
+  - B601   # paramiko_calls
+  - B602   # subprocess_popen_with_shell_equals_true
+  - B604   # any_other_function_with_shell_equals_true
+  - B605   # start_process_with_a_shell
+  - B606   # start_process_with_no_shell
+  - B607   # start_process_with_partial_path
+  - B608   # hardcoded_sql_expressions
+  - B609   # wildcard_injection
+  - B610   # django_extra_used
+  - B611   # django_rawsql_used
+  - B701   # jinja2_autoescape_false
+  - B702   # use_of_mako_templates

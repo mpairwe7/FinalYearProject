@@ -1,0 +1,74 @@
+# =============================================================================
+# CodeQL SAST Analysis – URA Chatbot (2026)
+#
+# Static Application Security Testing using GitHub's CodeQL engine:
+#   - Python  (backend API, ML pipelines)
+#   - JavaScript/TypeScript (Next.js frontend)
+#
+# Detects: SQL injection, XSS, command injection, path traversal,
+#          hardcoded credentials, insecure deserialization, SSRF, etc.
+#
+# Results: GitHub Security tab (Code Scanning alerts)
+# =============================================================================
+name: "Security: CodeQL Analysis"
+
+on:
+  push:
+    branches: [main, dev, develop]
+  pull_request:
+    branches: [main, dev, develop]
+  schedule:
+    # Weekly deep analysis – catch new query packs / detection rules
+    - cron: "30 4 * * 1"  # Monday 04:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: codeql-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: "CodeQL: ${{ matrix.language }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+        include:
+          - language: python
+            build-mode: none
+            paths: "ml/,App/backend/"
+          - language: javascript-typescript
+            build-mode: none
+            paths: "App/frontend/"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended: includes additional queries beyond default
+          queries: security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## CodeQL Analysis: ${{ matrix.language }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Query suite: security-extended" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Paths: ${{ matrix.paths }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Results: See [Code Scanning alerts](/${{ github.repository }}/security/code-scanning)" >> "$GITHUB_STEP_SUMMARY"

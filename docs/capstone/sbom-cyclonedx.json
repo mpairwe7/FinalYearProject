@@ -1,0 +1,314 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "version": 2,
+  "metadata": {
+    "timestamp": "2026-04-13T00:00:00Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "cyclonedx-bom",
+          "version": "4.0.0",
+          "publisher": "CycloneDX"
+        }
+      ]
+    },
+    "authors": [
+      {
+        "name": "Mpairwe Landwind",
+        "email": "mpairwe.landwind@students.mak.ac.ug"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "ura-chatbot",
+      "name": "ura-chatbot",
+      "version": "1.1.0",
+      "description": "MLOps Pipeline for URA Chat Bot \u2013 AI-powered customer-service chatbot for Uganda Revenue Authority",
+      "licenses": [
+        { "license": { "id": "Apache-2.0" } }
+      ],
+      "purl": "pkg:github/mpairweLandwind/ura-chatbot@1.1.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/fastapi@0.115.12",
+      "name": "fastapi",
+      "version": "0.115.12",
+      "purl": "pkg:pypi/fastapi@0.115.12",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/uvicorn@0.34.2",
+      "name": "uvicorn",
+      "version": "0.34.2",
+      "purl": "pkg:pypi/uvicorn@0.34.2",
+      "licenses": [{"license": {"id": "BSD-3-Clause"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/pydantic@2.11.3",
+      "name": "pydantic",
+      "version": "2.11.3",
+      "purl": "pkg:pypi/pydantic@2.11.3",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/transformers@4.51.3",
+      "name": "transformers",
+      "version": "4.51.3",
+      "purl": "pkg:pypi/transformers@4.51.3",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/torch@2.6.0",
+      "name": "torch",
+      "version": "2.6.0",
+      "purl": "pkg:pypi/torch@2.6.0",
+      "licenses": [{"license": {"id": "BSD-3-Clause"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/datasets@3.5.1",
+      "name": "datasets",
+      "version": "3.5.1",
+      "purl": "pkg:pypi/datasets@3.5.1",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/peft@0.14.0",
+      "name": "peft",
+      "version": "0.14.0",
+      "purl": "pkg:pypi/peft@0.14.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/bitsandbytes@0.45.5",
+      "name": "bitsandbytes",
+      "version": "0.45.5",
+      "purl": "pkg:pypi/bitsandbytes@0.45.5",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/accelerate@1.6.0",
+      "name": "accelerate",
+      "version": "1.6.0",
+      "purl": "pkg:pypi/accelerate@1.6.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/sentencepiece@0.2.0",
+      "name": "sentencepiece",
+      "version": "0.2.0",
+      "purl": "pkg:pypi/sentencepiece@0.2.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/safetensors@0.5.3",
+      "name": "safetensors",
+      "version": "0.5.3",
+      "purl": "pkg:pypi/safetensors@0.5.3",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/slowapi@0.1.9",
+      "name": "slowapi",
+      "version": "0.1.9",
+      "purl": "pkg:pypi/slowapi@0.1.9",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/sse-starlette@2.2.1",
+      "name": "sse-starlette",
+      "version": "2.2.1",
+      "purl": "pkg:pypi/sse-starlette@2.2.1",
+      "licenses": [{"license": {"id": "BSD-3-Clause"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/qdrant-client@1.14.2",
+      "name": "qdrant-client",
+      "version": "1.14.2",
+      "purl": "pkg:pypi/qdrant-client@1.14.2",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/sentence-transformers@4.1.0",
+      "name": "sentence-transformers",
+      "version": "4.1.0",
+      "purl": "pkg:pypi/sentence-transformers@4.1.0",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "scope": "required"
+    },
+    {
+      "type": "framework",
+      "bom-ref": "pkg:npm/next@16.2.3",
+      "name": "next",
+      "version": "16.2.3",
+      "purl": "pkg:npm/next@16.2.3",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/react@19.2.0",
+      "name": "react",
+      "version": "19.2.0",
+      "purl": "pkg:npm/react@19.2.0",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/react-dom@19.2.0",
+      "name": "react-dom",
+      "version": "19.2.0",
+      "purl": "pkg:npm/react-dom@19.2.0",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/zustand@5.0.5",
+      "name": "zustand",
+      "version": "5.0.5",
+      "purl": "pkg:npm/zustand@5.0.5",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/@tanstack/react-query@5.99.0",
+      "name": "@tanstack/react-query",
+      "version": "5.99.0",
+      "purl": "pkg:npm/%40tanstack/react-query@5.99.0",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/ruff@0.11.7",
+      "name": "ruff",
+      "version": "0.11.7",
+      "purl": "pkg:pypi/ruff@0.11.7",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/mypy@1.15.0",
+      "name": "mypy",
+      "version": "1.15.0",
+      "purl": "pkg:pypi/mypy@1.15.0",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/pytest@8.3.5",
+      "name": "pytest",
+      "version": "8.3.5",
+      "purl": "pkg:pypi/pytest@8.3.5",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "scope": "optional"
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "qwen3-8b",
+      "name": "Qwen3-8B",
+      "version": "1.0",
+      "purl": "pkg:huggingface/Qwen/Qwen3-8B@1.0",
+      "description": "Qwen 3 8B model used for RAG generation and agentic tool-calling",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "supplier": {
+        "name": "Alibaba Qwen Team"
+      }
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "gemma-2b-gguf",
+      "name": "gemma-2-2b-it-q4_k_m",
+      "version": "2.0",
+      "purl": "pkg:huggingface/google/gemma-2-2b-it-GGUF@2.0",
+      "description": "Gemma 2 2B IT GGUF quantised model for on-device mobile inference via MediaPipe",
+      "licenses": [{"license": {"name": "Gemma Terms of Use"}}],
+      "supplier": {
+        "name": "Google DeepMind"
+      }
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "bge-m3",
+      "name": "BAAI/bge-m3",
+      "version": "1.0",
+      "purl": "pkg:huggingface/BAAI/bge-m3@1.0",
+      "description": "Multilingual embedding model (1024-dim) for dense retrieval in the RAG pipeline",
+      "licenses": [{"license": {"id": "MIT"}}],
+      "supplier": {
+        "name": "BAAI"
+      }
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "ura-chatbot",
+      "dependsOn": [
+        "pkg:pypi/fastapi@0.115.12",
+        "pkg:pypi/uvicorn@0.34.2",
+        "pkg:pypi/pydantic@2.11.3",
+        "pkg:pypi/transformers@4.51.3",
+        "pkg:pypi/torch@2.6.0",
+        "pkg:pypi/datasets@3.5.1",
+        "pkg:pypi/peft@0.14.0",
+        "pkg:pypi/accelerate@1.6.0",
+        "pkg:pypi/sentencepiece@0.2.0",
+        "pkg:pypi/safetensors@0.5.3",
+        "pkg:pypi/slowapi@0.1.9",
+        "pkg:pypi/sse-starlette@2.2.1",
+        "pkg:pypi/qdrant-client@1.14.2",
+        "pkg:pypi/sentence-transformers@4.1.0",
+        "pkg:npm/next@16.2.3",
+        "pkg:npm/react@19.2.0",
+        "pkg:npm/react-dom@19.2.0",
+        "pkg:npm/zustand@5.0.5",
+        "pkg:npm/@tanstack/react-query@5.99.0",
+        "qwen2.5-3b-instruct",
+        "gemma-2b-gguf",
+        "bge-m3",
+        "pkg:pypi/bitsandbytes@0.45.5",
+        "pkg:pypi/ruff@0.11.7",
+        "pkg:pypi/mypy@1.15.0",
+        "pkg:pypi/pytest@8.3.5"
+      ]
+    }
+  ]
+}

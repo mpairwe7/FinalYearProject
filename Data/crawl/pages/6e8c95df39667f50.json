@@ -1,0 +1,66 @@
+{
+  "url": "https://ura.go.ug/ac/livestock-farming/",
+  "title": "Livestock Farming - Acholi - Uganda Revenue Authority",
+  "text": "\n| ANNUAL CHARGEABLE INCOME (CY ) IN UGX | RATE OF TAX |\n| --- | --- |\n| 0 to 2,820,000 | Nil |\n| 2,820,000 to 4,020,000 | (CY – 2,820,000UGX) x 10% |\n| 4,020,000 to 4,920,000 | (CY – 4,020,000UGX) x 20% + 120,000UGX |\n| 4,920,000 to 120,000,000 | (CY – 4,920,000UGX) x 30% + 300,000UGX |\n| Above 120,000,000 | [(CY – 4,920,000UGX) x 30% + 300,000UGX] + [(CY – 120,000,000UGX) x 10%] |\n\n| ANNUAL CHARGEABLE INCOME (CY ) IN UGX | RATE OF TAX |\n| --- | --- |\n| 0 to 4,020,000 | CY x 10% |\n| 4,020,000 to 4,920,000 | (CY – 4,020,000UGX) x 20% + 402,000UGX |\n| 4,920,000 to 120,000,000 | (CY – 4,920,000UGX) x 30% + 582,000UGX |\n| Above 120,000,000 | [(CY – 4,920,000UGX) x 30% + 582,000UGX] +[(CY – 120,000,000UGX) x 10%] |\n",
+  "content_hash": "6e8c95df39667f50",
+  "timestamp": "2026-07-24T06:44:38Z",
+  "discovered_pdfs": [
+    "https://ura.go.ug/storage/2023/08/A-GUIDE-TO-TAXATION-OF-AGRICULTURAL-SECTOR.pdf"
+  ],
+  "tables": [
+    {
+      "headers": [
+        "ANNUAL CHARGEABLE INCOME (CY ) IN UGX",
+        "RATE OF TAX"
+      ],
+      "rows": [
+        [
+          "0 to 2,820,000",
+          "Nil"
+        ],
+        [
+          "2,820,000 to 4,020,000",
+          "(CY – 2,820,000UGX) x 10%"
+        ],
+        [
+          "4,020,000 to 4,920,000",
+          "(CY – 4,020,000UGX) x 20% + 120,000UGX"
+        ],
+        [
+          "4,920,000 to 120,000,000",
+          "(CY – 4,920,000UGX) x 30% + 300,000UGX"
+        ],
+        [
+          "Above 120,000,000",
+          "[(CY – 4,920,000UGX) x 30% + 300,000UGX] + [(CY – 120,000,000UGX) x 10%]"
+        ]
+      ],
+      "row_count": 5
+    },
+    {
+      "headers": [
+        "ANNUAL CHARGEABLE INCOME (CY ) IN UGX",
+        "RATE OF TAX"
+      ],
+      "rows": [
+        [
+          "0 to 4,020,000",
+          "CY x 10%"
+        ],
+        [
+          "4,020,000 to 4,920,000",
+          "(CY – 4,020,000UGX) x 20% + 402,000UGX"
+        ],
+        [
+          "4,920,000 to 120,000,000",
+          "(CY – 4,920,000UGX) x 30% + 582,000UGX"
+        ],
+        [
+          "Above 120,000,000",
+          "[(CY – 4,920,000UGX) x 30% + 582,000UGX] +[(CY – 120,000,000UGX) x 10%]"
+        ]
+      ],
+      "row_count": 4
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "url": "https://ura.go.ug/ac/fish-exporting-company-business-2/",
+  "title": "Fish Products Export - Uganda Revenue Authority",
+  "text": "\n| Description | Tax Incentive |\n| --- | --- |\n| Refrigerated Trucks | Exempted from all taxes under the fifth schedule of the East African Community Customs Management Act, 2004. |\n| Cold Rooms A cold a room in which a low temperature is maintained (as for refrigeration) | Import Duty is 0% in accordance with the EAC CET. Helps on post-harvest management and cold chain storage of agricultural products such as beef, chicken, fish etc |\n",
+  "content_hash": "524fcd0fd6e9aec2",
+  "timestamp": "2026-07-24T06:43:23Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Description",
+        "Tax Incentive"
+      ],
+      "rows": [
+        [
+          "Refrigerated Trucks",
+          "Exempted from all taxes under the fifth schedule of the East African Community Customs Management Act, 2004."
+        ],
+        [
+          "Cold Rooms A cold a room in which a low temperature is maintained (as for refrigeration)",
+          "Import Duty is 0% in accordance with the EAC CET. Helps on post-harvest management and cold chain storage of agricultural products such as beef, chicken, fish etc"
+        ]
+      ],
+      "row_count": 2
+    }
+  ]
+}

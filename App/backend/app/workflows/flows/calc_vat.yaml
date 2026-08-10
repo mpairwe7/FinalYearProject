@@ -1,0 +1,26 @@
+id: calc_vat
+name: VAT Calculator
+version: "1"
+description: Guided VAT calculation (add VAT to a net amount or extract it from a gross one).
+requires_auth: false
+trigger_phrases: []
+
+steps:
+  - id: ask_amount
+    question: "What is the **amount** in UGX? (e.g. 1,000,000 or 1m — tell me if it already includes VAT)"
+    slot: amount
+    validator: number
+
+  - id: run_calc
+    slot: ""
+    tool: calculate_vat
+    args:
+      amount: "{amount}"
+      direction: "{direction}"
+
+  - id: done
+    question: >-
+      That uses the standard VAT rate from the URA rate table for the
+      fiscal year shown above. Feel free to ask me to run another amount.
+    slot: ""
+    validator: text

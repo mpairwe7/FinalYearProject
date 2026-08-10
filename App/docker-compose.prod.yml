@@ -1,0 +1,79 @@
+# Production hardening overlay.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# The base compose file remains useful for local/ngrok demos. This overlay flips
+# production guardrails on and refuses startup when required secrets are missing.
+
+services:
+  redis:
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --requirepass
+      - ${REDIS_AUTH:?}
+
+  qdrant:
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env.production}
+
+  api:
+    environment:
+      - APP_ENV=production
+      - WORKERS=${WORKERS:-2}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CORS_ORIGINS=${CORS_ORIGINS:?Set production CORS_ORIGINS}
+      - AUTH_ALG=RS256
+      - OIDC_ISSUER=${OIDC_ISSUER:?Set OIDC_ISSUER}
+      - OIDC_AUDIENCE=${OIDC_AUDIENCE:?Set OIDC_AUDIENCE}
+      - OIDC_JWKS_URL=${OIDC_JWKS_URL:?Set OIDC_JWKS_URL}
+      - AUTH_DEV_SECRET=${AUTH_DEV_SECRET:?Set non-default AUTH_DEV_SECRET even when RS256 is used}
+      - FLAG_AUTH_REQUIRED=true
+      - FLAG_MULTI_TENANT=true
+      - FLAG_AUDIT_LEDGER=true
+      - FLAG_VOICE_CONSENT=true
+      - FLAG_AGENTIC_MODE=${FLAG_AGENTIC_MODE:-true}
+      - FLAG_TOOL_USE=${FLAG_TOOL_USE:-true}
+      - FLAG_TICKET_QUEUE=${FLAG_TICKET_QUEUE:-true}
+      - FLAG_MEMORY_ENABLED=${FLAG_MEMORY_ENABLED:-true}
+      - FLAG_HANDOFF_SUMMARIES=true
+      - FLAG_WORKFLOWS=true
+      - ANALYTICS_BACKEND=postgres
+      - POSTGRES_DSN=${POSTGRES_DSN:?Set POSTGRES_DSN}
+      - REDIS_URL=redis://:${REDIS_AUTH:?}@redis:6379/0
+      - SLOWAPI_STORAGE_URI=redis://:${REDIS_AUTH:?}@redis:6379/1
+      - QDRANT_API_KEY=${QDRANT_API_KEY:?Set QDRANT_API_KEY}
+      - INDEX_API_KEY=${INDEX_API_KEY:?Set strong INDEX_API_KEY}
+      - REQUIRE_FRESH_AUTHORITY=true
+      - URA_AUTHORITY_MANIFEST=${URA_AUTHORITY_MANIFEST:-/app/artifacts/authority/manifest.json}
+      - URA_ACCOUNT_API_BASE=${URA_ACCOUNT_API_BASE:-}
+      - URA_ACCOUNT_API_TOKEN=${URA_ACCOUNT_API_TOKEN:-}
+      - URA_ACTION_API_BASE=${URA_ACTION_API_BASE:-}
+      - URA_ACTION_API_TOKEN=${URA_ACTION_API_TOKEN:-}
+      - LLM_MODEL_REVISION=${LLM_MODEL_REVISION:?Pin LLM_MODEL_REVISION to a model commit SHA}
+      - LLM_TRUST_REMOTE_CODE=false
+      - LLM_SERIALIZE_LOCAL_GENERATION=true
+      - STORE_RAW_PROMPTS=false
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  frontend:
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_AUTH_TOKEN_STORAGE_KEY=${NEXT_PUBLIC_AUTH_TOKEN_STORAGE_KEY:-ura_auth_token}
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

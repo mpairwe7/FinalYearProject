@@ -1,0 +1,59 @@
+# =============================================================================
+# URA Chatbot — Caddy TLS ingress
+# =============================================================================
+# Terminates TLS (automatic Let's Encrypt), HTTP/2 + HTTP/3, and fronts both
+# the Next.js frontend and the FastAPI backend behind a single public domain.
+#
+# Usage:
+#   1. Set CADDY_DOMAIN and CADDY_ACME_EMAIL in .env
+#   2. Point your DNS A/AAAA record at the Docker host
+#   3. docker compose --profile tls up
+#
+# Caddy will auto-renew certs and handle OCSP stapling.
+# =============================================================================
+
+{
+    # Global options
+    email {$CADDY_ACME_EMAIL}
+    # Uncomment to use Let's Encrypt staging during testing
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$CADDY_DOMAIN} {
+    encode zstd gzip
+
+    # Security headers (defence-in-depth; also set by backend + next.config.mjs)
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "DENY"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+        Permissions-Policy        "camera=(), geolocation=(), microphone=(self)"
+        # Remove Server header
+        -Server
+    }
+
+    # Backend API — include SSE streaming path
+    @api path /v1/* /health /ready /metrics /classify /classify/batch /tags /faq/*
+    reverse_proxy @api api:8000 {
+        # SSE needs flush buffering disabled
+        flush_interval -1
+        header_up X-Request-ID {http.request.header.X-Request-ID}
+        header_up X-Real-IP    {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+
+    # Frontend — Next.js standalone
+    reverse_proxy frontend:3000 {
+        header_up X-Real-IP       {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+
+    # Access log to stdout so Docker/Loki can collect it
+    log {
+        output stdout
+        format json
+    }
+}

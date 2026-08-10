@@ -1,0 +1,155 @@
+# Weekly retraining evaluation pipeline.
+# Collects feedback, detects drift, runs pipeline dry-run, evaluates.
+# Does NOT auto-deploy — creates a PR for human review.
+name: Scheduled Retrain Evaluation
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'  # Sunday 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      drift_threshold:
+        description: 'Drift threshold for retraining trigger'
+        default: '0.15'
+        type: string
+      force:
+        description: 'Force retraining even if drift is below threshold'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: scheduled-retrain
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  evaluate:
+    name: Evaluate & Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        id: setup_uv
+        continue-on-error: true
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Install uv fallback
+        if: steps.setup_uv.outcome != 'success'
+        run: |
+          python -m pip install --upgrade pip uv
+
+      - name: Verify uv
+        run: uv --version
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -r requirements.txt
+          uv pip install --system sentence-transformers
+
+      - name: Download latest datasets (SALT + WAXAL + JW300)
+        id: datasets
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python -m ml.scripts.data_aug.dataset_downloader \
+            --output-dir Data/online_corpora \
+            --lang-pairs en-lg en-sw en-nyn en-ach \
+            --no-fleurs \
+            2>&1 | tail -20
+          echo "Downloaded $(find Data/online_corpora -name '*.jsonl' | wc -l) corpus files"
+
+      - name: Collect feedback & detect drift
+        id: drift
+        run: |
+          python -c "
+          from ml.pipelines.continuous_training import (
+              ContinuousTrainingConfig, collect_feedback, compute_drift
+          )
+          from pathlib import Path
+          import json, logging
+          logging.basicConfig(level=logging.INFO)
+
+          feedback_dir = Path('Data/feedback')
+          if not feedback_dir.exists():
+              print('No feedback directory; drift=0')
+              with open('drift_result.json', 'w') as f:
+                  json.dump({'drift': 0, 'samples': 0, 'trigger': False}, f)
+          else:
+              candidates = collect_feedback(feedback_dir)
+              texts = [c.get('user_query', '') for c in candidates if c.get('user_query')]
+              drift = compute_drift(texts) if len(texts) >= 10 else 0.0
+              trigger = drift >= ${{ inputs.drift_threshold || '0.15' }} or '${{ inputs.force }}' == 'true'
+              with open('drift_result.json', 'w') as f:
+                  json.dump({'drift': round(drift, 4), 'samples': len(candidates), 'trigger': trigger}, f)
+          "
+          cat drift_result.json
+          echo "drift=$(python -c 'import json; print(json.load(open(\"drift_result.json\"))[\"drift\"])')" >> "$GITHUB_OUTPUT"
+          echo "trigger=$(python -c 'import json; print(str(json.load(open(\"drift_result.json\"))[\"trigger\"]).lower())')" >> "$GITHUB_OUTPUT"
+
+      - name: Run pipeline (dry-run)
+        if: steps.drift.outputs.trigger == 'true'
+        run: |
+          python ml/scripts/data_augmentation.py \
+            --csv-dir Data/dataset \
+            --pdf-dir Data/pdfs \
+            --teacher-qa-dir Data/teacher_qa \
+            --output-dir /tmp/retrain_eval \
+            --no-parquet \
+            --no-pdf-corpus --no-pdf-retrieval \
+            --tokenizer-model "" \
+            -v
+
+      - name: Run quality gates (soft-fail)
+        if: steps.drift.outputs.trigger == 'true'
+        continue-on-error: true
+        run: |
+          python -m ml.pipelines.quality_gates \
+            --family production \
+            --results-dir /tmp/retrain_eval \
+            --soft-fail
+
+      - name: Generate evaluation plots
+        if: steps.drift.outputs.trigger == 'true'
+        continue-on-error: true
+        run: |
+          python -m ml.plots.generate_all \
+            --metrics-dir /tmp/retrain_eval \
+            --output-dir /tmp/retrain_eval/plots \
+            --format png
+          echo "Generated $(ls /tmp/retrain_eval/plots/*.png 2>/dev/null | wc -l) plots"
+
+      - name: Upload evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: retrain-evaluation-${{ github.run_number }}
+          path: |
+            drift_result.json
+            /tmp/retrain_eval/manifest.json
+            /tmp/retrain_eval/plots/
+          retention-days: 30
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Retrain Evaluation" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dataset refresh: ${{ steps.datasets.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Drift score: ${{ steps.drift.outputs.drift }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Retrain triggered: ${{ steps.drift.outputs.trigger }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Threshold: ${{ inputs.drift_threshold || '0.15' }}" >> "$GITHUB_STEP_SUMMARY"

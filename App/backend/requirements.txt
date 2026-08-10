@@ -1,0 +1,86 @@
+# Core API backend (2026 production stable)
+fastapi>=0.136.1,<0.137
+uvicorn[standard]>=0.46.0,<0.47
+pydantic>=2.13.3,<2.14
+
+# Rate limiting — slowapi's in-process buckets are per-worker; for
+# multi-replica deploys set `SLOWAPI_STORAGE_URI=redis://...` (see
+# App/README.md).  slowapi[redis] pins an ancient redis<4, so we install
+# the bare slowapi package plus `limits[redis]` (slowapi's storage layer)
+# directly — that pulls a modern redis compatible with our cache client.
+slowapi>=0.1.9
+limits[redis]>=3.13
+
+# Distributed semantic cache + analytics backends (opt-in)
+redis>=5.0.0
+psycopg[binary]>=3.2.0
+psycopg-pool>=3.3.1
+
+# Continuous evaluation — the harness in App/backend/app/evaluation.py
+# uses these when installed and falls back to heuristic metrics otherwise.
+# They are intentionally NOT required for the core API to run.
+# ragas>=0.2.0
+# datasets>=3.0.0
+
+# Data loading
+pandas>=2.2
+
+# Hybrid retrieval (dense + sparse + reranking)
+sentence-transformers>=5.4.1,<6
+qdrant-client>=1.17.1,<2
+numpy>=2.4.4,<3
+
+# PDF ingestion
+pymupdf4llm>=0.0.17
+pymupdf>=1.25.3
+
+# Document attachment analysis (POST /v1/documents/analyze) — DOCX/XLSX
+# extraction plus multipart form parsing for the upload endpoint. All
+# import sites are lazy + ImportError-guarded, matching the app's
+# graceful-degradation pattern.
+python-docx>=1.1.2
+openpyxl>=3.1.5
+python-multipart>=0.0.18
+# Optional local OCR sidecar client (enabled with OCR_BACKEND=service),
+# and the transport for MCP namespaces bound to a remote server via
+# MCP_SERVER_URL_* (see App/docs/mcp-architecture.md).
+httpx>=0.28.1,<0.29
+
+# MCP tool argument/result validation against JSON Schema 2020-12
+# (app/mcp/validation.py). Previously pulled in transitively; the MCP
+# boundary now depends on it directly, with a structural fallback if it
+# is ever absent.
+jsonschema>=4.23
+
+# PDF report generation (pdf_export.py: /v1/export/* and
+# /v1/documents/{id}/report) + image-attachment decoding. Previously
+# undeclared — PDF export only worked where fpdf2 happened to be installed.
+fpdf2>=2.8
+Pillow>=10.4
+
+# LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch)
+transformers>=4.46.0
+torch==2.12.1
+accelerate>=1.2.0
+peft>=0.13.0
+bitsandbytes>=0.45.0
+lingua-language-detector>=2.0.0
+cryptography>=47.0.0
+
+# SSE streaming
+sse-starlette>=3.4.1
+
+# OpenTelemetry GenAI observability (opt-in, aligned with 2025 stable semconv)
+opentelemetry-api>=1.29.0
+opentelemetry-sdk>=1.29.0
+opentelemetry-exporter-otlp-proto-grpc>=1.29.0
+
+# Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
+pydantic-settings>=2.5.0
+boto3>=1.34.0
+# DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
+dnspython>=2.6.0
+
+# Cloud neural TTS fallback (edge-tts) — used when local Piper is unavailable;
+# English voice configurable via SPEECH_EN_EDGE_VOICE (default en-US-AriaNeural)
+edge-tts>=7.0,<8

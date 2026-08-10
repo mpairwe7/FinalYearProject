@@ -1,0 +1,510 @@
+# =============================================================================
+# Trivy Security Scanning Pipeline – URA Chatbot (2026)
+#
+# Comprehensive supply chain & container security:
+#   1. Filesystem scan       – vulnerabilities in Python/Node.js/Dart dependencies
+#   2. IaC misconfig scan    – Dockerfiles, docker-compose, CI workflows
+#   3. Container image scans – all 3 Dockerfiles (API, ML, Frontend)
+#   4. SBOM generation       – CycloneDX for each image (supply chain transparency)
+#   5. License compliance    – block copyleft licenses in production
+#   6. Secret scanning       – backup layer to pre-commit hooks
+#
+# Results uploaded to: GitHub Security tab (SARIF), artifacts (JSON/CycloneDX)
+# =============================================================================
+name: "Security: Trivy Scanning"
+
+on:
+  push:
+    branches: [main, dev, develop]
+  pull_request:
+    branches: [main, dev, develop]
+  schedule:
+    # Weekly full scan – catch newly disclosed CVEs against existing code
+    - cron: "0 3 * * 1"  # Monday 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write   # Upload SARIF to GitHub Security tab
+  actions: read             # Required for SARIF upload
+
+concurrency:
+  group: trivy-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  TRIVY_VERSION: "0.69.3"
+  API_IMAGE: "landwind/ura-chatbot-api:trivy-scan"
+  ML_IMAGE: "landwind/ura-chatbot-trainer:trivy-scan"
+  FRONTEND_IMAGE: "landwind/ura-chatbot-frontend:trivy-scan"
+
+jobs:
+  # ============================================
+  # 0. PR Image Scan Scope
+  # ============================================
+  image-change-filter:
+    name: "Image Scan Scope"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      ml: ${{ steps.filter.outputs.ml }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Determine changed image paths
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          api=true
+          ml=true
+          frontend=true
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            api=false
+            ml=false
+            frontend=false
+
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            changed_paths="$(git diff --name-only "origin/${{ github.base_ref }}" HEAD)"
+
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              case "$path" in
+                Dockerfile|.dockerignore|trivy.yaml|App/backend/*|App/docker-compose.yml)
+                  api=true
+                  ;;
+              esac
+              case "$path" in
+                Dockerfile.ml|.dockerignore|trivy.yaml|requirements.txt|ml/*|Data/dataset/*)
+                  ml=true
+                  ;;
+              esac
+              case "$path" in
+                trivy.yaml|App/frontend/*)
+                  frontend=true
+                  ;;
+              esac
+            done <<< "$changed_paths"
+          fi
+
+          {
+            echo "api=$api"
+            echo "ml=$ml"
+            echo "frontend=$frontend"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "## Trivy Image Scan Scope" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | Scan? |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| API | $api |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ML trainer | $ml |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Frontend | $frontend |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # 1. Filesystem Dependency & Secret Scan
+  # ============================================
+  filesystem-scan:
+    name: "Filesystem: Dependencies & Secrets"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run Trivy filesystem scan (vulnerabilities)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-fs-vuln.sarif
+          trivy-config: trivy.yaml
+          ignore-unfixed: true
+
+      - name: Upload filesystem SARIF to GitHub Security
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-fs-vuln.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: trivy-fs-vuln.sarif
+          category: trivy-filesystem
+
+      - name: Run Trivy filesystem scan (JSON for artifact)
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH,MEDIUM
+          format: json
+          output: trivy-fs-results.json
+          trivy-config: trivy.yaml
+
+      - name: Upload filesystem results artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-filesystem-results
+          path: |
+            trivy-fs-vuln.sarif
+            trivy-fs-results.json
+          retention-days: 30
+
+  # ============================================
+  # 2. IaC Misconfiguration Scan
+  # ============================================
+  iac-scan:
+    name: "IaC: Dockerfile & Compose Misconfigs"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run Trivy IaC misconfiguration scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: config
+          scan-ref: .
+          scanners: misconfig
+          severity: CRITICAL,HIGH,MEDIUM
+          format: sarif
+          output: trivy-iac.sarif
+          trivy-config: trivy.yaml
+
+      - name: Upload IaC SARIF to GitHub Security
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-iac.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: trivy-iac.sarif
+          category: trivy-iac
+
+      - name: Run IaC scan (table output for step summary)
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: config
+          scan-ref: .
+          scanners: misconfig
+          severity: CRITICAL,HIGH,MEDIUM
+          format: table
+          output: trivy-iac-table.txt
+          trivy-config: trivy.yaml
+        continue-on-error: true
+
+      - name: IaC step summary
+        if: always()
+        run: |
+          echo "## Trivy IaC Misconfiguration Results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat trivy-iac-table.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No issues found" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # 3. License Compliance Scan
+  # ============================================
+  license-scan:
+    name: "License: Compliance Check"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run Trivy license scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: license
+          severity: CRITICAL,HIGH
+          format: json
+          output: trivy-license.json
+          trivy-config: trivy.yaml
+        continue-on-error: true
+
+      - name: License step summary
+        if: always()
+        run: |
+          echo "## Trivy License Compliance" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f trivy-license.json ]; then
+            python3 -c "
+          import json, sys
+          data = json.load(open('trivy-license.json'))
+          results = data.get('Results', [])
+          total = sum(len(r.get('Licenses', [])) for r in results)
+          print(f'- Scanned dependencies with license findings: {total}')
+          blocked = ['AGPL-1.0', 'AGPL-3.0', 'GPL-2.0', 'GPL-3.0', 'SSPL-1.0', 'BSL-1.1']
+          violations = []
+          for r in results:
+            for lic in r.get('Licenses', []):
+              if lic.get('Name') in blocked:
+                violations.append(f\"{lic.get('PkgName','?')}: {lic.get('Name')}\")
+          if violations:
+            print('- **BLOCKED licenses found:**')
+            for v in violations:
+              print(f'  - {v}')
+            sys.exit(1)
+          else:
+            print('- No copyleft/restricted license violations')
+          " >> "\$GITHUB_STEP_SUMMARY"
+          else
+            echo "- License scan produced no output" >> "\$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload license results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-license-results
+          path: trivy-license.json
+          retention-days: 30
+
+  # ============================================
+  # 4. Container Image Scans + SBOM Generation
+  # ============================================
+  container-scan-api:
+    name: "Container: API Image"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: image-change-filter
+    if: needs.image-change-filter.outputs.api == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Build API image (local, no push)
+        uses: docker/build-push-action@v6.18.0
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.API_IMAGE }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Trivy vulnerability scan (SARIF)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.API_IMAGE }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-api-image.sarif
+          trivy-config: trivy.yaml
+          ignore-unfixed: true
+
+      - name: Upload API image SARIF
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-api-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: trivy-api-image.sarif
+          category: trivy-api-image
+
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.API_IMAGE }}
+          format: cyclonedx
+          output: sbom-api.cdx.json
+
+      - name: Trivy secret scan on image
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.API_IMAGE }}
+          scanners: secret
+          severity: CRITICAL,HIGH,MEDIUM
+          format: json
+          output: trivy-api-secrets.json
+        continue-on-error: true
+
+      - name: Upload API scan artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-api-results
+          path: |
+            trivy-api-image.sarif
+            sbom-api.cdx.json
+            trivy-api-secrets.json
+          retention-days: 90
+
+  container-scan-ml:
+    name: "Container: ML Trainer Image"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: image-change-filter
+    if: needs.image-change-filter.outputs.ml == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Build ML image (local, no push)
+        uses: docker/build-push-action@v6.18.0
+        with:
+          context: .
+          file: ./Dockerfile.ml
+          push: false
+          load: true
+          tags: ${{ env.ML_IMAGE }}
+          cache-from: type=gha,scope=ml
+          cache-to: type=gha,scope=ml,mode=max
+
+      - name: Trivy vulnerability scan (SARIF)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.ML_IMAGE }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-ml-image.sarif
+          trivy-config: trivy.yaml
+          ignore-unfixed: true
+
+      - name: Upload ML image SARIF
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-ml-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: trivy-ml-image.sarif
+          category: trivy-ml-image
+
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.ML_IMAGE }}
+          format: cyclonedx
+          output: sbom-ml.cdx.json
+
+      - name: Upload ML scan artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-ml-results
+          path: |
+            trivy-ml-image.sarif
+            sbom-ml.cdx.json
+          retention-days: 90
+
+  container-scan-frontend:
+    name: "Container: Frontend Image"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: image-change-filter
+    if: needs.image-change-filter.outputs.frontend == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Build Frontend image (local, no push)
+        uses: docker/build-push-action@v6.18.0
+        with:
+          context: ./App/frontend
+          file: ./App/frontend/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.FRONTEND_IMAGE }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - name: Trivy vulnerability scan (SARIF)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-frontend-image.sarif
+          trivy-config: trivy.yaml
+          ignore-unfixed: true
+
+      - name: Upload Frontend image SARIF
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-frontend-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: trivy-frontend-image.sarif
+          category: trivy-frontend-image
+
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}
+          format: cyclonedx
+          output: sbom-frontend.cdx.json
+
+      - name: Upload Frontend scan artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-frontend-results
+          path: |
+            trivy-frontend-image.sarif
+            sbom-frontend.cdx.json
+          retention-days: 90
+
+  # ============================================
+  # 5. Summary Gate
+  # ============================================
+  security-gate:
+    name: "Security Gate: All Scans"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - filesystem-scan
+      - iac-scan
+      - license-scan
+      - container-scan-api
+      - container-scan-ml
+      - container-scan-frontend
+    if: always()
+    steps:
+      - name: Evaluate scan results
+        run: |
+          echo "## Trivy Security Gate Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Scan | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+
+          results='${{ toJson(needs) }}'
+          overall="pass"
+
+          for job in filesystem-scan iac-scan license-scan container-scan-api container-scan-ml container-scan-frontend; do
+            status=$(echo "$results" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('${job}',{}).get('result','unknown'))" 2>/dev/null || echo "unknown")
+            if [ "$status" = "success" ]; then
+              icon="✅"
+            elif [ "$status" = "skipped" ]; then
+              icon="⏭️"
+            else
+              icon="❌"
+              overall="fail"
+            fi
+            echo "| ${job} | ${icon} ${status} |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$overall" = "fail" ]; then
+            echo "**❌ Security gate FAILED – review findings in the Security tab.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          else
+            echo "**✅ All security scans passed.**" >> "$GITHUB_STEP_SUMMARY"
+          fi

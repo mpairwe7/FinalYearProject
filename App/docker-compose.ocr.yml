@@ -1,0 +1,45 @@
+# Opt-in local OCR profile.  Run with:
+# docker compose -f docker-compose.yml -f docker-compose.ocr.yml --profile ocr up -d --build ocr api
+#
+# This mirrors the BP workflow-engine pattern: OCR runs as an independently
+# health-checked local service and the API uses a private Docker-network URL.
+services:
+  ocr:
+    profiles: ["ocr"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.ocr
+    container_name: ura-app-ocr
+    ports:
+      - "127.0.0.1:${OCR_HOST_PORT:-8100}:8100"
+    environment:
+      OCR_BACKEND: easyocr
+      OCR_GPU: ${OCR_GPU:-false}
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-en}
+      OCR_SERVICE_MAX_BYTES: ${OCR_SERVICE_MAX_BYTES:-12582912}
+      OCR_SERVICE_MAX_PIXELS: ${OCR_SERVICE_MAX_PIXELS:-20000000}
+      OCR_INFERENCE_MAX_CONCURRENT: ${OCR_INFERENCE_MAX_CONCURRENT:-1}
+    volumes:
+      - ocr_models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/ready', timeout=30)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  api:
+    environment:
+      OCR_BACKEND: service
+      OCR_SERVICE_URL: http://ocr:8100
+      OCR_SERVICE_TIMEOUT_SECONDS: ${OCR_SERVICE_TIMEOUT_SECONDS:-6}
+      OCR_SERVICE_MAX_CONCURRENT: ${OCR_SERVICE_MAX_CONCURRENT:-2}
+    depends_on:
+      ocr:
+        condition: service_healthy
+
+volumes:
+  ocr_models:

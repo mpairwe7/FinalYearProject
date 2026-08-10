@@ -1,0 +1,74 @@
+{
+  "url": "https://ura.go.ug/en/opportunities/careers/eacffpc/",
+  "title": "EACFFPC Program - Uganda Revenue Authority",
+  "text": "\n| East African Region participants | Examination & Tuition Fees | 1,500,000 UGX |\n| --- | --- | --- |\n| Registration | $150 |  |\n| Field Study fees | 1,200,000 UGX |  |\n| Non-East African Region participants | Examination & Tuition Fees | $825 |\n| Registration | $225 |  |\n| Field Study fees | 1,200,000 UGX |  |\n\n| Customs Module | Paper 1: Customs Clearance procedures Paper 2 : WTO customs valuation Paper 3 : Classification of goods and ROO |\n| --- | --- |\n| Freight Forwarding Module | Paper 4 : Freight forwarding procedures Paper 5 : Port clearance Paper 6: Carriage of goods |\n| Warehousing module | Paper 7: Warehousing operations and Warehousing storage |\n| Management Module | Paper 8: Basic Course |\n| Field Study | Paper 9: Field study report |\n| Customs Management Information Systems (non-examinable) | Paper 10: Application of customs automated systems (ASYCUDA World) |\n",
+  "content_hash": "adac2055ccca1e72",
+  "timestamp": "2026-07-24T06:34:59Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "East African Region participants",
+        "Examination & Tuition Fees",
+        "1,500,000 UGX"
+      ],
+      "rows": [
+        [
+          "Registration",
+          "$150",
+          ""
+        ],
+        [
+          "Field Study fees",
+          "1,200,000 UGX",
+          ""
+        ],
+        [
+          "Non-East African Region participants",
+          "Examination & Tuition Fees",
+          "$825"
+        ],
+        [
+          "Registration",
+          "$225",
+          ""
+        ],
+        [
+          "Field Study fees",
+          "1,200,000 UGX",
+          ""
+        ]
+      ],
+      "row_count": 5
+    },
+    {
+      "headers": [
+        "Customs Module",
+        "Paper 1: Customs Clearance procedures Paper 2 : WTO customs valuation Paper 3 : Classification of goods and ROO"
+      ],
+      "rows": [
+        [
+          "Freight Forwarding Module",
+          "Paper 4 : Freight forwarding procedures Paper 5 : Port clearance Paper 6: Carriage of goods"
+        ],
+        [
+          "Warehousing module",
+          "Paper 7: Warehousing operations and Warehousing storage"
+        ],
+        [
+          "Management Module",
+          "Paper 8: Basic Course"
+        ],
+        [
+          "Field Study",
+          "Paper 9: Field study report"
+        ],
+        [
+          "Customs Management Information Systems (non-examinable)",
+          "Paper 10: Application of customs automated systems (ASYCUDA World)"
+        ]
+      ],
+      "row_count": 5
+    }
+  ]
+}

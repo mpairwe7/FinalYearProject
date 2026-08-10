@@ -1,0 +1,29 @@
+# CODEOWNERS – URA Chat Bot MLOps Pipeline
+# Each line is a file pattern followed by one or more owners.
+# Order matters: last matching pattern takes precedence.
+
+# Default owner for everything
+*                       @mpairweLandwind
+
+# Training data (explicit review for data poisoning defence)
+/Data/                  @mpairweLandwind
+
+# ML pipeline and notebooks
+/ml/                    @mpairweLandwind
+/Notebooks/             @mpairweLandwind
+
+# Backend API
+/App/backend/           @mpairweLandwind
+
+# Frontend
+/App/frontend/          @mpairweLandwind
+
+# CI/CD workflows (require explicit review)
+/.github/               @mpairweLandwind
+
+# Documentation
+/docs/                  @mpairweLandwind
+
+# Security-sensitive files
+SECURITY.md             @mpairweLandwind
+.env.example            @mpairweLandwind

@@ -1,0 +1,139 @@
+{
+  "fiscal_year": "FY2026-27",
+  "effective_from": "2026-07-01",
+  "effective_to": "2027-06-30",
+  "status": "confirmed",
+  "currency": "UGX",
+  "rates": {
+    "vat_standard": 0.18,
+    "vat_registration_threshold_annual": 300000000,
+    "paye_bands_resident": [
+      [
+        0,
+        335000,
+        0.0
+      ],
+      [
+        335000,
+        410000,
+        0.2
+      ],
+      [
+        410000,
+        485000,
+        0.25
+      ],
+      [
+        485000,
+        10000000,
+        0.3
+      ],
+      [
+        10000000,
+        null,
+        0.4
+      ]
+    ],
+    "paye_bands_non_resident": [
+      [
+        0,
+        335000,
+        0.1
+      ],
+      [
+        335000,
+        410000,
+        0.2
+      ],
+      [
+        410000,
+        10000000,
+        0.3
+      ],
+      [
+        10000000,
+        null,
+        0.4
+      ]
+    ],
+    "corporation_tax": 0.3,
+    "capital_gains_corporate": 0.3,
+    "rental_tax_individual": 0.12,
+    "rental_tax_individual_threshold": 2820000,
+    "rental_tax_company": 0.3,
+    "rental_company_expense_cap": 0.5,
+    "withholding_services": 0.06,
+    "withholding_goods": 0.06,
+    "withholding_management_fees": 0.15,
+    "withholding_dividend": 0.15,
+    "withholding_royalty": 0.15,
+    "withholding_public_entertainer": 0.06,
+    "withholding_betting_winnings": 0.15,
+    "withholding_foreign_interest": 0.05,
+    "withholding_telecom_commission": 0.1,
+    "withholding_non_business_asset": 0.06,
+    "customs_duty_common": 0.25,
+    "environmental_levy_used_clothing": 0.3,
+    "nssf_employee_contribution": 0.05
+  },
+  "unverified": [
+    "vat_registration_threshold_annual",
+    "environmental_levy_used_clothing",
+    "withholding_royalty"
+  ],
+  "legal_basis": {
+    "vat_standard": "VAT Act (Cap 349), s.78 and Schedule 3",
+    "vat_registration_threshold_annual": "VAT (Amendment) Act 2026 - threshold raised to UGX 300,000,000",
+    "paye_bands_resident": "Income Tax (Amendment) Act 2026, s.20(a) substituting Schedule 4 Part I",
+    "paye_bands_non_resident": "Income Tax Act (Cap 338), Schedule 4 Part II - not amended in 2026",
+    "corporation_tax": "Income Tax Act (Cap 338), s.6 and Schedule 4",
+    "capital_gains_corporate": "Income Tax Act (Cap 338), s.18 - gains included in gross income",
+    "rental_tax_individual": "Income Tax Act (Cap 338), s.5",
+    "rental_tax_individual_threshold": "Income Tax Act (Cap 338), s.5 annual threshold",
+    "rental_tax_company": "Income Tax Act (Cap 338), s.22(1)(c) expense cap",
+    "rental_company_expense_cap": "Income Tax Act (Cap 338), s.22(1)(c)",
+    "withholding_services": "Income Tax Act (Cap 338), s.119",
+    "withholding_goods": "Income Tax Act (Cap 338), s.119",
+    "withholding_management_fees": "Income Tax Act (Cap 338), s.85",
+    "withholding_dividend": "Income Tax Act (Cap 338), s.118",
+    "withholding_royalty": "Income Tax Act (Cap 338), s.83 - rate not amended in 2026",
+    "withholding_public_entertainer": "Income Tax (Amendment) Act 2026, s.16 inserting s.135B; Schedule 4 Part XVI",
+    "withholding_betting_winnings": "Income Tax (Amendment) Act 2026, s.14 substituting s.131; Schedule 4 Part XI",
+    "withholding_foreign_interest": "Income Tax (Amendment) Act 2026, s.20(b); Schedule 4 Part 2 para 2A (s.82(5) debenture interest)",
+    "withholding_telecom_commission": "Income Tax (Amendment) Act 2026, s.20(e) substituting Schedule 4 Part XIII (s.133)",
+    "withholding_non_business_asset": "Income Tax (Amendment) Act 2026, s.13 inserting s.130(3); Schedule 4 Part X item 4",
+    "customs_duty_common": "EAC Common External Tariff - finished goods band",
+    "environmental_levy_used_clothing": "Excise Duty (Amendment) Act 2026 - worn clothing imports, share of CIF value",
+    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE."
+  },
+  "notes": {
+    "paye_bands_resident": "Schedule 4 Part I states ANNUAL chargeable income; these are the monthly equivalents (annual divided by 12). The Act's table is: nil up to UGX 4,020,000; 20% of the excess over 4,020,000 up to 4,920,000; UGX 180,000 plus 25% of the excess over 4,920,000 up to 5,820,000; UGX 405,000 plus 30% of the excess over 5,820,000 up to 120,000,000; above 120,000,000 the same plus an additional 10% of the excess over 120,000,000. The top band is expressed here as a single 40% marginal rate.",
+    "paye_bands_non_resident": "The 2026 Act substitutes only Schedule 4 Part I, which by its terms applies to resident individuals. Part II (non-residents) is not amended, so the Cap 338 rates continue to apply.",
+    "withholding_royalty": "The 2026 Act amends only the s.2 definition of 'royalty' (inserting 'software'); it does not change the rate. The 15% here is the pre-existing Cap 338 rate and has not been reconciled against s.83 directly.",
+    "withholding_non_business_asset": "Applies to a person who purchases a non-business asset (s.130(3)). Distinct from the 6% on services and goods under s.119.",
+    "withholding_telecom_commission": "Commission paid by a telecommunications service provider for telecom retail services, mobile network services or mobile money services.",
+    "rental_tax_individual": "The 2026 Act (s.12, inserting s.124(1a)) lets an individual liable to rental tax file a provisional return monthly. The rate and annual threshold are unchanged.",
+    "vat_registration_threshold_annual": "Businesses below UGX 300,000,000 annual turnover are no longer required to register; voluntary registration remains available.",
+    "customs_duty_common": "Indicative EAC CET band for finished consumer goods. The binding rate is the tariff line for the specific HS code."
+  },
+  "sources": [
+    {
+      "id": "ita-amendment-act-2026",
+      "title": "Income Tax (Amendment) Act 2026 (Bill No. 6) - s.20 substituting Schedule 4 Part I, plus Parts X, XI, XIII and XVI",
+      "publisher": "Parliament of Uganda",
+      "url": "https://www.parliament.go.ug/page/tax-bills-2026"
+    },
+    {
+      "id": "ey-ug-2026-acts",
+      "title": "Uganda issues Tax Amendment Acts for 2026 - assented 18 May 2026, effective 1 July 2026",
+      "publisher": "EY Global Tax News",
+      "url": "https://globaltaxnews.ey.com/news/2026-1253-uganda-issues-tax-amendment-acts-for-2026"
+    },
+    {
+      "id": "kpmg-ug-2026-27",
+      "title": "Uganda: Tax amendments based on 2026/2027 budget passed by Parliament",
+      "publisher": "KPMG TaxNewsFlash",
+      "url": "https://kpmg.com/us/en/taxnewsflash/news/2026/06/uganda-tax-amendments-2026-2027-budget.html"
+    }
+  ]
+}

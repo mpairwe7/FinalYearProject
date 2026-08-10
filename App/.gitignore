@@ -1,0 +1,9 @@
+# Local retrieval corpus and generated sparse-index state.
+# Recreate these from the documented local harness; do not commit source
+# documents or machine-specific Qdrant/BM25 build artifacts.
+Data/dataset/
+Data/faq_jsonl/
+Data/pdfs/
+Data/eval/
+Data/teacher_qa/
+Model/bm25_state.json

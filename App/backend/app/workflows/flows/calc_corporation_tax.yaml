@@ -1,0 +1,26 @@
+id: calc_corporation_tax
+name: Corporation Tax Calculator
+version: "1"
+description: Guided corporation tax calculation from annual chargeable income.
+requires_auth: false
+trigger_phrases: []
+
+steps:
+  - id: ask_income
+    question: "What is the company's **annual chargeable income** in UGX? (profit after allowable deductions — e.g. 50,000,000 or 50m)"
+    slot: chargeable_income
+    validator: number
+
+  - id: run_calc
+    slot: ""
+    tool: calculate_corporation_tax
+    args:
+      chargeable_income: "{chargeable_income}"
+
+  - id: done
+    question: >-
+      That applies the corporation tax rate from the URA rate table in
+      force for the fiscal year shown above. Happy to run different figures
+      whenever you like.
+    slot: ""
+    validator: text

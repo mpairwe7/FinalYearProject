@@ -1,0 +1,31 @@
+id: calc_capital_gains
+name: Capital Gains Calculator
+version: "1"
+description: Guided capital gains tax calculation from sale price and cost base.
+requires_auth: false
+trigger_phrases: []
+
+steps:
+  - id: ask_sale_price
+    question: "What was the **sale price** of the asset in UGX? (e.g. 80,000,000 or 80m)"
+    slot: sale_price
+    validator: number
+
+  - id: ask_cost_base
+    question: "What was the **cost base** — the original purchase cost plus improvements — in UGX?"
+    slot: cost_base
+    validator: number
+
+  - id: run_calc
+    slot: ""
+    tool: calculate_capital_gains
+    args:
+      sale_price: "{sale_price}"
+      cost_base: "{cost_base}"
+
+  - id: done
+    question: >-
+      That uses the corporate rate from the URA rate table for the fiscal
+      year shown above. If the figures change, just ask me to recalculate.
+    slot: ""
+    validator: text

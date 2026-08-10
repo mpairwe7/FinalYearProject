@@ -1,0 +1,34 @@
+id: calc_vat_registration
+name: VAT Registration Check
+version: "1"
+description: >-
+  Guided check of whether a business must register for VAT, against the
+  compulsory annual-turnover threshold in force for the fiscal year.
+requires_auth: false
+
+# Started programmatically by the calculator router — no trigger phrases,
+# so questions that already carry the turnover figure are answered
+# immediately instead of entering the guided flow.
+trigger_phrases: []
+
+steps:
+  - id: ask_turnover
+    question: >-
+      What is your **annual taxable turnover** in UGX? (e.g. 250,000,000 or
+      250m — an estimate for the coming twelve months is fine)
+    slot: annual_turnover
+    validator: number
+
+  - id: run_check
+    slot: ""
+    tool: check_vat_registration
+    args:
+      annual_turnover: "{annual_turnover}"
+
+  - id: done
+    question: >-
+      The threshold is the one in force for the current URA fiscal year — it
+      rose to UGX 300,000,000 with effect from 1 July 2026. Ask me any time if
+      your turnover changes, or if you'd like to know how to register.
+    slot: ""
+    validator: text

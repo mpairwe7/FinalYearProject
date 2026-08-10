@@ -1,0 +1,1052 @@
+# Kaggle Remote Training Pipeline
+# Triggers training on Kaggle notebooks via API
+# Supports multi-stage pipeline: DataIngestion -> Training -> Fine-tuning
+# Auto-triggers data pipeline when Data/ folder or DataIngestion notebook changes
+#
+# 2026 Best Practices Applied:
+#   - Least-privilege permissions
+#   - SHA-pinned actions (supply-chain security)
+#   - Composite actions for DRY (setup-kaggle, upload-dataset, commit-and-push, download-hf-luganda)
+#   - Concurrency control to prevent conflicting runs
+#   - Job timeout limits on every job
+#   - Rebase-retry git push (handles concurrent commits)
+#   - GITHUB_STEP_SUMMARY for pipeline observability
+#   - SLSA build provenance attestation for model artifacts
+#   - Secrets handled via env vars, never shell-interpolated
+
+name: Kaggle Training Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Notebooks/**'
+      - 'Data/**'
+      - 'ml/**'
+      - '.github/workflows/kaggle-training.yml'
+  workflow_dispatch:
+    inputs:
+      notebook:
+        description: 'Kaggle notebook to run'
+        required: true
+        default: 'ura-training'
+        type: choice
+        options:
+          - ura-training
+          - DataIngestion_Augmentation
+          - embedding-fine-tune
+          - full-pipeline
+      accelerator:
+        description: 'Training accelerator'
+        required: false
+        default: tpu
+        type: choice
+        options:
+          - gpu
+          - tpu
+      gpu:
+        description: '[Deprecated] true = GPU, false = TPU'
+        required: false
+        default: true
+        type: boolean
+      run_data_eda:
+        description: 'Run EDA visualizations in DataIngestion notebook'
+        required: false
+        default: false
+        type: boolean
+      run_data_pipeline_first:
+        description: 'Run DataIngestion_Augmentation before training'
+        required: false
+        default: false
+        type: boolean
+      skip_data_upload:
+        description: 'Skip uploading Data folder to Kaggle'
+        required: false
+        default: false
+        type: boolean
+
+# Least-privilege permissions
+permissions:
+  contents: write
+  actions: read
+  id-token: write
+  attestations: write
+
+# Prevent concurrent runs from conflicting (especially git push)
+concurrency:
+  group: kaggle-training-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================
+  # Stage 0: Resolve Accelerator
+  # ============================================
+  resolve-accelerator:
+    name: Resolve Accelerator
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      accelerator: ${{ steps.resolve.outputs.accelerator }}
+    steps:
+      - name: Resolve accelerator mode
+        id: resolve
+        run: |
+          ACCELERATOR="gpu"
+
+          # workflow_dispatch supports explicit accelerator selection.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ github.event.inputs.accelerator }}" ]; then
+              ACCELERATOR="${{ github.event.inputs.accelerator }}"
+            elif [ "${{ github.event.inputs.gpu }}" = "false" ]; then
+              ACCELERATOR="tpu"
+            fi
+          fi
+
+          if [ "$ACCELERATOR" != "gpu" ] && [ "$ACCELERATOR" != "tpu" ]; then
+            ACCELERATOR="gpu"
+          fi
+
+          echo "accelerator=$ACCELERATOR" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Accelerator Resolution"
+            echo ""
+            echo "- Selected accelerator: \`$ACCELERATOR\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 0a: Check for Data Changes
+  # ============================================
+  check-data-changes:
+    name: Check for Data Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      data-changed: ${{ steps.check.outputs.data-changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+
+      - name: Check if Data folder or DataIngestion notebook changed
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            DATA_CHANGED=$(git diff --name-only HEAD^ HEAD -- 'Data/' | wc -l)
+            NOTEBOOK_CHANGED=$(git diff --name-only HEAD^ HEAD -- 'Notebooks/DataIngestion_Augmentation.ipynb' | wc -l)
+
+            if [ "$DATA_CHANGED" -gt 0 ] || [ "$NOTEBOOK_CHANGED" -gt 0 ]; then
+              echo "data-changed=true" >> "$GITHUB_OUTPUT"
+
+              # Step summary
+              {
+                echo "## Data Change Detection"
+                echo "| Source | Changed Files |"
+                echo "|--------|--------------|"
+                [ "$DATA_CHANGED" -gt 0 ] && echo "| Data/ | $DATA_CHANGED |"
+                [ "$NOTEBOOK_CHANGED" -gt 0 ] && echo "| DataIngestion notebook | 1 |"
+                echo ""
+                echo "**Result:** Data pipeline will be triggered."
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "data-changed=false" >> "$GITHUB_OUTPUT"
+              echo "## Data Change Detection" >> "$GITHUB_STEP_SUMMARY"
+              echo "No changes in Data/ or DataIngestion notebook. Data pipeline skipped." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            # workflow_dispatch
+            if [ "${{ github.event.inputs.notebook }}" == "DataIngestion_Augmentation" ] || \
+               [ "${{ github.event.inputs.notebook }}" == "full-pipeline" ] || \
+               [ "${{ github.event.inputs.run_data_pipeline_first }}" == "true" ]; then
+              echo "data-changed=true" >> "$GITHUB_OUTPUT"
+              echo "## Data Change Detection" >> "$GITHUB_STEP_SUMMARY"
+              echo "Manual trigger requested data pipeline." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "data-changed=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  # ============================================
+  # Stage 0b: Upload Data to Kaggle Dataset
+  # ============================================
+  upload-data-to-kaggle:
+    name: Upload Data to Kaggle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: check-data-changes
+    if: ${{ needs.check-data-changes.outputs.data-changed == 'true' && github.event.inputs.skip_data_upload != 'true' }}
+    outputs:
+      dataset-id: ${{ steps.upload-ds.outputs.dataset-id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Kaggle CLI
+        uses: ./.github/actions/setup-kaggle
+        with:
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          kaggle-key: ${{ secrets.KAGGLE_API_TOKEN }}
+
+      - name: Prepare dataset directory
+        run: |
+          mkdir -p ura-dataset/Data
+          echo "Copying Data folder..."
+          cp -r Data/* ura-dataset/Data/
+
+      - name: Download Luganda corpus
+        uses: ./.github/actions/download-hf-luganda
+        with:
+          hf-token: ${{ secrets.HF_TOKEN }}
+          output-dir: ura-dataset/Data
+
+      - name: Show dataset structure
+        run: |
+          echo "Dataset structure:"
+          find ura-dataset -type f | wc -l
+          echo "total files"
+
+          {
+            echo "## Upload Data to Kaggle"
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Total files | $(find ura-dataset -type f | wc -l) |"
+            echo "| Total size | $(du -sh ura-dataset | cut -f1) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload dataset
+        id: upload-ds
+        uses: ./.github/actions/upload-kaggle-dataset
+        with:
+          dataset-dir: ura-dataset
+          base-title: ura-dataset
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          run-id: ${{ github.run_id }}
+          description: 'URA Tax Assistant raw dataset for DataIngestion pipeline'
+
+  # ============================================
+  # Stage 0c: Run Data Ingestion Pipeline
+  # ============================================
+  run-data-ingestion:
+    name: Run DataIngestion_Augmentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    needs: [check-data-changes, upload-data-to-kaggle]
+    if: ${{ always() && needs.check-data-changes.outputs.data-changed == 'true' && needs.upload-data-to-kaggle.result == 'success' }}
+    outputs:
+      kernel-id: ${{ steps.push-data.outputs.kernel-id }}
+      data-ready: ${{ steps.download-data.outputs.data-ready }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Kaggle CLI
+        uses: ./.github/actions/setup-kaggle
+        with:
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          kaggle-key: ${{ secrets.KAGGLE_API_TOKEN }}
+          extra-packages: requests
+
+      - name: Prepare DataIngestion notebook for Kaggle
+        env:
+          DATASET_ID: ${{ needs.upload-data-to-kaggle.outputs.dataset-id }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          RUN_DATA_EDA: ${{ github.event.inputs.run_data_eda || 'false' }}
+        run: |
+          mkdir -p ml/kaggle
+          cp Notebooks/DataIngestion_Augmentation.ipynb ml/kaggle/
+
+          # CI optimization: run exactly one entrypoint and optionally skip EDA.
+          python3 << PYEOF
+          import json, os
+
+          notebook_path = "ml/kaggle/DataIngestion_Augmentation.ipynb"
+          with open(notebook_path, "r", encoding="utf-8") as f:
+              nb = json.load(f)
+
+          run_plain = "\n".join([
+              "# Run the enhanced pipeline",
+              "if __name__ == \"__main__\":",
+              "    enhanced_main_pipeline()",
+              "",
+          ])
+          run_with_eda = "\n".join([
+              "# Run the enhanced pipeline with EDA",
+              "if __name__ == \"__main__\":",
+              "    enhanced_main_pipeline_with_eda()",
+              "",
+          ])
+          disabled_marker = "# Auto-run disabled by kaggle-training workflow\\n"
+
+          run_eda = os.environ.get("RUN_DATA_EDA", "false").lower() == "true"
+          updated_cells = 0
+
+          for cell in nb.get("cells", []):
+              if cell.get("cell_type") != "code":
+                  continue
+
+              src = "".join(cell.get("source", []))
+              new_src = src
+
+              # Avoid running both entrypoints in the same notebook execution.
+              new_src = new_src.replace(run_plain, disabled_marker)
+              if run_eda:
+                  # Keep EDA entrypoint as-is.
+                  pass
+              else:
+                  new_src = new_src.replace(run_with_eda, run_plain)
+
+              if new_src != src:
+                  updated_cells += 1
+                  cell["source"] = new_src.splitlines(keepends=True)
+
+          with open(notebook_path, "w", encoding="utf-8") as f:
+              json.dump(nb, f, ensure_ascii=False, indent=1)
+
+          mode = "with_eda" if run_eda else "without_eda"
+          print(f"Notebook entrypoint prepared ({mode}), updated cells: {updated_cells}")
+          PYEOF
+
+          python3 << PYEOF
+          import json, os
+          meta = {
+              "id": f"{os.environ['KAGGLE_USERNAME']}/dataingestion-augmentation",
+              "title": "DataIngestion_Augmentation",
+              "code_file": "DataIngestion_Augmentation.ipynb",
+              "language": "python",
+              "kernel_type": "notebook",
+              "is_private": True,
+              "enable_gpu": True,
+              "enable_tpu": False,
+              "enable_internet": True,
+              "dataset_sources": [os.environ["DATASET_ID"]],
+              "competition_sources": [],
+              "kernel_sources": [],
+          }
+          with open("ml/kaggle/kernel-metadata.json", "w") as f:
+              json.dump(meta, f, indent=2)
+          print(f"Kernel metadata prepared with dataset: {os.environ['DATASET_ID']}")
+          PYEOF
+
+      - name: Push DataIngestion notebook to Kaggle
+        id: push-data
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+        run: |
+          cd ml/kaggle
+          kaggle kernels push
+          echo "kernel-id=${KAGGLE_USERNAME}/dataingestion-augmentation" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for DataIngestion completion
+        run: |
+          python ml/scripts/monitor_kaggle.py \
+            --kernel-id "${{ steps.push-data.outputs.kernel-id }}" \
+            --timeout 10800 \
+            --poll-interval 90
+
+      - name: Download DataIngestion outputs
+        id: download-data
+        run: |
+          mkdir -p artifacts/data_pipeline
+          kaggle kernels output "${{ steps.push-data.outputs.kernel-id }}" -p artifacts/data_pipeline
+          echo "Downloaded files:"
+          find artifacts/data_pipeline -type f | head -50
+
+          if [ -f "artifacts/data_pipeline/enhanced_training_data.jsonl" ]; then
+            echo "data-ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "data-ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Enhanced training data not found, will use fallback"
+          fi
+
+      - name: Upload DataIngestion outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: data-pipeline-outputs
+          path: artifacts/data_pipeline/
+          retention-days: 7
+
+      - name: Copy processed data to repo
+        run: |
+          mkdir -p Data/processed Data/eda_visualizations
+
+          cp -v artifacts/data_pipeline/*.jsonl Data/processed/ 2>/dev/null || true
+          cp -v artifacts/data_pipeline/*.json Data/processed/ 2>/dev/null || true
+
+          if [ -d "artifacts/data_pipeline/enhanced_splits" ]; then
+            mkdir -p Data/processed/splits
+            cp -v artifacts/data_pipeline/enhanced_splits/* Data/processed/splits/ 2>/dev/null || true
+          fi
+
+          cp -v artifacts/data_pipeline/*.png Data/eda_visualizations/ 2>/dev/null || true
+          cp -v artifacts/data_pipeline/*.html Data/eda_visualizations/ 2>/dev/null || true
+          cp -v artifacts/data_pipeline/eda_report.md Data/eda_visualizations/ 2>/dev/null || true
+
+      - name: Commit processed data
+        uses: ./.github/actions/commit-and-push
+        with:
+          paths: Data/processed/ Data/eda_visualizations/
+          commit-message: |
+            chore: update processed data from DataIngestion pipeline
+
+            Kaggle kernel: ${{ steps.push-data.outputs.kernel-id }}
+            Workflow run: ${{ github.run_id }}
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## DataIngestion Pipeline"
+            echo "| Item | Status |"
+            echo "|------|--------|"
+            echo "| Kernel | \`${{ steps.push-data.outputs.kernel-id }}\` |"
+            echo "| Data ready | ${{ steps.download-data.outputs.data-ready || 'unknown' }} |"
+            echo "| EDA mode | ${{ github.event.inputs.run_data_eda || 'false' }} |"
+            echo "| Processed files | $(find Data/processed -type f 2>/dev/null | wc -l) |"
+            echo "| EDA files | $(find Data/eda_visualizations -type f 2>/dev/null | wc -l) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 1: Prepare & Trigger Training
+  # ============================================
+  prepare-kaggle:
+    name: Prepare Kaggle Notebook
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [resolve-accelerator, run-data-ingestion, upload-data-to-kaggle, check-data-changes]
+    if: always() && (github.event.inputs.notebook != 'DataIngestion_Augmentation')
+    outputs:
+      kernel-id: ${{ steps.push.outputs.kernel-id }}
+      training-notebook: ${{ steps.resolve.outputs.training-notebook }}
+      accelerator: ${{ needs.resolve-accelerator.outputs.accelerator }}
+    env:
+      TRAINING_ACCELERATOR: ${{ needs.resolve-accelerator.outputs.accelerator }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Pull latest changes
+        run: git pull origin ${{ github.ref_name }} || echo "No new changes to pull"
+
+      - name: Download DataIngestion outputs if available
+        if: needs.run-data-ingestion.outputs.data-ready == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: data-pipeline-outputs
+          path: artifacts/data_pipeline/
+        continue-on-error: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android || true
+          sudo docker image prune -a -f 2>/dev/null || true
+
+      - name: Setup Kaggle CLI
+        uses: ./.github/actions/setup-kaggle
+        with:
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          kaggle-key: ${{ secrets.KAGGLE_API_TOKEN }}
+          extra-packages: requests pandas
+
+      - name: Download Luganda corpus
+        uses: ./.github/actions/download-hf-luganda
+        with:
+          hf-token: ${{ secrets.HF_TOKEN }}
+          output-dir: kaggle_dataset/Data
+
+      - name: Resolve training notebook
+        id: resolve
+        run: |
+          NOTEBOOK="${{ github.event.inputs.notebook || 'ura-training' }}"
+          if [ "$NOTEBOOK" == "full-pipeline" ] || [ "$NOTEBOOK" == "DataIngestion_Augmentation" ]; then
+            NOTEBOOK="ura-training"
+          fi
+          echo "training-notebook=$NOTEBOOK" >> "$GITHUB_OUTPUT"
+          echo "Resolved training notebook: $NOTEBOOK"
+
+      - name: Prepare training dataset for Kaggle
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          UPLOADED_DATASET_ID: ${{ needs.upload-data-to-kaggle.outputs.dataset-id }}
+        run: |
+          mkdir -p artifacts kaggle_dataset/Data
+
+          # Use processed data from DataIngestion pipeline if available
+          if [ -f "artifacts/data_pipeline/enhanced_training_data.jsonl" ]; then
+            echo "Using processed data from DataIngestion pipeline artifact"
+            cp artifacts/data_pipeline/*.jsonl artifacts/ 2>/dev/null || true
+          elif [ -f "Data/processed/enhanced_training_data.jsonl" ]; then
+            echo "Using processed data from repository"
+            cp Data/processed/*.jsonl artifacts/ 2>/dev/null || true
+          else
+            echo "::notice::No processed data available - training will use raw data"
+          fi
+
+          # Build training dataset
+          cp -r Data/* kaggle_dataset/Data/
+
+          if ls artifacts/*.jsonl 1>/dev/null 2>&1; then
+            mkdir -p kaggle_dataset/Data/processed
+            cp artifacts/*.jsonl kaggle_dataset/Data/processed/ 2>/dev/null || true
+          fi
+
+      - name: Export TPU-ready packed dataset
+        if: ${{ env.TRAINING_ACCELERATOR == 'tpu' }}
+        run: |
+          uv pip install --system --quiet "transformers>=4.45" tokenizers
+
+          mkdir -p artifacts/tpu_ready
+          python ml/scripts/export_tpu_ready_data.py \
+            --input-jsonl artifacts/data_pipeline/enhanced_training_data.jsonl \
+            --input-jsonl artifacts/enhanced_training_data.jsonl \
+            --input-jsonl Data/processed/enhanced_training_data.jsonl \
+            --output-dir artifacts/tpu_ready \
+            --tokenizer google/flan-t5-small \
+            --seq-len 512 \
+            --val-ratio 0.1 \
+            --seed 42 \
+            --shard-size 2000
+
+          mkdir -p kaggle_dataset/Data/processed/tpu_ready
+          cp -v artifacts/tpu_ready/* kaggle_dataset/Data/processed/tpu_ready/
+
+      - name: Upload TPU-ready data artifact
+        if: ${{ env.TRAINING_ACCELERATOR == 'tpu' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tpu-ready-data
+          path: artifacts/tpu_ready/
+          retention-days: 14
+
+      - name: Upload training dataset
+        id: upload-training-ds
+        uses: ./.github/actions/upload-kaggle-dataset
+        with:
+          dataset-dir: kaggle_dataset
+          base-title: ura-training-data
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          run-id: ${{ github.run_id }}
+          description: 'URA training dataset with processed data'
+
+      - name: Prepare and push notebook to Kaggle
+        id: push
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          DATASET_ID: ${{ steps.upload-training-ds.outputs.dataset-id }}
+          TRAINING_NOTEBOOK: ${{ steps.resolve.outputs.training-notebook }}
+          TRAINING_ACCELERATOR: ${{ env.TRAINING_ACCELERATOR }}
+        run: |
+          # Prepare the notebook using the helper script
+          python ml/scripts/prepare_kaggle_notebook.py \
+            --notebook "$TRAINING_NOTEBOOK" \
+            --accelerator "$TRAINING_ACCELERATOR" \
+            --dataset "$DATASET_ID"
+
+          # Overwrite with latest notebook from Notebooks/
+          cp "Notebooks/${TRAINING_NOTEBOOK}.ipynb" ml/kaggle/
+
+          cd ml/kaggle
+          kaggle kernels push
+          echo "kernel-id=${KAGGLE_USERNAME}/${TRAINING_NOTEBOOK}" >> "$GITHUB_OUTPUT"
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Prepare Kaggle Notebook"
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Notebook | \`${{ steps.resolve.outputs.training-notebook }}\` |"
+            echo "| Kernel ID | \`${{ steps.push.outputs.kernel-id }}\` |"
+            echo "| Dataset | \`${{ steps.upload-training-ds.outputs.dataset-id }}\` |"
+            echo "| Accelerator | ${{ env.TRAINING_ACCELERATOR }} |"
+            echo "| TPU-ready files | $(find artifacts/tpu_ready -type f 2>/dev/null | wc -l) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 2: Monitor Training
+  # ============================================
+  monitor-training:
+    name: Monitor Kaggle Training
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    needs: prepare-kaggle
+    if: ${{ github.event.inputs.notebook != 'DataIngestion_Augmentation' && needs.prepare-kaggle.result == 'success' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Kaggle CLI
+        uses: ./.github/actions/setup-kaggle
+        with:
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          kaggle-key: ${{ secrets.KAGGLE_API_TOKEN }}
+          extra-packages: requests
+
+      - name: Wait for training completion
+        run: |
+          TIMEOUT=7200
+          POLL_INTERVAL=60
+          if [ "${{ needs.prepare-kaggle.outputs.accelerator }}" = "tpu" ]; then
+            # TPU runs may spend extra time in compile/warmup.
+            TIMEOUT=9000
+            POLL_INTERVAL=90
+          fi
+
+          python ml/scripts/monitor_kaggle.py \
+            --kernel-id "${{ needs.prepare-kaggle.outputs.kernel-id }}" \
+            --timeout "$TIMEOUT" \
+            --poll-interval "$POLL_INTERVAL"
+
+      - name: Download outputs
+        run: |
+          mkdir -p artifacts/kaggle
+          kaggle kernels output "${{ needs.prepare-kaggle.outputs.kernel-id }}" -p artifacts/kaggle
+          echo "Downloaded files:"
+          find artifacts/kaggle -type f | head -50
+
+      - name: Upload Kaggle outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kaggle-training-outputs
+          path: artifacts/kaggle/
+          retention-days: 14
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Monitor Kaggle Training"
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Kernel | \`${{ needs.prepare-kaggle.outputs.kernel-id }}\` |"
+            echo "| Accelerator | ${{ needs.prepare-kaggle.outputs.accelerator }} |"
+            echo "| Output files | $(find artifacts/kaggle -type f 2>/dev/null | wc -l) |"
+            echo "| Output size | $(du -sh artifacts/kaggle 2>/dev/null | cut -f1 || echo 'N/A') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 3: Process & Deploy Model
+  # ============================================
+  process-model:
+    name: Process Trained Model
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [monitor-training, run-data-ingestion]
+    if: ${{ always() && github.event.inputs.notebook != 'DataIngestion_Augmentation' && needs.monitor-training.result == 'success' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Pull latest changes
+        run: git pull origin ${{ github.ref_name }} || echo "No new changes to pull"
+
+      - name: Download Kaggle outputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: kaggle-training-outputs
+          path: artifacts/kaggle/
+
+      - name: Download DataIngestion outputs if available
+        if: needs.run-data-ingestion.outputs.data-ready == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: data-pipeline-outputs
+          path: artifacts/data_pipeline/
+        continue-on-error: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv pip install --system huggingface_hub torch transformers joblib
+
+      - name: Process and validate model
+        run: |
+          python ml/scripts/process_kaggle_output.py \
+            --input-dir artifacts/kaggle \
+            --output-dir artifacts/models
+
+      - name: Copy artifacts to repo folders
+        run: |
+          mkdir -p Model Results/metrics Results/plots Results/reports
+
+          # Model files
+          if [ -d "artifacts/models" ]; then
+            for ext in joblib pth onnx pkl bin; do
+              cp -v artifacts/models/*."$ext" Model/ 2>/dev/null || true
+            done
+            cp -v artifacts/models/manifest.json Model/ 2>/dev/null || true
+            cp -v artifacts/models/class_labels.json Model/ 2>/dev/null || true
+            cp -v artifacts/models/config.json Model/ 2>/dev/null || true
+          fi
+
+          # Metrics
+          find artifacts/kaggle \( -name "*metrics*.json" -o -name "*results*.json" -o -name "*scores*.json" -o -name "classification_report*.json" \) \
+            -exec cp -v {} Results/metrics/ \; 2>/dev/null || true
+
+          # Plots
+          find artifacts/kaggle \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.svg" \) \
+            -exec cp -v {} Results/plots/ \; 2>/dev/null || true
+
+          # Reports
+          find artifacts/kaggle \( -name "*.csv" -o -name "*report*.txt" -o -name "*summary*.txt" -o -name "*log*.txt" \) \
+            -exec cp -v {} Results/reports/ \; 2>/dev/null || true
+
+      - name: Commit artifacts
+        uses: ./.github/actions/commit-and-push
+        with:
+          paths: Model/ Results/
+          commit-message: |
+            chore: update model and results from Kaggle training
+
+            Kaggle kernel: ${{ needs.prepare-kaggle.outputs.kernel-id }}
+            Workflow run: ${{ github.run_id }}
+
+      - name: Attest build provenance
+        if: hashFiles('Model/**') != ''
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: Model/
+
+      - name: Push to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python ml/pipelines/push_to_hub.py \
+            --model-path Model \
+            --repo-id ${{ vars.HF_REPO }} \
+            --commit-message "Kaggle training: ${{ github.run_id }}"
+
+      - name: Create release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          tag_name: model-${{ github.run_number }}
+          name: Model Release ${{ github.run_number }}
+          make_latest: true
+          files: |
+            Model/**
+            Results/metrics/**
+            Data/processed/**
+          body: |
+            ## Model Training Complete
+            - Kaggle kernel: `${{ needs.prepare-kaggle.outputs.kernel-id }}`
+            - Run ID: `${{ github.run_id }}`
+            - Data Pipeline: ${{ needs.run-data-ingestion.result == 'success' && 'Ran DataIngestion_Augmentation' || 'Skipped' }}
+
+            ### Artifacts
+            - **Model/**: Trained model files
+            - **Results/**: Metrics, plots, and reports
+            - **Data/processed/**: Augmented training datasets (if data pipeline ran)
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Process Trained Model"
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Model files | $(find Model -type f 2>/dev/null | wc -l) |"
+            echo "| Metrics files | $(find Results/metrics -type f 2>/dev/null | wc -l) |"
+            echo "| Plot files | $(find Results/plots -type f 2>/dev/null | wc -l) |"
+            echo "| Report files | $(find Results/reports -type f 2>/dev/null | wc -l) |"
+            echo "| HF push | Attempted |"
+            echo "| Release | model-${{ github.run_number }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 4: Fine-tune with Gemma Notebook
+  # ============================================
+  fine-tune-model:
+    name: Fine-tune with Gemma Notebook
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    needs: [process-model, run-data-ingestion]
+    if: ${{ always() && needs.process-model.result == 'success' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Pull latest changes
+        run: git pull origin ${{ github.ref_name }} || echo "No new changes to pull"
+
+      - name: Download previously trained model
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: kaggle-training-outputs
+          path: artifacts/kaggle/
+
+      - name: Download DataIngestion outputs if available
+        if: needs.run-data-ingestion.outputs.data-ready == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: data-pipeline-outputs
+          path: artifacts/data_pipeline/
+        continue-on-error: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Kaggle CLI
+        uses: ./.github/actions/setup-kaggle
+        with:
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          kaggle-key: ${{ secrets.KAGGLE_API_TOKEN }}
+          extra-packages: pandas
+
+      - name: Download Luganda corpus
+        uses: ./.github/actions/download-hf-luganda
+        with:
+          hf-token: ${{ secrets.HF_TOKEN }}
+          output-dir: finetune_dataset/Data
+
+      - name: Prepare fine-tuning dataset with pre-trained model
+        run: |
+          mkdir -p artifacts finetune_dataset/Data
+
+          # Copy processed data if available
+          if [ -f "artifacts/data_pipeline/enhanced_training_data.jsonl" ]; then
+            echo "Using processed data from DataIngestion pipeline"
+            cp artifacts/data_pipeline/*.jsonl artifacts/ 2>/dev/null || true
+          elif [ -f "Data/processed/enhanced_training_data.jsonl" ]; then
+            echo "Using processed data from repository"
+            cp Data/processed/*.jsonl artifacts/ 2>/dev/null || true
+          fi
+
+          # Copy previously trained model
+          if [ -d "artifacts/kaggle" ]; then
+            mkdir -p artifacts/pretrained_model
+            cp -r artifacts/kaggle/* artifacts/pretrained_model/ 2>/dev/null || true
+          fi
+
+          # Build fine-tuning dataset
+          cp -r Data/* finetune_dataset/Data/
+
+          # Verify teacher_qa data
+          if [ ! -f "finetune_dataset/Data/teacher_qa/teacher_qa.jsonl" ]; then
+            echo "::error::Teacher QA data missing!"
+            ls -la finetune_dataset/Data/
+            exit 1
+          fi
+          echo "Teacher QA data: $(wc -l < finetune_dataset/Data/teacher_qa/teacher_qa.jsonl) lines"
+
+          # Copy processed data and pretrained model into dataset
+          if ls artifacts/*.jsonl 1>/dev/null 2>&1; then
+            mkdir -p finetune_dataset/Data/processed
+            cp artifacts/*.jsonl finetune_dataset/Data/processed/ 2>/dev/null || true
+          fi
+          if [ -d "artifacts/pretrained_model" ]; then
+            mkdir -p finetune_dataset/pretrained_model
+            cp -r artifacts/pretrained_model/* finetune_dataset/pretrained_model/ 2>/dev/null || true
+          fi
+
+      - name: Upload fine-tuning dataset
+        id: upload-finetune-ds
+        uses: ./.github/actions/upload-kaggle-dataset
+        with:
+          dataset-dir: finetune_dataset
+          base-title: ura-finetune-data
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          run-id: ${{ github.run_id }}
+          description: 'URA fine-tuning dataset with pretrained model'
+
+      - name: Prepare and push fine_tune_gemma notebook
+        id: push-finetune
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          FINETUNE_DATASET_ID: ${{ steps.upload-finetune-ds.outputs.dataset-id }}
+        run: |
+          mkdir -p ml/kaggle
+          cp Notebooks/fine_tune_gemma.ipynb ml/kaggle/
+
+          python3 << PYEOF
+          import json, os
+          meta = {
+              "id": f"{os.environ['KAGGLE_USERNAME']}/fine-tune-gemma",
+              "title": "Fine-tune Gemma with Pretrained Model",
+              "code_file": "fine_tune_gemma.ipynb",
+              "language": "python",
+              "kernel_type": "notebook",
+              "is_private": True,
+              "enable_gpu": True,
+              "enable_internet": True,
+              "dataset_sources": [os.environ["FINETUNE_DATASET_ID"]],
+              "competition_sources": [],
+              "kernel_sources": [],
+          }
+          with open("ml/kaggle/kernel-metadata.json", "w") as f:
+              json.dump(meta, f, indent=2)
+          PYEOF
+
+          cd ml/kaggle
+          kaggle kernels push
+          echo "kernel-id=${KAGGLE_USERNAME}/fine-tune-gemma" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for fine-tuning completion
+        run: |
+          python ml/scripts/monitor_kaggle.py \
+            --kernel-id "${{ steps.push-finetune.outputs.kernel-id }}" \
+            --timeout 10800 \
+            --poll-interval 90
+
+      - name: Download fine-tuned model
+        run: |
+          mkdir -p artifacts/finetuned
+          kaggle kernels output "${{ steps.push-finetune.outputs.kernel-id }}" -p artifacts/finetuned
+          echo "Downloaded fine-tuned model files:"
+          find artifacts/finetuned -type f | head -50
+
+      - name: Upload fine-tuned model artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: finetuned-model-outputs
+          path: artifacts/finetuned/
+          retention-days: 14
+
+      - name: Update Model/ with fine-tuned files
+        run: |
+          mkdir -p Model
+          if [ -d "artifacts/finetuned" ]; then
+            for ext in joblib pth onnx pkl bin safetensors; do
+              cp -v artifacts/finetuned/*."$ext" Model/ 2>/dev/null || true
+            done
+            cp -v artifacts/finetuned/adapter_model.bin Model/ 2>/dev/null || true
+            cp -v artifacts/finetuned/adapter_config.json Model/ 2>/dev/null || true
+            cp -v artifacts/finetuned/manifest.json Model/ 2>/dev/null || true
+            cp -v artifacts/finetuned/class_labels.json Model/ 2>/dev/null || true
+            cp -v artifacts/finetuned/config.json Model/ 2>/dev/null || true
+          fi
+
+      - name: Commit fine-tuned model
+        uses: ./.github/actions/commit-and-push
+        with:
+          paths: Model/
+          commit-message: |
+            chore: update fine-tuned model from Gemma fine-tuning
+
+            Kaggle kernel: ${{ steps.push-finetune.outputs.kernel-id }}
+            Workflow run: ${{ github.run_id }}
+            Base model: Previously trained URA model
+            Fine-tuning: Additional training with Gemma optimizations
+
+      - name: Attest build provenance
+        if: hashFiles('Model/**') != ''
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: Model/
+
+      - name: Push fine-tuned model to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python ml/pipelines/push_to_hub.py \
+            --model-path Model \
+            --repo-id ${{ vars.HF_REPO }}-finetuned \
+            --commit-message "Fine-tuned model: ${{ github.run_id }}"
+
+      - name: Create fine-tuned model release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          tag_name: finetuned-model-${{ github.run_number }}
+          name: Fine-tuned Model Release ${{ github.run_number }}
+          make_latest: true
+          files: |
+            Model/**
+          body: |
+            ## Fine-tuned Model Complete
+            - Fine-tuning kernel: `${{ steps.push-finetune.outputs.kernel-id }}`
+            - Run ID: `${{ github.run_id }}`
+            - Data Pipeline: ${{ needs.run-data-ingestion.result == 'success' && 'Ran DataIngestion_Augmentation' || 'Skipped' }}
+
+            ### Process
+            1. **Base Training**: URA model trained on processed data
+            2. **Fine-tuning**: Additional optimization with Gemma techniques
+            3. **Optimization**: Unsloth, QLoRA, Flash Attention
+
+            ### Artifacts
+            - **Model/**: Fine-tuned model with Gemma optimizations
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Fine-tune with Gemma"
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Kernel | \`${{ steps.push-finetune.outputs.kernel-id }}\` |"
+            echo "| Dataset | \`${{ steps.upload-finetune-ds.outputs.dataset-id }}\` |"
+            echo "| Model files | $(find Model -type f 2>/dev/null | wc -l) |"
+            echo "| HF push | Attempted to \`${{ vars.HF_REPO }}-finetuned\` |"
+            echo "| Release | finetuned-model-${{ github.run_number }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

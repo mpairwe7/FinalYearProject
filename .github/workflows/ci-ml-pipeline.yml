@@ -1,0 +1,1444 @@
+# MLOps CI/CD Pipeline for URA Chatbot
+# Handles: linting, testing, data validation, Docker builds, HF deployment
+# GPU training is handled separately by kaggle-training.yml
+#
+# Security scanning is handled by dedicated workflows:
+#   - security-trivy.yml      → SCA, IaC, license, container, SBOM
+#   - devsecops-sast-dast.yml → Semgrep, Bandit, pip-audit, Checkov, ZAP, Scorecard, threat model
+#   - secret-scanning.yml     → TruffleHog, Gitleaks, ggshield, detect-secrets
+name: ML Pipeline CI/CD
+
+on:
+  push:
+    branches: [main, dev, develop]
+    paths:
+      - 'ml/**'
+      - 'App/backend/**'
+      - 'Data/**'
+      - 'Model/**'
+      - 'requirements.txt'
+      - '.github/workflows/ci-ml-pipeline.yml'
+  pull_request:
+    branches: [main, dev, develop]
+  workflow_dispatch:
+    inputs:
+      run_training:
+        description: 'Run full model training (dry-run on CI)'
+        required: false
+        default: false
+        type: boolean
+      deploy_model:
+        description: 'Deploy model to Hugging Face'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+concurrency:
+  group: ml-pipeline-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.11'
+  HF_REPO: ${{ vars.HF_REPO || 'mpairweLandwind/ura-chatbot' }}
+  DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE || 'landwind/ura-chatbot-api' }}
+
+jobs:
+  # ============================================
+  # Stage 1: Code Quality & Linting
+  # ============================================
+  lint-and-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system ruff pytest pytest-cov
+          uv pip install --system -r requirements.txt
+
+      - name: Run Ruff linter
+        run: |
+          # Blocking lint is limited to syntax/undefined-name classes so CI
+          # catches production-breaking Python errors without failing on
+          # legacy style debt already reported by advisory scans.
+          ruff check ml/ App/backend/ --select=E9,F63,F7,F82 --output-format=github
+
+      - name: Ruff style report (advisory)
+        if: always()
+        run: ruff check ml/ App/backend/ --statistics --exit-zero
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --cov=ml --cov=App/backend --cov-report=xml --cov-report=term-missing --cov-fail-under=35
+
+      - name: Upload coverage report
+        if: always()
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Lint & Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Python: ${{ env.PYTHON_VERSION }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Linter: ruff" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Coverage gate: baseline 35% minimum; raise after focused coverage expansion" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 1a: Reproducibility — compile + upload uv lockfile
+  # ============================================
+  # Freezes the transitive dep graph so every CI job later in this run
+  # (and every retrain that references the same commit) resolves to the
+  # same wheels. Uploaded as an artifact; can be committed via a bot PR
+  # if `commit-lockfile=true` is set on workflow_dispatch.
+  reproducibility:
+    name: Compile lockfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Compile requirements.lock
+        run: |
+          uv pip compile requirements.txt -o requirements.lock \
+            --generate-hashes \
+            --python-version "${{ env.PYTHON_VERSION }}" \
+            --python-platform x86_64-manylinux_2_28
+          echo "lines: $(wc -l < requirements.lock)"
+          head -n 20 requirements.lock
+
+      - name: Upload lockfile artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: requirements-lock
+          path: requirements.lock
+          retention-days: 30
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Lockfile" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`requirements.lock\` compiled with uv" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Lines: $(wc -l < requirements.lock 2>/dev/null || echo 'n/a')" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 1b: Governance Compliance Check
+  # ============================================
+  governance-check:
+    name: Governance & Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv pip install --system pyyaml
+
+      - name: Run governance compliance check
+        run: python governance/compliance_check.py
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Governance Compliance" >> "$GITHUB_STEP_SUMMARY"
+          echo "Checked: NIST AI RMF, ISO/IEC 42001, OWASP LLM Top 10, EU AI Act" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 1c: Data Augmentation Smoke Test (fast, PR-triggered)
+  # ============================================
+  # Runs on every PR touching ml/scripts/data_aug/ or data_augmentation.py.
+  # Dry-run mode skips file writes and heavy deps (no pyarrow, no
+  # sentence-transformers, no pymupdf4llm). Catches regressions in the
+  # data pipeline in <2 minutes instead of waiting for the 30-min
+  # prepare-training-data job, which is gated on main/manual dispatch.
+  data-aug-smoke:
+    name: Data Aug Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install minimum data-aug deps
+        run: |
+          uv pip install --system \
+            'numpy==1.26.4' 'pandas>=1.5,<2.0' 'pydantic>=2.5' pyyaml \
+            'datasketch==1.6.5' ftfy \
+            'beautifulsoup4>=4.12.0' requests
+
+      - name: Import smoke test
+        run: |
+          python - <<'PY'
+          import importlib
+          mods = [
+              "ml.scripts.data_aug.schema",
+              "ml.scripts.data_aug.text_utils",
+              "ml.scripts.data_aug.chunkers",
+              "ml.scripts.data_aug.loaders",
+              "ml.scripts.data_aug.dedup",
+              "ml.scripts.data_aug.quality",
+              "ml.scripts.data_aug.quality_classifier",
+              "ml.scripts.data_aug.splitters",
+              "ml.scripts.data_aug.formatters",
+              "ml.scripts.data_aug.provenance",
+              "ml.scripts.data_aug.pipeline",
+              "ml.scripts.data_aug.crawler",
+              "ml.scripts.data_aug.dataset_downloader",
+              "ml.scripts.data_aug.faq_translator",
+              "ml.scripts.data_augmentation",
+              "ml.scripts.train_quality_classifier",
+              "ml.scripts.fine_tune_gemma",
+          ]
+          for m in mods:
+              importlib.import_module(m)
+              print(f"OK {m}")
+          PY
+
+      - name: Schema + PII unit checks
+        run: |
+          python - <<'PY'
+          from ml.scripts.data_aug.schema import (
+              TrainingExample, Message, Metadata, SourceType, TaskType, content_hash,
+          )
+          # Verify new source types exist (Phase 1-3 additions).
+          assert hasattr(SourceType, 'WEB_CRAWL'), "Missing SourceType.WEB_CRAWL"
+          assert hasattr(SourceType, 'ONLINE_CORPUS'), "Missing SourceType.ONLINE_CORPUS"
+          assert hasattr(SourceType, 'TRANSLATED_FAQ'), "Missing SourceType.TRANSLATED_FAQ"
+          from ml.scripts.data_aug.text_utils import redact_pii, clean_text
+
+          # 1. Rejects message without an assistant turn
+          try:
+              TrainingExample(
+                  messages=[Message(role="user", content="u")],
+                  metadata=Metadata(
+                      source="x", source_type=SourceType.CSV_FAQ, task=TaskType.QA,
+                      content_hash="abc",
+                  ),
+              )
+              raise SystemExit("FAIL: accepted missing assistant")
+          except Exception:
+              pass
+
+          # 2. Hash is normalised
+          assert content_hash("VAT rate?", "18%") == content_hash("  vat rate?  ", "18%")
+
+          # 3. PII redaction
+          text, report = redact_pii(
+              "Call 0712345678 or email bob@example.com TIN 1012345678")
+          assert "[PHONE]" in text and "[EMAIL]" in text and "[TIN]" in text
+          assert report.phone == 1 and report.email == 1 and report.tin == 1
+
+          # 4. Unicode + whitespace cleaning
+          assert clean_text("  hello\u00a0 \t world ") == "hello world"
+          print("schema/PII/hash unit checks OK")
+          PY
+
+      - name: Pipeline dry-run (CSV only, no heavy deps)
+        run: |
+          python ml/scripts/data_augmentation.py \
+            --csv-dir Data/dataset \
+            --teacher-qa-dir Data/teacher_qa \
+            --output-dir /tmp/aug_smoke \
+            --no-parquet \
+            --no-pdf-corpus --no-pdf-retrieval \
+            --tokenizer-model "" \
+            --dry-run \
+            -v
+          # --dry-run must leave the output dir empty (no files written)
+          if [ -d /tmp/aug_smoke ] && [ -n "$(ls -A /tmp/aug_smoke 2>/dev/null)" ]; then
+            echo "ERROR: --dry-run wrote files to /tmp/aug_smoke"
+            ls -la /tmp/aug_smoke
+            exit 1
+          fi
+          echo "dry-run OK — no files written"
+
+      - name: Pipeline real run (CSV only, validate outputs)
+        run: |
+          python ml/scripts/data_augmentation.py \
+            --csv-dir Data/dataset \
+            --teacher-qa-dir Data/teacher_qa \
+            --output-dir /tmp/aug_real \
+            --no-parquet \
+            --no-pdf-corpus --no-pdf-retrieval \
+            --tokenizer-model "" \
+            -v
+
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          m = json.loads(Path("/tmp/aug_real/manifest.json").read_text())
+          split = m["stages"]["split"]
+          if split["contamination_leaked"] != 0:
+              print(f"ERROR: contamination={split['contamination_leaked']}")
+              sys.exit(1)
+          if split["train"] < 50:
+              print(f"ERROR: only {split['train']} train rows")
+              sys.exit(2)
+          # Every required file must exist
+          required = [
+              "train.messages.jsonl", "val.messages.jsonl", "test.messages.jsonl",
+              "train.instruction.jsonl", "training_data.jsonl",
+              "training_data.messages.jsonl",
+              "manifest.json", "DATA_CARD.md",
+          ]
+          missing = [f for f in required if not Path(f"/tmp/aug_real/{f}").exists()]
+          if missing:
+              print(f"ERROR: missing outputs: {missing}")
+              sys.exit(3)
+          print(f"OK train={split['train']} val={split['val']} test={split['test']} "
+                f"strata={split['strata_count']}")
+          PY
+
+      - name: Generate data quality plots
+        continue-on-error: true
+        run: |
+          pip install matplotlib seaborn 2>/dev/null
+          python -m ml.plots.generate_all \
+            --metrics-dir /tmp/aug_real \
+            --output-dir /tmp/aug_real/plots \
+            --format png 2>&1 | tail -5
+          echo "Generated $(ls /tmp/aug_real/plots/*.png 2>/dev/null | wc -l) plots"
+
+      - name: Upload data quality plots
+        if: always()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: data-quality-plots
+          path: /tmp/aug_real/plots/
+          retention-days: 7
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Data Augmentation Smoke Test" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Modules: imported OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Schema/PII unit checks: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dry-run: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pipeline end-to-end: passed" >> "$GITHUB_STEP_SUMMARY"
+          PLOTS=$(ls /tmp/aug_real/plots/*.png 2>/dev/null | wc -l)
+          echo "- Plots generated: $PLOTS" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Speech Pipeline Smoke Test (2026)
+  # ============================================
+  # Dry-runs every speech pipeline stage (ASR / MT / TTS / mobile export /
+  # redteam / TTS eval) without downloading real models, training, or
+  # connecting mobile hardware. Validates that the scaffolding is wired
+  # correctly and each script's `--dry-run` path exits 0.
+  #
+  # Full model training stays on Kaggle / manual runs — see
+  # `.github/workflows/kaggle-training.yml`.
+  speech-smoke:
+    name: Speech Pipeline Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install minimum speech-smoke deps
+        run: |
+          uv pip install --system \
+            'numpy==1.26.4' 'pydantic>=2.5' pyyaml 'pandas>=1.5,<2.0' ftfy
+
+      - name: Import smoke test
+        run: |
+          python - <<'PY'
+          import importlib
+          mods = [
+              "ml.scripts.data_aug.speech_schema",
+              "ml.scripts.data_aug.asr_loaders",
+              "ml.scripts.data_aug.mt_loaders",
+              "ml.scripts.lang_id",
+              "ml.scripts.asr.download_models",
+              "ml.scripts.asr.export_asr_onnx",
+              "ml.scripts.asr.export_asr_sherpa",
+              "ml.scripts.asr.infer_asr",
+              "ml.scripts.asr.train_luganda",
+              "ml.scripts.tts.download_models",
+              "ml.scripts.tts.export_tts_onnx",
+              "ml.scripts.tts.infer_tts",
+              "ml.scripts.tts.train_luganda_vits",
+              "ml.scripts.mt.download_models",
+              "ml.scripts.mt.finetune_mt",
+              "ml.scripts.mt.distill_mt",
+              "ml.scripts.mt.backtranslate",
+              "ml.scripts.mt.export_mt_onnx",
+              "ml.scripts.mt.infer_mt",
+              "ml.scripts.speech.speech_pipeline",
+              "ml.pipelines.evaluate_speech",
+              "ml.pipelines.evaluate_mt",
+              "ml.pipelines.evaluate_tts",
+              "ml.pipelines.benchmark_mobile",
+              "ml.pipelines.redteam_voice",
+          ]
+          for m in mods:
+              importlib.import_module(m)
+          print(f"imported {len(mods)} modules")
+          PY
+
+      - name: Schema round-trip
+        run: |
+          python - <<'PY'
+          from ml.scripts.data_aug.speech_schema import (
+              AudioExample, AudioSourceType,
+              MTExample, MTSourceType,
+              LicenseClass, audio_content_hash, mt_content_hash,
+              COMMERCIAL_SAFE_LICENSES,
+          )
+
+          # AudioExample
+          a = AudioExample(
+              audio_path="Data/lgaudio/sample.mp3",
+              sample_rate=16000,
+              duration_s=3.5,
+              reference_text="omusolo gw'emigaso",
+              language="lg",
+              source="sample",
+              source_type=AudioSourceType.COMMON_VOICE,
+              license=LicenseClass.PUBLIC_DOMAIN,
+              content_hash=audio_content_hash("Data/lgaudio/sample.mp3", "omusolo gw'emigaso"),
+          )
+          assert a.license.is_commercial_safe
+          # MTExample
+          m = MTExample(
+              source_text="Value Added Tax",
+              target_text="Omusolo gw'Emigaso",
+              source_lang="en",
+              target_lang="lg",
+              source="test",
+              source_type=MTSourceType.LUGANDA_PARALLEL,
+              license=LicenseClass.PROPRIETARY,
+              content_hash=mt_content_hash("Value Added Tax", "Omusolo gw'Emigaso"),
+          )
+          assert LicenseClass.CC_BY_NC not in COMMERCIAL_SAFE_LICENSES
+          print("schema OK")
+          PY
+
+      - name: Language ID heuristic
+        run: |
+          python - <<'PY'
+          from ml.scripts.lang_id import LanguageDetector
+          det = LanguageDetector()
+          en = det.detect("The tax authority processes your annual return in due course")
+          assert en.lang == "en", f"expected en, got {en.lang}"
+          print("lang_id OK:", en)
+          PY
+
+      - name: ASR / MT / TTS CLI dry runs
+        run: |
+          python -m ml.scripts.asr.download_models --dry-run
+          python -m ml.scripts.mt.download_models --dry-run
+          python -m ml.scripts.tts.download_models --dry-run
+          python -m ml.scripts.asr.export_asr_onnx --dry-run
+          python -m ml.scripts.asr.export_asr_sherpa --name whisper-small --dry-run
+          python -m ml.scripts.tts.export_tts_onnx --voice en_US-lessac-medium --dry-run
+          python -m ml.scripts.mt.export_mt_onnx --dry-run
+          python -m ml.scripts.mt.finetune_mt --dry-run
+          python -m ml.scripts.mt.distill_mt --dry-run
+          python -m ml.scripts.mt.backtranslate --dry-run
+          python -m ml.scripts.asr.train_luganda --dry-run
+          python -m ml.scripts.tts.train_luganda_vits --dry-run
+
+      - name: Evaluation harnesses (dry run)
+        run: |
+          python -m ml.pipelines.evaluate_speech --dry-run
+          python -m ml.pipelines.evaluate_mt --dry-run
+          python -m ml.pipelines.evaluate_tts --dry-run
+          python -m ml.pipelines.benchmark_mobile --dry-run
+          python -m ml.pipelines.redteam_voice --dry-run
+
+      - name: Speech quality gates (soft-fail)
+        run: |
+          python -m ml.pipelines.quality_gates \
+            --config ml/configs/training_config.yaml \
+            --metrics-path Results/metrics/speech_metrics.json \
+            --family speech \
+            --soft-fail
+
+          python -m ml.pipelines.quality_gates \
+            --config ml/configs/training_config.yaml \
+            --metrics-path Results/metrics/mt_metrics.json \
+            --family mt \
+            --soft-fail
+
+      - name: Upload speech metrics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: speech-metrics
+          path: |
+            Results/metrics/speech_metrics.json
+            Results/metrics/mt_metrics.json
+            Results/metrics/tts_metrics.json
+            Results/metrics/mobile_benchmark.json
+            Results/metrics/redteam_voice.json
+          if-no-files-found: ignore
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## Speech Pipeline Smoke" >> "$GITHUB_STEP_SUMMARY"
+          echo "- ASR / MT / TTS dry-runs: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Evaluation harnesses: dry-run passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mobile bundle exporter: dry-run passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Redteam voice: dry-run passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Quality gates: soft-fail passed" >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 2: Data Validation
+  # ============================================
+  data-validation:
+    name: Validate Data Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint-and-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install validation dependencies
+        run: uv pip install --system pandas great-expectations pydantic
+
+      - name: Run data validation
+        run: python ml/pipelines/validate_data.py
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: data-validation-report
+          path: Results/reports/data_validation_report.json
+
+  # ============================================
+  # Stage 3: Data Augmentation & Preparation (2026 pipeline)
+  # ============================================
+  # Runs the four-stage pipeline from ml/scripts/data_aug/:
+  #   1. train a quality classifier (FineWeb-Edu style) from gold CSV FAQs
+  #   2. run the full data augmentation pipeline using that classifier
+  #   3. upload manifest.json, DATA_CARD.md, and every messages/parquet shard
+  # Guarantees a manifest with git SHA + content hashes so downstream
+  # training jobs are byte-reproducible from the committed dataset alone.
+  prepare-training-data:
+    name: Prepare Training Data
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: data-validation
+    if: inputs.run_training == true || github.ref == 'refs/heads/main'
+    outputs:
+      train_rows: ${{ steps.aug_stats.outputs.train_rows }}
+      val_rows: ${{ steps.aug_stats.outputs.val_rows }}
+      test_rows: ${{ steps.aug_stats.outputs.test_rows }}
+      classifier_f1: ${{ steps.classifier_train.outputs.f1 }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install data-augmentation dependencies
+        run: |
+          # Core pipeline
+          uv pip install --system \
+            'pandas>=1.5,<2.0' 'pydantic>=2.5' pyyaml \
+            'datasketch==1.6.5' 'pyarrow==18.1.0' ftfy \
+            pymupdf4llm pymupdf
+          # Quality classifier (FineWeb-Edu style)
+          uv pip install --system \
+            'scikit-learn>=1.3' joblib 'sentence-transformers>=3.0' \
+            --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Cache Hugging Face embedder
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cache/huggingface/hub
+            ~/huggingface_cache
+          key: hf-minilm-${{ runner.os }}-${{ env.PYTHON_VERSION }}-v1
+          restore-keys: |
+            hf-minilm-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Train quality classifier (bootstrapped from CSV FAQs)
+        id: classifier_train
+        run: |
+          mkdir -p artifacts/models
+          python ml/scripts/train_quality_classifier.py \
+            --from-csv-dir Data/dataset \
+            --save-path artifacts/models/quality_classifier.joblib \
+            --max-per-class 500 \
+            -v
+          # Expose the validation F1 so the job summary can show it.
+          python - <<'PY'
+          import json, os
+          m = json.load(open("artifacts/models/quality_classifier.metrics.json"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"f1={m['f1']:.4f}\n")
+              f.write(f"accuracy={m['accuracy']:.4f}\n")
+              f.write(f"precision={m['precision']:.4f}\n")
+              f.write(f"recall={m['recall']:.4f}\n")
+          PY
+
+      - name: Run 2026 data augmentation pipeline
+        run: |
+          mkdir -p artifacts/training_data Data/processed
+          # Quality thresholds are tuned to match local smoke-test runs:
+          #  - min-tokens=8 / max-tokens=2048 matches gemma-2-2b-it max-seq
+          #  - near-dup threshold 0.85 is the same Llama/FineWeb setting
+          #  - luganda cap prevents that source dominating the dataset
+          #  - pdf workers=2 stays within GitHub runner CPU budget
+          python ml/scripts/data_augmentation.py \
+            --csv-dir Data/dataset \
+            --pdf-dir Data/pdfs \
+            --luganda-dir Data/TTT \
+            --teacher-qa-dir Data/teacher_qa \
+            --output-dir artifacts/training_data \
+            --pdf-workers 2 \
+            --max-pdfs 5 \
+            --tokenizer-model "" \
+            --min-tokens 8 --max-tokens 2048 \
+            --near-dup-threshold 0.85 \
+            --source-cap luganda_parallel=5000 \
+            --source-cap pdf_corpus=2000 \
+            --source-cap retrieval=2000 \
+            --quality-classifier artifacts/models/quality_classifier.joblib \
+            --quality-threshold 0.45 \
+            --val-ratio 0.08 --test-ratio 0.02 \
+            --seed 42 \
+            -v
+
+      - name: Validate manifest + flag contamination
+        id: aug_stats
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+
+          manifest_path = Path("artifacts/training_data/manifest.json")
+          if not manifest_path.exists():
+              print("ERROR: manifest.json missing")
+              sys.exit(1)
+          m = json.loads(manifest_path.read_text())
+
+          split = m["stages"]["split"]
+          quality = m["stages"]["quality"]
+          dedup = m["stages"]["ingest_dedup"]
+
+          print(f"train={split['train']} val={split['val']} test={split['test']}")
+          print(f"dedup: input={dedup['input_count']} dup_removed={dedup['exact_removed']} near={dedup['near_removed']}")
+          print(f"quality: dropped_classifier={quality.get('dropped_classifier', 0)} "
+                f"classifier_report={quality.get('classifier', {})}")
+
+          if split["contamination_leaked"] > 0:
+              print(f"ERROR: {split['contamination_leaked']} train rows leaked into val/test")
+              sys.exit(2)
+          if split["train"] < 100:
+              print(f"ERROR: too few training rows ({split['train']})")
+              sys.exit(3)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"train_rows={split['train']}\n")
+              f.write(f"val_rows={split['val']}\n")
+              f.write(f"test_rows={split['test']}\n")
+          PY
+
+      - name: Verify messages-format JSONL schema
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          required_top = {"messages", "source", "source_type", "task", "language", "content_hash"}
+          required_msg = {"role", "content"}
+          seen_roles = set()
+
+          for name in ("train.messages.jsonl", "val.messages.jsonl", "test.messages.jsonl"):
+              p = Path("artifacts/training_data") / name
+              if not p.exists():
+                  print(f"ERROR: {p} missing")
+                  sys.exit(1)
+              count = 0
+              for line in p.read_text().splitlines():
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  missing = required_top - row.keys()
+                  if missing:
+                      print(f"ERROR: {name} row missing {missing}")
+                      sys.exit(2)
+                  for msg in row["messages"]:
+                      if required_msg - msg.keys():
+                          print(f"ERROR: {name} message missing role/content")
+                          sys.exit(3)
+                      seen_roles.add(msg["role"])
+                  count += 1
+              print(f"{name}: {count} rows OK")
+
+          if "assistant" not in seen_roles:
+              print("ERROR: no assistant role seen")
+              sys.exit(4)
+          if "user" not in seen_roles:
+              print("ERROR: no user role seen")
+              sys.exit(5)
+          print(f"roles seen: {sorted(seen_roles)}")
+          PY
+
+      - name: Upload training data + manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: training-data
+          path: |
+            artifacts/training_data/train.messages.jsonl
+            artifacts/training_data/val.messages.jsonl
+            artifacts/training_data/test.messages.jsonl
+            artifacts/training_data/train.instruction.jsonl
+            artifacts/training_data/val.instruction.jsonl
+            artifacts/training_data/test.instruction.jsonl
+            artifacts/training_data/training_data.jsonl
+            artifacts/training_data/training_data.messages.jsonl
+            artifacts/training_data/train.parquet
+            artifacts/training_data/val.parquet
+            artifacts/training_data/test.parquet
+            artifacts/training_data/manifest.json
+            artifacts/training_data/DATA_CARD.md
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload quality classifier
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: quality-classifier
+          path: |
+            artifacts/models/quality_classifier.joblib
+            artifacts/models/quality_classifier.metrics.json
+          retention-days: 30
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Training Data (2026 Pipeline)"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Train rows | ${{ steps.aug_stats.outputs.train_rows }} |"
+            echo "| Val rows   | ${{ steps.aug_stats.outputs.val_rows }} |"
+            echo "| Test rows  | ${{ steps.aug_stats.outputs.test_rows }} |"
+            echo "| Classifier F1 | ${{ steps.classifier_train.outputs.f1 }} |"
+            echo ""
+            echo "### Manifest"
+            echo '```json'
+            if [ -f artifacts/training_data/manifest.json ]; then
+              python -c "import json; m=json.load(open('artifacts/training_data/manifest.json')); print(json.dumps(m['stages'], indent=2))"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 4: Model Training (Dry-Run on CI)
+  # ============================================
+  train-model:
+    name: Train Model (Dry-Run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: prepare-training-data
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download prepared data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: training-data
+          path: artifacts/training_data/
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install training dependencies
+        run: |
+          uv pip install --system -r requirements.txt
+          uv pip install --system kaggle transformers datasets peft accelerate bitsandbytes trl
+
+      - name: Configure Kaggle API
+        uses: ./.github/actions/setup-kaggle
+        with:
+          kaggle-username: ${{ secrets.KAGGLE_USERNAME }}
+          kaggle-key: ${{ secrets.KAGGLE_API_TOKEN }}
+
+      - name: Dry-run fine-tuning validation
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # The 2026 data_augmentation pipeline emits train.messages.jsonl
+          # (OpenAI chat format); fine_tune_gemma.py auto-detects the
+          # ``messages`` column and applies the right chat template per
+          # model target via _messages_to_{gemma,llama,t5}_text.
+          python ml/scripts/fine_tune_gemma.py \
+            --data artifacts/training_data/train.messages.jsonl \
+            --target web_high_accuracy \
+            --output artifacts/ura-gemma-finetuned \
+            --dry-run
+
+      - name: Upload model artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trained-model
+          path: |
+            Model/
+            Results/metrics/
+            artifacts/
+
+      - name: Step summary
+        run: |
+          echo "## Training Pipeline" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Data validation: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Training data: prepared" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Fine-tuning config: validated (dry-run)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "For GPU training, use the **kaggle-training** workflow." >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 5: Model Evaluation
+  # ============================================
+  evaluate-model:
+    name: Evaluate Model
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: train-model
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download trained model
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trained-model
+          path: ./
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install evaluation dependencies
+        run: uv pip install --system -r requirements.txt
+
+      - name: Run model evaluation
+        run: |
+          mkdir -p Results/metrics Results/reports
+          python ml/pipelines/evaluate.py \
+            --model-path Model \
+            --output-dir Results
+
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evaluation-results
+          path: Results/
+
+      - name: Check model quality gates
+        run: python ml/pipelines/quality_gates.py
+
+  # ============================================
+  # Stage 5b: RAG Evaluation & Quality Gates
+  # ============================================
+  #
+  # Deliberately NOT on the training chain.  `prepare-training-data` is gated
+  # on `run_training || ref == main`, so anything downstream of it is skipped
+  # for every PR and every push to dev — which used to include this job, and
+  # meant the faithfulness / groundedness / citation / abstention gates never
+  # ran on the branch where changes actually land.  A grounding regression
+  # could (and did) merge with the whole suite silently skipped.
+  #
+  # The eval sets are self-contained ({question, answer, contexts,
+  # ground_truth}), so this scores fixed rows with deterministic metrics plus
+  # a MiniLM encoder.  It needs no trained model, no Qdrant and no LLM — there
+  # was never a real dependency on `evaluate-model`, only an inherited one.
+  evaluate-rag:
+    name: RAG Evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: lint-and-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system numpy pyyaml sentence-transformers torch --extra-index-url https://download.pytorch.org/whl/cpu
+
+      # answer_relevancy embeds with MiniLM. Now that this job runs on every
+      # PR rather than only on main, pulling that model fresh each time drew
+      # HTTP 429s from the Hub, and huggingface_hub retried until the job hit
+      # its 20-minute timeout — a rate limit reported as a failed quality
+      # gate. Cache the weights (same key as the classifier job, which
+      # already does this) and authenticate when a token is configured;
+      # authenticated pulls get a far higher limit.
+      - name: Cache Hugging Face embedder
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cache/huggingface/hub
+            ~/huggingface_cache
+          key: hf-minilm-${{ runner.os }}-${{ env.PYTHON_VERSION }}-v1
+          restore-keys: |
+            hf-minilm-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Verify RAG evaluation set exists
+        run: |
+          if [ ! -f Data/eval/rag_eval.jsonl ]; then
+            echo "ERROR: RAG evaluation set Data/eval/rag_eval.jsonl is missing"
+            exit 1
+          fi
+          echo "Eval set: $(wc -l < Data/eval/rag_eval.jsonl) samples"
+
+      - name: Run RAG evaluation (English)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          mkdir -p Results
+          python -m ml.pipelines.evaluate_rag \
+            --eval-set Data/eval/rag_eval.jsonl \
+            --output-dir Results \
+            --config ml/configs/training_config.yaml
+
+      - name: Verify Luganda evaluation set exists
+        run: |
+          if [ ! -f Data/eval/rag_eval_lg.jsonl ]; then
+            echo "ERROR: Luganda evaluation set Data/eval/rag_eval_lg.jsonl is missing"
+            exit 1
+          fi
+          echo "Luganda eval set: $(wc -l < Data/eval/rag_eval_lg.jsonl) samples"
+
+      # faithfulness and groundedness are lexical-overlap scorers (shared
+      # tokens / shared 3-grams).  The Luganda set pairs Luganda answers with
+      # English contexts, so both measure translation overlap rather than
+      # grounding and sit near zero even for a perfectly faithful answer.
+      # They stay measured and reported, but cannot decide this run — the
+      # honest options were to exclude them or to make the scorers
+      # cross-lingual, not to lower a threshold until the numbers fit.
+      # Every other metric (relevancy, precision/recall, numerical accuracy,
+      # safety probes, abstention) is language-agnostic and still gates.
+      - name: Run RAG evaluation (Luganda)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python -m ml.pipelines.evaluate_rag \
+            --eval-set Data/eval/rag_eval_lg.jsonl \
+            --output-dir Results/lg \
+            --config ml/configs/training_config.yaml \
+            --gate-exclude faithfulness,groundedness
+
+      - name: Upload RAG evaluation results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rag-evaluation-results
+          path: |
+            Results/rag_evaluation_results.json
+            Results/rag_quality_gates.json
+            Results/lg/
+
+      - name: Step summary
+        if: always()
+        run: |
+          echo "## RAG Evaluation" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f Results/rag_evaluation_results.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat Results/rag_evaluation_results.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ============================================
+  # Stage 5d: Production Gates (2026 offline mobile)
+  # ============================================
+  # Runs the full production-readiness check: tokenizer audit, synthetic
+  # benchmark, model card generation + validation, and the combined
+  # production quality gate.  Uses --soft-fail so CI stays green while
+  # artefacts are still being built up; remove --soft-fail once the full
+  # pipeline produces real calibration / benchmark data on every run.
+  production-gates:
+    name: Production Gates (2026)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: [evaluate-rag]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download RAG evaluation results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rag-evaluation-results
+          path: Results/
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system pyyaml
+
+      - name: Tokenizer audit (proxy mode — no HF model download)
+        run: |
+          mkdir -p Results/tokenizer_audit
+          python -m ml.pipelines.audit_tokenizer \
+            --tokenizer google/gemma-2-2b-it \
+            --en Data/eval/rag_eval.jsonl \
+            --lg Data/eval/rag_eval_lg.jsonl \
+            --output-dir Results/tokenizer_audit \
+          || echo "WARN: tokenizer audit failed — will soft-fail"
+
+      - name: Safety evaluation (mock backend)
+        run: |
+          python -m ml.pipelines.evaluate_safety \
+            --corpus Data/eval/redteam_corpus.jsonl \
+            --backend mock \
+            --output-dir Results
+
+      - name: Calibration from RAG confidence scores
+        run: |
+          if [ -f Results/confidence_scores.jsonl ]; then
+            mkdir -p Results/calibration
+            python -m ml.pipelines.calibrate \
+              --preds Results/confidence_scores.jsonl \
+              --output-dir Results/calibration
+          else
+            echo "WARN: confidence_scores.jsonl not found — skipping calibration"
+          fi
+
+      - name: Synthetic inference benchmark
+        run: |
+          mkdir -p Results/benchmark
+          python -m ml.scripts.benchmark_inference \
+            --synthetic \
+            --output-dir Results/benchmark
+
+      - name: Generate model card
+        run: |
+          python -m ml.pipelines.generate_model_card \
+            --output Results/MODEL_CARD.md \
+            --rag-eval Results/rag_evaluation_results.json \
+            --safety Results/safety_evaluation_results.json \
+            --calibration Results/calibration/calibration_report.json \
+            --tokenizer-audit Results/tokenizer_audit/tokenizer_audit.json \
+            --benchmark Results/benchmark/benchmark.json \
+          || echo "WARN: model card generation failed — will soft-fail"
+
+      - name: Run production quality gates
+        run: |
+          python -m ml.pipelines.quality_gates \
+            --family production \
+            --config ml/configs/training_config.yaml \
+            --rag-eval Results/rag_evaluation_results.json \
+            --safety Results/safety_evaluation_results.json \
+            --calibration Results/calibration/calibration_report.json \
+            --tokenizer-audit Results/tokenizer_audit/tokenizer_audit.json \
+            --benchmark Results/benchmark/benchmark.json \
+            --model-card Results/MODEL_CARD.md \
+            --soft-fail
+
+      - name: Upload production gate artefacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-gate-results
+          path: |
+            Results/tokenizer_audit/
+            Results/benchmark/
+            Results/calibration/
+            Results/safety_evaluation_results.json
+            Results/confidence_scores.jsonl
+            Results/MODEL_CARD.md
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Production Gates (2026)"
+            echo ""
+            echo "| Artefact | Status |"
+            echo "|---|---|"
+            echo "| Safety eval | $([ -f Results/safety_evaluation_results.json ] && echo 'generated (mock)' || echo 'missing') |"
+            echo "| Calibration | $([ -f Results/calibration/calibration_report.json ] && echo 'generated' || echo 'missing') |"
+            echo "| Tokenizer audit | $([ -f Results/tokenizer_audit/tokenizer_audit.json ] && echo 'generated' || echo 'missing') |"
+            echo "| Benchmark | $([ -f Results/benchmark/benchmark.json ] && echo 'generated (synthetic)' || echo 'missing') |"
+            echo "| Model card | $([ -f Results/MODEL_CARD.md ] && echo 'generated' || echo 'missing') |"
+            echo ""
+            echo "Quality gates run with \`--soft-fail\` until real model-backed artefacts replace mock/synthetic stubs."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================
+  # Stage 5e: Adapter Evaluation (multilingual LoRA quality gates)
+  # ============================================
+  # Dry-run evaluation of fine-tuned LoRA adapters for Qwen3 and Whisper.
+  # On CI (no GPU), validates the eval scripts can parse and run metrics.
+  # Full GPU evaluation runs on-demand via workflow_dispatch.
+  evaluate-adapters:
+    name: Adapter Evaluation (multilingual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [evaluate-rag]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system pyyaml
+
+      - name: Validate eval scripts (syntax + metric functions)
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          spec = importlib.util.spec_from_file_location(
+              "eq", "fine-tuning/scripts/10_evaluate_lora_qwen.py"
+          )
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          assert mod.compute_rouge_l("a b c", "a b c") == 1.0, "ROUGE-L identity failed"
+          assert mod.compute_bleu_1("a b c", "a b c") == 1.0, "BLEU-1 identity failed"
+          assert mod.compute_rouge_l("a b c", "x y z") == 0.0, "ROUGE-L disjoint failed"
+          print("Qwen eval metrics OK")
+
+          spec2 = importlib.util.spec_from_file_location(
+              "ew", "fine-tuning/scripts/11_evaluate_lora_whisper.py"
+          )
+          mod2 = importlib.util.module_from_spec(spec2)
+          spec2.loader.exec_module(mod2)
+          assert mod2.compute_wer("a b c", "a b c") == 0.0, "WER identity failed"
+          assert mod2.compute_cer("abc", "abc") == 0.0, "CER identity failed"
+          assert mod2.compute_wer("a b c", "x y z") == 1.0, "WER disjoint failed"
+          print("Whisper eval metrics OK")
+
+          from App.backend.app.query import detect_language
+
+          assert detect_language("How do I register for TIN?") == "en"
+          assert detect_language("Ninawezaje kupata TIN kwa biashara") == "sw"
+          print("Language detection OK")
+          print("All adapter eval validations passed")
+          PY
+
+      - name: Check adapter directory structure
+        run: |
+          echo "## Adapter Evaluation Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Language | Qwen3 Adapter | Whisper Adapter |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|---------------|-----------------|" >> "$GITHUB_STEP_SUMMARY"
+          for lang in lg sw nyn ach; do
+            qwen_dir="fine-tuning/adapters/${lang}-lora"
+            if [ "$lang" = "lg" ]; then qwen_dir="fine-tuning/adapters/luganda-lora"; fi
+            whisper_dir="fine-tuning/adapters/whisper-${lang}"
+            qwen_status="not found"
+            whisper_status="not found"
+            if [ -d "$qwen_dir" ] && [ -f "$qwen_dir/adapter_config.json" ]; then
+              qwen_status="present ($(du -sh $qwen_dir | cut -f1))"
+            fi
+            if [ -d "$whisper_dir" ] && [ -f "$whisper_dir/adapter_config.json" ]; then
+              whisper_status="present ($(du -sh $whisper_dir | cut -f1))"
+            fi
+            echo "| $lang | $qwen_status | $whisper_status |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Validate eval results (if present)
+        run: |
+          for lang in lg sw nyn ach; do
+            f="Results/eval_lora_qwen_${lang}.json"
+            if [ -f "$f" ]; then
+              python - "$f" "$lang" <<'PY'
+          import json
+          import sys
+
+          path, lang = sys.argv[1], sys.argv[2]
+          data = json.load(open(path, encoding="utf-8"))
+          ft = data.get("fine_tuned_summary", {})
+          if ft:
+              rouge = ft.get("rouge_l_mean", 0)
+              quality = ft.get("quality_mean", 0)
+              print(f"  {lang}: ROUGE-L={rouge:.3f} Quality={quality:.3f}")
+              if quality < 0.3:
+                  print(f"  WARNING: {lang} quality below threshold (0.3)")
+                  sys.exit(1)
+          else:
+              print(f"  {lang}: no fine-tuned results yet")
+          PY
+            fi
+          done
+          echo "Adapter eval gate: PASS"
+
+  # ============================================
+  # Stage 6: Push to Hugging Face Hub
+  # ============================================
+  push-to-huggingface:
+    name: Deploy to Hugging Face
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [evaluate-model, evaluate-rag]
+    if: inputs.deploy_model == true || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download model artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: trained-model
+          path: ./
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Hugging Face CLI
+        run: uv pip install --system huggingface_hub
+
+      - name: Push model to Hugging Face Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python ml/pipelines/push_to_hub.py \
+            --model-path Model \
+            --repo-id "$HF_REPO" \
+            --commit-message "CI/CD: Update model from commit ${{ github.sha }}"
+
+  # ============================================
+  # Stage 7: Build & Push Docker Image
+  # ============================================
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [lint-and-test]
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+
+      - name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: |
+            ${{ steps.meta.outputs.tags }}
+            ${{ env.DOCKER_IMAGE }}:ci-${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy vulnerability scan (SARIF → GitHub Security tab)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:ci-${{ github.sha }}
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-results.sarif
+          trivy-config: trivy.yaml
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-ml-pipeline
+
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:ci-${{ github.sha }}
+          format: cyclonedx
+          output: sbom-api-pipeline.cdx.json
+
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-ml-pipeline-results
+          path: |
+            trivy-results.sarif
+            sbom-api-pipeline.cdx.json
+          retention-days: 90
+
+  # ============================================
+  # Stage 8: Deploy Backend
+  # ============================================
+  deploy-backend:
+    name: Deploy Backend API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [build-docker, push-to-huggingface, production-gates]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Deploy to production
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          API_HOST: ${{ secrets.API_HOST }}
+        run: |
+          echo "Deploying $DOCKER_IMAGE:latest to production"
+          # Add deployment commands here (e.g., SSH, kubectl, etc.)
+          # ssh -i "$DEPLOY_KEY" user@"$API_HOST" "docker pull $DOCKER_IMAGE:latest && docker-compose up -d"
+
+      - name: Health check
+        run: |
+          echo "Running health check..."
+          # curl -f "${{ vars.API_URL }}/health" || exit 1
+
+      - name: Step summary
+        run: |
+          echo "## Backend Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: \`${{ env.DOCKER_IMAGE }}:latest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"

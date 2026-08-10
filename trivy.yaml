@@ -1,0 +1,75 @@
+# =============================================================================
+# Trivy Configuration – URA Chatbot (2026 Industry Standard)
+#
+# Central config for all Trivy scan modes:
+#   - Vulnerability scanning (OS packages + language deps)
+#   - Secret detection (backup layer to pre-commit hooks)
+#   - Misconfiguration / IaC scanning (Dockerfiles, Compose, K8s)
+#   - License compliance (block copyleft in production images)
+#   - SBOM generation (CycloneDX for supply chain transparency)
+#
+# Docs: https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
+# =============================================================================
+
+# ── Scan settings ────────────────────────────────────────────────────────────
+scan:
+  # Scanners to enable by default
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+    - license
+
+  # Severities that cause a non-zero exit code
+  severity:
+    - CRITICAL
+    - HIGH
+
+# ── Vulnerability settings ───────────────────────────────────────────────────
+vulnerability:
+  # Ignore unfixed vulnerabilities (no patch available yet)
+  ignore-unfixed: true
+
+  # Vulnerability database sources
+  type:
+    - os       # OS package vulnerabilities (Debian, Alpine, etc.)
+    - library  # Language-specific dependencies (pip, npm, etc.)
+
+# ── Misconfiguration / IaC settings ─────────────────────────────────────────
+misconfiguration:
+  # Check Dockerfiles, docker-compose, Kubernetes manifests, Terraform, etc.
+  include-non-failures: false
+
+  # Trivy checks IDs to skip (use .trivyignore for per-finding suppression)
+  # skip-checks: []
+
+# ── License compliance ───────────────────────────────────────────────────────
+license:
+  # Block restrictive licenses in production dependencies
+  forbidden:
+    - AGPL-1.0
+    - AGPL-3.0
+    - GPL-2.0
+    - GPL-3.0
+    - SSPL-1.0
+    - BSL-1.1
+  # Confidence threshold for license detection (0.0 - 1.0)
+  confidence-level: 0.8
+
+# ── Secret scanning ─────────────────────────────────────────────────────────
+secret:
+  # Trivy's built-in secret scanner (supplements pre-commit hooks)
+  config: ""
+
+# ── SBOM generation ──────────────────────────────────────────────────────────
+# SBOM is generated via CLI flags, not config. Example:
+#   trivy image --format cyclonedx --output sbom.json <image>
+
+# ── Caching ──────────────────────────────────────────────────────────────────
+cache:
+  # Cache DB locally for faster repeat scans
+  backend: fs
+
+# ── Output settings ──────────────────────────────────────────────────────────
+# Default output is table format to stdout.
+# CI pipelines override with --format sarif / cyclonedx / json as needed.

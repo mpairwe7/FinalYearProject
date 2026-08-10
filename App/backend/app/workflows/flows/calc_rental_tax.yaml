@@ -1,0 +1,41 @@
+id: calc_rental_tax
+name: Rental Income Tax Calculator
+version: "1"
+description: Guided rental income tax calculation for individual or company landlords.
+requires_auth: false
+trigger_phrases: []
+
+steps:
+  - id: ask_landlord_type
+    question: "Is the landlord an **individual** or a **company**?"
+    slot: landlord_type
+    validator: "enum[individual,company]"
+
+  - id: ask_rent
+    question: "What is the **total gross rental income for the year** in UGX? (e.g. 12,000,000 or 12m)"
+    slot: annual_gross_rent
+    validator: number
+
+  - id: ask_expenses
+    question: >-
+      What are the **deductible expenses** for the year in UGX? Companies
+      may deduct up to 50% of gross rent — reply 0 if none.
+    slot: allowable_expenses
+    validator: "number[min=0]"
+    when: "landlord_type == company"
+
+  - id: run_calc
+    slot: ""
+    tool: calculate_rental_tax
+    args:
+      landlord_type: "{landlord_type}"
+      annual_gross_rent: "{annual_gross_rent}"
+      allowable_expenses: "{allowable_expenses}"
+
+  - id: done
+    question: >-
+      Those figures use the URA rate table for the fiscal year shown above
+      (12% above the annual threshold for individuals; 30% on chargeable
+      income for companies). Ask me anytime to recalculate.
+    slot: ""
+    validator: text

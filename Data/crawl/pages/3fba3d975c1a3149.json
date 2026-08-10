@@ -1,0 +1,35 @@
+{
+  "url": "https://ura.go.ug/en/efris/list-of-accredited-efris-software-integrators-3/",
+  "title": "List of Accredited EFRIS Software Integrators - Uganda Revenue Authority",
+  "text": "\n| Vendor | Product Name | Product Model | Effective Start Date | Effective End Date | Contact Details | Email Address | Sector |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| Vendor | Product Name | Product Model | Effective Start Date | Effective End Date | Contact Details | Email Address | Sector |\n",
+  "content_hash": "3fba3d975c1a3149",
+  "timestamp": "2026-08-10T05:42:25Z",
+  "discovered_pdfs": [],
+  "tables": [
+    {
+      "headers": [
+        "Vendor",
+        "Product Name",
+        "Product Model",
+        "Effective Start Date",
+        "Effective End Date",
+        "Contact Details",
+        "Email Address",
+        "Sector"
+      ],
+      "rows": [
+        [
+          "Vendor",
+          "Product Name",
+          "Product Model",
+          "Effective Start Date",
+          "Effective End Date",
+          "Contact Details",
+          "Email Address",
+          "Sector"
+        ]
+      ],
+      "row_count": 1
+    }
+  ]
+}

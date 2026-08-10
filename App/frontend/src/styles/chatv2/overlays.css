@@ -1,0 +1,242 @@
+/* =============================================================================
+ * chatv2 — confirm dialog + language picker overlay.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * Confirm dialog (destructive actions)
+ * ------------------------------------------------------------------------- */
+.chatv2 .dlgv2-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: dlgv2-fade 140ms ease;
+}
+@keyframes dlgv2-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.chatv2 .dlgv2 {
+  position: relative;
+  width: min(440px, 100%);
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  padding: 22px;
+  animation: dlgv2-pop 140ms ease;
+}
+@keyframes dlgv2-pop {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+}
+
+.chatv2 .dlgv2-x {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.chatv2 .dlgv2-x:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+.chatv2 .dlgv2-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  padding-right: 32px;
+}
+.chatv2 .dlgv2-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--cv2-danger-soft);
+  color: var(--danger);
+  flex-shrink: 0;
+}
+.chatv2 .dlgv2 h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+.chatv2 .dlgv2 p {
+  margin: 0 0 18px;
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.chatv2 .dlgv2-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.chatv2 .dlgv2-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chatv2 .dlgv2-btn:hover {
+  background: var(--surface-2);
+}
+.chatv2 .dlgv2-btn.dlgv2-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+}
+:root[data-theme="dark"] .chatv2 .dlgv2-btn.dlgv2-danger {
+  color: #212121;
+}
+/* Hover must out-specify .dlgv2-btn:hover or the red fill goes grey with an
+   invisible label (sandbox lesson). Light: red on pale red; dark: white on
+   deep red. */
+.chatv2 .dlgv2-btn.dlgv2-danger:hover {
+  background: var(--cv2-danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+:root[data-theme="dark"] .chatv2 .dlgv2-btn.dlgv2-danger:hover {
+  color: #ffffff;
+}
+
+@media (max-width: 480px) {
+  .chatv2 .dlgv2-row {
+    flex-direction: column-reverse;
+  }
+  .chatv2 .dlgv2-btn {
+    width: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Language picker — centred focus overlay (an anchored popover clipped against
+ * the header in the sandbox; a centred panel cannot clip at any viewport).
+ * Options keep role=radio inside aria-label "Language selection".
+ * ------------------------------------------------------------------------- */
+.chatv2 .lmv2-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 350;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: dlgv2-fade 140ms ease;
+}
+
+.chatv2 .lmv2 {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, 100%);
+  max-height: min(70vh, 480px);
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: dlgv2-pop 140ms ease;
+}
+
+.chatv2 .lmv2-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 12px 10px 18px;
+  border-bottom: 1px solid var(--border-0);
+  flex-shrink: 0;
+}
+.chatv2 .lmv2-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+
+.chatv2 .lmv2-list {
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.chatv2 .lmv2-opt {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  color: var(--text-0);
+  font-family: inherit;
+  text-align: left;
+}
+.chatv2 .lmv2-opt:hover {
+  background: var(--surface-2);
+}
+.chatv2 .lmv2-opt[aria-checked="true"] {
+  font-weight: 600;
+}
+.chatv2 .lmv2-opt[aria-checked="true"] svg {
+  color: var(--success);
+}
+
+.chatv2 .lmv2-names {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.chatv2 .lmv2-name {
+  font-size: 14px;
+}
+.chatv2 .lmv2-native {
+  font-size: 12px;
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.chatv2 .lmv2-foot {
+  padding: 9px 18px;
+  border-top: 1px solid var(--border-0);
+  background: var(--bg-1);
+  font-size: 11.5px;
+  color: var(--text-2);
+  flex-shrink: 0;
+}

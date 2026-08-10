@@ -1,0 +1,15 @@
+version: 1
+date: ""  # Fill in recording date (YYYY-MM-DD)
+language: "ach"
+speaker_name: ""  # Full name of speaker
+speaker_id: "speaker_001"
+consent_type: "tts_training"
+consent_text: |
+  I agree that my recorded voice will be used to train a text-to-speech
+  model for the URA Tax Assistant application. I understand that:
+  1. My voice will be synthesised to read tax information aloud.
+  2. The model will be deployed on mobile devices.
+  3. My identity will not be disclosed.
+  4. I may withdraw consent by contacting the project team.
+signed: false  # Set to true after speaker signs
+witness: ""  # Witness name

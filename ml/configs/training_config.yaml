@@ -1,0 +1,243 @@
+# ML Pipeline Configuration
+# URA Chatbot - Training & Deployment Settings
+
+# ===========================================
+# Data Configuration
+# ===========================================
+data:
+  datasets_dir: "Data/dataset"
+  pdf_dir: "Data/pdfs"
+  output_dir: "Model"
+  results_dir: "Results"
+  
+  # Data splits
+  test_size: 0.2
+  validation_size: 0.1
+  random_seed: 42
+  
+  # Preprocessing
+  min_question_words: 3
+  min_answer_words: 3
+  max_words: 512
+  chunk_size: 800
+  chunk_overlap: 120
+
+# ===========================================
+# Model Configuration
+# ===========================================
+models:
+  # Embedding model for vectorization
+  # 2026 default: BAAI/bge-m3 — multilingual (100+ langs incl. Luganda),
+  # 1024-dim, MTEB 63.0.  See docs/MODEL_SWAP_GUIDE.md for alternatives.
+  embedding:
+    name: "BAAI/bge-m3"
+    dimension: 1024
+
+  # Alternative embedding models (see docs/MODEL_SWAP_GUIDE.md)
+  embedding_alternatives:
+    - name: "Qwen/Qwen3-Embedding-8B"
+      params: 8B
+      mteb: 70.58
+      mobile_ready: false
+    - name: "Qwen/Qwen3-Embedding-0.6B"
+      params: 0.6B
+      mteb: 58
+      mobile_ready: true
+    - name: "sentence-transformers/all-MiniLM-L6-v2"
+      params: 22M
+      mteb: 48
+      mobile_ready: true
+      
+  # Generation models — 2026 defaults (see docs/MODEL_SWAP_GUIDE.md)
+  generation:
+    web_inference: "Qwen/Qwen3-8B"               # API backend (llm.py) — Apache-2.0, MMLU 74.7
+    web_budget: "Qwen/Qwen3-4B"                   # Budget GPU (8 GB VRAM)
+    web_moe: "Qwen/Qwen3-30B-A3B"                 # MoE — 30B quality at 3B active cost (vLLM)
+    web_alt: "microsoft/Phi-4-mini-instruct"       # MIT license, strong math/logic
+    mobile_primary: "google/gemma-3n-E2B-it"       # On-device mobile (GGUF INT4) — outperforms 27B
+    mobile_fallback: "Qwen/Qwen3-1.7B"             # Matches Qwen2.5-3B quality, smaller
+    background_t5: "google/flan-t5-small"
+    
+  # Tag classifier
+  classifier:
+    type: "SGDClassifier"
+    loss: "log_loss"
+    penalty: "l2"
+    alpha: 0.0001
+    max_iter: 2000
+    early_stopping: true
+    validation_fraction: 0.15
+    n_iter_no_change: 5
+
+# ===========================================
+# Training Configuration
+# ===========================================
+training:
+  # Cross-validation
+  cv_folds: 5
+  
+  # Training parameters
+  batch_size: 16
+  learning_rate: 5e-5
+  num_epochs: 3
+  warmup_steps: 100
+  weight_decay: 0.01
+  
+  # Early stopping
+  patience: 3
+  min_delta: 0.001
+  
+  # Logging
+  logging_steps: 25
+  eval_steps: 100
+  save_steps: 500
+
+# ===========================================
+# Quality Gates
+# ===========================================
+quality_gates:
+  min_accuracy: 0.85
+  min_f1_score: 0.75
+  min_precision: 0.75
+  min_recall: 0.70
+  max_latency_ms: 100
+
+# RAG-specific quality gates (evaluated by ml/pipelines/evaluate_rag.py)
+rag_quality_gates:
+  min_faithfulness: 0.6
+  min_answer_relevancy: 0.65
+  min_context_precision: 0.5
+  min_context_recall: 0.5
+  min_groundedness: 0.15
+  min_citation_accuracy: 0.4
+  min_numerical_accuracy: 0.6
+  min_safety_probe_pass_rate: 1.0
+  min_abstention_precision: 0.5
+
+# Speech-recognition quality gates (2026 — evaluated by ml/pipelines/evaluate_speech.py).
+# Per-language overrides are honoured when the key is present, e.g. max_wer_lg.
+speech_quality_gates:
+  max_wer_en: 0.15
+  max_wer_lg: 0.25
+  max_wer_sw: 0.20
+  max_wer_nyn: 0.30
+  max_wer_ach: 0.30
+  max_cer_en: 0.07
+  max_cer_lg: 0.12
+  max_cer_sw: 0.10
+  max_cer_nyn: 0.15
+  max_cer_ach: 0.15
+  max_rtf: 0.5
+  max_p50_latency_ms: 800
+  max_p95_latency_ms: 1500
+
+# Machine-translation quality gates (2026 — evaluated by ml/pipelines/evaluate_mt.py).
+# Directions are ISO 639-1 source/target pairs ("en_lg", "lg_en").
+mt_quality_gates:
+  min_bleu_en_lg: 15.0
+  min_bleu_lg_en: 20.0
+  min_bleu_en_sw: 12.0
+  min_bleu_sw_en: 15.0
+  min_bleu_en_nyn: 8.0
+  min_bleu_nyn_en: 10.0
+  min_bleu_en_ach: 8.0
+  min_bleu_ach_en: 10.0
+  min_chrf_en_lg: 0.35
+  min_chrf_lg_en: 0.40
+  min_chrf_en_sw: 0.30
+  min_chrf_sw_en: 0.35
+  max_length_ratio_deviation: 0.30
+  max_hallucination_rate: 0.05
+  min_comet_kiwi: 0.50       # optional; only enforced if unbabel-comet installed
+
+# 2026 Production gates — offline mobile release (evaluated by quality_gates.py --family production)
+production_gates:
+  # Calibration
+  max_ece: 0.25
+  max_brier: 0.25
+  # Safety
+  min_redteam_refusal_rate: 0.90
+  min_safety_probe_pass_rate: 0.80
+  # Tokenizer
+  max_lg_over_en_fertility: 1.8
+  # Mobile bundle
+  max_mobile_size_mb: 1800
+  # Benchmark (advisory when synthetic)
+  min_tokens_per_sec: 8.0
+  max_ttft_p95_ms: 1500
+  max_peak_rss_mb: 2200
+  # Per-language floors — Luganda can have softer thresholds
+  per_language_floor:
+    lg:
+      faithfulness: 0.45
+      numerical_accuracy: 0.55
+      law_citation_accuracy: 0.35
+    en:
+      faithfulness: 0.55
+      numerical_accuracy: 0.65
+      law_citation_accuracy: 0.45
+
+# Text-to-Speech quality gates (2026 — evaluated by ml/pipelines/evaluate_tts.py).
+tts_quality_gates:
+  min_roundtrip_intelligibility: 0.80    # 1 - WER when ASR re-transcribes TTS audio
+  max_tts_rtf: 0.5
+  min_mos: 3.5                            # optional; populated by human study
+  min_speaker_consistency: 0.85           # embedding cosine similarity across samples
+  
+# ===========================================
+# Deployment Configuration
+# ===========================================
+deployment:
+  # Hugging Face Hub
+  huggingface:
+    repo_id: "mpairweLandwind/ura-chatbot"
+    private: false
+    
+  # Docker
+  docker:
+    image_name: "landwind/ura-chatbot-api"
+    registry: "docker.io"
+    
+  # Export formats
+  export_formats:
+    - joblib      # sklearn (backend classifier)
+    - onnx        # cross-platform (ONNX Runtime)
+    - pytorch     # web deployment (PyTorch)
+    - torchscript # mobile deployment (LibTorch)
+    - gguf        # on-device LLM (llama.cpp / MediaPipe)
+
+# ===========================================
+# Mobile Export Configuration (Gemma-3n-E2B GGUF)
+# ===========================================
+mobile_export:
+  base_model: "google/gemma-3n-E2B-it"
+  target: "mobile_primary"
+  quantization: "Q4_K_M"
+  output_dir: "artifacts/mobile"
+  model_filename: "ura-gemma-3n-e2b-q4_k_m.gguf"
+  max_context_length: 4096
+  inference_engine: "MediaPipe LLM Inference API"
+  min_android_sdk: 24
+  min_ios_version: "16.0"
+  min_ram_mb: 2000
+  android_asset_path: "models/ura-gemma-3n-e2b-q4_k_m.gguf"
+  ios_bundle_resource: "ura-gemma-3n-e2b-q4_k_m"
+
+# ===========================================
+# MLflow Tracking (Optional)
+# ===========================================
+mlflow:
+  tracking_uri: "mlruns"
+  experiment_name: "ura-chatbot"
+  artifact_location: "artifacts/mlflow"
+
+# ===========================================
+# Kaggle Configuration
+# ===========================================
+kaggle:
+  kernel_slug: "ura-training"
+  competition: null
+  datasets:
+    - "mpairwelandwind/ura-faqs"
+  enable_gpu: true
+  enable_internet: true

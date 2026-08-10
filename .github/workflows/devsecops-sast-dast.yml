@@ -1,0 +1,559 @@
+# =============================================================================
+# DevSecOps SAST/DAST Pipeline — URA Chatbot (2026)
+#
+# Comprehensive application security testing:
+#   1. Semgrep          – SAST for Python + TypeScript (custom + community rules)
+#   2. Bandit           – Python-specific security linter (AST-based)
+#   3. pip-audit        – Python dependency vulnerability auditing (OSV/PyPI)
+#   4. Checkov          – IaC security & compliance (CIS, NIST benchmarks)
+#   5. OWASP ZAP        – DAST baseline scan against live API
+#   6. OSSF Scorecard   – OpenSSF supply chain security scoring
+#   7. Threat Model     – pytm validation + threat registry audit
+#
+# Standards: OWASP Top 10, OWASP LLM Top 10, NIST SP 800-218, CIS Benchmarks,
+#            MITRE ATLAS, OpenSSF SLSA v1.2
+# =============================================================================
+name: "DevSecOps: SAST/DAST & Threat Model"
+
+on:
+  push:
+    branches: [main, dev, develop]
+  pull_request:
+    branches: [main, dev, develop]
+  schedule:
+    - cron: "30 3 * * 1"   # Weekly Monday 03:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: devsecops-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================
+  # 1. Semgrep – Multi-language SAST
+  # ============================================
+  semgrep:
+    name: "SAST: Semgrep"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep:latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run Semgrep (community + custom rules)
+        run: |
+          semgrep scan \
+            --config=p/python \
+            --config=p/typescript \
+            --config=p/react \
+            --config=p/owasp-top-ten \
+            --config=p/security-audit \
+            --config=p/docker \
+            --config=p/supply-chain \
+            --config=p/secrets \
+            --config=.semgrep/ \
+            --sarif --output=semgrep-results.sarif \
+            --severity=WARNING \
+            --exclude='Data/' \
+            --exclude='Results/' \
+            --exclude='Notebooks/' \
+            --exclude='*.ipynb' \
+            --exclude='node_modules/' \
+            --exclude='*.lock' \
+            --metrics=off \
+            .
+        env:
+          SEMGREP_RULES: >-
+            p/python
+            p/typescript
+            p/react
+            p/owasp-top-ten
+            p/security-audit
+            p/gitleaks
+            p/docker
+            p/supply-chain
+            p/secrets
+
+      - name: Mark workspace safe for SARIF upload
+        if: always()
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
+          git config --global --add safe.directory /__w/FinalYearProject/FinalYearProject || true
+
+      - name: Upload Semgrep SARIF
+        if: always() && hashFiles('semgrep-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: semgrep-results.sarif
+          category: semgrep
+
+      - name: Run Semgrep (JSON for artifact)
+        if: always()
+        run: |
+          semgrep scan \
+            --config=p/python \
+            --config=p/typescript \
+            --config=p/react \
+            --config=p/owasp-top-ten \
+            --config=p/security-audit \
+            --config=p/docker \
+            --config=p/supply-chain \
+            --config=p/secrets \
+            --config=.semgrep/ \
+            --json --output=semgrep-results.json \
+            --severity=WARNING \
+            --exclude='Data/' \
+            --exclude='Results/' \
+            --exclude='Notebooks/' \
+            --exclude='*.ipynb' \
+            --exclude='node_modules/' \
+            --exclude='*.lock' \
+            --metrics=off \
+            . || true
+
+      - name: Semgrep step summary
+        if: always()
+        run: |
+          echo "## Semgrep SAST Results" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f semgrep-results.json ]; then
+            python3 -c "
+          import json
+          data = json.load(open('semgrep-results.json'))
+          results = data.get('results', [])
+          errors = [r for r in results if r.get('extra', {}).get('severity') == 'ERROR']
+          warnings = [r for r in results if r.get('extra', {}).get('severity') == 'WARNING']
+          info = [r for r in results if r.get('extra', {}).get('severity') == 'INFO']
+          print(f'- Total findings: {len(results)}')
+          print(f'- Errors: {len(errors)}')
+          print(f'- Warnings: {len(warnings)}')
+          print(f'- Info: {len(info)}')
+          if errors:
+            print('')
+            print('**Error-level findings:**')
+            for r in errors[:10]:
+              path = r.get('path','?')
+              line = r.get('start',{}).get('line','?')
+              rule = r.get('check_id','?').split('.')[-1]
+              print(f'- \`{path}:{line}\` — {rule}')
+          " >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- No results file found" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Semgrep artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semgrep-results
+          path: |
+            semgrep-results.sarif
+            semgrep-results.json
+          retention-days: 30
+
+  # ============================================
+  # 2. Bandit – Python Security Linter
+  # ============================================
+  bandit:
+    name: "SAST: Bandit (Python)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install Bandit
+        run: pip install bandit[sarif]
+
+      - name: Run Bandit scan
+        run: |
+          bandit -r App/backend/ ml/ \
+            -f sarif \
+            -o bandit-results.sarif \
+            --severity-level medium \
+            --confidence-level medium \
+            -x "*/tests/*,*/test_*" \
+            -c .bandit.yaml \
+            || true
+
+      - name: Upload Bandit SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: bandit-results.sarif
+          category: bandit
+
+      - name: Run Bandit (text summary)
+        if: always()
+        run: |
+          echo "## Bandit Python Security Scan" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          bandit -r App/backend/ ml/ \
+            -f txt \
+            --severity-level medium \
+            --confidence-level medium \
+            -x "*/tests/*,*/test_*" \
+            -c .bandit.yaml \
+            2>&1 | tail -20 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Bandit artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bandit-results
+          path: bandit-results.sarif
+          retention-days: 30
+
+  # ============================================
+  # 3. pip-audit – Python Dependency Auditing
+  # ============================================
+  pip-audit:
+    name: "SCA: pip-audit"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        requirements:
+          - requirements.txt
+          - App/backend/requirements.txt
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        run: |
+          REQ_NAME=$(basename $(dirname ${{ matrix.requirements }}))_$(basename ${{ matrix.requirements }})
+          pip-audit \
+            -r ${{ matrix.requirements }} \
+            --format=json \
+            --output=pip-audit-${REQ_NAME}.json \
+            --desc \
+            --progress-spinner=off \
+            || true
+
+      - name: pip-audit step summary
+        if: always()
+        run: |
+          REQ_NAME=$(basename $(dirname ${{ matrix.requirements }}))_$(basename ${{ matrix.requirements }})
+          echo "## pip-audit: ${{ matrix.requirements }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "pip-audit-${REQ_NAME}.json" ]; then
+            python3 -c "
+          import json
+          data = json.load(open('pip-audit-${REQ_NAME}.json'))
+          deps = data.get('dependencies', [])
+          vulns = [d for d in deps if d.get('vulns')]
+          print(f'- Dependencies scanned: {len(deps)}')
+          print(f'- Vulnerable packages: {len(vulns)}')
+          for d in vulns[:10]:
+            name = d.get('name','?')
+            ver = d.get('version','?')
+            for v in d.get('vulns', []):
+              vid = v.get('id','?')
+              fix = v.get('fix_versions', ['no fix'])
+              print(f'  - **{name}=={ver}**: {vid} (fix: {\", \".join(fix)})')
+          " >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload pip-audit results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pip-audit-${{ strategy.job-index }}
+          path: pip-audit-*.json
+          retention-days: 30
+
+  # ============================================
+  # 4. Checkov – IaC Security & Compliance
+  # ============================================
+  checkov:
+    name: "IaC: Checkov"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@f9b0a2206b0401cad02ac0a66be2a7934a5be838 # v9
+        with:
+          directory: .
+          framework: dockerfile,github_actions,secrets
+          output_format: cli,sarif
+          output_file_path: console,checkov-results.sarif
+          soft_fail: true
+          skip_path: node_modules/,Data/,Results/,Notebooks/,.next/
+          config_file: .checkov.yaml
+
+      - name: Upload Checkov SARIF
+        if: always() && github.event_name != 'pull_request' && hashFiles('checkov-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: checkov-results.sarif
+          category: checkov
+        continue-on-error: true
+
+      - name: Upload Checkov artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: checkov-results
+          path: checkov-results.sarif
+          retention-days: 30
+        continue-on-error: true
+
+  # ============================================
+  # 5. OWASP ZAP – DAST Baseline Scan
+  # ============================================
+  zap-baseline:
+    name: "DAST: OWASP ZAP Baseline"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Only run on main/develop push (not on every PR to save CI minutes)
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build and start API for scanning
+        env:
+          API_PORT: "8087"
+          APP_ENV: "development"
+          SPEECH_ENABLED: "false"
+          LLM_ENABLED: "false"
+          WORKERS: "1"
+        run: |
+          touch .env
+          docker compose up -d qdrant api || {
+            docker compose ps
+            docker compose logs --no-color --tail=200 qdrant api
+            exit 1
+          }
+
+          echo "Waiting for API to be healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8087/health > /dev/null 2>&1; then
+              echo "API is healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error::API did not become healthy on port 8087"
+          docker compose ps
+          docker compose logs --no-color --tail=200 qdrant api
+          exit 1
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@2b5fc7f98d837319798ab7f128ea50b7d40563b6 # v0.14.0
+        with:
+          target: "http://localhost:8087"
+          rules_file_name: ".zap-rules.tsv"
+          cmd_options: >-
+            -J report_json.json
+            -w report_md.md
+            -z "-config scanner.threadPerHost=2"
+          allow_issue_writing: false
+
+      - name: Upload ZAP results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zap-results
+          path: |
+            report_json.json
+            report_md.md
+          retention-days: 30
+
+      - name: ZAP step summary
+        if: always()
+        run: |
+          echo "## OWASP ZAP DAST Baseline Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Target: \`http://localhost:8087\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f report_md.md ]; then
+            head -50 report_md.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- ZAP scan did not produce results (API may not have started)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Tear down services
+        if: always()
+        env:
+          API_PORT: "8087"
+        run: docker compose down -v || true
+
+  # ============================================
+  # 6. OSSF Scorecard – Supply Chain Security
+  # ============================================
+  scorecard:
+    name: "Supply Chain: OSSF Scorecard"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only on default branch (Scorecard needs repo context)
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/dev')
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      id-token: write  # Required for Scorecard
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run OSSF Scorecard
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: false
+
+      - name: Upload Scorecard SARIF
+        if: always() && hashFiles('scorecard-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: scorecard-results.sarif
+          category: ossf-scorecard
+
+      - name: Upload Scorecard artifact
+        if: always() && hashFiles('scorecard-results.sarif') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-results
+          path: scorecard-results.sarif
+          retention-days: 90
+
+  # ============================================
+  # 7. Threat Model Validation
+  # ============================================
+  threat-model:
+    name: "Threat Model: Validate Registry"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install pytm
+        run: pip install pytm
+
+      - name: Validate threat registry
+        run: python threat-model/validate_threats.py
+
+      - name: Generate threat model report
+        if: always()
+        run: |
+          mkdir -p threat-model/output
+          python threat-model/tm.py --describe threat-model/output/threats.md || true
+
+      - name: Threat model step summary
+        if: always()
+        run: |
+          echo "## Threat Model Validation" >> "$GITHUB_STEP_SUMMARY"
+          python3 -c "
+          import sys
+          sys.path.insert(0, 'threat-model')
+          from validate_threats import THREAT_REGISTRY
+          total = len(THREAT_REGISTRY)
+          mitigated = sum(1 for t in THREAT_REGISTRY if t['status'] == 'mitigated')
+          accepted = sum(1 for t in THREAT_REGISTRY if t['status'] == 'accepted')
+          owasp = len({t['owasp_llm'] for t in THREAT_REGISTRY if t.get('owasp_llm')})
+          stride = len({t['category'] for t in THREAT_REGISTRY})
+          atlas = len([t for t in THREAT_REGISTRY if t.get('mitre_atlas')])
+          print(f'- **{total}** threats registered ({mitigated} mitigated, {accepted} accepted)')
+          print(f'- **{stride}/6** STRIDE categories covered')
+          print(f'- **{owasp}/10** OWASP LLM Top 10 mapped')
+          print(f'- **{atlas}** MITRE ATLAS techniques mapped')
+          " >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload threat model artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: threat-model-report
+          path: threat-model/output/
+          retention-days: 90
+
+  # ============================================
+  # 8. Security Gate — All Tools Must Pass
+  # ============================================
+  devsecops-gate:
+    name: "DevSecOps Gate: All Scans"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - semgrep
+      - bandit
+      - pip-audit
+      - checkov
+      - threat-model
+    if: always()
+    steps:
+      - name: Evaluate all scan results
+        run: |
+          echo "## DevSecOps Security Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tool | Type | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+
+          results='${{ toJson(needs) }}'
+          overall="pass"
+
+          for job in semgrep bandit pip-audit checkov threat-model; do
+            status=$(echo "$results" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          print(d.get('${job}',{}).get('result','unknown'))
+          " 2>/dev/null || echo "unknown")
+
+            case "$job" in
+              semgrep) type="SAST" ;;
+              bandit) type="SAST" ;;
+              pip-audit) type="SCA" ;;
+              checkov) type="IaC" ;;
+              threat-model) type="Threat Model" ;;
+            esac
+
+            if [ "$status" = "success" ]; then
+              icon="PASS"
+            elif [ "$status" = "skipped" ]; then
+              icon="SKIP"
+            else
+              icon="FAIL"
+              overall="fail"
+            fi
+            echo "| ${job} | ${type} | ${icon} |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$overall" = "fail" ]; then
+            echo "**DevSecOps gate FAILED — review findings in Security tab.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          else
+            echo "**All DevSecOps security scans passed.**" >> "$GITHUB_STEP_SUMMARY"
+          fi
