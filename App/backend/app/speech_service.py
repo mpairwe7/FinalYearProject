@@ -121,6 +121,24 @@ DEFAULT_LG_VOICE = os.getenv("SPEECH_LG_VOICE", "luganda-vits-v1")
 SPEECH_EN_EDGE_VOICE = os.getenv("SPEECH_EN_EDGE_VOICE", "en-US-AriaNeural")
 SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-UG-MaleNeural")
 
+# Locales that ship a genuine local (Piper/Sherpa) voice model. Anything outside
+# this set can only be synthesized locally by an *English* model reading foreign
+# text — which the chain below must treat as "no voice", not as success.
+LOCAL_TTS_VOICES: dict[str, str] = {
+    "en": DEFAULT_EN_VOICE,
+    "lg": DEFAULT_LG_VOICE,
+}
+
+
+def _sunbird_has_native_voice(locale: str) -> bool:
+    """True when Sunbird ships a native speaker for *locale*."""
+    try:
+        from . import sunbird
+
+        return bool(sunbird.TTS_SPEAKERS.get(locale))
+    except Exception:  # noqa: BLE001 — sunbird optional; absence means no voice
+        return False
+
 # Cloudflare Workers AI models for ENGLISH STT/TTS — configurable so the model
 # can be swapped (e.g. to Deepgram nova-3/flux/aura-2) via env without code
 # changes. Defaults are the free-tier-friendly combo; TTS_FALLBACK_MODEL_2 is a
@@ -132,12 +150,15 @@ TTS_FALLBACK_MODEL_2 = os.getenv("TTS_FALLBACK_MODEL_2", "@cf/deepgram/aura-2-en
 
 # Whisper LoRA adapters — per-language fine-tuned for multilingual ASR.
 # Set WHISPER_ADAPTER_PATH for single-language (backward-compat), or
-# set WHISPER_ADAPTER_{LG,SW,NYN} for per-language routing.
+# set WHISPER_ADAPTER_{LG,SW,NYN,ACH} for per-language routing.
+# Every locale the UI can select needs a slot here; a missing key means the
+# locale silently gets the un-adapted base model instead of its fine-tune.
 WHISPER_ADAPTER_PATH = os.getenv("WHISPER_ADAPTER_PATH", "") or None
 WHISPER_ADAPTERS: dict[str, str | None] = {
     "lg": os.getenv("WHISPER_ADAPTER_LG", "") or None,
     "sw": os.getenv("WHISPER_ADAPTER_SW", "") or None,
     "nyn": os.getenv("WHISPER_ADAPTER_NYN", "") or None,
+    "ach": os.getenv("WHISPER_ADAPTER_ACH", "") or None,
     # Phase 23 — accent-specific adapters (populated by train_accent_asr.py)
     "en_ug_central": os.getenv("WHISPER_ADAPTER_EN_UG_CENTRAL", "") or None,
     "en_ug_eastern": os.getenv("WHISPER_ADAPTER_EN_UG_EASTERN", "") or None,
@@ -469,7 +490,12 @@ class SpeechModel:
                     w.setsampwidth(2)
                     w.setframerate(sample_rate)
                     w.writeframes(pcm16.tobytes())
-                lang_code = {"en": "eng", "lg": "lug"}.get(language or "en", "eng")
+                # Read the code from sunbird's own locale table rather than a
+                # local copy. The inline map here only knew en/lg, so Swahili,
+                # Runyankole and Acholi audio was submitted tagged as English —
+                # Sunbird then transcribed it with an English model and returned
+                # confident nonsense, which the RAG layer had no way to spot.
+                lang_code = sunbird.LOCALE_TO_SUNBIRD.get(language or "en", "eng")
                 stt_result = _cloud_call(
                     "Sunbird STT",
                     sunbird.speech_to_text,
@@ -716,7 +742,7 @@ class SpeechModel:
                 audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
                 latency_s=0.0, backend="disabled", voice="", error="SPEECH_ENABLED=false",
             )
-        voice = voice or (DEFAULT_LG_VOICE if language == "lg" else DEFAULT_EN_VOICE)
+        voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
 
         # ⓪ Phrase cache — repeated short prompts (greetings, empathy openers,
         #    workflow questions) skip the whole backend chain.
@@ -748,8 +774,22 @@ class SpeechModel:
         language: str,
     ) -> SynthesizeResult:
         """The actual backend fallback chain behind :meth:`synthesize`."""
+        # A backend with no real voice for this language must step aside rather
+        # than "succeed" with an English model reading foreign text. Local Piper
+        # and edge-tts both defaulted to an English voice and returned audio, so
+        # the chain never reached Sunbird's native Runyankole (243) / Swahili
+        # (246) speakers — a taxpayer who picked Runyankole heard their answer
+        # read by an English voice.
+        #
+        # Only step aside when a genuine native voice actually exists further
+        # down the chain. Acholi has no Sunbird speaker, so for it the English
+        # fallback below is still the best available option and is left intact.
+        prefer_native_cloud = (
+            language not in LOCAL_TTS_VOICES and _sunbird_has_native_voice(language)
+        )
+
         # ① Local Sherpa/Piper TTS (primary — offline, low-latency)
-        if self._breakers["tts"].allow_request():
+        if not prefer_native_cloud and self._breakers["tts"].allow_request():
             future = self._executor.submit(self._do_synthesize, text, voice)
             try:
                 result = future.result(timeout=SPEECH_DEADLINE_S)
@@ -769,9 +809,15 @@ class SpeechModel:
             except Exception:
                 logger.debug("Workers AI TTS failed", exc_info=True)
 
-        # ② edge-tts (Microsoft neural voices — needs internet, no API key)
+        # ② edge-tts (Microsoft neural voices — needs internet, no API key).
+        # Skipped for the same reason as local TTS: its voice map only covers
+        # en/lg and silently falls back to English for anything else.
         try:
-            result = _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
+            result = (
+                None
+                if prefer_native_cloud
+                else _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
+            )
             if result and result.audio:
                 return result
         except Exception:
