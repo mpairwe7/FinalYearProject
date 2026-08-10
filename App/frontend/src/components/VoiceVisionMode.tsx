@@ -13,6 +13,10 @@
  *   POST /v1/voice/vision/chat → ASR + OCR + LLM + TTS
  *
  * Feature-flagged behind FLAG_VOICE_VISION.
+ *
+ * Styling note: modeled on the working .camera-capture-* classes
+ * (CameraCapture.tsx) — same full-screen-camera shell shape — plus the
+ * voice-recording states this mode layers on top.
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
@@ -272,121 +276,81 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
   }, [setCapturedImageBlob]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+    <div className="vv-root" role="dialog" aria-modal="true" aria-label="Voice and vision mode">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 pt-4 safe-area-top z-10">
-        <button
-          onClick={onClose}
-          className="p-2 rounded-full bg-black/50 text-white hover:bg-black/70"
-          aria-label="Close vision mode"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div className="vv-topbar">
+        <button onClick={onClose} className="vfc-icon-btn" aria-label="Close vision mode">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
 
-        <div className="flex items-center gap-2">
-          {latencyMs > 0 && (
-            <span className="px-2 py-1 bg-black/50 text-white text-xs rounded-full">
-              {latencyMs}ms
-            </span>
-          )}
-          <span className="px-3 py-1 bg-violet-500/80 text-white text-sm rounded-full font-medium">
-            Voice + Vision
-          </span>
+        <div className="vv-topbar-meta">
+          {latencyMs > 0 && <span className="vv-chip">{latencyMs}ms</span>}
+          <span className="vv-chip vv-chip-mode">Voice + Vision</span>
         </div>
 
-        <div className="w-9" /> {/* Spacer for alignment */}
+        <span className="vv-spacer" aria-hidden="true" />
       </div>
 
       {/* Camera feed / captured image */}
-      <div className="flex-1 relative">
+      <div className="vv-viewport">
         {captureState === "preview" ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
+          <video ref={videoRef} autoPlay playsInline muted className="vv-video" />
         ) : capturedImageUrl ? (
           // Blob object URLs cannot be optimized by next/image.
           // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={capturedImageUrl}
-            alt="Captured document"
-            className="w-full h-full object-contain bg-gray-900"
-          />
+          <img src={capturedImageUrl} alt="Captured document" className="vv-captured-img" />
         ) : null}
 
         {/* Hidden canvas for capture */}
-        <canvas ref={canvasRef} className="hidden" />
+        <canvas ref={canvasRef} className="vv-canvas" />
 
         {/* Document scanning guide overlay (preview mode) */}
         {captureState === "preview" && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-72 h-96 border-2 border-white/40 rounded-lg">
-              <span className="absolute top-2 left-1/2 -translate-x-1/2 text-white/60 text-sm bg-black/50 px-3 py-1 rounded-full">
-                Align document here
-              </span>
+          <div className="vv-guide">
+            <div className="vv-guide-frame">
+              <span className="vv-guide-label">Align document here</span>
             </div>
           </div>
         )}
 
         {/* Processing overlay */}
         {captureState === "processing" && (
-          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
-              <p className="text-white text-lg">Processing document + voice...</p>
+          <div className="vv-processing">
+            <div className="vv-processing-inner">
+              <span className="vfc-spinner" aria-hidden="true" />
+              <p className="vv-processing-text">Processing document + voice...</p>
             </div>
           </div>
         )}
       </div>
 
       {/* Bottom controls */}
-      <div className="bg-gray-900 px-4 py-4 safe-area-bottom">
+      <div className="vv-bottombar">
         {captureState === "preview" && (
-          <div className="flex items-center justify-center">
-            <button
-              onClick={capturePhoto}
-              className="w-16 h-16 rounded-full bg-white border-4 border-gray-600 active:scale-95 transition-transform"
-              aria-label="Capture document"
-            />
+          <div className="vv-shutter-row">
+            <button onClick={capturePhoto} className="vv-shutter" aria-label="Capture document" />
           </div>
         )}
 
         {captureState === "recording" && (
-          <div className="flex flex-col items-center gap-3">
-            <p className="text-gray-300 text-sm">
-              Photo captured. Now ask your question by voice:
-            </p>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={resetToPreview}
-                className="px-4 py-2 bg-gray-700 text-white rounded-full text-sm"
-                aria-label="Retake photo"
-              >
+          <div className="vv-record-row">
+            <p className="vv-record-hint">Photo captured. Now ask your question by voice:</p>
+            <div className="vv-record-actions">
+              <button onClick={resetToPreview} className="vv-retake-btn" aria-label="Retake photo">
                 Retake
               </button>
               {!isRecording ? (
-                <button
-                  onClick={startVoiceRecording}
-                  className="w-14 h-14 rounded-full bg-green-500 flex items-center justify-center active:scale-95 transition-transform"
-                  aria-label="Start recording"
-                >
-                  <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <button onClick={startVoiceRecording} className="vv-mic-btn" aria-label="Start recording">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 01-14 0v-2" />
                   </svg>
                 </button>
               ) : (
-                <button
-                  onClick={stopVoiceRecording}
-                  className="w-14 h-14 rounded-full bg-red-500 flex items-center justify-center animate-pulse active:scale-95 transition-transform"
-                  aria-label="Stop recording"
-                >
-                  <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <button onClick={stopVoiceRecording} className="vv-stop-btn" aria-label="Stop recording">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                     <rect x="6" y="6" width="12" height="12" rx="2" />
                   </svg>
                 </button>
@@ -396,33 +360,27 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
         )}
 
         {captureState === "result" && (
-          <div className="flex flex-col gap-3 max-h-60 overflow-y-auto">
-            {error && (
-              <p className="text-red-400 text-sm">{error}</p>
-            )}
+          <div className="vv-result">
+            {error && <p className="vv-result-error">{error}</p>}
             {transcript && (
-              <div className="p-3 bg-blue-500/10 rounded-xl">
-                <p className="text-xs text-gray-400 mb-1">You said:</p>
-                <p className="text-white text-sm">{transcript}</p>
+              <div className="vv-result-card vv-result-card-transcript">
+                <p className="vv-result-label">You said:</p>
+                <p className="vv-result-text">{transcript}</p>
               </div>
             )}
             {ocrText && (
-              <div className="p-3 bg-amber-500/10 rounded-xl">
-                <p className="text-xs text-gray-400 mb-1">Document text:</p>
-                <p className="text-amber-200 text-sm">{ocrText}</p>
+              <div className="vv-result-card vv-result-card-ocr">
+                <p className="vv-result-label">Document text:</p>
+                <p className="vv-result-text">{ocrText}</p>
               </div>
             )}
             {reply && (
-              <div className="p-3 bg-violet-500/10 rounded-xl">
-                <p className="text-xs text-gray-400 mb-1">Assistant:</p>
-                <p className="text-white text-sm">{reply}</p>
+              <div className="vv-result-card vv-result-card-reply">
+                <p className="vv-result-label">Assistant:</p>
+                <p className="vv-result-text">{reply}</p>
               </div>
             )}
-            <button
-              onClick={resetToPreview}
-              className="w-full py-3 bg-blue-500 text-white rounded-xl font-medium"
-              aria-label="Scan another document"
-            >
+            <button onClick={resetToPreview} className="vv-rescan-btn" aria-label="Scan another document">
               Scan another document
             </button>
           </div>

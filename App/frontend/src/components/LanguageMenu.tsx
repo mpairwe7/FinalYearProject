@@ -18,13 +18,9 @@ import { CheckIcon, ChevronDownIcon, GlobeIcon, CloseIcon } from "./Icons";
 export interface LanguageOption {
   value: string;
   label: string;
+  /** The language's own name for itself, shown under the English label. */
+  native?: string;
 }
-
-/** Native-language names shown under the English label. */
-const NATIVE_NAMES: Record<string, string> = {
-  en: "English",
-  lg: "Oluganda",
-};
 
 interface LanguageMenuProps {
   locale: string;
@@ -113,6 +109,14 @@ export default function LanguageMenu({ locale, options, onLocaleChange }: Langua
     } else if (e.key === "End") {
       e.preventDefault();
       move(options.length - 1);
+    } else if (/^[a-z]$/i.test(e.key)) {
+      // Type-ahead: jump to the first option whose label starts with the
+      // typed letter, matching native <select> and WAI-ARIA listbox behavior.
+      const match = options.findIndex((o) => o.label.toLowerCase().startsWith(e.key.toLowerCase()));
+      if (match >= 0) {
+        e.preventDefault();
+        move(match);
+      }
     }
   };
 
@@ -179,9 +183,7 @@ export default function LanguageMenu({ locale, options, onLocaleChange }: Langua
                 >
                   <span className="lmv2-names">
                     <span className="lmv2-name">{o.label}</span>
-                    {NATIVE_NAMES[o.value] && (
-                      <span className="lmv2-native">{NATIVE_NAMES[o.value]}</span>
-                    )}
+                    {o.native && <span className="lmv2-native">{o.native}</span>}
                   </span>
                   {o.value === locale && <CheckIcon />}
                 </button>

@@ -2990,8 +2990,8 @@ summary {
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  background: var(--bg, #0a0a12);
-  color: var(--fg, #e8e8f0);
+  background: var(--bg-0);
+  color: var(--text-0);
 }
 
 .voice-chat-header {
@@ -3004,7 +3004,7 @@ summary {
 .voice-chat-close {
   background: none;
   border: none;
-  color: var(--fg-muted, #888);
+  color: var(--text-2);
   cursor: pointer;
   padding: 0.5rem;
   border-radius: 50%;
@@ -3098,7 +3098,7 @@ summary {
 
 .voice-phase-label {
   font-size: 0.95rem;
-  color: var(--fg-muted, #888);
+  color: var(--text-2);
   text-align: center;
 }
 
@@ -3136,13 +3136,13 @@ summary {
   padding: 0.75rem 1rem;
   background: var(--surface-1, #15151e);
   border-radius: 12px;
-  border: 1px solid var(--border, #2a2a3d);
+  border: 1px solid var(--border-0);
 }
 
 .voice-transcript-text {
   font-size: 0.9rem;
   line-height: 1.4;
-  color: var(--fg, #e8e8f0);
+  color: var(--text-0);
 }
 
 /* ── Reply bubble ── */
@@ -3157,13 +3157,13 @@ summary {
 .voice-reply-text {
   font-size: 0.9rem;
   line-height: 1.4;
-  color: var(--fg, #e8e8f0);
+  color: var(--text-0);
 }
 
 /* ── Latency indicator ── */
 .voice-latency {
   font-size: 0.7rem;
-  color: var(--fg-muted, #666);
+  color: var(--text-2);
   font-family: var(--font-mono);
 }
 
@@ -3262,4 +3262,470 @@ summary {
 .camera-capture-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* =============================================================================
+ * Voice-first mobile chat (Phase 27) — full-screen voice interface.
+ * Rewritten off Tailwind (never configured in this project, so every
+ * className below was previously a silent no-op) onto the real :root tokens
+ * and the .voice-orb-* language already established by the Phase-23 VoiceChat
+ * modal above, so every voice surface in the app shares one look and actually
+ * responds to the light/dark toggle.
+ * ========================================================================== */
+.vfc-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 100dvh;
+  background: var(--bg-0);
+  color: var(--text-0);
+  transition: background-color 400ms ease, color 400ms ease;
+}
+
+.vfc-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) 0
+    max(1rem, env(safe-area-inset-left, 0px));
+}
+.vfc-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.vfc-spacer-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.vfc-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-0);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.vfc-icon-btn:hover {
+  background: var(--surface-3);
+}
+.vfc-icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.vfc-latency {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+}
+.vfc-latency-good { color: var(--success); }
+.vfc-latency-ok { color: var(--warning); }
+.vfc-latency-slow { color: var(--danger); }
+
+.vfc-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  background: var(--surface-2);
+  color: var(--text-1);
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+.vfc-offline-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+}
+.vfc-offline-count {
+  padding: 0.1rem 0.5rem;
+  background: rgba(251, 176, 52, 0.18);
+  color: var(--ura-gold-muted, #d4a843);
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+.vfc-offline-hint {
+  font-size: 0.7rem;
+  color: var(--text-2);
+}
+
+/* ── Center stage ── */
+.vfc-stage {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 32rem;
+  min-height: 0;
+  padding: 0 max(1.5rem, env(safe-area-inset-right, 0px)) 0 max(1.5rem, env(safe-area-inset-left, 0px));
+}
+
+.vfc-card {
+  width: 100%;
+  padding: 1rem;
+  border-radius: var(--radius-lg, 18px);
+  background: var(--surface-1);
+  border: 1px solid var(--border-0);
+}
+.vfc-card-label {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  color: var(--text-2);
+}
+.vfc-card-text {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.4;
+  color: var(--text-0);
+}
+.vfc-card-partial {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+}
+.vfc-card-partial .vfc-card-text {
+  font-style: italic;
+  color: var(--success);
+}
+.vfc-card-reply {
+  max-height: 12rem;
+  overflow-y: auto;
+  border-color: rgba(139, 92, 246, 0.35);
+  background: rgba(139, 92, 246, 0.08);
+}
+
+/* Orb — same ring/pulse/color mechanics as .voice-orb, sized up for this
+   full-screen hero context (the primary mobile entry point). */
+.vfc-orb-lg.voice-orb {
+  width: 168px;
+  height: 168px;
+}
+.vfc-orb-lg .voice-orb-inner {
+  width: 120px;
+  height: 120px;
+}
+.vfc-orb-lg .voice-orb-ring-1 { width: 144px; height: 144px; }
+.vfc-orb-lg .voice-orb-ring-2 { width: 168px; height: 168px; }
+
+.vfc-orb-wave {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  height: 48px;
+}
+.vfc-orb-wave span {
+  width: 5px;
+  min-height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  transition: height 75ms ease-out;
+}
+
+.vfc-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: voice-orb-rotate 1s linear infinite;
+}
+
+.vfc-phase-label {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--text-1);
+  text-align: center;
+}
+
+/* ── Bottom controls ── */
+.vfc-bottombar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 0 1rem max(2rem, env(safe-area-inset-bottom, 0px));
+  min-height: 44px;
+}
+
+.vfc-lang-btn {
+  min-height: 44px;
+  padding: 0 1.1rem;
+  border: 1px solid var(--border-0);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.vfc-lang-btn:hover {
+  background: var(--surface-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vfc-root { transition: none; }
+  .vfc-spinner { animation: none; }
+}
+
+/* =============================================================================
+ * Voice + Vision mode (Phase 27) — camera + voice document scanning.
+ * Modeled directly on .camera-capture-* above (same shell shape: full-screen
+ * camera feed, capture footer) plus the voice-recording states this mode
+ * layers on top; also rewritten off the Tailwind classes this project never
+ * configured a build for.
+ * ========================================================================== */
+.vv-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: #fff;
+}
+
+.vv-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) 0
+    max(1rem, env(safe-area-inset-left, 0px));
+}
+.vv-topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.vv-chip {
+  padding: 0.3rem 0.7rem;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 0.75rem;
+  border-radius: 999px;
+}
+.vv-chip-mode {
+  background: rgba(139, 92, 246, 0.8);
+  font-weight: 600;
+}
+.vv-spacer {
+  width: 36px;
+}
+
+.vv-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.vv-video,
+.vv-captured-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vv-captured-img {
+  object-fit: contain;
+  background: #111;
+}
+.vv-canvas {
+  display: none;
+}
+
+.vv-guide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.vv-guide-frame {
+  position: relative;
+  width: 288px;
+  height: 384px;
+  max-width: 80vw;
+  max-height: 60vh;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-radius: var(--radius-md, 14px);
+}
+.vv-guide-label {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.3rem 0.75rem;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.vv-processing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+.vv-processing-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.vv-processing-text {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #fff;
+}
+
+.vv-bottombar {
+  background: #111;
+  padding: 1rem max(1rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px))
+    max(1rem, env(safe-area-inset-left, 0px));
+}
+
+.vv-shutter-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vv-shutter {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid #666;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.vv-shutter:active {
+  transform: scale(0.95);
+}
+
+.vv-record-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+.vv-record-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #ccc;
+}
+.vv-record-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.vv-retake-btn {
+  min-height: 44px;
+  padding: 0 1.1rem;
+  border: none;
+  border-radius: 999px;
+  background: #3a3a3a;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.vv-mic-btn,
+.vv-stop-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.vv-mic-btn { background: var(--success, #22c55e); }
+.vv-stop-btn {
+  background: var(--danger, #ef4444);
+  animation: voice-orb-pulse 1.4s ease-in-out infinite;
+}
+.vv-mic-btn:active,
+.vv-stop-btn:active {
+  transform: scale(0.95);
+}
+.vv-mic-btn svg,
+.vv-stop-btn svg {
+  width: 28px;
+  height: 28px;
+  color: #fff;
+}
+
+.vv-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+.vv-result-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #f87171;
+}
+.vv-result-card {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md, 14px);
+}
+.vv-result-card-transcript { background: rgba(59, 130, 246, 0.12); }
+.vv-result-card-ocr { background: rgba(251, 191, 36, 0.1); }
+.vv-result-card-reply { background: rgba(139, 92, 246, 0.12); }
+.vv-result-label {
+  margin: 0 0 0.25rem;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+.vv-result-text {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #fff;
+}
+.vv-result-card-ocr .vv-result-text {
+  color: #fde68a;
+}
+.vv-rescan-btn {
+  width: 100%;
+  padding: 0.85rem;
+  border: none;
+  border-radius: var(--radius-md, 14px);
+  background: var(--ura-blue-bright, #3b82f6);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vv-stop-btn { animation: none; }
 }

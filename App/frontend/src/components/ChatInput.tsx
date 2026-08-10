@@ -186,7 +186,7 @@ function ChatInputInner({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
                 aria-label="Attach a document (PDF, Word, Excel, CSV, or image)"
-                title="Attach a document"
+                data-tip="Attach a document"
               >
                 <PaperclipIcon />
               </button>
@@ -226,6 +226,7 @@ function ChatInputInner({
             onClick={onMicClick}
             disabled={speechUnavailable || isLoading || isTransitioning}
             aria-label={speechState === 'listening' ? 'Stop listening' : 'Start speaking'}
+            data-tip={speechState === 'listening' ? 'Stop listening' : 'Start speaking'}
           >
             <MicIcon />
           </button>
@@ -234,6 +235,7 @@ function ChatInputInner({
             onClick={() => onSend()}
             disabled={isLoading || isUploading || !message.trim()}
             aria-label={isUploading ? 'Analysing attachment...' : 'Send message'}
+            data-tip={isUploading ? 'Analysing…' : 'Send message'}
           >
             <SendIcon />
           </button>

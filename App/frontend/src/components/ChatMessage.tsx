@@ -2,6 +2,7 @@ import React, { lazy, memo, Suspense, useCallback, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, sourceUrl, telDigits } from '../lib/uraContacts';
 import { formatDocType } from '../lib/attachments';
+import { localeLabel } from '../lib/locales';
 import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
 import { authHeaders } from '../lib/authSession';
 import FeedbackButtons from './FeedbackButtons';
@@ -207,7 +208,7 @@ function ChatMessageInner({
               className={`listen-btn ${playingTurnId === turn.id ? 'listen-btn-active' : ''}`}
               onClick={() => onListen(turn.id, turn.content)}
               disabled={ttsLoading === turn.id || isTransitioning}
-              aria-label={playingTurnId === turn.id ? 'Stop listening' : `Listen in ${locale === 'lg' ? 'Luganda' : 'English'}`}
+              aria-label={playingTurnId === turn.id ? 'Stop listening' : `Listen in ${localeLabel(locale)}`}
             >
               {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
             </button>
