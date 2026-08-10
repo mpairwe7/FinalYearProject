@@ -214,6 +214,54 @@
 }
 
 /* ---------------------------------------------------------------------------
+ * Toolbar tooltips (data-tip attribute) — a custom-styled label that replaces
+ * the native browser title tooltip on icon-only buttons: consistent across
+ * platforms, on-brand, and themeable, where title="" renders as an OS-default
+ * box after an inconsistent delay.
+ * ------------------------------------------------------------------------- */
+.chatv2 [data-tip] {
+  position: relative;
+}
+.chatv2 [data-tip]:hover::after,
+.chatv2 [data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--text-0);
+  color: var(--bg-0);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+  animation: cv2-tip-in 120ms ease 350ms both;
+}
+@keyframes cv2-tip-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(2px);
+  }
+}
+/* Touch browsers can latch :hover after a tap, which would leave the tooltip
+   stuck open until the next unrelated tap — keep it a hover/keyboard-only
+   affordance there. */
+@media (hover: none) {
+  .chatv2 [data-tip]:hover::after {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 [data-tip]:hover::after,
+  .chatv2 [data-tip]:focus-visible::after {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * Dock — desktop sticky; ≤720px keeps the legacy fixed, keyboard-aware dock
  * (fed by --keyboard-inset / --chat-dock-height from page.tsx), re-tinted.
  * ------------------------------------------------------------------------- */

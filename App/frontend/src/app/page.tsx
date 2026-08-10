@@ -4,6 +4,7 @@ import Image from 'next/image';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useChatStore, ChatTurn, createTurn, cleanResponse } from '../store/useChatStore';
 import { useVoiceStore } from '../store/useVoiceStore';
+import { LOCALE_OPTIONS } from '../lib/locales';
 import {
   initAnalytics,
   getAnalyticsSessionId,
@@ -60,11 +61,6 @@ const API_URL = '/api';
 // frontend's Vercel project to the blog's real production URL; the value below
 // is a placeholder fallback used until that env var is configured.
 const BLOG_URL = process.env.NEXT_PUBLIC_BLOG_URL || 'https://blog-two-mu-45.vercel.app';
-
-const LOCALE_OPTIONS = [
-  { value: 'en', label: 'English', speechLang: 'en-US' },
-  { value: 'lg', label: 'Luganda', speechLang: 'lg-UG' },
-] as const;
 
 const STARTER_PROMPTS = [
   { label: 'What services does URA provide?', category: 'Getting started' },
@@ -201,8 +197,9 @@ export default function Page() {
 
   useEffect(() => {
     // Keep the document language honest for screen readers and hyphenation
-    // when the user switches to Luganda.
-    document.documentElement.lang = locale === 'lg' ? 'lg' : 'en';
+    // as the user switches locales — every LOCALE_OPTIONS code is a valid
+    // BCP-47 primary subtag on its own (nyn/ach have no 2-letter form).
+    document.documentElement.lang = locale || 'en';
   }, [locale]);
 
   useEffect(() => {

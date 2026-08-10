@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { normalizeLocale } from '../lib/locales';
 
 export interface Citation {
   ref: string;
@@ -183,10 +184,6 @@ function sanitizeConversation(value: unknown): Conversation | null {
     createdAt: typeof value.createdAt === 'number' ? value.createdAt : 0,
     updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : 0,
   };
-}
-
-function normalizeLocale(value: unknown): string {
-  return value === 'lg' ? 'lg' : 'en';
 }
 
 function readPersistedChatState(): PersistedChatState | null {
