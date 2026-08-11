@@ -51,13 +51,26 @@ LOCALE_TO_SUNBIRD: dict[str, str] = {
     "sw": "swa",      # Swahili
 }
 
-# Sunbird TTS speaker IDs (native speakers)
+# Sunbird TTS speaker IDs (native speakers).
+#
+# Numbering comes from the Sunbird/spark-tts-salt voice catalogue:
+#   241 Acholi ♀ · 242 Ateso ♀ · 243 Runyankore ♀ · 245 Lugbara ♀
+#   246 Swahili ♂ · 248 Luganda ♀
+# The three IDs already here matched that catalogue exactly, gender included,
+# which is what confirms this table uses the same numbering rather than a
+# coincidental overlap.
 TTS_SPEAKERS: dict[str, int] = {
     "lg": 248,    # Luganda female
     "nyn": 243,   # Runyankole female
     "sw": 246,    # Swahili male
-    "en": 246,    # fallback English
+    "ach": 241,   # Acholi female
+    "en": 246,    # fallback English — the catalogue has no dedicated English
+                  # voice, and edge-tts serves English first anyway.
 }
+# Also available in the catalogue but not wired up, because neither is offered
+# in the UI's locale picker: 242 Ateso (teo) and 245 Lugbara (lgg). Both are
+# already in TRANSLATION_LANGUAGES, so adding them is a picker change plus one
+# line each here rather than new infrastructure.
 
 # Languages supported for TRANSLATION (Sunbird NLLB-based): English plus the
 # five Ugandan languages their production translate endpoint is trained on —
