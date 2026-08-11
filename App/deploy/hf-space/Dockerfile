@@ -9,8 +9,18 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-30da0d7 carries PRs #247 #248, which finally make native TTS
-# actually work rather than merely reachable:
+# image. sha-a4bcab3 carries PRs #247 #248 #250, which finally make native TTS
+# actually work rather than merely reachable, and unblock speech INPUT for the
+# two locales that could never use it:
+#
+#   * /v1/asr and /v1/voice/chat validated `language` with ^[a-z]{2}$. Two of
+#     the five locales the picker offers, nyn and ach, have no two-letter
+#     639-1 code, so both endpoints returned 400 before doing any work.
+#     /v1/voice/chat is the whole audio->ASR->MT->LLM->TTS->audio pipeline,
+#     so voice conversation was impossible in Runyankole and Acholi, not
+#     merely degraded. Every request model in models.py already allowed
+#     {2,3} — one of them documents its field as "(en, lg, sw, nyn, ach)",
+#     naming the exact codes the routes refused.
 #
 #   * /tasks/audio/speech serves orpheus-3b-tts, which addresses voices by
 #     CATALOG TAG. Our table held numeric speaker ids read off the
@@ -74,7 +84,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-30da0d7
+FROM landwind/ura-chatbot:sha-a4bcab3
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
