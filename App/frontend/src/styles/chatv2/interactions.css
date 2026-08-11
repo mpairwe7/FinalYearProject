@@ -108,13 +108,6 @@
     padding-left: 4px;
     padding-right: 4px;
   }
-  /* The language trigger reserves 62px for a code that is only ever 2-3
-     characters; let it size to content on the narrowest screens. */
-  .chatv2 .cmpv2-bar .cmpv2-lang-btn {
-    min-width: 0;
-    padding-left: 4px;
-    padding-right: 4px;
-  }
   /* Voice (81px) + Narrate (92px) were together consuming 173px of a 370px
      row — nearly half of it, on padding rather than content. */
   .chatv2 .cmpv2-bar .voice-toggle {
