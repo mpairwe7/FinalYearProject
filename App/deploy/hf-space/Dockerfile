@@ -9,7 +9,17 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-48698cd adds PR #259: a question asked in Luganda shares no terms
+# image. sha-6d069ff adds PRs #261 #262. Retrieved answers are rendered as
+# prose a person can scan: the corpus writes lists as prose, so "What services
+# does URA provide?" arrived as one 600-character sentence holding nine
+# services. Prose enumerations and one-line numbered procedures now become real
+# lists, `--` becomes an em dash, a trailing citation no longer strands itself
+# as a floating superscript, and sources show "About URA" rather than
+# ura_about_ura_faqs.csv. Verified across all 506 answers: 102 reformatted,
+# none lossy. #261 pins the FAQ coverage gate with the measurement showing why
+# lowering it takes wrong answers from 1 in 6 off-domain questions to 5 in 6.
+#
+# It also carries PR #259: a question asked in Luganda shares no terms
 # with the English FAQ corpus, so BM25 had nothing to score and ALL 12 Luganda
 # golden questions returned zero candidates. They are now translated to English
 # and retried — lazily, only after the untranslated attempt comes back empty,
@@ -121,7 +131,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-48698cd
+FROM landwind/ura-chatbot:sha-6d069ff
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
