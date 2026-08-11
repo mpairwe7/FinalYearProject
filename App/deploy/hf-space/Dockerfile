@@ -9,7 +9,13 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-6d069ff adds PRs #261 #262. Retrieved answers are rendered as
+# image. sha-a264da7 adds PR #264: inline [n] citation markers are stripped
+# from the answer body — a pill landing on a lead-in read as a stray number
+# ("Core services include: 1" directly above a list). References stay in the
+# Sources block, and the strip covers Copy and Listen too so the marker does
+# not reach the clipboard or get voiced mid-sentence.
+#
+# It also carries PRs #261 #262. Retrieved answers are rendered as
 # prose a person can scan: the corpus writes lists as prose, so "What services
 # does URA provide?" arrived as one 600-character sentence holding nine
 # services. Prose enumerations and one-line numbered procedures now become real
@@ -131,7 +137,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-6d069ff
+FROM landwind/ura-chatbot:sha-a264da7
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
