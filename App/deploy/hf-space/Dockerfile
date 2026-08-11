@@ -9,7 +9,15 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-cd0f107 adds PR #255: Workers AI calls now try the AI Gateway and
+# image. sha-39979c5 adds PR #256: the composer has ONE primary action that
+# changes job — Enter voice mode while the box is empty, Send once there is
+# text — with the mic beside it for dictation. The Voice and Narrate
+# checkboxes are gone; entering voice mode turns narration on by itself.
+# That freed enough of the row to give every composer control a full 44x44
+# touch target, and fixed a 9px toolbar overflow that predated it. Also
+# raises the consent banner's body text off a 3.6:1 contrast failure.
+#
+# It also carries PR #255: Workers AI calls now try the AI Gateway and
 # fall through to Cloudflare's direct REST API on a transport failure. The
 # Space cannot reach gateway.ai.cloudflare.com at all (TLS handshake dies with
 # SSL: UNEXPECTED_EOF_WHILE_READING), and the relay built for that points at
@@ -103,7 +111,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-cd0f107
+FROM landwind/ura-chatbot:sha-39979c5
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
