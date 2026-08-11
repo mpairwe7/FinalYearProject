@@ -774,22 +774,75 @@ class SpeechModel:
         language: str,
     ) -> SynthesizeResult:
         """The actual backend fallback chain behind :meth:`synthesize`."""
-        # A backend with no real voice for this language must step aside rather
-        # than "succeed" with an English model reading foreign text. Local Piper
-        # and edge-tts both defaulted to an English voice and returned audio, so
-        # the chain never reached Sunbird's native Runyankole (243) / Swahili
-        # (246) speakers — a taxpayer who picked Runyankole heard their answer
-        # read by an English voice.
+        # Local Piper and edge-tts both default to an English voice for any
+        # language they have no model for, and then *succeed* — so left in
+        # their natural order they answer a Runyankole question in an English
+        # voice and the chain never reaches Sunbird's native speaker.
         #
-        # Only step aside when a genuine native voice actually exists further
-        # down the chain. Acholi has no Sunbird speaker, so for it the English
-        # fallback below is still the best available option and is left intact.
+        # So for languages whose only genuine voice is Sunbird's, try Sunbird
+        # FIRST rather than removing the other backends from the chain.
+        # Ordering, not exclusion: an earlier revision skipped local and edge
+        # outright, which turned a Sunbird outage into silence. It did exactly
+        # that in production — Sunbird's TTS endpoint had been answering 405
+        # since it moved, so those locales returned no audio at all. Degraded
+        # audio beats no audio; a wrong-sounding voice is still recoverable
+        # information, silence is not.
         prefer_native_cloud = (
             language not in LOCAL_TTS_VOICES and _sunbird_has_native_voice(language)
         )
 
+        def _try_sunbird() -> SynthesizeResult | None:
+            """One attempt at Sunbird's native voice. None if unavailable."""
+            try:
+                from . import sunbird
+
+                if not sunbird.is_available():
+                    return None
+
+                def _fetch():
+                    tts_result = sunbird.text_to_speech(text, locale=language)
+                    if not tts_result or not tts_result.get("audio_url"):
+                        return None
+                    import httpx
+
+                    return httpx.get(tts_result["audio_url"], timeout=15)
+
+                audio_resp = _cloud_call("Sunbird TTS", _fetch)
+                if audio_resp is None:
+                    return None
+                if audio_resp.status_code == 200 and _looks_like_audio(audio_resp.content):
+                    return SynthesizeResult(
+                        audio=audio_resp.content,
+                        sample_rate=22050,
+                        num_samples=0,
+                        duration_s=0.0,
+                        latency_s=0.0,
+                        backend="sunbird_cloud",
+                        voice=f"sunbird_{language}",
+                    )
+                logger.warning(
+                    "Sunbird TTS returned non-audio payload (status=%s, %d bytes)",
+                    audio_resp.status_code,
+                    len(audio_resp.content),
+                )
+            except Exception:
+                logger.debug("Sunbird TTS attempt failed", exc_info=True)
+            return None
+
+        # ⓪ Native cloud voice first, for languages that have one there and
+        #    nowhere else. Falls through on failure rather than giving up.
+        if prefer_native_cloud:
+            result = _try_sunbird()
+            if result:
+                return result
+            logger.info(
+                "Sunbird native voice unavailable for %s; degrading to the "
+                "generic chain rather than returning silence",
+                language,
+            )
+
         # ① Local Sherpa/Piper TTS (primary — offline, low-latency)
-        if not prefer_native_cloud and self._breakers["tts"].allow_request():
+        if self._breakers["tts"].allow_request():
             future = self._executor.submit(self._do_synthesize, text, voice)
             try:
                 result = future.result(timeout=SPEECH_DEADLINE_S)
@@ -809,52 +862,20 @@ class SpeechModel:
             except Exception:
                 logger.debug("Workers AI TTS failed", exc_info=True)
 
-        # ② edge-tts (Microsoft neural voices — needs internet, no API key).
-        # Skipped for the same reason as local TTS: its voice map only covers
-        # en/lg and silently falls back to English for anything else.
+        # ② edge-tts (Microsoft neural voices — needs internet, no API key)
         try:
-            result = (
-                None
-                if prefer_native_cloud
-                else _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
-            )
+            result = _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
             if result and result.audio:
                 return result
         except Exception:
             logger.debug("edge-tts failed", exc_info=True)
 
-        # ③ Sunbird cloud TTS (fallback — native Luganda speaker voices)
-        try:
-            from . import sunbird
-            if sunbird.is_available():
-
-                def _sunbird_tts():
-                    tts_result = sunbird.text_to_speech(text, locale=language)
-                    if not tts_result or not tts_result.get("audio_url"):
-                        return None
-                    import httpx
-
-                    return httpx.get(tts_result["audio_url"], timeout=15)
-
-                audio_resp = _cloud_call("Sunbird TTS", _sunbird_tts)
-                if audio_resp is not None:
-                    if audio_resp.status_code == 200 and _looks_like_audio(audio_resp.content):
-                        return SynthesizeResult(
-                            audio=audio_resp.content,
-                            sample_rate=22050,
-                            num_samples=0,
-                            duration_s=0.0,
-                            latency_s=0.0,
-                            backend="sunbird_cloud",
-                            voice=f"sunbird_{language}",
-                        )
-                    logger.warning(
-                        "Sunbird TTS returned non-audio payload (status=%s, %d bytes)",
-                        audio_resp.status_code,
-                        len(audio_resp.content),
-                    )
-        except Exception:
-            logger.debug("Sunbird TTS fallback also failed")
+        # ③ Sunbird cloud TTS — for languages that did not already try it at ⓪
+        #    (i.e. en/lg, whose primary voice is local).
+        if not prefer_native_cloud:
+            result = _try_sunbird()
+            if result:
+                return result
 
         return SynthesizeResult(
             audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
