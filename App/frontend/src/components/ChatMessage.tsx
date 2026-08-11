@@ -1,6 +1,6 @@
 import React, { lazy, memo, Suspense, useCallback, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
-import { URA_CONTACTS, sourceUrl, telDigits } from '../lib/uraContacts';
+import { URA_CONTACTS, sourceLabel, sourceUrl, telDigits } from '../lib/uraContacts';
 import { formatDocType } from '../lib/attachments';
 import { localeLabel } from '../lib/locales';
 import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
@@ -181,12 +181,12 @@ function ChatMessageInner({
                         href={href}
                         target="_blank"
                         rel="noopener noreferrer nofollow"
-                        title="Find official URA documents at ura.go.ug"
+                        title={`${c.source} — find official URA documents at ura.go.ug`}
                       >
-                        <strong>{c.source}</strong>
+                        <strong>{sourceLabel(c.source)}</strong>
                       </a>
                     ) : (
-                      <strong>{c.source}</strong>
+                      <strong title={c.source}>{sourceLabel(c.source)}</strong>
                     )}
                     {c.page ? ` p.${c.page}` : ''}
                     {c.section ? ` ${c.section}` : ''}
