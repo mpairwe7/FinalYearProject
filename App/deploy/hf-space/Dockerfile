@@ -9,9 +9,20 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-a4bcab3 carries PRs #247 #248 #250, which finally make native TTS
-# actually work rather than merely reachable, and unblock speech INPUT for the
-# two locales that could never use it:
+# image. sha-cb3a2a6 carries PRs #247 #248 #250 #252, which make native TTS
+# actually work rather than merely reachable, unblock speech INPUT for the two
+# locales that could never use it, and stop the API reporting invented timings:
+#
+#   * /v1/tts and /v1/asr both promise timing metadata, and in both only the
+#     LOCAL backends computed it from real audio. sunbird_cloud advertised a
+#     hardcoded 22050 Hz for 24 kHz audio with duration 0 and latency 0 after
+#     two network hops; edge_tts derived duration with the raw-PCM16 formula
+#     despite returning MP3, reporting a 4.15s phrase as 0.52s; and the three
+#     cloud ASR paths left duration_s and rtf null — which is every
+#     non-English locale, since those all reach Sunbird. Metadata is now read
+#     from the container's own header (WAV parse, or one MPEG frame header),
+#     with no decode. Verified against a frame count of a real clip: 0.0%
+#     error where the old formula was 87% out.
 #
 #   * /v1/asr and /v1/voice/chat validated `language` with ^[a-z]{2}$. Two of
 #     the five locales the picker offers, nyn and ach, have no two-letter
@@ -84,7 +95,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-a4bcab3
+FROM landwind/ura-chatbot:sha-cb3a2a6
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
