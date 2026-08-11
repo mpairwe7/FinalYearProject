@@ -72,14 +72,17 @@
     min-height: 44px;
   }
 
-  /* Width is applied only where there is room for it.
-     The composer toolbar is deliberately excluded. It packs attach + language +
-     two labelled toggles + mic + send onto one row; forcing 44px on each
-     overflowed a 412px phone and wrapped the send button onto a line of its
-     own. Those controls are already 38x44 after the rule above, which clears
-     WCAG 2.2 §2.5.8 (24px) comfortably, and the send button carries its own
-     44x44 from composer.css. */
-  .chatv2 .top-bar-icon-btn {
+  /* Width, now applied to the composer toolbar too.
+     It used to be excluded: the row packed attach + language + two labelled
+     toggles + mic + send, and forcing 44px on each overflowed a 412px phone
+     and wrapped the send button onto a line of its own. That row no longer
+     exists — language moved to the header, and the Voice/Narrate toggles are
+     gone, leaving attach + spacer + mic + one primary button. On the narrowest
+     supported phone (320px) those measure ~136px against ~300px of room, so
+     the constraint that forced 38px-wide controls is spent. They reach a full
+     44x44 rather than settling for WCAG 2.2 §2.5.8's 24px floor. */
+  .chatv2 .top-bar-icon-btn,
+  .chatv2 .cmpv2-bar .composer-circle-btn {
     min-width: 44px;
   }
 
