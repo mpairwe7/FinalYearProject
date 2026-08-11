@@ -27,6 +27,18 @@ export const HeadphonesIcon = () => (
     <path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3" />
   </svg>
 );
+/** Voice-mode waveform — the now-conventional "talk to it" affordance
+ *  (Grok, ChatGPT). Distinct from MicIcon, which is dictation: one turns the
+ *  conversation into speech, the other just fills the textarea. */
+export const VoiceWaveIcon = () => (
+  <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+    <path d="M3 11v2" />
+    <path d="M7.5 7.5v9" />
+    <path d="M12 4v16" />
+    <path d="M16.5 7.5v9" />
+    <path d="M21 11v2" />
+  </svg>
+);
 export const SpeakerIcon = () => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
     <path d="M11 5 6 9H2v6h4l5 4V5Z" />

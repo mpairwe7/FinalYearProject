@@ -1,5 +1,14 @@
 import React, { memo, useLayoutEffect, useRef } from 'react';
-import { MicIcon, SendIcon, CloseIcon, CheckIcon, PaperclipIcon, FileIcon, LoadingDots } from './Icons';
+import {
+  MicIcon,
+  SendIcon,
+  CloseIcon,
+  CheckIcon,
+  PaperclipIcon,
+  FileIcon,
+  LoadingDots,
+  VoiceWaveIcon,
+} from './Icons';
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENTS,
@@ -24,14 +33,18 @@ interface ChatInputProps {
   attachments?: PendingAttachment[];
   onAttachFiles?: (files: FileList) => void;
   onRemoveAttachment?: (clientId: string) => void;
-  /* Conversation-level controls that live in the composer toolbar.
-     All optional: the control renders only when its handler is provided.
-     Language is NOT here — it is a session-level setting and lives in the
-     header (see ChatHeader). */
+  /* Voice mode is the composer's only conversation-level control. It renders
+     only when its handler is provided. Language is NOT here — it is a
+     session-level setting and lives in the header (see ChatHeader).
+
+     There used to be two checkboxes here as well, "Voice" and "Narrate".
+     They are gone: they spent 173px of a 370px phone row on two settings
+     that describe one activity, and asking someone to tick "Voice" and then
+     tick "Narrate" to hold a spoken conversation is a worse question than
+     "do you want to talk to it?". Entering voice mode now turns narration on
+     by itself, so the capability survives without the controls. */
   onVoiceModeChange?: (on: boolean) => void;
   voiceModeDisabled?: boolean;
-  autoNarrate?: boolean;
-  onAutoNarrateChange?: (on: boolean) => void;
 }
 
 /** Inline waveform — 5 animated bars */
@@ -61,12 +74,15 @@ function ChatInputInner({
   onRemoveAttachment,
   onVoiceModeChange,
   voiceModeDisabled,
-  autoNarrate,
-  onAutoNarrateChange,
 }: ChatInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
+  // Drives the morph in the primary slot: nothing typed yet -> offer voice
+  // mode; the moment there is something to send -> offer send. Trimmed, so a
+  // stray space does not present a send button that refuses to send.
+  const hasText = message.trim().length > 0;
+  const canSend = hasText && !isLoading && !isUploading;
 
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -145,7 +161,7 @@ function ChatInputInner({
           id="composer-input"
           aria-label="Type your message"
           aria-multiline="true"
-          placeholder={voiceMode ? 'Voice mode on — tap mic or type...' : 'Ask anything about URA...'}
+          placeholder={voiceMode ? 'Voice mode on — speak, or type' : 'Ask anything about URA...'}
           value={message}
           rows={1}
           enterKeyHint="send"
@@ -187,28 +203,9 @@ function ChatInputInner({
               </button>
             </>
           )}
-          {onVoiceModeChange && (
-            <label className="voice-toggle" title="Voice mode: server-side ASR + TTS">
-              <input
-                type="checkbox"
-                checked={voiceMode}
-                onChange={(e) => onVoiceModeChange(e.target.checked)}
-                disabled={voiceModeDisabled}
-              />
-              <span className="voice-toggle-label">Voice</span>
-            </label>
-          )}
-          {onAutoNarrateChange && (
-            <label className="voice-toggle" title="Auto-read replies aloud">
-              <input
-                type="checkbox"
-                checked={autoNarrate ?? false}
-                onChange={(e) => onAutoNarrateChange(e.target.checked)}
-              />
-              <span className="voice-toggle-label">Narrate</span>
-            </label>
-          )}
           <div className="cmpv2-spacer" />
+          {/* Dictation — fills the textarea. Stays put in both states so it
+              never moves under a thumb that is already reaching for it. */}
           <button
             className={`composer-circle-btn mic-circle-btn ${speechState === 'listening' ? 'btn-recording' : ''}`}
             onClick={onMicClick}
@@ -218,20 +215,39 @@ function ChatInputInner({
           >
             <MicIcon />
           </button>
-          <button
-            className="composer-circle-btn send-circle-btn"
-            onClick={() => onSend()}
-            disabled={isLoading || isUploading || !message.trim()}
-            aria-label={isUploading ? 'Analysing attachment...' : 'Send message'}
-            data-tip={isUploading ? 'Analysing…' : 'Send message'}
-          >
-            <SendIcon />
-          </button>
+          {/* One primary slot, two jobs. Empty composer offers the thing you
+              can actually do (talk); typing replaces it with send. Rendering
+              both at once would leave a disabled send button sitting next to
+              the mic for the whole of an empty composer. */}
+          {canSend || !onVoiceModeChange ? (
+            <button
+              className="composer-circle-btn send-circle-btn"
+              onClick={() => onSend()}
+              disabled={isLoading || isUploading || !hasText}
+              aria-label={isUploading ? 'Analysing attachment...' : 'Send message'}
+              data-tip={isUploading ? 'Analysing…' : 'Send message'}
+            >
+              <SendIcon />
+            </button>
+          ) : (
+            <button
+              className={`composer-circle-btn voicemode-circle-btn ${voiceMode ? 'is-active' : ''}`}
+              onClick={() => onVoiceModeChange(!voiceMode)}
+              disabled={voiceModeDisabled}
+              aria-pressed={voiceMode}
+              aria-label={voiceMode ? 'Exit voice mode' : 'Enter voice mode'}
+              data-tip={voiceMode ? 'Exit voice mode' : 'Enter voice mode'}
+            >
+              <VoiceWaveIcon />
+            </button>
+          )}
         </div>
       </div>
+      {/* The hint carries what the removed toggles used to say — that voice
+          mode answers aloud — so nothing is only discoverable by tooltip. */}
       <p className="composer-hint">
         {voiceMode
-          ? 'Tap mic to record, then your voice is transcribed, answered, and narrated back.'
+          ? 'Voice mode: tap the mic to speak, and replies are read back to you.'
           : 'URA Assistant can make mistakes. Verify important tax information at ura.go.ug.'}
       </p>
     </>

@@ -41,10 +41,14 @@ test.describe("Voice STT/TTS (mocked)", () => {
     test.skip(testInfo.project.name === "mobile-chrome", HEADER_ONLY);
     await mockBackend(page);
     await page.goto("/");
-    const voiceToggle = page.getByRole("checkbox", { name: "Voice" });
+    const voiceToggle = page.getByRole("button", { name: "Enter voice mode" });
     await expect(voiceToggle).toBeEnabled();
-    await voiceToggle.check();
-    await expect(voiceToggle).toBeChecked();
+    await voiceToggle.click();
+    // The one primary slot now reads "Exit voice mode" — same button, engaged.
+    await expect(page.getByRole("button", { name: "Exit voice mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     // The mic affordance is present and enabled in the composer.
     await expect(page.getByRole("button", { name: "Start speaking" })).toBeEnabled();
   });
@@ -57,7 +61,7 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await mockBackend(page);
     await page.goto("/");
 
-    await page.getByRole("checkbox", { name: "Voice" }).check();
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
 
     // Start recording → composer switches to the "Listening…" state.
     await page.getByRole("button", { name: "Start speaking" }).click();
