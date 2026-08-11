@@ -833,8 +833,11 @@ async def transcribe_audio(
     if not 8000 <= sample_rate <= 48000:
         raise HTTPException(status_code=400, detail="sample_rate must be in [8000, 48000]")
     language = request.query_params.get("language")
-    if language is not None and not re.match(r"^[a-z]{2}$", language):
-        raise HTTPException(status_code=400, detail="language must be an ISO 639-1 code")
+    # 639-1 OR 639-3: two of the five locales the picker offers (nyn, ach) have
+    # no two-letter code, so a {2}-only rule rejected Runyankole and Acholi
+    # speech outright. Every request model in models.py already allows {2,3}.
+    if language is not None and not re.match(r"^[a-z]{2,3}$", language):
+        raise HTTPException(status_code=400, detail="language must be an ISO 639-1/639-3 code")
 
     audio_bytes = await request.body()
     if not audio_bytes:
@@ -1159,9 +1162,10 @@ async def voice_chat(
 
     # --- Input validation (mirrors /v1/asr strictness) -----------------------
     language = request.query_params.get("language", "en")
-    if not re.match(r"^[a-z]{2}$", language):
+    if not re.match(r"^[a-z]{2,3}$", language):
         raise HTTPException(
-            status_code=400, detail="language must be an ISO 639-1 code (e.g. en, lg)"
+            status_code=400,
+            detail="language must be an ISO 639-1/639-3 code (e.g. en, lg, nyn, ach)",
         )
 
     voice = request.query_params.get("voice") or None
