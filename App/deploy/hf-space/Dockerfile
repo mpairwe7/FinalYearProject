@@ -9,7 +9,7 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-b5d4969 carries PRs #234 + #235 + #238 + #241:
+# image. sha-7fd708d carries PRs #234 + #235 + #238 + #241 + #243:
 #
 #   * Speech now honours all five locales the picker offers. The same
 #     two-entry {"en","lg"} language map had been copy-pasted into three
@@ -36,7 +36,14 @@
 #     catalogue. Speaker 241 is Acholi female, corroborated by the three
 #     IDs already configured matching that catalogue exactly, gender
 #     included. All five offered locales now reach a native voice.
-FROM landwind/ura-chatbot:sha-b5d4969
+#   * Sunbird retired /tasks/modal/tts and /tasks/modal/stt. Every call to
+#     the former had been answering 405, so non-English narration was dead
+#     in production — English hid it, because edge-tts serves English
+#     before Sunbird is reached. Migrated to /tasks/audio/speech and
+#     /tasks/audio/transcriptions. Native voices are now preferred by
+#     ORDER rather than by removing the other backends, so a Sunbird
+#     outage degrades to a generic voice instead of returning silence.
+FROM landwind/ura-chatbot:sha-7fd708d
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
