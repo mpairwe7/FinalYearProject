@@ -211,7 +211,11 @@ function ChatInputInner({
             onClick={onMicClick}
             disabled={speechUnavailable || isLoading || isTransitioning}
             aria-label={speechState === 'listening' ? 'Stop listening' : 'Start speaking'}
-            data-tip={speechState === 'listening' ? 'Stop listening' : 'Start speaking'}
+            /* The tip says "Dictate" while the accessible name stays "Start
+               speaking": two speech controls sit side by side here, and the
+               one thing a user must not have to guess is which one types and
+               which one talks back. */
+            data-tip={speechState === 'listening' ? 'Stop listening' : 'Dictate'}
           >
             <MicIcon />
           </button>
