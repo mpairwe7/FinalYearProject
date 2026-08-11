@@ -166,8 +166,90 @@ function splitLongParagraph(text: string): string[] {
   }
   if (buf) sentences.push(buf);
 
+  // A trailing "[1]" is its own "sentence" after the split above, which left it
+  // stranded as a paragraph containing nothing but a citation pill — a bare
+  // superscript 1 floating under the answer. Reattach any citation-only chunk
+  // to the text it refers to.
+  for (let j = sentences.length - 1; j > 0; j--) {
+    if (/^(?:\[\d+\]\s*)+$/.test(sentences[j].trim())) {
+      sentences[j - 1] = `${sentences[j - 1]} ${sentences[j].trim()}`;
+      sentences.splice(j, 1);
+    }
+  }
+
   // Only split if we got multiple chunks
   return sentences.length >= 2 ? sentences : [text];
+}
+
+/**
+ * Turn a "lead-in: a; b; c." enumeration into a lead-in plus list items.
+ *
+ * Retrieved answers arrive as the corpus wrote them, and the corpus writes
+ * lists as prose. The URA services answer is one 600-character sentence
+ * holding nine distinct services separated by semicolons — every word of it
+ * useful, none of it scannable, and sentence-splitting cannot help because it
+ * is a single sentence.
+ *
+ * This is a layout change only: the same words in the same order, with the
+ * separators the author already put there used as the list boundaries. It is
+ * deliberately conservative, because reformatting grounded text is only safe
+ * while it stays lossless:
+ *
+ *   - needs a colon lead-in and 3+ semicolon-separated parts, so ordinary
+ *     prose that happens to contain a semicolon is left alone;
+ *   - every part must be short enough to read as an item, so a paragraph of
+ *     semicolon-joined clauses is not shredded;
+ *   - a trailing citation marker stays with the lead-in, where it refers to
+ *     the whole answer rather than to the last item.
+ *
+ * Returns null when the text is not an enumeration, and the caller keeps its
+ * paragraph.
+ */
+function asEnumeration(text: string): { lead: string; items: string[] } | null {
+  const colon = text.indexOf(":");
+  if (colon < 0) return null;
+
+  let lead = text.slice(0, colon + 1);
+  let rest = text.slice(colon + 1).trim();
+  if (!rest || rest.length < 80) return null;
+
+  // Keep a trailing "[1]" (and any run of them) attached to the lead-in.
+  const cite = rest.match(/(\s*(?:\[\d+\]\s*)+)$/);
+  if (cite) {
+    rest = rest.slice(0, rest.length - cite[1].length).trim();
+    lead += cite[1].replace(/\s+$/, "");
+  }
+  rest = rest.replace(/\.$/, "");
+
+  const parts = rest
+    .split(";")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length < 3) return null;
+  // An item longer than this is a clause, not a list entry. Measured against
+  // the real corpus: the longest genuine item here is the 170-character
+  // "domestic tax administration — VAT, PAYE and employment income, …", so a
+  // tighter bound silently rejects the exact answer this exists to fix.
+  if (parts.some((p) => p.length > 220)) return null;
+
+  const items = parts.map((p, idx) =>
+    // "and online payments…" reads as a leftover conjunction once the item
+    // stands on its own line.
+    idx === parts.length - 1 ? p.replace(/^and\s+/i, "") : p,
+  );
+  return { lead: lead.trim(), items };
+}
+
+/**
+ * Typographic clean-up for retrieved text.
+ *
+ * The corpus stores em dashes as a literal double hyphen ("domestic tax
+ * administration -- VAT"), which renders as exactly that. Only the spaced
+ * form is converted, so `--flag` in prose and the `---` horizontal rule are
+ * both left alone.
+ */
+function tidyTypography(text: string): string {
+  return text.replace(/(\s)--(\s)/g, "$1—$2");
 }
 
 function isHeading(line: string) {
@@ -324,10 +406,18 @@ function parseBlocks(src: string): Block[] {
     }
 
     // Join into a single paragraph text, then auto-split if too long
-    const fullText = pLines.join(" ");
+    const fullText = tidyTypography(pLines.join(" "));
     const chunks = splitLongParagraph(fullText);
     for (const chunk of chunks) {
-      blocks.push({ type: "paragraph", text: chunk });
+      // A prose enumeration becomes a lead-in plus a real list; anything else
+      // stays the paragraph it was.
+      const enumerated = asEnumeration(chunk);
+      if (enumerated) {
+        blocks.push({ type: "paragraph", text: enumerated.lead });
+        blocks.push({ type: "ul", items: enumerated.items });
+      } else {
+        blocks.push({ type: "paragraph", text: chunk });
+      }
     }
   }
 
