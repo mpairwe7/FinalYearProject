@@ -124,31 +124,10 @@
   opacity: 0.5;
 }
 
-/* Language trigger */
-.chatv2 .cmpv2-lang {
-  position: relative;
-}
-.chatv2 .cmpv2-lang-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 62px;
-  height: 38px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-2);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-}
-.chatv2 .cmpv2-lang-btn:hover {
-  background: var(--surface-2);
-  color: var(--text-0);
-}
+/* The language trigger used to live in this toolbar. It moved to the header —
+   it is a session-level setting rather than a per-message one, and the row was
+   over capacity on a phone (25px of slack against a 63px control). Its styles
+   moved with it, to shell.css. */
 
 /* ---------------------------------------------------------------------------
  * Recording state (legacy markup, red treatment per the approved design).

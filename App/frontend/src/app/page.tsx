@@ -698,10 +698,8 @@ export default function Page() {
     attachments: pendingAttachments,
     onAttachFiles: attachFiles,
     onRemoveAttachment: removeAttachment,
-    // chatv2: conversation-level controls live in the composer toolbar.
-    locale,
-    localeOptions: LOCALE_OPTIONS,
-    onLocaleChange: setLocale,
+    // Conversation-level controls live in the composer toolbar. Language is
+    // session-level and lives in the header instead — see <ChatHeader />.
     onVoiceModeChange: setVoiceMode,
     voiceModeDisabled: !serverReady && !hasMediaRecorder,
     autoNarrate,
@@ -754,6 +752,9 @@ export default function Page() {
         blogUrl={BLOG_URL}
         healthOk={speechHealth?.status === 'ready'}
         healthLabel={healthLabel}
+        locale={locale}
+        localeOptions={LOCALE_OPTIONS}
+        onLocaleChange={setLocale}
       />
 
       <main className="app-content">

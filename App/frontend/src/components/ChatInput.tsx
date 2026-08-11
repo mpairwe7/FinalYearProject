@@ -1,6 +1,5 @@
 import React, { memo, useLayoutEffect, useRef } from 'react';
 import { MicIcon, SendIcon, CloseIcon, CheckIcon, PaperclipIcon, FileIcon, LoadingDots } from './Icons';
-import LanguageMenu, { LanguageOption } from './LanguageMenu';
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENTS,
@@ -25,11 +24,10 @@ interface ChatInputProps {
   attachments?: PendingAttachment[];
   onAttachFiles?: (files: FileList) => void;
   onRemoveAttachment?: (clientId: string) => void;
-  /* chatv2 — controls relocated from the header into the composer toolbar.
-     All optional: the control renders only when its handler is provided. */
-  locale?: string;
-  localeOptions?: readonly LanguageOption[];
-  onLocaleChange?: (code: string) => void;
+  /* Conversation-level controls that live in the composer toolbar.
+     All optional: the control renders only when its handler is provided.
+     Language is NOT here — it is a session-level setting and lives in the
+     header (see ChatHeader). */
   onVoiceModeChange?: (on: boolean) => void;
   voiceModeDisabled?: boolean;
   autoNarrate?: boolean;
@@ -61,9 +59,6 @@ function ChatInputInner({
   attachments,
   onAttachFiles,
   onRemoveAttachment,
-  locale,
-  localeOptions,
-  onLocaleChange,
   onVoiceModeChange,
   voiceModeDisabled,
   autoNarrate,
@@ -191,13 +186,6 @@ function ChatInputInner({
                 <PaperclipIcon />
               </button>
             </>
-          )}
-          {onLocaleChange && localeOptions && locale !== undefined && (
-            <LanguageMenu
-              locale={locale}
-              options={localeOptions}
-              onLocaleChange={onLocaleChange}
-            />
           )}
           {onVoiceModeChange && (
             <label className="voice-toggle" title="Voice mode: server-side ASR + TTS">

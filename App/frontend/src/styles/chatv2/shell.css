@@ -53,6 +53,42 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+ * Language selector.
+ *
+ * Lives in the header rather than the composer toolbar: it is a session-level
+ * setting — it governs the reply language, the TTS voice and STT recognition
+ * for the whole conversation, not one message — and the composer row had only
+ * 25px of slack on a phone against this control's 63px, having already been
+ * trimmed once to stop it clipping the send button. The header carries 138px.
+ *
+ * Sized to sit level with the icon buttons beside it rather than reusing the
+ * composer's 38px height.
+ * ------------------------------------------------------------------------- */
+.chatv2 .langsel {
+  position: relative;
+}
+.chatv2 .langsel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.chatv2 .langsel-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
 /* Kebab (overflow) menu */
 .chatv2 .hdrv2-kebab {
   position: relative;
