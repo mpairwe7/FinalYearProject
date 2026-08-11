@@ -109,6 +109,98 @@ def _looks_like_audio(data: bytes) -> bool:
     if data.startswith(_AUDIO_MAGIC):
         return True
     return data[0] == 0xFF and (data[1] & 0xE0) == 0xE0  # raw MPEG frame sync
+
+
+# MPEG audio frame tables, for reading a duration off an MP3 without decoding
+# it. Index by (version, layer) as encoded in the frame header.
+_MPEG_BITRATES_V1_L3 = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
+_MPEG_BITRATES_V2_L3 = (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0)
+_MPEG_RATES = {3: (44100, 48000, 32000), 2: (22050, 24000, 16000), 0: (11025, 12000, 8000)}
+
+
+def _mp3_metadata(data: bytes) -> tuple[int, float] | None:
+    """(sample_rate, duration_s) from an MP3's first frame header, or None.
+
+    Duration assumes a constant bitrate, which is what edge-tts emits. A VBR
+    file would come out approximate — still far closer than the byte-length
+    guess this replaces, which assumed the bytes were raw PCM.
+    """
+    i = 0
+    if data[:3] == b"ID3":  # skip the ID3v2 tag: 10-byte header + syncsafe size
+        if len(data) < 10:
+            return None
+        size = 0
+        for b in data[6:10]:
+            size = (size << 7) | (b & 0x7F)
+        i = 10 + size
+    # Scan a bounded window for the frame sync rather than trusting alignment.
+    limit = min(len(data) - 4, i + 8192)
+    while i < limit:
+        if data[i] == 0xFF and (data[i + 1] & 0xE0) == 0xE0:
+            h1, h2 = data[i + 1], data[i + 2]
+            version = (h1 >> 3) & 0x03  # 3=MPEG1, 2=MPEG2, 0=MPEG2.5
+            layer = (h1 >> 1) & 0x03    # 1=Layer III
+            br_idx = (h2 >> 4) & 0x0F
+            sr_idx = (h2 >> 2) & 0x03
+            if version != 1 and layer == 1 and sr_idx != 3 and br_idx not in (0, 15):
+                table = _MPEG_BITRATES_V1_L3 if version == 3 else _MPEG_BITRATES_V2_L3
+                bitrate = table[br_idx] * 1000
+                rate = _MPEG_RATES[version][sr_idx]
+                if bitrate:
+                    return rate, round((len(data) - i) * 8 / bitrate, 3)
+                return rate, 0.0
+        i += 1
+    return None
+
+
+def _audio_metadata(data: bytes, default_rate: int) -> tuple[int, int, float]:
+    """(sample_rate, num_samples, duration_s) read from *data*'s own header.
+
+    Every cloud TTS tier used to report these as hardcoded constants and zeros,
+    so `/v1/tts` advertised a sample rate the audio did not have and a duration
+    of 0 for real speech. Reading the container is cheap — a WAV header parse or
+    one MPEG frame header — and is the only way these fields can be true for a
+    backend that hands us encoded bytes rather than samples.
+
+    Falls back to (default_rate, 0, 0.0) for anything unrecognised, so an
+    unknown container degrades to the old behaviour instead of raising.
+    """
+    if not data or len(data) < 4:
+        return default_rate, 0, 0.0
+    try:
+        if data[:4] == b"RIFF":
+            import io as _io
+            import wave as _wave
+
+            with _wave.open(_io.BytesIO(data), "rb") as w:
+                rate = w.getframerate()
+                frames = w.getnframes()
+            return rate, frames, round(frames / rate, 3) if rate else 0.0
+        if data[:3] == b"ID3" or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+            mp3 = _mp3_metadata(data)
+            if mp3:
+                rate, duration = mp3
+                return rate, int(duration * rate), duration
+    except Exception:  # noqa: BLE001 — metadata is advisory; never fail a response
+        logger.debug("Could not read audio metadata from %d bytes", len(data), exc_info=True)
+    return default_rate, 0, 0.0
+
+
+def _input_duration_s(data: bytes, sample_rate: int) -> float:
+    """Wall-clock length of posted audio, for ASR results that omit it.
+
+    Prefers the container's own header; falls back to treating the bytes as
+    raw PCM16 at *sample_rate*, which is what `/v1/asr` documents its body to
+    be. Returns 0.0 rather than raising when the input makes no sense.
+    """
+    _, _, duration = _audio_metadata(data, sample_rate)
+    if duration:
+        return duration
+    if not data or sample_rate <= 0:
+        return 0.0
+    return round(len(data) / (sample_rate * 2), 3)  # int16 mono
+
+
 SPEECH_MAX_CONCURRENCY = int(os.getenv("SPEECH_MAX_CONCURRENCY", "2"))
 
 DEFAULT_EN_VOICE = os.getenv("SPEECH_EN_VOICE", "en_US-lessac-medium")
@@ -394,9 +486,31 @@ class SpeechModel:
     def transcribe(
         self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
     ) -> TranscribeResult:
-        """Transcribe raw PCM bytes.
+        """Transcribe raw PCM bytes, filling in any timing the backend omitted.
 
-        Fallback chain (local-first for production):
+        The local backends report duration_s / latency_s / rtf themselves; the
+        cloud ones reported none of them, so `/v1/asr` answered with nulls
+        whenever it fell through to Sunbird or Workers AI — which is the common
+        case for every non-English locale. Input duration does not depend on
+        which backend ran: it is a property of the audio that was posted. So it
+        is computed once here and used to fill the gaps, rather than at each
+        `return` in the chain where the next branch added would miss it.
+        """
+        t_start = time.perf_counter()
+        result = self._transcribe_chain(audio_bytes, sample_rate, language)
+        if result.duration_s is None:
+            result.duration_s = _input_duration_s(audio_bytes, sample_rate)
+        if result.latency_s is None:
+            result.latency_s = round(time.perf_counter() - t_start, 3)
+        if result.rtf is None and result.duration_s:
+            result.rtf = round(result.latency_s / max(result.duration_s, 0.01), 2)
+        return result
+
+    def _transcribe_chain(
+        self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
+    ) -> TranscribeResult:
+        """The backend fallback chain itself.
+
             ① Whisper + LoRA     — fine-tuned, language-specific, offline
             ② Local Sherpa ASR   — offline, if model available
             ③ faster-whisper     — CTranslate2 int8, good multilingual
@@ -613,17 +727,12 @@ class SpeechModel:
                 if not audio:
                     continue
                 breakers.CF_TTS_BREAKER.record_success()
-                sr = out.get("sample_rate") or 24000
-                if out.get("fmt") == "wav":
-                    try:
-                        import io as _io
-                        import wave as _wave
-                        with _wave.open(_io.BytesIO(audio), "rb") as w:
-                            sr = w.getframerate()
-                    except Exception:
-                        pass
+                # Was a WAV-only header peek that still left num_samples and
+                # duration at zero; _audio_metadata covers MP3 too and fills
+                # all three, falling back to the provider's declared rate.
+                sr, samples, duration = _audio_metadata(audio, out.get("sample_rate") or 24000)
                 return SynthesizeResult(
-                    audio=audio, sample_rate=sr, num_samples=0, duration_s=0.0,
+                    audio=audio, sample_rate=sr, num_samples=samples, duration_s=duration,
                     latency_s=round(time.perf_counter() - t0, 3),
                     backend="cf_workers_ai", voice=model,
                 )
@@ -800,6 +909,7 @@ class SpeechModel:
 
         def _try_sunbird() -> SynthesizeResult | None:
             """One attempt at Sunbird's native voice. None if unavailable."""
+            t_sunbird = time.perf_counter()
             try:
                 from . import sunbird
 
@@ -818,12 +928,17 @@ class SpeechModel:
                 if audio_resp is None:
                     return None
                 if audio_resp.status_code == 200 and _looks_like_audio(audio_resp.content):
+                    # These were 22050/0/0.0 regardless of what came back. The
+                    # audio is actually 24 kHz, so the advertised rate was wrong
+                    # for every native voice, and latency read 0.0 for a call
+                    # that had just crossed the network twice.
+                    rate, samples, duration = _audio_metadata(audio_resp.content, 24000)
                     return SynthesizeResult(
                         audio=audio_resp.content,
-                        sample_rate=22050,
-                        num_samples=0,
-                        duration_s=0.0,
-                        latency_s=0.0,
+                        sample_rate=rate,
+                        num_samples=samples,
+                        duration_s=duration,
+                        latency_s=round(time.perf_counter() - t_sunbird, 3),
                         backend="sunbird_cloud",
                         voice=f"sunbird_{language}",
                     )
@@ -1011,11 +1126,15 @@ class SpeechModel:
 
         latency = time.perf_counter() - t0
         logger.info("edge-tts: %d bytes in %.1fs (voice=%s)", len(audio_bytes), latency, voice_id)
+        # edge-tts returns MP3, but duration was computed as len/(24000*2) —
+        # the bytes-to-samples formula for raw PCM16. Against a ~48 kbps MP3
+        # that understates a real phrase by roughly 5x. Read the frame header.
+        rate, samples, duration = _audio_metadata(audio_bytes, 24000)
         return SynthesizeResult(
             audio=audio_bytes,
-            sample_rate=24000,
-            num_samples=0,
-            duration_s=round(len(audio_bytes) / (24000 * 2), 2) if audio_bytes else 0.0,
+            sample_rate=rate,
+            num_samples=samples,
+            duration_s=duration,
             latency_s=round(latency, 3),
             backend="edge_tts",
             voice=voice_id,
