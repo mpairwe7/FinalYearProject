@@ -9,7 +9,7 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-7fd708d carries PRs #234 + #235 + #238 + #241 + #243:
+# image. sha-bf22059 carries PRs #234 #235 #238 #241 #243 #245:
 #
 #   * Speech now honours all five locales the picker offers. The same
 #     two-entry {"en","lg"} language map had been copy-pasted into three
@@ -43,7 +43,12 @@
 #     /tasks/audio/transcriptions. Native voices are now preferred by
 #     ORDER rather than by removing the other backends, so a Sunbird
 #     outage degrades to a generic voice instead of returning silence.
-FROM landwind/ura-chatbot:sha-7fd708d
+#   * The URA ghost logo is behind the transcript again — globals.css had
+#     always painted it; chatv2 had only switched it off.
+#   * The language selector moved from the composer toolbar to the header.
+#     It is a session-level setting, and the composer row had 25px of
+#     slack against a 63px control; the header had 138px.
+FROM landwind/ura-chatbot:sha-bf22059
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
