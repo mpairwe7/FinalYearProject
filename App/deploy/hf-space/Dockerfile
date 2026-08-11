@@ -9,7 +9,15 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-cb3a2a6 carries PRs #247 #248 #250 #252, which make native TTS
+# image. sha-cd0f107 adds PR #255: Workers AI calls now try the AI Gateway and
+# fall through to Cloudflare's direct REST API on a transport failure. The
+# Space cannot reach gateway.ai.cloudflare.com at all (TLS handshake dies with
+# SSL: UNEXPECTED_EOF_WHILE_READING), and the relay built for that points at
+# the Crane Cloud host and answers 500. api.cloudflare.com is a two-label
+# hostname like every other host this Space reaches successfully, so it is
+# worth a try; the fallback is correct either way.
+#
+# It also carries PRs #247 #248 #250 #252, which make native TTS
 # actually work rather than merely reachable, unblock speech INPUT for the two
 # locales that could never use it, and stop the API reporting invented timings:
 #
@@ -95,7 +103,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-cb3a2a6
+FROM landwind/ura-chatbot:sha-cd0f107
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
