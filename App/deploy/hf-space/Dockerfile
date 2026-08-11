@@ -9,7 +9,17 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-39979c5 adds PR #256: the composer has ONE primary action that
+# image. sha-48698cd adds PR #259: a question asked in Luganda shares no terms
+# with the English FAQ corpus, so BM25 had nothing to score and ALL 12 Luganda
+# golden questions returned zero candidates. They are now translated to English
+# and retried — lazily, only after the untranslated attempt comes back empty,
+# so English is byte-identical and pays no translation latency. 5 of the 12 are
+# rescued. A static-embedding dense path was built for this and rejected on its
+# numbers: it cost 14-26 points of Hit@1 at every fusion weight, and its
+# cosines ranked "buy cheap flight tickets to Dubai" above every genuine
+# rescue.
+#
+# It also carries PR #256: the composer has ONE primary action that
 # changes job — Enter voice mode while the box is empty, Send once there is
 # text — with the mic beside it for dictation. The Voice and Narrate
 # checkboxes are gone; entering voice mode turns narration on by itself.
@@ -111,7 +121,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-39979c5
+FROM landwind/ura-chatbot:sha-48698cd
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
