@@ -119,7 +119,14 @@ DEFAULT_LG_VOICE = os.getenv("SPEECH_LG_VOICE", "luganda-vits-v1")
 # a natural English neural voice; Sunbird has no native English voice, so this
 # is what keeps English TTS off the poor Sunbird-English fallback.
 SPEECH_EN_EDGE_VOICE = os.getenv("SPEECH_EN_EDGE_VOICE", "en-US-AriaNeural")
-SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-UG-MaleNeural")
+# edge-tts has no Luganda voice, so this is an English voice reading Luganda
+# text — a stopgap for when Sunbird's native Luganda voice is unreachable.
+# It was en-UG-MaleNeural, which is not a real edge-tts voice: the service has
+# no Uganda locale at all, so every call raised "No audio was received" and
+# Luganda lost its only fallback. en-KE is the nearest available East African
+# English (Kenya borders Uganda) and Chilemba is male, matching the intent of
+# the previous value.
+SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-KE-ChilembaNeural")
 
 # Locales that ship a genuine local (Piper/Sherpa) voice model. Anything outside
 # this set can only be synthesized locally by an *English* model reading foreign
@@ -135,7 +142,7 @@ def _sunbird_has_native_voice(locale: str) -> bool:
     try:
         from . import sunbird
 
-        return bool(sunbird.TTS_SPEAKERS.get(locale))
+        return bool(sunbird.TTS_VOICES.get(locale))
     except Exception:  # noqa: BLE001 — sunbird optional; absence means no voice
         return False
 
