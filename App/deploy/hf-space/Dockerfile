@@ -9,7 +9,33 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-bf22059 carries PRs #234 #235 #238 #241 #243 #245:
+# image. sha-30da0d7 carries PRs #247 #248, which finally make native TTS
+# actually work rather than merely reachable:
+#
+#   * /tasks/audio/speech serves orpheus-3b-tts, which addresses voices by
+#     CATALOG TAG. Our table held numeric speaker ids read off the
+#     spark-tts model card — a different model — so every non-English
+#     request named a voice the serving model does not have. #243 fixed the
+#     endpoint and turned 405 into 422; this fixes the payload. Measured
+#     against the live API before deploying: numeric ids return 422 naming
+#     `body.voice`, catalog tags return 200 with fetchable WAV audio, for
+#     all four local languages.
+#   * Luganda had been returning "All TTS backends failed" — total silence,
+#     the only locale with no working fallback. Its edge-tts voice was
+#     en-UG-MaleNeural and edge-tts has no Uganda locale at all, so that
+#     stage always raised "No audio was received". Now en-KE-ChilembaNeural.
+#   * Repairing that edge voice would have QUIETLY DOWNGRADED Luganda:
+#     with stage ② working, edge answers `lg` with an English voice and
+#     returns, so Sunbird's native Luganda speaker is never reached — the
+#     repair would have hidden the regression it caused. Sunbird now runs
+#     before edge-tts for every non-English locale. edge stays beneath it,
+#     so a Sunbird outage still degrades to audio, not silence.
+#   * STT sent `language` only when truthy, but the field is required —
+#     confirmed live: omitting it returns 422 "Field required".
+#   * Sunbird errors now log the response body. A bare status cost a full
+#     build-and-deploy cycle to diagnose; the body names the bad field.
+#
+# The previous pin, sha-bf22059, carried PRs #234 #235 #238 #241 #243 #245:
 #
 #   * Speech now honours all five locales the picker offers. The same
 #     two-entry {"en","lg"} language map had been copy-pasted into three
@@ -48,7 +74,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-bf22059
+FROM landwind/ura-chatbot:sha-30da0d7
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
