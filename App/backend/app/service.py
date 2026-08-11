@@ -1686,6 +1686,35 @@ _FAQ_TERM_ALIASES = {
     "thresholds": "threshold",
     "vehicles": "vehicle",
 }
+# Minimum share of the query an FAQ must cover before it may answer.
+#
+# 0.58 looks high, and the translated-retrieval path makes it look higher still:
+# machine translation is paraphrastic, so a translated question covers the
+# corpus less well than a native one, and 7 of the 12 Luganda golden questions
+# land at 0.33-0.57 and are refused. "What is EFRIS and how does it work?"
+# scores 0.57 and is refused even though the corpus has EFRIS entries.
+#
+# It was measured rather than guessed, and it should not be lowered. Against
+# off-domain questions that borrow money/government vocabulary — the ones a
+# coverage metric actually confuses — the score distributions overlap:
+#
+#   coverage   in-domain 0.33-0.91      off-domain 0.00-0.59
+#   bm25       in-domain 7.78-15.27     off-domain 3.03-10.40
+#
+# Neither signal separates them, together or apart. End to end, lowering the
+# floor took wrong answers from 1 of 6 off-domain questions to 5 of 6:
+# "Who is the president of Uganda?" answered from the AEO scheme FAQ, "How do
+# I pay my rent to my landlord?" answered with URA payment instructions. The
+# downstream abstention guard does not catch them. Six extra correct answers
+# are not worth four extra confident wrong ones from a tax authority.
+#
+# Rewriting the translated query instead was also measured: it lifts exactly
+# one question over the line and pushes "What is withholding tax?" from 0.91
+# to 0.50, under it.
+#
+# test_faq_match_gate.py pins this. If you raise recall here, raise it with a
+# signal that separates — reranking or a judge over the candidates — not by
+# moving the floor.
 _FAQ_MATCH_MIN = float(os.getenv("FAQ_MATCH_MIN", "0.58"))
 _FAQ_MATCH_RELATIVE = float(os.getenv("FAQ_MATCH_RELATIVE", "0.82"))
 # Minimum share of an FAQ question's own terms that the query must account for
