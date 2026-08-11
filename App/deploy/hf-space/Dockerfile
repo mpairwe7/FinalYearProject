@@ -9,7 +9,7 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-f03006b carries PRs #234 + #235 + #238:
+# image. sha-b5d4969 carries PRs #234 + #235 + #238 + #241:
 #
 #   * Speech now honours all five locales the picker offers. The same
 #     two-entry {"en","lg"} language map had been copy-pasted into three
@@ -30,7 +30,13 @@
 #     Voice and Narrate toggles were spending 173px of a 370px row on
 #     padding. Verified on a Pixel 7 with both the narrowest ("EN") and
 #     widest ("NYN") locale codes.
-FROM landwind/ura-chatbot:sha-f03006b
+#   * Acholi finally gets its own voice. It had been falling back to an
+#     English one on the belief that Sunbird ships no Acholi speaker —
+#     wrong: that was read off this repo's own speaker table, not their
+#     catalogue. Speaker 241 is Acholi female, corroborated by the three
+#     IDs already configured matching that catalogue exactly, gender
+#     included. All five offered locales now reach a native voice.
+FROM landwind/ura-chatbot:sha-b5d4969
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
