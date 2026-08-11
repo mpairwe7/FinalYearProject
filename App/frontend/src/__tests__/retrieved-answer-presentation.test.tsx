@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import Markdown from '../components/Markdown';
 import { sourceLabel } from '../lib/uraContacts';
+import { stripCitationMarkers } from '../lib/answerText';
 
 // Verbatim from https://landwind22-ura-chatbot.hf.space/api/v1/chat for
 // "What services does URA provide?".
@@ -99,17 +100,32 @@ describe('typography', () => {
 });
 
 describe('citation markers', () => {
-  it('never strands a citation as its own paragraph', () => {
+  // The reference belongs in the Sources block under the answer, not mid-
+  // sentence. A pill on a lead-in read as a stray number: "Core services
+  // include: 1".
+  it('strips inline markers from the answer body', () => {
     const { container } = render(<Markdown content={SERVICES_ANSWER} />);
-    const paras = Array.from(container.querySelectorAll('p'));
-    for (const p of paras) {
-      expect((p.textContent ?? '').trim()).not.toMatch(/^\d+$/);
-    }
+    expect(container.querySelectorAll('sup.md-cite-ref')).toHaveLength(0);
+    expect(container.textContent).not.toMatch(/\[\d+\]/);
   });
 
-  it('still renders the marker as a superscript reference', () => {
+  it('leaves no seam where the marker was', () => {
     const { container } = render(<Markdown content={SERVICES_ANSWER} />);
-    expect(container.querySelectorAll('sup.md-cite-ref').length).toBeGreaterThan(0);
+    const paras = Array.from(container.querySelectorAll('p')).map((p) => p.textContent ?? '');
+    // no stray number paragraph, no doubled space, no space before punctuation
+    for (const p of paras) {
+      expect(p.trim()).not.toMatch(/^\d+$/);
+      expect(p).not.toMatch(/ {2,}/);
+      expect(p).not.toMatch(/\s[.,;:]/);
+    }
+    expect(paras.some((p) => p.trim().endsWith('include:'))).toBe(true);
+  });
+
+  it('removes a marker from mid-sentence without joining words', () => {
+    const { container } = render(
+      <Markdown content={'The Act [2] requires registration within twenty days [3].'} />,
+    );
+    expect(container.textContent).toContain('The Act requires registration within twenty days.');
   });
 });
 
@@ -130,5 +146,31 @@ describe('source labels', () => {
     expect(sourceLabel('https://ura.go.ug/tax-rates')).toBe('https://ura.go.ug/tax-rates');
     expect(sourceLabel('')).toBe('URA knowledge base');
     expect(sourceLabel(null)).toBe('URA knowledge base');
+  });
+});
+
+describe('citation markers are stripped everywhere the reply is consumed', () => {
+  // Three surfaces share the reply: the rendered message, the clipboard, and
+  // the narrator. A marker left in any of them shows up as a stray number in
+  // whatever the reader pastes, or gets voiced mid-sentence.
+  it('strips for copy and speech, not just for rendering', () => {
+    const raw = 'Pay via the URA portal [1]. Late filing attracts a penalty [2].';
+    expect(stripCitationMarkers(raw)).toBe(
+      'Pay via the URA portal. Late filing attracts a penalty.',
+    );
+  });
+
+  it('keeps a numeric-text link intact', () => {
+    const raw = 'See [1](https://ura.go.ug) for the schedule.';
+    expect(stripCitationMarkers(raw)).toBe(raw);
+  });
+
+  it('is a no-op on text without markers', () => {
+    const raw = 'The standard VAT rate in Uganda is 18%.';
+    expect(stripCitationMarkers(raw)).toBe(raw);
+  });
+
+  it('handles an empty reply', () => {
+    expect(stripCitationMarkers('')).toBe('');
   });
 });
