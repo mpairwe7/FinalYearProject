@@ -44,14 +44,27 @@ test.describe("WCAG 2.1 AA Accessibility", () => {
     await page.goto("/");
 
     // Composer input has aria-label
-    await expect(page.getByLabel("Type your message")).toBeVisible();
+    const input = page.getByLabel("Type your message");
+    await expect(input).toBeVisible();
 
-    // Send button has aria-label
-    await expect(page.getByLabel("Send message")).toBeVisible();
-
-    // Mic button — matched by accessible name (aria-label "Start speaking")
+    // Mic button — matched by accessible name (aria-label "Start speaking").
+    // Present in both composer states; only the primary slot beside it swaps.
     const micBtn = page.getByRole("button", { name: /speak/i });
     await expect(micBtn.first()).toBeVisible();
+
+    // The primary slot carries an accessible name in BOTH states, which is the
+    // part that matters here: an empty composer offers voice mode, and typing
+    // replaces it with send. Asserting both directions stops the morph from
+    // regressing into a permanently-disabled send button.
+    await expect(page.getByLabel("Enter voice mode")).toBeVisible();
+    await expect(page.getByLabel("Send message")).toHaveCount(0);
+
+    await input.fill("What is EFRIS?");
+    await expect(page.getByLabel("Send message")).toBeVisible();
+    await expect(page.getByLabel("Enter voice mode")).toHaveCount(0);
+
+    await input.fill("");
+    await expect(page.getByLabel("Enter voice mode")).toBeVisible();
   });
 
   test("interactive elements are keyboard-accessible", async ({ page }) => {

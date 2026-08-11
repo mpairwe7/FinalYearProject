@@ -698,12 +698,18 @@ export default function Page() {
     attachments: pendingAttachments,
     onAttachFiles: attachFiles,
     onRemoveAttachment: removeAttachment,
-    // Conversation-level controls live in the composer toolbar. Language is
-    // session-level and lives in the header instead — see <ChatHeader />.
-    onVoiceModeChange: setVoiceMode,
+    // Voice mode is the composer's only conversation-level control. Language
+    // is session-level and lives in the header instead — see <ChatHeader />.
+    //
+    // It carries narration with it. The separate "Narrate" checkbox is gone,
+    // and a voice mode that listens but answers in silence is not the thing
+    // anyone means by voice mode — so entering turns auto-narrate on and
+    // leaving turns it off, which is what ticking both boxes used to do.
+    onVoiceModeChange: (on: boolean) => {
+      setVoiceMode(on);
+      setAutoNarrate(on);
+    },
     voiceModeDisabled: !serverReady && !hasMediaRecorder,
-    autoNarrate,
-    onAutoNarrateChange: setAutoNarrate,
   };
 
   // ---- Render ----

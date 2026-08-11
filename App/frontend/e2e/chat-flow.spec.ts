@@ -21,13 +21,17 @@ test.describe("Agentic chat flow", () => {
     await expect(page.getByLabel("Type your message")).toBeVisible();
   });
 
-  test("send button is disabled until text is entered", async ({ page }) => {
+  test("the primary action becomes send once text is entered", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");
-    const send = page.getByLabel("Send message");
-    await expect(send).toBeDisabled();
+    // An empty composer no longer parks a disabled send button in the primary
+    // slot — it offers the thing you can actually do, which is talk.
+    await expect(page.getByLabel("Enter voice mode")).toBeVisible();
+    await expect(page.getByLabel("Send message")).toHaveCount(0);
+
     await page.getByLabel("Type your message").fill("What is the VAT rate?");
-    await expect(send).toBeEnabled();
+    await expect(page.getByLabel("Send message")).toBeEnabled();
+    await expect(page.getByLabel("Enter voice mode")).toHaveCount(0);
   });
 
   test("sending a message renders user + assistant bubbles", async ({ page }) => {
