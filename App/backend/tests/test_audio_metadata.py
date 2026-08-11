@@ -23,7 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.speech_service import _audio_metadata, _mp3_metadata  # noqa: E402
+from app.speech_service import (  # noqa: E402
+    _audio_metadata,
+    _input_duration_s,
+    _mp3_metadata,
+)
 
 
 def _wav(sample_rate: int = 24_000, seconds: float = 1.0) -> bytes:
@@ -126,6 +130,61 @@ class TestDegradesSafely(unittest.TestCase):
     def test_never_raises(self):
         for data in (b"", b"\xff", b"\xff\xf3", b"RIFF", b"ID3", b"ID3\x04\x00\x00"):
             _audio_metadata(data, 24_000)  # must not raise
+
+
+class TestInputDuration(unittest.TestCase):
+    def test_prefers_the_container_header(self):
+        self.assertAlmostEqual(_input_duration_s(_wav(24_000, 1.5), 16_000), 1.5, places=2)
+
+    def test_falls_back_to_raw_pcm16(self):
+        """/v1/asr documents its body as raw PCM16, which has no header."""
+        pcm = b"\x00\x00" * 16_000  # 1s mono int16 @ 16 kHz
+        self.assertAlmostEqual(_input_duration_s(pcm, 16_000), 1.0, places=2)
+
+    def test_degenerate_input_is_zero_not_an_error(self):
+        self.assertEqual(_input_duration_s(b"", 16_000), 0.0)
+        self.assertEqual(_input_duration_s(b"\x00" * 100, 0), 0.0)
+
+
+class TestTranscribeTimingFill(unittest.TestCase):
+    """Cloud ASR backends returned null duration_s/rtf; the wrapper fills them."""
+
+    def _model(self, chain_result):
+        from app.speech_service import SpeechModel
+
+        model = SpeechModel.__new__(SpeechModel)
+        model.enabled = True
+        model._transcribe_chain = lambda *a, **k: chain_result
+        return model
+
+    def test_fills_timing_a_cloud_backend_omitted(self):
+        from app.speech_service import TranscribeResult
+
+        model = self._model(TranscribeResult(text="hi", backend="sunbird_cloud"))
+        out = model.transcribe(b"\x00\x00" * 16_000, sample_rate=16_000)
+        self.assertAlmostEqual(out.duration_s, 1.0, places=2)
+        self.assertIsNotNone(out.latency_s)
+        self.assertIsNotNone(out.rtf)
+
+    def test_does_not_overwrite_a_local_backend(self):
+        """whisper_peft/faster_whisper measure their own; keep their numbers."""
+        from app.speech_service import TranscribeResult
+
+        model = self._model(
+            TranscribeResult(
+                text="hi", backend="whisper_peft", duration_s=9.0, latency_s=0.5, rtf=0.06
+            )
+        )
+        out = model.transcribe(b"\x00\x00" * 16_000, sample_rate=16_000)
+        self.assertEqual((out.duration_s, out.latency_s, out.rtf), (9.0, 0.5, 0.06))
+
+    def test_silent_failure_still_reports_input_duration(self):
+        """backend='unavailable' should still say how much audio was sent."""
+        from app.speech_service import TranscribeResult
+
+        model = self._model(TranscribeResult(text="", backend="unavailable"))
+        out = model.transcribe(b"\x00\x00" * 32_000, sample_rate=16_000)
+        self.assertAlmostEqual(out.duration_s, 2.0, places=2)
 
 
 if __name__ == "__main__":

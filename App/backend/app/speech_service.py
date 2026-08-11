@@ -186,6 +186,21 @@ def _audio_metadata(data: bytes, default_rate: int) -> tuple[int, int, float]:
     return default_rate, 0, 0.0
 
 
+def _input_duration_s(data: bytes, sample_rate: int) -> float:
+    """Wall-clock length of posted audio, for ASR results that omit it.
+
+    Prefers the container's own header; falls back to treating the bytes as
+    raw PCM16 at *sample_rate*, which is what `/v1/asr` documents its body to
+    be. Returns 0.0 rather than raising when the input makes no sense.
+    """
+    _, _, duration = _audio_metadata(data, sample_rate)
+    if duration:
+        return duration
+    if not data or sample_rate <= 0:
+        return 0.0
+    return round(len(data) / (sample_rate * 2), 3)  # int16 mono
+
+
 SPEECH_MAX_CONCURRENCY = int(os.getenv("SPEECH_MAX_CONCURRENCY", "2"))
 
 DEFAULT_EN_VOICE = os.getenv("SPEECH_EN_VOICE", "en_US-lessac-medium")
@@ -471,9 +486,31 @@ class SpeechModel:
     def transcribe(
         self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
     ) -> TranscribeResult:
-        """Transcribe raw PCM bytes.
+        """Transcribe raw PCM bytes, filling in any timing the backend omitted.
 
-        Fallback chain (local-first for production):
+        The local backends report duration_s / latency_s / rtf themselves; the
+        cloud ones reported none of them, so `/v1/asr` answered with nulls
+        whenever it fell through to Sunbird or Workers AI — which is the common
+        case for every non-English locale. Input duration does not depend on
+        which backend ran: it is a property of the audio that was posted. So it
+        is computed once here and used to fill the gaps, rather than at each
+        `return` in the chain where the next branch added would miss it.
+        """
+        t_start = time.perf_counter()
+        result = self._transcribe_chain(audio_bytes, sample_rate, language)
+        if result.duration_s is None:
+            result.duration_s = _input_duration_s(audio_bytes, sample_rate)
+        if result.latency_s is None:
+            result.latency_s = round(time.perf_counter() - t_start, 3)
+        if result.rtf is None and result.duration_s:
+            result.rtf = round(result.latency_s / max(result.duration_s, 0.01), 2)
+        return result
+
+    def _transcribe_chain(
+        self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
+    ) -> TranscribeResult:
+        """The backend fallback chain itself.
+
             ① Whisper + LoRA     — fine-tuned, language-specific, offline
             ② Local Sherpa ASR   — offline, if model available
             ③ faster-whisper     — CTranslate2 int8, good multilingual
