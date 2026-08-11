@@ -869,6 +869,24 @@ class SpeechModel:
             except Exception:
                 logger.debug("Workers AI TTS failed", exc_info=True)
 
+        # ①.75 Native cloud voice for a locale that has a local voice on paper
+        #      but whose local model may be absent from the running image —
+        #      today that is Luganda, whose luganda-vits-v1 does not ship in the
+        #      slim deploy image.
+        #
+        #      This MUST come before edge-tts. edge has no voice for any Ugandan
+        #      language, so it answers Luganda with an English one; letting it
+        #      run first means it always succeeds and Sunbird's native Luganda
+        #      speaker at ③ is never reached. That is not hypothetical — while
+        #      the edge voice was misconfigured, stage ② failed and the chain
+        #      fell through to Sunbird; repairing the edge voice would have
+        #      silently swapped Luganda's native speaker for an English one,
+        #      leaving it the only local language without a native voice.
+        if not prefer_native_cloud and (language or "en") != "en":
+            result = _try_sunbird()
+            if result:
+                return result
+
         # ② edge-tts (Microsoft neural voices — needs internet, no API key)
         try:
             result = _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
@@ -877,9 +895,10 @@ class SpeechModel:
         except Exception:
             logger.debug("edge-tts failed", exc_info=True)
 
-        # ③ Sunbird cloud TTS — for languages that did not already try it at ⓪
-        #    (i.e. en/lg, whose primary voice is local).
-        if not prefer_native_cloud:
+        # ③ Sunbird cloud TTS — English only by this point; every other locale
+        #    already tried it at ⓪ or ①.75, and the gates are mutually exclusive
+        #    so Sunbird is still attempted at most once per request.
+        if not prefer_native_cloud and (language or "en") == "en":
             result = _try_sunbird()
             if result:
                 return result
