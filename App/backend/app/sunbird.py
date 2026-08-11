@@ -270,7 +270,10 @@ def speech_to_text(
         data: dict[str, Any] = {}
         if language:
             data["language"] = language
-        resp = _post("/tasks/modal/stt", files=files, data=data)
+        # /tasks/modal/stt was retired; /tasks/audio/transcriptions replaces
+        # it (along with /stt, /stt_from_gcs and /org/stt). Same multipart
+        # shape — an `audio` part plus a `language` field.
+        resp = _post("/tasks/audio/transcriptions", files=files, data=data)
         result = resp.json()
         transcription = (
             result.get("output", {}).get("audio_transcription")
@@ -294,9 +297,19 @@ def text_to_speech(
     if not is_available() or not speaker_id:
         return None
     try:
-        resp = _post("/tasks/modal/tts", json={
+        # /tasks/modal/tts was retired and answered 405 for every request —
+        # which is why non-English narration had been failing across the
+        # board, not just for the locales missing a speaker id.
+        # /tasks/audio/speech replaces it (along with /tasks/runpod/tts and
+        # /tasks/modal/orpheus/tts) and routes by model. The numeric ids in
+        # TTS_SPEAKERS are spark-tts speakers, so the model must be named
+        # explicitly; orpheus uses catalog tags like "salt_lug_0001" instead
+        # and would reject them. `voice` is a string here, not the old
+        # integer `speaker_id`.
+        resp = _post("/tasks/audio/speech", json={
             "text": text[:10000],
-            "speaker_id": speaker_id,
+            "model": "spark-tts",
+            "voice": str(speaker_id),
             "response_mode": "url",
         })
         data = resp.json()
@@ -306,7 +319,10 @@ def text_to_speech(
         return {
             "audio_url": audio_url,
             "file_name": data.get("file_name"),
-            "expires_at": data.get("expires_at"),
+            # The new response names this `audio_url_expires_at`; keep reading
+            # the old key too so a rollback to an older Space image still
+            # populates it.
+            "expires_at": data.get("audio_url_expires_at") or data.get("expires_at"),
         }
     except Exception as e:
         logger.warning("Sunbird TTS failed: %s", e)
