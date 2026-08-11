@@ -2,6 +2,7 @@
 
 import React, { lazy, memo, Suspense, useMemo } from "react";
 
+import { stripCitationMarkers } from "../lib/answerText";
 import { PHONE_SRC } from "../lib/uraContacts";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
@@ -12,7 +13,7 @@ const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
  * Handles both structured markdown AND flat LLM prose by:
  *   - Parsing standard markdown (headings, lists, code, blockquotes, etc.)
  *   - Auto-splitting long flat paragraphs at sentence boundaries
- *   - Rendering [1] citation references as superscript pills
+ *   - Stripping [1] citation markers (references live in the Sources block)
  *   - Breaking on --- for disclaimer sections
  */
 
@@ -166,16 +167,9 @@ function splitLongParagraph(text: string): string[] {
   }
   if (buf) sentences.push(buf);
 
-  // A trailing "[1]" is its own "sentence" after the split above, which left it
-  // stranded as a paragraph containing nothing but a citation pill — a bare
-  // superscript 1 floating under the answer. Reattach any citation-only chunk
-  // to the text it refers to.
-  for (let j = sentences.length - 1; j > 0; j--) {
-    if (/^(?:\[\d+\]\s*)+$/.test(sentences[j].trim())) {
-      sentences[j - 1] = `${sentences[j - 1]} ${sentences[j].trim()}`;
-      sentences.splice(j, 1);
-    }
-  }
+  // There is no citation-marker case to handle here: stripCitationMarkers runs
+  // before parsing, so a trailing "[1]" can no longer become its own sentence
+  // and strand itself as a paragraph holding nothing but a pill.
 
   // Only split if we got multiple chunks
   return sentences.length >= 2 ? sentences : [text];
@@ -199,8 +193,6 @@ function splitLongParagraph(text: string): string[] {
  *     prose that happens to contain a semicolon is left alone;
  *   - every part must be short enough to read as an item, so a paragraph of
  *     semicolon-joined clauses is not shredded;
- *   - a trailing citation marker stays with the lead-in, where it refers to
- *     the whole answer rather than to the last item.
  *
  * Returns null when the text is not an enumeration, and the caller keeps its
  * paragraph.
@@ -228,12 +220,6 @@ function asEnumeration(text: string): { lead: string; items: string[] } | null {
   }
   if (!rest || rest.length < 80) return null;
 
-  // Keep a trailing "[1]" (and any run of them) attached to the lead-in.
-  const cite = rest.match(/(\s*(?:\[\d+\]\s*)+)$/);
-  if (cite) {
-    rest = rest.slice(0, rest.length - cite[1].length).trim();
-    lead += cite[1].replace(/\s+$/, "");
-  }
   rest = rest.replace(/\.$/, "");
 
   const parts = rest
@@ -342,7 +328,7 @@ function parseTableRow(line: string) {
 }
 
 function parseBlocks(src: string): Block[] {
-  const lines = src.split("\n");
+  const lines = stripCitationMarkers(src).split("\n");
   const blocks: Block[] = [];
   let i = 0;
 

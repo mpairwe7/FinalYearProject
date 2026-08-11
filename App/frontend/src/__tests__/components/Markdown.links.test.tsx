@@ -55,10 +55,13 @@ describe("Markdown autolinking", () => {
     expect(a).not.toHaveAttribute("target");
   });
 
-  it("keeps [n] as a citation pill, not a link", () => {
+  it("strips [n] citation markers from the body, and never links them", () => {
+    // References live in the Sources block under the answer; a pill mid-
+    // sentence read as a stray number ("Core services include: 1").
     const { container } = render(<Markdown content={"Per the Act [1] you must file."} />);
-    expect(container.querySelector(".md-cite-ref")).toBeInTheDocument();
+    expect(container.querySelector(".md-cite-ref")).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();
+    expect(container.textContent).toBe("Per the Act you must file.");
   });
 
   it("treats numeric link text [1](url) as a link, not a citation", () => {
