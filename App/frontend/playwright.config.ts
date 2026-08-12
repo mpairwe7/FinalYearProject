@@ -67,6 +67,24 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
       testMatch: /a11y\.spec\.ts$/,
     },
+    // Gecko. CI gates on the chromium projects; this one exists because some
+    // locked-down containers can't spawn Chromium's renderer at all (see the
+    // launchOptions note above), and a layout change still needs *an* engine to
+    // be checked against before it is pushed. Not a substitute for chromium:
+    // grid track rounding and backdrop-filter differ between the two.
+    {
+      name: "firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+        // Gecko rejects `microphone` outright ("Unknown permission"), and the
+        // fake-media flags above are Chromium-only, so both are dropped here.
+        permissions: [],
+        launchOptions: {},
+      },
+      // The voice flow depends on the Chromium fake capture device, so it is not
+      // meaningful on this project.
+      testIgnore: /voice.*\.spec\.ts$/,
+    },
   ],
 
   // Start the Next.js dev server before E2E runs (local only — CI builds first)

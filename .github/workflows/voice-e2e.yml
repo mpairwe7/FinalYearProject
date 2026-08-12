@@ -8,6 +8,9 @@
 #       MediaRecorder → AudioContext capture pipeline against Chromium's fake
 #       media device; /api/* is stubbed (helpers.ts). Asserts the UI state
 #       machine + request contract (raw-audio body, X-Voice-Consent, sample_rate).
+#       It has since become the general Blink lane: theme, responsive, staff
+#       operations UI and the WCAG audit all ride along here, because this is the
+#       only place a real Chromium renderer is available.
 #
 #   Tier B (tier-b-integration) — same browser flow against a REAL FastAPI
 #       backend reached via the Next.js /api rewrite, started with deterministic
@@ -37,6 +40,15 @@ on:
       - "App/frontend/src/styles/**"
       - "App/frontend/src/components/ConversationRail.tsx"
       - "App/frontend/src/components/ChatHeader.tsx"
+      # Staff operations UI. Built against Gecko (Chromium cannot spawn a
+      # renderer in the dev sandbox), so Tier A is the only place its grid
+      # tracks and backdrop-filter are ever checked in Blink.
+      - "App/frontend/src/app/signin/**"
+      - "App/frontend/src/app/admin/**"
+      - "App/frontend/src/app/agent/**"
+      - "App/frontend/src/components/StaffGuard.tsx"
+      - "App/frontend/src/components/staffGuard.css"
+      - "App/frontend/src/lib/authSession.ts"
       - "App/backend/app/speech_service.py"
       - ".github/workflows/voice-e2e.yml"
   pull_request:
@@ -106,6 +118,9 @@ jobs:
 
       - name: Run responsive.spec.ts (layout breakpoints — chromium + mobile-chrome)
         run: bunx playwright test e2e/responsive.spec.ts --project=chromium --project=mobile-chrome
+
+      - name: Run staff-ui.spec.ts (operations UI in Blink — chromium + mobile-chrome)
+        run: bunx playwright test e2e/staff-ui.spec.ts --project=chromium --project=mobile-chrome
 
       - name: Run a11y.spec.ts (WCAG 2.1 AA audit — desktop + mobile)
         run: bunx playwright test e2e/a11y.spec.ts --project=a11y --project=mobile-chrome
