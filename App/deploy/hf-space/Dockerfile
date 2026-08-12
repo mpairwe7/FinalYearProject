@@ -8,6 +8,43 @@
 # config (Sunbird/Gemini/Cloudflare secrets, SPEECH_ENABLED, …) is supplied as
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
+# sha-9c69489 is the first image with staff sign-in and the operations
+# dashboards: /signin (+/signin/callback), /admin and /agent, gated by StaffGuard.
+# Auth is real OIDC — authorization-code + PKCE S256 to Auth0, RS256 tokens
+# verified against the tenant's live JWKS. The backend verifies and never issues,
+# so there is no password form and no client secret anywhere; the public client's
+# issuer, client id and audience are baked into the bundle by design (build args,
+# from repo variables). Runtime verification vars are Space variables. See
+# docs/STAFF_AUTH_DEPLOYMENT.md.
+#
+# Five defects were found by testing against a real provider rather than a mock,
+# every one of which made sign-in impossible on any deployment:
+#   * The app's own CSP blocked the token exchange. connect-src was 'self', which
+#     was right while every browser call went through the /api/* rewrite — but the
+#     callback exchanges its code directly with the provider, because a public
+#     client has no secret for a proxy to protect. Failed as a bare "NetworkError".
+#   * Roles were read from a flat `role` claim no real provider sends. Keycloak
+#     nests them under realm_access.roles, Auth0 uses permissions or a namespaced
+#     claim. Every genuine officer resolved to "public" and was refused by the
+#     dashboard they had just been granted.
+#   * An unmapped role value reached AuthUser.role, which is a Literal, so a valid
+#     sign-in 500'd instead of degrading. Unknown vocabulary is now "public".
+#   * Endpoints were hardcoded to Keycloak's paths. Auth0 serves /authorize and
+#     /oauth/token, Entra and Okta differ again; they are now discovered from
+#     /.well-known/openid-configuration.
+#   * No `audience` was sent, so Auth0 returns an OPAQUE access token — not a JWT
+#     at all — and the backend rejected every sign-in as malformed.
+#
+# Also fixes the frontend lint gate, red since the dashboards landed (four
+# set-state-in-effect violations, resolved by not keeping derived state, plus a
+# raw <a> to a route), and trims whitespace from OIDC config: the issuer had been
+# set with a trailing space, invisible in a variables list, which encodes into the
+# discovery host as %20.
+#
+# Verified: both an admin and a staff identity 15/15 end-to-end against a live
+# Keycloak 26 (re-run after every refactor), 1285 backend tests, 101 frontend
+# tests, and the dashboards' layout on chromium + mobile-chrome in CI.
+#
 # sha-b970c3d adds two fixes found by verifying 20 FAQs against this Space:
 #   * The Sources block was built from a set, so it had no order and the
 #     document the answer came from was not reliably first — citations and
@@ -215,7 +252,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-b970c3d
+FROM landwind/ura-chatbot:sha-9c69489
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
