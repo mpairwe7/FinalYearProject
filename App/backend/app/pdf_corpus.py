@@ -91,6 +91,17 @@ _LEADER_RUN_RE = re.compile(r"(?:[.�]\s*){3,}\d*")
 _DIGIT_DOT_RE = re.compile(r"(?<=\d)�(?=\d)")
 # Markdown emphasis leaks out of pymupdf4llm headings ("**4.3 Certainty**").
 _EMPHASIS_RE = re.compile(r"[*_]{1,3}")
+# pymupdf4llm replaces every figure with a literal placeholder line. 956 of 7,035
+# chunks carried one (2,491 occurrences), and a query with no real match could be
+# answered with "picture [468 x 294] intentionally omitted" as the evidence —
+# observed live for "write me a poem about cats". The text is noise for retrieval
+# either way: it matches nothing a taxpayer would ask and dilutes the chunk.
+_FIGURE_PLACEHOLDER_RE = re.compile(
+    # The leading class also eats the markdown run-in the extractor emits around
+    # these lines ("**==>"), which would otherwise be left stranded as noise.
+    r"[*_#>=\s]*(?:picture|image|figure|table)\s*\[[^\]]*\]\s*intentionally\s+omitted[*_\s]*",
+    re.I,
+)
 _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
 
 # Fiscal year in a filename, e.g. "...-FY-2024-25-1.pdf", "...FY2023-24.pdf",
@@ -152,6 +163,7 @@ def normalise_extracted_text(text: str) -> str:
         return ""
     text = _DIGIT_DOT_RE.sub(".", text)
     text = _LEADER_RUN_RE.sub(" ", text)
+    text = _FIGURE_PLACEHOLDER_RE.sub(" ", text)
     text = text.replace("�", "")
     lines = [_MULTI_SPACE_RE.sub(" ", line).rstrip() for line in text.split("\n")]
     return "\n".join(lines).strip()

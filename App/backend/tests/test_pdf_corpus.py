@@ -88,6 +88,25 @@ class ExtractionNormalisationTests(unittest.TestCase):
         prose = "Section 1.2.3 applies. See a. b. c. below."
         self.assertEqual(normalise_extracted_text(prose), prose)
 
+    def test_strips_figure_placeholders(self) -> None:
+        """pymupdf4llm replaces every figure with a literal placeholder line. 956 of
+        7,035 chunks carried one, and a query with no real match could be answered
+        with "picture [468 x 294] intentionally omitted" as its evidence — observed
+        live for "write me a poem about cats"."""
+        self.assertEqual(
+            normalise_extracted_text("Intro text **==> picture [468 x 294] intentionally omitted more text"),
+            "Intro text more text",
+        )
+        # A chunk that is nothing but placeholders collapses to empty, so the
+        # min-chars floor drops it instead of indexing noise.
+        self.assertEqual(normalise_extracted_text("picture [100 x 200] intentionally omitted"), "")
+        self.assertEqual(normalise_extracted_text("table [10 x 20] INTENTIONALLY OMITTED"), "")
+
+    def test_real_prose_and_tables_survive_placeholder_stripping(self) -> None:
+        self.assertEqual(normalise_extracted_text("The rate is 18% on supplies."), "The rate is 18% on supplies.")
+        table = "| Band | Rate |\n| --- | --- |"
+        self.assertEqual(normalise_extracted_text(table), table)
+
     def test_heading_normalisation_strips_markdown_emphasis(self) -> None:
         self.assertEqual(normalise_heading("**4�3 Certainty**"), "4.3 Certainty")
 

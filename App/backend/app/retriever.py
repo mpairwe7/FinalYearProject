@@ -234,6 +234,83 @@ _CONTEXT_FLOOR = float(os.getenv("RETRIEVER_CONTEXT_FLOOR", "0.20"))
 #: context that reads as corroboration.
 _CONTEXT_RELATIVE_DROP = float(os.getenv("RETRIEVER_CONTEXT_RELATIVE_DROP", "0.45"))
 
+#: Content words carry the subject of a question; these do not.  Shared with the
+#: same intent as ``cache._CACHE_QUERY_STOPWORDS`` — a query and a passage that
+#: agree only on "what is the" are not about the same thing.
+_LEXICAL_STOPWORDS = frozenset(
+    "a an the is are was were be been being am do does did will would shall should "
+    "can could may might must have has had of in on at to for with by from as and "
+    "or not no but so if then than that this these those it its i me my we our you "
+    "your what which who whom whose how when where why about into over under "
+    "please tell know like want need explain describe give show me".split()
+)
+_LEXICAL_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+#: Minimum share of a question's *information* (IDF-weighted content words) that
+#: must appear in a passage for it to count as relevant when no reranker score
+#: exists.
+#:
+#: Calibrated against the live sidecar corpus, not guessed. Plain term recall does
+#: not separate the classes — "How do I hack into a bank account?" scores 0.667 on
+#: unweighted recall because a tax corpus is full of "bank" and "account". Weighting
+#: by IDF fixes that: measured over 8 off-domain questions and 130 on-domain ones
+#: (120 verbatim FAQ questions plus 10 paraphrases), on-domain ranged 0.557–1.000
+#: while off-domain sat at 0.000–0.406, with one outlier at 0.664. 0.50 leaves
+#: margin under the on-domain minimum and rejects 7 of 8 off-domain.
+LEXICAL_RELEVANCE_FLOOR = float(os.getenv("RETRIEVER_LEXICAL_FLOOR", "0.50"))
+
+
+def _lexical_terms(text: str) -> set[str]:
+    return {
+        token
+        for token in _LEXICAL_TOKEN_RE.findall((text or "").lower())
+        if token not in _LEXICAL_STOPWORDS and len(token) > 2
+    }
+
+
+def lexical_relevance(
+    query: str, hit: dict[str, Any], encoder: BM25SparseEncoder | None = None
+) -> float:
+    """Share of the query's *information* present in *hit*, in ``[0, 1]``.
+
+    With an *encoder*, terms are weighted by IDF, which is what makes the score
+    discriminating; without one it degrades to plain term recall.
+
+    A cheap stand-in for a relevance score when nothing better exists. It is not
+    a ranking signal — BM25 already ranked these — it answers a narrower
+    question: *is this passage about what was asked at all?*
+
+    This exists because the sparse-only sidecar has no cross-encoder, so every
+    hit reaches :meth:`OutputGuard.should_abstain` carrying only an RRF score,
+    ``hit_relevance`` returns ``None``, and the guard took its "cannot assess
+    relevance" branch and answered anyway. That was safe while the fallback was
+    keyword search over curated FAQ rows, which had their own question-F1 gate;
+    over 7,000 raw document chunks BM25 finds *something* for any query, so
+    "What is the capital of France?" was answered from a chunk about Thales Las
+    France (Tanzania Branch) — one shared token out of two content words.
+
+    Recall over precision by design: matching the terms is necessary for
+    relevance, not sufficient. Downstream grounding and claim checks still run.
+    """
+    terms = _lexical_terms(query)
+    if not terms:
+        return 0.0
+    haystack = " ".join(
+        str(hit.get(field) or "")
+        for field in ("text", "question", "answer", "section", "title", "source")
+    )
+    present = _lexical_terms(haystack)
+    if not present:
+        return 0.0
+    if encoder is None:
+        return len(terms & present) / len(terms)
+
+    weights = {term: encoder.term_idf(term) for term in terms}
+    total = sum(weights.values())
+    if total <= 0:
+        return 0.0
+    return sum(w for term, w in weights.items() if term in present) / total
+
 
 def prune_context(
     hits: list[dict[str, Any]],
@@ -371,6 +448,24 @@ class BM25SparseEncoder:
     @property
     def corpus_hash(self) -> str:
         return self._corpus_hash
+
+    @property
+    def max_idf(self) -> float:
+        """Highest IDF in the corpus; the weight given to unseen terms."""
+        return max(self._idf.values()) if self._idf else 1.0
+
+    def term_idf(self, token: str) -> float:
+        """IDF of *token*, or :attr:`max_idf` when the corpus has never seen it.
+
+        Treating an out-of-vocabulary term as maximally informative is the point:
+        a question containing a word absent from the entire corpus is very likely
+        not about this corpus, and weighting it heavily makes that unmatched term
+        dominate the coverage score.
+        """
+        tid = self._vocab.get(token)
+        if tid is None:
+            return self.max_idf
+        return self._idf.get(tid, 0.0)
 
     # -- Serialisation -------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
@@ -716,8 +811,19 @@ class HybridRetriever:
         # occupy most of top_k and a superseded edition can outrank the current
         # one on dense score alone.
         candidates = _dedupe_candidates(candidates)
+        self._attach_lexical_relevance(query, candidates)
         self._ready = True
         return candidates[:top_k]
+
+    def _attach_lexical_relevance(self, query: str, candidates: list[dict[str, Any]]) -> None:
+        """Stamp each candidate with ``score_lexical``, in place.
+
+        Computed here because this class owns the BM25 statistics the score needs.
+        ``OutputGuard.should_abstain`` then reads the field without having to
+        reach for an encoder, and both retrieval paths carry it.
+        """
+        for candidate in candidates:
+            candidate["score_lexical"] = lexical_relevance(query, candidate, self._sparse_encoder)
 
     def _verify_bm25_binding(self) -> None:
         """Disable sparse retrieval if the loaded bm25_state's corpus hash does
@@ -974,6 +1080,7 @@ class HybridRetriever:
             # passage — they cost reranker time and then crowd genuinely
             # different evidence out of top_k.
             candidates = _dedupe_candidates(candidates)
+            self._attach_lexical_relevance(query, candidates)
 
             # Cross-encoder reranking
             if self._reranker and candidates:

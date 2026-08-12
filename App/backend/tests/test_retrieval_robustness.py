@@ -14,11 +14,13 @@ from unittest import mock
 
 from app.corrective_rag import _improved, _ranking_key
 from app.retriever import (
+    BM25SparseEncoder,
     HybridRetriever,
     _dedupe_candidates,
     _shingles,
     fiscal_year_rank,
     hit_relevance,
+    lexical_relevance,
 )
 
 
@@ -325,3 +327,92 @@ class BackendPriorityTests(unittest.TestCase):
         r = HybridRetriever()
         r._ready = True
         self.assertEqual(r.backend, "qdrant")
+
+
+class LexicalRelevanceGateTests(unittest.TestCase):
+    """The sparse-only sidecar has no cross-encoder, so every hit reached
+    should_abstain carrying only an RRF score, hit_relevance returned None, and the
+    guard took its "cannot assess relevance" branch and answered anyway. Safe over
+    499 curated FAQ rows behind the question-F1 gate; not safe over 7,000+ raw
+    document chunks, where BM25 returns something for every query.
+
+    Observed live before the fix: "What is the capital of France?" answered from a
+    chunk about Thales Las France (Tanzania Branch).
+    """
+
+    _CHUNK = {
+        "text": (
+            "Value Added Tax is charged at eighteen percent on taxable supplies "
+            "made by a registered person in Uganda."
+        ),
+        "section": "VAT > 3.1 Rates",
+        "source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+    }
+
+    def test_unweighted_coverage_counts_matched_content_terms(self) -> None:
+        self.assertEqual(lexical_relevance("taxable supplies", self._CHUNK), 1.0)
+        self.assertEqual(lexical_relevance("zzzz qqqq", self._CHUNK), 0.0)
+
+    def test_stopwords_and_short_tokens_do_not_inflate_the_score(self) -> None:
+        """"What is the ..." must not count as agreement on subject."""
+        self.assertEqual(lexical_relevance("what is the", self._CHUNK), 0.0)
+
+    def test_idf_weighting_demotes_terms_the_corpus_uses_everywhere(self) -> None:
+        """Plain recall scored "hack into a bank account" 0.667 against this corpus
+        because "bank" and "account" are common in it. Weighting by IDF is what
+        makes the unmatched, distinctive term dominate."""
+        encoder = BM25SparseEncoder().fit(
+            [
+                "the bank account details for paying tax",
+                "a bank account is required for registration",
+                "taxable supplies of goods and services",
+            ]
+        )
+        chunk = {"text": "the bank account details for paying tax"}
+        unweighted = lexical_relevance("hack bank account", chunk)
+        weighted = lexical_relevance("hack bank account", chunk, encoder)
+        self.assertGreater(unweighted, weighted)
+
+    def test_an_unseen_term_is_treated_as_maximally_informative(self) -> None:
+        encoder = BM25SparseEncoder().fit(["taxable supplies of goods and services"])
+        self.assertEqual(encoder.term_idf("nonexistentword"), encoder.max_idf)
+
+    def test_abstains_on_a_stamped_low_relevance_hit(self) -> None:
+        from app.guardrails import OutputGuard
+
+        self.assertTrue(
+            OutputGuard.should_abstain([{"score_rrf": 0.016, "score_lexical": 0.10}])
+        )
+
+    def test_answers_on_a_stamped_high_relevance_hit(self) -> None:
+        from app.guardrails import OutputGuard
+
+        self.assertFalse(
+            OutputGuard.should_abstain([{"score_rrf": 0.016, "score_lexical": 0.95}])
+        )
+
+    def test_a_reranker_score_still_takes_precedence(self) -> None:
+        """The cross-encoder is the better signal wherever it exists."""
+        from app.guardrails import OutputGuard
+
+        self.assertFalse(
+            OutputGuard.should_abstain([{"score_norm": 0.9, "score_lexical": 0.0}])
+        )
+        self.assertTrue(
+            OutputGuard.should_abstain([{"score_norm": 0.01, "score_lexical": 1.0}])
+        )
+
+    def test_unstamped_hits_keep_the_permissive_legacy_behaviour(self) -> None:
+        """Keyword/FAQ hits arrive unstamped and already carry their own
+        authorization gate; scoring them again double-gates them and re-breaks
+        distress-framed questions (the bug PR #167 fixed)."""
+        from app.guardrails import OutputGuard
+
+        self.assertFalse(OutputGuard.should_abstain([{"_overlap": 3.2, "answer": "..."}]))
+
+    def test_a_malformed_stamp_is_ignored_rather_than_crashing(self) -> None:
+        from app.guardrails import OutputGuard
+
+        self.assertFalse(
+            OutputGuard.should_abstain([{"score_rrf": 0.016, "score_lexical": "nonsense"}])
+        )

@@ -399,21 +399,46 @@ class OutputGuard:
 
     @staticmethod
     def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD_NORM) -> bool:
-        """Return True if the best calibrated retrieval relevance is too low.
+        """Return True if the best retrieval relevance is too low to answer from.
 
-        Uses the normalized [0,1] reranker score (P1-5). When no reranker
-        signal is available (RRF-only / keyword fallback), relevance is unknown
-        — we do NOT abstain on an incomparable raw score; the presence of hits
-        plus downstream grounding/claim checks govern.
+        Prefers the normalized [0,1] reranker score (P1-5). Failing that, uses the
+        IDF-weighted lexical coverage the retriever stamps as ``score_lexical``.
+        Failing both, relevance is unknown and we do not abstain on an
+        incomparable raw score.
+
+        The middle tier exists because "no comparable score" used to mean "answer
+        anyway", and the sparse-only sidecar has no cross-encoder. Over 7,000+ raw
+        document chunks that let BM25's always-something result be served for
+        off-domain questions — "What is the capital of France?" answered from a
+        chunk about Thales Las France (Tanzania Branch).
+
+        Only *stamped* hits are judged this way, deliberately. Keyword/FAQ hits
+        arrive unstamped and already carry their own authorization gate
+        (``service._faq_match_score`` scores the FAQ's own question against the
+        query, and ``_retain_faq_candidates`` applies a relative cutoff). Scoring
+        them again here double-gates them and re-breaks distress-framed questions,
+        whose wording overlaps an FAQ answer weakly — the bug PR #167 fixed.
         """
         if not hits:
             return True
-        from .retriever import hit_relevance
+        from .retriever import LEXICAL_RELEVANCE_FLOOR, hit_relevance
 
         scores = [r for h in hits if (r := hit_relevance(h)) is not None]
-        if not scores:
+        if scores:
+            return max(scores) < threshold
+
+        stamped: list[float] = []
+        for hit in hits:
+            value = hit.get("score_lexical")
+            if value is None:
+                continue
+            try:
+                stamped.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        if not stamped:
             return False  # degraded mode — cannot assess relevance by score
-        return max(scores) < threshold
+        return max(stamped) < LEXICAL_RELEVANCE_FLOOR
 
     @staticmethod
     def should_escalate(
