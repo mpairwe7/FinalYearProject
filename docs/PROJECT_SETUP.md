@@ -149,6 +149,7 @@ AUTH_DEV_SECRET=dev-insecure-change-me  # Shared secret for HS256
 OIDC_ISSUER=                  # OIDC issuer URI (RS256)
 OIDC_AUDIENCE=ura-chatbot     # OIDC audience
 OIDC_JWKS_URL=                # JWKS endpoint (RS256)
+OIDC_ROLE_CLAIM=              # Optional dot-path override, e.g. realm_access.roles
 
 # Speech Pipeline (Phase 16 — requires speech models)
 SPEECH_ENABLED=true
@@ -236,6 +237,84 @@ python App/app.py
 # Simple classifier demo
 python App/classifier.py
 ```
+
+## Staff Sign-In (OIDC)
+
+`/signin`, `/admin` and `/agent` need a staff identity. The backend **verifies**
+tokens but never issues them, so there is no password form — sign-in is an
+OAuth 2.1 authorization-code redirect with PKCE S256 to your identity provider
+(public client, no secret in the bundle).
+
+### Wiring a provider
+
+The frontend needs three build-time variables and the backend four at runtime:
+
+```bash
+# Frontend (inlined at BUILD time — a rebuild is required to change them)
+NEXT_PUBLIC_OIDC_ISSUER=https://idp.example.gov/realms/ura
+NEXT_PUBLIC_OIDC_CLIENT_ID=ura-chatbot
+NEXT_PUBLIC_OIDC_SCOPE="openid profile email"   # optional, this is the default
+
+# Backend (read at process start)
+AUTH_ALG=RS256
+OIDC_ISSUER=https://idp.example.gov/realms/ura
+OIDC_AUDIENCE=ura-chatbot
+OIDC_JWKS_URL=https://idp.example.gov/realms/ura/protocol/openid-connect/certs
+```
+
+Three things are easy to get wrong and each fails in a way that does not name
+its own cause:
+
+- **`connect-src` must allow the provider.** The callback exchanges its code
+  directly with the provider's token endpoint, which is the one browser call
+  that does not go through the `/api/*` rewrite. `next.config.mjs` derives that
+  origin from `NEXT_PUBLIC_OIDC_ISSUER` automatically — but it reads the value at
+  **server start**, while the client bundle inlines it at **build time**. Set it
+  in both places or sign-in fails with an opaque `NetworkError`.
+- **The access token needs the right `aud`.** Keycloak does not add your client
+  to the audience by default; without an audience mapper the backend rejects
+  every token with `audience mismatch`. Redirect URIs must also list
+  `<app-origin>/signin/callback` exactly.
+- **Roles are read from wherever your provider puts them.** Keycloak sends
+  `realm_access.roles`, Entra ID and Okta commonly send `roles` or `groups`;
+  only our dev tokens use a flat `role`. All of these are probed by default. Use
+  `OIDC_ROLE_CLAIM` (a dot-path, e.g. `realm_access.roles`) if yours differs.
+  Role names must match `ura_staff` / `ura_admin` / `ura_auditor` — hyphens and
+  group-path prefixes are normalised, anything unrecognised resolves to `public`
+  and the dashboards refuse it.
+
+### Verifying locally against a real Keycloak
+
+```bash
+docker run -d --name ura-kc -p 8180:8080 \
+  -v "$PWD/realm.json:/opt/keycloak/data/import/realm.json:ro" \
+  quay.io/keycloak/keycloak:26.0 start-dev --import-realm --http-port=8080
+```
+
+The realm needs a public client (`publicClient: true`,
+`pkce.code.challenge.method: S256`), an `oidc-audience-mapper` adding the client
+to `aud`, realm roles named as above, and users holding them. Point both the
+frontend and backend at `http://127.0.0.1:8180/realms/<realm>` — the issuer must
+match byte-for-byte on both sides, so do not mix `localhost` and `127.0.0.1`.
+
+### Dev-token fallback
+
+Where no provider is configured, `/signin` can accept a locally minted token:
+
+```bash
+NEXT_PUBLIC_DEV_SIGNIN=true   # frontend: reveals the panel
+AUTH_ALG=HS256                # backend
+AUTH_DEV_SECRET=<shared secret>
+```
+
+```bash
+cd App/backend && python -c \
+  "from app.auth.jwt_auth import make_dev_token; print(make_dev_token('dev-user', role='ura_admin'))"
+```
+
+This is **not** authentication — anyone with the secret can mint one, and the
+panel says so on screen. `make_dev_token` refuses to run under
+`APP_ENV=production`; leave `NEXT_PUBLIC_DEV_SIGNIN` unset on any real deploy.
 
 ## Project Structure
 

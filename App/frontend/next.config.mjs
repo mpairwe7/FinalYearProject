@@ -10,6 +10,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL || "http://127.0.0.1:8887";
 const isDev = process.env.NODE_ENV !== "production";
 
+// Origin of the OIDC provider, if one is configured.
+//
+// Every other call the browser makes goes through the /api/* rewrite, but the
+// sign-in callback exchanges its authorization code directly with the provider's
+// token endpoint. That is deliberate: a public client holds no secret, so there
+// is nothing for a server-side proxy to protect (OAuth 2.1 §4.1 with PKCE), and
+// the backend issues no tokens of its own to proxy through. So this one origin
+// has to be allowed in connect-src or the exchange is blocked and sign-in fails
+// with an opaque "NetworkError".
+//
+// Derived from the issuer rather than hardcoded, and omitted entirely when no
+// provider is set, so a deployment that does not use OIDC keeps the tighter policy.
+const OIDC_ORIGIN = (() => {
+  const issuer = process.env.NEXT_PUBLIC_OIDC_ISSUER || "";
+  if (!issuer) return "";
+  try {
+    return new URL(issuer).origin;
+  } catch {
+    console.warn(`[next.config] NEXT_PUBLIC_OIDC_ISSUER is not a URL: ${issuer}`);
+    return "";
+  }
+})();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
@@ -61,9 +84,10 @@ const nextConfig = {
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src 'self' https://fonts.gstatic.com",
           "img-src 'self' data:",
-          // All API calls go through the Next.js rewrite at /api/*, so 'self' is
-          // the only origin the browser needs. Allow ws: for Turbopack HMR in dev.
-          `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
+          // API calls go through the Next.js rewrite at /api/*, so 'self' covers
+          // them all; the OIDC token exchange is the one exception (see above).
+          // Allow ws: for Turbopack HMR in dev.
+          `connect-src 'self'${OIDC_ORIGIN ? ` ${OIDC_ORIGIN}` : ""}${isDev ? " ws: wss:" : ""}`,
         ].join("; "),
       },
     ];

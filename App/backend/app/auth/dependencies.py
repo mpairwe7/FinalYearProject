@@ -18,6 +18,7 @@ or for optional auth (public endpoint that personalizes if signed in)::
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,6 +31,93 @@ from .models import AuthUser
 logger = logging.getLogger(__name__)
 
 _verifier: JWTVerifier | None = None
+
+# ---------------------------------------------------------------------------
+# Role resolution
+#
+# Real providers do not put roles where our dev tokens do. Keycloak nests them
+# under ``realm_access.roles`` (realm roles) or ``resource_access.<client>.roles``
+# (client roles); Entra ID and Okta commonly use ``groups``. Only our own
+# ``make_dev_token`` emits a flat ``role`` string.
+#
+# Probing the known shapes in order keeps a standards-compliant IdP working with
+# no bespoke protocol mapper. Relying on a mapper instead would mean every new
+# tenant needs custom provider config, and a missing mapper degrades every
+# officer to "public" with nothing in the logs to say why.
+#
+# ``OIDC_ROLE_CLAIM`` overrides the probe with an explicit dot-path when a
+# provider puts roles somewhere else entirely.
+# ---------------------------------------------------------------------------
+OIDC_ROLE_CLAIM = os.getenv("OIDC_ROLE_CLAIM", "")
+
+_DEFAULT_ROLE_CLAIM_PATHS = (
+    "role",  # our dev tokens
+    "roles",  # Entra ID app roles, generic
+    "realm_access.roles",  # Keycloak realm roles
+    "groups",  # Entra ID / Okta group claim
+)
+
+# Mirrors the Literal on AuthUser.role. Anything outside this set is not a role
+# we understand — a provider's own vocabulary ("offline_access", "default-roles-ura")
+# must not reach the model, which would raise ValidationError and 500 the request.
+_KNOWN_ROLES = ("public", "verified_taxpayer", "ura_staff", "ura_admin", "ura_auditor")
+
+# A token can legitimately carry several of ours at once (an admin who is also on
+# the queue). Resolve to the widest, so access does not depend on claim ordering.
+_ROLE_PRECEDENCE = ("ura_admin", "ura_auditor", "ura_staff", "verified_taxpayer", "public")
+
+
+def _claim_at_path(claims: dict[str, Any], path: str) -> Any:
+    """Walk a dot-path through nested claim dicts. Missing → None."""
+    node: Any = claims
+    for part in path.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+        if node is None:
+            return None
+    return node
+
+
+def _role_candidates(claims: dict[str, Any], audience: str) -> list[str]:
+    """Collect every role-ish string the token offers, in probe order."""
+    paths: list[str] = []
+    if OIDC_ROLE_CLAIM:
+        paths.append(OIDC_ROLE_CLAIM)
+    else:
+        paths.extend(_DEFAULT_ROLE_CLAIM_PATHS)
+        if audience:
+            # Keycloak client roles live under the client id the token was issued for.
+            paths.append(f"resource_access.{audience}.roles")
+
+    found: list[str] = []
+    for path in paths:
+        value = _claim_at_path(claims, path)
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, (list, tuple)):
+            found.extend(str(v) for v in value if isinstance(v, (str, int)))
+    return found
+
+
+def resolve_role(claims: dict[str, Any], audience: str = "") -> str:
+    """Pick the app role a verified token grants. Unknown vocabulary → "public".
+
+    Never raises: an authenticated user with roles we don't recognise is a
+    legitimate public user, not a server error.
+    """
+    held = set()
+    for raw in _role_candidates(claims, audience):
+        # Keycloak and Entra emit group claims as paths ("/ura-admin"); hyphens
+        # are also common where our enum uses underscores.
+        name = str(raw).strip().lstrip("/").lower().replace("-", "_")
+        if name in _KNOWN_ROLES:
+            held.add(name)
+
+    for role in _ROLE_PRECEDENCE:
+        if role in held:
+            return role
+    return "public"
 
 
 def _get_verifier() -> JWTVerifier:
@@ -94,7 +182,7 @@ def _claims_to_user(claims: dict[str, Any]) -> AuthUser:
         user_id=str(claims.get("sub", "")),
         tenant_id=str(claims.get("tenant_id", "default")),
         email=str(claims.get("email", "")),
-        role=str(claims.get("role", "public")),
+        role=resolve_role(claims, _get_verifier().audience),
         locale=str(claims.get("locale", "en")),
         granted_purposes=[str(p) for p in granted],
         token_issued_at=float(claims.get("iat", 0)),
