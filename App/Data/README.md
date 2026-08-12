@@ -19,6 +19,11 @@ hashes and stable record ids, so the indexer rejects a missing, partial or
 stale export instead of silently indexing an incomplete corpus. Raw CSVs, PDFs
 and crawl JSON are never embedded directly.
 
+Current size: **7,924 vector documents** — 480 FAQ, 6 teacher-QA, 7,035 PDF
+chunks (135 unique PDFs after skipping 11 byte-identical duplicates), 403 crawl
+chunks. The single-container deployments serve all of it through an in-image
+Qdrant sidecar; see `docs/CLOUDFLARE_FALLBACKS.md` for the tier order.
+
 ## Building the corpus
 
 The two chunk corpora need an offline export first: they depend on

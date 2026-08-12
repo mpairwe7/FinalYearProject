@@ -232,17 +232,31 @@ def _validate_production_env() -> None:
 
     # P0-4: vectors must live in an external/managed Qdrant, not the ephemeral
     # in-container default that is wiped on restart.
+    # An in-container Qdrant sidecar is a legitimate production topology for the
+    # single-container deployments (Crane Cloud, HF Space): they cannot reach a
+    # managed Qdrant at all, and the collection is baked into the image at build
+    # time, so localhost is the intended target rather than a misconfiguration.
+    # It stays opt-in so an accidental localhost URL is still caught, and the
+    # durability caveat the original check was guarding still applies — the
+    # sidecar's storage is read-mostly and rebuilt with the image, never written
+    # to by the app.
+    qdrant_sidecar = os.getenv("QDRANT_SIDECAR", "false").lower() in ("1", "true", "yes", "on")
     qdrant_url = os.getenv("QDRANT_URL", "")
+    qdrant_is_local = any(h in qdrant_url for h in ("localhost", "127.0.0.1", "[::1]"))
     if not qdrant_url:
         errors.append(
             "QDRANT_URL must point at an external/managed Qdrant in production "
             "(the in-container default is not durable)."
         )
-    elif any(h in qdrant_url for h in ("localhost", "127.0.0.1", "[::1]")):
+    elif qdrant_is_local and not qdrant_sidecar:
         errors.append(
-            "QDRANT_URL must not be localhost in production — use an external/managed Qdrant."
+            "QDRANT_URL must not be localhost in production — use an external/managed "
+            "Qdrant, or set QDRANT_SIDECAR=true if this deployment runs the in-image "
+            "Qdrant sidecar."
         )
-    if qdrant_url and not os.getenv("QDRANT_API_KEY"):
+    # A sidecar on loopback needs no API key: it is not reachable from outside the
+    # container, and requiring one would only add a secret with nothing to protect.
+    if qdrant_url and not os.getenv("QDRANT_API_KEY") and not (qdrant_sidecar and qdrant_is_local):
         errors.append("QDRANT_API_KEY must be set when QDRANT_URL is configured in production.")
 
     # P0-4: the audit ledger and conversation memory are SQLite-backed via

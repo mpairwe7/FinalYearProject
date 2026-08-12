@@ -332,6 +332,60 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
             with self.assertRaisesRegex(CorpusValidationError, "source changed"):
                 ingest_pdf_jsonls(pdf_dir, jsonl_dir)
 
+    def test_source_free_ingest_is_refused_by_default(self) -> None:
+        """Losing the sources must not silently weaken validation."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir, jsonl_dir, _ = self._export(
+                root, {"guide-FY-2024-25.pdf": [_FakeChunk(text=_body("A"))]}
+            )
+            (pdf_dir / "guide-FY-2024-25.pdf").unlink()
+            with self.assertRaisesRegex(CorpusValidationError, "No PDF files found"):
+                ingest_pdf_jsonls(pdf_dir, jsonl_dir)
+
+    def test_trust_manifest_ingests_without_the_source_pdfs(self) -> None:
+        """The serving image ships the derived JSONL but not 500 MB of PDFs."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir, jsonl_dir, _ = self._export(
+                root, {"guide-FY-2024-25.pdf": [_FakeChunk(text=_body("A"), heading_trail=["H"])]}
+            )
+            (pdf_dir / "guide-FY-2024-25.pdf").unlink()
+            with mock.patch("app.pdf_corpus.TRUST_MANIFEST", True):
+                documents = ingest_pdf_jsonls(pdf_dir, jsonl_dir)
+            self.assertEqual(len(documents), 1)
+            self.assertEqual(documents[0]["fiscal_year"], "FY2024-25")
+
+    def test_trust_manifest_still_rejects_a_source_that_is_present_and_changed(self) -> None:
+        """Trust applies only where verification is impossible. A source that IS
+        on disk is still hashed, so the relaxation cannot be used to skip a real
+        staleness check."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir, jsonl_dir, _ = self._export(
+                root, {"guide-FY-2024-25.pdf": [_FakeChunk(text=_body("A"))]}
+            )
+            (pdf_dir / "guide-FY-2024-25.pdf").write_bytes(b"%PDF-1.7 replaced")
+            with mock.patch("app.pdf_corpus.TRUST_MANIFEST", True):
+                with self.assertRaisesRegex(CorpusValidationError, "source changed"):
+                    ingest_pdf_jsonls(pdf_dir, jsonl_dir)
+
+    def test_trust_manifest_still_rejects_edited_jsonl(self) -> None:
+        """Everything internal to the export stays verified under trust mode."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir, jsonl_dir, _ = self._export(
+                root, {"guide-FY-2024-25.pdf": [_FakeChunk(text=_body("A"))]}
+            )
+            (pdf_dir / "guide-FY-2024-25.pdf").unlink()
+            jsonl_path = jsonl_dir / "guide-FY-2024-25.jsonl"
+            record = json.loads(jsonl_path.read_text(encoding="utf-8").splitlines()[0])
+            record["text"] = record["text"].replace("taxable", "exempt")
+            jsonl_path.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+            with mock.patch("app.pdf_corpus.TRUST_MANIFEST", True):
+                with self.assertRaisesRegex(CorpusValidationError, "does not match its content"):
+                    ingest_pdf_jsonls(pdf_dir, jsonl_dir)
+
     def test_export_requires_at_least_one_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

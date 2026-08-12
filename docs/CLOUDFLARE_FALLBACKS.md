@@ -69,11 +69,26 @@ STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
 `HybridRetriever.initialize` tries the tiers in order and reports the winner via
 `HybridRetriever.backend`:
 
-| Tier | Backend | Signals |
-| --- | --- | --- |
-| 1 | **Qdrant** | dense + BM25 sparse fused by RRF, then cross-encoder rerank |
-| 2 | **Cloudflare Vectorize** | dense bge-m3 + client-side lexical re-score (no GPU) |
-| 3 | **Keyword** | in-process FAQ/keyword search |
+| Tier | Backend | Signals | Corpus |
+| --- | --- | --- | --- |
+| 1 | **Qdrant** (dense + sparse) | dense + BM25 sparse fused by RRF, then cross-encoder rerank | all 7,924 docs |
+| 1b | **Qdrant** (sparse-only sidecar) | BM25 sparse only — no dense, no rerank | all 7,924 docs |
+| 2 | **Cloudflare Vectorize** | dense bge-m3 + client-side lexical re-score (no GPU) | all 7,924 docs |
+| 3 | **Keyword** | in-process FAQ search over the CSVs | 486 FAQ rows only |
+
+Tier 1b is what the single-container deployments run. Crane Cloud and the HF
+Space can reach neither a managed Qdrant nor Cloudflare, so they used to land on
+tier 3 — which reads `ura_*_faqs.csv` and therefore never saw a PDF or crawl
+chunk. They now run Qdrant as a supervisord sidecar against a collection baked
+into the image at build time (`SPARSE_ONLY_INDEX=true`).
+
+Sparse-only is a necessity, not a preference: a BM25 query vector is computed
+from `bm25_state.json` in pure Python, whereas a dense query would need bge-m3,
+and these images ship no torch — dense vectors would be unqueryable. The
+retriever detects sparse-only from the collection's own vector config, so a
+process that *does* have torch still behaves correctly against the same
+collection (keying it off the import instead produces
+`400 Not existing vector name error: dense` and a silent zero-hit search).
 
 Qdrant is always preferred when reachable. **Every** way it can be unavailable —
 `QDRANT_ENABLED=false`, an unreachable host, a missing collection, or an

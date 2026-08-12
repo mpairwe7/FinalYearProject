@@ -55,6 +55,17 @@ logger = logging.getLogger(__name__)
 PDF_JSONL_SCHEMA_VERSION = 1
 PDF_MANIFEST_NAME = "pdf_corpus_manifest.json"
 
+#: Ingest without the source PDFs present, trusting the manifest's own hashes.
+#:
+#: Normally ingest re-hashes every PDF on disk, which is what makes a stale
+#: export impossible to index. The serving image cannot do that: it ships the
+#: derived JSONL but not 500 MB of PDFs. Everything internal to the export is
+#: still verified — schema, per-record ``chunk_id`` against its own content,
+#: per-source record counts, id uniqueness — so a truncated or edited JSONL is
+#: still rejected. Only the source-hash comparison is skipped, and skipping it
+#: is logged.
+TRUST_MANIFEST = os.getenv("CORPUS_TRUST_MANIFEST", "false").lower() in ("1", "true", "yes", "on")
+
 # Chunk sizing. The defaults mirror ``ml.scripts.data_aug.chunkers.chunk_pdf``
 # so the retrieval corpus and the training corpus are cut the same way.
 # ``BAAI/bge-m3`` accepts 8192 tokens, so there is headroom to grow these — but
@@ -359,19 +370,31 @@ def ingest_pdf_jsonls(pdf_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
     Validation deliberately avoids re-extracting the PDFs — see the module
     docstring for the contract this enforces instead.
     """
-    pdf_paths = sorted(pdf_dir.glob("*.pdf"))
-    if not pdf_paths:
-        raise CorpusValidationError(f"No PDF files found in {pdf_dir}")
-
     manifest = _load_manifest(jsonl_dir)
     by_pdf = {str(entry.get("pdf", "")): entry for entry in manifest["sources"] if isinstance(entry, dict)}
-    expected_names = {path.name for path in pdf_paths}
-    if len(by_pdf) != len(manifest["sources"]) or set(by_pdf) != expected_names:
-        missing = sorted(expected_names - set(by_pdf))
-        unexpected = sorted(set(by_pdf) - expected_names)
-        raise CorpusValidationError(
-            f"PDF JSONL coverage mismatch (missing={missing or 'none'}, unexpected={unexpected or 'none'})"
+    if len(by_pdf) != len(manifest["sources"]):
+        raise CorpusValidationError(f"{jsonl_dir}: duplicate source entries in the manifest")
+
+    pdf_paths = sorted(pdf_dir.glob("*.pdf"))
+    if TRUST_MANIFEST and not pdf_paths:
+        # Source-free ingest: walk the manifest instead of the directory.
+        logger.warning(
+            "CORPUS_TRUST_MANIFEST=true and no PDFs at %s — indexing %d sources on the "
+            "manifest's own hashes; a source replaced since export cannot be detected here.",
+            pdf_dir,
+            len(by_pdf),
         )
+        pdf_paths = [pdf_dir / name for name in sorted(by_pdf)]
+    elif not pdf_paths:
+        raise CorpusValidationError(f"No PDF files found in {pdf_dir}")
+    else:
+        expected_names = {path.name for path in pdf_paths}
+        if set(by_pdf) != expected_names:
+            missing = sorted(expected_names - set(by_pdf))
+            unexpected = sorted(set(by_pdf) - expected_names)
+            raise CorpusValidationError(
+                f"PDF JSONL coverage mismatch (missing={missing or 'none'}, unexpected={unexpected or 'none'})"
+            )
 
     documents: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
@@ -379,11 +402,18 @@ def ingest_pdf_jsonls(pdf_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
 
     for pdf_path in pdf_paths:
         entry = by_pdf[pdf_path.name]
-        source_sha256 = _sha256_file(pdf_path)
-        if entry.get("sha256") != source_sha256:
-            raise CorpusValidationError(
-                f"{pdf_path}: source changed since PDF JSONL export; regenerate the corpus"
-            )
+        if pdf_path.is_file():
+            source_sha256 = _sha256_file(pdf_path)
+            if entry.get("sha256") != source_sha256:
+                raise CorpusValidationError(
+                    f"{pdf_path}: source changed since PDF JSONL export; regenerate the corpus"
+                )
+        elif TRUST_MANIFEST:
+            source_sha256 = _clean(entry.get("sha256"))
+            if not source_sha256:
+                raise CorpusValidationError(f"{pdf_path}: manifest entry has no sha256 to trust")
+        else:
+            raise CorpusValidationError(f"{pdf_path}: source PDF is missing")
 
         # A byte-identical duplicate contributes no rows: its content is already
         # indexed under the canonical name, so there is no JSONL to read. The

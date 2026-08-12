@@ -106,6 +106,29 @@ class ProductionHardeningTests(unittest.TestCase):
                 _validate_production_env()
         self.assertIn("QDRANT_URL must not be localhost", str(raised.exception))
 
+    def test_sidecar_qdrant_is_accepted_on_loopback(self) -> None:
+        """Crane Cloud and the HF Space cannot reach a managed Qdrant at all, so
+        they run it in-container against a collection baked into the image. That
+        is the intended topology, not a misconfiguration — but it stays opt-in so
+        an accidental localhost URL is still caught."""
+        env = {
+            **self.secure_env,
+            "QDRANT_URL": "http://127.0.0.1:6333",
+            "QDRANT_SIDECAR": "true",
+        }
+        env.pop("QDRANT_API_KEY", None)  # loopback is not externally reachable
+        with patch.dict(os.environ, env, clear=True):
+            _validate_production_env()
+
+    def test_sidecar_flag_does_not_excuse_an_external_url_without_a_key(self) -> None:
+        """The API-key waiver is scoped to loopback; a real host still needs one."""
+        env = {**self.secure_env, "QDRANT_URL": "http://qdrant.example:6333", "QDRANT_SIDECAR": "true"}
+        env.pop("QDRANT_API_KEY", None)
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        self.assertIn("QDRANT_API_KEY must be set", str(raised.exception))
+
     def test_missing_qdrant_url_rejected_in_prod(self) -> None:
         env = {k: v for k, v in self.secure_env.items() if k != "QDRANT_URL"}
         with patch.dict(os.environ, env, clear=True):

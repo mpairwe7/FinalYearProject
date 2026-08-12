@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .faq_corpus import CorpusValidationError
-from .pdf_corpus import normalise_extracted_text, normalise_heading
+from .pdf_corpus import TRUST_MANIFEST, normalise_extracted_text, normalise_heading
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -262,20 +262,31 @@ def ingest_crawl_jsonls(pages_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]
         for entry in manifest["sources"]
         if isinstance(entry, dict)
     }
-    # Re-select from the live crawl and require the export to match it.
-    current = {path.name: payload for path, payload in select_pages(pages_dir)}
-    if set(current) != set(expected_by_source):
-        missing = sorted(set(current) - set(expected_by_source))
-        unexpected = sorted(set(expected_by_source) - set(current))
-        raise CorpusValidationError(
-            f"Crawl JSONL coverage mismatch (missing={missing[:5] or 'none'}, "
-            f"unexpected={unexpected[:5] or 'none'}); regenerate the corpus"
+    # Re-select from the live crawl and require the export to match it. The
+    # serving image ships the derived JSONL without the crawl pages, so that
+    # comparison is skipped there — see pdf_corpus.TRUST_MANIFEST for what is
+    # still verified.
+    if TRUST_MANIFEST and not pages_dir.is_dir():
+        logger.warning(
+            "CORPUS_TRUST_MANIFEST=true and no crawl pages at %s — indexing %d sources on "
+            "the manifest's own hashes; a page changed since export cannot be detected here.",
+            pages_dir,
+            len(expected_by_source),
         )
-    for source, payload in current.items():
-        if _clean(payload.get("content_hash")) != _clean(expected_by_source[source].get("content_hash")):
+    else:
+        current = {path.name: payload for path, payload in select_pages(pages_dir)}
+        if set(current) != set(expected_by_source):
+            missing = sorted(set(current) - set(expected_by_source))
+            unexpected = sorted(set(expected_by_source) - set(current))
             raise CorpusValidationError(
-                f"{source}: crawl page changed since export; regenerate the corpus"
+                f"Crawl JSONL coverage mismatch (missing={missing[:5] or 'none'}, "
+                f"unexpected={unexpected[:5] or 'none'}); regenerate the corpus"
             )
+        for source, payload in current.items():
+            if _clean(payload.get("content_hash")) != _clean(expected_by_source[source].get("content_hash")):
+                raise CorpusValidationError(
+                    f"{source}: crawl page changed since export; regenerate the corpus"
+                )
 
     documents: list[dict[str, Any]] = []
     seen_ids: set[str] = set()

@@ -48,11 +48,18 @@ COPY App/backend/requirements-cranecloud.txt ./requirements-cranecloud.txt
 RUN pip install --upgrade pip wheel setuptools && \
     pip install -r requirements-cranecloud.txt && \
     # Aggressive prune to keep image small.
+    #
+    # dist-info directories are deliberately KEPT. Deleting them saves a few MB
+    # of an 800 MB image and breaks importlib.metadata for any package that
+    # reads its own version at runtime — qdrant-client does exactly that in
+    # QdrantRemote.__init__, so `QdrantClient(url=...)` raised
+    # PackageNotFoundError and every Qdrant connection failed before it opened a
+    # socket. HybridRetriever swallowed it as "Qdrant init failed" and dropped to
+    # the keyword fallback, which is part of why these deployments looked like
+    # they simply had no Qdrant to reach.
     find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + && \
     find /opt/venv -type d -name "tests" -prune -exec rm -rf {} + && \
-    find /opt/venv -type d -name "test" -prune -exec rm -rf {} + && \
-    find /opt/venv -type f -name "*.dist-info" -prune -exec rm -rf {} + 2>/dev/null || true && \
-    find /opt/venv -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+    find /opt/venv -type d -name "test" -prune -exec rm -rf {} +
 
 # =============================================================================
 # Stage 2 — Frontend (Next.js standalone build)
@@ -107,6 +114,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         fonts-dejavu-core \
         libgomp1 \
+        # The Qdrant sidecar binary links libunwind-ptrace.so.0; without this it
+        # fails to start with "error while loading shared libraries" and the
+        # baked-collection build step times out waiting on /healthz.
+        libunwind8 \
         tini \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
@@ -166,11 +177,19 @@ RUN set -eux; \
         if curl -sf http://127.0.0.1:6333/healthz >/dev/null 2>&1; then break; fi; \
         sleep 1; \
     done; \
-    curl -sf http://127.0.0.1:6333/healthz >/dev/null; \
+    if ! curl -sf http://127.0.0.1:6333/healthz >/dev/null; then \
+        echo "qdrant did not become healthy; it usually failed to exec — check shared libs:" >&2; \
+        /usr/local/bin/qdrant --version >&2 || true; \
+        exit 1; \
+    fi; \
     cd /app/backend; \
     SPARSE_ONLY_INDEX=true \
     QDRANT_URL=http://127.0.0.1:6333 \
     APP_DATA_ROOT=/app/Data \
+    # The image ships the derived JSONL but not the 500 MB of source PDFs or the
+    # crawl pages, so ingest cannot re-hash them. Everything internal to the
+    # export is still verified; only the source-hash comparison is skipped.
+    CORPUS_TRUST_MANIFEST=true \
     PYTHONPATH=. \
     /opt/venv/bin/python -m app.indexer --recreate; \
     # bm25_state.json is rewritten by the index build so the sparse vectors and
@@ -200,6 +219,10 @@ ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
     QDRANT_ENABLED=true \
     QDRANT_URL=http://127.0.0.1:6333 \
     QDRANT_COLLECTION=ura_knowledge_base \
+    # Tells the production env check that this loopback URL is the intentional
+    # in-image sidecar, not a misconfiguration. Without it the backend refuses to
+    # start in production.
+    QDRANT_SIDECAR=true \
     FLAG_WS_CHAT=false \
     FLAG_TOOL_USE=false \
     FLAG_AGENTIC_MODE=false \
