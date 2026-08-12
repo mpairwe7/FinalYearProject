@@ -28,7 +28,11 @@ const DISCOVERY_PATH = "/.well-known/openid-configuration";
  * that some providers 404.
  */
 export async function discoverOidc(issuer: string): Promise<OidcEndpoints> {
-  const base = issuer.replace(/\/+$/, "");
+  // Trim before stripping slashes. These values arrive from CI variables and env
+  // files, where a trailing space is easy to introduce and invisible on screen —
+  // it would otherwise be percent-encoded into the host and fail as an opaque
+  // network error rather than a bad-configuration message.
+  const base = issuer.trim().replace(/\/+$/, "");
   const url = `${base}${DISCOVERY_PATH}`;
 
   let res: Response;

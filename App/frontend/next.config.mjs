@@ -23,7 +23,7 @@ const isDev = process.env.NODE_ENV !== "production";
 // Derived from the issuer rather than hardcoded, and omitted entirely when no
 // provider is set, so a deployment that does not use OIDC keeps the tighter policy.
 const OIDC_ORIGIN = (() => {
-  const issuer = process.env.NEXT_PUBLIC_OIDC_ISSUER || "";
+  const issuer = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
   if (!issuer) return "";
   try {
     return new URL(issuer).origin;

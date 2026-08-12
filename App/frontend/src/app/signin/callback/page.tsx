@@ -17,8 +17,8 @@ import { setAuthToken } from "../../../lib/authSession";
 import { discoverOidc, TOKEN_ENDPOINT_KEY } from "../../../lib/oidc";
 import "../signin.css";
 
-const OIDC_ISSUER = process.env.NEXT_PUBLIC_OIDC_ISSUER || "";
-const OIDC_CLIENT_ID = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "";
+const OIDC_ISSUER = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
+const OIDC_CLIENT_ID = (process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "").trim();
 
 type Phase = "working" | "error" | "done";
 

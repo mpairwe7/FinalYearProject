@@ -38,9 +38,9 @@ const STAFF_ROLES = [
   { role: "ura_auditor", label: "Auditor", hint: "Read-only oversight" },
 ] as const;
 
-const OIDC_ISSUER = process.env.NEXT_PUBLIC_OIDC_ISSUER || "";
-const OIDC_CLIENT_ID = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "";
-const OIDC_SCOPE = process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email";
+const OIDC_ISSUER = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
+const OIDC_CLIENT_ID = (process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "").trim();
+const OIDC_SCOPE = (process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email").trim();
 /**
  * Optional `audience`. Some providers only issue a verifiable JWT access token
  * when the request names an API audience — Auth0 returns an OPAQUE token
@@ -48,7 +48,7 @@ const OIDC_SCOPE = process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email";
  * Keycloak needs nothing here (its audience mapper handles it), so this stays
  * empty unless a deployment requires it.
  */
-const OIDC_AUDIENCE = process.env.NEXT_PUBLIC_OIDC_AUDIENCE || "";
+const OIDC_AUDIENCE = (process.env.NEXT_PUBLIC_OIDC_AUDIENCE || "").trim();
 /** Dev sign-in is opt-in and must never be enabled on a production deployment. */
 const DEV_SIGNIN_ENABLED = process.env.NEXT_PUBLIC_DEV_SIGNIN === "true";
 

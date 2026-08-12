@@ -317,8 +317,23 @@ their cause:
 Register the app as a **Single Page Application** (public client, PKCE) with
 `<app-origin>/signin/callback` in Allowed Callback URLs and `<app-origin>` in
 Allowed Web Origins. Role names must still be `ura_admin` / `ura_staff` /
-`ura_auditor`. The issuer is `https://<tenant>.<region>.auth0.com/` — keep the
-trailing slash exactly as Auth0 shows it; discovery normalises it.
+`ura_auditor`.
+
+> **Watch the issuer string.** It is
+> `https://<tenant>.<region>.auth0.com/` — the backend compares `iss`
+> byte-for-byte, so a missing trailing slash rejects every token as
+> `issuer mismatch`. A *trailing space* is worse: it is invisible in a CI
+> variable or `.env`, and turns the discovery URL into
+> `…auth0.com%20/.well-known/…`, which the browser reports only as
+> `NetworkError`. Both are now trimmed defensively in
+> `src/lib/oidc.ts` and at every `NEXT_PUBLIC_OIDC_*` read, but set them
+> cleanly anyway. Verify with:
+>
+> ```bash
+> curl -s https://<tenant>/.well-known/openid-configuration | jq -r .issuer
+> ```
+>
+> and use that exact string for `OIDC_ISSUER`.
 
 ### Verifying locally against a real Keycloak
 
