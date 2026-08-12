@@ -9,7 +9,30 @@
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
-# image. sha-a264da7 adds PR #264: inline [n] citation markers are stripped
+# image.
+#
+# sha-4ae350b is the biggest retrieval change this Space has had: it runs Qdrant
+# as an in-container sidecar against a collection baked into the image, so the
+# whole corpus is finally reachable here. Retrieval was BM25 over the 499 FAQ
+# rows via the keyword fallback — the 300+ MB of URA handbooks under Data/pdfs
+# and the monthly crawl were invisible, because the FAQ path scores candidates on
+# an F1 against each FAQ's own question and a document chunk has no question.
+# The collection now holds 7,943 documents: 499 FAQ, 6 teacher-QA, 7,035 PDF
+# chunks (135 unique PDFs, 11 byte-identical duplicates skipped) and 403 crawl
+# chunks. /ready reports retrieval_mode "hybrid" instead of "keyword", and
+# questions answerable only from the handbooks now cite them.
+#
+# The sidecar serves SPARSE-ONLY (BM25). That is a necessity, not a compromise: a
+# BM25 query vector is computed from bm25_state.json in pure Python, whereas a
+# dense query needs bge-m3 and this image ships no torch, so dense vectors would
+# be unqueryable. Storage is 33 MB and the Qdrant binary ~85 MB.
+#
+# Chunks keep the structure the hierarchical chunker recovers — heading trail as
+# the citation locator, rate tables kept atomic — and carry a fiscal_year, so
+# among near-identical passages the newer edition wins and a repealed rate cannot
+# silently evict the one in force.
+#
+# It also carries PR #264: inline [n] citation markers are stripped
 # from the answer body — a pill landing on a lead-in read as a stray number
 # ("Core services include: 1" directly above a list). References stay in the
 # Sources block, and the strip covers Copy and Listen too so the marker does
@@ -137,7 +160,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-a264da7
+FROM landwind/ura-chatbot:sha-4ae350b
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
