@@ -141,6 +141,47 @@ COPY --from=frontend-builder /build/frontend/.next/standalone /app/frontend
 COPY --from=frontend-builder /build/frontend/.next/static    /app/frontend/.next/static
 COPY --from=frontend-builder /build/frontend/public          /app/frontend/public
 
+# --- Qdrant sidecar ---------------------------------------------------------
+# Neither a managed Qdrant nor Cloudflare is reachable from Crane Cloud or the HF
+# Space, which left retrieval on the FAQ-only keyword fallback — it never saw a
+# PDF or crawl chunk. Running Qdrant in-container puts the whole corpus back
+# behind the retriever.
+#
+# The collection is SPARSE-ONLY and is built here, at image build time, so the
+# image is self-contained and no runtime indexing step is needed. Sparse-only is
+# not a compromise for this image: a BM25 query vector is computed from
+# bm25_state.json in pure Python, whereas a dense query would need bge-m3 and
+# this image deliberately ships no torch, so dense vectors would be unqueryable.
+COPY --from=qdrant/qdrant:v1.15.1 /qdrant/qdrant /usr/local/bin/qdrant
+
+RUN set -eux; \
+    mkdir -p /app/qdrant/storage; \
+    cd /app/qdrant; \
+    QDRANT__STORAGE__STORAGE_PATH=/app/qdrant/storage \
+    QDRANT__SERVICE__HTTP_PORT=6333 \
+    QDRANT__TELEMETRY_DISABLED=true \
+    /usr/local/bin/qdrant & \
+    QDRANT_PID=$!; \
+    for _ in $(seq 1 90); do \
+        if curl -sf http://127.0.0.1:6333/healthz >/dev/null 2>&1; then break; fi; \
+        sleep 1; \
+    done; \
+    curl -sf http://127.0.0.1:6333/healthz >/dev/null; \
+    cd /app/backend; \
+    SPARSE_ONLY_INDEX=true \
+    QDRANT_URL=http://127.0.0.1:6333 \
+    APP_DATA_ROOT=/app/Data \
+    PYTHONPATH=. \
+    /opt/venv/bin/python -m app.indexer --recreate; \
+    # bm25_state.json is rewritten by the index build so the sparse vectors and
+    # the vocab/idf come from the same fit — the corpus-hash sentinel would
+    # otherwise disable sparse retrieval at startup.
+    test -s /app/Model/bm25_state.json; \
+    # procps is not installed, so stop it by the PID captured above.
+    kill "$QDRANT_PID"; \
+    wait "$QDRANT_PID" || true; \
+    du -sh /app/qdrant/storage
+
 # Process supervision + reverse proxy.
 COPY App/deploy/cranecloud/nginx.conf       /etc/nginx/nginx.conf
 COPY App/deploy/cranecloud/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -152,6 +193,13 @@ EXPOSE 8080
 # Default operational env — overridable by the Crane Cloud env panel.
 ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
     DATA_DIR=/app/Data/dataset \
+    APP_DATA_ROOT=/app/Data \
+    # Point the retriever at the in-container sidecar holding the baked
+    # sparse-only collection. It detects sparse-only from the collection itself,
+    # so no extra flag is needed here.
+    QDRANT_ENABLED=true \
+    QDRANT_URL=http://127.0.0.1:6333 \
+    QDRANT_COLLECTION=ura_knowledge_base \
     FLAG_WS_CHAT=false \
     FLAG_TOOL_USE=false \
     FLAG_AGENTIC_MODE=false \
