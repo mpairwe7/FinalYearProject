@@ -8,21 +8,32 @@
 # config (Sunbird/Gemini/Cloudflare secrets, SPEECH_ENABLED, …) is supplied as
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
-# ROLLED BACK 2026-08-12 to sha-a264da7.
+# sha-fdd680b restores the roll withheld earlier, with the abstention defect fixed
+# and verified. The withheld image answered off-domain questions: should_abstain
+# reads hit_relevance, which is None when only an RRF score exists, and the
+# sparse-only sidecar has no reranker — so it took its "cannot assess relevance"
+# branch and answered anyway. Safe over 499 curated FAQ rows behind the question-F1
+# gate; not over 7,000+ raw chunks, where BM25 returns something for any query.
 #
-# sha-41b7296 (Qdrant + Redis sidecars, 7,943-doc corpus) is withheld: end-to-end
-# testing against it found that off-domain questions stopped abstaining.
-# guardrails.should_abstain reads hit_relevance, which is None when only an RRF
-# score exists, and the sparse-only sidecar has no reranker — so it took its
-# "degraded mode, cannot assess relevance" branch and never abstained. That default
-# was safe when degraded meant keyword search over 499 curated FAQ rows behind the
-# question-F1 gate; with 7,943 raw document chunks BM25 finds something for any
-# query. Observed live: "What is the capital of France?" answered from a Thales Las
-# France (Tanzania Branch) chunk, and "write me a poem about cats" returned
-# pymupdf4llm image-placeholder text.
+# The retriever now stamps each hit with an IDF-weighted lexical coverage score and
+# should_abstain uses it when no reranker score exists. Floor 0.50, calibrated over
+# 8 off-domain and 130 on-domain questions. Measured on this image:
+#   off-domain  5 of 6 abstain   (was 0 of 6)
+#   on-domain   8 of 8 answer    (no regression)
 #
-# Re-pin to the sidecar image once chunk hits carry a lexical binding signal that
-# should_abstain can use without a reranker.
+# Two other defects the battery surfaced, both fixed here:
+#   * 956 of 7,035 chunks carried pymupdf4llm's "picture [W x H] intentionally
+#     omitted" placeholder, which was once served as an answer. Stripped at export;
+#     the corpus is now 7,874 documents.
+#   * correct_spelling substituted without word boundaries, so "withholdin" ->
+#     "withholding" rewrote "withholding" as "withholdingg", dropping the term from
+#     the BM25 query. "What is withholding tax?" was answered from VAT and EFRIS
+#     documents; it now answers from the withholding-tax material. Pre-existing.
+#
+# Known residual: "What is the capital of France?" still answers, from an EAC
+# tax-cases compendium where both content terms genuinely occur. Four lexical
+# variants were measured and none separate it; closing it needs a reranker or a
+# judge over the candidates. See app/retriever.py LEXICAL_RELEVANCE_FLOOR.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
@@ -191,7 +202,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-a264da7
+FROM landwind/ura-chatbot:sha-fdd680b
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
