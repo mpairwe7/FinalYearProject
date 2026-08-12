@@ -115,15 +115,26 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--drop", type=int, default=2, help="rarest terms to remove")
     ap.add_argument("--k", type=int, default=60, help="RRF constant")
+    ap.add_argument(
+        "--min-hit1",
+        type=float,
+        default=None,
+        help="fail if verbatim BM25 Hit@1 falls below this (0-1); CI regression gate",
+    )
     args = ap.parse_args()
 
     from ml.scripts import static_dense as sd
 
     entries = _load_entries()
     bm25 = BM25(entries)
-    if not sd.is_available():
-        print("static dense index unavailable — build it first")
-        return 1
+    # Building the static index needs sentence-transformers, which the CI image
+    # and the deployed image both lack. Without it, report BM25 alone rather than
+    # refusing to measure anything — the corpus-derived ground truth still makes
+    # Hit@k and MRR meaningful for the lexical path, which is what actually
+    # serves when no dense backend is reachable.
+    dense_available = sd.is_available()
+    if not dense_available:
+        print("static dense index unavailable — reporting BM25 only")
 
     def jargon_dropped(question: str) -> str:
         toks = _tokenize(question)
@@ -139,32 +150,58 @@ def main() -> int:
         f"jargon-dropped (-{args.drop} rarest)": lambda e: jargon_dropped(e["question"]),
     }
 
+    methods = ("bm25", "dense", "rrf") if dense_available else ("bm25",)
+    verbatim_bm25_hit1 = None
+
     for suite_name, make_query in suites.items():
-        agg = {m: [0, 0, 0, 0.0] for m in ("bm25", "dense", "rrf")}
+        agg = {m: [0, 0, 0, 0.0] for m in methods}
         n = 0
         for e in entries:
             q = make_query(e)
             if not q.strip():
                 continue
             n += 1
-            b_hits = bm25.search(q, top_k=20)
-            d_hits = sd.search(q, top_k=20)
-            b_rank = [d for d, _ in b_hits]
-            d_rank = [d for d, _ in d_hits]
-            fused = sd.rrf_fuse([b_rank, d_rank], k=args.k)
-            r_rank = [d for d, _ in sorted(fused.items(), key=lambda x: -x[1])]
-            for name, ranked in (("bm25", b_rank), ("dense", d_rank), ("rrf", r_rank)):
-                h1, h3, h5, rr = metrics(ranked, e["id"])
+            b_rank = [d for d, _ in bm25.search(q, top_k=20)]
+            ranked_by_method = {"bm25": b_rank}
+            if dense_available:
+                d_rank = [d for d, _ in sd.search(q, top_k=20)]
+                fused = sd.rrf_fuse([b_rank, d_rank], k=args.k)
+                ranked_by_method["dense"] = d_rank
+                ranked_by_method["rrf"] = [
+                    d for d, _ in sorted(fused.items(), key=lambda x: -x[1])
+                ]
+            for name in methods:
+                h1, h3, h5, rr = metrics(ranked_by_method[name], e["id"])
                 agg[name][0] += h1
                 agg[name][1] += h3
                 agg[name][2] += h5
                 agg[name][3] += rr
 
+        if not n:
+            print(f"\n{suite_name}: no queries produced — nothing measured")
+            continue
+
         print(f"\n{suite_name}  (n={n})")
         print(f"  {'method':8}{'Hit@1':>8}{'Hit@3':>8}{'Hit@5':>8}{'MRR@10':>9}")
-        for name in ("bm25", "dense", "rrf"):
+        for name in methods:
             h1, h3, h5, rr = agg[name]
             print(f"  {name:8}{h1/n:>8.1%}{h3/n:>8.1%}{h5/n:>8.1%}{rr/n:>9.3f}")
+        if suite_name.startswith("verbatim"):
+            verbatim_bm25_hit1 = agg["bm25"][0] / n
+
+    if args.min_hit1 is not None:
+        if verbatim_bm25_hit1 is None:
+            print("\nFAIL: --min-hit1 given but the verbatim suite produced no queries")
+            return 1
+        if verbatim_bm25_hit1 < args.min_hit1:
+            print(
+                f"\nFAIL: verbatim BM25 Hit@1 {verbatim_bm25_hit1:.1%} "
+                f"< required {args.min_hit1:.1%}"
+            )
+            return 1
+        print(
+            f"\nOK: verbatim BM25 Hit@1 {verbatim_bm25_hit1:.1%} >= {args.min_hit1:.1%}"
+        )
     return 0
 
 

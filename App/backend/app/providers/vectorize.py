@@ -48,6 +48,11 @@ def vectorize_query(
                 "page": meta.get("page"),
                 "section": meta.get("section", ""),
                 "tag": meta.get("tag", ""),
+                "doc_type": meta.get("doc_type", ""),
+                # Edition of the source document. The retriever prefers the
+                # newest known fiscal year among near-identical passages, so a
+                # superseded rate table cannot evict the one in force.
+                "fiscal_year": meta.get("fiscal_year", ""),
                 "score": float(m.get("score", 0.0)),
             }
         )

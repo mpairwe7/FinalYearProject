@@ -89,6 +89,126 @@ jobs:
         run: |
           pytest tests/ -v --cov=ml --cov=App/backend --cov-report=xml --cov-report=term-missing --cov-fail-under=35
 
+      - name: Install backend test dependencies
+        run: |
+          # The Crane Cloud requirements deliberately exclude the
+          # torch/transformers/sentence-transformers stack, and together with the
+          # root requirements they cover every backend import — so the backend
+          # suite runs here in the same keyword-fallback shape it runs locally,
+          # without a multi-gigabyte torch download.
+          uv pip install --system -r App/backend/requirements-cranecloud.txt
+
+      - name: Run backend unit tests
+        # The repo-root suite above never touched App/backend/tests, so the
+        # backend suite — the majority of the project's tests, including the
+        # corpus-validation and retrieval-ranking contracts — was ungated.
+        working-directory: App/backend
+        env:
+          PYTHONPATH: .
+        run: pytest tests/ -q
+
+      - name: Corpus contract round-trip
+        # Exercises export → validate → ingest on the committed crawl corpus, so
+        # a change that breaks chunking, page selection, or the manifest contract
+        # fails here rather than at the next reindex. Uses the real 1,000+ page
+        # crawl (seconds); the PDF corpus is deliberately excluded because
+        # extracting 290 MB takes far too long for a PR gate.
+        working-directory: App/backend
+        env:
+          # "." for the app package, workspace root for the ml chunker the
+          # exporters import.
+          PYTHONPATH: .:${{ github.workspace }}
+          REPO_ROOT: ${{ github.workspace }}
+        run: |
+          python - <<'PY'
+          import os
+          import tempfile
+          from pathlib import Path
+
+          from app.crawl_corpus import export_crawl_pages_to_jsonl, ingest_crawl_jsonls
+          from app.faq_corpus import export_faq_csvs_to_jsonl, ingest_faq_jsonls
+
+          root = Path(os.environ["REPO_ROOT"])
+          with tempfile.TemporaryDirectory() as tmp:
+              out = Path(tmp)
+
+              faq_stats = export_faq_csvs_to_jsonl(root / "Data" / "dataset", out / "faq_jsonl")
+              faq_docs = ingest_faq_jsonls(root / "Data" / "dataset", out / "faq_jsonl")
+              assert len(faq_docs) == faq_stats["records"], (len(faq_docs), faq_stats)
+              print(f"FAQ corpus OK: {len(faq_docs)} documents from {faq_stats['sources']} CSVs")
+
+              pages = root / "Data" / "crawl" / "pages"
+              crawl_stats = export_crawl_pages_to_jsonl(pages, out / "crawl_jsonl")
+              crawl_docs = ingest_crawl_jsonls(pages, out / "crawl_jsonl")
+              assert len(crawl_docs) == crawl_stats["records"], (len(crawl_docs), crawl_stats)
+              assert all(d["url"] and d["chunk_id"] for d in crawl_docs)
+              print(
+                  f"Crawl corpus OK: {crawl_stats['pages_selected']}/"
+                  f"{crawl_stats['pages_available']} pages -> {len(crawl_docs)} chunks"
+              )
+          PY
+
+      - name: Retrieval ranking gate
+        # Real Hit@k / MRR against ground truth that needs no hand labelling: each
+        # FAQ entry is the single correct answer for a query derived from it
+        # (verbatim, and with its rarest terms dropped to model a user who does
+        # not know the jargon). This is the ranking measurement the offline eval
+        # cannot make — its eval set carries no relevance labels.
+        #
+        # BM25-only here: the static dense index needs sentence-transformers,
+        # which this job deliberately does not install. BM25 is also what serves
+        # when no dense backend is reachable, so it is the right floor to defend.
+        # Measured 92.1% verbatim Hit@1 (n=506); the gate sits below that with
+        # headroom so it catches regressions without flapping.
+        working-directory: App/backend
+        env:
+          PYTHONPATH: .:${{ github.workspace }}
+          LLM_ENABLED: 'false'
+          QDRANT_ENABLED: 'false'
+        run: python -m ml.scripts.eval_retrieval --min-hit1 0.85
+
+      - name: Live-retrieval evaluation smoke
+        # evaluate_rag_offline is the only pipeline that drives real retrieval
+        # (the CI grounding gate scores frozen contexts), and it had never run
+        # against this repository's eval set — it raised KeyError: 'query' on the
+        # first row. This asserts it executes and produces every metric, so that
+        # schema drift is caught here instead of going unnoticed.
+        #
+        # Deliberately not gated on metric thresholds: with no Qdrant this runs
+        # in keyword-fallback mode, and the ranking metrics need
+        # `relevant_sources` labels the eval set does not yet carry, so any
+        # threshold would be measuring the harness rather than the system.
+        env:
+          LLM_ENABLED: 'false'
+          QDRANT_ENABLED: 'false'
+          SPEECH_ENABLED: 'false'
+        run: |
+          python -m ml.pipelines.evaluate_rag_offline \
+            --eval-set Data/eval/rag_eval.jsonl \
+            --output "${RUNNER_TEMP}/rag_offline_report.json"
+          python - <<'PY'
+          import json
+          import os
+
+          report = json.load(open(f"{os.environ['RUNNER_TEMP']}/rag_offline_report.json"))
+          agg = report["aggregates"]
+          required = {
+              "faithfulness_mean",
+              "answer_relevancy_mean",
+              "context_precision_mean",
+              "context_recall_mean",
+              "mrr_mean",
+              "hit_at_k_mean",
+              "total_evaluated",
+              "total_errors",
+          }
+          missing = required - set(agg)
+          assert not missing, f"report is missing metrics: {sorted(missing)}"
+          assert agg["total_evaluated"] > 0, "no evaluation rows were scored"
+          assert agg["total_errors"] == 0, f"{agg['total_errors']} rows raised during evaluation"
+          print(f"Live-retrieval eval OK: {agg['total_evaluated']} rows, 0 errors")
+          PY
+
       - name: Upload coverage report
         if: always()
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import json as _json
 import logging
 import os
@@ -98,6 +99,29 @@ def _cache_queries_compatible(query: str, cached_query: str) -> bool:
     return overlap >= required
 
 
+#: Placeholder embedding for exact-tier entries, which carry no vector.
+_EMPTY_EMBEDDING = np.zeros(0, dtype=np.float32)
+_EXACT_KEY_STRIP_RE = re.compile(r"[^\w\s]+")
+_EXACT_KEY_WS_RE = re.compile(r"\s+")
+
+
+def exact_cache_key(query: str, locale: str = "en") -> str:
+    """Return a model-free lookup key: casefolded, punctuation-stripped query.
+
+    The similarity tiers below need an embedding, so they return ``None`` the
+    moment no dense model is available — which is every deployment that ships
+    without torch (Crane Cloud, the HF Space). The cache was therefore inert
+    there: `set_model` is only called when the retriever has a dense model, so
+    both backends missed on every request and nothing was ever reused.
+
+    A repeated question is the common case for an FAQ assistant, and matching one
+    needs no model at all. "What is the VAT rate?" and "what is the vat rate"
+    collapse to the same key, so the second asker gets the first asker's answer.
+    """
+    normalised = _EXACT_KEY_WS_RE.sub(" ", _EXACT_KEY_STRIP_RE.sub(" ", (query or "").casefold())).strip()
+    return f"{locale}\x1f{normalised}"
+
+
 @dataclass
 class CacheEntry:
     query: str
@@ -112,6 +136,8 @@ class SemanticCache:
 
     def __init__(self, dense_model: Any = None) -> None:
         self._entries: list[CacheEntry] = []
+        #: Exact (normalised-query) tier, usable with no embedding model.
+        self._exact: dict[str, CacheEntry] = {}
         self._lock = threading.Lock()
         self._dense_model = dense_model
         self._stats = {"hits": 0, "misses": 0, "evictions": 0}
@@ -138,15 +164,37 @@ class SemanticCache:
         before = len(self._entries)
         self._entries = [e for e in self._entries if (now - e.created_at) < CACHE_TTL_SECONDS]
         evicted = before - len(self._entries)
+        stale = [k for k, e in self._exact.items() if (now - e.created_at) >= CACHE_TTL_SECONDS]
+        for key in stale:
+            del self._exact[key]
+        evicted += len(stale)
         if evicted:
             self._stats["evictions"] += evicted
 
     def get(self, query: str, locale: str = "en") -> dict[str, Any] | None:
         """Look up a semantically similar cached response.
 
+        Tries an exact (normalised) key first, then semantic similarity. The
+        exact tier is what makes the cache work at all without an embedder.
+
         Returns the cached response dict or None on miss.
         """
-        if not CACHE_ENABLED or not self._dense_model:
+        if not CACHE_ENABLED:
+            return None
+
+        key = exact_cache_key(query, locale)
+        with self._lock:
+            self._evict_expired()
+            exact = self._exact.get(key)
+            if exact is not None and (time.time() - exact.created_at) < CACHE_TTL_SECONDS:
+                exact.hits += 1
+                self._stats["hits"] += 1
+                logger.debug("Cache HIT (exact): %s", query[:50].replace("\n", "\\n"))
+                return exact.response
+
+        if not self._dense_model:
+            with self._lock:
+                self._stats["misses"] += 1
             return None
 
         with self._lock:
@@ -187,7 +235,21 @@ class SemanticCache:
 
     def put(self, query: str, response: dict[str, Any]) -> None:
         """Store a query-response pair in the cache."""
-        if not CACHE_ENABLED or not self._dense_model:
+        if not CACHE_ENABLED:
+            return
+
+        # The exact tier is always written, so a deployment with no embedder
+        # still accumulates a usable cache.
+        key = exact_cache_key(query, response.get("locale") or "en")
+        with self._lock:
+            if len(self._exact) >= CACHE_MAX_SIZE:
+                oldest = sorted(self._exact.items(), key=lambda kv: kv[1].created_at)
+                for stale_key, _entry in oldest[: len(self._exact) - CACHE_MAX_SIZE + 1]:
+                    del self._exact[stale_key]
+                    self._stats["evictions"] += 1
+            self._exact[key] = CacheEntry(query=query, embedding=_EMPTY_EMBEDDING, response=response)
+
+        if not self._dense_model:
             return
 
         with self._lock:
@@ -211,7 +273,7 @@ class SemanticCache:
 
     @property
     def stats(self) -> dict[str, int]:
-        return {**self._stats, "size": len(self._entries)}
+        return {**self._stats, "size": len(self._entries) + len(self._exact)}
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +324,30 @@ class RedisSemanticCache:
     def _decode_emb(blob: bytes) -> np.ndarray:
         return np.frombuffer(base64.b64decode(blob), dtype=np.float32)
 
+    #: Exact-tier keys live under their own namespace so the similarity scan
+    #: below never walks them (it matches CACHE_REDIS_PREFIX*).
+    @staticmethod
+    def _exact_redis_key(query: str, locale: str) -> str:
+        digest = hashlib.sha256(exact_cache_key(query, locale).encode("utf-8")).hexdigest()[:32]
+        return f"{CACHE_REDIS_PREFIX}exact:{digest}"
+
     def get(self, query: str, locale: str = "en") -> dict[str, Any] | None:
-        if not CACHE_ENABLED or self._client is None or self._dense_model is None:
+        if not CACHE_ENABLED or self._client is None:
+            return None
+
+        # Exact tier: a single GET, and the only tier that works without an
+        # embedder — which is every deployment shipping without torch.
+        try:
+            raw = self._client.get(self._exact_redis_key(query, locale))
+            if raw:
+                self._stats["hits"] += 1
+                logger.debug("Redis cache HIT (exact): %s", query[:50].replace("\n", "\\n"))
+                return _json.loads(raw.decode("utf-8"))
+        except Exception:
+            logger.debug("Redis exact cache get failed", exc_info=True)
+
+        if self._dense_model is None:
+            self._stats["misses"] += 1
             return None
 
         embedding = self._embed(query)
@@ -314,7 +398,20 @@ class RedisSemanticCache:
             return None
 
     def put(self, query: str, response: dict[str, Any]) -> None:
-        if not CACHE_ENABLED or self._client is None or self._dense_model is None:
+        if not CACHE_ENABLED or self._client is None:
+            return
+
+        locale = response.get("locale") or "en"
+        try:
+            self._client.set(
+                self._exact_redis_key(query, locale),
+                _json.dumps(response).encode("utf-8"),
+                ex=CACHE_TTL_SECONDS,
+            )
+        except Exception:
+            logger.debug("Redis exact cache put failed", exc_info=True)
+
+        if self._dense_model is None:
             return
         embedding = self._embed(query)
         if embedding is None:

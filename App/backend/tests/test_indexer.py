@@ -1,40 +1,100 @@
-"""Regression tests for the PDF chunking pipeline (backend/app/indexer.py)."""
+"""Regression tests for the JSONL-first indexing pipeline (backend/app/indexer.py).
+
+The chunking that used to live here moved to ``ml.scripts.data_aug.chunkers``
+(structure-preserving, exercised by ``tests/test_data_augmentation.py``) and
+reaches the index through ``app.pdf_corpus``. What remains indexer-owned is how
+a vector document is turned into embedding input and a Qdrant payload.
+"""
 
 from __future__ import annotations
 
 import unittest
 
-from app.indexer import _chunk_text
+from app.indexer import _embedding_text, _vector_payload, annotate_fiscal_year
 
 
-class ChunkTextWordBoundaryTests(unittest.TestCase):
-    def test_chunks_never_start_mid_word(self) -> None:
-        """Reproduces a live bug: `end` is snapped to a sentence/word
-        boundary, but `start = end - overlap` for the next chunk was not,
-        so a chunk could begin inside the word straddling that offset (the
-        production reply for "What services does URA provide?" started
-        with "omes and wealth..." instead of "incomes and wealth...")."""
-        paragraph = (
-            "To achieve equity, the government may impose a progressive "
-            "tax on the incomes and wealth of the rich. The revenue raised "
-            "is then used to provide social services for the benefit of "
-            "the society. "
-        )
-        text = paragraph * 20
-        chunks = _chunk_text(text, chunk_size=800, overlap=120)
-        self.assertGreater(len(chunks), 1)
-        for chunk in chunks:
-            idx = text.find(chunk[:30])
-            self.assertGreaterEqual(idx, 0, chunk[:30])
-            if idx > 0:
-                self.assertTrue(
-                    text[idx - 1].isspace(),
-                    f"chunk starts mid-word: {chunk[:40]!r}",
-                )
+class EmbeddingTextTests(unittest.TestCase):
+    def test_pdf_chunks_embed_their_contextual_prefix(self) -> None:
+        """Contextual retrieval: the prefix naming the document and section is
+        embedded so an isolated chunk stays findable, while ``text`` remains the
+        verbatim content that gets displayed and cited."""
+        doc = {
+            "text": "The standard rate is 18%.",
+            "embed_text": "[Document: VAT-GUIDE — VAT > 3.1 Rates]\n\nThe standard rate is 18%.",
+        }
+        self.assertEqual(_embedding_text(doc), doc["embed_text"])
 
-    def test_short_text_is_returned_unchanged(self) -> None:
-        short = "A short passage that fits in one chunk."
-        self.assertEqual(_chunk_text(short, chunk_size=800, overlap=120), [short])
+    def test_other_corpora_embed_their_text_verbatim(self) -> None:
+        doc = {"text": "Question: What is VAT?\nAnswer: A consumption tax."}
+        self.assertEqual(_embedding_text(doc), doc["text"])
+
+    def test_blank_embed_text_falls_back_to_text(self) -> None:
+        """An empty prefix must not produce an empty embedding input."""
+        doc = {"text": "Rental income is taxed at 12%.", "embed_text": ""}
+        self.assertEqual(_embedding_text(doc), doc["text"])
+
+
+class PayloadShapeTests(unittest.TestCase):
+    def test_embed_text_is_excluded_from_the_stored_payload(self) -> None:
+        """``embed_text`` is an input to embedding, not retrievable content —
+        storing it would duplicate every chunk body inside Qdrant."""
+        doc = {
+            "text": "body",
+            "embed_text": "[Document: D]\n\nbody",
+            "source": "d.pdf",
+            "doc_type": "pdf_chunk",
+        }
+        payload = _vector_payload(doc)
+        self.assertNotIn("embed_text", payload)
+        self.assertEqual(payload["text"], "body")
+        self.assertEqual(payload["doc_type"], "pdf_chunk")
+
+    def test_payload_keeps_every_other_field_including_temporal_metadata(self) -> None:
+        doc = {
+            "text": "body",
+            "source": "guide-FY-2024-25.pdf",
+            "fiscal_year": "FY2024-25",
+            "section": "Handbook > 4.3 Certainty",
+            "heading_trail": ["Handbook", "4.3 Certainty"],
+        }
+        self.assertEqual(_vector_payload(doc), doc)
+
+
+class FiscalYearAnnotationTests(unittest.TestCase):
+    """Every corpus must reach the index with the same temporal field, so the
+    retriever's edition preference applies uniformly rather than only to PDFs."""
+
+    def test_derives_the_edition_from_a_faq_or_teacher_qa_source_name(self) -> None:
+        documents = [
+            {"source": "ura_taxation_handbook_fy2025_26_faqs.csv", "text": "q/a"},
+            {"source": "808977692-Taxation-Handbook-FY-2024-25-1.pdf", "text": "q/a"},
+        ]
+        annotate_fiscal_year(documents)
+        self.assertEqual([d["fiscal_year"] for d in documents], ["FY2025-26", "FY2024-25"])
+
+    def test_a_source_without_an_edition_stays_empty(self) -> None:
+        """Empty means unknown; the retriever must not read it as superseded."""
+        documents = [{"source": "ura_vat_faqs.csv", "text": "q/a"}]
+        annotate_fiscal_year(documents)
+        self.assertEqual(documents[0]["fiscal_year"], "")
+
+    def test_never_overwrites_an_edition_the_corpus_already_declared(self) -> None:
+        """PDF chunks carry the value from their own manifest — a filename must
+        not override it."""
+        documents = [{"source": "guide-FY-2020-21.pdf", "fiscal_year": "FY2025-26", "text": "x"}]
+        annotate_fiscal_year(documents)
+        self.assertEqual(documents[0]["fiscal_year"], "FY2025-26")
+
+    def test_is_idempotent_and_returns_the_same_list(self) -> None:
+        documents = [{"source": "guide-FY-2024-25.pdf", "text": "x"}]
+        self.assertIs(annotate_fiscal_year(documents), documents)
+        annotate_fiscal_year(documents)
+        self.assertEqual(documents[0]["fiscal_year"], "FY2024-25")
+
+    def test_tolerates_a_document_with_no_source(self) -> None:
+        documents = [{"text": "x"}]
+        annotate_fiscal_year(documents)
+        self.assertEqual(documents[0]["fiscal_year"], "")
 
 
 if __name__ == "__main__":

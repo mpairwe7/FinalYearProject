@@ -485,9 +485,36 @@ class RetrieverVectorizeModeTest(unittest.TestCase):
         self.assertEqual(hits[0]["text"], "VAT rate is 18 percent")
         self.assertEqual(hits[0]["chunk_id"], "c1")
 
-    def test_vectorize_mode_off_without_flag(self):
+    def test_unset_flag_auto_enables_the_fallback_when_cloudflare_is_configured(self):
+        """Unset means AUTO. It used to mean OFF, which left a deployment holding
+        valid Vectorize credentials on keyword-only search whenever Qdrant was
+        unavailable — the opposite of the intent."""
         from app import retriever as R
 
+        r = R.HybridRetriever()
+        with mock.patch.object(R, "QDRANT_ENABLED", False), mock.patch.object(
+            R, "DENSE_FALLBACK_BACKEND", ""
+        ):
+            self.assertTrue(r.initialize())
+            self.assertTrue(r._vectorize_mode)
+            self.assertEqual(r.backend, "vectorize")
+
+    def test_fallback_can_be_explicitly_disabled(self):
+        from app import retriever as R
+
+        for value in ("none", "off", "disabled"):
+            r = R.HybridRetriever()
+            with mock.patch.object(R, "QDRANT_ENABLED", False), mock.patch.object(
+                R, "DENSE_FALLBACK_BACKEND", value
+            ):
+                self.assertFalse(r.initialize(), value)
+                self.assertFalse(r._vectorize_mode, value)
+                self.assertEqual(r.backend, "keyword")
+
+    def test_fallback_stays_off_when_cloudflare_is_not_configured(self):
+        from app import retriever as R
+
+        _clear_keys()
         r = R.HybridRetriever()
         with mock.patch.object(R, "QDRANT_ENABLED", False), mock.patch.object(
             R, "DENSE_FALLBACK_BACKEND", ""

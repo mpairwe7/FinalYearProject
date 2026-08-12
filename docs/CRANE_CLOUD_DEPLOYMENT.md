@@ -259,20 +259,23 @@ Knowledge base files baked into the image:
 /app/Model/bm25_state.json       # Pre-built BM25 posting list + IDF
 ```
 
-Rebuild the BM25 state before each release:
+Rebuild the BM25 state before each release by rebuilding the index, which writes
+it as a side effect:
 
 ```bash
 cd App/backend
-PYTHONPATH=. python -c "
-from app.indexer import DATA_DIR, PDF_DIR, ingest_csvs, ingest_pdfs
-from app.retriever import BM25SparseEncoder, BM25_STATE_PATH
-docs = ingest_csvs(DATA_DIR) + ingest_pdfs(PDF_DIR)
-enc = BM25SparseEncoder()
-enc.fit([d['text'] for d in docs])
-enc.save(BM25_STATE_PATH)
-print('BM25 state saved to', BM25_STATE_PATH, 'docs=', len(docs))
-"
+PYTHONPATH=. python -m app.indexer --export-faq-jsonl
+PYTHONPATH=. python -m app.indexer --export-pdf-jsonl     # optional, minutes
+PYTHONPATH=. python -m app.indexer --export-crawl-jsonl   # optional, seconds
+PYTHONPATH=. python -m app.indexer --recreate             # writes Model/bm25_state.json
 ```
+
+**Do not fit the sparse state on its own.** BM25 token ids are assigned in
+first-seen order, so a state file fitted separately from the vectors it is paired
+with produces a desynced inverted index. `build_index` stamps the corpus hash
+into the collection and `HybridRetriever._verify_bm25_binding` disables sparse
+retrieval when the two disagree — so a standalone refit degrades search silently
+rather than failing loudly at build time.
 
 Commit the resulting `Model/bm25_state.json` so the Crane Cloud build
 picks it up automatically.

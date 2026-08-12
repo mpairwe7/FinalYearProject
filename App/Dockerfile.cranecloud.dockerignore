@@ -14,6 +14,13 @@
 !App/Dockerfile.cranecloud
 !Model/bm25_state.json
 !Data/dataset/**
+# Validated JSONL corpora. These are generated (App/.gitignore excludes them),
+# so they exist only after `python -m app.indexer --export-*-jsonl` has run in
+# the build context — the COPY fails loudly rather than shipping a half corpus.
+!App/Data/faq_jsonl/**
+!App/Data/teacher_qa/**
+!App/Data/pdf_jsonl/**
+!App/Data/crawl_jsonl/**
 
 # Within the allow-listed paths, still strip cruft.
 App/frontend/node_modules/

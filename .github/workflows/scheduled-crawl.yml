@@ -1,10 +1,14 @@
-# Daily URA website crawl for new content and PDFs.
-# Lightweight — no GPU. Commits new data to Data/crawl/ and Data/pdfs/.
+# Monthly URA website crawl for new content and PDFs, run on the last day of
+# the month. Lightweight — no GPU. Commits new data to Data/crawl/ and
+# Data/pdfs/.
 name: Scheduled URA Crawl
 
 on:
   schedule:
-    - cron: '0 4 * * *'  # Daily at 04:00 UTC
+    # GitHub Actions cron has no "last day of month" token, so this fires on
+    # every date that could be the last day and the `guard` job drops the runs
+    # that are not. Keeps one crawl per month without hardcoding month lengths.
+    - cron: '0 4 28-31 * *'
   workflow_dispatch:
     inputs:
       max_pages:
@@ -23,9 +27,30 @@ env:
   PYTHON_VERSION: '3.11'
 
 jobs:
+  guard:
+    name: Last day of month?
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - name: Check whether today ends the month
+        id: check
+        run: |
+          # Tomorrow being the 1st is the only portable "last day" test.
+          if [ "$(date -u -d tomorrow +%d)" = "01" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "$(date -u +%Y-%m-%d) ends the month — crawling."
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "$(date -u +%Y-%m-%d) is not the last day of the month — skipping."
+          fi
+
   crawl:
     name: Crawl ura.go.ug
     runs-on: ubuntu-latest
+    needs: guard
+    # A manual run is always intentional, so it bypasses the calendar guard.
+    if: github.event_name == 'workflow_dispatch' || needs.guard.outputs.proceed == 'true'
     timeout-minutes: 30
     steps:
       - name: Checkout code
@@ -83,3 +108,13 @@ jobs:
           echo "## URA Crawl Results" >> "$GITHUB_STEP_SUMMARY"
           echo "- New files: ${{ steps.check.outputs.new_files }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Crawl state: Data/crawl/crawl_state.json" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.check.outputs.new_files }}" != "0" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "New source documents landed, so the retrieval corpus is now stale." >> "$GITHUB_STEP_SUMMARY"
+            echo "Refresh it from a checkout with \`Data/pdfs\` synced into \`App/Data/pdfs\`:" >> "$GITHUB_STEP_SUMMARY"
+            echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+            echo "python -m app.indexer --export-pdf-jsonl   # re-chunk; rejects a stale export by PDF hash" >> "$GITHUB_STEP_SUMMARY"
+            echo "python -m app.indexer --recreate           # rebuild Qdrant" >> "$GITHUB_STEP_SUMMARY"
+            echo "python scripts/reindex_vectorize.py        # rebuild Vectorize from the same JSONL" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi

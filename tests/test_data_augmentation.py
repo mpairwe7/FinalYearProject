@@ -207,6 +207,98 @@ def _write_csv_faqs(tmpdir: Path) -> Path:
     return csv_path
 
 
+# ---------------------------------------------------------------------------
+# chunkers.py
+# ---------------------------------------------------------------------------
+#
+# These cover the markdown-parsing internals only, so no real PDF and no
+# pymupdf4llm are needed. The chunker feeds both the training corpus and — since
+# ``app.pdf_corpus`` — the retrieval index, so its structure guarantees are now
+# load-bearing in two places.
+
+
+class TestChunkers:
+    def test_split_headings_builds_a_hierarchical_trail(self):
+        from ml.scripts.data_aug.chunkers import _split_headings
+
+        markdown = (
+            "# Taxation Handbook\n\nIntro prose.\n\n"
+            "## Part A\n\nPart A prose.\n\n"
+            "### 1.2 Origin of Taxation\n\nOrigin prose.\n\n"
+            "## Part B\n\nPart B prose.\n"
+        )
+        sections = dict((tuple(trail), body) for trail, body in _split_headings(markdown))
+        assert ("Taxation Handbook",) in sections
+        assert sections[("Taxation Handbook", "Part A", "1.2 Origin of Taxation")].strip() == "Origin prose."
+        # Part B is a sibling of Part A, so the deeper level is popped off.
+        assert ("Taxation Handbook", "Part B") in sections
+
+    def test_markdown_tables_stay_in_one_piece(self):
+        """Rate tables are the highest-value content in the corpus; splitting
+        one across chunks separates a band from its rate."""
+        from ml.scripts.data_aug.chunkers import _split_paragraphs_keep_tables
+
+        body = (
+            "Resident individual rates apply as follows.\n\n"
+            "| Chargeable income | Rate |\n"
+            "| --- | --- |\n"
+            "| Not exceeding 235,000 | Nil |\n"
+            "| Exceeding 410,000 | 30% |\n\n"
+            "Trailing prose after the table.\n"
+        )
+        paragraphs = _split_paragraphs_keep_tables(body)
+        table_parts = [p for p in paragraphs if "|" in p]
+        assert len(table_parts) == 1
+        assert "Not exceeding 235,000" in table_parts[0]
+        assert "Exceeding 410,000" in table_parts[0]
+
+    def test_chunks_never_start_mid_word(self):
+        """Regression: the previous fixed-window chunker subtracted a constant
+        overlap from a boundary-snapped offset, so a chunk could begin inside a
+        word (the live reply for "What services does URA provide?" started with
+        "omes and wealth..." instead of "incomes and wealth...")."""
+        from ml.scripts.data_aug.chunkers import _recursive_chunk
+
+        paragraph = (
+            "To achieve equity, the government may impose a progressive tax on "
+            "the incomes and wealth of the rich. The revenue raised is then used "
+            "to provide social services for the benefit of the society."
+        )
+        paragraphs = [paragraph] * 12
+        chunks = _recursive_chunk(paragraphs, target_chars=600, hard_max_chars=1200)
+        assert len(chunks) > 1
+        words = set(paragraph.split())
+        for chunk in chunks:
+            assert chunk == chunk.strip()
+            # Every chunk boundary lands on a whole word from the source.
+            assert chunk.split()[0].strip(".,") in {w.strip(".,") for w in words}
+
+    def test_oversized_paragraph_is_sentence_split_not_truncated(self):
+        from ml.scripts.data_aug.chunkers import _recursive_chunk
+
+        sentence = "The taxpayer shall file a return within the prescribed period. "
+        chunks = _recursive_chunk([sentence * 40], target_chars=400, hard_max_chars=800)
+        assert len(chunks) > 1
+        assert all(len(c) <= 800 for c in chunks)
+        # Nothing is silently dropped.
+        assert sum(c.count("taxpayer") for c in chunks) == 40
+
+    def test_contextual_prefix_names_document_and_section(self):
+        from ml.scripts.data_aug.chunkers import Chunk
+
+        chunk = Chunk(
+            text="body",
+            doc_id="TAXATION-HANDBOOK-FY-2025-26",
+            source="TAXATION-HANDBOOK-FY-2025-26.pdf",
+            chunk_id=3,
+            heading_trail=["Handbook", "Part A", "4.3 Certainty"],
+        )
+        assert chunk.contextual_prefix == (
+            "[Document: TAXATION-HANDBOOK-FY-2025-26 — Handbook > Part A > 4.3 Certainty]"
+        )
+        assert Chunk(text="b", doc_id="D", source="D.pdf", chunk_id=0).contextual_prefix == "[Document: D]"
+
+
 class TestLoaders:
     def test_load_csv_faqs_basic(self):
         from ml.scripts.data_aug.loaders import load_csv_faqs

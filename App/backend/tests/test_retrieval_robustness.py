@@ -10,9 +10,16 @@ including ones the cross-encoder scored as irrelevant.
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from app.corrective_rag import _improved, _ranking_key
-from app.retriever import _dedupe_candidates, _shingles, hit_relevance
+from app.retriever import (
+    HybridRetriever,
+    _dedupe_candidates,
+    _shingles,
+    fiscal_year_rank,
+    hit_relevance,
+)
 
 
 class ScaleComparabilityTests(unittest.TestCase):
@@ -104,6 +111,89 @@ class DeduplicationTests(unittest.TestCase):
         self.assertEqual(_shingles("VAT is 18"), frozenset({"vat", "is", "18"}))
 
 
+class EditionAwareDeduplicationTests(unittest.TestCase):
+    """The corpus holds the same guidance across fiscal-year editions, and the
+    two phrasings are near-identical text. Retrieval scores therefore cannot
+    tell a repealed rate from the one in force — so among *equivalent* passages
+    the newer known edition must win regardless of rank, or the oldest handbook
+    in the corpus can silently evict the current one."""
+
+    _PASSAGE = (
+        "The standard VAT rate in Uganda is 18 percent on taxable supplies "
+        "of goods and services made by a registered person."
+    )
+
+    def test_fiscal_year_rank_parses_known_labels(self) -> None:
+        self.assertEqual(fiscal_year_rank("FY2024-25"), 2024)
+        self.assertLess(fiscal_year_rank("FY2023-24"), fiscal_year_rank("FY2025-26"))
+
+    def test_unknown_fiscal_year_is_none_not_zero(self) -> None:
+        """``None`` must not compare as older than a real year."""
+        for value in ("", None, "2024", "FY2024", "unknown"):
+            self.assertIsNone(fiscal_year_rank(value), repr(value))
+
+    def test_newer_edition_wins_even_when_it_ranks_lower(self) -> None:
+        candidates = [
+            {"text": self._PASSAGE, "id": "stale", "fiscal_year": "FY2023-24"},
+            {"text": self._PASSAGE, "id": "current", "fiscal_year": "FY2025-26"},
+        ]
+        kept = _dedupe_candidates(candidates)
+        self.assertEqual([c["id"] for c in kept], ["current"])
+
+    def test_older_edition_never_displaces_a_newer_one(self) -> None:
+        candidates = [
+            {"text": self._PASSAGE, "id": "current", "fiscal_year": "FY2025-26"},
+            {"text": self._PASSAGE, "id": "stale", "fiscal_year": "FY2023-24"},
+        ]
+        self.assertEqual([c["id"] for c in _dedupe_candidates(candidates)], ["current"])
+
+    def test_unknown_edition_does_not_displace_a_known_one(self) -> None:
+        candidates = [
+            {"text": self._PASSAGE, "id": "known", "fiscal_year": "FY2025-26"},
+            {"text": self._PASSAGE, "id": "unknown", "fiscal_year": ""},
+        ]
+        self.assertEqual([c["id"] for c in _dedupe_candidates(candidates)], ["known"])
+
+    def test_a_known_edition_does_not_displace_an_unknown_one(self) -> None:
+        """Most URA filenames carry no fiscal year, so an unknown label is not
+        evidence of staleness — rank order still decides."""
+        candidates = [
+            {"text": self._PASSAGE, "id": "unknown", "fiscal_year": ""},
+            {"text": self._PASSAGE, "id": "known", "fiscal_year": "FY2025-26"},
+        ]
+        self.assertEqual([c["id"] for c in _dedupe_candidates(candidates)], ["unknown"])
+
+    def test_same_edition_keeps_the_better_ranked_copy(self) -> None:
+        candidates = [
+            {"text": self._PASSAGE, "id": "best", "fiscal_year": "FY2025-26"},
+            {"text": self._PASSAGE, "id": "worse", "fiscal_year": "FY2025-26"},
+        ]
+        self.assertEqual([c["id"] for c in _dedupe_candidates(candidates)], ["best"])
+
+    def test_different_passages_from_different_editions_all_survive(self) -> None:
+        """The override only applies to near-duplicates; distinct evidence from
+        an older edition is still evidence."""
+        candidates = [
+            {"text": self._PASSAGE, "id": "vat", "fiscal_year": "FY2023-24"},
+            {
+                "text": "Corporation tax is charged at 30 percent of chargeable income.",
+                "id": "corp",
+                "fiscal_year": "FY2025-26",
+            },
+        ]
+        self.assertEqual(len(_dedupe_candidates(candidates)), 2)
+
+    def test_replacement_survives_a_third_matching_copy(self) -> None:
+        """After a replacement the stored signature must still point at the
+        kept row, so a later duplicate compares against the winner."""
+        candidates = [
+            {"text": self._PASSAGE, "id": "oldest", "fiscal_year": "FY2022-23"},
+            {"text": self._PASSAGE, "id": "middle", "fiscal_year": "FY2024-25"},
+            {"text": self._PASSAGE, "id": "newest", "fiscal_year": "FY2025-26"},
+        ]
+        self.assertEqual([c["id"] for c in _dedupe_candidates(candidates)], ["newest"])
+
+
 class QueryEmbeddingCacheTests(unittest.TestCase):
     def test_repeat_queries_reuse_the_embedding(self) -> None:
         from app.retriever import HybridRetriever
@@ -158,3 +248,80 @@ class QueryEmbeddingCacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackendPriorityTests(unittest.TestCase):
+    """Retrieval must prefer Qdrant (dense + BM25 + rerank) and fall through to
+    the Cloudflare Vectorize dense index before keyword search.
+
+    The regression: Vectorize was only attempted when ``QDRANT_ENABLED=false``,
+    so a missing collection, an unreachable host or an encoder mismatch skipped
+    tier 2 entirely and degraded straight to keyword — even on a deployment
+    holding valid Vectorize credentials.
+    """
+
+    def _retriever(self, *, qdrant_ok: bool, vectorize_ok: bool) -> HybridRetriever:
+        r = HybridRetriever()
+        r._init_qdrant = lambda: qdrant_ok  # type: ignore[method-assign]
+
+        def _vectorize() -> bool:
+            if not vectorize_ok:
+                return False
+            r._vectorize_mode = True
+            r._ready = True
+            return True
+
+        r._init_vectorize_mode = _vectorize  # type: ignore[method-assign]
+        return r
+
+    def test_qdrant_is_used_when_available_and_vectorize_is_not_consulted(self) -> None:
+        r = self._retriever(qdrant_ok=True, vectorize_ok=True)
+        calls: list[str] = []
+        r._init_vectorize_mode = lambda: calls.append("vectorize") or False  # type: ignore[method-assign]
+        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+            self.assertTrue(r.initialize())
+        self.assertEqual(calls, [], "Vectorize must not be probed while Qdrant works")
+        self.assertFalse(r._vectorize_mode)
+
+    def test_qdrant_failure_falls_through_to_vectorize(self) -> None:
+        r = self._retriever(qdrant_ok=False, vectorize_ok=True)
+        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+            self.assertTrue(r.initialize())
+        self.assertTrue(r._vectorize_mode)
+        self.assertEqual(r.backend, "vectorize")
+
+    def test_both_unavailable_reports_keyword(self) -> None:
+        r = self._retriever(qdrant_ok=False, vectorize_ok=False)
+        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+            self.assertFalse(r.initialize())
+        self.assertEqual(r.backend, "keyword")
+
+    def test_disabled_qdrant_still_reaches_vectorize(self) -> None:
+        r = self._retriever(qdrant_ok=True, vectorize_ok=True)
+        with mock.patch("app.retriever.QDRANT_ENABLED", False):
+            self.assertTrue(r.initialize())
+        self.assertTrue(r._vectorize_mode)
+
+    def test_half_initialised_qdrant_state_is_cleared_before_falling_back(self) -> None:
+        """A Qdrant failure can happen after the client is built; leaving it set
+        would let search() query the collection this process just rejected."""
+        r = HybridRetriever()
+
+        def _failing_qdrant() -> bool:
+            r._client = object()
+            r._dense_model = object()
+            r._sparse_ok = False
+            return False
+
+        r._init_qdrant = _failing_qdrant  # type: ignore[method-assign]
+        r._init_vectorize_mode = lambda: False  # type: ignore[method-assign]
+        with mock.patch("app.retriever.QDRANT_ENABLED", True):
+            r.initialize()
+        self.assertIsNone(r._client)
+        self.assertIsNone(r._dense_model)
+        self.assertTrue(r._sparse_ok)
+
+    def test_backend_reports_qdrant_when_ready_without_vectorize_mode(self) -> None:
+        r = HybridRetriever()
+        r._ready = True
+        self.assertEqual(r.backend, "qdrant")

@@ -230,26 +230,32 @@ def extract_markdown(pdf_path: Path) -> str | None:
         return None
 
 
-def chunk_pdf(
-    pdf_path: Path,
+def chunk_markdown(
+    markdown: str,
     *,
+    doc_id: str,
+    source: str,
     target_chars: int = 2000,
     hard_max_chars: int = 4000,
     min_chars: int = 200,
 ) -> Iterator[Chunk]:
-    """Yield hierarchical, structure-preserving chunks from a PDF.
+    """Yield hierarchical, structure-preserving chunks from *markdown*.
+
+    Shared by :func:`chunk_pdf` and by the crawl corpus, whose pages are
+    already markdown — the heading hierarchy, atomic tables and contextual
+    prefixes are worth exactly as much to a crawled page as to a PDF.
 
     Args:
-        pdf_path: PDF file
+        markdown: document body
+        doc_id: short identifier used in the contextual prefix
+        source: full source name recorded on each chunk
         target_chars: soft size target (~500 tokens for Gemma/Llama)
         hard_max_chars: maximum before we force-split (~1000 tokens)
         min_chars: drop chunks smaller than this (usually orphan headings)
     """
-    markdown = extract_markdown(pdf_path)
     if not markdown:
         return
 
-    doc_id = pdf_path.stem
     sections = _split_headings(markdown)
     if not sections:
         sections = [([], markdown)]
@@ -273,8 +279,32 @@ def chunk_pdf(
             yield Chunk(
                 text=text,
                 doc_id=doc_id,
-                source=pdf_path.name,
+                source=source,
                 chunk_id=chunk_idx,
                 heading_trail=list(trail),
             )
             chunk_idx += 1
+
+
+def chunk_pdf(
+    pdf_path: Path,
+    *,
+    target_chars: int = 2000,
+    hard_max_chars: int = 4000,
+    min_chars: int = 200,
+) -> Iterator[Chunk]:
+    """Yield hierarchical, structure-preserving chunks from a PDF.
+
+    Extraction only; the chunking itself is :func:`chunk_markdown`.
+    """
+    markdown = extract_markdown(pdf_path)
+    if not markdown:
+        return
+    yield from chunk_markdown(
+        markdown,
+        doc_id=pdf_path.stem,
+        source=pdf_path.name,
+        target_chars=target_chars,
+        hard_max_chars=hard_max_chars,
+        min_chars=min_chars,
+    )

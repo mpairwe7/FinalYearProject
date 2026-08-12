@@ -39,14 +39,20 @@ Gemini uses `x-goog-api-key`. **No key is ever placed in a URL query string.**
 4. **Vectorize**: `wrangler vectorize create ura-kb-bge-m3 --dimensions 1024 --metric cosine` → `VECTORIZE_INDEX`.
 5. **R2 bucket** + S3 access key/secret → `R2_*` (10 GB free).
 6. **Gemini** key from <https://aistudio.google.com/apikey> → `GEMINI_API_KEY` (free tier is RPM-limited; capped by `GEMINI_RPM`).
-7. **Re-index the corpus into Vectorize** (embeds via Workers AI bge-m3 — no local torch). *CLI pending (Phase 1 follow-up);* until then upsert the 729 chunks with `wrangler vectorize insert` using vectors from `gateway.workers_ai_embed`, metadata `{text, source, page, section, tag, chunk_id}`.
+7. **Re-index the corpus into Vectorize** (embeds via Workers AI bge-m3 — no local torch):
+   `python scripts/reindex_vectorize.py --create`. It builds from the same
+   validated JSONL as the Qdrant indexer (FAQ + teacher-QA + PDF chunks + crawl
+   chunks) and **refuses to seed a partial corpus** unless `--allow-partial` is
+   given, so export the chunk corpora first (`python -m app.indexer
+   --export-pdf-jsonl --export-crawl-jsonl`). Per-vector metadata is
+   `{text, source, page, section, tag, chunk_id, doc_type, fiscal_year}`.
 
 Set values in the gitignored `.env` (template: `.env.example`) for local dev, or
 as Crane Cloud deployment env. To activate on Crane Cloud:
 
 ```bash
 FLAG_CLOUDFLARE_FALLBACK=true
-DENSE_FALLBACK_BACKEND=workers_ai        # restores hybrid retrieval
+DENSE_FALLBACK_BACKEND=                  # unset = AUTO (see below); workers_ai forces on
 LLM_FALLBACK_BACKEND=gemini              # (Phase 2)
 TRANSLATE_FALLBACK_BACKEND=gemini        # (Phase 3) Luganda via Gemini 2.5 Flash
 STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
@@ -57,6 +63,67 @@ STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
 - **Phase 1 — restore hybrid retrieval: DONE.** `providers/` package + `retriever`
   Vectorize fallback (`_init_vectorize_mode` / `_search_vectorize`). Once Vectorize
   is populated + the env is set, `/ready` flips `keyword` → `hybrid`.
+
+### Retrieval backend priority
+
+`HybridRetriever.initialize` tries the tiers in order and reports the winner via
+`HybridRetriever.backend`:
+
+| Tier | Backend | Signals | Corpus |
+| --- | --- | --- | --- |
+| 1 | **Qdrant** (dense + sparse) | dense + BM25 sparse fused by RRF, then cross-encoder rerank | all 7,924 docs |
+| 1b | **Qdrant** (sparse-only sidecar) | BM25 sparse only — no dense, no rerank | all 7,924 docs |
+| 2 | **Cloudflare Vectorize** | dense bge-m3 + client-side lexical re-score (no GPU) | all 7,924 docs |
+| 3 | **Keyword** | in-process FAQ search over the CSVs | 486 FAQ rows only |
+
+Tier 1b is what the single-container deployments run. Crane Cloud and the HF
+Space can reach neither a managed Qdrant nor Cloudflare, so they used to land on
+tier 3 — which reads `ura_*_faqs.csv` and therefore never saw a PDF or crawl
+chunk. They now run Qdrant as a supervisord sidecar against a collection baked
+into the image at build time (`SPARSE_ONLY_INDEX=true`).
+
+Sparse-only is a necessity, not a preference: a BM25 query vector is computed
+from `bm25_state.json` in pure Python, whereas a dense query would need bge-m3,
+and these images ship no torch — dense vectors would be unqueryable. The
+retriever detects sparse-only from the collection's own vector config, so a
+process that *does* have torch still behaves correctly against the same
+collection (keying it off the import instead produces
+`400 Not existing vector name error: dense` and a silent zero-hit search).
+
+### Response cache (Redis sidecar)
+
+The single-container image also runs Redis under supervisord: response cache on
+db 0 (`REDIS_URL`), rate-limit storage on db 1 (`SLOWAPI_STORAGE_URI`) so
+flushing the cache cannot reset a rate-limit window. It is configured as a pure
+cache — persistence off, `maxmemory 192mb`, `allkeys-lru` — and has no readiness
+gate, because `cache.py` falls back to in-process memory when Redis is
+unreachable.
+
+The same no-torch constraint applies, and it used to make the cache useless
+here: both backends return `None` from `get()` when there is no dense model, and
+`service.py` only calls `set_model` when the retriever has one. So the cache
+missed on every request in these deployments. `cache.py` now has a **model-free
+exact tier** keyed on the casefolded, punctuation-stripped query plus locale,
+which is what makes Redis worth embedding — a repeated question is the common
+case for an FAQ assistant. Semantic similarity remains a second tier wherever an
+embedder exists.
+
+Qdrant is always preferred when reachable. **Every** way it can be unavailable —
+`QDRANT_ENABLED=false`, an unreachable host, a missing collection, or an
+embedder-stamp mismatch — now falls through to tier 2; previously only the
+explicit flag did, so a Qdrant outage skipped Vectorize and degraded straight to
+keyword even with valid Cloudflare credentials.
+
+`DENSE_FALLBACK_BACKEND` controls tier 2:
+
+- **unset (default) — AUTO:** active whenever `CLOUDFLARE_*` + `VECTORIZE_INDEX`
+  are configured. This is the recommended setting.
+- `workers_ai` — force on (same behaviour, explicit).
+- `none` / `off` / `disabled` — force off; a Qdrant outage goes straight to keyword.
+
+Tier 2 only helps if the index holds the whole corpus, which is why
+`reindex_vectorize.py` refuses to seed a subset — otherwise the same question
+answers from 3,900 chunks normally and from 486 FAQ rows during an outage.
 - **Phase 2 — LLM fallback: DONE.** `service._llm_cloud_fallback` /
   `_stream_cloud_fallback` wired into `_call_llm_with_deadline` + `stream_llm_tokens`,
   keyed off `_LLM_CIRCUIT` (Gemini → Workers AI).

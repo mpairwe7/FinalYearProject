@@ -244,7 +244,10 @@ App/backend/app/
 ├── corrective_rag.py    # Corrective re-retrieval + clarification detection
 ├── guardrails.py        # InputGuard + OutputGuard (OWASP LLM Top 10 2025)
 ├── retriever.py         # HybridRetriever (bge-m3 + BM25 + RRF + rerank) + CircuitBreaker
-├── indexer.py           # PDF/CSV → Qdrant document indexing
+├── indexer.py           # JSONL → Qdrant indexing (Qdrant → Vectorize → keyword tiers)
+├── faq_corpus.py        # ura_*_faqs.csv + teacher-QA → validated JSONL → vector docs
+├── pdf_corpus.py        # PDFs → hierarchical chunk JSONL (heading trail, atomic tables)
+├── crawl_corpus.py      # Crawl pages → chunk JSONL (newest capture per URL, above floor)
 ├── speech_service.py    # ASR (Whisper) + TTS (Piper) + MT (prompted/ONNX)
 ├── sunbird.py           # Sunbird AI cloud fallback (Ugandan languages)
 ├── tracing.py           # OpenTelemetry GenAI 2025 semconv tracing
