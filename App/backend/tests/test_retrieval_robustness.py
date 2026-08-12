@@ -416,3 +416,98 @@ class LexicalRelevanceGateTests(unittest.TestCase):
         self.assertFalse(
             OutputGuard.should_abstain([{"score_rrf": 0.016, "score_lexical": "nonsense"}])
         )
+
+
+class _FakePoint:
+    def __init__(self, payload: dict, score: float = 0.5) -> None:
+        self.id = payload.get("chunk_id", "p1")
+        self.payload = payload
+        self.score = score
+
+
+class _FakeQueryResult:
+    def __init__(self, points: list[_FakePoint]) -> None:
+        self.points = points
+
+
+class _FakeQdrantSearch:
+    """Minimal stand-in for the bits of QdrantClient that search() touches."""
+
+    def __init__(self, payloads: list[dict]) -> None:
+        self._payloads = payloads
+
+    def query_points(self, **kwargs):  # noqa: ANN003, ANN201
+        return _FakeQueryResult([_FakePoint(p) for p in self._payloads])
+
+
+class LexicalStampWiringTests(unittest.TestCase):
+    """The guard reads ``score_lexical``, so the retriever must actually set it.
+    A correct guard fed unstamped hits silently reverts to answering everything,
+    which is the failure this whole change exists to prevent."""
+
+    def _sparse_only_retriever(self, payloads: list[dict]) -> HybridRetriever:
+        r = HybridRetriever()
+        r._ready = True
+        r._sparse_only = True
+        r._dense_model = None
+        r._client = _FakeQdrantSearch(payloads)
+        r._sparse_encoder = BM25SparseEncoder().fit(
+            [
+                "value added tax is charged at eighteen percent on taxable supplies",
+                "a taxpayer identification number is required to register for tax",
+                "capital gains on the disposal of a business asset are chargeable",
+            ]
+        )
+        return r
+
+    def test_sparse_only_search_stamps_every_hit(self) -> None:
+        payloads = [
+            {
+                "chunk_id": "c1",
+                "text": "Value added tax is charged at eighteen percent on taxable supplies.",
+                "doc_type": "pdf_chunk",
+                "source": "handbook.pdf",
+            }
+        ]
+        r = self._sparse_only_retriever(payloads)
+        hits = r.search("taxable supplies rate", top_k=2)
+        self.assertTrue(hits, "expected the fake client to yield a hit")
+        for hit in hits:
+            self.assertIn("score_lexical", hit)
+            self.assertIsInstance(hit["score_lexical"], float)
+
+    def test_an_on_topic_query_stamps_higher_than_an_off_topic_one(self) -> None:
+        """The fake client returns the same passage whatever is asked, so the only
+        thing that can differ between these two searches is the stamp — which is
+        exactly the signal under test."""
+        payloads = [
+            {
+                "chunk_id": "c1",
+                "text": "Value added tax is charged at eighteen percent on taxable supplies.",
+                "doc_type": "pdf_chunk",
+                "source": "handbook.pdf",
+            }
+        ]
+        on = self._sparse_only_retriever(payloads).search("taxable supplies percent", top_k=1)
+        off = self._sparse_only_retriever(payloads).search("capital gains disposal", top_k=1)
+        self.assertTrue(on and off, "both queries must reach the fake client")
+        self.assertGreater(on[0]["score_lexical"], off[0]["score_lexical"])
+
+    def test_the_stamp_survives_into_the_abstention_decision(self) -> None:
+        """End-to-end within the retriever+guard pair: an off-topic question over
+        this corpus must come back as abstain, an on-topic one must not."""
+        from app.guardrails import OutputGuard
+
+        payloads = [
+            {
+                "chunk_id": "c1",
+                "text": "Value added tax is charged at eighteen percent on taxable supplies.",
+                "doc_type": "pdf_chunk",
+                "source": "handbook.pdf",
+            }
+        ]
+        on_hits = self._sparse_only_retriever(payloads).search("taxable supplies rate", top_k=1)
+        off_hits = self._sparse_only_retriever(payloads).search("write a poem about cats", top_k=1)
+        self.assertFalse(OutputGuard.should_abstain(on_hits))
+        if off_hits:  # an out-of-vocabulary query may return nothing at all
+            self.assertTrue(OutputGuard.should_abstain(off_hits))
