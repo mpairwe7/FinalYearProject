@@ -6,13 +6,17 @@ file records **what is actually configured**, where each value lives, and why.
 
 Last updated: 2026-08-13.
 
-**Current status:** deployed on image `sha-9c69489`. The pages, the CSP, the
-backend's RS256 mode and the authorization redirect are all live and verified.
-Sign-in is **not yet completable**: Auth0 refuses the token request with
-*Client "…" is not authorized to access resource server "https://ura-chatbot/api"*.
-The API exists and the application is registered correctly — see *Diagnosing an
-authorization-request failure* — so what remains is authorizing the application
-for that API in the Auth0 dashboard.
+**Current status:** deployed on image `sha-9c69489` and verified 16/16 against the
+live Space — the staff pages serve, the CSP carries the provider origin, the
+backend runs RS256 against the tenant's JWKS, and the sign-in redirect reaches
+Auth0's Universal Login with PKCE S256, the audience and no client secret. Auth0
+accepts the authorization request and serves its login form.
+
+The one leg not covered by automation is entering a user's password, which
+belongs to the operator. To finish the check by hand: sign in as a user holding
+`ura_admin` and confirm the landing on `/admin`; then as `ura_staff` and confirm
+`/agent`. If either lands but the dashboard refuses with role `public`, the roles
+are not reaching a probed claim — see *Roles* above.
 
 ## Topology
 
