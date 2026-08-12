@@ -121,11 +121,11 @@ export default function LanguageMenu({ locale, options, onLocaleChange }: Langua
   };
 
   return (
-    <div className="cmpv2-lang">
+    <div className="langsel">
       <button
         ref={btnRef}
         type="button"
-        className="cmpv2-lang-btn"
+        className="langsel-btn"
         aria-label={`Response language: ${current.label}`}
         aria-haspopup="dialog"
         aria-expanded={open}

@@ -174,7 +174,7 @@ PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Triv
 | `LLM_LOAD_IN_4BIT=true` | Load local Qwen3-8B with BitsAndBytes NF4 quantization |
 | `LORA_ADAPTER_LG/SW/NYN/ACH` | Mount and select Qwen LoRA adapters per locale |
 | `WHISPER_DEVICE=cpu` | Keep Whisper ASR off the Qwen GPU |
-| `WHISPER_ADAPTER_LG/SW/NYN` | Mount Whisper LoRA adapters for supported speech locales |
+| `WHISPER_ADAPTER_LG/SW/NYN/ACH` | Mount Whisper LoRA adapters for supported speech locales |
 | `FLAG_AUTH_REQUIRED` | Keep private routes fail-closed while public chat remains available via optional auth |
 
 ## Support

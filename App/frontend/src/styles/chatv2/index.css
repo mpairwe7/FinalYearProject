@@ -6,3 +6,10 @@
 @import "./composer.css";
 @import "./messages.css";
 @import "./overlays.css";
+/* Re-opens the shell so globals.css's gradient mesh shows through, while
+   keeping every text-bearing surface opaque. Must stay after the files whose
+   opaque backgrounds it overrides. */
+@import "./canvas.css";
+/* Interaction feel (press feedback, touch targets, scroll containment).
+   Visual identity untouched — this only changes how the surface responds. */
+@import "./interactions.css";

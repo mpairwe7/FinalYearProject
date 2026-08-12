@@ -109,6 +109,98 @@ def _looks_like_audio(data: bytes) -> bool:
     if data.startswith(_AUDIO_MAGIC):
         return True
     return data[0] == 0xFF and (data[1] & 0xE0) == 0xE0  # raw MPEG frame sync
+
+
+# MPEG audio frame tables, for reading a duration off an MP3 without decoding
+# it. Index by (version, layer) as encoded in the frame header.
+_MPEG_BITRATES_V1_L3 = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
+_MPEG_BITRATES_V2_L3 = (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0)
+_MPEG_RATES = {3: (44100, 48000, 32000), 2: (22050, 24000, 16000), 0: (11025, 12000, 8000)}
+
+
+def _mp3_metadata(data: bytes) -> tuple[int, float] | None:
+    """(sample_rate, duration_s) from an MP3's first frame header, or None.
+
+    Duration assumes a constant bitrate, which is what edge-tts emits. A VBR
+    file would come out approximate — still far closer than the byte-length
+    guess this replaces, which assumed the bytes were raw PCM.
+    """
+    i = 0
+    if data[:3] == b"ID3":  # skip the ID3v2 tag: 10-byte header + syncsafe size
+        if len(data) < 10:
+            return None
+        size = 0
+        for b in data[6:10]:
+            size = (size << 7) | (b & 0x7F)
+        i = 10 + size
+    # Scan a bounded window for the frame sync rather than trusting alignment.
+    limit = min(len(data) - 4, i + 8192)
+    while i < limit:
+        if data[i] == 0xFF and (data[i + 1] & 0xE0) == 0xE0:
+            h1, h2 = data[i + 1], data[i + 2]
+            version = (h1 >> 3) & 0x03  # 3=MPEG1, 2=MPEG2, 0=MPEG2.5
+            layer = (h1 >> 1) & 0x03    # 1=Layer III
+            br_idx = (h2 >> 4) & 0x0F
+            sr_idx = (h2 >> 2) & 0x03
+            if version != 1 and layer == 1 and sr_idx != 3 and br_idx not in (0, 15):
+                table = _MPEG_BITRATES_V1_L3 if version == 3 else _MPEG_BITRATES_V2_L3
+                bitrate = table[br_idx] * 1000
+                rate = _MPEG_RATES[version][sr_idx]
+                if bitrate:
+                    return rate, round((len(data) - i) * 8 / bitrate, 3)
+                return rate, 0.0
+        i += 1
+    return None
+
+
+def _audio_metadata(data: bytes, default_rate: int) -> tuple[int, int, float]:
+    """(sample_rate, num_samples, duration_s) read from *data*'s own header.
+
+    Every cloud TTS tier used to report these as hardcoded constants and zeros,
+    so `/v1/tts` advertised a sample rate the audio did not have and a duration
+    of 0 for real speech. Reading the container is cheap — a WAV header parse or
+    one MPEG frame header — and is the only way these fields can be true for a
+    backend that hands us encoded bytes rather than samples.
+
+    Falls back to (default_rate, 0, 0.0) for anything unrecognised, so an
+    unknown container degrades to the old behaviour instead of raising.
+    """
+    if not data or len(data) < 4:
+        return default_rate, 0, 0.0
+    try:
+        if data[:4] == b"RIFF":
+            import io as _io
+            import wave as _wave
+
+            with _wave.open(_io.BytesIO(data), "rb") as w:
+                rate = w.getframerate()
+                frames = w.getnframes()
+            return rate, frames, round(frames / rate, 3) if rate else 0.0
+        if data[:3] == b"ID3" or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+            mp3 = _mp3_metadata(data)
+            if mp3:
+                rate, duration = mp3
+                return rate, int(duration * rate), duration
+    except Exception:  # noqa: BLE001 — metadata is advisory; never fail a response
+        logger.debug("Could not read audio metadata from %d bytes", len(data), exc_info=True)
+    return default_rate, 0, 0.0
+
+
+def _input_duration_s(data: bytes, sample_rate: int) -> float:
+    """Wall-clock length of posted audio, for ASR results that omit it.
+
+    Prefers the container's own header; falls back to treating the bytes as
+    raw PCM16 at *sample_rate*, which is what `/v1/asr` documents its body to
+    be. Returns 0.0 rather than raising when the input makes no sense.
+    """
+    _, _, duration = _audio_metadata(data, sample_rate)
+    if duration:
+        return duration
+    if not data or sample_rate <= 0:
+        return 0.0
+    return round(len(data) / (sample_rate * 2), 3)  # int16 mono
+
+
 SPEECH_MAX_CONCURRENCY = int(os.getenv("SPEECH_MAX_CONCURRENCY", "2"))
 
 DEFAULT_EN_VOICE = os.getenv("SPEECH_EN_VOICE", "en_US-lessac-medium")
@@ -119,7 +211,32 @@ DEFAULT_LG_VOICE = os.getenv("SPEECH_LG_VOICE", "luganda-vits-v1")
 # a natural English neural voice; Sunbird has no native English voice, so this
 # is what keeps English TTS off the poor Sunbird-English fallback.
 SPEECH_EN_EDGE_VOICE = os.getenv("SPEECH_EN_EDGE_VOICE", "en-US-AriaNeural")
-SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-UG-MaleNeural")
+# edge-tts has no Luganda voice, so this is an English voice reading Luganda
+# text — a stopgap for when Sunbird's native Luganda voice is unreachable.
+# It was en-UG-MaleNeural, which is not a real edge-tts voice: the service has
+# no Uganda locale at all, so every call raised "No audio was received" and
+# Luganda lost its only fallback. en-KE is the nearest available East African
+# English (Kenya borders Uganda) and Chilemba is male, matching the intent of
+# the previous value.
+SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-KE-ChilembaNeural")
+
+# Locales that ship a genuine local (Piper/Sherpa) voice model. Anything outside
+# this set can only be synthesized locally by an *English* model reading foreign
+# text — which the chain below must treat as "no voice", not as success.
+LOCAL_TTS_VOICES: dict[str, str] = {
+    "en": DEFAULT_EN_VOICE,
+    "lg": DEFAULT_LG_VOICE,
+}
+
+
+def _sunbird_has_native_voice(locale: str) -> bool:
+    """True when Sunbird ships a native speaker for *locale*."""
+    try:
+        from . import sunbird
+
+        return bool(sunbird.TTS_VOICES.get(locale))
+    except Exception:  # noqa: BLE001 — sunbird optional; absence means no voice
+        return False
 
 # Cloudflare Workers AI models for ENGLISH STT/TTS — configurable so the model
 # can be swapped (e.g. to Deepgram nova-3/flux/aura-2) via env without code
@@ -132,12 +249,15 @@ TTS_FALLBACK_MODEL_2 = os.getenv("TTS_FALLBACK_MODEL_2", "@cf/deepgram/aura-2-en
 
 # Whisper LoRA adapters — per-language fine-tuned for multilingual ASR.
 # Set WHISPER_ADAPTER_PATH for single-language (backward-compat), or
-# set WHISPER_ADAPTER_{LG,SW,NYN} for per-language routing.
+# set WHISPER_ADAPTER_{LG,SW,NYN,ACH} for per-language routing.
+# Every locale the UI can select needs a slot here; a missing key means the
+# locale silently gets the un-adapted base model instead of its fine-tune.
 WHISPER_ADAPTER_PATH = os.getenv("WHISPER_ADAPTER_PATH", "") or None
 WHISPER_ADAPTERS: dict[str, str | None] = {
     "lg": os.getenv("WHISPER_ADAPTER_LG", "") or None,
     "sw": os.getenv("WHISPER_ADAPTER_SW", "") or None,
     "nyn": os.getenv("WHISPER_ADAPTER_NYN", "") or None,
+    "ach": os.getenv("WHISPER_ADAPTER_ACH", "") or None,
     # Phase 23 — accent-specific adapters (populated by train_accent_asr.py)
     "en_ug_central": os.getenv("WHISPER_ADAPTER_EN_UG_CENTRAL", "") or None,
     "en_ug_eastern": os.getenv("WHISPER_ADAPTER_EN_UG_EASTERN", "") or None,
@@ -366,9 +486,31 @@ class SpeechModel:
     def transcribe(
         self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
     ) -> TranscribeResult:
-        """Transcribe raw PCM bytes.
+        """Transcribe raw PCM bytes, filling in any timing the backend omitted.
 
-        Fallback chain (local-first for production):
+        The local backends report duration_s / latency_s / rtf themselves; the
+        cloud ones reported none of them, so `/v1/asr` answered with nulls
+        whenever it fell through to Sunbird or Workers AI — which is the common
+        case for every non-English locale. Input duration does not depend on
+        which backend ran: it is a property of the audio that was posted. So it
+        is computed once here and used to fill the gaps, rather than at each
+        `return` in the chain where the next branch added would miss it.
+        """
+        t_start = time.perf_counter()
+        result = self._transcribe_chain(audio_bytes, sample_rate, language)
+        if result.duration_s is None:
+            result.duration_s = _input_duration_s(audio_bytes, sample_rate)
+        if result.latency_s is None:
+            result.latency_s = round(time.perf_counter() - t_start, 3)
+        if result.rtf is None and result.duration_s:
+            result.rtf = round(result.latency_s / max(result.duration_s, 0.01), 2)
+        return result
+
+    def _transcribe_chain(
+        self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
+    ) -> TranscribeResult:
+        """The backend fallback chain itself.
+
             ① Whisper + LoRA     — fine-tuned, language-specific, offline
             ② Local Sherpa ASR   — offline, if model available
             ③ faster-whisper     — CTranslate2 int8, good multilingual
@@ -469,7 +611,12 @@ class SpeechModel:
                     w.setsampwidth(2)
                     w.setframerate(sample_rate)
                     w.writeframes(pcm16.tobytes())
-                lang_code = {"en": "eng", "lg": "lug"}.get(language or "en", "eng")
+                # Read the code from sunbird's own locale table rather than a
+                # local copy. The inline map here only knew en/lg, so Swahili,
+                # Runyankole and Acholi audio was submitted tagged as English —
+                # Sunbird then transcribed it with an English model and returned
+                # confident nonsense, which the RAG layer had no way to spot.
+                lang_code = sunbird.LOCALE_TO_SUNBIRD.get(language or "en", "eng")
                 stt_result = _cloud_call(
                     "Sunbird STT",
                     sunbird.speech_to_text,
@@ -580,17 +727,12 @@ class SpeechModel:
                 if not audio:
                     continue
                 breakers.CF_TTS_BREAKER.record_success()
-                sr = out.get("sample_rate") or 24000
-                if out.get("fmt") == "wav":
-                    try:
-                        import io as _io
-                        import wave as _wave
-                        with _wave.open(_io.BytesIO(audio), "rb") as w:
-                            sr = w.getframerate()
-                    except Exception:
-                        pass
+                # Was a WAV-only header peek that still left num_samples and
+                # duration at zero; _audio_metadata covers MP3 too and fills
+                # all three, falling back to the provider's declared rate.
+                sr, samples, duration = _audio_metadata(audio, out.get("sample_rate") or 24000)
                 return SynthesizeResult(
-                    audio=audio, sample_rate=sr, num_samples=0, duration_s=0.0,
+                    audio=audio, sample_rate=sr, num_samples=samples, duration_s=duration,
                     latency_s=round(time.perf_counter() - t0, 3),
                     backend="cf_workers_ai", voice=model,
                 )
@@ -716,7 +858,7 @@ class SpeechModel:
                 audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
                 latency_s=0.0, backend="disabled", voice="", error="SPEECH_ENABLED=false",
             )
-        voice = voice or (DEFAULT_LG_VOICE if language == "lg" else DEFAULT_EN_VOICE)
+        voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
 
         # ⓪ Phrase cache — repeated short prompts (greetings, empathy openers,
         #    workflow questions) skip the whole backend chain.
@@ -748,6 +890,79 @@ class SpeechModel:
         language: str,
     ) -> SynthesizeResult:
         """The actual backend fallback chain behind :meth:`synthesize`."""
+        # Local Piper and edge-tts both default to an English voice for any
+        # language they have no model for, and then *succeed* — so left in
+        # their natural order they answer a Runyankole question in an English
+        # voice and the chain never reaches Sunbird's native speaker.
+        #
+        # So for languages whose only genuine voice is Sunbird's, try Sunbird
+        # FIRST rather than removing the other backends from the chain.
+        # Ordering, not exclusion: an earlier revision skipped local and edge
+        # outright, which turned a Sunbird outage into silence. It did exactly
+        # that in production — Sunbird's TTS endpoint had been answering 405
+        # since it moved, so those locales returned no audio at all. Degraded
+        # audio beats no audio; a wrong-sounding voice is still recoverable
+        # information, silence is not.
+        prefer_native_cloud = (
+            language not in LOCAL_TTS_VOICES and _sunbird_has_native_voice(language)
+        )
+
+        def _try_sunbird() -> SynthesizeResult | None:
+            """One attempt at Sunbird's native voice. None if unavailable."""
+            t_sunbird = time.perf_counter()
+            try:
+                from . import sunbird
+
+                if not sunbird.is_available():
+                    return None
+
+                def _fetch():
+                    tts_result = sunbird.text_to_speech(text, locale=language)
+                    if not tts_result or not tts_result.get("audio_url"):
+                        return None
+                    import httpx
+
+                    return httpx.get(tts_result["audio_url"], timeout=15)
+
+                audio_resp = _cloud_call("Sunbird TTS", _fetch)
+                if audio_resp is None:
+                    return None
+                if audio_resp.status_code == 200 and _looks_like_audio(audio_resp.content):
+                    # These were 22050/0/0.0 regardless of what came back. The
+                    # audio is actually 24 kHz, so the advertised rate was wrong
+                    # for every native voice, and latency read 0.0 for a call
+                    # that had just crossed the network twice.
+                    rate, samples, duration = _audio_metadata(audio_resp.content, 24000)
+                    return SynthesizeResult(
+                        audio=audio_resp.content,
+                        sample_rate=rate,
+                        num_samples=samples,
+                        duration_s=duration,
+                        latency_s=round(time.perf_counter() - t_sunbird, 3),
+                        backend="sunbird_cloud",
+                        voice=f"sunbird_{language}",
+                    )
+                logger.warning(
+                    "Sunbird TTS returned non-audio payload (status=%s, %d bytes)",
+                    audio_resp.status_code,
+                    len(audio_resp.content),
+                )
+            except Exception:
+                logger.debug("Sunbird TTS attempt failed", exc_info=True)
+            return None
+
+        # ⓪ Native cloud voice first, for languages that have one there and
+        #    nowhere else. Falls through on failure rather than giving up.
+        if prefer_native_cloud:
+            result = _try_sunbird()
+            if result:
+                return result
+            logger.info(
+                "Sunbird native voice unavailable for %s; degrading to the "
+                "generic chain rather than returning silence",
+                language,
+            )
+
         # ① Local Sherpa/Piper TTS (primary — offline, low-latency)
         if self._breakers["tts"].allow_request():
             future = self._executor.submit(self._do_synthesize, text, voice)
@@ -769,6 +984,24 @@ class SpeechModel:
             except Exception:
                 logger.debug("Workers AI TTS failed", exc_info=True)
 
+        # ①.75 Native cloud voice for a locale that has a local voice on paper
+        #      but whose local model may be absent from the running image —
+        #      today that is Luganda, whose luganda-vits-v1 does not ship in the
+        #      slim deploy image.
+        #
+        #      This MUST come before edge-tts. edge has no voice for any Ugandan
+        #      language, so it answers Luganda with an English one; letting it
+        #      run first means it always succeeds and Sunbird's native Luganda
+        #      speaker at ③ is never reached. That is not hypothetical — while
+        #      the edge voice was misconfigured, stage ② failed and the chain
+        #      fell through to Sunbird; repairing the edge voice would have
+        #      silently swapped Luganda's native speaker for an English one,
+        #      leaving it the only local language without a native voice.
+        if not prefer_native_cloud and (language or "en") != "en":
+            result = _try_sunbird()
+            if result:
+                return result
+
         # ② edge-tts (Microsoft neural voices — needs internet, no API key)
         try:
             result = _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
@@ -777,38 +1010,13 @@ class SpeechModel:
         except Exception:
             logger.debug("edge-tts failed", exc_info=True)
 
-        # ③ Sunbird cloud TTS (fallback — native Luganda speaker voices)
-        try:
-            from . import sunbird
-            if sunbird.is_available():
-
-                def _sunbird_tts():
-                    tts_result = sunbird.text_to_speech(text, locale=language)
-                    if not tts_result or not tts_result.get("audio_url"):
-                        return None
-                    import httpx
-
-                    return httpx.get(tts_result["audio_url"], timeout=15)
-
-                audio_resp = _cloud_call("Sunbird TTS", _sunbird_tts)
-                if audio_resp is not None:
-                    if audio_resp.status_code == 200 and _looks_like_audio(audio_resp.content):
-                        return SynthesizeResult(
-                            audio=audio_resp.content,
-                            sample_rate=22050,
-                            num_samples=0,
-                            duration_s=0.0,
-                            latency_s=0.0,
-                            backend="sunbird_cloud",
-                            voice=f"sunbird_{language}",
-                        )
-                    logger.warning(
-                        "Sunbird TTS returned non-audio payload (status=%s, %d bytes)",
-                        audio_resp.status_code,
-                        len(audio_resp.content),
-                    )
-        except Exception:
-            logger.debug("Sunbird TTS fallback also failed")
+        # ③ Sunbird cloud TTS — English only by this point; every other locale
+        #    already tried it at ⓪ or ①.75, and the gates are mutually exclusive
+        #    so Sunbird is still attempted at most once per request.
+        if not prefer_native_cloud and (language or "en") == "en":
+            result = _try_sunbird()
+            if result:
+                return result
 
         return SynthesizeResult(
             audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
@@ -918,11 +1126,15 @@ class SpeechModel:
 
         latency = time.perf_counter() - t0
         logger.info("edge-tts: %d bytes in %.1fs (voice=%s)", len(audio_bytes), latency, voice_id)
+        # edge-tts returns MP3, but duration was computed as len/(24000*2) —
+        # the bytes-to-samples formula for raw PCM16. Against a ~48 kbps MP3
+        # that understates a real phrase by roughly 5x. Read the frame header.
+        rate, samples, duration = _audio_metadata(audio_bytes, 24000)
         return SynthesizeResult(
             audio=audio_bytes,
-            sample_rate=24000,
-            num_samples=0,
-            duration_s=round(len(audio_bytes) / (24000 * 2), 2) if audio_bytes else 0.0,
+            sample_rate=rate,
+            num_samples=samples,
+            duration_s=duration,
             latency_s=round(latency, 3),
             backend="edge_tts",
             voice=voice_id,
@@ -1258,8 +1470,19 @@ class SpeechModel:
             try:
                 from . import sunbird
                 if sunbird.is_available():
-                    src_code = {"en": "eng", "lg": "lug"}.get(source_lang, source_lang)
-                    tgt_code = {"en": "eng", "lg": "lug"}.get(target_lang, target_lang)
+                    # Same inline-map defect as the STT path had: this knew only
+                    # en/lg and passed everything else through unmapped, so
+                    # Swahili went out as "sw" rather than "swa". Runyankole and
+                    # Acholi only worked because their locale code happens to
+                    # equal their Sunbird code. Use the canonical table so that
+                    # is intentional rather than luck.
+                    #
+                    # Swahili still won't translate here — Sunbird's translate
+                    # endpoint covers English + five Ugandan languages only (see
+                    # TRANSLATION_LANGUAGES) — but it now declines with the right
+                    # code and falls through to Gemini/Workers AI/prompted.
+                    src_code = sunbird.LOCALE_TO_SUNBIRD.get(source_lang, source_lang)
+                    tgt_code = sunbird.LOCALE_TO_SUNBIRD.get(target_lang, target_lang)
                     result = sunbird.translate(text, src_code, tgt_code)
                     if result:
                         return _res(result, "sunbird_cloud")

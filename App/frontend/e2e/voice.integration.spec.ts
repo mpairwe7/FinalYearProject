@@ -40,7 +40,7 @@ test.describe("Voice STT/TTS — real backend (integration)", () => {
   }) => {
     test.slow();
     await page.goto("/");
-    await page.getByRole("checkbox", { name: "Voice" }).check();
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
 
     await page.getByRole("button", { name: "Start speaking" }).click();
     await expect(page.getByText("Listening...")).toBeVisible({ timeout: 10_000 });

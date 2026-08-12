@@ -1,0 +1,140 @@
+/* =============================================================================
+ * chatv2 — animated gradient-mesh canvas (restored).
+ *
+ * The original design system painted the page with a slow-drifting radial mesh
+ * in URA navy/teal/gold (`body::before`) plus an overlay-blend noise grain
+ * (`body::after`), with every panel floating above it as translucent glass.
+ * Those rules still live in globals.css, but chatv2 shipped opaque
+ * `background: var(--bg-0)` on the shell, which covered the mesh completely.
+ *
+ * This file re-opens the shell so the mesh shows through again, WITHOUT
+ * reintroducing the accessibility failure the flat redesign existed to fix:
+ * gold-on-gradient text measured ~1.9:1. The rule that keeps that impossible is
+ * that only *structural* surfaces become transparent — every surface that
+ * carries text (bubbles, composer, sidebar, menus, dialogs) stays opaque or
+ * near-opaque, so no glyph is ever rendered directly on a moving gradient.
+ *
+ * Loaded last in index.css so these overrides win at equal specificity.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * 1. Open the shell — the mesh lives on `body`, at z-index -2/-1, so making
+ *    these layers transparent is all that is needed to reveal it.
+ *    `.chatv2` tokens shadow --bg-0 inside the subtree, but body::before reads
+ *    :root's value, so the mesh keeps its original palette in both themes.
+ * ------------------------------------------------------------------------- */
+.chatv2,
+.app-shell.chatv2,
+.chatv2 .app-main-col,
+.chatv2 .app-content {
+  background: transparent;
+}
+
+/* Header floats as glass rather than a solid bar. */
+.chatv2 .hdrv2 {
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-0) 60%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. The transcript column stays transparent.
+ *
+ *    An earlier revision gave it a translucent scrim as a contrast floor under
+ *    the bubble-less assistant reply. That turned out to be both unnecessary
+ *    and harmful: the mesh's own base layer is a linear-gradient between
+ *    --bg-0 and --bg-1, so text over it is already sitting on essentially the
+ *    page background colour — the radial tints ride on top at 8% (light) and
+ *    22% (dark) and move the measured contrast very little.
+ *
+ *    Harmful because the ghost logo restored in §5 is painted *behind* the
+ *    transcript (z-index 0 vs 1). At 3% opacity it cannot survive an 82%
+ *    scrim on top of it, so the scrim would have silently cancelled the
+ *    watermark. Contrast is verified by the axe-core suite either way.
+ * ------------------------------------------------------------------------- */
+
+/* Landing has no transcript panel; its headline sits on the bare canvas, which
+   is fine — it is large, bold, high-contrast type, not body copy. */
+.chatv2 .landing {
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+ * 2b. The URA ghost logo, restored.
+ *
+ * globals.css paints a 280px /ura-logo.png watermark at 3% opacity, fixed and
+ * centred behind the transcript, with the transcript itself lifted to z-index 1
+ * so the mark never sits over text. chatv2 had switched it off outright
+ * (`display: none`) as part of the flat-canvas pass.
+ *
+ * Only the display toggle is reverted — geometry, opacity and the responsive
+ * step-down to 180px/2.5% on narrow screens all still come from globals.css, so
+ * there is one definition of the watermark rather than a copy that can drift.
+ * ------------------------------------------------------------------------- */
+.chatv2 .chat-area::before {
+  display: block;
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. Panels that carry text stay opaque. Listed explicitly rather than relying
+ *    on inheritance so a future transparent-background change to the shell
+ *    cannot silently put a gradient under a paragraph.
+ * ------------------------------------------------------------------------- */
+.chatv2 .conversation-rail,
+.chatv2 .composer.cmpv2,
+.chatv2 .hdrv2-menu,
+.chatv2 .lmv2,
+.chatv2 .dlgv2,
+.chatv2 .bubble.user,
+.chatv2 .citations ol,
+.chatv2 .landing-chip {
+  background: var(--bg-0);
+}
+:root[data-theme="dark"] .chatv2 .conversation-rail {
+  background: var(--bg-1);
+}
+.chatv2 .bubble.user {
+  background: var(--cv2-user-bubble);
+}
+
+/* The composer dock sat on a hard gradient-to-solid fade designed for an opaque
+   canvas; over the mesh that reads as a grey band. Let the mesh run behind it
+   and let the composer's own surface provide the contrast. */
+.chatv2 .chat-dock {
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. Motion + capability guards.
+ * ------------------------------------------------------------------------- */
+/* Only the header is glass now, so only the header needs these guards. The
+   transcript is transparent in every mode — giving it an opaque background
+   here would put a solid layer over the ghost logo behind it and undo §2b. */
+@supports not (backdrop-filter: blur(1px)) {
+  .chatv2 .hdrv2 {
+    background: var(--bg-0);
+  }
+}
+
+/* globals.css already stops the drift animation under reduced-motion; the mesh
+   stays as a static gradient, which is the intent. Blur is dropped too — it is
+   a GPU cost with no informational value for a user who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 .hdrv2 {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--bg-0);
+  }
+}
+
+/* Mobile: blur is the single most expensive effect on low-end Android, so the
+   header goes flat there. globals.css already steps the watermark down to
+   180px / 2.5% at this breakpoint. */
+@media (max-width: 720px) {
+  .chatv2 .hdrv2 {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--bg-0);
+  }
+}

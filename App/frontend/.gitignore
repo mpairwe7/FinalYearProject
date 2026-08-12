@@ -13,3 +13,6 @@ pnpm-lock.yaml
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# TypeScript incremental build cache — generated on every build
+*.tsbuildinfo

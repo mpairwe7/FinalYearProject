@@ -45,9 +45,10 @@ test.describe("URA Chatbot Smoke", () => {
   test("composer and chat area coexist", async ({ page }) => {
     await page.goto("/");
 
-    // Verify the input area and the landing chat surface are both present
+    // Verify the input area and the landing chat surface are both present.
+    // The primary slot holds voice mode until something is typed.
     await expect(page.getByLabel("Type your message")).toBeVisible();
-    await expect(page.getByLabel("Send message")).toBeVisible();
+    await expect(page.getByLabel("Enter voice mode")).toBeVisible();
     await expect(
       page.getByRole("group", { name: "Suggested questions" }),
     ).toBeVisible();
@@ -69,10 +70,10 @@ test.describe("URA Chatbot Smoke", () => {
     expect(value.length).toBeGreaterThan(0);
   });
 
-  test("send button is disabled when input is empty", async ({ page }) => {
+  test("an empty composer offers voice mode, not a dead send button", async ({ page }) => {
     await page.goto("/");
-    const sendBtn = page.getByLabel("Send message");
-    await expect(sendBtn).toBeDisabled();
+    await expect(page.getByLabel("Enter voice mode")).toBeEnabled();
+    await expect(page.getByLabel("Send message")).toHaveCount(0);
   });
 
   test("language switcher toggles locale", async ({ page }) => {
