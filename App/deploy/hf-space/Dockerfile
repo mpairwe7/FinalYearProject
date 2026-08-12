@@ -8,6 +8,22 @@
 # config (Sunbird/Gemini/Cloudflare secrets, SPEECH_ENABLED, …) is supplied as
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
+# ROLLED BACK 2026-08-12 to sha-a264da7.
+#
+# sha-41b7296 (Qdrant + Redis sidecars, 7,943-doc corpus) is withheld: end-to-end
+# testing against it found that off-domain questions stopped abstaining.
+# guardrails.should_abstain reads hit_relevance, which is None when only an RRF
+# score exists, and the sparse-only sidecar has no reranker — so it took its
+# "degraded mode, cannot assess relevance" branch and never abstained. That default
+# was safe when degraded meant keyword search over 499 curated FAQ rows behind the
+# question-F1 gate; with 7,943 raw document chunks BM25 finds something for any
+# query. Observed live: "What is the capital of France?" answered from a Thales Las
+# France (Tanzania Branch) chunk, and "write me a poem about cats" returned
+# pymupdf4llm image-placeholder text.
+#
+# Re-pin to the sidecar image once chunk hits carry a lexical binding signal that
+# should_abstain can use without a reranker.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
 #
@@ -175,7 +191,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-41b7296
+FROM landwind/ura-chatbot:sha-a264da7
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
