@@ -21,7 +21,7 @@
  *
  * Standards: ISO/IEC 25010:2023 §4 (Interaction Capability), WCAG 2.2 AA.
  */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import StaffGuard, { type StaffIdentity } from "../../components/StaffGuard";
 import {
   useTicket,
@@ -84,16 +84,93 @@ function QueueRow({
   );
 }
 
+/**
+ * The reply pair. Its own component so the parent can reset both drafts by
+ * changing `key` when the selected ticket changes — no effect, and no window in
+ * which the previous ticket's text is still mounted.
+ *
+ * `officer_reply` and `staff_note` stay separate all the way to the submit call:
+ * one reaches the taxpayer and one does not.
+ */
+function ReplyBox({
+  pending,
+  isError,
+  isSuccess,
+  onSend,
+}: {
+  pending: boolean;
+  isError: boolean;
+  isSuccess: boolean;
+  onSend: (officerReply: string, staffNote: string, nextStatus?: string) => void;
+}) {
+  const [officerReply, setOfficerReply] = useState("");
+  const [staffNote, setStaffNote] = useState("");
+  const empty = !officerReply.trim() && !staffNote.trim();
+
+  const send = (nextStatus?: string) => {
+    onSend(officerReply, staffNote, nextStatus);
+    setOfficerReply("");
+    setStaffNote("");
+  };
+
+  return (
+    <div className="ag-reply">
+      <label className="ag-field">
+        <span className="ag-field-label">
+          Reply to the taxpayer
+          <em>They see this on their next turn.</em>
+        </span>
+        <textarea
+          value={officerReply}
+          onChange={(e) => setOfficerReply(e.target.value)}
+          rows={4}
+          placeholder="Answer the question they actually asked…"
+        />
+      </label>
+
+      <label className="ag-field">
+        <span className="ag-field-label">
+          Internal note
+          <em>Never shown to the taxpayer.</em>
+        </span>
+        <textarea
+          value={staffNote}
+          onChange={(e) => setStaffNote(e.target.value)}
+          rows={2}
+          placeholder="Context for the next officer…"
+        />
+      </label>
+
+      <div className="ag-actions">
+        <button
+          type="button"
+          className="ag-primary"
+          onClick={() => send()}
+          disabled={pending || empty}
+        >
+          {pending ? "Saving…" : "Send reply"}
+        </button>
+        <button
+          type="button"
+          className="ag-secondary"
+          onClick={() => send("resolved")}
+          disabled={pending}
+        >
+          Send and resolve
+        </button>
+        {isError && <span className="ag-save-err">Could not save — try again.</span>}
+        {isSuccess && <span className="ag-save-ok">Saved.</span>}
+      </div>
+    </div>
+  );
+}
+
 function AgentQueue({ who }: { who: StaffIdentity }) {
   const [status, setStatus] = useState("open");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { data: queue, isLoading, error } = useTicketQueueFull(status, "", "", 50);
-  const { data: detail } = useTicket(selectedId);
   const { data: sla } = useTicketSla(30);
   const update = useUpdateTicket();
-
-  const [officerReply, setOfficerReply] = useState("");
-  const [staffNote, setStaffNote] = useState("");
 
   const tickets = useMemo(() => {
     const rows = [...(queue?.tickets ?? [])];
@@ -107,30 +184,31 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
     return rows;
   }, [queue]);
 
-  // Land on the top of the queue rather than an empty pane.
-  useEffect(() => {
-    if (!selectedId && tickets.length > 0) setSelectedId(tickets[0].id);
-  }, [tickets, selectedId]);
+  // Land on the top of the queue rather than an empty pane. Derived rather than
+  // synced into state by an effect, which cost an extra render and could point at
+  // a ticket that had left the filtered list.
+  const activeId =
+    selectedId && tickets.some((t) => t.id === selectedId)
+      ? selectedId
+      : (tickets[0]?.id ?? null);
 
-  // Switching ticket must not carry a half-typed reply onto someone else's case.
-  useEffect(() => {
-    setOfficerReply("");
-    setStaffNote("");
-  }, [selectedId]);
+  const { data: detail } = useTicket(activeId);
 
   const urgent = tickets.filter((t) => t.priority === "urgent").length;
   const awaiting = sla?.awaiting_first_response ?? 0;
 
-  const submit = (nextStatus?: string) => {
-    if (!selectedId) return;
+  const submit = (
+    officerReply: string,
+    staffNote: string,
+    nextStatus?: string,
+  ) => {
+    if (!activeId) return;
     const patch: Record<string, string> = {};
     if (officerReply.trim()) patch.officer_reply = officerReply.trim();
     if (staffNote.trim()) patch.staff_note = staffNote.trim();
     if (nextStatus) patch.status = nextStatus;
     if (!Object.keys(patch).length) return;
-    update.mutate({ id: selectedId, patch });
-    setOfficerReply("");
-    setStaffNote("");
+    update.mutate({ id: activeId, patch });
   };
 
   return (
@@ -189,7 +267,7 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
               <QueueRow
                 key={t.id}
                 ticket={t}
-                selected={t.id === selectedId}
+                selected={t.id === activeId}
                 onSelect={() => setSelectedId(t.id)}
               />
             ))}
@@ -197,8 +275,8 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
         </section>
 
         <section className="ag-detail" aria-label="Ticket detail">
-          {!selectedId && <p className="ag-empty">Pick a ticket to see the brief.</p>}
-          {selectedId && !detail && <p className="ag-empty">Loading the ticket…</p>}
+          {!activeId && <p className="ag-empty">Pick a ticket to see the brief.</p>}
+          {activeId && !detail && <p className="ag-empty">Loading the ticket…</p>}
           {detail && (
             <>
               <div className="ag-detail-head">
@@ -274,54 +352,15 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
                 )}
               </div>
 
-              <div className="ag-reply">
-                <label className="ag-field">
-                  <span className="ag-field-label">
-                    Reply to the taxpayer
-                    <em>They see this on their next turn.</em>
-                  </span>
-                  <textarea
-                    value={officerReply}
-                    onChange={(e) => setOfficerReply(e.target.value)}
-                    rows={4}
-                    placeholder="Answer the question they actually asked…"
-                  />
-                </label>
-
-                <label className="ag-field">
-                  <span className="ag-field-label">
-                    Internal note
-                    <em>Never shown to the taxpayer.</em>
-                  </span>
-                  <textarea
-                    value={staffNote}
-                    onChange={(e) => setStaffNote(e.target.value)}
-                    rows={2}
-                    placeholder="Context for the next officer…"
-                  />
-                </label>
-
-                <div className="ag-actions">
-                  <button
-                    type="button"
-                    className="ag-primary"
-                    onClick={() => submit()}
-                    disabled={update.isPending || (!officerReply.trim() && !staffNote.trim())}
-                  >
-                    {update.isPending ? "Saving…" : "Send reply"}
-                  </button>
-                  <button
-                    type="button"
-                    className="ag-secondary"
-                    onClick={() => submit("resolved")}
-                    disabled={update.isPending}
-                  >
-                    Send and resolve
-                  </button>
-                  {update.isError && <span className="ag-save-err">Could not save — try again.</span>}
-                  {update.isSuccess && <span className="ag-save-ok">Saved.</span>}
-                </div>
-              </div>
+              {/* `key` resets the draft when the officer switches ticket, so a
+                  half-typed reply cannot land on someone else's case. */}
+              <ReplyBox
+                key={activeId}
+                pending={update.isPending}
+                isError={update.isError}
+                isSuccess={update.isSuccess}
+                onSend={submit}
+              />
             </>
           )}
         </section>

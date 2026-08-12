@@ -20,8 +20,14 @@
  * Standards: OAuth 2.1 authorization-code + PKCE (draft-ietf-oauth-v2-1),
  * OIDC Core 1.0 §3.1; WCAG 2.2 AA for the form semantics.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { setAuthToken, getAuthToken, clearAuthToken } from "../../lib/authSession";
+import React, { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  setAuthToken,
+  getAuthToken,
+  clearAuthToken,
+  getServerAuthToken,
+  subscribeAuthToken,
+} from "../../lib/authSession";
 import { discoverOidc, TOKEN_ENDPOINT_KEY } from "../../lib/oidc";
 import "./signin.css";
 
@@ -67,11 +73,10 @@ export default function SignInPage() {
     kind: "idle",
     message: "",
   });
-  const [signedIn, setSignedIn] = useState(false);
-
-  useEffect(() => {
-    setSignedIn(Boolean(getAuthToken()));
-  }, []);
+  // Read the token as an external store rather than copying it into state on
+  // mount. It also means signing out updates this without a manual setState.
+  const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
+  const signedIn = Boolean(token);
 
   const oidcConfigured = useMemo(
     () => Boolean(OIDC_ISSUER && OIDC_CLIENT_ID),
@@ -135,8 +140,8 @@ export default function SignInPage() {
         });
         return;
       }
+      // No setSignedIn: setAuthToken above already notified the token store.
       const staff = ["ura_staff", "ura_admin", "ura_auditor"].includes(body.role);
-      setSignedIn(true);
       setStatus({
         kind: "ok",
         message: staff
@@ -151,7 +156,6 @@ export default function SignInPage() {
 
   const signOut = useCallback(() => {
     clearAuthToken();
-    setSignedIn(false);
     setDevToken("");
     setStatus({ kind: "idle", message: "Signed out." });
   }, []);

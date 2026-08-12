@@ -12,6 +12,39 @@ export function getAuthToken(): string {
   }
 }
 
+/**
+ * Subscribers for `useSyncExternalStore`.
+ *
+ * The token lives in localStorage, which React cannot see. Exposing it as a
+ * store lets components read it without a mount effect that calls setState —
+ * and it keeps two components (or two tabs) from disagreeing about whether
+ * anyone is signed in.
+ */
+const listeners = new Set<() => void>();
+
+function notify(): void {
+  listeners.forEach((listener) => listener());
+}
+
+/** Subscribe to sign-in/sign-out, including from another tab. */
+export function subscribeAuthToken(onChange: () => void): () => void {
+  listeners.add(onChange);
+  const onStorage = (event: StorageEvent) => {
+    // A null key means the whole store was cleared.
+    if (event.key === null || event.key === AUTH_TOKEN_STORAGE_KEY) onChange();
+  };
+  if (typeof window !== 'undefined') window.addEventListener('storage', onStorage);
+  return () => {
+    listeners.delete(onChange);
+    if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage);
+  };
+}
+
+/** Server snapshot for `useSyncExternalStore` — no token exists during SSR. */
+export function getServerAuthToken(): string {
+  return '';
+}
+
 export function setAuthToken(token: string): void {
   if (typeof window === 'undefined') return;
   try {
@@ -23,6 +56,8 @@ export function setAuthToken(token: string): void {
   } catch {
     // Storage can be unavailable in private contexts.
   }
+  // Fires for same-tab writes too; the `storage` event only covers other tabs.
+  notify();
 }
 
 export function clearAuthToken(): void {

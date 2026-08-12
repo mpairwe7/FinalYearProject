@@ -125,7 +125,13 @@ export default function OidcCallbackPage() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    void exchange();
+    // Deferred to a task rather than called inline: the validation branches
+    // (missing code, state mismatch) set state synchronously, and doing that in
+    // an effect body is a cascading render during mount. The values it reads —
+    // the query string and the PKCE verifier — are only available client-side,
+    // so this cannot move into render or an initialiser.
+    const id = window.setTimeout(() => void exchange(), 0);
+    return () => window.clearTimeout(id);
   }, [exchange]);
 
   return (

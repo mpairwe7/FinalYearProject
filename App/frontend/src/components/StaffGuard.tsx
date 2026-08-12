@@ -13,8 +13,15 @@
  * configured operator key. Anyone can edit localStorage; nobody can talk their
  * way past the API. Both layers are needed and neither replaces the other.
  */
-import React, { useEffect, useState } from "react";
-import { authHeaders, clearAuthToken, getAuthToken } from "../lib/authSession";
+import Link from "next/link";
+import React, { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  authHeaders,
+  clearAuthToken,
+  getAuthToken,
+  getServerAuthToken,
+  subscribeAuthToken,
+} from "../lib/authSession";
 import "./staffGuard.css";
 
 /** Mirrors `AuthUser.is_staff` in App/backend/app/auth/models.py. */
@@ -34,12 +41,17 @@ export interface StaffIdentity {
   tenant_id?: string;
 }
 
+/**
+ * What the /v1/me call established — identity only. Whether that identity is
+ * *allowed here* is decided at render from `requireRoles`, which keeps the role
+ * rule out of the effect's dependencies: it arrives as a fresh array literal on
+ * every parent render, and depending on it refetched /v1/me in an unbounded loop.
+ */
 type State =
   | { kind: "checking" }
   | { kind: "anonymous" }
-  | { kind: "forbidden"; who: StaffIdentity }
   | { kind: "unavailable"; detail: string }
-  | { kind: "ok"; who: StaffIdentity };
+  | { kind: "identified"; who: StaffIdentity };
 
 const NAV = [
   { href: "/admin", label: "Overview", roles: ["ura_admin", "ura_auditor"] },
@@ -98,15 +110,16 @@ export default function StaffGuard({
   /** Narrow further than "staff" — e.g. the overview is admin/auditor only. */
   requireRoles?: string[];
 }) {
+  // Read the token as an external store rather than copying it into state in a
+  // mount effect: no cascading render, and a sign-out in another tab is picked up.
+  const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const [state, setState] = useState<State>({ kind: "checking" });
 
   useEffect(() => {
+    // Nothing to ask the API about; the render below derives the anonymous state.
+    if (!token) return;
     let cancelled = false;
     (async () => {
-      if (!getAuthToken()) {
-        if (!cancelled) setState({ kind: "anonymous" });
-        return;
-      }
       try {
         const res = await fetch("/api/v1/me", { headers: authHeaders() });
         if (res.status === 503) {
@@ -120,14 +133,7 @@ export default function StaffGuard({
         }
         const who = (await res.json()) as StaffIdentity;
         if (cancelled) return;
-        if (!who?.authenticated) {
-          setState({ kind: "anonymous" });
-          return;
-        }
-        const allowed = requireRoles?.length
-          ? requireRoles.includes(who.role)
-          : STAFF_ROLES.has(who.role);
-        setState(allowed ? { kind: "ok", who } : { kind: "forbidden", who });
+        setState(who?.authenticated ? { kind: "identified", who } : { kind: "anonymous" });
       } catch (err) {
         if (!cancelled)
           setState({ kind: "unavailable", detail: `Could not reach the backend: ${(err as Error).message}` });
@@ -136,7 +142,15 @@ export default function StaffGuard({
     return () => {
       cancelled = true;
     };
-  }, [requireRoles]);
+  }, [token]);
+
+  if (!token || state.kind === "anonymous") {
+    return <AccessGate kind="anonymous" requireRoles={requireRoles} />;
+  }
+
+  if (state.kind === "unavailable") {
+    return <AccessGate kind="unavailable" detail={state.detail} requireRoles={requireRoles} />;
+  }
 
   if (state.kind === "checking") {
     return (
@@ -148,32 +162,56 @@ export default function StaffGuard({
     );
   }
 
-  if (state.kind === "ok") {
-    return (
-      <>
-        <StaffNav who={state.who} current={current} />
-        {children(state.who)}
-      </>
-    );
+  // Identity is known; authorisation is decided here rather than in the effect.
+  const allowed = requireRoles?.length
+    ? requireRoles.includes(state.who.role)
+    : STAFF_ROLES.has(state.who.role);
+
+  if (!allowed) {
+    return <AccessGate kind="forbidden" who={state.who} requireRoles={requireRoles} />;
   }
 
+  return (
+    <>
+      <StaffNav who={state.who} current={current} />
+      {children(state.who)}
+    </>
+  );
+}
+
+/** The refusal / unavailable card. Extracted so the no-token path can render it
+ *  without going through state. */
+function AccessGate({
+  kind,
+  who,
+  detail,
+  requireRoles,
+}: {
+  kind: "anonymous" | "forbidden" | "unavailable";
+  who?: StaffIdentity;
+  detail?: string;
+  requireRoles?: string[];
+}) {
   const title =
-    state.kind === "anonymous"
+    kind === "anonymous"
       ? "Sign in to continue"
-      : state.kind === "forbidden"
+      : kind === "forbidden"
         ? "You do not have access to this page"
         : "Staff tools unavailable";
 
-  const body =
-    state.kind === "anonymous"
-      ? "These pages show taxpayer escalations and operational data, so they need a staff sign-in."
-      : state.kind === "forbidden"
-        ? `You are signed in as ${state.who.email || state.who.external_id} with the role "${state.who.role}". ${
-            requireRoles?.length
-              ? `This page is limited to ${requireRoles.join(", ")}.`
-              : "Staff access is required."
-          }`
-        : state.detail;
+  let body: string;
+  if (kind === "anonymous") {
+    body =
+      "These pages show taxpayer escalations and operational data, so they need a staff sign-in.";
+  } else if (kind === "forbidden" && who) {
+    body = `You are signed in as ${who.email || who.external_id} with the role "${who.role}". ${
+      requireRoles?.length
+        ? `This page is limited to ${requireRoles.join(", ")}.`
+        : "Staff access is required."
+    }`;
+  } else {
+    body = detail || "Staff access is required.";
+  }
 
   return (
     <main className="staff-gate">
@@ -181,12 +219,12 @@ export default function StaffGuard({
         <h1>{title}</h1>
         <p>{body}</p>
         <div className="staff-gate-actions">
-          <a className="staff-gate-primary" href="/signin">
+          <Link className="staff-gate-primary" href="/signin">
             Go to sign-in
-          </a>
-          <a className="staff-gate-link" href="/">
+          </Link>
+          <Link className="staff-gate-link" href="/">
             Back to the assistant
-          </a>
+          </Link>
         </div>
       </div>
     </main>
