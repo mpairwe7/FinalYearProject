@@ -118,6 +118,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         # fails to start with "error while loading shared libraries" and the
         # baked-collection build step times out waiting on /healthz.
         libunwind8 \
+        # Redis sidecar: a response cache shared across the 4 uvicorn workers,
+        # and cluster-wide rate-limit storage (slowapi warns that limits are
+        # per-worker without it).
+        redis-server \
         tini \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
@@ -229,6 +233,13 @@ ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
     # in-image sidecar, not a misconfiguration. Without it the backend refuses to
     # start in production.
     QDRANT_SIDECAR=true \
+    # Redis sidecar: response cache on db 0, rate-limit store on db 1 so a cache
+    # flush cannot reset someone's rate-limit window. REDIS_MAXMEMORY is read by
+    # supervisord's redis command line.
+    CACHE_BACKEND=redis \
+    REDIS_URL=redis://127.0.0.1:6379/0 \
+    SLOWAPI_STORAGE_URI=redis://127.0.0.1:6379/1 \
+    REDIS_MAXMEMORY=192mb \
     FLAG_WS_CHAT=false \
     FLAG_TOOL_USE=false \
     FLAG_AGENTIC_MODE=false \
