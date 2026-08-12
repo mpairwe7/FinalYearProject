@@ -2036,6 +2036,31 @@ def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str,
     return hits
 
 
+def ordered_sources(hits: list[dict[str, Any]]) -> list[str]:
+    """Distinct source names in hit order — most relevant first.
+
+    This used to be ``list({h["source"] for h in hits})``. A set has no order, so
+    the answer's own source was not reliably first and the list reshuffled between
+    identical requests. ``build_citations`` walks ``hits`` in order, so the two
+    disagreed: for "What is withholding tax?" the reply and ``citations[1]`` both
+    came from Withholding-Tax-FY-2024-25-1.pdf while ``sources[0]`` was a
+    tax-exemption FAQ — the UI's Sources block credited the wrong document.
+
+    ``hits`` is already ranked (RRF, then the cross-encoder where it runs), so
+    preserving that order is all this needs to do. Deduplicated on first
+    appearance, which keeps the best-ranked passage's document ahead of a
+    lower-ranked passage from the same file.
+    """
+    seen: set[str] = set()
+    names: list[str] = []
+    for hit in hits:
+        source = str(hit.get("source") or "")
+        if source and source not in seen:
+            seen.add(source)
+            names.append(source)
+    return names
+
+
 def _filter_unbound_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Remove canonical FAQ passages that do not answer the requested intent.
 
@@ -4178,7 +4203,7 @@ class ChatModel:
             # Attachment turns always go to the LLM — a canned procedure
             # template cannot read the attached document.
             if hits and not attachments:
-                deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
+                deterministic_sources = ordered_sources(hits)
                 deterministic_citations = HybridRetriever.build_citations(hits)
                 deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
                     rewritten, hits, deterministic_citations
@@ -4283,7 +4308,7 @@ class ChatModel:
             # 5. Build response with citations
             extractive_fallback = False
             if hits:
-                sources = list({h.get("source", "") for h in hits if h.get("source")})
+                sources = ordered_sources(hits)
                 citations = HybridRetriever.build_citations(hits)
                 contexts = [h.get("text") or h.get("answer", "") for h in hits]
 
@@ -5193,7 +5218,7 @@ class ChatModel:
         # instead of being re-synthesised and re-scored via the LLM.
         # Attachment turns always go to the LLM (templates can't read docs).
         if hits and not attachments:
-            deterministic_sources = list({h.get("source", "") for h in hits if h.get("source")})
+            deterministic_sources = ordered_sources(hits)
             deterministic_citations = HybridRetriever.build_citations(hits)
             deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
                 rewritten, hits, deterministic_citations
@@ -5278,7 +5303,7 @@ class ChatModel:
                 "_personalization_context": (personalization or {}).get("prompt_context", ""),
             }
 
-        sources = list({h.get("source", "") for h in hits if h.get("source")})
+        sources = ordered_sources(hits)
         citations = HybridRetriever.build_citations(hits)
         best = hits[0] if hits else {}
         reply = best.get("answer") or best.get("text", "")
