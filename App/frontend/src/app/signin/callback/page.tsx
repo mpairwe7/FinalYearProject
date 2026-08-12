@@ -14,6 +14,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { setAuthToken } from "../../../lib/authSession";
+import { discoverOidc, TOKEN_ENDPOINT_KEY } from "../../../lib/oidc";
 import "../signin.css";
 
 const OIDC_ISSUER = process.env.NEXT_PUBLIC_OIDC_ISSUER || "";
@@ -61,7 +62,11 @@ export default function OidcCallbackPage() {
     }
 
     try {
-      const tokenUrl = `${OIDC_ISSUER.replace(/\/$/, "")}/protocol/openid-connect/token`;
+      // The sign-in leg stashes the discovered endpoint; discover again if this
+      // page was reached without it (a bookmarked callback, a new tab).
+      const tokenUrl =
+        sessionStorage.getItem(TOKEN_ENDPOINT_KEY) ||
+        (await discoverOidc(OIDC_ISSUER)).token_endpoint;
       const res = await fetch(tokenUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -85,6 +90,7 @@ export default function OidcCallbackPage() {
       setAuthToken(body.access_token);
       sessionStorage.removeItem("ura_pkce_verifier");
       sessionStorage.removeItem("ura_oidc_state");
+      sessionStorage.removeItem(TOKEN_ENDPOINT_KEY);
 
       // Confirm the backend accepts it, and find out which role we hold, before
       // sending anyone to a dashboard that would refuse them.

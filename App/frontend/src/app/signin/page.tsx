@@ -22,6 +22,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { setAuthToken, getAuthToken, clearAuthToken } from "../../lib/authSession";
+import { discoverOidc, TOKEN_ENDPOINT_KEY } from "../../lib/oidc";
 import "./signin.css";
 
 /** Roles the backend treats as staff — `AuthUser.is_staff` in auth/models.py. */
@@ -34,6 +35,14 @@ const STAFF_ROLES = [
 const OIDC_ISSUER = process.env.NEXT_PUBLIC_OIDC_ISSUER || "";
 const OIDC_CLIENT_ID = process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "";
 const OIDC_SCOPE = process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email";
+/**
+ * Optional `audience`. Some providers only issue a verifiable JWT access token
+ * when the request names an API audience — Auth0 returns an OPAQUE token
+ * without it, which the backend cannot verify and rejects as a malformed token.
+ * Keycloak needs nothing here (its audience mapper handles it), so this stays
+ * empty unless a deployment requires it.
+ */
+const OIDC_AUDIENCE = process.env.NEXT_PUBLIC_OIDC_AUDIENCE || "";
 /** Dev sign-in is opt-in and must never be enabled on a production deployment. */
 const DEV_SIGNIN_ENABLED = process.env.NEXT_PUBLIC_DEV_SIGNIN === "true";
 
@@ -72,13 +81,21 @@ export default function SignInPage() {
   const startOidc = useCallback(async () => {
     if (!oidcConfigured) return;
     try {
+      // Ask the provider where its endpoints are rather than assuming a vendor's
+      // URL layout; every provider publishes this and they all differ.
+      const endpoints = await discoverOidc(OIDC_ISSUER);
+
       const verifier = randomVerifier();
       const challenge = await pkceChallenge(verifier);
       // Held for the callback leg; sessionStorage so it dies with the tab.
       sessionStorage.setItem("ura_pkce_verifier", verifier);
       const state = randomVerifier().slice(0, 24);
       sessionStorage.setItem("ura_oidc_state", state);
-      const url = new URL(`${OIDC_ISSUER.replace(/\/$/, "")}/protocol/openid-connect/auth`);
+      // Carry the token endpoint over so the callback does not have to discover
+      // again; it re-discovers if this is missing.
+      sessionStorage.setItem(TOKEN_ENDPOINT_KEY, endpoints.token_endpoint);
+
+      const url = new URL(endpoints.authorization_endpoint);
       url.searchParams.set("client_id", OIDC_CLIENT_ID);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", OIDC_SCOPE);
@@ -86,6 +103,7 @@ export default function SignInPage() {
       url.searchParams.set("state", state);
       url.searchParams.set("code_challenge", challenge);
       url.searchParams.set("code_challenge_method", "S256");
+      if (OIDC_AUDIENCE) url.searchParams.set("audience", OIDC_AUDIENCE);
       window.location.assign(url.toString());
     } catch (err) {
       setStatus({

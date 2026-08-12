@@ -114,6 +114,33 @@ class TestResolveRole(unittest.TestCase):
         # The string-not-list case is still a legitimate single role.
         self.assertEqual(deps.resolve_role({"realm_access": {"roles": "ura_admin"}}), "ura_admin")
 
+    def test_auth0_permissions_claim(self) -> None:
+        # Auth0 with RBAC + "add permissions to the access token".
+        self.assertEqual(deps.resolve_role({"permissions": ["ura_staff"]}), "ura_staff")
+
+    def test_auth0_namespaced_claim_contains_dots(self) -> None:
+        # Auth0 requires custom claims to be namespaced as a URI, so the claim
+        # NAME contains dots and slashes. Splitting it as a dot-path would look
+        # for an "https://ura" key and find nothing.
+        claims = {"https://ura.go.ug/roles": ["ura_admin"]}
+        with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "https://ura.go.ug/roles"):
+            self.assertEqual(deps.resolve_role(claims), "ura_admin")
+
+    def test_literal_claim_name_wins_over_path_walk(self) -> None:
+        # A literal key must be preferred, otherwise a nested claim could shadow
+        # a namespaced one that happens to share a prefix.
+        claims = {
+            "a.b": ["ura_admin"],
+            "a": {"b": ["ura_staff"]},
+        }
+        with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "a.b"):
+            self.assertEqual(deps.resolve_role(claims), "ura_admin")
+
+    def test_nested_path_still_resolves_when_no_literal_key(self) -> None:
+        claims = {"a": {"b": ["ura_staff"]}}
+        with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "a.b"):
+            self.assertEqual(deps.resolve_role(claims), "ura_staff")
+
     def test_explicit_claim_path_override(self) -> None:
         claims = {"ura": {"access": {"role": ["ura_auditor"]}}}
         with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "ura.access.role"):

@@ -55,6 +55,7 @@ _DEFAULT_ROLE_CLAIM_PATHS = (
     "roles",  # Entra ID app roles, generic
     "realm_access.roles",  # Keycloak realm roles
     "groups",  # Entra ID / Okta group claim
+    "permissions",  # Auth0 with RBAC "add permissions to access token"
 )
 
 # Mirrors the Literal on AuthUser.role. Anything outside this set is not a role
@@ -68,7 +69,16 @@ _ROLE_PRECEDENCE = ("ura_admin", "ura_auditor", "ura_staff", "verified_taxpayer"
 
 
 def _claim_at_path(claims: dict[str, Any], path: str) -> Any:
-    """Walk a dot-path through nested claim dicts. Missing → None."""
+    """Resolve a claim by name, or by dot-path for nested claims. Missing → None.
+
+    A literal match is tried first because namespaced claim names contain dots:
+    Auth0 emits roles as ``https://ura.go.ug/roles`` and splitting that on "."
+    would look for a "https://ura" key. Only fall back to walking when the whole
+    string is not itself a claim.
+    """
+    if path in claims:
+        return claims[path]
+
     node: Any = claims
     for part in path.split("."):
         if not isinstance(node, dict):

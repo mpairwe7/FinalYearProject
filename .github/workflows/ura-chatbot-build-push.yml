@@ -178,6 +178,7 @@ jobs:
             NEXT_PUBLIC_OIDC_ISSUER=${{ vars.NEXT_PUBLIC_OIDC_ISSUER }}
             NEXT_PUBLIC_OIDC_CLIENT_ID=${{ vars.NEXT_PUBLIC_OIDC_CLIENT_ID }}
             NEXT_PUBLIC_OIDC_SCOPE=${{ vars.NEXT_PUBLIC_OIDC_SCOPE }}
+            NEXT_PUBLIC_OIDC_AUDIENCE=${{ vars.NEXT_PUBLIC_OIDC_AUDIENCE }}
             NEXT_PUBLIC_DEV_SIGNIN=${{ vars.NEXT_PUBLIC_DEV_SIGNIN }}
           cache-from: type=gha,scope=ura-chatbot-cranecloud
           cache-to: type=gha,mode=max,scope=ura-chatbot-cranecloud

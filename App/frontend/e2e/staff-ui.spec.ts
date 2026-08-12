@@ -188,7 +188,11 @@ test.describe("Staff UI on Chromium", () => {
       // to a blur means the effect is live rather than silently dropped.
       const blurred = await nav.evaluate((el) => {
         const s = getComputedStyle(el);
-        return /blur/.test(s.backdropFilter || "") || /blur/.test(s.webkitBackdropFilter || "");
+        // The prefixed property is not in the DOM typings, so read it by name.
+        return (
+          /blur/.test(s.backdropFilter || "") ||
+          /blur/.test(s.getPropertyValue("-webkit-backdrop-filter") || "")
+        );
       });
       expect(blurred).toBe(true);
 

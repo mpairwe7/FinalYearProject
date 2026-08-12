@@ -249,11 +249,16 @@ OAuth 2.1 authorization-code redirect with PKCE S256 to your identity provider
 
 The frontend needs three build-time variables and the backend four at runtime:
 
+The app discovers the provider's endpoints from
+`<issuer>/.well-known/openid-configuration`, so it works with any compliant
+provider — no vendor URL layout is assumed.
+
 ```bash
 # Frontend (inlined at BUILD time — a rebuild is required to change them)
 NEXT_PUBLIC_OIDC_ISSUER=https://idp.example.gov/realms/ura
 NEXT_PUBLIC_OIDC_CLIENT_ID=ura-chatbot
 NEXT_PUBLIC_OIDC_SCOPE="openid profile email"   # optional, this is the default
+NEXT_PUBLIC_OIDC_AUDIENCE=                      # required for Auth0 (see below)
 
 # Backend (read at process start)
 AUTH_ALG=RS256
@@ -282,6 +287,38 @@ its own cause:
   Role names must match `ura_staff` / `ura_admin` / `ura_auditor` — hyphens and
   group-path prefixes are normalised, anything unrecognised resolves to `public`
   and the dashboards refuse it.
+
+### Auth0
+
+Auth0 works, but two of its defaults will otherwise fail in ways that do not name
+their cause:
+
+- **You must pass an audience, or the access token is opaque.** Auth0 only issues
+  a verifiable JWT when the authorization request names a registered API. Create
+  an API (Applications → APIs) and set its identifier as
+  `NEXT_PUBLIC_OIDC_AUDIENCE` (and as the backend's `OIDC_AUDIENCE`). Without it
+  the backend rejects every sign-in with `malformed token`, because an opaque
+  token is not a JWT at all.
+- **Roles need a claim the backend can find.** Either enable RBAC on the API with
+  "Add Permissions in the Access Token" (lands in `permissions`, probed by
+  default), or add a Login Action setting a namespaced claim and point
+  `OIDC_ROLE_CLAIM` at it — the claim NAME contains dots, which is handled:
+
+  ```js
+  // Auth0 Action (Login → Post Login)
+  exports.onExecutePostLogin = async (event, api) => {
+    api.accessToken.setCustomClaim("https://ura.go.ug/roles", event.authorization?.roles ?? []);
+  };
+  ```
+  ```
+  OIDC_ROLE_CLAIM=https://ura.go.ug/roles
+  ```
+
+Register the app as a **Single Page Application** (public client, PKCE) with
+`<app-origin>/signin/callback` in Allowed Callback URLs and `<app-origin>` in
+Allowed Web Origins. Role names must still be `ura_admin` / `ura_staff` /
+`ura_auditor`. The issuer is `https://<tenant>.<region>.auth0.com/` — keep the
+trailing slash exactly as Auth0 shows it; discovery normalises it.
 
 ### Verifying locally against a real Keycloak
 
