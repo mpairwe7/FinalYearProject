@@ -1686,6 +1686,35 @@ _FAQ_TERM_ALIASES = {
     "thresholds": "threshold",
     "vehicles": "vehicle",
 }
+# Minimum share of the query an FAQ must cover before it may answer.
+#
+# 0.58 looks high, and the translated-retrieval path makes it look higher still:
+# machine translation is paraphrastic, so a translated question covers the
+# corpus less well than a native one, and 7 of the 12 Luganda golden questions
+# land at 0.33-0.57 and are refused. "What is EFRIS and how does it work?"
+# scores 0.57 and is refused even though the corpus has EFRIS entries.
+#
+# It was measured rather than guessed, and it should not be lowered. Against
+# off-domain questions that borrow money/government vocabulary — the ones a
+# coverage metric actually confuses — the score distributions overlap:
+#
+#   coverage   in-domain 0.33-0.91      off-domain 0.00-0.59
+#   bm25       in-domain 7.78-15.27     off-domain 3.03-10.40
+#
+# Neither signal separates them, together or apart. End to end, lowering the
+# floor took wrong answers from 1 of 6 off-domain questions to 5 of 6:
+# "Who is the president of Uganda?" answered from the AEO scheme FAQ, "How do
+# I pay my rent to my landlord?" answered with URA payment instructions. The
+# downstream abstention guard does not catch them. Six extra correct answers
+# are not worth four extra confident wrong ones from a tax authority.
+#
+# Rewriting the translated query instead was also measured: it lifts exactly
+# one question over the line and pushes "What is withholding tax?" from 0.91
+# to 0.50, under it.
+#
+# test_faq_match_gate.py pins this. If you raise recall here, raise it with a
+# signal that separates — reranking or a judge over the candidates — not by
+# moving the floor.
 _FAQ_MATCH_MIN = float(os.getenv("FAQ_MATCH_MIN", "0.58"))
 _FAQ_MATCH_RELATIVE = float(os.getenv("FAQ_MATCH_RELATIVE", "0.82"))
 # Minimum share of an FAQ question's own terms that the query must account for
@@ -1881,6 +1910,7 @@ def _simple_search(
     top_k: int = 4,
     *,
     binding_query: str | None = None,
+    locale: str | None = None,
 ) -> list[dict[str, str]]:
     """Keyword retrieval over the in-memory FAQ index.
 
@@ -1891,6 +1921,10 @@ def _simple_search(
     ``_overlap`` key carrying the score (BM25 or overlap, depending on
     which path was taken) — kept under the same name to preserve the
     score_rrf wiring in _faq_hits_to_retrieval_hits.
+
+    When *locale* names a non-English language and the question finds nothing,
+    the query is translated to English and retried — see the comment on the
+    retry below.
     """
     # Query rewriting expands abbreviations (for example VAT → "Value Added
     # Tax") and resolves conversational references.  Ranking can use the
@@ -1900,35 +1934,84 @@ def _simple_search(
     match_query = binding_query or query
     encoder = _get_bm25_encoder()
 
-    if encoder is not None:
-        query_tokens = encoder._tokenize(query)
-        if not query_tokens:
+    def _one_pass(search_text: str, bind_text: str) -> list[dict[str, str]]:
+        """Score the whole index against *search_text*, gated on *bind_text*."""
+        if encoder is not None:
+            query_tokens = encoder._tokenize(search_text)
+            if not query_tokens:
+                return []
+            scored: list[tuple[float, dict[str, str], float]] = []
+            for entries in faq_index.values():
+                for entry in entries:
+                    s = _faq_bm25_score(query_tokens, entry, encoder)
+                    if s > 0:
+                        match = _faq_match_score(bind_text, entry)
+                        if match > 0:
+                            scored.append((s, entry, match))
+            return _retain_faq_candidates(bind_text, scored, top_k)
+
+        # Fallback: plain content-word overlap (pre-BM25 behaviour).
+        query_tokens_set = _faq_terms(search_text)
+        if not query_tokens_set:
             return []
-        scored: list[tuple[float, dict[str, str], float]] = []
+        scored_fallback: list[tuple[float, dict[str, str], float]] = []
         for entries in faq_index.values():
             for entry in entries:
-                s = _faq_bm25_score(query_tokens, entry, encoder)
-                if s > 0:
-                    match = _faq_match_score(match_query, entry)
+                q_tokens = _faq_terms(entry["question"])
+                a_tokens = _faq_terms(entry["answer"])
+                overlap = len(query_tokens_set & (q_tokens | a_tokens))
+                if overlap > 0:
+                    match = _faq_match_score(bind_text, entry)
                     if match > 0:
-                        scored.append((s, entry, match))
-        return _retain_faq_candidates(match_query, scored, top_k)
+                        scored_fallback.append((float(overlap), entry, match))
+        return _retain_faq_candidates(bind_text, scored_fallback, top_k)
 
-    # Fallback: plain content-word overlap (pre-BM25 behaviour).
-    query_tokens_set = _faq_terms(match_query)
-    if not query_tokens_set:
-        return []
-    scored_fallback: list[tuple[float, dict[str, str], float]] = []
-    for entries in faq_index.values():
-        for entry in entries:
-            q_tokens = _faq_terms(entry["question"])
-            a_tokens = _faq_terms(entry["answer"])
-            overlap = len(query_tokens_set & (q_tokens | a_tokens))
-            if overlap > 0:
-                match = _faq_match_score(match_query, entry)
-                if match > 0:
-                    scored_fallback.append((float(overlap), entry, match))
-    return _retain_faq_candidates(match_query, scored_fallback, top_k)
+    hits = _one_pass(query, match_query)
+    if hits or not locale or locale == "en":
+        return hits
+
+    # Nothing matched and the question was not asked in English. The corpus is
+    # English, so a Luganda or Runyankole question shares no terms with it:
+    # BM25 has nothing to score, and the coverage gate rejects the little it
+    # finds. Measured on the Luganda golden set, ALL 12 questions returned zero
+    # candidates from this function; translating and retrying rescues 5.
+    #
+    # Standard translate-then-retrieve for a monolingual corpus, and
+    # deliberately LAZY — it runs only after the untranslated attempt came back
+    # empty. So the queries that already work keep their exact results and pay
+    # no translation latency, and this can add candidates where there were none
+    # but never displace or reorder existing ones.
+    #
+    # A dense-embedding path was built and measured for this instead, and
+    # rejected — see ml/scripts/eval_retrieval.py. Fusing static embeddings cost
+    # 14-26 points of Hit@1 at every weight tried, and their cosines did not
+    # separate real matches from off-domain noise ("buy cheap flight tickets to
+    # Dubai" outscored every genuine Luganda rescue), so no threshold admitted
+    # the rescues without also admitting nonsense. A tax assistant answering an
+    # off-topic question with a confident-looking tax FAQ is worse than
+    # answering nothing.
+    try:
+        from . import sunbird
+
+        english = sunbird.translate_to_english(query, locale)
+    except Exception:  # noqa: BLE001 — translation is best-effort
+        logger.debug("Retrieval translation failed for locale %s", locale, exc_info=True)
+        return hits
+    if not english or english.strip().lower() == query.strip().lower():
+        return hits
+
+    # Authorization binds to the TRANSLATED text, because that is what shares
+    # vocabulary with the corpus. The user's own words cannot cover an English
+    # FAQ by construction, so reusing them here would reject every candidate
+    # this path exists to find. The gate itself is unchanged: an off-domain
+    # translation still fails it.
+    rescued = _one_pass(english, english)
+    if rescued:
+        logger.info(
+            "Retrieval rescued by translation (%s -> en): %r -> %r, %d hit(s)",
+            locale, query[:60], english[:60], len(rescued),
+        )
+    return rescued
 
 
 def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -3970,6 +4053,7 @@ class ChatModel:
                         self._faq_index,
                         top_k=top_k,
                         binding_query=binding_query,
+                        locale=locale,
                     )
                     hits = _faq_hits_to_retrieval_hits(kw_hits)
 
@@ -4010,6 +4094,7 @@ class ChatModel:
                     self._faq_index,
                     top_k=2,
                     binding_query=binding_query,
+                    locale=locale,
                 )
                 priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
                 seen_texts = {h.get("text", "")[:80] for h in hits}
@@ -5012,6 +5097,7 @@ class ChatModel:
                 self._faq_index,
                 top_k=top_k,
                 binding_query=binding_query,
+                locale=locale,
             )
             hits = _faq_hits_to_retrieval_hits(kw_hits)
 
@@ -5046,6 +5132,7 @@ class ChatModel:
             self._faq_index,
             top_k=2,
             binding_query=binding_query,
+            locale=locale,
         )
         # Graph claims first — same reasoning as the SSE path above.
         graph_hits = self._graph_hits(retrieval_query)

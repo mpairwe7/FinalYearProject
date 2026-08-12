@@ -1811,7 +1811,12 @@ main.legacy-layout {
 .consent-text p {
   margin: 0;
   font-size: 0.8rem;
-  color: var(--text-2);
+  /* Was --text-2, which renders 3.6:1 here against the banner's near-white
+     surface and fails WCAG AA for 12.8px body text. This is a consent notice
+     — the one paragraph in the app someone has to read before deciding — so
+     it is the worst possible place to have unreadable text. --text-1 clears
+     the threshold with room to spare in both themes. */
+  color: var(--text-1);
   line-height: 1.5;
 }
 

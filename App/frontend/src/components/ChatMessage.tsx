@@ -1,7 +1,8 @@
 import React, { lazy, memo, Suspense, useCallback, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
-import { URA_CONTACTS, sourceUrl, telDigits } from '../lib/uraContacts';
+import { URA_CONTACTS, sourceLabel, sourceUrl, telDigits } from '../lib/uraContacts';
 import { formatDocType } from '../lib/attachments';
+import { stripCitationMarkers } from '../lib/answerText';
 import { localeLabel } from '../lib/locales';
 import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
 import { authHeaders } from '../lib/authSession';
@@ -181,12 +182,12 @@ function ChatMessageInner({
                         href={href}
                         target="_blank"
                         rel="noopener noreferrer nofollow"
-                        title="Find official URA documents at ura.go.ug"
+                        title={`${c.source} — find official URA documents at ura.go.ug`}
                       >
-                        <strong>{c.source}</strong>
+                        <strong>{sourceLabel(c.source)}</strong>
                       </a>
                     ) : (
-                      <strong>{c.source}</strong>
+                      <strong title={c.source}>{sourceLabel(c.source)}</strong>
                     )}
                     {c.page ? ` p.${c.page}` : ''}
                     {c.section ? ` ${c.section}` : ''}
@@ -206,13 +207,13 @@ function ChatMessageInner({
           <div className="bubble-actions">
             <button
               className={`listen-btn ${playingTurnId === turn.id ? 'listen-btn-active' : ''}`}
-              onClick={() => onListen(turn.id, turn.content)}
+              onClick={() => onListen(turn.id, stripCitationMarkers(turn.content))}
               disabled={ttsLoading === turn.id || isTransitioning}
               aria-label={playingTurnId === turn.id ? 'Stop listening' : `Listen in ${localeLabel(locale)}`}
             >
               {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
             </button>
-            <CopyButton text={turn.content} />
+            <CopyButton text={stripCitationMarkers(turn.content)} />
             <FeedbackButtons messageId={turn.id} userQuery={userQuery} botReply={turn.content} />
           </div>
         )}

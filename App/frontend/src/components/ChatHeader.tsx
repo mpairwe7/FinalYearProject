@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import React, { useEffect, useRef, useState } from 'react';
 import ThemeToggle from './ThemeToggle';
+import LanguageMenu, { LanguageOption } from './LanguageMenu';
 import {
   BookIcon,
   HeadphonesIcon,
@@ -33,6 +34,12 @@ interface ChatHeaderProps {
   blogUrl: string;
   healthOk: boolean;
   healthLabel: string;
+  /* Language is a session-level setting — it governs the reply language, the
+     TTS voice and STT recognition for the whole conversation — so it sits with
+     the other settings here rather than in the composer toolbar. */
+  locale: string;
+  localeOptions: readonly LanguageOption[];
+  onLocaleChange: (code: string) => void;
 }
 
 export default function ChatHeader({
@@ -46,6 +53,9 @@ export default function ChatHeader({
   blogUrl,
   healthOk,
   healthLabel,
+  locale,
+  localeOptions,
+  onLocaleChange,
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -105,6 +115,11 @@ export default function ChatHeader({
           <PlusIcon />
         </button>
       )}
+      <LanguageMenu
+        locale={locale}
+        options={localeOptions}
+        onLocaleChange={onLocaleChange}
+      />
       <button
         className="top-bar-icon-btn"
         onClick={onToggleVoiceChat}

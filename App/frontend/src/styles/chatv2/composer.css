@@ -67,8 +67,11 @@
   color: var(--text-0);
 }
 
-/* Send: solid accent, 44px round, AA glyph (navy/white light, light/dark dark). */
-.chatv2 .cmpv2-bar .send-circle-btn {
+/* Primary slot: send and voice-mode swap in and out of the same position, so
+   they must be the same size and treatment or the swap reads as the toolbar
+   reflowing rather than one control changing job. */
+.chatv2 .cmpv2-bar .send-circle-btn,
+.chatv2 .cmpv2-bar .voicemode-circle-btn {
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -77,14 +80,34 @@
   box-shadow: none;
   margin-left: 4px;
 }
-.chatv2 .cmpv2-bar .send-circle-btn:hover:not(:disabled) {
+.chatv2 .cmpv2-bar .send-circle-btn:hover:not(:disabled),
+.chatv2 .cmpv2-bar .voicemode-circle-btn:hover:not(:disabled) {
   background: var(--cv2-accent-hover);
   color: var(--cv2-accent-contrast);
   box-shadow: none;
   transform: translateY(-1px);
 }
-.chatv2 .cmpv2-bar .send-circle-btn:disabled {
+.chatv2 .cmpv2-bar .send-circle-btn:disabled,
+.chatv2 .cmpv2-bar .voicemode-circle-btn:disabled {
   opacity: 0.35;
+}
+
+/* Voice mode engaged. A ring rather than a colour change: the button keeps the
+   accent fill it had a moment ago, so "on" is legible without the control
+   appearing to become a different button. */
+.chatv2 .cmpv2-bar .voicemode-circle-btn.is-active {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cv2-accent) 30%, transparent);
+}
+.chatv2 .cmpv2-bar .voicemode-circle-btn.is-active svg {
+  animation: cv2-voicewave 1.6s ease-in-out infinite;
+}
+@keyframes cv2-voicewave {
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 .cmpv2-bar .voicemode-circle-btn.is-active svg {
+    animation: none;
+  }
 }
 
 /* Mic keeps its legacy recording pulse via .btn-recording. */
@@ -124,31 +147,10 @@
   opacity: 0.5;
 }
 
-/* Language trigger */
-.chatv2 .cmpv2-lang {
-  position: relative;
-}
-.chatv2 .cmpv2-lang-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 62px;
-  height: 38px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-2);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-}
-.chatv2 .cmpv2-lang-btn:hover {
-  background: var(--surface-2);
-  color: var(--text-0);
-}
+/* The language trigger used to live in this toolbar. It moved to the header —
+   it is a session-level setting rather than a per-message one, and the row was
+   over capacity on a phone (25px of slack against a 63px control). Its styles
+   moved with it, to shell.css. */
 
 /* ---------------------------------------------------------------------------
  * Recording state (legacy markup, red treatment per the approved design).

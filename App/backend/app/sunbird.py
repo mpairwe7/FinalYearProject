@@ -51,15 +51,38 @@ LOCALE_TO_SUNBIRD: dict[str, str] = {
     "sw": "swa",      # Swahili
 }
 
-# Sunbird TTS speaker IDs (native speakers)
-TTS_SPEAKERS: dict[str, int] = {
-    "lg": 248,    # Luganda female
-    "nyn": 243,   # Runyankole female
-    "sw": 246,    # Swahili male
-    "en": 246,    # fallback English
+# Sunbird TTS voices — orpheus-3b-tts catalog tags, per the API's own guide.
+#
+# These are NOT the numeric speaker ids this table used to hold. Numeric ids
+# address spark-tts; /tasks/audio/speech serves orpheus-3b-tts, which takes a
+# catalog tag and rejects an id with 400. That mismatch is why every
+# non-English voice failed even after the endpoint itself was corrected.
+#
+# `salt_*_0001` is each language's first catalog voice and is used as the
+# default. Other tags exist per language (waxal_lug_0002..0008,
+# waxal_ach_0001/0005/0006/0008, waxal_nyn_0003/0004/0007/0008,
+# waxal_swa_0007) if a different speaker is ever wanted.
+TTS_VOICES: dict[str, str] = {
+    "lg": "salt_lug_0001",    # Luganda
+    "nyn": "salt_nyn_0001",   # Runyankole
+    "ach": "salt_ach_0001",   # Acholi
+    "sw": "waxal_swa_0006",   # Swahili — the catalog exposes no salt_swa_* tag
+    "en": "salt_eng_0001",    # last-resort only; edge-tts serves English first
 }
+# Ateso (teo) has salt_teo_0001 available but is not in the UI's locale picker.
+# Lugbara (lgg) is in the model's training mix but exposes NO voice id, so it
+# would have no narration even if it were offered.
 
-# Languages supported for translation (Sunbird NLLB-based)
+# Languages supported for TRANSLATION (Sunbird NLLB-based): English plus the
+# five Ugandan languages their production translate endpoint is trained on —
+# Acholi, Ateso, Luganda, Lugbara, Runyankole.
+#
+# "swa" is deliberately absent. Swahili appears in Sunbird's SALT *dataset* and
+# has a TTS voice (see TTS_VOICES), which makes it look like an oversight —
+# it is not. The translate endpoint does not serve Swahili, so adding it here
+# would turn today's graceful "unsupported, fall through to the next backend"
+# into a live API error. Swahili translation is handled by the Gemini / Workers
+# AI / prompted tiers in speech_service.translate instead.
 TRANSLATION_LANGUAGES = {"eng", "lug", "nyn", "ach", "teo", "lgg"}
 
 # Sunbird code → URA locale (reverse mapping)
@@ -244,11 +267,13 @@ def speech_to_text(
     if not is_available():
         return None
     try:
-        files = {"audio": (filename, io.BytesIO(audio_bytes))}
-        data: dict[str, Any] = {}
-        if language:
-            data["language"] = language
-        resp = _post("/tasks/modal/stt", files=files, data=data)
+        files = {"audio": (filename, io.BytesIO(audio_bytes), "audio/wav")}
+        # /tasks/modal/stt was retired; /tasks/audio/transcriptions replaces it
+        # (along with /stt, /stt_from_gcs and /org/stt). `language` is REQUIRED
+        # here — it used to be sent only when truthy, which would have meant
+        # omitting a mandatory field rather than falling back to English.
+        data: dict[str, Any] = {"language": language or "eng"}
+        resp = _post("/tasks/audio/transcriptions", files=files, data=data)
         result = resp.json()
         transcription = (
             result.get("output", {}).get("audio_transcription")
@@ -256,8 +281,16 @@ def speech_to_text(
         )
         logger.info("Sunbird STT (%s): '%s'", language, transcription[:80])
         return {"text": transcription, "language": result.get("language", language)}
+    except httpx.HTTPStatusError as e:
+        body = ""
+        try:
+            body = e.response.text[:400]
+        except Exception:  # noqa: BLE001 — body may be unreadable; status still useful
+            pass
+        logger.warning("Sunbird STT failed (%s): %s | body=%s", language, e, body)
+        return None
     except Exception as e:
-        logger.warning("Sunbird STT failed: %s", e)
+        logger.warning("Sunbird STT failed (%s): %s", language, e)
         return None
 
 
@@ -268,26 +301,50 @@ def text_to_speech(
     locale: str = "en",
 ) -> dict[str, Any] | None:
     """Convert text to speech via Sunbird native voices."""
-    speaker_id = TTS_SPEAKERS.get(locale)
-    if not is_available() or not speaker_id:
+    voice = TTS_VOICES.get(locale)
+    if not is_available() or not voice:
         return None
+    lang_code = LOCALE_TO_SUNBIRD.get(locale)
     try:
-        resp = _post("/tasks/modal/tts", json={
+        # orpheus-3b-tts is the documented model for this endpoint and the only
+        # one that answers here. It takes a catalog tag as `voice` and an ISO
+        # 639-3 `language`; numeric speaker ids belong to spark-tts, and sending
+        # one is what the API was rejecting with 400.
+        payload: dict[str, Any] = {
             "text": text[:10000],
-            "speaker_id": speaker_id,
+            "model": "orpheus-3b-tts",
+            "voice": voice,
             "response_mode": "url",
-        })
+        }
+        if lang_code:
+            payload["language"] = lang_code  # orpheus-only field
+        resp = _post("/tasks/audio/speech", json=payload)
         data = resp.json()
         audio_url = data.get("output", {}).get("audio_url") or data.get("audio_url")
-        logger.info("Sunbird TTS (%s, speaker %d): url=%s", locale, speaker_id,
+        logger.info("Sunbird TTS (%s, voice %s): url=%s", locale, voice,
                      (audio_url or "")[:60])
         return {
             "audio_url": audio_url,
-            "file_name": data.get("file_name"),
-            "expires_at": data.get("expires_at"),
+            "file_name": data.get("gcs_object") or data.get("file_name"),
+            # The response names this `audio_url_expires_at`; the old key is
+            # still read so rolling the Space back does not lose the field.
+            # Signed URLs expire in ~30 minutes, so it must be fetched promptly.
+            "expires_at": data.get("audio_url_expires_at") or data.get("expires_at"),
         }
+    except httpx.HTTPStatusError as e:
+        # The status alone cost a full deploy cycle to diagnose last time: a
+        # bare "400 Bad Request" says nothing about *which* field was wrong.
+        # The body carries the validation detail, so log it (truncated).
+        body = ""
+        try:
+            body = e.response.text[:400]
+        except Exception:  # noqa: BLE001 — body may be unreadable; status still useful
+            pass
+        logger.warning("Sunbird TTS failed (%s, voice %s): %s | body=%s",
+                       locale, voice, e, body)
+        return None
     except Exception as e:
-        logger.warning("Sunbird TTS failed: %s", e)
+        logger.warning("Sunbird TTS failed (%s, voice %s): %s", locale, voice, e)
         return None
 
 
