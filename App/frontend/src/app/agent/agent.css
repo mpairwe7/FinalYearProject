@@ -1,0 +1,447 @@
+/* Tax agent queue. Tokens from globals.css; panels use --surface-ink so both
+   themes work from one palette. */
+
+.ag-page {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 22px 20px 48px;
+}
+
+.ag-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.ag-head h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+
+.ag-sub {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.ag-counts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ag-count {
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.ag-count strong {
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.ag-count.urgent {
+  background: rgba(251, 113, 133, 0.13);
+  border-color: rgba(251, 113, 133, 0.38);
+  color: var(--danger);
+}
+.ag-count.urgent strong { color: var(--danger); }
+
+.ag-count.warn {
+  background: rgba(251, 191, 36, 0.13);
+  border-color: rgba(251, 191, 36, 0.38);
+  color: var(--warning);
+}
+.ag-count.warn strong { color: var(--warning); }
+
+/* Status tabs ------------------------------------------------------------- */
+
+.ag-status-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.ag-status-tabs button {
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.ag-status-tabs button.active {
+  background: var(--surface-3);
+  color: var(--text-0);
+  border-color: var(--border-2);
+}
+
+.ag-status-tabs button:focus-visible,
+.ag-row:focus-visible,
+.ag-primary:focus-visible,
+.ag-secondary:focus-visible,
+.ag-field textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Split layout ------------------------------------------------------------ */
+
+.ag-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.ag-queue-pane,
+.ag-detail {
+  background: var(--surface-ink);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md, 14px);
+  box-shadow: var(--shadow-sm);
+  padding: 12px;
+}
+
+.ag-detail {
+  padding: 18px 20px 20px;
+}
+
+.ag-empty {
+  margin: 0;
+  padding: 18px 6px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.ag-error { color: var(--danger); }
+
+/* Queue rows -------------------------------------------------------------- */
+
+.ag-queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 68vh;
+  overflow-y: auto;
+}
+
+.ag-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-0);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ag-row:hover { background: var(--surface-2); }
+
+.ag-row.selected {
+  background: var(--surface-3);
+  border-color: var(--accent);
+}
+
+.ag-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ag-row-topic {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-0);
+}
+
+.ag-row-query,
+.ag-row-wait {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.ag-row-query {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ag-row-wait {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Priority pills ---------------------------------------------------------- */
+
+.ag-pri {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.ag-pri-urgent {
+  background: rgba(251, 113, 133, 0.16);
+  border: 1px solid rgba(251, 113, 133, 0.42);
+  color: var(--danger);
+}
+.ag-pri-high {
+  background: rgba(251, 191, 36, 0.16);
+  border: 1px solid rgba(251, 191, 36, 0.42);
+  color: var(--warning);
+}
+.ag-pri-normal,
+.ag-pri-low {
+  background: var(--surface-3);
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+}
+
+/* Detail ------------------------------------------------------------------ */
+
+.ag-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.ag-detail-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--text-0);
+}
+
+.ag-detail-wait {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ag-section-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Handoff brief. A "warm" transfer means brief the officer before they engage,
+   so it gets the gold edge rather than being one more grey block. */
+.ag-brief {
+  padding: 14px 16px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  margin-bottom: 16px;
+}
+
+.ag-brief.warm {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.ag-brief-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.ag-brief-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.ag-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-1);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: capitalize;
+}
+
+.ag-brief-summary,
+.ag-brief-open {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-1);
+}
+
+.ag-brief-need {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.ag-brief-need ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 3px;
+}
+
+/* Transcript — full and unedited, on purpose. */
+
+.ag-transcript {
+  margin-bottom: 18px;
+  max-height: 34vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ag-turn {
+  padding: 10px 12px;
+  border: 1px solid var(--border-0);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  margin-bottom: 8px;
+}
+
+.ag-turn p {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-1);
+}
+
+.ag-turn-who {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+
+.ag-turn-bot { color: var(--text-2); }
+
+.ag-turn-meta {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+/* Reply — two inputs, never merged. */
+
+.ag-reply {
+  border-top: 1px solid var(--border-0);
+  padding-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.ag-field { display: block; }
+
+.ag-field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-1);
+}
+
+.ag-field-label em {
+  display: block;
+  font-style: normal;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+
+.ag-field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: var(--surface-2);
+  color: var(--text-0);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.ag-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ag-primary,
+.ag-secondary {
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ag-primary {
+  background: var(--grad-primary);
+  color: #fff;
+  border: 1px solid transparent;
+  box-shadow: var(--shadow-sm);
+}
+
+.ag-primary:disabled,
+.ag-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ag-secondary {
+  background: var(--surface-3);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+}
+
+.ag-save-ok { font-size: 12px; color: var(--success); }
+.ag-save-err { font-size: 12px; color: var(--danger); }
+
+@media (max-width: 960px) {
+  .ag-split { grid-template-columns: 1fr; }
+  .ag-queue { max-height: 42vh; }
+}
+
+@media (max-width: 560px) {
+  .ag-page { padding: 16px 14px 36px; }
+  .ag-detail { padding: 14px; }
+}
