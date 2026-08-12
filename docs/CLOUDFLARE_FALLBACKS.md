@@ -90,6 +90,35 @@ process that *does* have torch still behaves correctly against the same
 collection (keying it off the import instead produces
 `400 Not existing vector name error: dense` and a silent zero-hit search).
 
+### Abstention without a cross-encoder
+
+Tier 1b has no reranker, and `OutputGuard.should_abstain` preferred the
+normalized cross-encoder score. With none available it took a "cannot assess
+relevance" branch and answered anyway — safe while the only score-less path was
+keyword search over curated FAQ rows (which carry their own question-F1
+authorization gate), and unsafe over 7,000+ raw document chunks, where BM25
+returns something for every query. Observed live before the fix: *"What is the
+capital of France?"* answered from a chunk about Thales Las France (Tanzania
+Branch).
+
+The retriever now stamps each hit with `score_lexical` — the share of the
+question's **IDF-weighted** content words present in the passage — and
+`should_abstain` uses it when no reranker score exists. IDF weighting is what
+makes it work: plain term recall cannot separate the classes, because
+*"hack into a bank account"* matches a tax corpus full of "bank" and "account".
+An out-of-vocabulary term is treated as maximally informative, so a question
+containing a word the corpus has never seen fails immediately.
+
+`RETRIEVER_LEXICAL_FLOOR` defaults to **0.50**, calibrated against the live
+sidecar over 8 off-domain and 130 on-domain questions: on-domain 0.557–1.000,
+off-domain 0.000–0.406 with one outlier at 0.664. Where a cross-encoder does run,
+its score still takes precedence — it is the better signal, and it is what
+catches the residual case whose terms all genuinely occur in the corpus.
+
+Only *stamped* hits are judged this way. Keyword/FAQ hits arrive unstamped and
+keep their existing gate; scoring them twice re-breaks distress-framed questions
+(the bug PR #167 fixed).
+
 ### Response cache (Redis sidecar)
 
 The single-container image also runs Redis under supervisord: response cache on
