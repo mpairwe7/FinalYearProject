@@ -6,6 +6,14 @@ file records **what is actually configured**, where each value lives, and why.
 
 Last updated: 2026-08-13.
 
+**Current status:** deployed on image `sha-9c69489`. The pages, the CSP, the
+backend's RS256 mode and the authorization redirect are all live and verified.
+Sign-in is **not yet completable**: Auth0 refuses the token request with
+*Client "…" is not authorized to access resource server "https://ura-chatbot/api"*.
+The API exists and the application is registered correctly — see *Diagnosing an
+authorization-request failure* — so what remains is authorizing the application
+for that API in the Auth0 dashboard.
+
 ## Topology
 
 ```
@@ -121,6 +129,47 @@ blocked and sign-in fails with an opaque `NetworkError`.
 | `invalid token: unexpected alg: HS256` | expected in RS256 mode; also confirms `AUTH_ALG=RS256` is live |
 | Officer refused with role `public` | roles not in a probed claim, or RBAC not enabled on the API |
 | `unauthorized_client` at the token endpoint | app registered as Regular Web App instead of SPA |
+| `invalid_request` — *Client "…" is not authorized to access resource server "…"* | the API exists but the application is not authorized for it (Auth0 side) |
+| `access_denied` — *Service not found: <audience>* | no API registered with that identifier |
+
+## Diagnosing an authorization-request failure
+
+The redirect leg can be probed without a browser or a user password, which
+separates *our* configuration from the provider's. Three requests to `/authorize`
+distinguish the cases above:
+
+```bash
+HOST=https://<tenant>; CID=<client id>; RU=<app-origin>/signin/callback
+CH=$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')
+
+probe () {   # $1 = audience
+  curl -s -o /dev/null -D - -G "$HOST/authorize" \
+    --data-urlencode "client_id=$CID" --data-urlencode "response_type=code" \
+    --data-urlencode "scope=openid profile email" --data-urlencode "redirect_uri=$RU" \
+    --data-urlencode "state=probe1234567890" --data-urlencode "code_challenge=$CH" \
+    --data-urlencode "code_challenge_method=S256" --data-urlencode "audience=$1" \
+  | grep -i '^location:'
+}
+
+probe "<your API identifier>"      # the real one
+probe "https://not-registered/xyz" # control
+probe ""                           # no audience at all
+```
+
+Read it as:
+
+- **No-audience request serves a login page** → the application itself is correct:
+  client id, redirect URI, PKCE and the SPA registration all check out. Any
+  failure is then about the API, not the app.
+- **Control returns `Service not found`** while the real one returns
+  `not authorized to access resource server` → the API *does* exist; the missing
+  piece is the application→API authorization in Auth0.
+- **Both return `Service not found`** → the API identifier is wrong or the API
+  was never created. Note the identifier is an opaque string, not a URL that has
+  to resolve — but it must match `OIDC_AUDIENCE` byte-for-byte.
+
+A redirect back to `/signin/callback` carrying `error=` (rather than an Auth0
+error page) is itself a positive signal: it means the redirect URI is registered.
 
 ## Verification
 
