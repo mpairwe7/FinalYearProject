@@ -8,6 +8,19 @@
 # config (Sunbird/Gemini/Cloudflare secrets, SPEECH_ENABLED, …) is supplied as
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
+# sha-b970c3d adds two fixes found by verifying 20 FAQs against this Space:
+#   * The Sources block was built from a set, so it had no order and the
+#     document the answer came from was not reliably first — citations and
+#     sources disagreed. Now ordered by hit rank, so the two agree.
+#   * A document chunk could outrank the curated FAQ row that answers the
+#     question word for word: "What are business records?" was answered from an
+#     agriculture-sector PDF. A verbatim FAQ counterpart is now promoted ahead
+#     of chunk prose, keyed on symmetric term-equivalence so a near-miss like
+#     "withholding tax exemption" cannot displace "withholding tax".
+#
+# 20-FAQ battery on the previous image: 18/20 acceptable, 19/20 cited the
+# originating file, 0 abstentions, median 3.4s.
+#
 # sha-fdd680b restores the roll withheld earlier, with the abstention defect fixed
 # and verified. The withheld image answered off-domain questions: should_abstain
 # reads hit_relevance, which is None when only an RRF score exists, and the
@@ -202,7 +215,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-fdd680b
+FROM landwind/ura-chatbot:sha-b970c3d
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
