@@ -11,7 +11,22 @@
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
 #
-# sha-4ae350b is the biggest retrieval change this Space has had: it runs Qdrant
+# sha-41b7296 adds two in-container sidecars under supervisord — Qdrant for
+# retrieval and Redis for the response cache — plus a readiness gate so the
+# backend does not start before Qdrant is serving. Without the gate the first
+# minute after a roll answered from 499 FAQ rows: the retriever initialised
+# before the sidecar and fell back to keyword until a later request re-inited it.
+#
+# Redis matters here for a non-obvious reason. Both cache backends returned None
+# whenever no dense model was present, and this image ships no torch, so the
+# response cache missed on EVERY request — it was not slow, it was off. cache.py
+# now has a model-free exact tier (casefolded, punctuation-stripped query +
+# locale), which is what makes a cache worth running here. Measured in the built
+# image: 211ms cold, 27ms on a repeat, 25ms on a normalised variant, with the LLM
+# disabled — the saving is larger once generation is in the path. Redis also
+# gives the 4 uvicorn workers a shared cache and cluster-wide rate limits.
+#
+# It also carries the biggest retrieval change this Space has had: it runs Qdrant
 # as an in-container sidecar against a collection baked into the image, so the
 # whole corpus is finally reachable here. Retrieval was BM25 over the 499 FAQ
 # rows via the keyword fallback — the 300+ MB of URA handbooks under Data/pdfs
@@ -160,7 +175,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-4ae350b
+FROM landwind/ura-chatbot:sha-41b7296
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.

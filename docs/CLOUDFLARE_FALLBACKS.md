@@ -90,6 +90,24 @@ process that *does* have torch still behaves correctly against the same
 collection (keying it off the import instead produces
 `400 Not existing vector name error: dense` and a silent zero-hit search).
 
+### Response cache (Redis sidecar)
+
+The single-container image also runs Redis under supervisord: response cache on
+db 0 (`REDIS_URL`), rate-limit storage on db 1 (`SLOWAPI_STORAGE_URI`) so
+flushing the cache cannot reset a rate-limit window. It is configured as a pure
+cache — persistence off, `maxmemory 192mb`, `allkeys-lru` — and has no readiness
+gate, because `cache.py` falls back to in-process memory when Redis is
+unreachable.
+
+The same no-torch constraint applies, and it used to make the cache useless
+here: both backends return `None` from `get()` when there is no dense model, and
+`service.py` only calls `set_model` when the retriever has one. So the cache
+missed on every request in these deployments. `cache.py` now has a **model-free
+exact tier** keyed on the casefolded, punctuation-stripped query plus locale,
+which is what makes Redis worth embedding — a repeated question is the common
+case for an FAQ assistant. Semantic similarity remains a second tier wherever an
+embedder exists.
+
 Qdrant is always preferred when reachable. **Every** way it can be unavailable —
 `QDRANT_ENABLED=false`, an unreachable host, a missing collection, or an
 embedder-stamp mismatch — now falls through to tier 2; previously only the
