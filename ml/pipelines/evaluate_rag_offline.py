@@ -44,17 +44,48 @@ DEFAULT_THRESHOLDS = {
 
 
 def load_eval_set(path: Path) -> list[dict[str, Any]]:
-    """Load JSONL evaluation set.
+    """Load JSONL evaluation set, normalising the field names.
 
-    Each line: {"query": "...", "expected_answer": "...", "relevant_sources": [...]}
+    Canonical shape: ``{"query": ..., "expected_answer": ..., "relevant_sources": [...]}``.
+
+    ``Data/eval/rag_eval.jsonl`` is shared with :mod:`ml.pipelines.evaluate_rag`
+    and uses ``question``/``ground_truth`` instead, which used to raise
+    ``KeyError: 'query'`` here — so this pipeline had never run against the
+    repository's own evaluation set. Both spellings are accepted rather than
+    migrating the file, because the other pipeline reads the original names.
+
+    ``relevant_sources`` is the ground-truth relevance label. It is absent from
+    the current set, and without it the ranking metrics (MRR, Hit@K, context
+    precision) are structurally zero — :func:`check_regression` therefore
+    refuses to gate on them rather than reporting a meaningless failure.
     """
     entries = []
     with open(path) as f:
-        for line in f:
+        for line_number, line in enumerate(f, 1):
             line = line.strip()
-            if line:
-                entries.append(json.loads(line))
-    logger.info("Loaded %d evaluation entries from %s", len(entries), path)
+            if not line:
+                continue
+            record = json.loads(line)
+            query = record.get("query") or record.get("question") or ""
+            if not query:
+                raise ValueError(f"{path}:{line_number}: entry has neither 'query' nor 'question'")
+            record["query"] = query
+            record.setdefault(
+                "expected_answer", record.get("ground_truth") or record.get("answer") or ""
+            )
+            entries.append(record)
+    labelled = sum(1 for e in entries if e.get("relevant_sources"))
+    logger.info(
+        "Loaded %d evaluation entries from %s (%d with relevance labels)",
+        len(entries),
+        path,
+        labelled,
+    )
+    if not labelled:
+        logger.warning(
+            "No entry carries 'relevant_sources', so MRR / Hit@K / context precision "
+            "cannot be measured. Add relevance labels to gate on retrieval ranking."
+        )
     return entries
 
 
@@ -165,9 +196,17 @@ def run_evaluation(
     return {"aggregates": aggregates, "results": results}
 
 
+#: Metrics that are only meaningful when the evaluation set carries
+#: ``relevant_sources``. Gating on them without labels would fail every run at
+#: exactly 0.0 and say nothing about retrieval quality.
+_LABEL_DEPENDENT_CHECKS = frozenset({"context_precision_mean", "mrr_mean", "hit_at_k_mean"})
+
+
 def check_regression(
     aggregates: dict[str, float],
     thresholds: dict[str, float],
+    *,
+    has_relevance_labels: bool = True,
 ) -> list[str]:
     """Check if metrics pass quality gates. Returns list of failures."""
     failures = []
@@ -179,6 +218,11 @@ def check_regression(
         ("hit_at_k_mean", "hit_at_k_min"),
     ]
     for metric_key, threshold_key in checks:
+        if not has_relevance_labels and metric_key in _LABEL_DEPENDENT_CHECKS:
+            logger.warning(
+                "Skipping %s gate: evaluation set has no relevance labels", metric_key
+            )
+            continue
         actual = aggregates.get(metric_key, 0)
         threshold = thresholds.get(threshold_key, 0)
         if actual < threshold:
@@ -226,7 +270,11 @@ def main():
 
         # Regression check
         if args.fail_on_regression:
-            failures = check_regression(agg, DEFAULT_THRESHOLDS)
+            failures = check_regression(
+                agg,
+                DEFAULT_THRESHOLDS,
+                has_relevance_labels=any(e.get("relevant_sources") for e in eval_set),
+            )
             if failures:
                 logger.error("QUALITY GATE FAILURES:")
                 for f in failures:

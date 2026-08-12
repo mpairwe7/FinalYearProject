@@ -39,14 +39,20 @@ Gemini uses `x-goog-api-key`. **No key is ever placed in a URL query string.**
 4. **Vectorize**: `wrangler vectorize create ura-kb-bge-m3 --dimensions 1024 --metric cosine` → `VECTORIZE_INDEX`.
 5. **R2 bucket** + S3 access key/secret → `R2_*` (10 GB free).
 6. **Gemini** key from <https://aistudio.google.com/apikey> → `GEMINI_API_KEY` (free tier is RPM-limited; capped by `GEMINI_RPM`).
-7. **Re-index the corpus into Vectorize** (embeds via Workers AI bge-m3 — no local torch). *CLI pending (Phase 1 follow-up);* until then upsert the 729 chunks with `wrangler vectorize insert` using vectors from `gateway.workers_ai_embed`, metadata `{text, source, page, section, tag, chunk_id}`.
+7. **Re-index the corpus into Vectorize** (embeds via Workers AI bge-m3 — no local torch):
+   `python scripts/reindex_vectorize.py --create`. It builds from the same
+   validated JSONL as the Qdrant indexer (FAQ + teacher-QA + PDF chunks + crawl
+   chunks) and **refuses to seed a partial corpus** unless `--allow-partial` is
+   given, so export the chunk corpora first (`python -m app.indexer
+   --export-pdf-jsonl --export-crawl-jsonl`). Per-vector metadata is
+   `{text, source, page, section, tag, chunk_id, doc_type, fiscal_year}`.
 
 Set values in the gitignored `.env` (template: `.env.example`) for local dev, or
 as Crane Cloud deployment env. To activate on Crane Cloud:
 
 ```bash
 FLAG_CLOUDFLARE_FALLBACK=true
-DENSE_FALLBACK_BACKEND=workers_ai        # restores hybrid retrieval
+DENSE_FALLBACK_BACKEND=                  # unset = AUTO (see below); workers_ai forces on
 LLM_FALLBACK_BACKEND=gemini              # (Phase 2)
 TRANSLATE_FALLBACK_BACKEND=gemini        # (Phase 3) Luganda via Gemini 2.5 Flash
 STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
@@ -57,6 +63,34 @@ STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
 - **Phase 1 — restore hybrid retrieval: DONE.** `providers/` package + `retriever`
   Vectorize fallback (`_init_vectorize_mode` / `_search_vectorize`). Once Vectorize
   is populated + the env is set, `/ready` flips `keyword` → `hybrid`.
+
+### Retrieval backend priority
+
+`HybridRetriever.initialize` tries the tiers in order and reports the winner via
+`HybridRetriever.backend`:
+
+| Tier | Backend | Signals |
+| --- | --- | --- |
+| 1 | **Qdrant** | dense + BM25 sparse fused by RRF, then cross-encoder rerank |
+| 2 | **Cloudflare Vectorize** | dense bge-m3 + client-side lexical re-score (no GPU) |
+| 3 | **Keyword** | in-process FAQ/keyword search |
+
+Qdrant is always preferred when reachable. **Every** way it can be unavailable —
+`QDRANT_ENABLED=false`, an unreachable host, a missing collection, or an
+embedder-stamp mismatch — now falls through to tier 2; previously only the
+explicit flag did, so a Qdrant outage skipped Vectorize and degraded straight to
+keyword even with valid Cloudflare credentials.
+
+`DENSE_FALLBACK_BACKEND` controls tier 2:
+
+- **unset (default) — AUTO:** active whenever `CLOUDFLARE_*` + `VECTORIZE_INDEX`
+  are configured. This is the recommended setting.
+- `workers_ai` — force on (same behaviour, explicit).
+- `none` / `off` / `disabled` — force off; a Qdrant outage goes straight to keyword.
+
+Tier 2 only helps if the index holds the whole corpus, which is why
+`reindex_vectorize.py` refuses to seed a subset — otherwise the same question
+answers from 3,900 chunks normally and from 486 FAQ rows during an outage.
 - **Phase 2 — LLM fallback: DONE.** `service._llm_cloud_fallback` /
   `_stream_cloud_fallback` wired into `_call_llm_with_deadline` + `stream_llm_tokens`,
   keyed off `_LLM_CIRCUIT` (Gemini → Workers AI).

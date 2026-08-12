@@ -108,9 +108,14 @@ class PipelineConfig:
     # Split
     split: SplitConfig = field(default_factory=SplitConfig)
 
-    # Phase 2 — canonical retrieval embedder. Written to manifest so
-    # downstream serving code can verify it has the same encoder.
-    canonical_embedder: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # Canonical retrieval embedder, recorded in the manifest and data card.
+    # This must name the encoder that actually builds the served index
+    # (``app.indexer.DENSE_MODEL_NAME``); it previously said MiniLM while
+    # serving had moved to bge-m3, so the provenance record was wrong by two
+    # model generations and 640 dimensions. The binding that is *enforced* is
+    # stamped into the collection itself and checked by
+    # ``HybridRetriever._verify_embedder_binding``.
+    canonical_embedder: str = "BAAI/bge-m3"
 
     # Reproducibility
     seed: int = 42

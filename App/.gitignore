@@ -3,6 +3,8 @@
 # documents or machine-specific Qdrant/BM25 build artifacts.
 Data/dataset/
 Data/faq_jsonl/
+Data/pdf_jsonl/
+Data/crawl_jsonl/
 Data/pdfs/
 Data/eval/
 Data/teacher_qa/

@@ -44,8 +44,15 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
 QDRANT_ENABLED = os.getenv("QDRANT_ENABLED", "true").lower() not in ("0", "false", "no", "off")
 # When Qdrant is unavailable (e.g. CPU-only Crane Cloud), restore dense
 # retrieval via Cloudflare Workers AI bge-m3 + Vectorize instead of degrading
-# to keyword-only.  "" disables; "workers_ai" enables the cloud dense fallback.
+# to keyword-only.
+#
+# Unset (the default) means *auto*: the fallback engages whenever Cloudflare and
+# a Vectorize index are actually configured. It previously required an explicit
+# opt-in, so a deployment holding valid Vectorize credentials still collapsed to
+# keyword search the moment Qdrant went away — the opposite of the intent.
+# "workers_ai" forces it on; "none"/"off"/"disabled" turns it off.
 DENSE_FALLBACK_BACKEND = os.getenv("DENSE_FALLBACK_BACKEND", "").strip().lower()
+_DENSE_FALLBACK_DISABLED = {"none", "off", "disabled", "false", "0"}
 # 2026 default embedding: BAAI/bge-m3 — multilingual (100+ langs incl.
 # Bantu-family languages relevant to Luganda), 1024-dim, current MTEB
 # state-of-art for free models.  Set DENSE_MODEL=sentence-transformers/
@@ -135,32 +142,59 @@ def _shingles(text: str) -> frozenset[str]:
     return frozenset(" ".join(words[i : i + 5]) for i in range(len(words) - 4))
 
 
+_FY_RANK_RE = re.compile(r"FY(\d{4})-\d{2}")
+
+
+def fiscal_year_rank(value: object) -> int | None:
+    """Return a comparable ordinal for a ``FY2024-25`` label, else ``None``.
+
+    ``None`` means *unknown*, never *old*: most URA filenames carry no fiscal
+    year, so callers must not treat a missing label as superseded.
+    """
+    match = _FY_RANK_RE.fullmatch(str(value or "").strip())
+    return int(match.group(1)) if match else None
+
+
 def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop near-identical passages, keeping the best-ranked copy.
+    """Drop near-identical passages, keeping the best copy.
 
     The corpus repeats the same guidance across document editions, so a
     prefetch commonly returns several copies of one passage.  Keeping
     them wastes reranker compute and, worse, lets one fact occupy most of
     ``top_k`` — the model then sees three restatements instead of three
     pieces of evidence.
+
+    "Best" is normally the best-ranked copy, with one override: when two
+    equivalent passages carry *different known* fiscal years, the newer edition
+    wins regardless of rank.  Retrieval scores cannot distinguish a repealed
+    rate from a current one — the FY2023-24 and FY2025-26 phrasings of a rate
+    table are near-identical text — so without this the corpus's oldest edition
+    can silently evict the one in force.  An unknown fiscal year never displaces
+    a known one and is never displaced by it, because unknown is not old.
     """
     kept: list[dict[str, Any]] = []
-    signatures: list[frozenset[str]] = []
+    # (signature, index into ``kept``) so a duplicate can replace what it matched.
+    signatures: list[tuple[frozenset[str], int]] = []
     for candidate in candidates:
         text = candidate.get("text") or candidate.get("answer") or candidate.get("question", "")
         signature = _shingles(text)
         if not signature:
             kept.append(candidate)
             continue
-        duplicate = False
-        for seen in signatures:
+        duplicate_of: int | None = None
+        for seen, kept_index in signatures:
             overlap = len(signature & seen)
             if overlap and overlap / min(len(signature), len(seen)) >= _DEDUPE_THRESHOLD:
-                duplicate = True
+                duplicate_of = kept_index
                 break
-        if not duplicate:
+        if duplicate_of is None:
             kept.append(candidate)
-            signatures.append(signature)
+            signatures.append((signature, len(kept) - 1))
+            continue
+        incoming = fiscal_year_rank(candidate.get("fiscal_year"))
+        existing = fiscal_year_rank(kept[duplicate_of].get("fiscal_year"))
+        if incoming is not None and existing is not None and incoming > existing:
+            kept[duplicate_of] = candidate
     return kept
 
 
@@ -390,12 +424,58 @@ class HybridRetriever:
         )
 
     def initialize(self) -> bool:
-        """Connect to Qdrant and load models.  Returns ``True`` if ready."""
-        if not QDRANT_ENABLED:
-            if self._init_vectorize_mode():
+        """Bring up retrieval on the richest backend available.
+
+        Priority, highest first:
+
+        1. **Qdrant** — dense + BM25 sparse fused by RRF, then cross-encoder
+           rerank. The only backend with a lexical signal and reranking, so it
+           is always preferred when reachable.
+        2. **Cloudflare Vectorize** — dense-only via Workers AI ``bge-m3``, with
+           a client-side lexical re-score. No GPU or torch required.
+        3. **Keyword** — the caller's fallback when this returns ``False``.
+
+        Every way Qdrant can be unavailable now falls through to Vectorize:
+        previously only ``QDRANT_ENABLED=false`` did, so a missing collection, an
+        unreachable host or an encoder mismatch skipped the dense fallback
+        entirely and degraded straight to keyword search.
+        """
+        if QDRANT_ENABLED:
+            if self._init_qdrant():
                 return True
-            logger.info("HybridRetriever disabled by QDRANT_ENABLED=false; keyword fallback active")
-            return False
+            logger.warning(
+                "Qdrant unavailable at %s; trying the Cloudflare Vectorize dense fallback",
+                QDRANT_URL,
+            )
+            self._reset_backend_state()
+        else:
+            logger.info("QDRANT_ENABLED=false; trying the Cloudflare Vectorize dense fallback")
+
+        if self._init_vectorize_mode():
+            return True
+        logger.warning(
+            "Neither Qdrant nor Vectorize is available; keyword fallback active. "
+            "Retrieval is degraded — check QDRANT_URL/QDRANT_ENABLED, or configure "
+            "CLOUDFLARE_*/VECTORIZE_INDEX and seed the index with "
+            "scripts/reindex_vectorize.py."
+        )
+        return False
+
+    def _reset_backend_state(self) -> None:
+        """Drop half-initialised Qdrant state before trying another backend.
+
+        A failure can happen after the client is constructed (missing
+        collection, encoder mismatch); leaving it set would let ``search`` take
+        the Qdrant path against a collection this process just rejected.
+        """
+        self._client = None
+        self._dense_model = None
+        self._reranker = None
+        self._ready = False
+        self._sparse_ok = True
+
+    def _init_qdrant(self) -> bool:
+        """Connect to Qdrant and load models.  Returns ``True`` if ready."""
         try:
             from qdrant_client import QdrantClient
 
@@ -411,6 +491,12 @@ class HybridRetriever:
                     self._sparse_encoder = BM25SparseEncoder.from_dict(json.load(f))
                 logger.info("Loaded BM25 state from %s", BM25_STATE_PATH)
             self._verify_bm25_binding()
+            if not self._verify_embedder_binding():
+                # Both halves of hybrid search are untrustworthy against this
+                # collection. Give up on Qdrant so ``initialize`` can try the
+                # Vectorize index, which is built by a known-correct encoder.
+                self._ready = False
+                return False
 
             from sentence_transformers import CrossEncoder, SentenceTransformer
 
@@ -449,21 +535,34 @@ class HybridRetriever:
             )
             return True
         except Exception:
-            logger.warning("HybridRetriever init failed; keyword fallback active", exc_info=True)
+            logger.warning("Qdrant init failed", exc_info=True)
             self._ready = False
             return False
 
     def _init_vectorize_mode(self) -> bool:
-        """Restore dense retrieval via Workers AI bge-m3 + Vectorize when Qdrant
-        is off (no GPU/torch needed). Returns True if the fallback is active."""
-        if DENSE_FALLBACK_BACKEND != "workers_ai":
+        """Dense retrieval via Workers AI bge-m3 + Vectorize (no GPU/torch).
+
+        The second choice after Qdrant: dense-only, so it has no BM25 signal and
+        no cross-encoder rerank. Returns ``True`` if the fallback is active.
+        """
+        if DENSE_FALLBACK_BACKEND in _DENSE_FALLBACK_DISABLED:
+            logger.info("Vectorize dense fallback disabled by DENSE_FALLBACK_BACKEND=%s", DENSE_FALLBACK_BACKEND)
+            return False
+        if DENSE_FALLBACK_BACKEND not in ("", "workers_ai"):
+            logger.warning(
+                "Unrecognised DENSE_FALLBACK_BACKEND=%r; expected 'workers_ai', "
+                "'none', or unset (auto)",
+                DENSE_FALLBACK_BACKEND,
+            )
             return False
         try:
             from .providers import config as _cfg
 
             if not _cfg.is_vectorize_configured():
                 logger.info(
-                    "DENSE_FALLBACK_BACKEND=workers_ai but Vectorize/Cloudflare not configured"
+                    "Vectorize dense fallback unavailable: Cloudflare/VECTORIZE_INDEX "
+                    "not configured (need CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, "
+                    "CF_AIG_GATEWAY, CF_AIG_TOKEN, VECTORIZE_INDEX)"
                 )
                 return False
             self._vectorize_mode = True
@@ -545,11 +644,17 @@ class HybridRetriever:
                 "chunk_id": str(hits[i].get("id", "")),
                 "page": hits[i].get("page", ""),
                 "section": hits[i].get("section", ""),
-                "doc_type": "",
+                "doc_type": hits[i].get("doc_type", ""),
+                "fiscal_year": hits[i].get("fiscal_year", ""),
                 "score_rrf": float(rrf[i]),
             }
             for i in order
         ]
+        # Same near-duplicate collapse the Qdrant path applies: this fallback
+        # serves the same multi-edition corpus, so without it one passage can
+        # occupy most of top_k and a superseded edition can outrank the current
+        # one on dense score alone.
+        candidates = _dedupe_candidates(candidates)
         self._ready = True
         return candidates[:top_k]
 
@@ -589,6 +694,72 @@ class HybridRetriever:
                 )
         except Exception:
             logger.warning("BM25 binding verification failed; leaving sparse enabled", exc_info=True)
+
+    def _verify_embedder_binding(self) -> bool:
+        """Return ``False`` when the collection was built by a different encoder.
+
+        Dense retrieval has no way to notice this on its own: querying a
+        ``bge-m3`` collection with, say, a 384-dim MiniLM vector either raises
+        deep inside the client or — worse, once dimensions happen to agree —
+        returns confidently ranked nonsense. Degrading to keyword search is the
+        safe outcome for a tax assistant.
+
+        A missing stamp (collection built before this check) is treated as
+        "cannot verify" and left enabled, matching :meth:`_verify_bm25_binding`.
+        """
+        try:
+            points = self._client.retrieve(
+                collection_name=QDRANT_COLLECTION,
+                ids=[bm25_binding_sentinel_id(QDRANT_COLLECTION)],
+                with_payload=True,
+                with_vectors=False,
+            )
+            payload = (points[0].payload or {}) if points else {}
+            remote_model = str(payload.get("dense_model", ""))
+            if not remote_model:
+                logger.warning(
+                    "Collection '%s' carries no embedder stamp; cannot verify it was "
+                    "built with %s — reindex to write it.",
+                    QDRANT_COLLECTION,
+                    DENSE_MODEL_NAME,
+                )
+                return True
+            if remote_model != DENSE_MODEL_NAME:
+                logger.error(
+                    "Embedder MISMATCH: collection '%s' was indexed with %s but this "
+                    "process queries with %s — disabling dense retrieval; reindex or set "
+                    "DENSE_MODEL=%s.",
+                    QDRANT_COLLECTION,
+                    remote_model,
+                    DENSE_MODEL_NAME,
+                    remote_model,
+                )
+                return False
+            remote_dim = payload.get("dense_dim")
+            if isinstance(remote_dim, int) and remote_dim != DENSE_DIM:
+                logger.error(
+                    "Embedding dimension MISMATCH: collection '%s' is %d-dim, this "
+                    "process is configured for %d — disabling dense retrieval.",
+                    QDRANT_COLLECTION,
+                    remote_dim,
+                    DENSE_DIM,
+                )
+                return False
+            return True
+        except Exception:
+            logger.warning("Embedder binding verification failed; leaving dense enabled", exc_info=True)
+            return True
+
+    @property
+    def backend(self) -> str:
+        """Which retrieval tier is serving: ``qdrant``, ``vectorize`` or ``keyword``.
+
+        Reported so a silent demotion from hybrid to dense-only is visible in
+        logs and health output rather than only showing up as worse answers.
+        """
+        if not self._ready:
+            return "keyword"
+        return "vectorize" if self._vectorize_mode else "qdrant"
 
     @property
     def is_ready(self) -> bool:
@@ -719,6 +890,9 @@ class HybridRetriever:
                         "page": p.get("page", ""),
                         "section": p.get("section", ""),
                         "doc_type": p.get("doc_type", ""),
+                        # Edition of the source document, used to prefer current
+                        # guidance over a superseded restatement of it.
+                        "fiscal_year": p.get("fiscal_year", ""),
                         "score_rrf": float(pt.score) if pt.score else 0.0,
                     }
                 )

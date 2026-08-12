@@ -9,6 +9,8 @@ from __future__ import annotations
 import unittest
 
 from app.retriever import (
+    DENSE_DIM,
+    DENSE_MODEL_NAME,
     BM25SparseEncoder,
     HybridRetriever,
     bm25_binding_sentinel_id,
@@ -116,6 +118,62 @@ class BindingVerificationTest(unittest.TestCase):
         r = self._retriever(local_hash="", remote_hash="anything")
         r._verify_bm25_binding()
         self.assertTrue(r._sparse_ok)
+
+
+class _FakeEmbedderPoint:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+
+class _FakeEmbedderQdrant:
+    def __init__(self, payload: dict | None) -> None:
+        self._payload = payload
+
+    def retrieve(self, **kwargs):  # noqa: ANN003
+        return [] if self._payload is None else [_FakeEmbedderPoint(self._payload)]
+
+
+class EmbedderBindingVerificationTest(unittest.TestCase):
+    """The dense half has no self-check: querying a collection built by another
+    encoder returns confidently ranked nonsense rather than an error, so the
+    encoder identity is stamped into the collection and verified at init."""
+
+    def _retriever(self, payload: dict | None) -> HybridRetriever:
+        r = HybridRetriever()
+        r._client = _FakeEmbedderQdrant(payload)
+        return r
+
+    def test_matching_model_and_dim_pass(self) -> None:
+        r = self._retriever({"dense_model": DENSE_MODEL_NAME, "dense_dim": DENSE_DIM})
+        self.assertTrue(r._verify_embedder_binding())
+
+    def test_a_different_encoder_is_rejected(self) -> None:
+        r = self._retriever(
+            {"dense_model": "sentence-transformers/all-MiniLM-L6-v2", "dense_dim": 384}
+        )
+        self.assertFalse(r._verify_embedder_binding())
+
+    def test_a_dimension_change_under_the_same_name_is_rejected(self) -> None:
+        r = self._retriever({"dense_model": DENSE_MODEL_NAME, "dense_dim": DENSE_DIM + 1})
+        self.assertFalse(r._verify_embedder_binding())
+
+    def test_unstamped_collection_cannot_be_verified_and_stays_enabled(self) -> None:
+        """Collections built before the stamp existed must keep working."""
+        self.assertTrue(self._retriever({"corpus_hash": "abc"})._verify_embedder_binding())
+        self.assertTrue(self._retriever(None)._verify_embedder_binding())
+
+    def test_a_missing_dim_stamp_still_accepts_a_matching_model(self) -> None:
+        r = self._retriever({"dense_model": DENSE_MODEL_NAME})
+        self.assertTrue(r._verify_embedder_binding())
+
+    def test_a_qdrant_error_does_not_take_dense_retrieval_down(self) -> None:
+        class _Boom:
+            def retrieve(self, **kwargs):  # noqa: ANN003
+                raise RuntimeError("qdrant unreachable")
+
+        r = HybridRetriever()
+        r._client = _Boom()
+        self.assertTrue(r._verify_embedder_binding())
 
 
 if __name__ == "__main__":
