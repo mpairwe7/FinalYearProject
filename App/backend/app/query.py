@@ -124,10 +124,19 @@ def expand_abbreviations(query: str) -> str:
 
 
 def correct_spelling(query: str) -> str:
-    """Fix common domain-specific misspellings."""
+    """Fix common domain-specific misspellings.
+
+    Substitutions are anchored to word boundaries. Without ``\\b`` a key that is a
+    prefix of its own replacement corrupts the correctly-spelled word:
+    ``"withholdin" -> "withholding"`` rewrote *"What is withholding tax?"* as
+    *"What is withholdingg tax?"*, which drops "withholding" from the BM25 query
+    entirely. Retrieval then fell back to generic tax matches and answered a
+    withholding-tax question from VAT and EFRIS documents — measured against the
+    live corpus, where a direct query ranks the Withholding-Tax PDF first.
+    """
     result = query
     for wrong, right in _CORRECTIONS.items():
-        result = re.sub(re.escape(wrong), right, result, flags=re.IGNORECASE)
+        result = re.sub(rf"\b{re.escape(wrong)}\b", right, result, flags=re.IGNORECASE)
     return result
 
 
