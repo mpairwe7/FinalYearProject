@@ -2036,6 +2036,59 @@ def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str,
     return hits
 
 
+def faq_question_equivalence(query: str, entry: dict[str, Any]) -> float:
+    """F1 over content terms between *query* and an FAQ row's own question.
+
+    1.0 means the user asked *this* FAQ's question — same content terms, modulo
+    stopwords and the alias table. Unlike ``_faq_match_score`` this is symmetric,
+    so an FAQ whose question carries an extra subject term cannot reach 1.0:
+    "What is withholding tax exemption?" scores 0.800 against "What is
+    withholding tax?", because "exemption" is a term the query never supplied.
+    """
+    asked = _faq_terms(query)
+    faq = _faq_terms(str(entry.get("question") or ""))
+    if not asked or not faq:
+        return 0.0
+    overlap = len(asked & faq)
+    if not overlap:
+        return 0.0
+    precision, recall = overlap / len(faq), overlap / len(asked)
+    return 2 * precision * recall / (precision + recall)
+
+
+def _promote_equivalent_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Move FAQ rows whose question the user asked verbatim to the front.
+
+    Ranking is RRF over 7,000+ document chunks, and a chunk can outrank the
+    curated FAQ row that answers the question word for word. Measured on the
+    deployed Space: "What are business records?" was answered from an
+    agriculture-sector PDF while the identically-worded FAQ row sat second, and
+    "When are capital gains taxed?" returned *how* they are taxed rather than
+    *when*. Both have an exact FAQ counterpart.
+
+    Deliberately narrow. Promotion requires term-*equivalence* (1.0), not a high
+    score: at 0.8 this would also fire for "What is withholding tax exemption?"
+    against "What is withholding tax?", where it currently answers correctly from
+    the withholding-tax guide. Relative order is preserved within both groups, so
+    where several rows are equivalent — the same question appearing in two files —
+    retrieval's own ranking still decides between them.
+    """
+    if not hits:
+        return hits
+    promoted: list[dict[str, Any]] = []
+    rest: list[dict[str, Any]] = []
+    for hit in hits:
+        is_faq = (
+            str(hit.get("doc_type", "")).lower() in _FAQ_DOC_TYPES
+            and str(hit.get("question") or "").strip() != ""
+        )
+        if is_faq and faq_question_equivalence(query, hit) >= 1.0:
+            promoted.append(hit)
+        else:
+            rest.append(hit)
+    return promoted + rest if promoted else hits
+
+
 def ordered_sources(hits: list[dict[str, Any]]) -> list[str]:
     """Distinct source names in hit order — most relevant first.
 
@@ -4158,6 +4211,9 @@ class ChatModel:
             # would otherwise re-dilute this second authorization gate too
             # and filter every hit out (score below cutoff for all of them).
             hits = _filter_unbound_faq_hits(binding_query, hits)
+            # A chunk can outrank the FAQ row that answers the question
+            # verbatim; put an exact FAQ counterpart back in front.
+            hits = _promote_equivalent_faq_hits(binding_query, hits)
 
             # 3d. Attached documents — prepend as top-priority grounding hits.
             #     They flow through the same LLM01 scrub + spotlight markers
@@ -5185,6 +5241,9 @@ class ChatModel:
         # Apply the same FAQ intent binding as the REST path before streaming
         # can expose a passage to the model.
         hits = _filter_unbound_faq_hits(binding_query, hits)
+        # A chunk can outrank the FAQ row that answers the question
+        # verbatim; put an exact FAQ counterpart back in front.
+        hits = _promote_equivalent_faq_hits(binding_query, hits)
 
         # Attached documents — prepend as top-priority grounding hits
         # (parity with generate(); see the comment there).
