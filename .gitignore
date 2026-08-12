@@ -113,7 +113,12 @@ tmp/
 temp/
 *.tmp
 ci-ml-pipeline.yml
-.claude/
+# Ignore .claude *contents* rather than the directory itself — git cannot
+# re-include a path inside an excluded directory, and project skills are
+# shared workflow definitions that belong in review. settings.local.json
+# stays ignored.
+.claude/*
+!.claude/skills/
 Data/common_voice_*
 
 # Runtime analytics databases (conversation logs — privacy: never commit).

@@ -139,10 +139,64 @@ class RoutingReport:
         return "\n".join(lines) + "\n"
 
 
+#: Luganda cases.  Every query without a marked source is taken from
+#: ``Data/eval/rag_eval_lg.jsonl`` — real taxpayer questions — so this
+#: set measures the language people actually write, not a translation of
+#: the English set.
+#:
+#: Measured before the locale tables existed: **all twelve corpus
+#: questions routed to plain retrieval**, including the two that ask for
+#: a human.  That is the regression this set exists to prevent.
+GOLDEN_SET_LG: list[tuple[str, AgentRoute, str]] = [
+    # -- rate lookups: "-meka" with no amount ----------------------
+    ("Omusolo gwa VAT gw'ameka mu Uganda?", AgentRoute.TOOLS, "lookup_rate"),
+    ("Corporate tax rate ya Uganda y'emeka?", AgentRoute.TOOLS, "lookup_rate"),
+    ("Omusolo gwa PAYE gw'ameka?", AgentRoute.TOOLS, "lookup_rate"),
+    # -- calculation: "-meka" *with* an amount ---------------------
+    #    Routed by the existing numeric path, not by a Luganda pattern.
+    ("VAT ku 500000 y'emeka?", AgentRoute.TOOLS, "calculate_vat"),
+    ("PAYE ku 2000000 y'emeka?", AgentRoute.TOOLS, "calculate_paye"),
+    # -- escalation: the misses that mattered most -----------------
+    ("Njagala okwogera n'omuntu", AgentRoute.ESCALATE, ""),
+    ("Njagala okwogera n'omukozi wa URA", AgentRoute.ESCALATE, ""),
+    ("Nkola ntya okuwakanya assessment y'omusolo?", AgentRoute.ESCALATE, ""),
+    ("Njagala omuntu annyambe", AgentRoute.ESCALATE, ""),
+    # -- learning: the postposed "kye ki" --------------------------
+    ("Withholding tax kye ki?", AgentRoute.TOOLS, "explain_tax_concept"),
+    ("Omusolo kye ki?", AgentRoute.TOOLS, "explain_tax_concept"),
+    # -- temporal --------------------------------------------------
+    ("Leero lunaku ki?", AgentRoute.TOOLS, "get_current_date"),
+    ("Kaakati mwaka gwa musolo ki?", AgentRoute.TOOLS, "get_current_date"),
+    # -- greeting / courtesy ---------------------------------------
+    ("oli otya", AgentRoute.GREET, ""),
+    ("wasuze otya", AgentRoute.GREET, ""),
+    # -- retrieval: procedural questions belong on the RAG path ----
+    #    "kiki ekibaawo" is "what happens", a consequence question —
+    #    retrieval holds the penalty figures, the education tool does not.
+    ("Kiki ekibaawo bw'osasula omusolo nga wayiise obudde?", AgentRoute.RAG, ""),
+    ("Bwe nsazaamu obutaggya return y'omusolo, kiki ekibaawo?", AgentRoute.RAG, ""),
+    ("Nnina okwewandiisa otya okufuna TIN mu Uganda?", AgentRoute.RAG, ""),
+    ("Nsobola ntya okusasula emisolo gyange ku ssimu?", AgentRoute.RAG, ""),
+    ("EFRIS kye ki era ekola etya?", AgentRoute.RAG, ""),
+    ("Emirimu ki egiteekeddwawo okuba egitasasulwako musolo gwa VAT?", AgentRoute.RAG, ""),
+    ("Nsobola ntya okufuna ennyingiza y'emisolo egy'entadde?", AgentRoute.RAG, ""),
+    ("Nfaayo ki ezeetaagisa okukola ku masannyalaze ga URA?", AgentRoute.RAG, ""),
+]
+
+#: Locale → golden set.  A locale with no set here cannot pass
+#: :func:`locale_gate`, which is what stops ``multilingual_routing``
+#: opening on vocabulary nobody has checked against real text.
+GOLDEN_SETS: dict[str, list[tuple[str, AgentRoute, str]]] = {
+    "en": GOLDEN_SET,
+    "lg": GOLDEN_SET_LG,
+}
+
+
 def run_routing_eval(
     golden_set: list[tuple[str, AgentRoute, str]] | None = None,
+    locale: str = "en",
 ) -> RoutingReport:
-    """Score the supervisor against *golden_set*.
+    """Score the supervisor against *golden_set* in *locale*.
 
     A case counts as correct only if the route matches **and** the
     expected tool is offered. Routing to the right path while omitting
@@ -158,7 +212,11 @@ def run_routing_eval(
     correct = 0
 
     for query, expected_route, expected_tool in cases:
-        decision = supervisor.classify(query)
+        # Rules only. This harness measures rule coverage and claims to
+        # be deterministic and offline — both stop being true the moment
+        # the LLM tiebreak can fire, which it does on exactly the
+        # fall-through cases this set is meant to pin.
+        decision = supervisor.classify(query, locale=locale, allow_tiebreak=False)
         bucket = by_route.setdefault(expected_route.value, {"total": 0, "correct": 0})
         bucket["total"] += 1
 
@@ -185,15 +243,51 @@ def run_routing_eval(
     )
 
 
+#: Accuracy a locale must reach before ``multilingual_routing`` may open
+#: for it.  English is held at 1.0 — it scores 36/36 today and any drop
+#: is a regression introduced by a locale extension.
+LOCALE_GATE_THRESHOLD = 0.90
+
+
+def locale_gate(locale: str) -> tuple[bool, str]:
+    """Whether *locale* may be served, and why not when it may not.
+
+    Two conditions, both necessary. The locale needs a golden set — you
+    cannot claim an accuracy you have not measured — and its pattern
+    tables must be ``corpus_backed``, meaning the vocabulary came from
+    real user text rather than from a dictionary. Runyankole and Acholi
+    currently fail the second, on purpose.
+    """
+    from .patterns import for_locale
+
+    cases = GOLDEN_SETS.get(locale)
+    if not cases:
+        return False, f"no golden set for {locale!r}"
+    if not for_locale(locale).corpus_backed:
+        return False, f"{locale!r} patterns are not corpus-backed — needs native review"
+
+    report = run_routing_eval(cases, locale=locale)
+    if report.accuracy < LOCALE_GATE_THRESHOLD:
+        return False, (
+            f"{locale!r} accuracy {report.accuracy:.2f} below {LOCALE_GATE_THRESHOLD:.2f} "
+            f"({len(report.misses)} miss(es))"
+        )
+    return True, f"{locale!r} accuracy {report.accuracy:.2f}"
+
+
 def main() -> int:  # pragma: no cover - CLI
-    """Print the report; non-zero exit when anything is misrouted."""
+    """Print a report per locale; non-zero exit when anything is misrouted."""
     import json
 
-    report = run_routing_eval()
-    print(json.dumps(report.to_dict(), indent=2))
-    for miss in report.misses:
-        print(f"  MISS {miss.describe()}")
-    return 0 if not report.misses else 1
+    failed = False
+    for locale, cases in GOLDEN_SETS.items():
+        report = run_routing_eval(cases, locale=locale)
+        print(f"== {locale} ==")
+        print(json.dumps(report.to_dict(), indent=2))
+        for miss in report.misses:
+            print(f"  MISS {miss.describe()}")
+        failed = failed or bool(report.misses)
+    return 0 if not failed else 1
 
 
 if __name__ == "__main__":  # pragma: no cover

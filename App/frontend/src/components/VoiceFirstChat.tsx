@@ -15,6 +15,10 @@
  *  - Voice + Vision mode toggle (camera + speech)
  *  - Sentence-chunked streaming TTS
  *  - Haptic feedback on interactions
+ *
+ * Styling note: renders outside the chatv2 scope (see app/page.tsx), so it
+ * shares the app's real :root tokens and the .voice-orb-* language already
+ * established by the Phase-23 VoiceChat modal, not chatv2's scoped tokens.
  */
 
 import {
@@ -28,6 +32,7 @@ import {
 import { useVoiceStore } from "@/store/useVoiceStore";
 import { useChatStore } from "@/store/useChatStore";
 import { authHeaders } from "@/lib/authSession";
+import { LOCALE_OPTIONS, localeLabel } from "@/lib/locales";
 
 /* ---------- Types ---------- */
 
@@ -85,46 +90,13 @@ type SpeechRecognitionWindow = Window & {
 
 /* ---------- Phase → visual config ---------- */
 
-const PHASE_CONFIG: Record<
-  VoicePhase,
-  { color: string; label: string; pulse: boolean; bgClass: string }
-> = {
-  idle: {
-    color: "#3b82f6",
-    label: "Tap to speak",
-    pulse: false,
-    bgClass: "bg-blue-500/10",
-  },
-  listening: {
-    color: "#22c55e",
-    label: "Listening...",
-    pulse: true,
-    bgClass: "bg-green-500/10",
-  },
-  processing: {
-    color: "#f59e0b",
-    label: "Thinking...",
-    pulse: true,
-    bgClass: "bg-amber-500/10",
-  },
-  speaking: {
-    color: "#8b5cf6",
-    label: "Speaking...",
-    pulse: true,
-    bgClass: "bg-violet-500/10",
-  },
-  error: {
-    color: "#ef4444",
-    label: "Error — tap to retry",
-    pulse: false,
-    bgClass: "bg-red-500/10",
-  },
-  offline: {
-    color: "#6b7280",
-    label: "Offline mode",
-    pulse: false,
-    bgClass: "bg-gray-500/10",
-  },
+const PHASE_CONFIG: Record<VoicePhase, { color: string; label: string; pulse: boolean }> = {
+  idle: { color: "#3b82f6", label: "Tap to speak", pulse: false },
+  listening: { color: "#22c55e", label: "Listening...", pulse: true },
+  processing: { color: "#f59e0b", label: "Thinking...", pulse: true },
+  speaking: { color: "#8b5cf6", label: "Speaking...", pulse: true },
+  error: { color: "#ef4444", label: "Error — tap to retry", pulse: false },
+  offline: { color: "#6b7280", label: "Offline mode", pulse: false },
 };
 
 /* ---------- Helpers ---------- */
@@ -143,7 +115,8 @@ function getSpeechRecognitionConstructor(): BrowserSpeechRecognitionConstructor 
 
 /* ---------- Sub-components ---------- */
 
-/** Animated voice orb with state-driven ring effects */
+/** Animated voice orb with state-driven ring effects — shares .voice-orb-*
+ *  with the VoiceChat modal, sized up via .vfc-orb-lg for this hero context. */
 const VoiceOrb = memo(function VoiceOrb({
   phase,
   onTap,
@@ -158,60 +131,25 @@ const VoiceOrb = memo(function VoiceOrb({
   return (
     <button
       onClick={onTap}
-      className="relative flex items-center justify-center w-44 h-44 rounded-full focus:outline-none"
+      className={`voice-orb vfc-orb-lg voice-orb-${phase}`}
+      style={{ "--orb-color": config.color } as React.CSSProperties}
       aria-label={config.label}
     >
-      {/* Outer pulse rings */}
-      {config.pulse && (
-        <>
-          <span
-            className="absolute inset-0 rounded-full animate-ping opacity-20"
-            style={{ backgroundColor: config.color }}
-          />
-          <span
-            className="absolute inset-2 rounded-full animate-pulse opacity-30"
-            style={{ backgroundColor: config.color }}
-          />
-        </>
-      )}
-
-      {/* Main orb */}
-      <span
-        className="relative z-10 flex items-center justify-center w-32 h-32 rounded-full shadow-2xl transition-colors duration-300"
-        style={{ backgroundColor: config.color }}
-      >
-        {/* Waveform bars inside orb during listening */}
+      <span className="voice-orb-ring voice-orb-ring-1" aria-hidden="true" />
+      <span className="voice-orb-ring voice-orb-ring-2" aria-hidden="true" />
+      <span className="voice-orb-inner">
         {phase === "listening" && waveformData.length > 0 ? (
-          <span className="flex items-end gap-0.5 h-12">
+          <span className="vfc-orb-wave" aria-hidden="true">
             {waveformData.slice(0, 12).map((v, i) => (
-              <span
-                key={i}
-                className="w-1.5 bg-white/90 rounded-full transition-all duration-75"
-                style={{ height: `${Math.max(4, v * 48)}px` }}
-              />
+              <span key={i} style={{ height: `${Math.max(4, v * 48)}px` }} />
             ))}
           </span>
         ) : phase === "processing" ? (
-          <span className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+          <span className="vfc-spinner" aria-hidden="true" />
         ) : (
-          /* Microphone icon */
-          <svg
-            className="w-12 h-12 text-white"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"
-            />
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" />
           </svg>
         )}
       </span>
@@ -226,15 +164,11 @@ const OfflineBanner = memo(function OfflineBanner({
   pendingCount: number;
 }) {
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-gray-800/90 text-gray-300 rounded-full text-sm">
-      <span className="w-2 h-2 bg-amber-400 rounded-full" />
+    <div className="vfc-offline">
+      <span className="vfc-offline-dot" aria-hidden="true" />
       <span>Offline mode</span>
-      {pendingCount > 0 && (
-        <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded-full text-xs">
-          {pendingCount} pending
-        </span>
-      )}
-      <span className="text-xs text-gray-500">Sync when online</span>
+      {pendingCount > 0 && <span className="vfc-offline-count">{pendingCount} pending</span>}
+      <span className="vfc-offline-hint">Sync when online</span>
     </div>
   );
 });
@@ -247,8 +181,8 @@ const LatencyBadge = memo(function LatencyBadge({
 }) {
   if (!latency?.total_ms) return null;
   const ms = latency.total_ms;
-  const color = ms < 1200 ? "text-green-400" : ms < 2000 ? "text-amber-400" : "text-red-400";
-  return <span className={`text-xs ${color}`}>{ms}ms</span>;
+  const tier = ms < 1200 ? "good" : ms < 2000 ? "ok" : "slow";
+  return <span className={`vfc-latency vfc-latency-${tier}`}>{ms}ms</span>;
 });
 
 /* ---------- Main component ---------- */
@@ -454,7 +388,8 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
             const SpeechRecognition = getSpeechRecognitionConstructor();
             if (SpeechRecognition) {
               const recognition = new SpeechRecognition();
-              recognition.lang = locale === "lg" ? "lg-UG" : "en-US";
+              recognition.lang =
+                LOCALE_OPTIONS.find((o) => o.value === locale)?.speechLang ?? "en-US";
               recognition.continuous = false;
               recognition.interimResults = false;
               recognition.onresult = (e) => {
@@ -542,97 +477,81 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
   }, []);
 
   return (
-    <div
-      className={`fixed inset-0 z-50 flex flex-col items-center justify-between ${config.bgClass} bg-gray-950 transition-colors duration-500`}
-    >
+    <div className="vfc-root" role="dialog" aria-modal="true" aria-label="Voice-first chat">
       {/* Top bar */}
-      <div className="flex items-center justify-between w-full px-4 pt-4 safe-area-top">
-        <button
-          onClick={onClose}
-          className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
-          aria-label="Close voice chat"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div className="vfc-topbar">
+        <button onClick={onClose} className="vfc-icon-btn" aria-label="Close voice chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className="vfc-topbar-actions">
           <LatencyBadge latency={lastLatency} />
           {!isOnline && <OfflineBanner pendingCount={pendingCount} />}
         </div>
 
-        {onOpenVision && (
-          <button
-            onClick={() => {
-              haptic();
-              onOpenVision();
-            }}
-            className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
-            aria-label="Open camera mode"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        {onOpenVision ? (
+          <button onClick={() => { haptic(); onOpenVision(); }} className="vfc-icon-btn" aria-label="Open camera mode">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
               <circle cx="12" cy="13" r="3" />
             </svg>
           </button>
+        ) : (
+          <span className="vfc-spacer-icon" aria-hidden="true" />
         )}
       </div>
 
       {/* Transcript display */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8 w-full max-w-lg">
-        {/* Final transcript */}
+      <div className="vfc-stage">
         {finalTranscript && (
-          <div className="w-full p-4 bg-white/5 rounded-2xl">
-            <p className="text-sm text-gray-400 mb-1">You said:</p>
-            <p className="text-white text-lg">{finalTranscript}</p>
+          <div className="vfc-card">
+            <p className="vfc-card-label">You said:</p>
+            <p className="vfc-card-text">{finalTranscript}</p>
           </div>
         )}
 
-        {/* Partial transcript during recording */}
         {partialTranscript && phase === "listening" && (
-          <div className="w-full p-3 bg-green-500/10 rounded-xl">
-            <p className="text-green-300 text-base italic">{partialTranscript}</p>
+          <div className="vfc-card vfc-card-partial">
+            <p className="vfc-card-text">{partialTranscript}</p>
           </div>
         )}
 
-        {/* Voice orb */}
         <VoiceOrb phase={phase} onTap={handleOrbTap} waveformData={waveformData} />
 
-        <p className="text-lg text-gray-300 font-medium">{config.label}</p>
+        <p className="vfc-phase-label">{config.label}</p>
 
-        {/* Streaming reply */}
         {streamingReply && (
-          <div className="w-full p-4 bg-violet-500/10 rounded-2xl max-h-48 overflow-y-auto">
-            <p className="text-sm text-gray-400 mb-1">Assistant:</p>
-            <p className="text-white">{streamingReply}</p>
+          <div className="vfc-card vfc-card-reply">
+            <p className="vfc-card-label">Assistant:</p>
+            <p className="vfc-card-text">{streamingReply}</p>
           </div>
         )}
       </div>
 
       {/* Bottom controls */}
-      <div className="flex items-center gap-4 pb-8 safe-area-bottom">
-        {/* Barge-in button (visible during speaking) */}
+      <div className="vfc-bottombar">
         {phase === "speaking" && (
-          <button
-            onClick={handleBargeIn}
-            className="px-6 py-3 bg-red-500/80 text-white rounded-full font-medium hover:bg-red-500 transition-colors"
-            aria-label="Stop and speak"
-          >
+          <button onClick={handleBargeIn} className="voice-barge-in-btn" aria-label="Stop and speak">
             Stop and speak
           </button>
         )}
 
-        {/* Language toggle */}
+        {/* Language cycle — steps through every locale the assistant supports;
+            a full picker overlay would need a dedicated anchor point in this
+            full-screen surface, unlike the composer toolbar. */}
         <button
           onClick={() => {
             haptic();
-            setLocale(locale === "en" ? "lg" : "en");
+            const idx = LOCALE_OPTIONS.findIndex((o) => o.value === locale);
+            const next = LOCALE_OPTIONS[(idx + 1) % LOCALE_OPTIONS.length];
+            setLocale(next.value);
           }}
-          className="px-4 py-2 bg-white/10 text-white rounded-full text-sm hover:bg-white/20 transition-colors"
-          aria-label={`Switch language to ${locale === "en" ? "Luganda" : "English"}`}
+          className="vfc-lang-btn"
+          aria-label={`Response language: ${localeLabel(locale)}. Tap to switch.`}
         >
-          {locale === "en" ? "English" : "Luganda"}
+          {localeLabel(locale)}
         </button>
       </div>
     </div>

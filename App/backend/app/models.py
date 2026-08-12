@@ -18,7 +18,9 @@ class ChatRequest(BaseModel):
     )
     top_k: int = Field(4, ge=1, le=10, description="Number of passages to retrieve")
     locale: str = Field(
-        "en", pattern=r"^[a-z]{2}(-[A-Z]{2})?$", description="ISO 639-1 locale (e.g. en, lg)"
+        "en",
+        pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
+        description="ISO 639-1/639-3 locale (e.g. en, lg, nyn, ach)",
     )
     attachment_ids: list[Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]] = Field(
         default_factory=list,
@@ -212,7 +214,7 @@ class TranscribeRequest(BaseModel):
     """
 
     sample_rate: int = Field(16000, ge=8000, le=48000)
-    language: str | None = Field(None, pattern=r"^[a-z]{2}$", description="ISO 639-1 hint")
+    language: str | None = Field(None, pattern=r"^[a-z]{2,3}$", description="ISO 639-1/639-3 hint")
 
 
 class TranscribeResponse(BaseModel):
@@ -232,7 +234,7 @@ class SynthesizeRequest(BaseModel):
         pattern=r"^[a-zA-Z0-9_\-]{1,64}$",
         description="Voice id (e.g. en_US-lessac-medium, luganda-vits-v1)",
     )
-    language: str = Field("en", pattern=r"^[a-z]{2}$", description="ISO 639-1 language code")
+    language: str = Field("en", pattern=r"^[a-z]{2,3}$", description="ISO 639-1/639-3 language code")
     streaming: bool = Field(False, description="Emit audio as a sentence-chunked stream")
 
 
@@ -249,8 +251,8 @@ class SynthesizeResponse(BaseModel):
 
 class TranslateRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=4000)
-    source_lang: str = Field("en", pattern=r"^[a-z]{2}$")
-    target_lang: str = Field("lg", pattern=r"^[a-z]{2}$")
+    source_lang: str = Field("en", pattern=r"^[a-z]{2,3}$")
+    target_lang: str = Field("lg", pattern=r"^[a-z]{2,3}$")
 
 
 class TranslateResponse(BaseModel):
@@ -265,7 +267,9 @@ class TranslateResponse(BaseModel):
 class VoiceChatRequest(BaseModel):
     """Compound voice chat: audio in -> ASR -> [MT] -> LLM -> [MT] -> TTS -> audio out."""
 
-    language: str = Field("en", pattern=r"^[a-z]{2}$", description="User language (en or lg)")
+    language: str = Field(
+        "en", pattern=r"^[a-z]{2,3}$", description="User language (en, lg, sw, nyn, ach)"
+    )
     voice: str | None = Field(None, pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
     top_k: int = Field(4, ge=1, le=10)
     conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
@@ -321,7 +325,7 @@ class SpeechHealthResponse(BaseModel):
 class VoiceStreamConfig(BaseModel):
     """Initial config frame sent by client on WebSocket connect."""
 
-    language: str = Field("en", pattern=r"^[a-z]{2}$")
+    language: str = Field("en", pattern=r"^[a-z]{2,3}$")
     voice: str | None = Field(None, pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
     conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     sample_rate: int = Field(16000, ge=8000, le=48000)
@@ -593,7 +597,7 @@ class OfflineAdminStats(BaseModel):
 class VoiceVisionChatRequest(BaseModel):
     """Compound voice + vision chat: audio + image -> ASR -> OCR -> LLM -> TTS."""
 
-    language: str = Field("en", pattern=r"^[a-z]{2}$", description="User language")
+    language: str = Field("en", pattern=r"^[a-z]{2,3}$", description="User language")
     voice: str | None = Field(None, pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
     top_k: int = Field(4, ge=1, le=10)
     conversation_id: str | None = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
