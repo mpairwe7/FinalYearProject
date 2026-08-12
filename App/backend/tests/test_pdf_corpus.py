@@ -102,7 +102,10 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
         pdf_dir, jsonl_dir = root / "pdfs", root / "pdf_jsonl"
         pdf_dir.mkdir(exist_ok=True)
         for name in chunks_by_pdf:
-            self._pdf(pdf_dir, name)
+            # Distinct bytes per fixture: identical payloads would be collapsed
+            # by the byte-identical-duplicate check, which is exercised on its
+            # own in test_byte_identical_pdfs_are_chunked_once.
+            self._pdf(pdf_dir, name, f"%PDF-1.7 {name}".encode())
 
         def fake_chunk_pdf(pdf_path, **_kwargs):
             return iter(chunks_by_pdf[pdf_path.name])
@@ -136,7 +139,14 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
             )
             self.assertEqual(
                 stats,
-                {"sources": 1, "records": 2, "empty_sources": 0, "unknown_fiscal_year": 0},
+                {
+                    "sources": 1,
+                    "unique_sources": 1,
+                    "duplicates_skipped": 0,
+                    "records": 2,
+                    "empty_sources": 0,
+                    "unknown_fiscal_year": 0,
+                },
             )
 
             documents = ingest_pdf_jsonls(pdf_dir, jsonl_dir)
@@ -258,6 +268,69 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
             self.assertEqual(manifest["empty_sources"], ["scanned-image-only.pdf"])
             # The empty source still ingests cleanly — it contributes no rows.
             self.assertEqual(len(ingest_pdf_jsonls(pdf_dir, jsonl_dir)), 1)
+
+    def test_byte_identical_pdfs_are_chunked_once(self) -> None:
+        """The corpus ships the same document with and without the crawl prefix.
+        Chunking both would embed every passage twice and let one passage take
+        several top_k slots."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir, jsonl_dir = root / "pdfs", root / "pdf_jsonl"
+            pdf_dir.mkdir()
+            same = b"%PDF-1.7 identical bytes"
+            self._pdf(pdf_dir, "GUIDE-FY-2024-25.pdf", same)
+            self._pdf(pdf_dir, "ura.go.ug-GUIDE-FY-2024-25.pdf", same)
+            self._pdf(pdf_dir, "OTHER-FY-2024-25.pdf", b"%PDF-1.7 different")
+
+            def fake_chunk_pdf(pdf_path, **_kwargs):
+                return iter([_FakeChunk(text=_body(pdf_path.stem), heading_trail=["H"])])
+
+            with mock.patch.dict(
+                "sys.modules",
+                {"ml.scripts.data_aug.chunkers": mock.Mock(chunk_pdf=fake_chunk_pdf)},
+            ):
+                stats = export_pdf_chunks_to_jsonl(pdf_dir, jsonl_dir)
+
+            self.assertEqual(stats["sources"], 3)
+            self.assertEqual(stats["unique_sources"], 2)
+            self.assertEqual(stats["duplicates_skipped"], 1)
+            self.assertEqual(stats["records"], 2)
+
+            manifest = json.loads((jsonl_dir / PDF_MANIFEST_NAME).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["duplicate_sources"], ["ura.go.ug-GUIDE-FY-2024-25.pdf"])
+            # The first name sorted wins, so the prefixed copy is the duplicate.
+            dupe = next(s for s in manifest["sources"] if s.get("duplicate_of"))
+            self.assertEqual(dupe["duplicate_of"], "GUIDE-FY-2024-25.pdf")
+            self.assertEqual(dupe["records"], 0)
+
+            # Ingest still validates full coverage and yields one copy.
+            documents = ingest_pdf_jsonls(pdf_dir, jsonl_dir)
+            self.assertEqual(len(documents), 2)
+            self.assertNotIn("ura.go.ug-GUIDE-FY-2024-25.pdf", {d["source"] for d in documents})
+
+    def test_a_duplicate_whose_bytes_change_is_still_caught(self) -> None:
+        """The duplicate claim is verified, not trusted: its hash is checked even
+        though it contributes no rows."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir, jsonl_dir = root / "pdfs", root / "pdf_jsonl"
+            pdf_dir.mkdir()
+            same = b"%PDF-1.7 identical bytes"
+            self._pdf(pdf_dir, "GUIDE-FY-2024-25.pdf", same)
+            self._pdf(pdf_dir, "ura.go.ug-GUIDE-FY-2024-25.pdf", same)
+
+            def fake_chunk_pdf(pdf_path, **_kwargs):
+                return iter([_FakeChunk(text=_body("A"), heading_trail=["H"])])
+
+            with mock.patch.dict(
+                "sys.modules",
+                {"ml.scripts.data_aug.chunkers": mock.Mock(chunk_pdf=fake_chunk_pdf)},
+            ):
+                export_pdf_chunks_to_jsonl(pdf_dir, jsonl_dir)
+
+            (pdf_dir / "ura.go.ug-GUIDE-FY-2024-25.pdf").write_bytes(b"%PDF-1.7 now different")
+            with self.assertRaisesRegex(CorpusValidationError, "source changed"):
+                ingest_pdf_jsonls(pdf_dir, jsonl_dir)
 
     def test_export_requires_at_least_one_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

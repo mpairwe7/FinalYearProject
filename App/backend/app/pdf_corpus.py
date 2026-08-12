@@ -232,10 +232,34 @@ def export_pdf_chunks_to_jsonl(pdf_dir: Path, jsonl_dir: Path) -> dict[str, Any]
     jsonl_dir.mkdir(parents=True, exist_ok=True)
     manifest_sources: list[dict[str, Any]] = []
     empty_sources: list[str] = []
+    # The corpus holds the same document under more than one name — usually with
+    # and without the ``ura.go.ug-`` crawl prefix. Chunking both would embed
+    # every passage twice and hand one passage several ``top_k`` slots, so the
+    # first name wins and the rest are recorded as duplicates of it.
+    canonical_by_hash: dict[str, str] = {}
+    duplicate_count = 0
     total_records = 0
 
     for pdf_path in pdf_paths:
         source_sha256 = _sha256_file(pdf_path)
+        canonical = canonical_by_hash.get(source_sha256)
+        if canonical is not None:
+            duplicate_count += 1
+            manifest_sources.append(
+                {
+                    "pdf": pdf_path.name,
+                    "jsonl": "",
+                    "sha256": source_sha256,
+                    "records": 0,
+                    "fiscal_year": fiscal_year_from_name(pdf_path.stem),
+                    "chars": 0,
+                    "duplicate_of": canonical,
+                }
+            )
+            logger.info("skipped %s — byte-identical to %s", pdf_path.name, canonical)
+            continue
+        canonical_by_hash[source_sha256] = pdf_path.name
+
         records = list(_chunk_pdf_records(pdf_path, source_sha256))
 
         output_path = jsonl_dir / f"{pdf_path.stem}.jsonl"
@@ -267,6 +291,10 @@ def export_pdf_chunks_to_jsonl(pdf_dir: Path, jsonl_dir: Path) -> dict[str, Any]
         "source_count": len(manifest_sources),
         "record_count": total_records,
         "empty_sources": sorted(empty_sources),
+        "duplicate_sources": sorted(
+            entry["pdf"] for entry in manifest_sources if entry.get("duplicate_of")
+        ),
+        "unique_sources": len(canonical_by_hash),
         "fiscal_year_counts": dict(sorted(fiscal_years.items())),
         "sources": manifest_sources,
     }
@@ -279,6 +307,8 @@ def export_pdf_chunks_to_jsonl(pdf_dir: Path, jsonl_dir: Path) -> dict[str, Any]
 
     return {
         "sources": len(manifest_sources),
+        "unique_sources": len(canonical_by_hash),
+        "duplicates_skipped": duplicate_count,
         "records": total_records,
         "empty_sources": len(empty_sources),
         "unknown_fiscal_year": fiscal_years.get("", 0),
@@ -354,6 +384,13 @@ def ingest_pdf_jsonls(pdf_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
             raise CorpusValidationError(
                 f"{pdf_path}: source changed since PDF JSONL export; regenerate the corpus"
             )
+
+        # A byte-identical duplicate contributes no rows: its content is already
+        # indexed under the canonical name, so there is no JSONL to read. The
+        # hash check above still ran, so the claim is verified rather than
+        # trusted.
+        if _clean(entry.get("duplicate_of")):
+            continue
 
         jsonl_name = _clean(entry.get("jsonl"))
         jsonl_path = jsonl_dir / jsonl_name

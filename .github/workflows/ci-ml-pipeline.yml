@@ -148,6 +148,25 @@ jobs:
               )
           PY
 
+      - name: Retrieval ranking gate
+        # Real Hit@k / MRR against ground truth that needs no hand labelling: each
+        # FAQ entry is the single correct answer for a query derived from it
+        # (verbatim, and with its rarest terms dropped to model a user who does
+        # not know the jargon). This is the ranking measurement the offline eval
+        # cannot make — its eval set carries no relevance labels.
+        #
+        # BM25-only here: the static dense index needs sentence-transformers,
+        # which this job deliberately does not install. BM25 is also what serves
+        # when no dense backend is reachable, so it is the right floor to defend.
+        # Measured 92.1% verbatim Hit@1 (n=506); the gate sits below that with
+        # headroom so it catches regressions without flapping.
+        working-directory: App/backend
+        env:
+          PYTHONPATH: .:${{ github.workspace }}
+          LLM_ENABLED: 'false'
+          QDRANT_ENABLED: 'false'
+        run: python -m ml.scripts.eval_retrieval --min-hit1 0.85
+
       - name: Live-retrieval evaluation smoke
         # evaluate_rag_offline is the only pipeline that drives real retrieval
         # (the CI grounding gate scores frozen contexts), and it had never run

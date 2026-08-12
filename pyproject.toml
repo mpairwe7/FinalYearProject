@@ -89,6 +89,13 @@ omit = [
     "ml/scripts/data_aug/quality.py",
     "ml/scripts/data_aug/provenance.py",
     "ml/scripts/lang_id.py",
+    # Offline retrieval-measurement scripts, same character as the training
+    # scripts above: no unit tests, but eval_retrieval.py is itself a CI gate
+    # (the "Retrieval ranking gate" step runs it with --min-hit1), so its
+    # behaviour is verified by execution rather than by coverage.
+    "ml/scripts/eval_retrieval.py",
+    "ml/scripts/build_static_index.py",
+    "ml/scripts/static_dense.py",
     "ml/huggingface/*",
     "ml/plots/*",
     # Backend runtime modules (require full app / integration tests)
