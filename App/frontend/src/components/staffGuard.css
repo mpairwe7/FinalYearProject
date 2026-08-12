@@ -1,0 +1,196 @@
+/* Shared staff nav + access-gate states. Tokens come from globals.css. */
+
+.staff-nav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 20px;
+  background: var(--surface-ink);
+  border-bottom: 1px solid var(--border-1);
+  backdrop-filter: blur(16px);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex-wrap: wrap;
+}
+
+.staff-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-0);
+  letter-spacing: 0.01em;
+}
+
+.staff-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--grad-blue);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.staff-nav ul {
+  display: flex;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.staff-nav a {
+  display: inline-block;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-decoration: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.staff-nav a:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+.staff-nav a.active {
+  background: var(--surface-3);
+  color: var(--text-0);
+  box-shadow: inset 0 0 0 1px var(--border-2);
+}
+
+.staff-nav a:focus-visible,
+.staff-signout:focus-visible,
+.staff-gate-primary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.staff-who {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.staff-role-pill {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(0, 168, 143, 0.14);
+  border: 1px solid rgba(0, 168, 143, 0.35);
+  color: var(--ura-teal-light);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.staff-email {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-signout {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-3);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Gate states ------------------------------------------------------------- */
+
+.staff-gate {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 148px 20px 32px;
+}
+
+.staff-gate-msg {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.staff-gate-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 30px 26px;
+  background: var(--surface-ink);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg, 18px);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+}
+
+.staff-gate-card h1 {
+  margin: 0 0 10px;
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+
+.staff-gate-card p {
+  margin: 0 0 20px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.staff-gate-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Three classes. globals.css has `:root[data-theme="light"] a { color:
+   var(--ura-blue) }` — :root and [data-theme] both count as classes, so that
+   selector is (0,2,1) and beat an earlier two-class attempt, leaving this label
+   dark-on-dark against the gradient. */
+.staff-gate-card .staff-gate-actions .staff-gate-primary {
+  padding: 11px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--grad-primary);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 650;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.staff-gate-link {
+  font-size: 13px;
+  color: var(--text-3);
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .staff-nav {
+    gap: 10px;
+    padding: 10px 14px;
+  }
+  .staff-who {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .staff-email {
+    max-width: 140px;
+  }
+}
