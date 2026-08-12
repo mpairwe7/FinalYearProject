@@ -250,13 +250,27 @@ _LEXICAL_TOKEN_RE = re.compile(r"[a-z0-9]+")
 #: must appear in a passage for it to count as relevant when no reranker score
 #: exists.
 #:
-#: Calibrated against the live sidecar corpus, not guessed. Plain term recall does
-#: not separate the classes — "How do I hack into a bank account?" scores 0.667 on
-#: unweighted recall because a tax corpus is full of "bank" and "account". Weighting
-#: by IDF fixes that: measured over 8 off-domain questions and 130 on-domain ones
-#: (120 verbatim FAQ questions plus 10 paraphrases), on-domain ranged 0.557–1.000
-#: while off-domain sat at 0.000–0.406, with one outlier at 0.664. 0.50 leaves
-#: margin under the on-domain minimum and rejects 7 of 8 off-domain.
+#: Calibrated against the live sidecar corpus, not guessed. Four variants were
+#: measured over 8 off-domain questions and 130 on-domain ones (120 verbatim FAQ
+#: questions plus 10 paraphrases); the last three are recorded so nobody repeats
+#: them:
+#:
+#:   variant                        on-domain min   off-domain max
+#:   plain term recall                    0.667           0.667   no separation
+#:   IDF-weighted, all fields  <- used    0.556           0.664
+#:   IDF-weighted, minus filename         0.556           0.664   no change
+#:   IDF-weighted, body text only         0.493           0.664   worse
+#:
+#: Plain recall fails because a tax corpus is full of "bank" and "account", so
+#: "How do I hack into a bank account?" scores 0.667. IDF weighting fixes that
+#: class. 0.50 leaves margin under the on-domain minimum and rejects 7 of 8
+#: off-domain.
+#:
+#: The residual is "What is the capital of France?" at 0.664: both content terms
+#: genuinely occur in the corpus (an EAC tax-cases compendium), so no lexical
+#: variant separates it — which is what ``service._FAQ_MATCH_MIN``'s comment
+#: already concluded from its own measurements. Closing it needs a signal that
+#: separates: the cross-encoder where it runs, or a judge over the candidates.
 LEXICAL_RELEVANCE_FLOOR = float(os.getenv("RETRIEVER_LEXICAL_FLOOR", "0.50"))
 
 
