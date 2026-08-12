@@ -413,6 +413,9 @@ class HybridRetriever:
         # Disabled at init time if the loaded bm25_state is out of sync with
         # the live Qdrant vectors (P1-6) — search then runs dense-only.
         self._sparse_ok = True
+        # Set when sentence-transformers is absent: Qdrant serves the corpus on
+        # its sparse half alone, since a BM25 query vector needs no model.
+        self._sparse_only = False
         # Set when Qdrant is off but the Workers AI + Vectorize dense fallback
         # is configured — search() then routes to _search_vectorize().
         self._vectorize_mode = False
@@ -474,6 +477,32 @@ class HybridRetriever:
         self._ready = False
         self._sparse_ok = True
 
+    def _collection_has_dense_vector(self) -> bool:
+        """Whether the live collection actually declares a named dense vector.
+
+        A sparse-only collection (built with ``SPARSE_ONLY_INDEX=true`` so it can
+        be created without torch) rejects a dense prefetch outright — Qdrant
+        answers ``400 Not existing vector name error: dense`` and the whole search
+        returns nothing. Asking the collection is therefore more reliable than
+        inferring from whether sentence-transformers happens to be importable:
+        the same sparse-only collection may well be queried by a process that
+        does have torch.
+        """
+        try:
+            params = self._client.get_collection(QDRANT_COLLECTION).config.params
+            vectors = getattr(params, "vectors", None)
+            if not vectors:
+                return False
+            if isinstance(vectors, dict):
+                return "dense" in vectors
+            # An unnamed single-vector collection still carries a dense space.
+            return True
+        except Exception:
+            # Unknown shape — assume dense so behaviour is unchanged, and let the
+            # search path surface any real error.
+            logger.warning("Could not read the collection's vector config", exc_info=True)
+            return True
+
     def _init_qdrant(self) -> bool:
         """Connect to Qdrant and load models.  Returns ``True`` if ready."""
         try:
@@ -498,7 +527,39 @@ class HybridRetriever:
                 self._ready = False
                 return False
 
-            from sentence_transformers import CrossEncoder, SentenceTransformer
+            # A sparse-only collection cannot serve a dense query at all, so
+            # decide from the collection first and only then try to load models.
+            collection_is_sparse_only = not self._collection_has_dense_vector()
+            try:
+                if collection_is_sparse_only:
+                    raise ImportError("collection declares no dense vector")
+                from sentence_transformers import CrossEncoder, SentenceTransformer
+            except ImportError:
+                # No torch in this image (Crane Cloud / HF Space). Dense search
+                # is impossible because the *query* cannot be encoded — but BM25
+                # sparse encoding is pure Python over the vocab+idf in
+                # bm25_state.json, so Qdrant can still serve the whole corpus on
+                # the sparse half alone. That is far better than the keyword
+                # fallback, which only reads the FAQ CSVs and never sees a PDF or
+                # crawl chunk.
+                if not self._sparse_ok or not self._sparse_encoder.corpus_hash:
+                    logger.warning(
+                        "No dense retrieval available (%s) and no usable BM25 state; "
+                        "cannot serve from Qdrant",
+                        "sparse-only collection" if collection_is_sparse_only else "no sentence-transformers",
+                    )
+                    return False
+                self._sparse_only = True
+                self._dense_model = None
+                self._reranker = None
+                self._ready = True
+                logger.info(
+                    "HybridRetriever ready in SPARSE-ONLY mode (url=%s collection=%s) — "
+                    "no sentence-transformers, so dense retrieval and reranking are off",
+                    QDRANT_URL,
+                    QDRANT_COLLECTION,
+                )
+                return True
 
             try:
                 self._dense_model = SentenceTransformer(DENSE_MODEL_NAME, device=RETRIEVER_DENSE_DEVICE)
@@ -820,7 +881,10 @@ class HybridRetriever:
         if self._vectorize_mode:
             return self._search_vectorize(query, top_k, prefetch_limit, filters)
 
-        if not self._ready or self._client is None or self._dense_model is None:
+        if not self._ready or self._client is None:
+            return []
+        # Sparse-only mode has no dense model by design; every other mode needs one.
+        if self._dense_model is None and not self._sparse_only:
             return []
 
         # Circuit breaker gate — reject immediately when OPEN
@@ -831,8 +895,13 @@ class HybridRetriever:
         try:
             from qdrant_client import models
 
-            dense_vec = self._encode_query(query)
+            dense_vec = None if self._sparse_only else self._encode_query(query)
             sparse_idx, sparse_val = self._sparse_encoder.encode(query)
+            if self._sparse_only and not sparse_idx:
+                # No query term is in the BM25 vocabulary, and there is no dense
+                # half to fall back on.
+                self._circuit.record_success()
+                return []
 
             # Build optional payload filter
             query_filter = None
@@ -850,9 +919,11 @@ class HybridRetriever:
                 if must_conditions:
                     query_filter = models.Filter(must=must_conditions)
 
-            prefetch = [
-                models.Prefetch(query=dense_vec, using="dense", limit=prefetch_limit),
-            ]
+            prefetch = []
+            if dense_vec is not None:
+                prefetch.append(
+                    models.Prefetch(query=dense_vec, using="dense", limit=prefetch_limit)
+                )
             if sparse_idx and self._sparse_ok:
                 prefetch.append(
                     models.Prefetch(

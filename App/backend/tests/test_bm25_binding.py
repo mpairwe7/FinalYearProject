@@ -176,5 +176,78 @@ class EmbedderBindingVerificationTest(unittest.TestCase):
         self.assertTrue(r._verify_embedder_binding())
 
 
+
+class _FakeCollectionConfig:
+    def __init__(self, vectors) -> None:
+        self.config = type("C", (), {"params": type("P", (), {"vectors": vectors})()})()
+
+
+class _FakeCollectionClient:
+    def __init__(self, vectors) -> None:
+        self._vectors = vectors
+
+    def get_collection(self, name):  # noqa: ANN001, ANN201
+        return _FakeCollectionConfig(self._vectors)
+
+
+class SparseOnlyCollectionDetectionTests(unittest.TestCase):
+    """A collection built with SPARSE_ONLY_INDEX=true declares no dense vector,
+    and a dense prefetch against it fails outright — Qdrant answers
+    `400 Not existing vector name error: dense` and the search returns nothing.
+
+    Detection must come from the collection, not from whether
+    sentence-transformers happens to be importable: the same sparse-only
+    collection can be queried by a process that does have torch (observed while
+    validating the HF Space sidecar).
+    """
+
+    def _retriever(self, vectors) -> HybridRetriever:
+        r = HybridRetriever()
+        r._client = _FakeCollectionClient(vectors)
+        return r
+
+    def test_named_dense_vector_is_detected(self) -> None:
+        self.assertTrue(self._retriever({"dense": object()})._collection_has_dense_vector())
+
+    def test_sparse_only_collection_reports_no_dense_vector(self) -> None:
+        for vectors in ({}, None):
+            self.assertFalse(
+                self._retriever(vectors)._collection_has_dense_vector(), repr(vectors)
+            )
+
+    def test_unnamed_single_vector_collection_counts_as_dense(self) -> None:
+        self.assertTrue(self._retriever(object())._collection_has_dense_vector())
+
+    def test_an_unreadable_config_assumes_dense_so_behaviour_is_unchanged(self) -> None:
+        class _Boom:
+            def get_collection(self, name):  # noqa: ANN001, ANN201
+                raise RuntimeError("no such collection")
+
+        r = HybridRetriever()
+        r._client = _Boom()
+        self.assertTrue(r._collection_has_dense_vector())
+
+
+class SparseOnlySearchGuardTests(unittest.TestCase):
+    def test_search_without_a_dense_model_is_refused_unless_sparse_only(self) -> None:
+        """The dense-model guard is relaxed only for the mode that legitimately
+        has no dense model — not removed outright."""
+        r = HybridRetriever()
+        r._ready = True
+        r._client = object()
+        r._dense_model = None
+        self.assertEqual(r.search("what is vat"), [])
+
+    def test_sparse_only_search_with_no_matching_vocabulary_returns_empty(self) -> None:
+        """With no dense half there is nothing to fall back on, so an
+        out-of-vocabulary query must return empty rather than raise."""
+        r = HybridRetriever()
+        r._ready = True
+        r._sparse_only = True
+        r._dense_model = None
+        r._client = object()
+        r._sparse_encoder = BM25SparseEncoder().fit(["vat is charged on taxable supplies"])
+        self.assertEqual(r.search("zzzz qqqq"), [])
+
 if __name__ == "__main__":
     unittest.main()

@@ -47,6 +47,10 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
 DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
 DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "64"))
+# Build sparse (BM25) vectors only, skipping the dense half. Set this where no
+# torch is available — the collection stays fully queryable there because a BM25
+# query vector is computed from bm25_state.json alone.
+SPARSE_ONLY_INDEX = os.getenv("SPARSE_ONLY_INDEX", "false").lower() in ("1", "true", "yes", "on")
 
 from ._root import APP_DATA_ROOT as _APP_DATA_ROOT
 from ._root import PROJECT_ROOT as _PROJECT_ROOT
@@ -130,7 +134,6 @@ def build_index(
     Returns indexing statistics.
     """
     from qdrant_client import QdrantClient, models
-    from sentence_transformers import SentenceTransformer
 
     from .retriever import (
         BM25SparseEncoder,
@@ -138,8 +141,20 @@ def build_index(
         deterministic_point_id,
     )
 
+    # Sparse-only builds exist so the collection can be created inside an image
+    # that has no torch (Crane Cloud / HF Space sidecar). A BM25 query vector
+    # needs no model, so a sparse-only collection still serves the whole corpus;
+    # a dense one would be unqueryable there because the *query* could not be
+    # encoded.
+    dense_model = None
+    if SPARSE_ONLY_INDEX:
+        logger.info("SPARSE_ONLY_INDEX=true — building sparse vectors only")
+    else:
+        from sentence_transformers import SentenceTransformer
+
+        dense_model = SentenceTransformer(DENSE_MODEL_NAME)
+
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
-    dense_model = SentenceTransformer(DENSE_MODEL_NAME)
 
     # -- Collection management -----------------------------------------------
     existing = [c.name for c in client.get_collections().collections]
@@ -150,19 +165,27 @@ def build_index(
     if QDRANT_COLLECTION not in existing or recreate:
         client.create_collection(
             collection_name=QDRANT_COLLECTION,
-            vectors_config={
-                "dense": models.VectorParams(
-                    size=DENSE_DIM,
-                    distance=models.Distance.COSINE,
-                ),
-            },
+            vectors_config=(
+                {}
+                if SPARSE_ONLY_INDEX
+                else {
+                    "dense": models.VectorParams(
+                        size=DENSE_DIM,
+                        distance=models.Distance.COSINE,
+                    ),
+                }
+            ),
             sparse_vectors_config={
                 "sparse": models.SparseVectorParams(
                     index=models.SparseIndexParams(on_disk=False),
                 ),
             },
         )
-        logger.info("Created Qdrant collection '%s'", QDRANT_COLLECTION)
+        logger.info(
+            "Created Qdrant collection '%s' (%s)",
+            QDRANT_COLLECTION,
+            "sparse only" if SPARSE_ONLY_INDEX else f"dense {DENSE_DIM}d + sparse",
+        )
 
     # -- BM25 sparse encoder -------------------------------------------------
     # Fitted on the same text that gets embedded, so dense and sparse retrieval
@@ -181,12 +204,16 @@ def build_index(
         batch = documents[i : i + BATCH_SIZE]
         batch_texts = [_embedding_text(d) for d in batch]
 
-        dense_embeddings = dense_model.encode(batch_texts, show_progress_bar=False)
+        dense_embeddings = (
+            None if dense_model is None else dense_model.encode(batch_texts, show_progress_bar=False)
+        )
 
         points: list[models.PointStruct] = []
         for j, doc in enumerate(batch):
             sparse_idx, sparse_val = sparse_encoder.encode(_embedding_text(doc))
-            vectors: dict[str, Any] = {"dense": dense_embeddings[j].tolist()}
+            vectors: dict[str, Any] = {}
+            if dense_embeddings is not None:
+                vectors["dense"] = dense_embeddings[j].tolist()
             if sparse_idx:
                 vectors["sparse"] = models.SparseVector(indices=sparse_idx, values=sparse_val)
 
@@ -216,15 +243,20 @@ def build_index(
         points=[
             models.PointStruct(
                 id=bm25_binding_sentinel_id(QDRANT_COLLECTION),
-                vector={"dense": [0.0] * DENSE_DIM},
+                vector={} if SPARSE_ONLY_INDEX else {"dense": [0.0] * DENSE_DIM},
                 payload={
                     "_meta": "bm25_binding",
                     "corpus_hash": sparse_encoder.corpus_hash,
                     # Dense-side binding: querying a bge-m3 collection with a
                     # different encoder returns confident nonsense rather than
-                    # an error, so the retriever verifies this at init.
-                    "dense_model": DENSE_MODEL_NAME,
-                    "dense_dim": DENSE_DIM,
+                    # an error, so the retriever verifies this at init. Omitted
+                    # for a sparse-only collection — claiming an encoder that
+                    # never ran would make the check assert a false fact.
+                    **(
+                        {}
+                        if SPARSE_ONLY_INDEX
+                        else {"dense_model": DENSE_MODEL_NAME, "dense_dim": DENSE_DIM}
+                    ),
                 },
             )
         ],

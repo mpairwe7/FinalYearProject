@@ -93,6 +93,48 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # The image COPYs App/Data/{faq_jsonl,teacher_qa,pdf_jsonl,crawl_jsonl},
+      # which App/.gitignore excludes — they are generated, so a fresh checkout
+      # has none of them and the COPY would fail. Generate them here.
+      #
+      # The PDF stage is the expensive one (markdown extraction over ~500 MB), so
+      # it is cached on the corpus contents: it only re-runs when a PDF actually
+      # changes, which is at most monthly after the scheduled crawl.
+      - name: Set up Python for corpus export
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install corpus export dependencies
+        run: pip install pymupdf4llm pymupdf ftfy pydantic
+
+      - name: Cache the PDF chunk corpus
+        id: pdf-cache
+        uses: actions/cache@v4
+        with:
+          path: App/Data/pdf_jsonl
+          key: pdf-jsonl-v1-${{ hashFiles('Data/pdfs/**') }}
+
+      - name: Export corpora
+        working-directory: App/backend
+        env:
+          PYTHONPATH: .:${{ github.workspace }}
+          PDF_CACHE_HIT: ${{ steps.pdf-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          # App/Data is the serving corpus root; seed it from the tracked copies.
+          mkdir -p ../Data/dataset ../Data/teacher_qa ../Data/pdfs
+          cp -f "$GITHUB_WORKSPACE"/Data/dataset/*.csv ../Data/dataset/
+          cp -f "$GITHUB_WORKSPACE"/Data/teacher_qa/*.jsonl ../Data/teacher_qa/
+          python -m app.indexer --export-faq-jsonl
+          python -m app.indexer --export-crawl-jsonl
+          if [ "${PDF_CACHE_HIT:-}" = "true" ]; then
+            echo "PDF chunk corpus restored from cache"
+          else
+            cp -f "$GITHUB_WORKSPACE"/Data/pdfs/*.pdf ../Data/pdfs/
+            python -m app.indexer --export-pdf-jsonl
+          fi
+
       # Derive tag list:
       #   type=ref      — branch name (dev / main / feature-X)
       #   type=sha      — sha-<short>, always present (used by deploy)

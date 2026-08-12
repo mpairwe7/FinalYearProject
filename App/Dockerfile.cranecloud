@@ -121,10 +121,20 @@ WORKDIR /app
 COPY App/backend/app /app/backend/app
 COPY App/backend/pyproject.toml* /app/backend/
 
-# Bake in the BM25 keyword index + the FAQ corpus.  Crane Cloud has
-# no persistent storage, so these MUST ship inside the image.
+# Bake in the BM25 keyword index + every corpus.  Crane Cloud and the HF Space
+# have no persistent storage and cannot reach Qdrant, so whatever retrieval can
+# see at runtime is exactly what ships here.
 COPY Model/bm25_state.json /app/Model/bm25_state.json
 COPY Data/dataset /app/Data/dataset
+# Validated JSONL corpora. APP_DATA_ROOT resolves to /app/Data in the container
+# (no /app/App directory), so these land where the ingesters look for them.
+# The chunk corpora are generated — build with `python -m app.indexer
+# --export-faq-jsonl --export-pdf-jsonl --export-crawl-jsonl` before the image
+# build, or these COPYs fail loudly rather than shipping a half corpus.
+COPY App/Data/faq_jsonl   /app/Data/faq_jsonl
+COPY App/Data/teacher_qa  /app/Data/teacher_qa
+COPY App/Data/pdf_jsonl   /app/Data/pdf_jsonl
+COPY App/Data/crawl_jsonl /app/Data/crawl_jsonl
 
 # Frontend: copy the Next.js standalone output ONLY.
 COPY --from=frontend-builder /build/frontend/.next/standalone /app/frontend
