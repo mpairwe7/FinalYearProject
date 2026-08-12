@@ -169,6 +169,16 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
+          # Staff sign-in config baked into the frontend bundle. Repo VARIABLES,
+          # not secrets: the issuer and client id are public in the shipped
+          # bundle by design (OAuth 2.1 public client). Unset → empty → the OIDC
+          # button renders disabled, exactly as before. The backend's RS256
+          # verification vars are runtime Space secrets, set separately.
+          build-args: |
+            NEXT_PUBLIC_OIDC_ISSUER=${{ vars.NEXT_PUBLIC_OIDC_ISSUER }}
+            NEXT_PUBLIC_OIDC_CLIENT_ID=${{ vars.NEXT_PUBLIC_OIDC_CLIENT_ID }}
+            NEXT_PUBLIC_OIDC_SCOPE=${{ vars.NEXT_PUBLIC_OIDC_SCOPE }}
+            NEXT_PUBLIC_DEV_SIGNIN=${{ vars.NEXT_PUBLIC_DEV_SIGNIN }}
           cache-from: type=gha,scope=ura-chatbot-cranecloud
           cache-to: type=gha,mode=max,scope=ura-chatbot-cranecloud
 

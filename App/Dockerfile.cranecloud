@@ -83,6 +83,24 @@ COPY App/frontend/ ./
 # next.config sets `output: "standalone"` per the live-smoke note; that
 # emits .next/standalone/server.js + .next/static/.
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# Staff sign-in config. NEXT_PUBLIC_* is inlined at THIS build step, not read at
+# runtime, so it cannot be a Space/Crane Cloud secret — it has to enter here or
+# the sign-in page has no provider to talk to. Empty defaults preserve the
+# current behaviour: the OIDC button renders disabled and the dev panel hides,
+# so an image built without these args is unchanged. The issuer and client id
+# are not secrets — they are visible in the shipped bundle by design — so the
+# workflow passes them as repo variables. The matching backend verification vars
+# (AUTH_ALG=RS256, OIDC_ISSUER, OIDC_AUDIENCE, OIDC_JWKS_URL) ARE runtime and
+# stay Space secrets.
+ARG NEXT_PUBLIC_OIDC_ISSUER=""
+ARG NEXT_PUBLIC_OIDC_CLIENT_ID=""
+ARG NEXT_PUBLIC_OIDC_SCOPE=""
+ARG NEXT_PUBLIC_DEV_SIGNIN=""
+ENV NEXT_PUBLIC_OIDC_ISSUER=${NEXT_PUBLIC_OIDC_ISSUER} \
+    NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID} \
+    NEXT_PUBLIC_OIDC_SCOPE=${NEXT_PUBLIC_OIDC_SCOPE} \
+    NEXT_PUBLIC_DEV_SIGNIN=${NEXT_PUBLIC_DEV_SIGNIN}
 RUN bun run build || npm run build
 
 # =============================================================================

@@ -1,0 +1,81 @@
+{
+  "_comment": "URA staff-auth realm — reference config for wiring a real OIDC provider to the staff dashboards. Verified end-to-end against Keycloak 26 (authorization-code + PKCE S256, RS256 tokens). Import with `start-dev --import-realm`. Passwords are placeholders: set real ones via the console or kcadm before use, and change the redirect URIs to your deployment's origin. See App/deploy/keycloak/README.md.",
+  "realm": "ura",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "accessTokenLifespan": 1800,
+  "roles": {
+    "realm": [
+      { "name": "ura_admin", "description": "Full operations view (/admin)" },
+      { "name": "ura_staff", "description": "Works the escalation queue (/agent)" },
+      { "name": "ura_auditor", "description": "Read-only oversight" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ura-chatbot",
+      "name": "URA Tax Assistant (staff web)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "_redirectUris_comment": "Replace with your deployment origin. The path must be exactly /signin/callback. Keep localhost for dev.",
+      "redirectUris": [
+        "http://localhost:3100/signin/callback",
+        "http://127.0.0.1:3100/signin/callback",
+        "https://YOUR-SPACE.hf.space/signin/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:3100",
+        "https://YOUR-SPACE.hf.space"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3100/signin##https://YOUR-SPACE.hf.space/signin"
+      },
+      "fullScopeAllowed": true,
+      "_protocolMappers_comment": "The audience mapper is load-bearing: without it Keycloak does not put this client in `aud`, and the backend rejects every token with 'audience mismatch'.",
+      "protocolMappers": [
+        {
+          "name": "ura-chatbot-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "ura-chatbot",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "_users_comment": "Demo officers. Passwords are placeholders — set real ones before use. Roles arrive in access tokens as realm_access.roles, which is where the backend probes by default (App/backend/app/auth/dependencies.py).",
+  "users": [
+    {
+      "username": "officer.admin",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "officer.admin@ura.go.ug",
+      "firstName": "Aisha",
+      "lastName": "Nakato",
+      "credentials": [{ "type": "password", "value": "CHANGE_ME_ADMIN", "temporary": false }],
+      "realmRoles": ["ura_admin"]
+    },
+    {
+      "username": "officer.queue",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "officer.queue@ura.go.ug",
+      "firstName": "Peter",
+      "lastName": "Okello",
+      "credentials": [{ "type": "password", "value": "CHANGE_ME_STAFF", "temporary": false }],
+      "realmRoles": ["ura_staff"]
+    }
+  ]
+}
