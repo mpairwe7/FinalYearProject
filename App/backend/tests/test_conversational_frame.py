@@ -55,29 +55,69 @@ class TestProceduralAnswersGetContactDetails(FrameTestCase):
 
 
 class TestInformationalAnswersGetAFollowUp(FrameTestCase):
-    def test_a_definition_gets_a_related_question(self):
-        reply = "EFRIS is URA's real-time e-invoicing system."
-        out = self.frame(reply, query="What is EFRIS?", tag="efris")
+    """Hits here are shaped like a REAL hybrid turn — a PDF chunk whose
+    ``section`` is a document heading, not a FAQ tag.
+
+    The first version of _related_question looked up siblings under that field
+    assuming it carried the tag. Every unit test passed because each supplied a
+    hand-made hit with a real tag in ``section``, while in production the
+    suggestion never once appeared: 0 of 40 replies carried one. The fixture
+    encoded the same assumption as the code, so the pair agreed with each other
+    and not with reality. These now use the shape production actually sends.
+    """
+
+    PDF_HIT = [
+        {
+            "section": "Chapter 4 — Customs procedure",
+            "source": "East_Africa_Community_Customs_Management_Act_Revised.pdf",
+            "doc_type": "pdf",
+            "text": "...",
+        }
+    ]
+
+    def frame_pdf(self, reply: str, query: str) -> str:
+        return self.model._add_conversational_frame(
+            reply, query=query, hits=self.PDF_HIT, retrieval_mode="hybrid"
+        )
+
+    def test_a_definition_gets_a_follow_up_even_when_the_top_hit_is_a_pdf(self):
+        out = self.frame_pdf("EFRIS is URA's real-time e-invoicing system.", "What is EFRIS?")
         self.assertIn("You might also want to know:", out)
 
-    def test_the_suggestion_is_a_question_the_corpus_can_answer(self):
+    def test_the_suggestion_is_a_real_question_from_the_corpus(self):
         """Rule 15 is only useful if what is offered actually resolves."""
-        reply = "EFRIS is URA's real-time e-invoicing system."
-        out = self.frame(reply, query="What is EFRIS?", tag="efris")
+        out = self.frame_pdf("EFRIS is URA's e-invoicing system.", "What is EFRIS?")
         suggested = out.split("You might also want to know:")[1].strip()
-        corpus = {e["question"].strip() for e in self.model._faq_index["efris"]}
+        corpus = {
+            e["question"].strip()
+            for entries in self.model._faq_index.values()
+            for e in entries
+        }
         self.assertIn(suggested, corpus)
 
     def test_it_does_not_suggest_the_question_just_asked(self):
-        asked = self.model._faq_index["efris"][0]["question"]
-        out = self.frame("Some grounded answer about EFRIS.", query=asked, tag="efris")
+        asked = "What is EFRIS?"
+        out = self.frame_pdf("EFRIS is URA's e-invoicing system.", asked)
         if "You might also want to know:" in out:
             suggested = out.split("You might also want to know:")[1].strip()
-            self.assertNotEqual(suggested.lower(), asked.strip().lower())
+            self.assertNotEqual(suggested.lower(), asked.lower())
 
-    def test_no_suggestion_when_the_topic_has_no_siblings(self):
-        out = self.frame("A standalone fact.", query="Anything?", tag="does-not-exist")
-        self.assertEqual(out, "A standalone fact.")
+    def test_it_reaches_across_topics(self):
+        """The tag-local version could only ever suggest within one file."""
+        found_cross_topic = False
+        for query in (
+            "What is the VAT rate in Uganda?",
+            "How will I receive my TIN?",
+            "What are business records?",
+        ):
+            out = self.frame_pdf("A grounded answer.", query)
+            if "You might also want to know:" in out:
+                found_cross_topic = True
+        self.assertTrue(found_cross_topic, "no suggestion surfaced for any common query")
+
+    def test_an_unanswerable_query_gets_no_suggestion(self):
+        out = self.frame_pdf("A grounded answer.", "zzzz qqqq xxxx")
+        self.assertNotIn("You might also want to know:", out)
 
 
 class TestFramingIsNotAppliedTwice(FrameTestCase):
@@ -132,3 +172,26 @@ class TestFramingDoesNotDamageGrounding(FrameTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSuggestionSurvivesAMissingBm25State(FrameTestCase):
+    """bm25_state.json is absent in some deployments and _simple_search already
+    degrades to term overlap there. The suggestion does the same rather than
+    switching itself off, since silently producing nothing is the exact failure
+    this method was rewritten to fix."""
+
+    def test_a_suggestion_is_still_produced_without_the_encoder(self):
+        import app.service as svc
+
+        saved_enc, saved_flag = svc._BM25_ENCODER, svc._BM25_LOAD_ATTEMPTED
+        svc._BM25_ENCODER, svc._BM25_LOAD_ATTEMPTED = None, True  # force the fallback
+        try:
+            out = self.model._add_conversational_frame(
+                "EFRIS is URA's e-invoicing system.",
+                query="What is EFRIS?",
+                hits=[{"section": "Chapter 1", "source": "x.pdf", "doc_type": "pdf"}],
+                retrieval_mode="hybrid",
+            )
+        finally:
+            svc._BM25_ENCODER, svc._BM25_LOAD_ATTEMPTED = saved_enc, saved_flag
+        self.assertIn("You might also want to know:", out)
