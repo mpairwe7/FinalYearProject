@@ -2090,6 +2090,20 @@ def faq_question_equivalence(query: str, entry: dict[str, Any]) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
+def _mark_faq_priority(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tag hits injected by `_priority_faq_hits` so later gates can recognise them.
+
+    These rows are not ordinary retrieval output. They are reached only when an
+    intent regex matches — `(file|submit|lodge).*(return|returns)` or
+    `(register|get|obtain|apply).*(tin|pin)` — and then picked by a hand-written
+    sort. Their whole reason for existing is that generic ranking misses them,
+    so a generic gate should not get to overrule them.
+    """
+    for hit in hits:
+        hit["faq_priority"] = True
+    return hits
+
+
 def _promote_equivalent_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Move FAQ rows whose question the user asked verbatim to the front.
 
@@ -2169,6 +2183,21 @@ def _filter_unbound_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dic
     scores: dict[int, float] = {}
     for idx, hit in enumerate(hits):
         if hit not in faq_rows:
+            continue
+        # Rows injected by _priority_faq_hits are exempt. They are reached only
+        # when an intent regex matches the question, so they are already bound
+        # to it more precisely than this gate can measure — and this gate scores
+        # term COVERAGE, which is biased toward whichever row has the wordiest
+        # answer regardless of whether it answers the question asked.
+        #
+        # That is not hypothetical. For "How do I file my annual tax returns?"
+        # the procedural row "How do I file a return?" scores 0.575 against a
+        # 0.584 cutoff and was dropped, while the definition "What is a return
+        # filing?" scored 0.713 and survived on the strength of a long answer
+        # listing PAYE, VAT, WHT and so on. A "how do I" question was answered
+        # with "a return of income is a declaration…", losing by 0.009 to a row
+        # that does not answer it at all.
+        if hit.get("faq_priority"):
             continue
         score = float(hit.get("faq_match_score") or _faq_match_score(query, hit))
         scores[idx] = score
@@ -2621,7 +2650,7 @@ class ChatModel:
                 ),
                 reverse=True,
             )
-            return _faq_hits_to_retrieval_hits(candidates[:top_k])
+            return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
 
         candidates: list[dict[str, str]] = []
         for tag in ("instant_tin_application", "processes_systems", "taxpayer_starter_pack"):
@@ -2646,7 +2675,7 @@ class ChatModel:
             return (exact + procedure, len(text))
 
         candidates.sort(key=score, reverse=True)
-        return _faq_hits_to_retrieval_hits(candidates[:top_k])
+        return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
 
     def _deterministic_procedure_reply(
         self,

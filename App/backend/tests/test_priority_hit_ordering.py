@@ -124,3 +124,72 @@ class TestPriorityFaqSortStillRanksProcedureFirst(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPriorityHitsSurviveTheBindingFilter(unittest.TestCase):
+    """The second half of the same failure.
+
+    Fixing the ordering was not enough: `_filter_unbound_faq_hits` then removed
+    the procedural row outright. That gate scores term COVERAGE, which favours
+    whichever row has the wordiest answer rather than the one that answers the
+    question. For "How do I file my annual tax returns?" the correct row scored
+    0.575 against a 0.584 cutoff while the definition scored 0.713 — carried by
+    a long answer listing PAYE, VAT and WHT — so a "how do I" question was
+    answered with "a return of income is a declaration…", losing by 0.009.
+
+    Priority rows are exempt because they are reached only when an intent regex
+    matches the question, which binds them more precisely than coverage can.
+    """
+
+    def _pipeline(self, query: str):
+        from app.service import (
+            _DATA_DIR,
+            ChatModel,
+            _filter_unbound_faq_hits,
+            _load_faq_data,
+            _prepend_unique,
+            _promote_equivalent_faq_hits,
+        )
+
+        model = ChatModel.__new__(ChatModel)
+        model._faq_index, _ = _load_faq_data(_DATA_DIR)
+        hits: list[dict] = []
+        _prepend_unique(hits, model._priority_faq_hits(query, top_k=2), set())
+        return _promote_equivalent_faq_hits(query, _filter_unbound_faq_hits(query, hits))
+
+    def test_filing_question_keeps_the_procedural_row(self):
+        for query in (
+            "How do I file my annual tax returns?",
+            "How do I submit my yearly tax return in Uganda?",
+        ):
+            with self.subTest(query=query):
+                hits = self._pipeline(query)
+                self.assertTrue(hits, "every priority row was filtered out")
+                self.assertIn("how do i file a return", hits[0]["question"].lower())
+
+    def test_the_answer_is_the_procedure_not_the_definition(self):
+        hits = self._pipeline("How do I file my annual tax returns?")
+        answer = hits[0]["answer"].lower()
+        self.assertNotIn("is a declaration to ura", answer)
+        # the real answer walks the portal
+        self.assertIn("e-returns", answer)
+
+    def test_tin_registration_still_returns_its_procedure(self):
+        hits = self._pipeline("How do I register for a TIN?")
+        self.assertTrue(hits)
+        self.assertIn("tin", hits[0]["question"].lower())
+        self.assertIn("ura.go.ug", hits[0]["answer"].lower())
+
+    def test_ordinary_faq_rows_are_still_filtered(self):
+        """The exemption must not disable the gate for everything else."""
+        from app.service import _filter_unbound_faq_hits
+
+        unrelated = {
+            "text": "Question: What is a driving permit?\nAnswer: A permit to drive.",
+            "question": "What is a driving permit?",
+            "answer": "A permit to drive.",
+            "source": "ura_processes_systems_faqs.csv",
+            "doc_type": "csv",
+        }
+        kept = _filter_unbound_faq_hits("How do I file my annual tax returns?", [unrelated])
+        self.assertEqual(kept, [], "an unrelated FAQ row should still be dropped")
