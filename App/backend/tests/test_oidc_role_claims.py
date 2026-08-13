@@ -146,12 +146,31 @@ class TestResolveRole(unittest.TestCase):
         with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "ura.access.role"):
             self.assertEqual(deps.resolve_role(claims), "ura_auditor")
 
-    def test_override_is_exclusive(self) -> None:
+    def test_override_wins_when_the_claim_is_present(self) -> None:
         # An explicit path means "roles live here"; a stray flat claim elsewhere
         # must not grant access the configured path does not.
         claims = {"role": "ura_admin", "ura": {"access": {"role": ["ura_staff"]}}}
         with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "ura.access.role"):
             self.assertEqual(deps.resolve_role(claims), "ura_staff")
+
+    def test_present_but_empty_override_grants_nothing(self) -> None:
+        # An empty list is a real answer — "this user holds no roles" — and must
+        # not fall through to a claim that would grant access.
+        claims = {"role": "ura_admin", "https://ura.go.ug/roles": []}
+        with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "https://ura.go.ug/roles"):
+            self.assertEqual(deps.resolve_role(claims), "public")
+
+    def test_absent_override_falls_back_to_the_defaults(self) -> None:
+        # Setting the variable before the provider mapping exists (or misspelling
+        # it) must not lock every officer out. The signed token already prevents
+        # claim injection, so probing the standard claims costs nothing.
+        claims = {"permissions": ["ura_admin"]}
+        with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "https://ura.go.ug/roles"):
+            self.assertEqual(deps.resolve_role(claims), "ura_admin")
+
+    def test_absent_override_with_no_roles_anywhere_is_public(self) -> None:
+        with mock.patch.object(deps, "OIDC_ROLE_CLAIM", "https://ura.go.ug/roles"):
+            self.assertEqual(deps.resolve_role({"sub": "abc"}), "public")
 
 
 class TestClaimsToUser(unittest.TestCase):

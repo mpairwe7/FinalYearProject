@@ -89,24 +89,47 @@ def _claim_at_path(claims: dict[str, Any], path: str) -> Any:
     return node
 
 
+def _values_at(claims: dict[str, Any], path: str) -> list[str]:
+    """Role-ish strings at one claim path. A missing claim yields nothing."""
+    value = _claim_at_path(claims, path)
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value if isinstance(v, (str, int))]
+    return []
+
+
 def _role_candidates(claims: dict[str, Any], audience: str) -> list[str]:
-    """Collect every role-ish string the token offers, in probe order."""
-    paths: list[str] = []
+    """Collect every role-ish string the token offers, in probe order.
+
+    ``OIDC_ROLE_CLAIM`` is authoritative *when the claim is present* — including
+    when it is present but empty, which legitimately means "this user holds no
+    roles" and must not be second-guessed by some other claim.
+
+    When the configured claim is ABSENT the defaults still run. That matters
+    operationally: the variable usually gets set at the same time as the provider
+    mapping that produces the claim, and if the mapping is missing or misspelled
+    an exclusive override would resolve every officer to "public" — locking out
+    all staff to defend against a threat the signed token already prevents.
+    """
     if OIDC_ROLE_CLAIM:
-        paths.append(OIDC_ROLE_CLAIM)
-    else:
-        paths.extend(_DEFAULT_ROLE_CLAIM_PATHS)
-        if audience:
-            # Keycloak client roles live under the client id the token was issued for.
-            paths.append(f"resource_access.{audience}.roles")
+        configured = _claim_at_path(claims, OIDC_ROLE_CLAIM)
+        if configured is not None:
+            return _values_at(claims, OIDC_ROLE_CLAIM)
+        logger.warning(
+            "OIDC_ROLE_CLAIM=%r is not present in this token; falling back to the "
+            "default role claims. Check the provider mapping that should emit it.",
+            OIDC_ROLE_CLAIM,
+        )
+
+    paths = list(_DEFAULT_ROLE_CLAIM_PATHS)
+    if audience:
+        # Keycloak client roles live under the client id the token was issued for.
+        paths.append(f"resource_access.{audience}.roles")
 
     found: list[str] = []
     for path in paths:
-        value = _claim_at_path(claims, path)
-        if isinstance(value, str):
-            found.append(value)
-        elif isinstance(value, (list, tuple)):
-            found.extend(str(v) for v in value if isinstance(v, (str, int)))
+        found.extend(_values_at(claims, path))
     return found
 
 

@@ -93,10 +93,23 @@ The backend probes these claims in order and takes the widest role it recognises
 `role` → `roles` → `realm_access.roles` → `groups` → `permissions` →
 `resource_access.<audience>.roles`
 
-Auth0 needs **RBAC enabled on the API** with *Add Permissions in the Access Token*,
-which lands them in `permissions`. Alternatively a Post-Login Action can set a
-namespaced claim — note the claim *name* then contains dots, which is handled (a
-literal claim name is matched before dot-path walking):
+`OIDC_ROLE_CLAIM` is authoritative **when that claim is present in the token**,
+including when it is present but empty (a real answer: "this user holds no
+roles"). When the claim is *absent* the defaults are probed anyway, and a warning
+is logged naming the variable. That is deliberate: the variable is usually set at
+the same time as the provider mapping meant to emit it, and if the mapping is
+missing or misspelled, an exclusive override would resolve every officer to
+`public` and lock all staff out — to defend against claim injection that the
+signed token already prevents.
+
+### Getting roles into an Auth0 token
+
+Assigning a role in Auth0 does **not** put it in the access token, and the RBAC
+toggle adds *permissions* (`read:tickets`-style), not role names. Two routes:
+
+**Post-Login Action (recommended — sends role names).** Enable RBAC on the API so
+`event.authorization` is populated, then Actions → Library → Build Custom →
+Login/Post Login:
 
 ```js
 exports.onExecutePostLogin = async (event, api) => {
@@ -106,6 +119,19 @@ exports.onExecutePostLogin = async (event, api) => {
 ```
 OIDC_ROLE_CLAIM=https://ura.go.ug/roles
 ```
+
+The Action must be **Deployed** *and* dragged onto **Actions → Triggers →
+post-login** and applied. An action that is built but not attached to the flow
+never runs, and the claim silently never appears.
+
+**Permissions shortcut (no Action).** Name the API's permissions literally
+`ura_admin` / `ura_staff` / `ura_auditor`, assign them to the matching roles, and
+enable RBAC + *Add Permissions in the Access Token*. They land in `permissions`,
+which is probed by default, so `OIDC_ROLE_CLAIM` stays unset. It works, but it
+uses permissions to carry role names, which is not what they are for.
+
+Users must live in the **`Username-Password-Authentication`** connection to sign
+in with a password; a Google-federated user has no database password at all.
 
 Role names must be exactly `ura_admin`, `ura_staff`, `ura_auditor`. Hyphens and
 group-path prefixes (`/ura-admin`) are normalised; anything unrecognised resolves
