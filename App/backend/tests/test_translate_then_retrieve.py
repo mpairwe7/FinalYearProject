@@ -115,3 +115,67 @@ class TestNonEnglishFallback(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestJudgeRescueIsOffByDefault(unittest.TestCase):
+    """The judge makes a network call, so nothing may reach it implicitly.
+
+    It sits last in the ladder — after the untranslated pass, the translated
+    pass and the coverage gate have all produced nothing — and is disabled
+    unless FAQ_JUDGE_ENABLED is set. A unit run or a deployment without a
+    configured model must behave exactly as it did before it existed.
+    """
+
+    def test_disabled_by_default(self):
+        self.assertFalse(service.FAQ_JUDGE_ENABLED)
+
+    def test_returns_nothing_and_calls_no_model_when_disabled(self):
+        with patch("app.providers.gateway.gemini_generate") as gen:
+            self.assertEqual(service._judge_rescue("anything", _index(), 4), [])
+            gen.assert_not_called()
+
+    def test_an_unconfident_verdict_is_refused(self):
+        """A confidently wrong tax answer costs more than 'I could not find it'."""
+        with (
+            patch.object(service, "FAQ_JUDGE_ENABLED", True),
+            patch("app.providers.config.is_gemini_configured", return_value=True),
+            patch(
+                "app.providers.gateway.gemini_generate",
+                return_value='{"pick": 1, "confident": false}',
+            ),
+        ):
+            self.assertEqual(service._judge_rescue("What is VAT?", _index(), 4), [])
+
+    def test_a_confident_verdict_is_accepted(self):
+        with (
+            patch.object(service, "FAQ_JUDGE_ENABLED", True),
+            patch("app.providers.config.is_gemini_configured", return_value=True),
+            patch(
+                "app.providers.gateway.gemini_generate",
+                return_value='```json\n{"pick": 1, "confident": true}\n```',
+            ),
+        ):
+            hits = service._judge_rescue("What is the VAT rate?", _index(), 4)
+        self.assertTrue(hits)
+        self.assertIn("VAT", hits[0]["question"])
+
+    def test_a_failed_call_degrades_to_no_answer(self):
+        for outcome in ({"side_effect": RuntimeError("offline")}, {"return_value": "not json"}):
+            with self.subTest(outcome=list(outcome)[0]):
+                with (
+                    patch.object(service, "FAQ_JUDGE_ENABLED", True),
+                    patch("app.providers.config.is_gemini_configured", return_value=True),
+                    patch("app.providers.gateway.gemini_generate", **outcome),
+                ):
+                    self.assertEqual(service._judge_rescue("What is VAT?", _index(), 4), [])
+
+    def test_an_out_of_range_pick_is_refused(self):
+        with (
+            patch.object(service, "FAQ_JUDGE_ENABLED", True),
+            patch("app.providers.config.is_gemini_configured", return_value=True),
+            patch(
+                "app.providers.gateway.gemini_generate",
+                return_value='{"pick": 99, "confident": true}',
+            ),
+        ):
+            self.assertEqual(service._judge_rescue("What is VAT?", _index(), 4), [])
