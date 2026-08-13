@@ -399,13 +399,21 @@ def _llm_cloud_fallback(
         logger.warning("LLM fallback chain total budget exhausted before Gemini attempt")
     elif (
         backend == "gemini"
+        # Checked BEFORE the budget call, which has a side effect: a locale we
+        # will never send must not spend a call from the free-tier allowance.
+        # Checked here rather than relying on gemini_generate to raise, because
+        # a policy refusal caught by the except below would record a breaker
+        # FAILURE and, after enough Luganda turns, open the circuit for English.
+        and gw.gemini_allowed_for(locale)
         and cfg.is_gemini_configured()
         and breakers.GEMINI_BREAKER.allow_request()
         and budget.try_consume_gemini_call()
     ):
         system, user = _build_fallback_prompt(query, passages, locale, tone_hint)
         try:
-            text = gw.gemini_generate(user, system=system, max_tokens=512, temperature=0.2)
+            text = gw.gemini_generate(
+                user, system=system, locale=locale, max_tokens=512, temperature=0.2
+            )
             breakers.GEMINI_BREAKER.record_success()
             routing.log_model_use("llm", "gemini_flash")
             if text and text.strip() and not _looks_truncated(text):
