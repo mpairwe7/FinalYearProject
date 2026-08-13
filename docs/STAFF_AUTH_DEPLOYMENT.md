@@ -6,17 +6,23 @@ file records **what is actually configured**, where each value lives, and why.
 
 Last updated: 2026-08-13.
 
-**Current status:** deployed on image `sha-459533c` and verified 16/16 against the
-live Space — the staff pages serve, the CSP carries the provider origin, the
-backend runs RS256 against the tenant's JWKS, and the sign-in redirect reaches
-Auth0's Universal Login with PKCE S256, the audience and no client secret. Auth0
-accepts the authorization request and serves its login form.
+**Current status:** deployed on image `sha-459533c` and **fully verified against the
+live Space with real Auth0 identities** — 10/10 for `ura_admin`, 11/11 for
+`ura_staff`. Each run covers the whole chain: runtime discovery, the PKCE S256
+redirect with audience and no client secret, Auth0 Universal Login, the code
+exchange, RS256 verification against the tenant's JWKS, role resolution, the
+landing page, role-scoped navigation, and (for staff) refusal from `/admin`.
 
-The one leg not covered by automation is entering a user's password, which
-belongs to the operator. To finish the check by hand: sign in as a user holding
-`ura_admin` and confirm the landing on `/admin`; then as `ura_staff` and confirm
-`/agent`. If either lands but the dashboard refuses with role `public`, the roles
-are not reaching a probed claim — see *Roles* above.
+Roles reach the token as **`permissions`**, so `OIDC_ROLE_CLAIM` is deliberately
+unset. Configured as: RBAC + *Add Permissions in the Access Token* enabled on the
+API; API permissions named `ura_admin` / `ura_staff` / `ura_auditor`; each
+permission granted to the matching role; roles assigned to users in the
+`Username-Password-Authentication` connection. No Post-Login Action is involved.
+
+Known cosmetic gap: the nav and refusal copy show the Auth0 subject
+(`auth0|6a7d…`) rather than an email, because an Auth0 **access** token carries no
+`email` claim — that lives in the ID token, which the app does not read. Purely a
+display issue; identity, role and gating are all correct.
 
 ## Topology
 
@@ -83,7 +89,7 @@ FastAPI process at start; changing them restarts the Space but needs no rebuild.
 | `OIDC_ISSUER` | `https://dev-s16d7m00eyrksjy2.us.auth0.com/` |
 | `OIDC_AUDIENCE` | `https://ura-chatbot/api` |
 | `OIDC_JWKS_URL` | `https://dev-s16d7m00eyrksjy2.us.auth0.com/.well-known/jwks.json` |
-| `OIDC_ROLE_CLAIM` | `https://ura.go.ug/roles` — set, matching the Post-Login Action |
+| `OIDC_ROLE_CLAIM` | *unset* — Auth0 delivers roles in `permissions`, which is probed by default |
 
 ## Roles
 
