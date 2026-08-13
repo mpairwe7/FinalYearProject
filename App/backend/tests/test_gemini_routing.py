@@ -162,5 +162,40 @@ class TestModelFallback(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
 
+class TestTheGuardCoversTheRealChatPath(unittest.TestCase):
+    """The guard defaults `locale` to None, so a call site that forgets to pass
+    it is silently ALLOWED. `_llm_cloud_fallback` is the path that serves
+    production chat, and it forgot — the gateway tests above all passed while
+    Luganda still reached Gemini in the one place it mattered.
+    """
+
+    def _run(self, locale: str):
+        import os
+
+        from app import service as svc
+
+        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
+            svc.flags, "is_enabled", return_value=True
+        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
+            "app.providers.budget.try_consume_gemini_call", return_value=True
+        ) as budget, patch(
+            "app.providers.gateway.gemini_generate", return_value="generated"
+        ) as gen:
+            svc._llm_cloud_fallback(
+                "How do I file a return?", [{"text": "passage"}], None, locale
+            )
+        return gen, budget
+
+    def test_a_luganda_turn_never_reaches_gemini(self):
+        gen, budget = self._run("lg")
+        gen.assert_not_called()
+        budget.assert_not_called()  # and spends none of the free-tier allowance
+
+    def test_an_english_turn_still_reaches_gemini_with_its_locale(self):
+        gen, _ = self._run("en")
+        gen.assert_called_once()
+        self.assertEqual(gen.call_args.kwargs.get("locale"), "en")
+
+
 if __name__ == "__main__":
     unittest.main()
