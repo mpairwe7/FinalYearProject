@@ -6,7 +6,7 @@ file records **what is actually configured**, where each value lives, and why.
 
 Last updated: 2026-08-13.
 
-**Current status:** deployed on image `sha-9c69489` and verified 16/16 against the
+**Current status:** deployed on image `sha-459533c` and verified 16/16 against the
 live Space — the staff pages serve, the CSP carries the provider origin, the
 backend runs RS256 against the tenant's JWKS, and the sign-in redirect reaches
 Auth0's Universal Login with PKCE S256, the audience and no client secret. Auth0
@@ -83,7 +83,7 @@ FastAPI process at start; changing them restarts the Space but needs no rebuild.
 | `OIDC_ISSUER` | `https://dev-s16d7m00eyrksjy2.us.auth0.com/` |
 | `OIDC_AUDIENCE` | `https://ura-chatbot/api` |
 | `OIDC_JWKS_URL` | `https://dev-s16d7m00eyrksjy2.us.auth0.com/.well-known/jwks.json` |
-| `OIDC_ROLE_CLAIM` | *(only if roles are not in a probed claim — see below)* |
+| `OIDC_ROLE_CLAIM` | `https://ura.go.ug/roles` — set, matching the Post-Login Action |
 
 ## Roles
 
