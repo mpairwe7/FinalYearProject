@@ -2014,6 +2014,40 @@ def _simple_search(
     return rescued
 
 
+def _prepend_unique(
+    hits: list[dict[str, Any]],
+    new_hits: list[dict[str, Any]],
+    seen_texts: set[str],
+) -> int:
+    """Put *new_hits* at the front of *hits*, in their own order, skipping any
+    already present. Returns how many were added.
+
+    This exists because the obvious loop does not do that::
+
+        for h in new_hits:
+            hits.insert(0, h)
+
+    Each insert goes to index 0, so the group arrives reversed and whatever
+    ranked LAST ends up as citation [1]. That is what made "How do I file my
+    annual tax returns?" answer with the definition "What is a return filing?":
+    _priority_faq_hits had correctly sorted "How do I file a return?" first —
+    matching that string is its top sort key — and the loop put it second.
+
+    Ordering between groups is unchanged: callers still prepend graph claims
+    before priority FAQs, so priority still lands above graph exactly as
+    before. Only the order within a group is fixed.
+    """
+    fresh: list[dict[str, Any]] = []
+    for h in new_hits:
+        key = h.get("text", "")[:80]
+        if key in seen_texts:
+            continue
+        seen_texts.add(key)
+        fresh.append(h)
+    hits[0:0] = fresh
+    return len(fresh)
+
+
 def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
     """Convert FAQ index rows into the retrieval-hit shape used downstream."""
     hits: list[dict[str, Any]] = []
@@ -4179,16 +4213,10 @@ class ChatModel:
                 # Graph claims go in first: they carry the statutory
                 # basis and the fiscal year, so where they and a passage
                 # disagree the passage is the one that is out of date.
-                for h in self._graph_hits(retrieval_query):
-                    if h.get("text", "")[:80] not in seen_texts:
-                        hits.insert(0, h)
-                        seen_texts.add(h.get("text", "")[:80])
-                        retrieval_mode = "graph"
-                for h in priority_hits:
-                    if h.get("text", "")[:80] not in seen_texts:
-                        hits.insert(0, h)
-                        seen_texts.add(h.get("text", "")[:80])
-                        retrieval_mode = "faq_priority"
+                if _prepend_unique(hits, self._graph_hits(retrieval_query), seen_texts):
+                    retrieval_mode = "graph"
+                if _prepend_unique(hits, priority_hits, seen_texts):
+                    retrieval_mode = "faq_priority"
                 for h in kw_hits:
                     faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
                     if faq_text[:80] not in seen_texts:
@@ -5222,11 +5250,8 @@ class ChatModel:
             retrieval_mode = "graph"
         priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
-        for h in priority_hits:
-            if h.get("text", "")[:80] not in seen_texts:
-                hits.insert(0, h)
-                seen_texts.add(h.get("text", "")[:80])
-                retrieval_mode = "faq_priority"
+        if _prepend_unique(hits, priority_hits, seen_texts):
+            retrieval_mode = "faq_priority"
         for h in kw_hits:
             faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
             if faq_text[:80] not in seen_texts:
