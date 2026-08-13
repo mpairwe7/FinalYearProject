@@ -2586,38 +2586,72 @@ class ChatModel:
             return reply
         return f"{body}\n\nYou might also want to know: {follow_up}"
 
+    # A suggestion has to be *related*, not merely retrievable. Below this the
+    # best candidate is noise and no suggestion is better than a random one.
+    _RELATED_MIN_SCORE = 1.5
+    # Above this the "related" question is a restatement of the one just asked.
+    _RELATED_MAX_OVERLAP = 0.6
+
     def _related_question(self, query: str, hits: list[dict[str, Any]]) -> str:
-        """A sibling FAQ question from the same topic, or "".
+        """The FAQ question most related to *query* that is not *query*, or "".
 
         Suggesting a question the corpus actually answers keeps Rule 15 useful
-        instead of decorative: whatever is offered here can be tapped and will
-        resolve. Skips the question just asked, and anything too close to it,
-        so the suggestion is not a restatement.
+        instead of decorative: whatever is offered can be tapped and will
+        resolve.
+
+        Ranked by BM25 over FAQ questions, corpus-wide. The first version
+        looked up siblings under the top hit's ``section``, assuming that field
+        carried the FAQ tag. It does for rows built by
+        _faq_hits_to_retrieval_hits, but a hybrid turn's top hit is usually a
+        PDF chunk whose ``section`` is a document heading, so the lookup missed
+        and the suggestion silently never appeared — 0 of 40 replies carried
+        one in production while the unit test passed, because the test supplied
+        a hand-made hit that encoded the same assumption.
+
+        Scoring the questions directly removes the dependency on hit metadata
+        entirely, and reaches related questions in other topics, which the
+        tag-local version could not: "How do I file a return?" can now surface
+        "When are returns and payments due?" from a different file.
         """
-        tag = ""
-        for hit in hits:
-            tag = str(hit.get("section") or hit.get("tag") or "")
-            if tag:
-                break
-        siblings = self._faq_index.get(tag) or []
-        if not siblings:
+        asked_terms = set(_faq_terms(query))
+        if not asked_terms:
             return ""
-        asked = set(_faq_terms(query))
+        asked_lower = query.strip().lower()
+
+        encoder = _get_bm25_encoder()
+        query_tokens = encoder._tokenize(query) if encoder is not None else []
+        # bm25_state.json is absent in some deployments, and _simple_search
+        # already degrades to term overlap there rather than returning nothing.
+        # Match that: a slightly worse suggestion beats the feature silently
+        # switching itself off, which is exactly the failure mode this method
+        # is being rewritten to fix.
+        floor = self._RELATED_MIN_SCORE if query_tokens else 0.15
+
         best = ""
-        best_overlap = -1.0
-        for entry in siblings:
-            question = str(entry.get("question") or "").strip()
-            if not question or question.lower() == query.strip().lower():
-                continue
-            terms = set(_faq_terms(question))
-            if not terms:
-                continue
-            overlap = len(asked & terms) / len(terms)
-            # Related, not a paraphrase of what was just asked.
-            if overlap > 0.6 or overlap <= best_overlap:
-                continue
-            best_overlap = overlap
-            best = question
+        best_score = floor
+        for tag, entries in self._faq_index.items():
+            for entry in entries:
+                question = str(entry.get("question") or "").strip()
+                if not question or question.lower() == asked_lower:
+                    continue
+                terms = set(_faq_terms(question))
+                if not terms:
+                    continue
+                shared = len(asked_terms & terms)
+                # A near-paraphrase is not a follow-up.
+                if shared / len(terms) > self._RELATED_MAX_OVERLAP:
+                    continue
+                if query_tokens:
+                    # Score the QUESTION, not the row: we are looking for what
+                    # to ask next, not the best answer to what was just asked.
+                    score = _faq_bm25_score(
+                        query_tokens, {"question": question, "answer": "", "tag": tag}, encoder
+                    )
+                else:
+                    score = shared / len(asked_terms | terms)  # Jaccard
+                if score > best_score:
+                    best_score = score
+                    best = question
         return best
 
     def _finalize_reply(self, reply: str) -> str:
