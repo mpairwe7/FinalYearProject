@@ -2013,7 +2013,141 @@ def _simple_search(
             "Retrieval rescued by translation (%s -> en): %r -> %r, %d hit(s)",
             locale, query[:60], english[:60], len(rescued),
         )
-    return rescued
+        return rescued
+    return _judge_rescue(english, faq_index, top_k) or rescued
+
+
+# Last-resort judge over retrieval candidates. Off unless explicitly enabled:
+# it makes a network call, so it must never fire from a unit test or a
+# deployment without a configured model.
+FAQ_JUDGE_ENABLED = os.getenv("FAQ_JUDGE_ENABLED", "false").lower() == "true"
+FAQ_JUDGE_MODEL = os.getenv("FAQ_JUDGE_MODEL", "gemini-3.5-flash-lite")
+FAQ_JUDGE_CANDIDATES = int(os.getenv("FAQ_JUDGE_CANDIDATES", "6"))
+
+_JUDGE_PROMPT = """You are ranking candidate FAQ entries for a Uganda Revenue Authority assistant.
+
+Question: {question}
+
+Candidates:
+{candidates}
+
+Reply with ONLY a JSON object: {{"pick": <candidate number>, "confident": true|false}}
+Pick the candidate that ANSWERS the question — what the user is trying to do,
+not merely shared words. A "how do I" question wants the procedure, not the
+definition.
+If no candidate answers it, reply {{"pick": 0, "confident": false}}."""
+
+
+def _judge_rescue(
+    query: str,
+    faq_index: dict[str, list[dict[str, str]]],
+    top_k: int,
+) -> list[dict[str, str]]:
+    """Ask a model which candidate answers *query*, after everything else failed.
+
+    `_faq_match_score` counts how much of the question a row's words cover. That
+    cannot tell "how do I file" from "what is filing", and it cannot rank a
+    machine-translated question against an English corpus — which is why 7 of
+    12 Luganda golden questions still return nothing even after translation.
+
+    Lowering the floor was measured and rejected: it took wrong answers from 1
+    of 6 off-domain questions to 5 of 6. A judge reads intent instead of
+    counting words, and measured on the same sets it recovers 4 of the 8 the
+    gate refuses with 0 of 7 false picks on off-domain — the precision the
+    lower floor could not hold.
+
+    Deliberately LAST and deliberately lazy. It runs only once the untranslated
+    pass, the translated pass and the coverage gate have all produced nothing,
+    so a question that already works pays no latency and no tokens; a question
+    that would otherwise return "I couldn't find a reliable answer" pays ~1.5s
+    to get a real one. Every failure path returns [] and the caller abstains
+    exactly as it does today.
+
+    gemini-3.5-flash-lite is the default after benchmarking four flash variants
+    on this task: all four scored identically, at 1.5s median / 8.7s max versus
+    4.7s / 74.9s for the configured gemini-2.5-flash.
+    """
+    if not FAQ_JUDGE_ENABLED or not query.strip():
+        return []
+    try:
+        from .providers import config as _cfg
+        from .providers import gateway as _gw
+
+        if not _cfg.is_gemini_configured():
+            return []
+    except Exception:  # noqa: BLE001 — providers optional
+        return []
+
+    encoder = _get_bm25_encoder()
+    rows = [
+        dict(entry, tag=tag)
+        for tag, entries in faq_index.items()
+        for entry in entries
+        if str(entry.get("question") or "").strip()
+    ]
+    if not rows:
+        return []
+    # Candidates come from scoring, NOT from _simple_search: the gate is what
+    # the judge is standing in for, so handing it a gate-filtered list would
+    # hide the row it exists to recover.
+    if encoder is not None:
+        tokens = encoder._tokenize(query)
+        rows.sort(key=lambda e: _faq_bm25_score(tokens, e, encoder), reverse=True)
+    else:
+        rows.sort(key=lambda e: _faq_match_score(query, e), reverse=True)
+    candidates = rows[:FAQ_JUDGE_CANDIDATES]
+
+    listing = "\n".join(
+        f"{i}. {c['question']} — {str(c.get('answer') or '')[:160]}"
+        for i, c in enumerate(candidates, 1)
+    )
+    try:
+        raw = _gw.gemini_generate(
+            _JUDGE_PROMPT.format(question=query, candidates=listing),
+            model=FAQ_JUDGE_MODEL,
+            # gemini-3.x flash are thinking models: reasoning tokens come out of
+            # this budget, and a small cap truncates the answer mid-JSON rather
+            # than returning a short one.
+            max_tokens=2000,
+            temperature=0.0,
+        )
+    except Exception:  # noqa: BLE001 — judge is best-effort
+        logger.debug("FAQ judge call failed", exc_info=True)
+        return []
+
+    cleaned = re.sub(r"^```(?:json)?|```$", "", (raw or "").strip(), flags=re.M)
+    match = re.search(r"\{.*?\}", cleaned, re.S)
+    if not match:
+        return []
+    try:
+        verdict = json.loads(match.group(0))
+        pick = int(verdict.get("pick", 0))
+        confident = bool(verdict.get("confident"))
+    except Exception:  # noqa: BLE001 — malformed judgement is a no-answer
+        return []
+    if not 1 <= pick <= len(candidates):
+        return []
+    # An unconfident pick is refused. Asked to choose from candidates that are
+    # all at least topically plausible, the judge will name the closest one
+    # rather than none — measured on the Luganda set, that turned 12
+    # abstentions into 4 right answers and 3 wrong ones, including "how do I
+    # register for a TIN" answered from the foreign-company document list.
+    # For a tax authority a confidently wrong answer costs more than "I could
+    # not find this", so the flag it already returns is honoured.
+    if not confident:
+        logger.info("FAQ judge declined (unconfident) for %r", query[:60])
+        return []
+
+    chosen = candidates[pick - 1]
+    logger.info(
+        "Retrieval rescued by judge (%s): %r -> %r",
+        FAQ_JUDGE_MODEL, query[:60], str(chosen.get("question"))[:60],
+    )
+    out = dict(chosen)
+    out.pop("_bm25_tf", None)
+    out.pop("_bm25_dl", None)
+    out["_overlap"] = "1"
+    return [out][:top_k]
 
 
 def _prepend_unique(

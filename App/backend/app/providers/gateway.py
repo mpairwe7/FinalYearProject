@@ -105,6 +105,40 @@ def _post_json(url: str, headers: dict[str, str], payload: dict) -> dict[str, An
 # API — retrying it elsewhere would repeat the same error and bill twice.
 
 _CF_API_BASE = "https://api.cloudflare.com/client/v4"
+# Google's own Gemini endpoint — the fallback when the AI Gateway is unreachable.
+_GOOGLE_AI_BASE = "https://generativelanguage.googleapis.com"
+
+# Gemini serves ENGLISH only. The Ugandan languages stay on Sunbird, which is
+# trained on them: it holds the native TTS voices, the ASR models and the only
+# translation that handles lug/nyn/ach/teo/lgg. Sending those locales to a
+# general model would answer in a language it approximates rather than speaks,
+# and would bypass the tier that exists for them.
+GEMINI_ENGLISH_ONLY = os.getenv("GEMINI_ENGLISH_ONLY", "true").lower() == "true"
+SUNBIRD_ONLY_LOCALES: frozenset[str] = frozenset(
+    s.strip().lower()
+    for s in os.getenv("SUNBIRD_ONLY_LOCALES", "lg,nyn,ach,teo,lgg,sw").split(",")
+    if s.strip()
+)
+
+# Primary and fallback for English. Both were benchmarked on the retrieval-judge
+# task: every flash variant scored identically, so the pair is chosen on
+# latency and headroom — 3.7 as the stronger default, 3.5-flash-lite behind it
+# at 1.5s median / 1.7s max, the fastest measured.
+# Statuses where a DIFFERENT model may still succeed: withdrawn/renamed (404),
+# rate-limited (429), or upstream capacity (5xx). A 400/401/403 describes the
+# request itself and would fail identically anywhere.
+_MODEL_RETRYABLE_STATUSES = frozenset({404, 429, 500, 502, 503, 504})
+
+GEMINI_PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
+
+
+def gemini_allowed_for(locale: str | None) -> bool:
+    """False when *locale* belongs to Sunbird rather than Gemini."""
+    if not GEMINI_ENGLISH_ONLY:
+        return True
+    lang = (locale or "en").strip().lower().split("-")[0].split("_")[0]
+    return lang not in SUNBIRD_ONLY_LOCALES
 
 
 def _workers_ai_targets(model: str) -> list[tuple[str, dict[str, str]]]:
@@ -246,18 +280,99 @@ def gemini_generate(
     model: str | None = None,
     max_tokens: int = 512,
     temperature: float = 0.2,
+    locale: str | None = None,
+    _allow_model_fallback: bool = True,
 ) -> str:
-    """Generate text via Gemini through the AI Gateway; returns the answer string."""
+    """Generate text via Gemini, preferring the AI Gateway.
+
+    Falls through to Google's own endpoint on a transport failure, for the same
+    reason workers_ai does: the AI Gateway lives on gateway.ai.cloudflare.com,
+    and the HF Space cannot open a TLS connection to any Cloudflare host — every
+    call dies in the handshake with SSL: UNEXPECTED_EOF_WHILE_READING. Without a
+    second route, Gemini is simply unavailable in the deployment that serves
+    users, which is how the English speech tier ended up configured but inert.
+
+    generativelanguage.googleapis.com is not Cloudflare, and the Space already
+    reaches Google infrastructure — it fetches every Sunbird TTS clip from
+    storage.googleapis.com — so the direct path is expected to work where the
+    gateway does not.
+
+    Transport failures only. A 4xx/5xx is a real answer from the model API and
+    retrying it on another host repeats the error and bills twice.
+    """
     s = get_cloud_settings()
-    model = model or s.gemini_model
-    url = f"{_gateway_url('google-ai-studio')}/v1beta/models/{model}:generateContent"
+    if locale is not None and not gemini_allowed_for(locale):
+        raise RuntimeError(
+            f"gemini_generate: {locale!r} is served by Sunbird, not Gemini"
+        )
+    model = model or GEMINI_PRIMARY_MODEL or s.gemini_model
     payload: dict[str, Any] = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
-    data = _post_json(url, _gemini_headers(), payload)
+
+    targets: list[tuple[str, dict[str, str]]] = [
+        (
+            f"{_gateway_url('google-ai-studio')}/v1beta/models/{model}:generateContent",
+            _gemini_headers(),
+        ),
+        (
+            f"{_GOOGLE_AI_BASE}/v1beta/models/{model}:generateContent",
+            {
+                "x-goog-api-key": s.gemini_api_key.get_secret_value(),
+                "Content-Type": "application/json",
+            },
+        ),
+    ]
+    data: dict[str, Any] | None = None
+    last: Exception | None = None
+    for index, (url, headers) in enumerate(targets):
+        try:
+            data = _post_json(url, headers, payload)
+            break
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            last = exc
+            logger.warning(
+                "Gemini: %s unreachable (%s); %s",
+                url.split("/")[2],
+                type(exc).__name__,
+                "trying Google directly" if index == 0 else "no targets left",
+            )
+        except httpx.HTTPStatusError as exc:
+            # A model can be withdrawn, renamed, rate-limited or overloaded.
+            # Those arrive as HTTP status, not as a transport failure, so the
+            # unreachable path above never sees them — which is how a 404 for a
+            # missing model produced no fallback at all when first tested.
+            # 4xx that describe the REQUEST (400 malformed, 401/403 auth) are
+            # not retried: another model or host repeats them identically.
+            last = exc
+            if exc.response.status_code not in _MODEL_RETRYABLE_STATUSES:
+                raise
+            logger.warning(
+                "Gemini %s on %s for model %s",
+                exc.response.status_code, url.split("/")[2], model,
+            )
+    if data is None:
+        # Both routes are unreachable for THIS model. If a lighter model is
+        # configured, try it once before giving up: a primary that is
+        # overloaded, rate-limited or withdrawn should degrade to a slower
+        # answer rather than to none.
+        if _allow_model_fallback and GEMINI_FALLBACK_MODEL and model != GEMINI_FALLBACK_MODEL:
+            logger.warning(
+                "Gemini %s unreachable; falling back to %s", model, GEMINI_FALLBACK_MODEL
+            )
+            return gemini_generate(
+                prompt,
+                system=system,
+                model=GEMINI_FALLBACK_MODEL,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                locale=locale,
+                _allow_model_fallback=False,
+            )
+        raise last if last else RuntimeError("gemini_generate: no reachable endpoint")
     cands = data.get("candidates", [])
     if not cands:
         raise RuntimeError("gemini_generate: no candidates returned")
