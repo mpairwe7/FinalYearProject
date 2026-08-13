@@ -266,7 +266,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-459533c
+FROM landwind/ura-chatbot:sha-f13d79d
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
