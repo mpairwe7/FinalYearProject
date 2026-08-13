@@ -85,6 +85,8 @@ from .text_signals import (
     NO_HITS_REPLY,
     detect_user_distress,
     empathy_ack,
+    is_courtesy_sentence,
+    split_sentences,
     tone_hint_for,
 )
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
@@ -2517,6 +2519,107 @@ class ChatModel:
         body = "\n\n".join(excerpts)
         return f"{GROUNDED_REVISION_PREAMBLE}\n\n{body}"
 
+    # Modes that already speak in their own voice. A workflow is mid-dialogue,
+    # a clarification is a question back, an abstention is an apology, a
+    # calculator hands over a figure — none of them want a second closer
+    # bolted on.
+    _FRAMED_MODES_EXCLUDED = frozenset(
+        {"workflow", "clarification", "abstained", "escalated", "calculator", "graph"}
+    )
+
+    _PROCEDURAL_RE = re.compile(
+        r"(^|\n)\s*(?:\d+[.)]|[-*•])\s+|→|\b(?:log ?in|visit|go to|click|select|submit|"
+        r"apply|download|upload|fill|attach)\b",
+        re.IGNORECASE | re.MULTILINE,
+    )
+
+    def _add_conversational_frame(
+        self,
+        reply: str,
+        *,
+        query: str,
+        hits: list[dict[str, Any]],
+        retrieval_mode: str,
+    ) -> str:
+        """Give an extractive answer the voice the LLM is already told to use.
+
+        The system prompt asks for this and the generated path delivers it:
+        Rule 14 puts URA's contact details on procedural answers, Rule 15 ends
+        a short informational answer with a follow-up suggestion, Rule 26
+        closes long procedures with reassurance. The EXTRACTIVE path never
+        reaches those rules — it lifts the FAQ row verbatim — so the same
+        assistant answers in two different registers depending on which tier
+        served the turn.
+
+        Measured over 114 indexed FAQs against the deployed Space: 111 came
+        back as `hybrid`, 84% were under 250 characters of verbatim corpus
+        text, only 7% addressed the reader as "you" and only 4% offered any
+        further help. The three that did were the procedural/workflow paths.
+
+        Two rules, applied to the extractive case:
+
+        * procedural answers get the contact footer (14/26);
+        * everything else gets ONE follow-up drawn from a sibling FAQ in the
+          same topic — a real question the corpus can answer, not a canned
+          "let me know if you need anything else".
+
+        Nothing is added when the reply already carries a courtesy sentence,
+        so a generated answer that followed the rules is left alone rather
+        than given a second footer.
+
+        Faithfulness is unaffected by construction: both additions match
+        `is_courtesy_sentence`, which `compute_faithfulness` excludes from
+        both sides of its ratio precisely so that politeness cannot read as
+        hallucination.
+        """
+        body = (reply or "").strip()
+        if not body or retrieval_mode in self._FRAMED_MODES_EXCLUDED:
+            return reply
+        if any(is_courtesy_sentence(s) for s in split_sentences(body)):
+            return reply
+
+        if self._PROCEDURAL_RE.search(body):
+            return f"{body}\n\n{CONTACT_FOOTER}"
+
+        follow_up = self._related_question(query, hits)
+        if not follow_up:
+            return reply
+        return f"{body}\n\nYou might also want to know: {follow_up}"
+
+    def _related_question(self, query: str, hits: list[dict[str, Any]]) -> str:
+        """A sibling FAQ question from the same topic, or "".
+
+        Suggesting a question the corpus actually answers keeps Rule 15 useful
+        instead of decorative: whatever is offered here can be tapped and will
+        resolve. Skips the question just asked, and anything too close to it,
+        so the suggestion is not a restatement.
+        """
+        tag = ""
+        for hit in hits:
+            tag = str(hit.get("section") or hit.get("tag") or "")
+            if tag:
+                break
+        siblings = self._faq_index.get(tag) or []
+        if not siblings:
+            return ""
+        asked = set(_faq_terms(query))
+        best = ""
+        best_overlap = -1.0
+        for entry in siblings:
+            question = str(entry.get("question") or "").strip()
+            if not question or question.lower() == query.strip().lower():
+                continue
+            terms = set(_faq_terms(question))
+            if not terms:
+                continue
+            overlap = len(asked & terms) / len(terms)
+            # Related, not a paraphrase of what was just asked.
+            if overlap > 0.6 or overlap <= best_overlap:
+                continue
+            best_overlap = overlap
+            best = question
+        return best
+
     def _finalize_reply(self, reply: str) -> str:
         """Apply response-side safety cleanup to generated, revised, and cached text."""
         cleaned = self._output_guard.redact_pii(str(reply or ""))
@@ -4801,6 +4904,13 @@ class ChatModel:
             trace_ctx["input_tokens"] = input_tokens
             trace_ctx["output_tokens"] = output_tokens
             record_token_usage(input_tokens, output_tokens)
+
+        # Extractive answers arrive as bare corpus text; give them the same
+        # voice the generated path gets from the system prompt. No-ops when the
+        # reply already carries a courtesy sentence.
+        reply = self._add_conversational_frame(
+            reply, query=message, hits=hits, retrieval_mode=retrieval_mode
+        )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
