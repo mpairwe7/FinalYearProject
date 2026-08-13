@@ -266,7 +266,48 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-468eb04
+# sha-8649917 routes by language: English generates on gemini-3.7-flash with
+# gemini-3.5-flash-lite behind it, and lg/nyn/ach/teo/lgg/sw are refused before
+# any network call so they stay on the Sunbird tier that actually speaks them.
+#
+# Gemini had to become reachable from this Space first, or the change would
+# have shipped inert. gemini_generate went ONLY through gateway.ai.cloudflare.com
+# — the host this Space cannot reach at all — so routing English to Gemini would
+# have failed on every call. It now tries generativelanguage.googleapis.com,
+# which is not Cloudflare and is the same infrastructure every Sunbird TTS clip
+# is already fetched from.
+#
+# Two fallbacks operate at different layers, and the first cut only had one:
+# a withdrawn model returns HTTP 404, not a connection error, so it sailed past
+# the transport fallback and nothing recovered. Model-level retry now covers
+# 404/429/5xx; 400/401/403 raise immediately, since another model repeats them.
+#
+# The locale guard defaults to ALLOW when no locale is passed — which made it
+# inert on the one path that serves production chat. _llm_cloud_fallback did not
+# pass a locale, so every gateway test passed while Luganda still reached Gemini
+# where it mattered. The check now sits in that function's guard condition,
+# before try_consume_gemini_call() (which spends the free-tier allowance) and as
+# a condition rather than a raise, because the except below records a breaker
+# failure — enough Luganda turns would have opened the circuit for English.
+#
+# Requires Space SECRETS (not variables — writing them as variables is what
+# caused the CONFIG_ERROR before): GEMINI_MODEL=gemini-3.7-flash and
+# GEMINI_FALLBACK_MODEL=gemini-3.5-flash-lite. GEMINI_MODEL already existed as a
+# secret holding the old model, so it overrode the new code default.
+#
+# Verified live before shipping: English reaches 3.7-flash; a withdrawn primary
+# recovers on 3.5-flash-lite in 4.0s; a malformed request raises instead of
+# retrying; lg/nyn/ach/sw are refused with no call made. 1338 backend tests.
+#
+# Also present but DORMANT: _judge_rescue, a last-resort model judge behind
+# FAQ_JUDGE_ENABLED (default false). Measured, and the measurements say leave it
+# off: on the Luganda turns it was built to rescue it now recovers 0 of 3,
+# because translate-then-retrieve already absorbed the recoverable ones, and it
+# fires on only 2 of 200 well-formed English questions.
+#
+# Pin to an immutable sha tag. Bump this line to roll the Space to a newer
+# image.
+FROM landwind/ura-chatbot:sha-8649917
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
