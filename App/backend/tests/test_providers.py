@@ -74,6 +74,23 @@ class ConfigTest(unittest.TestCase):
         self.assertTrue(config.is_gemini_configured())
         self.assertTrue(config.is_vectorize_configured())
 
+    def test_gemini_is_configured_without_any_cloudflare_values(self):
+        """The exact production state that kept English generation dark.
+
+        Gemini once reached Google only through the Cloudflare AI Gateway, so
+        `is_gemini_configured` demanded all four Cloudflare values. It now has a
+        direct generativelanguage.googleapis.com route that needs none of them —
+        and the HF Space cannot reach Cloudflare at all. While the two were
+        coupled, that Space reported "Gemini not configured" despite holding a
+        valid key, and every caller skipped the Gemini branch with no log line,
+        because these are guard conditions rather than failures.
+        """
+        _clear_keys()
+        os.environ["GEMINI_API_KEY"] = "gemini-key-only"
+        config.get_cloud_settings.cache_clear()
+        self.assertFalse(config.is_cloudflare_configured())
+        self.assertTrue(config.is_gemini_configured())
+
     def test_secret_masked_but_readable(self):
         _with_keys()
         s = config.get_cloud_settings()

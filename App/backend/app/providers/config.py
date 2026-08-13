@@ -86,8 +86,24 @@ def is_cloudflare_configured() -> bool:
 
 
 def is_gemini_configured() -> bool:
-    """Gemini needs its own key plus the AI Gateway (it routes through it)."""
-    return _has(get_cloud_settings().gemini_api_key) and is_cloudflare_configured()
+    """True when Gemini can be called — which now needs only its own API key.
+
+    This used to also require ``is_cloudflare_configured()``, because Gemini
+    reached Google exclusively through the Cloudflare AI Gateway. It no longer
+    does: ``gemini_generate`` falls through to generativelanguage.googleapis.com,
+    which needs no Cloudflare account, token or gateway.
+
+    Leaving the coupling in place made the direct route unreachable in exactly
+    the deployment it was written for. The HF Space cannot reach Cloudflare at
+    all, so any Space missing one of the four Cloudflare values answered "Gemini
+    is not configured" and every caller skipped the Gemini branch SILENTLY —
+    no log line, since these are guard conditions rather than failures. English
+    generation stayed dark on a Space holding a perfectly good GEMINI_API_KEY.
+
+    The gateway is still tried first when it is configured; it is simply no
+    longer a precondition for using Gemini at all.
+    """
+    return _has(get_cloud_settings().gemini_api_key)
 
 
 def is_vectorize_configured() -> bool:
