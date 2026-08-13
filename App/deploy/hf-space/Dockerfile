@@ -8,6 +8,20 @@
 # config (Sunbird/Gemini/Cloudflare secrets, SPEECH_ENABLED, …) is supplied as
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
+# sha-459533c makes OIDC_ROLE_CLAIM fall back instead of locking staff out. The
+# override used to be exclusive, so setting it stopped the default claim probes
+# entirely — a typo, or setting it before the provider mapping exists, resolved
+# every officer to "public" and refused every staff member with nothing in the
+# logs to say why. The configured claim is still authoritative when PRESENT
+# (including present-but-empty, which legitimately means "no roles"); only an
+# absent claim falls through, and it logs a warning naming the variable.
+#
+# This Space now runs with OIDC_ROLE_CLAIM=https://ura.go.ug/roles, matching the
+# Auth0 Post-Login Action that copies event.authorization.roles into a namespaced
+# claim. Assigning an Auth0 role does not by itself put it in the token, and the
+# RBAC toggle emits permissions rather than role names, so the action is required
+# — deployed AND attached to the post-login trigger.
+#
 # sha-9c69489 is the first image with staff sign-in and the operations
 # dashboards: /signin (+/signin/callback), /admin and /agent, gated by StaffGuard.
 # Auth is real OIDC — authorization-code + PKCE S256 to Auth0, RS256 tokens
@@ -252,7 +266,7 @@
 #   * The language selector moved from the composer toolbar to the header.
 #     It is a session-level setting, and the composer row had 25px of
 #     slack against a 63px control; the header had 138px.
-FROM landwind/ura-chatbot:sha-9c69489
+FROM landwind/ura-chatbot:sha-459533c
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
