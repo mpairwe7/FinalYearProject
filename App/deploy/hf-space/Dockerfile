@@ -314,9 +314,36 @@
 # why. Found by reading the Space's own logs after the previous roll and seeing
 # no Gemini line of any kind, success or failure.
 #
+# sha-138f8ea sizes the Gemini output budget for a THINKING model. gemini-3.x
+# flash bill reasoning tokens against maxOutputTokens before emitting a single
+# answer token, so the old 512 truncated every production reply. The truncated
+# text then failed _looks_truncated and the chain walked all three Workers AI
+# models against a Cloudflare host this deployment cannot reach — a good Gemini
+# answer discarded at the cost of a ~25s round trip. Logs: "looks truncated
+# (41 chars)", "(84 chars)". Measured live: 512 -> 337 chars truncated,
+# 2048 -> 455 chars complete.
+#
+# This roll is also the first on which English generation is actually LIVE.
+# The routing shipped correct but dormant behind three gates that all fail
+# silently, because they are guard conditions rather than errors:
+#   LLM_FALLBACK_BACKEND was empty            -> now the secret is "gemini"
+#   is_gemini_configured() demanded Cloudflare -> decoupled in sha-167c5cb
+#   FLAG_CLOUDFLARE_FALLBACK defaults False    -> now the secret is "true"
+# Nothing in the logs said any of this; the only symptom was that every reply
+# was a raw retrieved passage.
+#
+# Confirmed in the Space's own logs on the previous roll:
+#   "Gemini: gateway.ai.cloudflare.com unreachable (ConnectError);
+#    trying Google directly"
+#   "LLM fallback via Gemini succeeded"
+# So the AI Gateway really is dead from here and the direct
+# generativelanguage.googleapis.com route added in sha-8649917 is what carries
+# English. Luganda replies stayed byte-identical to the pre-change passages,
+# which is the guard holding.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-167c5cb
+FROM landwind/ura-chatbot:sha-138f8ea
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
