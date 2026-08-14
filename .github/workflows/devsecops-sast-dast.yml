@@ -408,8 +408,23 @@ jobs:
     name: "Supply Chain: OSSF Scorecard"
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only on default branch (Scorecard needs repo context)
-    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/dev')
+    # Scorecard REFUSES to run anywhere but the repository's default branch:
+    #   validating options: only default branch is supported
+    #   ##[error]Only the default branch dev is supported.
+    #
+    # The old condition constrained only workflow_dispatch, so a `push` to any
+    # branch in the trigger list still reached it. This repo's default branch is
+    # `dev` and every change is promoted dev -> main, so the job ran and failed
+    # on EVERY promotion: the workflow went red on main while all seven SAST and
+    # DAST jobs passed. A security run that is always red for a reason unrelated
+    # to security is one people learn to ignore.
+    #
+    # Compared against the branch GitHub reports as default rather than a
+    # hardcoded "dev", so renaming the default branch cannot silently
+    # reintroduce this.
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref_name == github.event.repository.default_branch
     permissions:
       contents: read
       security-events: write

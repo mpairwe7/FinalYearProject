@@ -273,7 +273,18 @@ jobs:
   container-scan-api:
     name: "Container: API Image"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # This job BUILDS the API image before scanning it, and that build alone has
+    # been measured at 21.7-31.3 min across 12 recent runs of the identical
+    # image in ura-chatbot-build-push.yml — 3 of those 12 exceeded 30 minutes.
+    # At timeout-minutes: 30 the build consumed the entire budget on a cold GHA
+    # cache and the job was CANCELLED before Trivy ran at all; the gate below
+    # counts a cancelled scan as a failure, so the security gate went red having
+    # found nothing. It happened three times in one day and each time the fix
+    # was "re-run it", which is how a gate stops meaning anything.
+    #
+    # Budget: worst observed build (31.3) + vuln scan + SBOM generation, with
+    # headroom for a slower runner.
+    timeout-minutes: 50
     needs: image-change-filter
     if: needs.image-change-filter.outputs.api == 'true'
     steps:
@@ -345,7 +356,12 @@ jobs:
   container-scan-ml:
     name: "Container: ML Trainer Image"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Same build-then-scan shape as the API job above, and the trainer image is
+    # the heavier of the two (it carries the ML stack), so it has at least the
+    # same exposure to the cold-cache build blowing the budget. Raised on that
+    # reasoning rather than its own measurement — it has been skipped in recent
+    # runs, so there is no duration history for it here.
+    timeout-minutes: 50
     needs: image-change-filter
     if: needs.image-change-filter.outputs.ml == 'true'
     steps:
@@ -476,7 +492,18 @@ jobs:
       - container-scan-api
       - container-scan-ml
       - container-scan-frontend
-    if: always()
+    # `always()` also ran the gate when the RUN ITSELF had been cancelled —
+    # which `concurrency.cancel-in-progress` does routinely as soon as a newer
+    # commit supersedes this one. The gate then read its dependencies as
+    # "cancelled", called that a failure, and reported a security failure for a
+    # run that had simply been replaced by a newer one.
+    #
+    # `!cancelled()` skips the gate in exactly that case and nowhere else: a job
+    # cancelled on its own timeout does NOT cancel the run, so the gate still
+    # runs, still sees "cancelled", and still blocks. An incomplete scan must
+    # never read as a pass — this only stops a superseded run from reporting a
+    # finding it never made.
+    if: ${{ !cancelled() }}
     steps:
       - name: Evaluate scan results
         run: |
