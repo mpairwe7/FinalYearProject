@@ -305,9 +305,18 @@
 # because translate-then-retrieve already absorbed the recoverable ones, and it
 # fires on only 2 of 200 well-formed English questions.
 #
+# sha-167c5cb decouples Gemini from Cloudflare. is_gemini_configured() required
+# all four Cloudflare values, because Gemini once reached Google only through
+# the AI Gateway — so this Space, which cannot reach Cloudflare at all, reported
+# "Gemini is not configured" while holding a valid key, and every caller skipped
+# the Gemini branch silently. These are guard conditions, not failures, so there
+# was no log line: production served raw retrieved passages with nothing to say
+# why. Found by reading the Space's own logs after the previous roll and seeing
+# no Gemini line of any kind, success or failure.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-8649917
+FROM landwind/ura-chatbot:sha-167c5cb
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
