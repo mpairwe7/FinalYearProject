@@ -22,16 +22,8 @@ import {
   getServerAuthToken,
   subscribeAuthToken,
 } from "../lib/authSession";
+import { isStaffRole, roleLabel } from "../lib/roles";
 import "./staffGuard.css";
-
-/** Mirrors `AuthUser.is_staff` in App/backend/app/auth/models.py. */
-const STAFF_ROLES = new Set(["ura_staff", "ura_admin", "ura_auditor"]);
-
-const ROLE_LABEL: Record<string, string> = {
-  ura_staff: "Tax agent",
-  ura_admin: "Administrator",
-  ura_auditor: "Auditor",
-};
 
 export interface StaffIdentity {
   authenticated: boolean;
@@ -83,7 +75,7 @@ export function StaffNav({ who, current }: { who: StaffIdentity; current: string
         ))}
       </ul>
       <span className="staff-who">
-        <span className="staff-role-pill">{ROLE_LABEL[who.role] || who.role}</span>
+        <span className="staff-role-pill">{roleLabel(who.role)}</span>
         <span className="staff-email">{who.email || who.external_id}</span>
         <button
           type="button"
@@ -165,7 +157,7 @@ export default function StaffGuard({
   // Identity is known; authorisation is decided here rather than in the effect.
   const allowed = requireRoles?.length
     ? requireRoles.includes(state.who.role)
-    : STAFF_ROLES.has(state.who.role);
+    : isStaffRole(state.who.role);
 
   if (!allowed) {
     return <AccessGate kind="forbidden" who={state.who} requireRoles={requireRoles} />;

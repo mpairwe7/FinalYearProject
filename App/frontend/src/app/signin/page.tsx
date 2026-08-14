@@ -3,15 +3,16 @@
 /**
  * Staff sign-in.
  *
- * The backend VERIFIES tokens; it does not issue them. There is no
- * credential store, no `/auth/login`, no `/signup` — `auth/jwt_auth.py` does
- * HS256 (dev shared secret) or RS256 against a remote JWKS. So this page cannot
- * be an email/password form: there is nothing to post to. It offers the two
- * paths that actually exist.
+ * The backend VERIFIES tokens; it does not issue them. There is no credential
+ * store and no `/auth/login` — `auth/jwt_auth.py` does HS256 (dev shared
+ * secret) or RS256 against a remote JWKS. So this page cannot be an
+ * email/password form: there is nothing to post to. It offers the two paths
+ * that actually exist.
  *
- * 1. OIDC authorization-code redirect to the configured issuer. Registration and
- *    password recovery belong to that provider, which is why this page has no
- *    "create account" form of its own.
+ * 1. OIDC authorization-code redirect to the configured issuer. Passwords and
+ *    recovery belong to that provider, which is why this page has no
+ *    credential form of its own. Registration is the same redirect with one
+ *    extra parameter and lives on `/signup` (see `lib/oidcFlow`).
  * 2. A dev token, for exploring the dashboards where no IdP is configured. It is
  *    NOT authentication and says so on screen — the backend's `make_dev_token`
  *    refuses to run under APP_ENV=production, and this panel hides itself unless
@@ -20,7 +21,8 @@
  * Standards: OAuth 2.1 authorization-code + PKCE (draft-ietf-oauth-v2-1),
  * OIDC Core 1.0 §3.1; WCAG 2.2 AA for the form semantics.
  */
-import React, { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
+import React, { useCallback, useState, useSyncExternalStore } from "react";
 import {
   setAuthToken,
   getAuthToken,
@@ -28,43 +30,19 @@ import {
   getServerAuthToken,
   subscribeAuthToken,
 } from "../../lib/authSession";
-import { discoverOidc, TOKEN_ENDPOINT_KEY } from "../../lib/oidc";
+import { beginOidcFlow, OIDC_CONFIGURED } from "../../lib/oidcFlow";
+import { isStaffRole } from "../../lib/roles";
 import "./signin.css";
 
-/** Roles the backend treats as staff — `AuthUser.is_staff` in auth/models.py. */
-const STAFF_ROLES = [
+/** Roles the dev-token panel can request — labels are specific to this panel. */
+const DEV_ROLE_OPTIONS = [
   { role: "ura_staff", label: "Tax agent", hint: "Works the escalation queue" },
   { role: "ura_admin", label: "Administrator", hint: "Full operations view" },
   { role: "ura_auditor", label: "Auditor", hint: "Read-only oversight" },
 ] as const;
 
-const OIDC_ISSUER = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
-const OIDC_CLIENT_ID = (process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "").trim();
-const OIDC_SCOPE = (process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email").trim();
-/**
- * Optional `audience`. Some providers only issue a verifiable JWT access token
- * when the request names an API audience — Auth0 returns an OPAQUE token
- * without it, which the backend cannot verify and rejects as a malformed token.
- * Keycloak needs nothing here (its audience mapper handles it), so this stays
- * empty unless a deployment requires it.
- */
-const OIDC_AUDIENCE = (process.env.NEXT_PUBLIC_OIDC_AUDIENCE || "").trim();
 /** Dev sign-in is opt-in and must never be enabled on a production deployment. */
 const DEV_SIGNIN_ENABLED = process.env.NEXT_PUBLIC_DEV_SIGNIN === "true";
-
-function randomVerifier(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
 
 export default function SignInPage() {
   const [role, setRole] = useState<string>("ura_staff");
@@ -78,45 +56,17 @@ export default function SignInPage() {
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const signedIn = Boolean(token);
 
-  const oidcConfigured = useMemo(
-    () => Boolean(OIDC_ISSUER && OIDC_CLIENT_ID),
-    [],
-  );
-
   const startOidc = useCallback(async () => {
-    if (!oidcConfigured) return;
+    if (!OIDC_CONFIGURED) return;
     try {
-      // Ask the provider where its endpoints are rather than assuming a vendor's
-      // URL layout; every provider publishes this and they all differ.
-      const endpoints = await discoverOidc(OIDC_ISSUER);
-
-      const verifier = randomVerifier();
-      const challenge = await pkceChallenge(verifier);
-      // Held for the callback leg; sessionStorage so it dies with the tab.
-      sessionStorage.setItem("ura_pkce_verifier", verifier);
-      const state = randomVerifier().slice(0, 24);
-      sessionStorage.setItem("ura_oidc_state", state);
-      // Carry the token endpoint over so the callback does not have to discover
-      // again; it re-discovers if this is missing.
-      sessionStorage.setItem(TOKEN_ENDPOINT_KEY, endpoints.token_endpoint);
-
-      const url = new URL(endpoints.authorization_endpoint);
-      url.searchParams.set("client_id", OIDC_CLIENT_ID);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("scope", OIDC_SCOPE);
-      url.searchParams.set("redirect_uri", `${window.location.origin}/signin/callback`);
-      url.searchParams.set("state", state);
-      url.searchParams.set("code_challenge", challenge);
-      url.searchParams.set("code_challenge_method", "S256");
-      if (OIDC_AUDIENCE) url.searchParams.set("audience", OIDC_AUDIENCE);
-      window.location.assign(url.toString());
+      await beginOidcFlow({ mode: "signin" });
     } catch (err) {
       setStatus({
         kind: "error",
         message: `Could not start the sign-in redirect: ${(err as Error).message}`,
       });
     }
-  }, [oidcConfigured]);
+  }, []);
 
   const useDevToken = useCallback(async () => {
     const token = devToken.trim();
@@ -141,7 +91,7 @@ export default function SignInPage() {
         return;
       }
       // No setSignedIn: setAuthToken above already notified the token store.
-      const staff = ["ura_staff", "ura_admin", "ura_auditor"].includes(body.role);
+      const staff = isStaffRole(body.role);
       setStatus({
         kind: "ok",
         message: staff
@@ -183,11 +133,11 @@ export default function SignInPage() {
             type="button"
             className="signin-primary"
             onClick={startOidc}
-            disabled={!oidcConfigured}
+            disabled={!OIDC_CONFIGURED}
           >
-            {oidcConfigured ? "Continue with URA identity provider" : "Identity provider not configured"}
+            {OIDC_CONFIGURED ? "Continue with URA identity provider" : "Identity provider not configured"}
           </button>
-          {!oidcConfigured && (
+          {!OIDC_CONFIGURED && (
             <p className="signin-hint">
               Set <code>NEXT_PUBLIC_OIDC_ISSUER</code> and{" "}
               <code>NEXT_PUBLIC_OIDC_CLIENT_ID</code> to enable this.
@@ -210,7 +160,7 @@ export default function SignInPage() {
 
             <fieldset className="signin-roles">
               <legend>Role to request</legend>
-              {STAFF_ROLES.map((r) => (
+              {DEV_ROLE_OPTIONS.map((r) => (
                 <label key={r.role} className={role === r.role ? "role-opt active" : "role-opt"}>
                   <input
                     type="radio"
@@ -269,6 +219,17 @@ export default function SignInPage() {
             </button>
           </nav>
         )}
+
+        {/* Both directions out of this page: register with the provider, or go
+            back to the assistant, which needs no account at all. */}
+        <footer className="signin-switch">
+          <p>
+            No account yet? <Link href="/signup">Create one</Link>
+          </p>
+          <Link className="signin-switch-alt" href="/">
+            Back to the assistant
+          </Link>
+        </footer>
       </div>
     </main>
   );

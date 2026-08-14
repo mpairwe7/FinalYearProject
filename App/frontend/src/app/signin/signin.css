@@ -316,11 +316,105 @@
   text-decoration: underline;
 }
 
+/* What an account changes (sign-up page) ---------------------------------- */
+
+.signin-benefits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+
+.signin-benefits li {
+  display: grid;
+  gap: 3px;
+  padding: 11px 13px;
+  border: 1px solid var(--border-0);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+}
+
+.signin-benefits strong {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-0);
+}
+
+.signin-benefits span {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+/* Sign-in ⇄ sign-up switch, plus the way back to the signed-out assistant.
+   Every auth page carries this so neither route is a dead end. */
+
+.signin-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-0);
+}
+
+.signin-switch p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.signin-switch a {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ura-blue-bright);
+  text-decoration: none;
+}
+
+.signin-switch a:hover {
+  text-decoration: underline;
+}
+
+/* Light theme, two problems from globals.css, which sets
+   `:root[data-theme="light"] a` (and its :hover) at a specificity no plain
+   `.signin-switch a` can beat:
+     1. resting — its darker `--ura-blue` is CORRECT here and is kept, because
+        `--ura-blue-bright` is #4A90D9 and only reaches 3.3:1 on this near-white
+        card, below WCAG 2.2 AA for body text;
+     2. hover — its teal is 2.6:1, so the hover keeps the resting colour and
+        signals with the underline instead.
+   The same pair applies to the onward links, whose hover had the same problem. */
+:root[data-theme="light"] .signin-switch a,
+:root[data-theme="light"] .signin-switch a:hover,
+:root[data-theme="light"] .signin-onward a,
+:root[data-theme="light"] .signin-onward a:hover {
+  color: var(--ura-blue);
+}
+
+.signin-switch a.signin-switch-alt,
+:root[data-theme="light"] .signin-switch a.signin-switch-alt,
+:root[data-theme="light"] .signin-switch a.signin-switch-alt:hover {
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.signin-switch a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 @media (max-width: 520px) {
   .signin-card {
     padding: 24px 18px 20px;
   }
   .signin-head h1 {
     font-size: 21px;
+  }
+  .signin-switch {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

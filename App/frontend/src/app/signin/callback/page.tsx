@@ -12,13 +12,21 @@
  * The token lands in the same store the API client already reads
  * (`lib/authSession`), so every existing hook picks it up with no change.
  */
+import Link from "next/link";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { setAuthToken } from "../../../lib/authSession";
 import { discoverOidc, TOKEN_ENDPOINT_KEY } from "../../../lib/oidc";
+import {
+  clearOidcFlowState,
+  OIDC_CLIENT_ID,
+  OIDC_ISSUER,
+  OIDC_REDIRECT_PATH,
+  OIDC_RETURN_TO_KEY,
+  OIDC_STATE_KEY,
+  PKCE_VERIFIER_KEY,
+} from "../../../lib/oidcFlow";
+import { isStaffRole, staffLandingPath } from "../../../lib/roles";
 import "../signin.css";
-
-const OIDC_ISSUER = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
-const OIDC_CLIENT_ID = (process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "").trim();
 
 type Phase = "working" | "error" | "done";
 
@@ -41,8 +49,11 @@ export default function OidcCallbackPage() {
 
     const code = params.get("code");
     const state = params.get("state");
-    const expectedState = sessionStorage.getItem("ura_oidc_state");
-    const verifier = sessionStorage.getItem("ura_pkce_verifier");
+    const expectedState = sessionStorage.getItem(OIDC_STATE_KEY);
+    const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
+    // Read before the flow state is cleared below: sign-up sets this so a
+    // taxpayer lands back on the assistant instead of a dashboard they cannot open.
+    const returnTo = sessionStorage.getItem(OIDC_RETURN_TO_KEY);
 
     if (!code) {
       setPhase("error");
@@ -74,7 +85,7 @@ export default function OidcCallbackPage() {
           grant_type: "authorization_code",
           client_id: OIDC_CLIENT_ID,
           code,
-          redirect_uri: `${window.location.origin}/signin/callback`,
+          redirect_uri: `${window.location.origin}${OIDC_REDIRECT_PATH}`,
           code_verifier: verifier,
         }),
       });
@@ -88,9 +99,7 @@ export default function OidcCallbackPage() {
       }
 
       setAuthToken(body.access_token);
-      sessionStorage.removeItem("ura_pkce_verifier");
-      sessionStorage.removeItem("ura_oidc_state");
-      sessionStorage.removeItem(TOKEN_ENDPOINT_KEY);
+      clearOidcFlowState();
 
       // Confirm the backend accepts it, and find out which role we hold, before
       // sending anyone to a dashboard that would refuse them.
@@ -105,17 +114,17 @@ export default function OidcCallbackPage() {
       }
       setRole(me.role || "");
       setPhase("done");
-      const staff = ["ura_staff", "ura_admin", "ura_auditor"].includes(me.role);
+      const staff = isStaffRole(me.role);
       setDetail(
         staff
           ? `Signed in as ${me.email || me.external_id} (${me.role}).`
-          : `Signed in as ${me.email || me.external_id}, but role "${me.role}" has no staff access.`,
+          : `Signed in as ${me.email || me.external_id}. This account has no staff access — taking you to the assistant.`,
       );
-      if (staff) {
-        // ura_staff works the queue; admin and auditor land on the overview.
-        const target = me.role === "ura_staff" ? "/agent" : "/admin";
-        window.setTimeout(() => window.location.replace(target), 900);
-      }
+      // Staff land on the tool their role can open; everyone else goes where the
+      // flow started, which for sign-up is the assistant itself. A non-staff
+      // account used to be left on this page with nowhere to go.
+      const target = staff ? staffLandingPath(me.role) : returnTo || "/";
+      window.setTimeout(() => window.location.replace(target), 900);
     } catch (err) {
       setPhase("error");
       setDetail(`Could not reach the identity provider: ${(err as Error).message}`);
@@ -157,6 +166,7 @@ export default function OidcCallbackPage() {
           <nav className="signin-onward" aria-label="Continue to">
             {role === "ura_staff" && <a href="/agent">My queue</a>}
             {(role === "ura_admin" || role === "ura_auditor") && <a href="/admin">Operations overview</a>}
+            <Link href="/">The assistant</Link>
             <a href="/signin">Back to sign-in</a>
           </nav>
         )}
