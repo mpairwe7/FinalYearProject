@@ -49,6 +49,25 @@ class TestTheLocaleTableCoversWhatWeClaimToSupport(unittest.TestCase):
         self.assertEqual(sunbird.LOCALE_TO_SUNBIRD.get("lgg"), "lgg")
 
 
+class TestTheSameTableProtectsSpeechToText(unittest.TestCase):
+    """The STT path resolves its language through this table too, with an
+    "eng" default — so a missing entry does not fail loudly, it submits the
+    audio TAGGED AS ENGLISH. Sunbird then transcribes with an English model and
+    returns confident nonsense, which nothing downstream can detect. That is
+    documented in speech_service for Swahili/Runyankole/Acholi; Ateso and
+    Lugbara had the same hole until the table gained their entries.
+    """
+
+    def test_no_supported_locale_silently_resolves_to_english(self):
+        for locale in ("lg", "nyn", "ach", "teo", "lgg"):
+            with self.subTest(locale=locale):
+                code = sunbird.LOCALE_TO_SUNBIRD.get(locale, "eng")
+                self.assertNotEqual(
+                    code, "eng", f"{locale} audio would be transcribed as English"
+                )
+                self.assertIn(code, sunbird.TRANSLATION_LANGUAGES)
+
+
 class TestSunbirdLeadsForEveryLanguageItServes(unittest.TestCase):
     """Ordering, asserted through the real function rather than a copy of its
     predicate — an earlier test in this repo passed while the wiring it was
