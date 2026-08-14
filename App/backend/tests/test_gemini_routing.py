@@ -232,6 +232,51 @@ class TestTheGuardCoversTheRealChatPath(unittest.TestCase):
         gen.assert_not_called()
         budget.assert_not_called()  # and spends none of the free-tier allowance
 
+    def test_a_luganda_turn_never_reaches_workers_ai_either(self):
+        """The policy is about the language, not the vendor.
+
+        Only the Gemini branch was guarded at first; execution fell through to
+        the Cloudflare chain below it, so a Luganda turn still walked all three
+        Workers AI models. That looked harmless purely because this deployment
+        cannot reach Cloudflare — every attempt failed. The moment the host
+        became reachable, Workers AI would have answered Luganda.
+        """
+        import os
+
+        from app import service as svc
+
+        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
+            svc.flags, "is_enabled", return_value=True
+        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
+            "app.providers.config.is_cloudflare_configured", return_value=True
+        ), patch("app.providers.budget.try_consume_gemini_call", return_value=True), patch(
+            "app.providers.budget.try_consume_neurons", return_value=True
+        ), patch("app.providers.gateway.gemini_generate", return_value="x") as gem, patch(
+            "app.providers.gateway.workers_ai_chat", return_value="x"
+        ) as cf:
+            svc._llm_cloud_fallback("q", [{"text": "p"}], None, "lg")
+        gem.assert_not_called()
+        cf.assert_not_called()
+
+    def test_english_still_reaches_workers_ai_when_gemini_yields_nothing(self):
+        """The guard must not disable the Cloudflare tier for English."""
+        import os
+
+        from app import service as svc
+
+        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
+            svc.flags, "is_enabled", return_value=True
+        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
+            "app.providers.config.is_cloudflare_configured", return_value=True
+        ), patch("app.providers.budget.try_consume_gemini_call", return_value=True), patch(
+            "app.providers.budget.try_consume_neurons", return_value=True
+        ), patch("app.providers.gateway.gemini_generate", return_value=""), patch(
+            "app.providers.gateway.workers_ai_chat", return_value="a full answer."
+        ) as cf:
+            out = svc._llm_cloud_fallback("q", [{"text": "p"}], None, "en")
+        cf.assert_called()
+        self.assertEqual(out, "a full answer.")
+
     def test_an_english_turn_still_reaches_gemini_with_its_locale(self):
         gen, _ = self._run("en")
         gen.assert_called_once()

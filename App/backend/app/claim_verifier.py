@@ -53,6 +53,11 @@ _NON_CLAIM_HINTS = (
     "please contact",
     "please try",
     "i don't have enough",
+    # The uncontracted form the models actually emit. "i don't have enough" was
+    # already exempt; a refusal written "I do not have enough information in the
+    # provided context" was not, so the model's own refusal counted as an
+    # uncited factual claim against it.
+    "do not have enough",
     "ask a new",
     "you might also want to know",
     "you may also want to",
@@ -62,6 +67,25 @@ _NON_CLAIM_HINTS = (
     "contact the ura contact centre",
     "visit https://ura",
     "call ura toll-free",
+    # Statements ABOUT the context rather than about tax. A model instructed to
+    # answer only from the passages says so when they run out, and that
+    # disclaimer is exactly the behaviour we asked for — but it asserts nothing
+    # citable, so it scored as an uncited, zero-overlap claim and dragged an
+    # otherwise fully-cited answer to "revise". Measured in production: a reply
+    # whose two substantive claims both carried correct refs still failed at
+    # score 0.667 on the single sentence "Please note that the provided context
+    # does not contain additional specific details regarding small traders."
+    # This is the same category the hints above already exempt (a request to
+    # contact URA is not a factual claim either), not a new leniency.
+    "the provided context does not contain",
+    "the provided context does not include",
+    "the context does not contain",
+    "the context does not include",
+    "the provided information does not",
+    "does not contain additional",
+    "is not covered in the provided",
+    "not specified in the provided",
+    "no information about",
 )
 
 

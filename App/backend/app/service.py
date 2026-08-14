@@ -86,6 +86,7 @@ from .text_signals import (
     detect_user_distress,
     empathy_ack,
     is_courtesy_sentence,
+    normalise_citation_markers,
     split_sentences,
     tone_hint_for,
 )
@@ -433,6 +434,8 @@ def _llm_cloud_fallback(
             )
             breakers.GEMINI_BREAKER.record_success()
             routing.log_model_use("llm", "gemini_flash")
+            # "[1, 3]" -> "[1][3]" before anything downstream reads citations.
+            text = normalise_citation_markers(text)
             if text and text.strip() and not _looks_truncated(text):
                 logger.info("LLM fallback via Gemini succeeded")
                 return text
@@ -462,6 +465,20 @@ def _llm_cloud_fallback(
         personalization_context=personalization_context,
         tone_hint=tone_hint,
     )
+    # Workers AI is a cloud generator too, so the locale policy applies to it
+    # exactly as it does to Gemini: the Ugandan languages are served by the
+    # Sunbird tier and the retrieval path, not by a general model.
+    #
+    # Only the Gemini branch was guarded at first, and execution fell straight
+    # through to here — so a Luganda turn still walked all three Cloudflare
+    # models. It looked harmless only because this deployment cannot reach
+    # Cloudflare at all, which made every attempt fail; the moment that host
+    # became reachable, Workers AI would have answered Luganda and quietly
+    # broken the policy. A guard that holds only while a dependency is broken
+    # is not a guard.
+    if not gw.cloud_generation_allowed_for(locale):
+        logger.info("Cloud generation skipped for locale %r — Sunbird tier owns it", locale)
+        return best
     # Strip the Qwen-only /no_think directive — a no-op token for Llama/Mistral.
     if messages and messages[0].get("role") == "system":
         sys_content = messages[0]["content"]
@@ -488,6 +505,7 @@ def _llm_cloud_fallback(
             text = gw.workers_ai_chat(messages, model=model, max_tokens=512, temperature=0.2)
             breakers.CF_LLM_BREAKER.record_success()
             routing.log_model_use("llm", model)
+            text = normalise_citation_markers(text)
             if text and text.strip() and not _looks_truncated(text):
                 logger.info("LLM via Workers AI (%s) succeeded", model)
                 return text

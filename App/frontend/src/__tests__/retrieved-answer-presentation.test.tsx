@@ -165,6 +165,26 @@ describe('citation markers are stripped everywhere the reply is consumed', () =>
     expect(stripCitationMarkers(raw)).toBe(raw);
   });
 
+  // A model told to cite "like [1]" groups its references routinely. The
+  // backend expands those now, but this is the last surface before a reader
+  // sees the text, and an unstripped group shows up as a literal "[1, 3]"
+  // mid-sentence.
+  it('strips a grouped citation marker', () => {
+    expect(stripCitationMarkers('A TIN identifies the taxpayer [1, 3].')).toBe(
+      'A TIN identifies the taxpayer.',
+    );
+  });
+
+  it('strips grouped markers written without spaces or with semicolons', () => {
+    expect(stripCitationMarkers('VAT is 18% [2,4].')).toBe('VAT is 18%.');
+    expect(stripCitationMarkers('VAT is 18% [2; 4].')).toBe('VAT is 18%.');
+  });
+
+  it('leaves a grouped numeric-text link alone', () => {
+    const raw = 'See [1, 2](https://ura.go.ug) for the schedule.';
+    expect(stripCitationMarkers(raw)).toBe(raw);
+  });
+
   it('is a no-op on text without markers', () => {
     const raw = 'The standard VAT rate in Uganda is 18%.';
     expect(stripCitationMarkers(raw)).toBe(raw);

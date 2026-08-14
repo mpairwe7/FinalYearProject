@@ -79,9 +79,17 @@ _COURTESY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"^(no worries|don't worry|do not worry)\b",
         r"^let('s| us) (sort|work|take|figure|go|get)\b",
         # -- offers of help / sign-offs / engagement ----------------------
-        r"\b(feel free to (ask|reach out)|happy to help|glad to help"
+        # "happy to help" was listed but the models write "happy to assist"
+        # just as often, and a closing pleasantry counted as an uncited factual
+        # claim — enough on its own to send a fully-cited answer to "revise".
+        r"\b(feel free to (ask|reach out)|(happy|glad|pleased) to (help|assist)"
         r"|hope (this|that) helps|don't hesitate to (ask|contact|reach out)"
         r"|is there anything else)\b",
+        # "If you have any further questions, …" — a sign-off, and the most
+        # common closing sentence in these replies. The figure guard above
+        # still keeps anything carrying a number scoreable.
+        r"^if you have any (further |other |additional |more )?"
+        r"(questions|inquiries|queries|concerns)\b",
         r"^(please )?let me know if\b",
         r"^i can help( you)?( with)?\b",
         r"\bhow (can|may) i (help|assist)\b",
@@ -339,3 +347,41 @@ CONTACT_FOOTER = (
 GROUNDED_REVISION_PREAMBLE = (
     "Here's the most relevant guidance I found in official URA sources:"
 )
+
+
+# A model asked to "cite passages like [1]" routinely groups its references
+# instead — "[1, 3]" — and every consumer in this codebase reads citations with
+# a regex shaped like \[(\d{1,3})\]. That regex does not match a grouped marker
+# at all, so a properly cited sentence is read as having NO citation.
+#
+# In production that silently discarded every Gemini answer: claim verification
+# marked the sentence uncited AND unsupported (no refs -> no cited context ->
+# zero lexical overlap), which decided "revise", which replaced the generated
+# prose with verbatim corpus excerpts under GROUNDED_REVISION_PREAMBLE. The
+# answer was correct and cited; it was thrown away on a formatting mismatch.
+# Measured on identical content: "[1, 3]" -> revise, score 0.5; "[1][3]" ->
+# approve, score 1.0.
+#
+# Normalising once, where generated text enters the system, is what makes that
+# right everywhere instead of in six places — the claim verifier, the three
+# has-a-citation checks in service.py, and the frontend's marker stripper, which
+# would otherwise leave a literal "[1, 3]" sitting in the rendered answer.
+_GROUPED_CITATION_RE = re.compile(r"\[\s*(\d{1,3}(?:\s*[,;]\s*\d{1,3})+)\s*\]")
+
+
+def normalise_citation_markers(text: str) -> str:
+    """Expand grouped citation markers: ``[1, 3]`` -> ``[1][3]``.
+
+    Single markers and non-citation brackets are left untouched, so this is
+    safe to apply to any reply. Ranges (``[1-3]``) are deliberately NOT
+    expanded: the hyphen is far more often a page or section reference than a
+    citation range, and inventing refs is worse than missing one.
+    """
+    if not text or "[" not in text:
+        return text
+
+    def expand(match: re.Match[str]) -> str:
+        refs = [r.strip() for r in re.split(r"[,;]", match.group(1))]
+        return "".join(f"[{r}]" for r in refs if r)
+
+    return _GROUPED_CITATION_RE.sub(expand, text)
