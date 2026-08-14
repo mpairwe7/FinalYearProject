@@ -422,9 +422,65 @@
 # have meant failing outright. That secret is now set and was verified
 # standalone first (eng->lug translate, lg TTS, eng->teo).
 #
+# sha-c1f8d99 adds account creation and a settings surface, and passes a
+# 2026 mobile/tablet audit.
+#
+# /signup is the same OAuth 2.1 + PKCE redirect /signin already used, plus a
+# registration hint (prompt=create for Entra/Google/Curity, screen_hint=signup
+# for Auth0 — both sent, providers ignore what they don't recognise). It needs
+# self-registration enabled at the provider or it just shows the login screen.
+# Settings (opened from the sidebar's new account block or the header menu) is
+# five tabs, every control backed by a real endpoint rather than a preference
+# with nowhere to go: General writes the existing theme/locale stores, Voice
+# writes the narration voice used by /v1/tts, Tax profile is
+# GET/PUT /v1/me/profile, Privacy & data covers /v1/me/consents plus the UDPA
+# 2019 pair (GET /v1/me/export, DELETE /v1/me — both confirmed first), and
+# Account shows identity/role/tenant with sign in/up/out. None of it gates the
+# assistant: chat, documents and voice all still work signed out, and every
+# auth entry point says so.
+#
+# Three defects surfaced by testing this against a live browser rather than
+# just the component tests:
+#   * globals.css's `:root[data-theme="light"] a` (and its :hover) is more
+#     specific than a plain `.chatv2 .thing`, so every accent button built as
+#     an anchor rendered navy text on its own navy fill in light mode — and
+#     six more controls turned an unreadable teal on hover. Anchor-based
+#     controls now name their element to win the cascade; every hover states
+#     its own colour rather than inheriting the global one.
+#   * The settings dialog's open/focus effect depended on `onClose`, a fresh
+#     closure every render, so it re-ran continuously and pulled focus back to
+#     the panel — arrow-keying the tab list moved once and went dead. Split
+#     into a focus-on-open effect keyed on `open` alone and a separate key trap.
+#   * The OIDC callback sent every non-staff account back to /signin with
+#     nowhere else to go. It now honours a returnTo the /signup leg sets, so a
+#     taxpayer who just registered lands in the assistant, not on a dead end.
+#
+# Also a full mobile/tablet pass across a 12-point device matrix (a 280px
+# foldable cover screen through a 1366px iPad Pro landscape, both
+# orientations): the settings switch, the header/rail auth pair and several
+# settings buttons were under the Apple HIG/Material 3 44px touch floor;
+# fixing the switch specifically needed technique, not just a size bump —
+# interactions.css's existing `(pointer: coarse)` rule stretches every button
+# to 44px tall, which turned the 24px switch track into a 44px oval with the
+# knob stranded at the top, so the track keeps its own height and the hit area
+# moves to an invisible ::after. Every settings `<select>`/`<input>` and the
+# composer's own textarea were 13-15px, under the size that makes iOS Safari
+# zoom on focus and not zoom back out. The touch-sizing rules had also landed
+# earlier in the cascade than the component rules they were meant to override,
+# which made them dead code. A phone turned sideways (844x390) left the
+# landing hero 3px taller than the viewport. The settings sheet and the
+# sidebar's account block now both reserve env(safe-area-inset-bottom) at the
+# bottom edge, which on a modern phone is the home indicator.
+#
+# Verified: 130/130 frontend unit tests, clean tsc/eslint, axe WCAG 2.1 AA
+# clean on every settings tab and both auth pages in both themes, zero
+# targets under the 44px touch floor and zero sub-16px form fields across the
+# full device matrix, 62/67 Playwright (5 failures are a documented Firefox/
+# StaffGuard environment gap in the sandbox this was built in, not the code).
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-9c0f594
+FROM landwind/ura-chatbot:sha-c1f8d99
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
