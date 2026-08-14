@@ -21,11 +21,17 @@
  * `[1](url)` is a link whose text happens to be a number, not a citation, so a
  * marker followed by "(" is left alone — stripping it would leave a bare
  * "(https://…)" behind.
+ *
+ * Grouped markers ("[1, 3]") are stripped too. A model told to cite "like [1]"
+ * groups its references routinely, and the backend now expands those before
+ * they reach here — but this is the last surface before a reader sees the
+ * text, and a marker that slips through is visible as a literal "[1, 3]" in
+ * the middle of a sentence.
  */
 export function stripCitationMarkers(text: string): string {
   if (!text) return text;
   return text
-    .replace(/\s*\[\d+\](?!\()/g, '') //   the marker, and the space before it
+    .replace(/\s*\[\d+(?:\s*[,;]\s*\d+)*\](?!\()/g, '') // the marker + leading space
     .replace(/[ \t]{2,}/g, ' ') //         seams left by the removal
     .replace(/[ \t]+([.,;:!?])/g, '$1') // space pushed onto punctuation
     .replace(/[ \t]+$/gm, ''); //          trailing space on a line

@@ -133,12 +133,26 @@ GEMINI_PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
 GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
 
 
-def gemini_allowed_for(locale: str | None) -> bool:
-    """False when *locale* belongs to Sunbird rather than Gemini."""
+def cloud_generation_allowed_for(locale: str | None) -> bool:
+    """False when *locale* is served by the Sunbird tier rather than a cloud model.
+
+    The policy is about the LANGUAGE, not about which vendor happens to be
+    configured: Sunbird holds the native voices, the ASR and the only
+    translation covering lug/nyn/ach/teo/lgg, so a general model would answer
+    in a language it approximates rather than speaks. That applies equally to
+    Gemini and to Workers AI, which is why this is named for the capability
+    instead of the provider — the first version was `gemini_allowed_for`, and
+    guarding only the Gemini branch let Luganda fall through to the Cloudflare
+    chain underneath it.
+    """
     if not GEMINI_ENGLISH_ONLY:
         return True
     lang = (locale or "en").strip().lower().split("-")[0].split("_")[0]
     return lang not in SUNBIRD_ONLY_LOCALES
+
+
+# Kept as the provider-specific spelling used at the Gemini call sites.
+gemini_allowed_for = cloud_generation_allowed_for
 
 
 def _workers_ai_targets(model: str) -> list[tuple[str, dict[str, str]]]:
