@@ -368,3 +368,21 @@
     margin-top: 20px;
   }
 }
+/* A phone turned sideways leaves ~390px of height for the header, the hero and
+   the composer. Tighten the hero rather than the input: the input carries the
+   44px thumb target, and it is what the whole screen is for. */
+@media (max-height: 430px) {
+  .chatv2 .ldv2-block {
+    margin-top: 12px;
+  }
+  .chatv2 .ldv2-brand {
+    margin-bottom: 2px;
+  }
+  .chatv2 .ldv2-brand img {
+    width: 28px;
+    height: 28px;
+  }
+  .chatv2 .landing .landing-sub {
+    margin-bottom: 12px;
+  }
+}

@@ -367,11 +367,24 @@
   color: var(--text-2);
 }
 
+/* inline-flex with a floor height: as a bare inline link this was a 17px-tall
+   target, under the WCAG 2.2 §2.5.8 minimum of 24 and nowhere near a thumb.
+   The switch line is the only way off these pages for someone who guessed
+   wrong, so it has to be hittable. */
 .signin-switch a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   font-size: 13px;
   font-weight: 600;
   color: var(--ura-blue-bright);
   text-decoration: none;
+}
+
+@media (max-width: 1024px), (pointer: coarse) {
+  .signin-switch a {
+    min-height: 44px;
+  }
 }
 
 .signin-switch a:hover {

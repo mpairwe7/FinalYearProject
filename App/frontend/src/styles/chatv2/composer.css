@@ -42,6 +42,21 @@
   color: var(--text-2);
 }
 
+/* iOS Safari zooms the page when a focused field is under 16px, and does not
+   zoom back out. The ≤720px block below already handles phones in portrait;
+   this covers every other touch surface — tablets to 1024, a phone turned
+   landscape (844 wide), and large coarse-pointer screens above that. */
+@media (max-width: 1024px), (pointer: coarse) {
+  .chatv2 .cmpv2 .input {
+    font-size: 16px;
+    /* 44 for the control this app is mostly used through. Box-sizing is
+       border-box here, so this is the whole collapsed field including its
+       17px of vertical padding — 28 would have been swallowed by the padding
+       and changed nothing. The field still grows with the message. */
+    min-height: 44px;
+  }
+}
+
 .chatv2 .cmpv2-bar {
   display: flex;
   align-items: center;

@@ -231,7 +231,9 @@
  * ------------------------------------------------------------------------- */
 .chatv2 .setv2-switch {
   position: relative;
-  width: 42px;
+  /* 44 wide keeps the whole control at the HIG/Material thumb size; the row
+     gives it 44 of height. */
+  width: 44px;
   height: 24px;
   flex-shrink: 0;
   padding: 0;
@@ -260,7 +262,7 @@
 }
 
 .chatv2 .setv2-switch[aria-checked="true"] .setv2-switch-knob {
-  transform: translateX(18px);
+  transform: translateX(20px);
   background: var(--cv2-accent-contrast);
 }
 
@@ -563,7 +565,13 @@
   flex-shrink: 0;
 }
 
+/* inline-flex + min-height because a bare 14px-tall link is under the WCAG 2.2
+   §2.5.8 minimum (24px) and is not exempt: it sits in a flex footer, not in a
+   sentence. The touch block below takes it to 44. */
 .chatv2 .setv2-foot a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   color: var(--ura-blue-bright);
   font-weight: 600;
   text-decoration: none;
@@ -587,9 +595,16 @@
   }
   .chatv2 .setv2 {
     width: 100%;
+    /* dvh, not vh: the sheet is measured against the *visible* viewport, so it
+       does not slide under the browser's collapsing address bar. */
     height: 94dvh;
     border-radius: 16px 16px 0 0;
     border-bottom: none;
+  }
+  /* The sheet sits on the bottom edge, which on a modern phone is the home
+     indicator. Without the inset the footer link is under it. */
+  .chatv2 .setv2-foot {
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
   }
   .chatv2 .setv2-body {
     grid-template-columns: minmax(0, 1fr);
@@ -634,6 +649,9 @@
   position: relative;
   flex-shrink: 0;
   padding: 8px;
+  /* The rail runs to the bottom edge of the screen, so on a phone this block
+     lands on the home indicator unless the inset is reserved. */
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border-0);
   background: var(--bg-1);
 }
@@ -909,4 +927,79 @@
   /* Keeps its own colour on hover: globals.css turns every light-theme
      link teal on :hover, which fails contrast here (see file header). */
   color: var(--ura-blue-bright);
+}
+
+
+/* ===========================================================================
+ * Touch sizing — LAST in this file on purpose.
+ *
+ * A media query adds no specificity, so these rules only beat the component
+ * defaults they raise (min-height 36 on the rail buttons, 34 in the header) by
+ * coming later in the cascade. Sitting above them, the whole block was inert.
+ * ======================================================================== */
+@media (max-width: 1024px), (pointer: coarse) {
+  .chatv2 .setv2-select,
+  .chatv2 .setv2-input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .chatv2 :is(a, button).setv2-btn,
+  .chatv2 a.setv2-link {
+    min-height: 44px;
+  }
+  .chatv2 .setv2-x {
+    width: 44px;
+    height: 44px;
+  }
+  .chatv2 .setv2-tab {
+    min-height: 44px;
+  }
+  .chatv2 .setv2-check {
+    min-height: 44px;
+  }
+  .chatv2 .setv2-foot a {
+    min-height: 44px;
+  }
+  .chatv2 :is(a, button).rail-acct-item,
+  .chatv2 .rail-acct-row,
+  .chatv2 a.rail-acct-primary,
+  .chatv2 a.rail-acct-ghost {
+    min-height: 44px;
+  }
+  .chatv2 a.hdrv2-signin,
+  .chatv2 a.hdrv2-signup {
+    min-height: 44px;
+  }
+  /* Legacy rail search: 37px tall at 13.28px, so it was both under the touch
+     size and inside the iOS zoom threshold on every tablet — globals.css only
+     bumps it below 720px. */
+  .chatv2 .rail-search {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Two controls that must NOT be grown by the blanket touch rule.
+ *
+ * interactions.css already sets `min-height: 44px` on every `.chatv2 button`
+ * for coarse pointers — right for buttons, wrong for a switch: it stretched the
+ * 24px track into a 44px oval with the knob stranded at the top. The track
+ * keeps its height and the touch area moves to a pseudo-element, which is
+ * invisible, costs no layout, and gives the thumb 48x44 to aim at.
+ * ------------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  .chatv2 button.setv2-switch {
+    min-height: 24px;
+  }
+  .chatv2 button.setv2-switch::after {
+    content: "";
+    position: absolute;
+    inset: -10px -2px;
+  }
+  /* The landing's account link sits inside a sentence — WCAG 2.2 §2.5.8 exempts
+     it, and a 44px box would open a gap in the middle of the paragraph. */
+  .chatv2 button.landing-auth-link {
+    min-height: 24px;
+  }
 }
