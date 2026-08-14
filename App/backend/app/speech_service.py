@@ -1511,10 +1511,30 @@ class SpeechModel:
                     logger.debug("Prompted MT via Qwen3 failed", exc_info=True)
             return None
 
-        # Luganda is low-resource → Sunbird's native NLLB leads; Gemini backs it up.
-        # All other languages → Gemini leads (Sunbird stays a fallback).
-        is_luganda = "lg" in (source_lang.lower(), target_lang.lower())
-        if is_luganda:
+        # Sunbird's NLLB leads for every pair its translate endpoint actually
+        # covers — not just Luganda. The gate used to be `"lg" in (src, tgt)`,
+        # which sent Runyankole, Acholi, Ateso and Lugbara to Gemini FIRST; and
+        # because Gemini answers, Sunbird was never reached for the four
+        # languages it is trained on. Measured in production: lg took 3.2s on
+        # sunbird_cloud while nyn/ach/teo took 17-18s on gemini_flash, for
+        # languages a general model approximates rather than speaks.
+        #
+        # Swahili deliberately still leads with Gemini: it has a Sunbird TTS
+        # voice but their translate endpoint does not serve it (see
+        # TRANSLATION_LANGUAGES), so leading with Sunbird there would just
+        # spend a failed call before falling through.
+        def _sunbird_translates(src: str, tgt: str) -> bool:
+            try:
+                from . import sunbird
+            except Exception:  # noqa: BLE001 — optional dependency
+                return False
+            codes = {
+                sunbird.LOCALE_TO_SUNBIRD.get(lang.lower(), lang.lower())
+                for lang in (src, tgt)
+            }
+            return codes <= sunbird.TRANSLATION_LANGUAGES
+
+        if _sunbird_translates(source_lang, target_lang):
             tiers = [
                 ("sunbird_cloud", _sunbird), ("gemini_flash", _gemini),
                 ("cf_workers_ai", _cf), ("local_mt", _local), ("prompted_qwen3", _prompted),

@@ -49,6 +49,18 @@ LOCALE_TO_SUNBIRD: dict[str, str] = {
     "nyn": "nyn",     # Runyankole
     "ach": "ach",     # Acholi
     "sw": "swa",      # Swahili
+    # Ateso and Lugbara were missing, and TRANSLATION_LANGUAGES below listed
+    # both as supported — so every caller that resolves a locale through this
+    # table got None for them and fell through to Gemini, for languages Sunbird
+    # actually serves. Verified against the live API: eng->teo returns
+    # "Ai bo ejai eyapiesi loka isolosinei?" and eng->lgg "Ofisi musoro ofezuri
+    # ngua?", both in about 2s, where the Gemini fallback took 18s.
+    #
+    # Their locale code equals their Sunbird code, which is exactly why the
+    # omission was easy to miss: anything passing the raw string through
+    # unmapped worked, and only the lookups broke.
+    "teo": "teo",     # Ateso
+    "lgg": "lgg",     # Lugbara
 }
 
 # Sunbird TTS voices — orpheus-3b-tts catalog tags, per the API's own guide.
