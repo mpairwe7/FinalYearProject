@@ -377,9 +377,35 @@
 # the English corpus, and returned IN ENGLISH. That is why lg and en replies
 # are byte-identical in every probe.
 #
+# sha-5159e35 routes every Ugandan language Sunbird covers to Sunbird, not just
+# Luganda. Two configuration defects sent four of them to Gemini instead:
+#
+#   * LOCALE_TO_SUNBIRD had no entry for teo or lgg, while TRANSLATION_LANGUAGES
+#     listed both as supported — so every caller resolving a locale through that
+#     table got None and fell through. Easy to miss because those locale codes
+#     EQUAL their Sunbird codes: anything passing the raw string through
+#     unmapped worked, and only the lookups broke.
+#   * the tier order gated on `"lg" in (source, target)`, so only Luganda led
+#     with Sunbird. Runyankole, Acholi, Ateso and Lugbara led with Gemini, which
+#     answers — so Sunbird was never reached for languages it is trained on.
+#
+# Measured on this Space before the fix: en->lg 3.2s on sunbird_cloud, while
+# en->nyn 17.7s, en->ach 18.1s and en->teo 18.4s all went to gemini_flash.
+# Swahili deliberately still leads with Gemini — it has a Sunbird TTS voice but
+# their translate endpoint does not serve it.
+#
+# The same table feeds SPEECH-TO-TEXT with an "eng" default, so the missing
+# entries meant Ateso and Lugbara audio was submitted TAGGED AS ENGLISH and
+# transcribed by an English model — confident nonsense nothing downstream can
+# detect. That path is fixed by the same change.
+#
+# Also set on this Space: SUNBIRD_FALLBACK_API_TOKEN, which was absent. The
+# account-failover path in _post was dead code here — one account, no second
+# chance — despite the token existing in .env all along.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-ec06de0
+FROM landwind/ura-chatbot:sha-5159e35
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
