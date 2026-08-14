@@ -162,6 +162,47 @@ class TestModelFallback(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
 
+class TestTheOutputBudgetFitsAThinkingModel(unittest.TestCase):
+    """512 tokens looks generous for an FAQ answer and is not.
+
+    gemini-3.x flash are thinking models: reasoning tokens are billed against
+    maxOutputTokens BEFORE any answer token is emitted. In production every
+    Gemini reply came back truncated ("truncated (41 chars)", "(84 chars)"),
+    failed _looks_truncated, and sent the chain through all three Workers AI
+    models against a Cloudflare host this deployment cannot reach — so a good
+    answer was thrown away at the cost of a ~25s round trip.
+
+    Measured live on the same prompt: 512 -> 337 chars, truncated; 2048 -> 455
+    chars, complete.
+    """
+
+    def test_the_budget_is_large_enough_for_reasoning_tokens(self):
+        from app import service as svc
+
+        self.assertGreaterEqual(
+            svc.GEMINI_MAX_OUTPUT_TOKENS,
+            1024,
+            "reasoning tokens come out of this budget before any answer text",
+        )
+
+    def test_the_chat_call_uses_the_budget_rather_than_a_literal(self):
+        import os
+
+        from app import service as svc
+
+        with patch.dict(os.environ, {"LLM_FALLBACK_BACKEND": "gemini"}), patch.object(
+            svc.flags, "is_enabled", return_value=True
+        ), patch("app.providers.config.is_gemini_configured", return_value=True), patch(
+            "app.providers.budget.try_consume_gemini_call", return_value=True
+        ), patch(
+            "app.providers.gateway.gemini_generate", return_value="a complete answer."
+        ) as gen:
+            svc._llm_cloud_fallback("q", [{"text": "p"}], None, "en")
+        self.assertEqual(
+            gen.call_args.kwargs.get("max_tokens"), svc.GEMINI_MAX_OUTPUT_TOKENS
+        )
+
+
 class TestTheGuardCoversTheRealChatPath(unittest.TestCase):
     """The guard defaults `locale` to None, so a call site that forgets to pass
     it is silently ALLOWED. `_llm_cloud_fallback` is the path that serves
