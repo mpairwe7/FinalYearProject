@@ -9,8 +9,10 @@
 #       media device; /api/* is stubbed (helpers.ts). Asserts the UI state
 #       machine + request contract (raw-audio body, X-Voice-Consent, sample_rate).
 #       It has since become the general Blink lane: theme, responsive, staff
-#       operations UI and the WCAG audit all ride along here, because this is the
-#       only place a real Chromium renderer is available.
+#       operations UI, the account/settings surfaces and the WCAG audit all ride
+#       along here, because this is the only place a real Chromium renderer is
+#       available. A spec added to e2e/ is NOT picked up automatically — each one
+#       is an explicit step below, so add it there or it silently never runs.
 #
 #   Tier B (tier-b-integration) — same browser flow against a REAL FastAPI
 #       backend reached via the Next.js /api rewrite, started with deterministic
@@ -49,6 +51,17 @@ on:
       - "App/frontend/src/components/StaffGuard.tsx"
       - "App/frontend/src/components/staffGuard.css"
       - "App/frontend/src/lib/authSession.ts"
+      # Account entry points + the settings dialog, for the same reason as the
+      # block above: account-settings.spec.ts is the only browser check on them,
+      # and without these paths a regression in either lands with no Blink run.
+      - "App/frontend/src/app/signup/**"
+      - "App/frontend/src/app/page.tsx"
+      - "App/frontend/src/components/settings/**"
+      - "App/frontend/src/components/AccountRail.tsx"
+      - "App/frontend/src/hooks/useIdentity.ts"
+      - "App/frontend/src/services/accountApi.ts"
+      - "App/frontend/src/lib/oidcFlow.ts"
+      - "App/frontend/src/lib/roles.ts"
       - "App/backend/app/speech_service.py"
       - ".github/workflows/voice-e2e.yml"
   pull_request:
@@ -121,6 +134,14 @@ jobs:
 
       - name: Run staff-ui.spec.ts (operations UI in Blink — chromium + mobile-chrome)
         run: bunx playwright test e2e/staff-ui.spec.ts --project=chromium --project=mobile-chrome
+
+      # chromium only, deliberately: the spec opens Settings from the sidebar's
+      # account block, and below 1024px the rail is a drawer parked off-screen,
+      # so that entry point does not exist on mobile-chrome (Pixel 7, 412px).
+      # The mobile side of these surfaces is covered by responsive.spec.ts and
+      # the a11y audit, both of which run at mobile width.
+      - name: Run account-settings.spec.ts (auth entry points + settings — chromium)
+        run: bunx playwright test e2e/account-settings.spec.ts --project=chromium
 
       - name: Run a11y.spec.ts (WCAG 2.1 AA audit — desktop + mobile)
         run: bunx playwright test e2e/a11y.spec.ts --project=a11y --project=mobile-chrome

@@ -28,11 +28,18 @@ display issue; identity, role and gating are all correct.
 
 ```
 browser ──1── /signin  (Next.js, public client, no secret)
+          or  /signup  (same request + prompt=create & screen_hint=signup)
         ──2── Auth0 /authorize      (redirect, PKCE S256 + audience)
         ──3── /signin/callback      (code → token, direct to Auth0 /oauth/token)
         ──4── /api/v1/me            (same-origin rewrite → FastAPI)
                  └── verifies RS256 against Auth0 JWKS, resolves role
 ```
+
+`/signup` is not a second flow: `src/lib/oidcFlow.ts` builds one authorization
+request for both entry points and adds the registration hints. Both return
+through leg 3, and the callback then routes by role — staff to `/agent` or
+`/admin`, anyone else back to where the flow started (`/` for a sign-up, so a
+taxpayer who registers from the assistant lands in the assistant).
 
 Leg 3 is the only browser call that does **not** go through the `/api/*` rewrite.
 A public client holds no secret, so there is nothing for a server-side proxy to
@@ -167,6 +174,7 @@ blocked and sign-in fails with an opaque `NetworkError`.
 | `unauthorized_client` at the token endpoint | app registered as Regular Web App instead of SPA |
 | `invalid_request` — *Client "…" is not authorized to access resource server "…"* | the API exists but the application is not authorized for it (Auth0 side) |
 | `access_denied` — *Service not found: <audience>* | no API registered with that identifier |
+| "Sign up" opens the **login** screen, with no way to register | self-registration is off at the provider: Auth0 → Authentication → Database → *Disable Sign Ups* is on (Keycloak: Realm settings → Login → *User registration*). The hints are sent either way, and a provider that does not offer registration simply ignores them |
 
 ## Diagnosing an authorization-request failure
 
@@ -214,8 +222,12 @@ checks for both an admin and a staff identity, covering the PKCE redirect, the
 provider login, the code exchange, RS256 verification against the live JWKS, role
 resolution, and the landing page. Vocabulary and temporal cases are pinned in
 `App/backend/tests/test_oidc_role_claims.py`; discovery in
-`App/frontend/src/__tests__/lib/oidc.test.ts`; the dashboards' layout in
-`App/frontend/e2e/staff-ui.spec.ts` (chromium + mobile-chrome in CI).
+`App/frontend/src/__tests__/lib/oidc.test.ts`; the authorization request itself
+— PKCE S256, `state`, the registration hints, and single-use cleanup — in
+`App/frontend/src/__tests__/lib/oidcFlow.test.ts`; the dashboards' layout in
+`App/frontend/e2e/staff-ui.spec.ts` and the account entry points in
+`App/frontend/e2e/account-settings.spec.ts` (both Blink in CI, via
+`voice-e2e.yml`'s Tier A — that workflow is where the Playwright suite runs).
 
 Quick live check that RS256 mode is active — an HS256-signed token must be refused:
 
