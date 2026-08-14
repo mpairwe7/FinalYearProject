@@ -403,9 +403,28 @@
 # account-failover path in _post was dead code here — one account, no second
 # chance — despite the token existing in .env all along.
 #
+# sha-9c0f594 stops _post retrying a Sunbird TIMEOUT on the same account. It
+# retried every httpx.HTTPError, and that includes timeouts — but a timeout
+# means the model is slow right now (usually a cold start), so the retry buys
+# an identical wait for the same answer.
+#
+# Measured across 8 live TTS calls: median 7.2s, max 79.1s. _cloud_call bounds
+# the caller at SPEECH_CLOUD_DEADLINE_S (40s), so the 79.1s call was abandoned
+# and TTS fell through to edge-tts — which has no Ugandan voice and narrated
+# Luganda in en-US-AriaNeural. The retry meant to add resilience was causing the
+# exact failure this tier exists to prevent. Worst case drops from
+# SUNBIRD_TIMEOUT x SUNBIRD_RETRIES x 2 accounts (120s) to 60s. Transport errors
+# (connection reset, DNS blip) are still retried — genuinely transient.
+#
+# This depends on a SECOND ACCOUNT existing. SUNBIRD_FALLBACK_API_TOKEN was
+# absent from this Space while sitting in .env all along, so the failover path
+# was dead code here — with one account, "fail over instead of retrying" would
+# have meant failing outright. That secret is now set and was verified
+# standalone first (eng->lug translate, lg TTS, eng->teo).
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-5159e35
+FROM landwind/ura-chatbot:sha-9c0f594
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
