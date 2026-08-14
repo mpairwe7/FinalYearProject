@@ -163,7 +163,7 @@ SUNBIRD_API_TOKEN=            # Required for cloud speech/translation
 
 # Analytics Database
 ANALYTICS_BACKEND=sqlite      # sqlite|postgres
-POSTGRES_DSN=                 # e.g. postgresql://user:pw@host/db
+POSTGRES_DSN=                 # e.g. postgresql://user:pw@host/db  # pragma: allowlist secret
 
 # vLLM Backend (alternative to local transformers)
 LLM_BACKEND=local             # local|vllm
@@ -238,12 +238,41 @@ python App/app.py
 python App/classifier.py
 ```
 
-## Staff Sign-In (OIDC)
+## Sign-In and Sign-Up (OIDC)
 
-`/signin`, `/admin` and `/agent` need a staff identity. The backend **verifies**
-tokens but never issues them, so there is no password form — sign-in is an
-OAuth 2.1 authorization-code redirect with PKCE S256 to your identity provider
-(public client, no secret in the bundle).
+`/admin` and `/agent` need a staff identity; the assistant itself needs none.
+The backend **verifies** tokens but never issues them, so there is no password
+form — signing in is an OAuth 2.1 authorization-code redirect with PKCE S256 to
+your identity provider (public client, no secret in the bundle).
+
+### The three routes
+
+| Route | What it does |
+| --- | --- |
+| `/signin` | Starts the redirect. Also hosts the opt-in dev-token panel. |
+| `/signup` | The same redirect with a registration hint, so "create an account" reaches the provider's own registration screen. |
+| `/signin/callback` | Completes the code exchange for both, then routes by role. |
+
+Registration is not a second flow: `src/lib/oidcFlow.ts` builds one
+authorization request and adds `prompt=create` ("Initiating User Registration
+via OpenID Connect 1.0", understood by Entra ID, Google and Curity) together
+with Auth0's older `screen_hint=signup`. Providers ignore parameters they do not
+recognise, so both are always sent and no build-time switch is needed. **The
+provider must have self-registration enabled** or it will simply show its login
+screen: Keycloak → Realm settings → Login → *User registration*; Auth0 →
+Authentication → Database → *Disable Sign Ups* must be off.
+
+After the exchange, the callback sends staff to the tool their role can open
+(`ura_staff` → `/agent`, admin/auditor → `/admin`) and everyone else back to
+where the flow started — `/` for a sign-up, so a taxpayer who registers from the
+assistant lands back in the assistant rather than on a dashboard that refuses
+them.
+
+Both entry points are reachable from the assistant without going looking for
+them: the header carries a Sign in / Sign up pair while signed out, the sidebar's
+account block carries the same pair plus Settings, and the landing hero says what
+an account adds. Nothing above those is gated — questions, document checks and
+voice all work signed out.
 
 ### Wiring a provider
 
@@ -363,6 +392,33 @@ AUTH_DEV_SECRET=<shared secret>
 cd App/backend && python -c \
   "from app.auth.jwt_auth import make_dev_token; print(make_dev_token('dev-user', role='ura_admin'))"
 ```
+
+## Settings
+
+`Settings` opens from the sidebar's account block, from the header's overflow
+menu, and from the landing page once signed in. It is one dialog with five tabs,
+and every control writes state something already reads — there are no
+preferences stored for their own sake:
+
+| Tab | Controls | Written to |
+| --- | --- | --- |
+| General | Theme, response language | `lib/theme` (`ura-theme`), `useChatStore.locale` — the same values the header's theme button and language menu use |
+| Voice | Narrate replies, narration voice (+ sample playback) | page narration state, `useVoiceStore.voiceId` (read by every `/v1/tts` call) |
+| Tax profile | Display name, taxpayer type, industry, answer detail, record language, registered tax heads | `GET`/`PUT /v1/me/profile` — needs an account, and says so when signed out |
+| Privacy & data | Anonymous analytics; consent receipts; download or delete local conversations; export or erase account data | `ura_analytics_consent`, `/v1/me/consents` (grant/withdraw), `useChatStore`, `GET /v1/me/export`, `DELETE /v1/me` |
+| Account | Identity, role, tenant, provider subject; sign in / sign up / sign out; operations links for staff | `GET /v1/me`, the token store |
+
+Two deliberate omissions: `useVoiceStore` also persists `autoBargeIn`,
+`silenceTimeout` and `accentProfile`, which nothing currently reads, so they are
+not offered — a switch that changes nothing is worse than a missing one. And
+withdrawing `personalization` consent purges the memory built under it
+server-side (UDPA 2019: a withdrawal must stop the processing), which is why that
+row warns before it is used.
+
+`DELETE /v1/me` is the right-to-erasure call: it removes every PII-bearing row
+except the hash-chained audit ledger, which records that the erasure happened.
+The dialog confirms first, then signs the person out, since the account behind
+the token no longer exists.
 
 This is **not** authentication — anyone with the secret can mint one, and the
 panel says so on screen. `make_dev_token` refuses to run under

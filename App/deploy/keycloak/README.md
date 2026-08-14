@@ -14,9 +14,10 @@ public client, the three staff roles, the audience mapper, and two demo officers
 | Concern | Requirement | Fails as |
 | --- | --- | --- |
 | Client type | Public client, PKCE `S256` (no secret in the browser bundle) | redirect refused |
-| Redirect URI | `<app-origin>/signin/callback`, exactly | `invalid redirect_uri` |
+| Redirect URI | `<app-origin>/signin/callback`, exactly — `/signup` returns through the same one | `invalid redirect_uri` |
 | Audience | Access token `aud` must include `ura-chatbot` (audience mapper) | backend 401 `audience mismatch` |
 | Roles | `ura_admin` / `ura_staff` / `ura_auditor` in `realm_access.roles` | officer degraded to `public`, dashboard refuses |
+| Registration | *User registration* on (Realm settings → Login) for `/signup` to be useful | "Sign up" lands on the login screen with no way to register |
 
 Any provider that meets these works — the backend probes Keycloak
 (`realm_access.roles`), Entra/Okta (`roles`, `groups`) and a flat `role` by
@@ -65,5 +66,10 @@ derived from `NEXT_PUBLIC_OIDC_ISSUER` at server start (`next.config.mjs`) — t
 sign-in callback exchanges its code with the provider directly, and without that
 origin the exchange is blocked with an opaque `NetworkError`.
 
-See `docs/PROJECT_SETUP.md` → *Staff Sign-In (OIDC)* for the full walkthrough and
-the dev-token fallback.
+`/signup` sends `prompt=create` and `screen_hint=signup` on the same request, so
+Keycloak opens its registration form when *User registration* is enabled and
+falls back to the login form when it is not. Nothing else differs between the two
+entry points.
+
+See `docs/PROJECT_SETUP.md` → *Sign-In and Sign-Up (OIDC)* for the full
+walkthrough and the dev-token fallback.

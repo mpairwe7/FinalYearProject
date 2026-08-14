@@ -825,6 +825,20 @@ Next.js 16 + React 19 PWA with SSE streaming, voice modal, and IEEE evaluation d
 - Zustand 5 state management with durable multi-conversation persistence
 - Staff analytics panel with escalation queue / ticket visibility
 
+**Accounts and settings:**
+- `/signin` and `/signup` are the same OAuth 2.1 + PKCE redirect; sign-up adds
+  the registration hints (`prompt=create`, Auth0 `screen_hint=signup`) and both
+  return through `/signin/callback` (`src/lib/oidcFlow.ts`)
+- Reachable from the assistant itself: header pair while signed out, sidebar
+  account block (Grok-style, with the account menu and Settings), landing note
+- Nothing is gated — chat, documents and voice all work signed out; an account
+  adds the server-side tax profile and staff tools
+- `useIdentity` treats "has a token" and "the backend accepts it" as separate
+  facts, so a stale session shows as stale rather than as an empty dashboard
+- Settings dialog (`src/components/settings/`) — General (theme, language),
+  Voice (narration + voice), Tax profile (`/v1/me/profile`), Privacy & data
+  (analytics consent, consent receipts, export/erase, local history), Account
+
 **Voice capabilities (2026):**
 - Full-screen voice modal (Grok-style pulse rings + waveform + transcript)
 - Voice persona selection (5 voices: 3 English + 1 default + 1 Luganda)
@@ -855,6 +869,11 @@ Next.js 16 + React 19 PWA with SSE streaming, voice modal, and IEEE evaluation d
 - `src/components/Markdown.tsx` — Zero-dep markdown renderer with citation pills
 - `src/components/MermaidDiagram.tsx` — Lazy Mermaid diagram renderer
 - `src/components/ConsentBanner.tsx` — GDPR consent banner
+- `src/components/AccountRail.tsx` — Sidebar account block (auth entry points)
+- `src/components/settings/SettingsDialog.tsx` — Tabbed settings + its sections
+- `src/lib/oidcFlow.ts` — Shared PKCE authorize request (sign-in and sign-up)
+- `src/hooks/useIdentity.ts` — Token + `/v1/me` identity, as one state machine
+- `src/services/accountApi.ts` — `/v1/me` family (profile, consents, export, erase)
 - `src/app/analytics/evaluation/page.tsx` — IEEE evaluation dashboard
 - `src/services/voiceService.ts` — AudioRecorder, playback, speech API wrappers
 - `src/store/useChatStore.ts` — Multi-conversation Zustand state
