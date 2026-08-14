@@ -123,6 +123,11 @@ LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
 # timeout), so the worst case becomes roughly this budget plus one more
 # hop's own timeout instead of the sum of every hop's timeout.
 LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "70"))
+# Output budget for the Gemini leg. Sized for THINKING models, where reasoning
+# tokens are consumed from this same budget before any answer token appears —
+# so this is not "answer length", and tuning it down to what an answer needs is
+# how the 512 default silently truncated every production reply.
+GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "2048"))
 SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "true"
 SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
@@ -412,7 +417,19 @@ def _llm_cloud_fallback(
         system, user = _build_fallback_prompt(query, passages, locale, tone_hint)
         try:
             text = gw.gemini_generate(
-                user, system=system, locale=locale, max_tokens=512, temperature=0.2
+                user,
+                system=system,
+                locale=locale,
+                # gemini-3.x flash are THINKING models: reasoning tokens are
+                # billed against this budget before a single answer token is
+                # emitted, so 512 truncated real answers mid-sentence. The
+                # truncated reply then failed _looks_truncated, and the chain
+                # walked all three Workers AI models against a Cloudflare host
+                # this deployment cannot reach — turning a good Gemini answer
+                # into a ~25s round trip that threw the answer away.
+                # Measured in production: "truncated (41 chars)", "(84 chars)".
+                max_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+                temperature=0.2,
             )
             breakers.GEMINI_BREAKER.record_success()
             routing.log_model_use("llm", "gemini_flash")
