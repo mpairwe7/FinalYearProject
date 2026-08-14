@@ -1,0 +1,912 @@
+/* =============================================================================
+ * chatv2 — settings dialog, the sidebar's account block, and the header /
+ * landing auth entry points.
+ *
+ * Everything is scoped under `.chatv2` and built from the tokens in tokens.css,
+ * so both themes come for free and nothing here defines a colour of its own.
+ * Stacking order: rail 200 → language picker 350 → settings 370 → confirm 400,
+ * so a confirmation always sits above the settings that raised it.
+ *
+ * One cascade trap to know about: globals.css carries
+ * `:root[data-theme="light"] a { color: var(--ura-blue) }` (and its :hover),
+ * which is specificity (0,2,1) — MORE specific than a plain `.chatv2 .thing`
+ * (0,2,0). Any button-like anchor here therefore names its element as well
+ * (`a.thing` / `:is(a, button).thing`) to reach (0,2,1) and win on order, since
+ * this file loads after globals.css. Without that, `Sign up` rendered navy text
+ * on its navy fill in the light theme — invisible — while the dark theme, which
+ * has no equivalent global rule, looked correct.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * Dialog shell
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 370;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: dlgv2-fade 140ms ease;
+}
+
+.chatv2 .setv2 {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(900px, 100%);
+  height: min(640px, 92dvh);
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: dlgv2-pop 140ms ease;
+}
+
+.chatv2 .setv2:focus {
+  outline: none;
+}
+
+.chatv2 .setv2-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 15px 18px 13px;
+  border-bottom: 1px solid var(--border-0);
+  flex-shrink: 0;
+}
+
+.chatv2 .setv2-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+
+/* The shared close button is absolutely positioned for .dlgv2; this dialog has
+   a header row to sit in, so pin it to that instead. */
+.chatv2 .setv2-x {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+}
+
+.chatv2 .setv2-body {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Tab rail
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-0);
+  overflow-y: auto;
+}
+
+.chatv2 .setv2-tab {
+  display: block;
+  width: 100%;
+  padding: 9px 11px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chatv2 .setv2-tab:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+.chatv2 .setv2-tab-active,
+.chatv2 .setv2-tab-active:hover {
+  background: var(--surface-3);
+  color: var(--text-0);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+ * Scrolling pane
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-pane {
+  padding: 18px 22px 26px;
+  overflow-y: auto;
+  min-height: 0;
+  /* Momentum scrolling inside the dialog rather than the page behind it. */
+  overscroll-behavior: contain;
+}
+
+.chatv2 .setv2-pane:focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: -2px;
+}
+
+.chatv2 .setv2-section + .setv2-section {
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-0);
+}
+
+.chatv2 .setv2-section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+
+.chatv2 .setv2-section-desc {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  max-width: 62ch;
+}
+
+.chatv2 .setv2-rows {
+  margin-top: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Rows
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-0);
+}
+
+.chatv2 .setv2-row:last-child {
+  border-bottom: none;
+}
+
+.chatv2 .setv2-row-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.chatv2 .setv2-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.chatv2 .setv2-row-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.chatv2 .setv2-row-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+  max-width: 56ch;
+}
+
+.chatv2 .setv2-row-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.chatv2 .setv2-row-stacked .setv2-row-control {
+  flex-shrink: 1;
+}
+
+.chatv2 .setv2-static {
+  font-size: 13px;
+  color: var(--text-1);
+}
+
+.chatv2 .setv2-static-mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+ * Switch
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  background: var(--surface-3);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.chatv2 .setv2-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-0);
+  box-shadow: var(--shadow-sm);
+  transition: transform 140ms ease;
+}
+
+.chatv2 .setv2-switch[aria-checked="true"] {
+  background: var(--cv2-accent);
+  border-color: var(--cv2-accent);
+}
+
+.chatv2 .setv2-switch[aria-checked="true"] .setv2-switch-knob {
+  transform: translateX(18px);
+  background: var(--cv2-accent-contrast);
+}
+
+.chatv2 .setv2-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+ * Segmented control
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-0);
+  border-radius: 9px;
+}
+
+.chatv2 .setv2-seg-opt {
+  padding: 6px 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chatv2 .setv2-seg-opt:hover {
+  color: var(--text-0);
+}
+
+.chatv2 .setv2-seg-active,
+.chatv2 .setv2-seg-active:hover {
+  background: var(--bg-0);
+  border-color: var(--border-1);
+  color: var(--text-0);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+ * Native inputs
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-select,
+.chatv2 .setv2-input {
+  min-height: 36px;
+  max-width: 260px;
+  padding: 0 10px;
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.chatv2 .setv2-select {
+  padding-right: 26px;
+  cursor: pointer;
+}
+
+.chatv2 .setv2-input::placeholder {
+  color: var(--text-3);
+}
+
+.chatv2 .setv2-select:disabled,
+.chatv2 .setv2-input:disabled {
+  opacity: 0.55;
+}
+
+.chatv2 .setv2-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chatv2 .setv2-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chatv2 .setv2-check input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--cv2-accent);
+  cursor: pointer;
+}
+
+.chatv2 .setv2-check-on {
+  border-color: var(--cv2-accent);
+  background: var(--cv2-accent-soft);
+  color: var(--text-0);
+}
+
+/* ---------------------------------------------------------------------------
+ * Buttons, action rows, notes
+ * ------------------------------------------------------------------------- */
+.chatv2 :is(a, button).setv2-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chatv2 :is(a, button).setv2-btn:hover {
+  background: var(--surface-2);
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--text-0);
+}
+
+.chatv2 :is(a, button).setv2-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chatv2 :is(a, button).setv2-btn-primary {
+  background: var(--cv2-accent);
+  border-color: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+}
+
+.chatv2 :is(a, button).setv2-btn-primary:hover:not(:disabled) {
+  background: var(--cv2-accent-hover);
+  border-color: var(--cv2-accent-hover);
+  color: var(--cv2-accent-contrast);
+}
+
+/* Danger reads as danger before it is pressed (outline), and fills on hover —
+   the same contract as .dlgv2-danger, inverted, so the destructive button in a
+   list of ordinary ones is identifiable without being the loudest thing here. */
+.chatv2 :is(a, button).setv2-btn-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--bg-0);
+}
+
+.chatv2 :is(a, button).setv2-btn-danger:hover:not(:disabled) {
+  background: var(--cv2-danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.chatv2 .setv2-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.chatv2 .setv2-note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-0);
+  border-radius: 10px;
+  background: var(--surface-1);
+  color: var(--text-1);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.chatv2 .setv2-note a {
+  color: var(--ura-blue-bright);
+  font-weight: 600;
+}
+
+.chatv2 .setv2-note a:hover {
+  /* As above: without this the light theme's global :hover turns it teal. */
+  color: var(--ura-blue-bright);
+  text-decoration: underline;
+}
+
+.chatv2 .setv2-note-ok {
+  background: var(--cv2-success-soft);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.chatv2 .setv2-note-error {
+  background: var(--cv2-danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.chatv2 .setv2-note-error a,
+.chatv2 .setv2-note-ok a {
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------------------
+ * Identity card + link list
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border-0);
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.chatv2 .setv2-avatar,
+.chatv2 .rail-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.chatv2 .setv2-identity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chatv2 .setv2-identity-name {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text-0);
+  overflow-wrap: anywhere;
+}
+
+.chatv2 .setv2-identity-role {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.chatv2 .setv2-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chatv2 a.setv2-link {
+  padding: 8px 12px;
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  color: var(--text-0);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.chatv2 a.setv2-link:hover {
+  background: var(--surface-2);
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--text-0);
+}
+
+/* ---------------------------------------------------------------------------
+ * Footer
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border-0);
+  background: var(--bg-1);
+  color: var(--text-2);
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+
+.chatv2 .setv2-foot a {
+  color: var(--ura-blue-bright);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.chatv2 .setv2-foot a:hover {
+  text-decoration: underline;
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--ura-blue-bright);
+}
+
+/* ---------------------------------------------------------------------------
+ * Phones: the tab rail becomes a scrolling strip above the pane.
+ * ------------------------------------------------------------------------- */
+@media (max-width: 720px) {
+  .chatv2 .setv2-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .chatv2 .setv2 {
+    width: 100%;
+    height: 94dvh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+  }
+  .chatv2 .setv2-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .chatv2 .setv2-tabs {
+    flex-direction: row;
+    gap: 6px;
+    padding: 10px 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-0);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .chatv2 .setv2-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .chatv2 .setv2-tab {
+    width: auto;
+    white-space: nowrap;
+  }
+  .chatv2 .setv2-pane {
+    padding: 16px 16px 32px;
+  }
+  .chatv2 .setv2-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .chatv2 .setv2-select,
+  .chatv2 .setv2-input {
+    max-width: none;
+    width: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Sidebar account block — the rail's footer.
+ * ------------------------------------------------------------------------- */
+.chatv2 .rail-account {
+  position: relative;
+  flex-shrink: 0;
+  padding: 8px;
+  border-top: 1px solid var(--border-0);
+  background: var(--bg-1);
+}
+
+.chatv2 .rail-acct-cta {
+  padding: 4px 6px 8px;
+}
+
+.chatv2 .rail-acct-pitch {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.chatv2 .rail-acct-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.chatv2 a.rail-acct-primary,
+.chatv2 a.rail-acct-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.chatv2 a.rail-acct-primary {
+  background: var(--cv2-accent);
+  border: 1px solid var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+}
+
+.chatv2 a.rail-acct-primary:hover {
+  background: var(--cv2-accent-hover);
+  border-color: var(--cv2-accent-hover);
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--cv2-accent-contrast);
+}
+
+.chatv2 a.rail-acct-ghost {
+  background: var(--bg-0);
+  border: 1px solid var(--border-1);
+  color: var(--text-0);
+}
+
+.chatv2 a.rail-acct-ghost:hover {
+  background: var(--surface-2);
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--text-0);
+}
+
+.chatv2 .rail-acct-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chatv2 .rail-acct-row:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+.chatv2 .rail-acct-row svg {
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.chatv2 .rail-acct-user {
+  gap: 10px;
+}
+
+.chatv2 .rail-acct-who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chatv2 .rail-acct-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatv2 .rail-acct-role {
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Opens upward: this row is pinned to the bottom of the viewport. */
+.chatv2 .rail-acct-menu {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  left: 8px;
+  right: 8px;
+  z-index: 210;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
+.chatv2 :is(a, button).rail-acct-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.chatv2 :is(a, button).rail-acct-item:hover {
+  background: var(--surface-2);
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--text-0);
+}
+
+.chatv2 :is(a, button).rail-acct-item svg {
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.chatv2 :is(a, button).rail-acct-item-danger {
+  color: var(--danger);
+}
+
+.chatv2 :is(a, button).rail-acct-item-danger svg {
+  color: var(--danger);
+}
+
+.chatv2 :is(a, button).rail-acct-item-danger:hover {
+  background: var(--cv2-danger-soft);
+  color: var(--danger);
+}
+
+/* The rail's own children are pinned to the open width so a desktop collapse
+   clips them instead of rewrapping (see shell.css). */
+@media (min-width: 1024px) {
+  .chatv2 .rail-account {
+    min-width: 276px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Header auth pair (signed out only).
+ * ------------------------------------------------------------------------- */
+.chatv2 .hdrv2-auth {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 2px;
+}
+
+.chatv2 a.hdrv2-signin,
+.chatv2 a.hdrv2-signup {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.chatv2 a.hdrv2-signin {
+  border: 1px solid var(--border-1);
+  background: var(--bg-0);
+  color: var(--text-0);
+}
+
+.chatv2 a.hdrv2-signin:hover {
+  background: var(--surface-2);
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--text-0);
+}
+
+.chatv2 a.hdrv2-signup {
+  border: 1px solid var(--cv2-accent);
+  background: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+}
+
+.chatv2 a.hdrv2-signup:hover {
+  background: var(--cv2-accent-hover);
+  border-color: var(--cv2-accent-hover);
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--cv2-accent-contrast);
+}
+
+/* Narrow screens keep one button: the sidebar's account block carries both,
+   and the header still has to fit the brand, language, mic and theme. */
+@media (max-width: 720px) {
+  .chatv2 a.hdrv2-signin {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Landing call to action, under the starter prompts.
+ * ------------------------------------------------------------------------- */
+.chatv2 .landing-auth {
+  margin: 18px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.chatv2 .landing-auth-signed strong {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.chatv2 :is(a, button).landing-auth-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ura-blue-bright);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.chatv2 :is(a, button).landing-auth-link:hover {
+  text-decoration: underline;
+  /* Keeps its own colour on hover: globals.css turns every light-theme
+     link teal on :hover, which fails contrast here (see file header). */
+  color: var(--ura-blue-bright);
+}

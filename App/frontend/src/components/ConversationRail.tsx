@@ -1,5 +1,6 @@
 import React, { memo, useMemo, useState, useSyncExternalStore } from 'react';
 import { Conversation } from '../store/useChatStore';
+import AccountRail from './AccountRail';
 import { CloseIcon, MessageSquareIcon, PlusIcon, TrashIcon } from './Icons';
 
 interface ConversationRailProps {
@@ -10,6 +11,8 @@ interface ConversationRailProps {
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
+  /** Account block at the foot of the rail — settings and sign-in live there. */
+  onOpenSettings: (tab?: 'account') => void;
 }
 
 function formatTimestamp(timestamp: number) {
@@ -100,6 +103,7 @@ function ConversationRailInner({
   onNewConversation,
   onSelectConversation,
   onDeleteConversation,
+  onOpenSettings,
 }: ConversationRailProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -208,6 +212,8 @@ function ConversationRailInner({
             </div>
           )}
         </div>
+
+        <AccountRail onOpenSettings={onOpenSettings} />
       </aside>
     </>
   );

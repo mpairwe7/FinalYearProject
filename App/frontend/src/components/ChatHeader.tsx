@@ -1,9 +1,11 @@
 "use client";
 
 import Image from 'next/image';
+import Link from 'next/link';
 import React, { useEffect, useRef, useState } from 'react';
 import ThemeToggle from './ThemeToggle';
 import LanguageMenu, { LanguageOption } from './LanguageMenu';
+import { useIdentity } from '../hooks/useIdentity';
 import {
   BookIcon,
   HeadphonesIcon,
@@ -12,6 +14,7 @@ import {
   MicIcon,
   PanelLeftIcon,
   PlusIcon,
+  SettingsIcon,
   TrashIcon,
 } from './Icons';
 
@@ -19,8 +22,13 @@ import {
  * chatv2 header: sidebar toggles, brand, then a compact action cluster.
  * Conversation-level controls (language, Voice, Narrate, attach) live in the
  * composer; the header keeps navigation, theme, the voice-overlay entry, the
- * speech-health status pill, and an overflow menu with Clear + the blog link.
- * All aria-labels match the legacy header so tests and AT behavior carry over.
+ * speech-health status pill, and an overflow menu with Settings, Clear and the
+ * blog link. All aria-labels match the legacy header so tests and AT behavior
+ * carry over.
+ *
+ * Signed out, the header also carries the Sign in / Sign up pair. The sidebar's
+ * account block is the primary home for those, but it is behind the hamburger
+ * on a phone — and the first screen someone lands on is this one.
  */
 interface ChatHeaderProps {
   hasStartedChat: boolean;
@@ -31,6 +39,7 @@ interface ChatHeaderProps {
   onRequestClear: () => void;
   voiceChatOpen: boolean;
   onToggleVoiceChat: () => void;
+  onOpenSettings: () => void;
   blogUrl: string;
   healthOk: boolean;
   healthLabel: string;
@@ -50,6 +59,7 @@ export default function ChatHeader({
   onRequestClear,
   voiceChatOpen,
   onToggleVoiceChat,
+  onOpenSettings,
   blogUrl,
   healthOk,
   healthLabel,
@@ -59,6 +69,10 @@ export default function ChatHeader({
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Only a confirmed sign-in hides the call to action: while the token is being
+  // checked the buttons stay, and they come back if it turns out to be stale.
+  const { status } = useIdentity();
+  const signedIn = status === 'signed-in';
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -136,6 +150,16 @@ export default function ChatHeader({
       >
         <HeadphonesIcon /> <span className="pill-sm-label">{healthLabel}</span>
       </div>
+      {!signedIn && (
+        <div className="hdrv2-auth">
+          <Link className="hdrv2-signin" href="/signin">
+            Sign in
+          </Link>
+          <Link className="hdrv2-signup" href="/signup">
+            Sign up
+          </Link>
+        </div>
+      )}
       <div className="hdrv2-kebab" ref={menuRef}>
         <button
           className="top-bar-icon-btn"
@@ -148,6 +172,17 @@ export default function ChatHeader({
         </button>
         {menuOpen && (
           <div className="hdrv2-menu" role="menu">
+            <button
+              role="menuitem"
+              className="hdrv2-menu-item"
+              onClick={() => {
+                setMenuOpen(false);
+                onOpenSettings();
+              }}
+              aria-label="Settings"
+            >
+              <SettingsIcon /> Settings
+            </button>
             <button
               role="menuitem"
               className="hdrv2-menu-item"

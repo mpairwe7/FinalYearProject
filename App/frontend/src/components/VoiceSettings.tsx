@@ -2,59 +2,17 @@
 
 import React, { memo, useCallback, useRef, useState } from "react";
 import { CloseIcon, SpeakerIcon } from "./Icons";
-import { authHeaders } from "@/lib/authSession";
+import { playVoiceSample, VOICES, type VoiceOption } from "@/lib/voices";
 
 /**
  * Voice personnel selection modal.
  *
- * Lets users pick from available TTS voices with preview playback.
+ * Lets users pick from available TTS voices with preview playback. The list
+ * itself lives in `lib/voices` because the Voice tab in settings offers the
+ * same choices and both write `useVoiceStore.voiceId`.
  */
 
-export interface VoiceOption {
-  id: string;
-  label: string;
-  description: string;
-  language: string;
-  sample: string; // text to preview
-}
-
-const VOICES: VoiceOption[] = [
-  {
-    id: "en-US-AriaNeural",
-    label: "English - Female (Professional)",
-    description: "Clear, professional tone ideal for tax guidance",
-    language: "en",
-    sample: "Welcome to URA. How can I help you today?",
-  },
-  {
-    id: "en-US-GuyNeural",
-    label: "English - Male (Friendly)",
-    description: "Warm, approachable voice for general queries",
-    language: "en",
-    sample: "The VAT rate in Uganda is 18 percent.",
-  },
-  {
-    id: "en-GB-SoniaNeural",
-    label: "English - British (Formal)",
-    description: "Formal British accent for official communication",
-    language: "en",
-    sample: "Your TIN registration has been processed successfully.",
-  },
-  {
-    id: "en-default",
-    label: "English - Default",
-    description: "Standard voice for English responses",
-    language: "en",
-    sample: "Please visit URA dot go dot UG for more information.",
-  },
-  {
-    id: "lg-default",
-    label: "Luganda - Default",
-    description: "Voice for Luganda language responses",
-    language: "lg",
-    sample: "Tukusanyukidde. Oyinza okubuuza ku musolo.",
-  },
-];
+export type { VoiceOption };
 
 interface VoiceSettingsProps {
   open: boolean;
@@ -76,23 +34,13 @@ function VoiceSettingsInner({ open, selectedVoice, onClose, onSelect }: VoiceSet
       }
       setPlaying(voice.id);
       try {
-        const res = await fetch("/api/v1/tts", {
-          method: "POST",
-          headers: authHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ text: voice.sample, language: voice.language, voice: voice.id }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!res.ok) throw new Error("TTS failed");
-        const data = await res.json();
-        if (data.audio_base64) {
-          const audio = new Audio(`data:audio/wav;base64,${data.audio_base64}`);
-          audioRef.current = audio;
-          audio.onended = () => setPlaying(null);
-          await audio.play();
-        }
+        const audio = await playVoiceSample(voice);
+        audioRef.current = audio;
+        // `play()` resolves when playback STARTS, so the button has to stay in
+        // its "Stop" state until the clip ends rather than resetting here.
+        audio.onended = () => setPlaying((p) => (p === voice.id ? null : p));
       } catch {
-        // preview unavailable
-      } finally {
+        // Preview unavailable (speech service down) — reset the button.
         setPlaying((p) => (p === voice.id ? null : p));
       }
     },

@@ -6,6 +6,9 @@
 @import "./composer.css";
 @import "./messages.css";
 @import "./overlays.css";
+/* Settings dialog + the account/auth entry points in the rail and header.
+   After overlays.css because it reuses .dlgv2-x and the shared keyframes. */
+@import "./settings.css";
 /* Re-opens the shell so globals.css's gradient mesh shows through, while
    keeping every text-bearing surface opaque. Must stay after the files whose
    opaque backgrounds it overrides. */

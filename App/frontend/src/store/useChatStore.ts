@@ -65,6 +65,7 @@ interface ChatStore {
   createNewSession: () => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
+  clearAllSessions: () => void;
   hydratePersisted: () => void;
 }
 
@@ -462,6 +463,23 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     } else {
       set({ conversations: filtered });
     }
+    writePersistedChatState(get());
+  },
+
+  /**
+   * Delete every stored conversation and return to the start screen.
+   *
+   * This is the settings panel's "clear chat history": local-only, because the
+   * conversations live in this browser's localStorage. Server-side history is a
+   * separate thing, removed by `DELETE /v1/me` (right to erasure).
+   */
+  clearAllSessions: () => {
+    set({
+      conversations: [],
+      chat: [GREETING],
+      activeConversationId: null,
+      message: '',
+    });
     writePersistedChatState(get());
   },
 

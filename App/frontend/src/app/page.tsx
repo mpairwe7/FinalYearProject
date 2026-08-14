@@ -33,11 +33,13 @@ import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
 import ConfirmDialog, { ConfirmRequest } from '../components/ConfirmDialog';
 import ConversationRail from '../components/ConversationRail';
+import SettingsDialog, { SettingsTab } from '../components/settings/SettingsDialog';
 import { VoiceChat } from '../components/VoiceChat';
 import { VoiceFirstChat } from '../components/VoiceFirstChat';
 import { VoiceVisionMode } from '../components/VoiceVisionMode';
 import ChatHeader from '../components/ChatHeader';
 import { BotIcon } from '../components/Icons';
+import { useIdentity } from '../hooks/useIdentity';
 
 // ---------------------------------------------------------------------------
 // Browser Speech Recognition types
@@ -133,6 +135,22 @@ export default function Page() {
   // chatv2 presentation state: destructive-action confirm + desktop rail collapse
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(false);
+
+  // Settings dialog. `settingsTab` lets a caller open straight onto a section
+  // (the sidebar's account row opens Account, everything else opens General).
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
+  const openSettings = useCallback((tab: SettingsTab = 'general') => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  }, []);
+  // Stable identity: the dialog's focus handling keys off its props, and a new
+  // closure on every render would make it re-run.
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+
+  // Signed-in state drives the landing call to action; the token is verified by
+  // the backend, so this is not "someone has a token in localStorage".
+  const { status: identityStatus, name: identityName } = useIdentity();
 
   // Document attachments awaiting the next chat turn
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -735,6 +753,10 @@ export default function Page() {
             action: () => deleteSession(id),
           });
         }}
+        onOpenSettings={(tab) => {
+          setSidebarOpen(false);
+          openSettings(tab ?? 'general');
+        }}
       />
 
       {/* ── Main column (top bar + content) ── */}
@@ -755,6 +777,7 @@ export default function Page() {
         }
         voiceChatOpen={voiceChatMode}
         onToggleVoiceChat={() => setVoiceChatMode((v) => !v)}
+        onOpenSettings={() => openSettings()}
         blogUrl={BLOG_URL}
         healthOk={speechHealth?.status === 'ready'}
         healthLabel={healthLabel}
@@ -798,6 +821,24 @@ export default function Page() {
                   </button>
                 ))}
               </div>
+
+              {/* Auth entry points, stated as what they add rather than as a
+                  gate: nothing above this line needs an account. */}
+              {identityStatus === 'signed-in' ? (
+                <p className="landing-auth landing-auth-signed">
+                  Signed in as <strong>{identityName}</strong>.{' '}
+                  <button type="button" className="landing-auth-link" onClick={() => openSettings('account')}>
+                    Account &amp; settings
+                  </button>
+                </p>
+              ) : (
+                <p className="landing-auth">
+                  <a className="landing-auth-link" href="/signin">Sign in</a>
+                  {' or '}
+                  <a className="landing-auth-link" href="/signup">create an account</a>
+                  {' to save conversations and keep a tax profile — or just start asking.'}
+                </p>
+              )}
             </div>
           </div>
         ) : (
@@ -867,6 +908,19 @@ export default function Page() {
           setConfirmReq(null);
           if (run) req?.action();
         }}
+      />
+
+      {/* Settings. Inside the .chatv2 scope so it inherits the redesign tokens
+          and the shared dialog styles. */}
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={closeSettings}
+        tab={settingsTab}
+        onTabChange={setSettingsTab}
+        autoNarrate={autoNarrate}
+        onAutoNarrateChange={setAutoNarrate}
+        speechReady={Boolean(serverReady)}
+        blogUrl={BLOG_URL}
       />
 
       </div>{/* end .app-main-col */}
