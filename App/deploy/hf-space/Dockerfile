@@ -341,9 +341,45 @@
 # English. Luganda replies stayed byte-identical to the pre-change passages,
 # which is the guard holding.
 #
+# sha-ec06de0 fixes two defects found by verifying the routing against this
+# Space.
+#
+# The locale policy was enforced on the Gemini branch ONLY. Execution fell
+# through to the Workers AI chain underneath it, so a Luganda turn still walked
+# all three Cloudflare models. It looked harmless purely because this Space
+# cannot reach Cloudflare — every attempt failed. The moment that host became
+# reachable, Workers AI would have answered Luganda. A guard that holds only
+# while a dependency is broken is not a guard. The predicate is now named for
+# the capability (cloud_generation_allowed_for) and both branches check it.
+#
+# The other defect threw away every Gemini answer. Production served corpus
+# excerpts under "Here's the most relevant guidance I found..." even though
+# Gemini had answered correctly and cited its sources — and faithfulness_score
+# read 1.0 the whole time, because it scores the REVISED text. Three causes,
+# all in what counts as a citable CLAIM, none in what counts as SUPPORT:
+#   * a model told to cite "like [1]" writes "[1, 3]", which the citation
+#     readers (shaped \[(\d{1,3})\]) do not match at all — so a cited sentence
+#     parsed as uncited AND unsupported. Now normalised once, where generated
+#     text enters the system, which also stops a literal "[1, 3]" reaching the
+#     rendered answer through the frontend's marker stripper.
+#   * the model's own context disclaimer ("the provided context does not
+#     contain ...") scored as an uncited factual claim.
+#   * its closing pleasantry: "happy to help" was exempt, "happy to assist" was
+#     not; "i don't have enough" was exempt, "i do not have enough" was not.
+#
+# Measured against live Gemini on 8 questions: 0/8 revised, was 3/8. Safety
+# counterweight on 6 bad answers (contradicted rate, invented amounts and
+# deadlines, uncited and mis-cited inventions): 0 missed, 0 good blocked.
+# 1360 backend tests, 104 frontend tests.
+#
+# Known gap, deliberately NOT changed here: sunbird.translate_from_english()
+# has no callers, so a Luganda question is translated to English, answered from
+# the English corpus, and returned IN ENGLISH. That is why lg and en replies
+# are byte-identical in every probe.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-138f8ea
+FROM landwind/ura-chatbot:sha-ec06de0
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
