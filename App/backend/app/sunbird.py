@@ -196,7 +196,27 @@ def _post(path: str, **kwargs: Any) -> httpx.Response:
                     time.sleep(delay)
                     continue
                 break
-            except httpx.HTTPError as e:  # timeouts + transport errors
+            except httpx.TimeoutException as e:
+                # Deliberately NOT retried inside the same account. A timeout
+                # means the model is slow right now — usually a cold start —
+                # and waiting the identical timeout a second time doubles the
+                # cost for the same answer. Measured across 8 TTS calls: median
+                # 7.2s, but a cold one reached 79.1s this way, which blows the
+                # 40s SPEECH_CLOUD_DEADLINE_S that bounds the caller. The caller
+                # then fell back to edge-tts, so a Luganda narration came back
+                # in an American English voice — the failure this whole tier
+                # exists to prevent.
+                #
+                # Failover to the next account still happens below, so a slow
+                # or stuck endpoint gets a second chance; it just does not get
+                # two identical waits on the same one first.
+                last_exc = e
+                logger.warning(
+                    "Sunbird timeout on %s (account #%d) after %ss; not retrying "
+                    "this account — failing over", path, idx + 1, SUNBIRD_TIMEOUT,
+                )
+                break
+            except httpx.HTTPError as e:  # transport errors — a retry can help
                 last_exc = e
                 if attempt < SUNBIRD_RETRIES:
                     delay = _retry_delay(attempt)
