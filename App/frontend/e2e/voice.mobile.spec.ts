@@ -62,8 +62,13 @@ test.describe("Voice STT/TTS — mobile composer (mocked)", () => {
     // The checkmark stops + sends the utterance → the stub answers with both.
     await send.click();
 
-    await expect(page.locator(".message-row-user")).toContainText(/VAT/i, { timeout: 15_000 });
-    await expect(page.locator(".message-row-assistant")).toContainText("18%", {
+    // .last(): the transcript is a new turn appended after the seeded greeting,
+    // so the assistant rows are the greeting and the reply. Matching the class
+    // alone is a strict-mode violation.
+    await expect(page.locator(".message-row-user").last()).toContainText(/VAT/i, {
+      timeout: 15_000,
+    });
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
       timeout: 15_000,
     });
   });
