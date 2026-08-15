@@ -78,9 +78,13 @@ describe("ChatInput", () => {
   });
 
   it("shows recording controls when isRecording", () => {
+    // `defaults` has voiceMode: false, i.e. dictation — where the checkmark
+    // inserts text rather than sending. This asserted "Send recording" for that
+    // case, which is the copy bug the "recording panel" tests below now cover
+    // on both flows.
     render(<ChatInput {...defaults} isRecording />);
     expect(screen.getByLabelText("Cancel recording")).toBeInTheDocument();
-    expect(screen.getByLabelText("Send recording")).toBeInTheDocument();
+    expect(screen.getByLabelText("Stop and insert text")).toBeInTheDocument();
   });
 });
 
@@ -164,6 +168,33 @@ describe("ChatInput attachments", () => {
       const mic = screen.getByLabelText("Start speaking");
       expect(mic).toBeEnabled();
       expect(mic).toHaveAttribute("data-tip", "Dictate");
+    });
+  });
+
+  /**
+   * Recording replaces the whole composer with a waveform panel, and its
+   * checkmark means two different things: in voice mode it sends the utterance
+   * as a turn, in dictation it only drops the transcript into the box. The
+   * panel used to say "Send recording" for both, promising the wrong outcome to
+   * anyone dictating.
+   */
+  describe("recording panel", () => {
+    it("offers to send the utterance in voice mode", () => {
+      render(<ChatInput {...defaults} isRecording voiceMode onVoiceModeChange={vi.fn()} />);
+      expect(screen.getByLabelText("Send recording")).toBeInTheDocument();
+      expect(screen.getByText(/Tap checkmark to send/)).toBeInTheDocument();
+    });
+
+    it("offers to insert the text when dictating, and does not claim to send", () => {
+      render(<ChatInput {...defaults} isRecording voiceMode={false} onVoiceModeChange={vi.fn()} />);
+      expect(screen.getByLabelText("Stop and insert text")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Send recording")).not.toBeInTheDocument();
+      expect(screen.getByText(/add what you said to the message/)).toBeInTheDocument();
+    });
+
+    it("always offers a way out of a recording", () => {
+      render(<ChatInput {...defaults} isRecording onCancelRecording={vi.fn()} />);
+      expect(screen.getByLabelText("Cancel recording")).toBeEnabled();
     });
   });
 });

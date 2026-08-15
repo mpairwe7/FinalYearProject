@@ -157,11 +157,16 @@ test.describe("Voice STT/TTS (mocked)", () => {
     const mic = page.getByRole("button", { name: "Start speaking" });
     await expect(mic).toBeEnabled();
     await mic.click();
-    await expect(page.getByRole("button", { name: "Stop listening" })).toBeVisible({
-      timeout: 10_000,
-    });
+
+    // Recording swaps the whole composer for the waveform panel — there is no
+    // mic button to re-press, which is what the first version of this test
+    // waited for. The checkmark is the stop control, and on this path it is
+    // labelled for what it actually does.
+    const stop = page.getByRole("button", { name: "Stop and insert text" });
+    await expect(stop).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Listening...")).toBeVisible();
     await page.waitForTimeout(1200); // let the fake device feed the recorder
-    await page.getByRole("button", { name: "Stop listening" }).click();
+    await stop.click();
 
     // The transcript lands in the textarea, and no turn was sent.
     await expect(page.getByLabel("Type your message")).toHaveValue(/TIN/i, { timeout: 15_000 });
@@ -178,11 +183,10 @@ test.describe("Voice STT/TTS (mocked)", () => {
     const box = page.getByLabel("Type your message");
     await box.fill("I registered last year");
     await page.getByRole("button", { name: "Start speaking" }).click();
-    await expect(page.getByRole("button", { name: "Stop listening" })).toBeVisible({
-      timeout: 10_000,
-    });
+    const stop = page.getByRole("button", { name: "Stop and insert text" });
+    await expect(stop).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(1200);
-    await page.getByRole("button", { name: "Stop listening" }).click();
+    await stop.click();
 
     // Half-typed question plus the dictated rest — replacing would lose the typing.
     await expect(box).toHaveValue(/I registered last year.*VAT/i, { timeout: 15_000 });

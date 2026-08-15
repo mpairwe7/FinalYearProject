@@ -92,7 +92,16 @@ function ChatInputInner({
   }, [message]);
 
   // ── Recording state: in-composer waveform + cancel/confirm ──
+  //
+  // Two flows land here and the checkmark means different things in each. In
+  // voice mode it sends the utterance as a turn. In dictation it does not send
+  // anything — it stops the recording and drops the transcript into the
+  // composer for you to edit. The panel said "Send recording" and "Tap
+  // checkmark to send" either way, which promised the wrong outcome to anyone
+  // dictating: they tap expecting their question to go, and get text in a box.
+  // Both the accessible name and the hint follow the flow now.
   if (isRecording) {
+    const confirmLabel = voiceMode ? 'Send recording' : 'Stop and insert text';
     return (
       <>
         <div className="composer cmpv2 composer-active-recording">
@@ -113,13 +122,18 @@ function ChatInputInner({
               className="composer-rec-confirm"
               onClick={onMicClick}
               disabled={isTransitioning}
-              aria-label="Send recording"
+              aria-label={confirmLabel}
+              data-tip={confirmLabel}
             >
               <CheckIcon />
             </button>
           </div>
         </div>
-        <p className="composer-hint">Tap checkmark to send, or X to cancel.</p>
+        <p className="composer-hint">
+          {voiceMode
+            ? 'Tap checkmark to send, or X to cancel.'
+            : 'Tap checkmark to add what you said to the message, or X to discard.'}
+        </p>
       </>
     );
   }
