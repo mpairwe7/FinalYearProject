@@ -163,10 +163,18 @@ jobs:
             OK=$(printf '%s' "$PATCH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "parse_err")
             [[ "$OK" == "success" ]] && break
 
-            # Deterministic failures — a bad token, a wrong app id, a rejected
-            # body. Retrying repeats them, so stop and say so immediately.
+            # Deterministic failures — a bad token, a rejected body. Retrying
+            # repeats them, so stop and say so immediately.
+            #
+            # 404 is deliberately NOT in this list. It looks deterministic, and
+            # on most APIs it is, but this control plane returned 404 for
+            # /apps/<id> at 08:43 on 2026-08-15 while the app was demonstrably
+            # alive — serving traffic, and successfully PATCHed with the same id
+            # and secret four hours earlier. Treating it as fatal cost a
+            # deployment. Retrying a genuinely missing app wastes ~75s and then
+            # fails with the same message, which is the cheaper mistake.
             case "$CODE" in
-              400|401|403|404|409|422)
+              400|401|403|409|422)
                 echo "::error::PATCH /apps/$CRANE_APP_ID rejected (HTTP $CODE, status=$OK) — not retrying"
                 printf '%s\n' "$PATCH" | head -200
                 exit 1
