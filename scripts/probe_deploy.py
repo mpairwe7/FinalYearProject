@@ -217,11 +217,25 @@ class Probe:
                 "POST", "/v1/tts", {"text": text + "x", "language": locale, "voice": "no-such-voice"}, 180
             )
             if self.check(code == 200, f"{locale}: an unknown voice still synthesizes", str(code)):
-                self.check(
-                    payload.get("voice") in opts,
-                    f"{locale}: unknown voice fell back into the catalogue",
-                    str(payload.get("voice")),
-                )
+                # Same provider check as above, and for the same reason. When
+                # Sunbird is unreachable the chain degrades to edge-tts, whose
+                # stand-in is an English voice that is correctly NOT in this
+                # locale's catalogue — so asserting catalogue membership turns a
+                # documented degradation into three red lines. Observed exactly
+                # that against the image with Sunbird timing out at ~30s.
+                served_by = (payload.get("backend") or "").split("+")[0]
+                default_provider = (voices.get(locale) or [{}])[0].get("provider") or "\0"
+                if not served_by.startswith(default_provider):
+                    self.note(
+                        f"{locale}: unknown-voice fallback served by {served_by} "
+                        f"({payload.get('voice')}) — {default_provider} was unreachable"
+                    )
+                else:
+                    self.check(
+                        payload.get("voice") in opts,
+                        f"{locale}: unknown voice fell back into the catalogue",
+                        str(payload.get("voice")),
+                    )
 
     def speech_to_text(self) -> None:
         """STT, per language, with real speech — not silence.

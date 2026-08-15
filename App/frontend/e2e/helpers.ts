@@ -36,6 +36,27 @@ export async function expectAuthCta(page: Page, liveName: RegExp) {
   }
 }
 
+/**
+ * Open Settings through the header's overflow menu — the one entry point that
+ * exists at every width.
+ *
+ * Not the sidebar's account block, which is what account-settings.spec.ts uses
+ * and why that spec is pinned to chromium: below 1024px the rail is a drawer
+ * parked off-screen at x=-312, and clicking it times out.
+ *
+ * The trap is that `isVisible()` returns **true** for it there. The drawer is
+ * moved with `transform: translateX(-100%)`, not `display:none`, so the button
+ * keeps a bounding box and Playwright counts it visible while it can never be
+ * clicked. Branching on isVisible() therefore picks the unreachable path on a
+ * phone and fails exactly as if there were no branch — which it did. Using the
+ * kebab unconditionally needs no probe, and it is a real path on desktop too.
+ */
+export async function openSettings(page: Page) {
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+}
+
 /** Seed an analytics-consent decision so the banner never renders.
  * The store reads "true"/"false" (see lib/analyticsConsent); anything else is
  * treated as undecided, so the banner would still show. */

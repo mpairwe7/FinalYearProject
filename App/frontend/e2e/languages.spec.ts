@@ -28,7 +28,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
+import { clearChatStore, mockBackend, openSettings, seedConsent, sendMessage } from "./helpers";
 
 /** Mirrors src/lib/locales.ts — kept here so a silent edit there fails a test. */
 const LOCALES = [
@@ -197,7 +197,7 @@ test.describe("Every configured language, through the UI", () => {
     });
 
     await page.goto("/");
-    await page.getByRole("button", { name: "Open settings" }).click();
+    await openSettings(page);
     await page.getByRole("tab", { name: "Voice" }).click();
 
     // Pick the non-default Luganda speaker. Voices are per language, so this
@@ -232,7 +232,7 @@ test.describe("Every configured language, through the UI", () => {
     await mockBackend(page);
     await mockVoiceCatalogue(page);
     await page.goto("/");
-    await page.getByRole("button", { name: "Open settings" }).click();
+    await openSettings(page);
     await page.getByRole("tab", { name: "Voice" }).click();
 
     for (const locale of LOCALES) {
