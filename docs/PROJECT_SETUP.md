@@ -263,16 +263,19 @@ screen: Keycloak → Realm settings → Login → *User registration*; Auth0 →
 Authentication → Database → *Disable Sign Ups* must be off.
 
 After the exchange, the callback sends staff to the tool their role can open
-(`ura_staff` → `/agent`, admin/auditor → `/admin`) and everyone else back to
-where the flow started — `/` for a sign-up, so a taxpayer who registers from the
-assistant lands back in the assistant rather than on a dashboard that refuses
-them.
+(`ura_staff` → `/agent`, admin/auditor → `/admin`). Everyone else goes to the
+`returnTo` the flow recorded, which only `/signup` sets — so a taxpayer who
+registers from the assistant lands back in the assistant, and a non-staff
+sign-in, which records nothing, falls back to `/` rather than a dashboard that
+would refuse them.
 
 Both entry points are reachable from the assistant without going looking for
-them: the header carries a Sign in / Sign up pair while signed out, the sidebar's
-account block carries the same pair plus Settings, and the landing hero says what
-an account adds. Nothing above those is gated — questions, document checks and
-voice all work signed out.
+them: the sidebar's account block carries Sign in, Sign up and Settings; the
+header carries the pair while signed out, though below 720px only *Sign up*
+stays (the header still has to fit the brand, language, mic and theme, and the
+sidebar carries both anyway); and the landing hero says what an account adds.
+Nothing above those is gated — questions, document checks and voice all work
+signed out.
 
 ### Wiring a provider
 

@@ -12,8 +12,6 @@
 
 export const STAFF_ROLES = ["ura_staff", "ura_admin", "ura_auditor"] as const;
 
-export type StaffRole = (typeof STAFF_ROLES)[number];
-
 const STAFF_ROLE_SET: ReadonlySet<string> = new Set(STAFF_ROLES);
 
 export function isStaffRole(role: string | undefined | null): boolean {

@@ -234,7 +234,7 @@ export function ActionButton({
   );
 }
 
-export type NoteKind = "info" | "ok" | "error";
+type NoteKind = "info" | "ok" | "error";
 
 export function StatusNote({ kind, children }: { kind: NoteKind; children: React.ReactNode }) {
   return (

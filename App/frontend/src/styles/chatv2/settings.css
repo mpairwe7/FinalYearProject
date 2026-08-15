@@ -896,6 +896,11 @@
 
 /* ---------------------------------------------------------------------------
  * Landing call to action, under the starter prompts.
+ *
+ * `landing-` and not `ldv2-`: both families live in this block on purpose —
+ * `ldv2-*` marks what the redesign REPLACED (block, brand, headline, cat) while
+ * `landing-*` are the surviving hooks the e2e specs still query (brand, sub,
+ * composer, prompts, chip). A new sibling of those follows them.
  * ------------------------------------------------------------------------- */
 .chatv2 .landing-auth {
   margin: 18px 0 0;

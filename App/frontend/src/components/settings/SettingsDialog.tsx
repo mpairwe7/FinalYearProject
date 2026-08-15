@@ -41,7 +41,7 @@ const TABS: readonly { id: SettingsTab; label: string }[] = [
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export interface SettingsDialogProps {
+interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
   /**

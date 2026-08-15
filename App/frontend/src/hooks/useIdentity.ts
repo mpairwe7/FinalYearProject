@@ -46,7 +46,6 @@ export type IdentityStatus =
 export interface IdentityState {
   status: IdentityStatus;
   identity: Identity | undefined;
-  hasToken: boolean;
   isStaff: boolean;
   /** Best available name: display email, else the provider's subject id. */
   name: string;
@@ -121,7 +120,6 @@ export function useIdentity(): IdentityState {
     return {
       status,
       identity,
-      hasToken: Boolean(token),
       isStaff: isStaffRole(identity?.role),
       name,
       roleName: roleLabel(identity?.role),

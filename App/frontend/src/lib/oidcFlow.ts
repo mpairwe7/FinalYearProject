@@ -23,14 +23,14 @@ import { discoverOidc, TOKEN_ENDPOINT_KEY } from "./oidc";
 
 export const OIDC_ISSUER = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
 export const OIDC_CLIENT_ID = (process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "").trim();
-export const OIDC_SCOPE = (process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email").trim();
+const OIDC_SCOPE = (process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email").trim();
 /**
  * Optional `audience`. Some providers only issue a verifiable JWT access token
  * when the request names an API audience — Auth0 returns an OPAQUE token
  * without it, which the backend cannot verify and rejects as malformed.
  * Keycloak needs nothing here (its audience mapper handles it).
  */
-export const OIDC_AUDIENCE = (process.env.NEXT_PUBLIC_OIDC_AUDIENCE || "").trim();
+const OIDC_AUDIENCE = (process.env.NEXT_PUBLIC_OIDC_AUDIENCE || "").trim();
 
 /** Both entry points return through this one route. */
 export const OIDC_REDIRECT_PATH = "/signin/callback";
@@ -43,7 +43,7 @@ export const OIDC_RETURN_TO_KEY = "ura_oidc_return_to";
 /** True when this deployment has an identity provider configured. */
 export const OIDC_CONFIGURED = Boolean(OIDC_ISSUER && OIDC_CLIENT_ID);
 
-export type AuthorizeMode = "signin" | "signup";
+type AuthorizeMode = "signin" | "signup";
 
 function randomHex(bytes = 32): string {
   const buf = new Uint8Array(bytes);
@@ -59,7 +59,7 @@ async function pkceChallenge(verifier: string): Promise<string> {
     .replace(/=+$/, "");
 }
 
-export interface BeginOidcOptions {
+interface BeginOidcOptions {
   /** `signup` asks the provider for its registration screen. */
   mode?: AuthorizeMode;
   /**
