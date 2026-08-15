@@ -8,9 +8,18 @@ dispatcher returns ``(is_valid, normalized_value, error_message)``.
 from __future__ import annotations
 
 import difflib
+import logging
 import re
+from collections.abc import Callable
 
 from ..calculator_router import parse_ugx_amount
+
+logger = logging.getLogger(__name__)
+
+#: Resolves a reply the rules could not place. Takes the raw reply and the
+#: options; returns the option it means, or None for "cannot tell". Returning
+#: anything that is not an option is treated as None — see _validate_enum.
+SlotResolver = Callable[[str, list[str]], "str | None"]
 
 _ENUM_RE = re.compile(r"^enum\[(.+)]$")
 _REGEX_RE = re.compile(r"^regex\[(.+)]$")
@@ -74,7 +83,7 @@ def _contains_sequence(haystack: list[str], needle: list[str]) -> bool:
     )
 
 
-def _validate_enum(value: str, spec: str) -> tuple[bool, str, str]:
+def _match_enum(value: str, options: list[str]) -> tuple[bool, str, str]:
     """Match a reply to one option, reading intent rather than demanding a token.
 
     The original compared the whole reply to each option with `==`, so an answer
@@ -98,13 +107,6 @@ def _validate_enum(value: str, spec: str) -> tuple[bool, str, str]:
     option re-asks naming just those, because guessing here writes a taxpayer
     classification into the rest of the flow.
     """
-    m = _ENUM_RE.match(spec)
-    if not m:
-        return False, value, "Invalid enum spec"
-    options = [o.strip() for o in m.group(1).split(",") if o.strip()]
-    if not options:
-        return False, value, "Invalid enum spec"
-
     reply = _canonical(value)
     if not reply:
         return False, value, f"Please choose one of: {', '.join(options)}"
@@ -177,6 +179,54 @@ def _validate_enum(value: str, spec: str) -> tuple[bool, str, str]:
     return False, value, f"Please choose one of: {', '.join(options)}"
 
 
+def _validate_enum(
+    value: str,
+    spec: str,
+    resolver: SlotResolver | None = None,
+) -> tuple[bool, str, str]:
+    """Deterministic matching first; ask the model only if that cannot decide.
+
+    The layers above are rules, and rules only cover what someone thought of.
+    They cannot read "sole trader", or an answer given in Luganda — which
+    matters in an assistant that answers in five languages and then demands the
+    English option word back.
+
+    So an optional resolver runs last, when every rule has failed. It is passed
+    in rather than imported (the same way speech_service takes its chat model)
+    so this module stays pure and testable, and so a deployment without a model
+    simply keeps the deterministic behaviour.
+
+    The model cannot invent a value. Whatever it answers is fed back through
+    `_match_enum`, so the result is an option or nothing — "unclear", a
+    paraphrase, or a hallucinated category all fail that check and re-ask. The
+    model's only job is to restate the reply in the option vocabulary; code
+    still decides whether that restatement is one of the options.
+    """
+    m = _ENUM_RE.match(spec)
+    if not m:
+        return False, value, "Invalid enum spec"
+    options = [o.strip() for o in m.group(1).split(",") if o.strip()]
+    if not options:
+        return False, value, "Invalid enum spec"
+
+    ok, matched, error = _match_enum(value, options)
+    if ok or resolver is None:
+        return ok, matched, error
+
+    try:
+        suggested = resolver(value, options)
+    except Exception:  # noqa: BLE001 — a resolver failure must not break the flow
+        logger.debug("slot resolver raised; keeping the deterministic result", exc_info=True)
+        return ok, matched, error
+    if not suggested:
+        return ok, matched, error
+
+    confirmed, value_out, _ = _match_enum(str(suggested), options)
+    if confirmed:
+        return True, value_out, ""
+    return ok, matched, error
+
+
 def _validate_regex(value: str, spec: str) -> tuple[bool, str, str]:
     m = _REGEX_RE.match(spec)
     if not m:
@@ -198,7 +248,10 @@ _NEGATIVE = {
 }
 
 
-def _validate_boolean(value: str) -> tuple[bool, bool | str, str]:
+def _validate_boolean(
+    value: str,
+    resolver: SlotResolver | None = None,
+) -> tuple[bool, bool | str, str]:
     """Yes/no, read from a sentence rather than a single token.
 
     Same failure as the enum matcher had: the whole reply was compared to a
@@ -216,6 +269,17 @@ def _validate_boolean(value: str) -> tuple[bool, bool | str, str]:
         return True, False, ""
     if yes and no:
         return False, value, "Was that a yes or a no?"
+    if resolver is not None:
+        # Same contract as the enum path: the model restates, code decides.
+        # A yes/no in another language is the common case here — no word list
+        # is going to hold every language's affirmative.
+        try:
+            suggested = resolver(value, ["yes", "no"])
+        except Exception:  # noqa: BLE001 — never let a resolver break the flow
+            logger.debug("boolean resolver raised", exc_info=True)
+            suggested = None
+        if suggested and str(suggested).strip().lower() in {"yes", "no"}:
+            return True, str(suggested).strip().lower() == "yes", ""
     return False, value, "Please answer yes or no."
 
 
@@ -244,19 +308,27 @@ def _validate_number(value: str, spec: str) -> tuple[bool, float | str, str]:
     return True, amount, ""
 
 
-def validate_slot(value: str, validator_spec: str) -> tuple[bool, object, str]:
+def validate_slot(
+    value: str,
+    validator_spec: str,
+    resolver: SlotResolver | None = None,
+) -> tuple[bool, object, str]:
     """Dispatch validation based on *validator_spec*.
 
     Returns ``(is_valid, normalized_value, error_message)``.
+
+    *resolver* is the optional last resort for choice questions — see
+    :func:`_validate_enum`. Omitted, every validator behaves exactly as before,
+    which is what keeps the unit tests here free of a model.
     """
     spec = validator_spec.strip()
 
     if spec == "boolean":
-        return _validate_boolean(value)
+        return _validate_boolean(value, resolver)
     if spec == "text" or not spec:
         return _validate_text(value)
     if spec.startswith("enum["):
-        return _validate_enum(value, spec)
+        return _validate_enum(value, spec, resolver)
     if spec.startswith("regex["):
         return _validate_regex(value, spec)
     if spec.startswith("number"):

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .loader import WorkflowDefinition, WorkflowStep, load_workflow
-from .slots import validate_slot
+from .slots import SlotResolver, validate_slot
 
 logger = logging.getLogger(__name__)
 
@@ -110,11 +110,21 @@ class WorkflowRegistry:
         return WorkflowSession(workflow_id=workflow_id)
 
     @classmethod
-    def advance(cls, session: WorkflowSession, user_input: str) -> WorkflowTurn:
+    def advance(
+        cls,
+        session: WorkflowSession,
+        user_input: str,
+        resolver: SlotResolver | None = None,
+    ) -> WorkflowTurn:
         """Advance the workflow by one step.
 
         Validates *user_input* against the current step's slot validator,
         stores the value, and returns the next prompt or completion.
+
+        *resolver* is threaded through to the slot validators as the last
+        resort for a choice question the deterministic rules cannot place.
+        Passed in rather than reached for, so this class stays free of the
+        model and its tests stay free of a fixture for one.
         """
         wf = cls._workflows.get(session.workflow_id)
         if not wf or session.completed:
@@ -137,7 +147,7 @@ class WorkflowRegistry:
         # question entirely so guided flows feel stateful rather than repetitive.
         if step.slot and session.slots.get(step.slot) not in ("", None):
             session.current_step_idx += 1
-            return cls.advance(session, user_input)
+            return cls.advance(session, user_input, resolver)
 
         # Informational terminal steps (question text but no slot/tool)
         # should be emitted once and then marked complete. This keeps
@@ -163,7 +173,7 @@ class WorkflowRegistry:
 
         # Validate slot input
         if step.slot and step.validator:
-            is_valid, normalised, error = validate_slot(user_input, step.validator)
+            is_valid, normalised, error = validate_slot(user_input, step.validator, resolver)
             if not is_valid:
                 return WorkflowTurn(
                     question=f"{error}\n\n{step.question}",

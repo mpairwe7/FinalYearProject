@@ -491,6 +491,40 @@ unset when a transcriber ran and returned nothing, and names the backend that
 answered. The composer says so too, rather than closing the recording panel onto
 an empty box: *"Didn't catch that. Try again, or type your question."*
 
+### Answering a guided flow's questions
+
+Guided workflows ask choice questions ("individual or organisation?") and used
+to accept only the option word, typed alone, in British spelling. "as an
+individual" and "organization" were both refused, and the flow re-asked the
+identical question — no way forward except guessing the exact token.
+
+Answers are now resolved in four widening layers, stopping at the first that
+identifies **exactly one** option:
+
+| Layer | Cost | Reaches |
+| --- | --- | --- |
+| Normalise + whole-word containment + distinctive prefix | µs | `as an individual`, `PAYE`, `withholding`, `management fees` |
+| Alias table (word-level, one-directional) | µs | `organization`, `momo` |
+| Fuzzy edit distance (stdlib `difflib`) | µs | `individul`, `organistion`, `compnay` |
+| Semantic resolution via the LLM | one short call, only on failure | `sole trader`, replies in any of the five languages |
+
+Two properties matter more than the breadth:
+
+**It never resolves ambiguity by picking.** These answers set a taxpayer
+classification the rest of the flow depends on, so a reply fitting two options
+asks again and names them. The fuzzy layer additionally requires a 0.82
+similarity, a 4-character minimum, and a 0.12 margin over the runner-up —
+`mport` resolves to import, `port` (0.80 against both) does not.
+
+**The model cannot introduce a value.** The semantic layer is injected, not
+imported — `WorkflowRegistry.advance(session, input, resolver)`, the same shape
+`speech_service` uses for its chat model — so the validators stay pure and their
+tests need no model. Whatever the model answers is fed back through the
+deterministic matcher, so `unclear`, a paraphrase, or an invented category all
+fail that check and the flow asks again. Its only job is to restate the reply in
+the option's own words; code still decides whether that restatement is an
+option. A deployment without a model keeps the deterministic behaviour exactly.
+
 ### Testing speech across the languages
 
 Three layers, because each catches something the others cannot:

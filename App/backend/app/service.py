@@ -3554,6 +3554,26 @@ class ChatModel:
             completed=str(row.get("status", "")) == "completed",
         )
 
+    @staticmethod
+    def _resolve_slot_choice(reply: str, options: list[str]) -> str | None:
+        """Last resort for a choice question the deterministic rules cannot place.
+
+        Handed to the workflow registry rather than reached for from inside it,
+        so the validators stay pure and their tests need no model.
+
+        Reached only after every rule has failed, which after normalisation,
+        containment, prefix and fuzzy matching is rare — so this does not put an
+        inference call on the common path. Its answer is re-validated against
+        the option list by the caller, so the model cannot introduce a value;
+        "unclear" and anything else off-list simply fall through to asking again.
+        """
+        from . import llm  # noqa: PLC0415 — deferred: llm imports torch lazily
+
+        if not llm.is_available():
+            return None
+        text = llm.classify_choice(reply, options)
+        return text or None
+
     def _advance_workflow(
         self,
         session: WorkflowSession,
@@ -3561,7 +3581,7 @@ class ChatModel:
     ) -> tuple[Any, list[str]]:
         """Advance a workflow and execute any deterministic tool steps inline."""
         tool_messages: list[str] = []
-        turn = WorkflowRegistry.advance(session, user_input)
+        turn = WorkflowRegistry.advance(session, user_input, self._resolve_slot_choice)
         while turn.tool_call:
             try:
                 from .mcp import get_client  # noqa: PLC0415

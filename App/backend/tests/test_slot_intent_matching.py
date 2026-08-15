@@ -164,6 +164,68 @@ class MisspellingTests(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class SemanticResolverTests(unittest.TestCase):
+    """The layer the rules cannot reach — and the leash on it.
+
+    Rules only cover phrasings someone anticipated. "sole trader", or an answer
+    given in Luganda, needs meaning rather than string distance. That is what
+    the resolver is for, and it is injected rather than imported so these tests
+    need no model.
+
+    The important property is not that it helps. It is that it cannot hurt: its
+    answer is re-validated against the option list, so the model can restate a
+    reply but never introduce a value.
+    """
+
+    def test_it_is_not_consulted_when_the_rules_already_decided(self):
+        calls = []
+        def resolver(reply, options):
+            calls.append(reply)
+            return "organisation"
+        ok, value, _ = validate_slot("as an individual", KIND, resolver)
+        self.assertTrue(ok)
+        self.assertEqual(value, "individual")
+        self.assertEqual(calls, [], "an inference call on the common path is waste")
+
+    def test_it_places_a_reply_no_rule_covers(self):
+        ok, value, _ = validate_slot("sole trader", KIND, lambda r, o: "individual")
+        self.assertTrue(ok)
+        self.assertEqual(value, "individual")
+
+    def test_it_handles_another_language(self):
+        """"nedda" is Luganda for no; no English word list will ever hold it."""
+        ok, value, _ = validate_slot("nedda", "boolean", lambda r, o: "no")
+        self.assertTrue(ok)
+        self.assertIs(value, False)
+
+    def test_unclear_falls_through_to_asking_again(self):
+        ok, _, error = validate_slot("hmm not sure", KIND, lambda r, o: "unclear")
+        self.assertFalse(ok)
+        self.assertIn("individual", error)
+
+    def test_a_value_outside_the_options_is_rejected(self):
+        """The model cannot introduce a taxpayer classification of its own."""
+        ok, _, error = validate_slot("something", KIND, lambda r, o: "sole_proprietor")
+        self.assertFalse(ok, "an off-list answer must not become a slot value")
+        self.assertIn("Please choose one of", error)
+
+    def test_a_chatty_answer_is_still_matched_by_the_rules(self):
+        """It restates; code decides. A sentence containing the option is fine."""
+        ok, value, _ = validate_slot("dunno", KIND, lambda r, o: "I think they mean individual")
+        self.assertTrue(ok)
+        self.assertEqual(value, "individual")
+
+    def test_a_resolver_that_raises_does_not_break_the_flow(self):
+        def boom(reply, options):
+            raise RuntimeError("model down")
+        ok, _, error = validate_slot("something", KIND, boom)
+        self.assertFalse(ok)
+        self.assertIn("Please choose one of", error)
+
+    def test_no_resolver_behaves_exactly_as_before(self):
+        self.assertEqual(validate_slot("sole trader", KIND), validate_slot("sole trader", KIND, None))
+
+
 class BooleanTests(unittest.TestCase):
     def test_natural_affirmatives(self):
         for reply in ("yes", "yeah", "yep", "sure", "ok", "yes please", "that's right"):

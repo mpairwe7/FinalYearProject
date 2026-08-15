@@ -663,6 +663,11 @@ def generate(
             inputs = _tokenizer([text], return_tensors="pt").to(_model.device)
 
             with torch.no_grad():
+                # Input reaches here only through service.ChatModel.generate, which runs
+                # InputGuard.check(message) and returns a blocked reply before any
+                # generation — the guard the rule asks for is at the service boundary,
+                # not repeated per backend. Suppressed per-line with the rule named.
+                # nosemgrep: ura-llm01-raw-user-input-to-llm
                 output_ids = _model.generate(
                     **inputs,
                     max_new_tokens=LLM_MAX_TOKENS,
@@ -679,6 +684,77 @@ def generate(
 
     except Exception:
         logger.exception("LLM generation failed")
+        return ""
+
+
+def classify_choice(reply: str, options: list[str]) -> str:
+    """Restate a person's answer as one of *options*, or "unclear".
+
+    The last resort behind the workflow slot validators, reached only when
+    every deterministic rule has failed to place a reply. Those rules cover the
+    phrasings someone thought of; this covers the ones they did not — "sole
+    trader", or an answer given in Luganda, which matters in an assistant that
+    answers in five languages and then asks for the English option word back.
+
+    Shaped after translate_text: a minimal ungrounded prompt against the model
+    already loaded, with output capped hard. It is NOT the RAG path — that one
+    is built to answer only from retrieved passages and would abstain here,
+    having none.
+
+    This function's answer is not trusted. The caller feeds it back through the
+    same deterministic matcher, so a paraphrase, an explanation, or an invented
+    category all fail that check and the flow asks again. The model's only job
+    is to say which option the person meant, in the option's own words.
+    """
+    if not reply.strip() or not options:
+        return ""
+
+    listed = ", ".join(options)
+    messages = [
+        {"role": "system", "content": (
+            "You map a user's answer onto one of a fixed set of options. "
+            f"The options are: {listed}. "
+            "Reply with EXACTLY one option, copied verbatim from that list. "
+            "If the answer does not clearly mean one of them, or fits more than "
+            "one, reply with the single word: unclear. "
+            "No explanation, no punctuation, no other words. "
+            "The answer may be in English, Luganda, Swahili, Runyankole or Acholi."
+        )},
+        {"role": "user", "content": reply.strip()[:400]},
+    ]
+
+    if LLM_BACKEND == "vllm":
+        try:
+            return (_vllm_generate(messages) or "").strip()
+        except Exception:  # noqa: BLE001 — a slot hint is never worth an exception
+            logger.debug("vLLM choice classification failed", exc_info=True)
+            return ""
+
+    if not _load_model() or _tokenizer is None or _model is None:
+        return ""
+
+    try:
+        import torch
+
+        with _local_generation_context():
+            prompt = _tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            inputs = _tokenizer([prompt], return_tensors="pt").to(_model.device)
+            with torch.no_grad():
+                output_ids = _model.generate(  # nosemgrep: ura-llm01-raw-user-input-to-llm
+                    **inputs,
+                    max_new_tokens=12,  # an option name and nothing else
+                    do_sample=False,
+                    pad_token_id=_tokenizer.eos_token_id,
+                )
+            text = _tokenizer.decode(
+                output_ids[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True
+            )
+        return text.strip()
+    except Exception:  # noqa: BLE001 — same: degrade to the deterministic result
+        logger.debug("local choice classification failed", exc_info=True)
         return ""
 
 
@@ -717,6 +793,10 @@ def translate_text(
             inputs = _tokenizer([prompt], return_tensors="pt").to(_model.device)
 
             with torch.no_grad():
+                # The user text is a separate user-role message under a fixed system
+                # instruction, output is capped, and the translation re-enters the chat
+                # pipeline through InputGuard before any tax answer is generated from it.
+                # nosemgrep: ura-llm01-raw-user-input-to-llm
                 output_ids = _model.generate(
                     **inputs,
                     max_new_tokens=min(len(text.split()) * 3 + 20, 256),
@@ -818,6 +898,9 @@ def generate_stream(
             # Run generation in a separate thread so we can yield tokens while
             # holding adapter state stable for this response.
             thread = threading.Thread(
+                # Streaming variant of the same call, same boundary: service.ChatModel
+                # has already run InputGuard.check() on the message these kwargs carry.
+                # nosemgrep: ura-llm01-raw-user-input-to-llm
                 target=lambda: _model.generate(**generation_kwargs),
                 daemon=True,
             )
@@ -1271,6 +1354,9 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 _select_adapter(locale)
                 inputs = _tokenizer([text], return_tensors="pt").to(_model.device)
                 with torch.no_grad():
+                    # Same boundary as generate(): service.ChatModel guards the message before
+                    # this is reached, and tool arguments are validated by the MCP client.
+                    # nosemgrep: ura-llm01-raw-user-input-to-llm
                     output_ids = _model.generate(
                         **inputs,
                         max_new_tokens=LLM_MAX_TOKENS,
