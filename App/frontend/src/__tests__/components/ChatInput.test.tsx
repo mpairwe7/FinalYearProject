@@ -196,5 +196,23 @@ describe("ChatInput attachments", () => {
       render(<ChatInput {...defaults} isRecording onCancelRecording={vi.fn()} />);
       expect(screen.getByLabelText("Cancel recording")).toBeEnabled();
     });
+
+    /**
+     * The trap that broke three CI runs: while recording, the composer is
+     * replaced wholesale, so the mic button — and its "Stop listening" label —
+     * does not exist, even though speechState is 'listening' at the same time.
+     * Three e2e tests waited on that label and timed out. Pinning it here means
+     * the next person writing a recording test sees why it is not there.
+     */
+    it("has no mic button while recording, in either flow", () => {
+      for (const voiceMode of [true, false]) {
+        const { unmount } = render(
+          <ChatInput {...defaults} isRecording speechState="listening" voiceMode={voiceMode} />,
+        );
+        expect(screen.queryByLabelText("Stop listening")).not.toBeInTheDocument();
+        expect(screen.queryByLabelText("Start speaking")).not.toBeInTheDocument();
+        unmount();
+      }
+    });
   });
 });

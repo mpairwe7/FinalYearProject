@@ -37,11 +37,13 @@ test.describe("Voice STT/TTS — mobile composer (mocked)", () => {
     await expect(page.getByPlaceholder(/Voice mode on/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Exit voice mode" })).toBeVisible();
 
-    // Tap the mic → getUserMedia + MediaRecorder.start succeeded.
+    // Tap the mic → getUserMedia + MediaRecorder.start succeeded. Recording
+    // replaces the composer with the waveform panel, so the mic is gone and the
+    // checkmark is what stops it — labelled "Send recording" here because voice
+    // mode does send the utterance as a turn.
     await page.getByRole("button", { name: "Start speaking" }).click();
-    await expect(page.getByRole("button", { name: "Stop listening" })).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(page.getByText("Listening...")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("button", { name: "Send recording" })).toBeVisible();
   });
 
   test("full mobile round-trip: capture → /v1/voice/chat → transcript + reply", async ({
@@ -53,13 +55,12 @@ test.describe("Voice STT/TTS — mobile composer (mocked)", () => {
 
     await page.getByRole("button", { name: "Enter voice mode" }).click();
     await page.getByRole("button", { name: "Start speaking" }).click();
-    await expect(page.getByRole("button", { name: "Stop listening" })).toBeVisible({
-      timeout: 10_000,
-    });
+    const send = page.getByRole("button", { name: "Send recording" });
+    await expect(send).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(1500); // let the fake device feed the recorder
 
-    // Second tap stops + sends the utterance → the stub answers with both.
-    await page.getByRole("button", { name: "Stop listening" }).click();
+    // The checkmark stops + sends the utterance → the stub answers with both.
+    await send.click();
 
     await expect(page.locator(".message-row-user")).toContainText(/VAT/i, { timeout: 15_000 });
     await expect(page.locator(".message-row-assistant")).toContainText("18%", {
