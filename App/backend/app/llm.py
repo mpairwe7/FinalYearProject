@@ -768,6 +768,24 @@ def translate_text(
     Uses the already-loaded Qwen3-8B with a minimal prompt (no RAG context)
     and capped output length to avoid runaway generation.
     """
+    # Guard here, not upstream. I first suppressed this call site on the claim
+    # that "InputGuard runs at the service boundary" — that is true for the chat
+    # paths and false for this one. /v1/voice/chat translates the transcript at
+    # step 2 and only reaches the guarded chat model at step 3, and /v1/translate
+    # is a public endpoint that hands arbitrary text straight to this function.
+    # Both were reaching an LLM unchecked, which is exactly what the rule is for.
+    #
+    # Refusing rather than translating: a blocked input makes the MT chain fall
+    # through to its next backend or report the failure, which is a better
+    # outcome than faithfully translating an injection attempt into the language
+    # the chat model is about to read.
+    from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
+
+    verdict = InputGuard().check(text)
+    if not verdict.allowed:
+        logger.warning("Prompted MT refused input: %s", verdict.reason)
+        return ""
+
     if not _load_model() or _tokenizer is None or _model is None:
         return ""
 
