@@ -10,8 +10,9 @@
  * The capability did not go anywhere: the composer's voice mode records,
  * POSTs /v1/voice/chat, and renders transcript + reply, which is what the
  * dialog did. So the coverage moves here rather than being deleted. The
- * round-trip is REST now, not the WS stream, which is why mockVoiceWebSocket is
- * no longer needed.
+ * round-trip is REST now, not the WS stream, so the mockVoiceWebSocket helper
+ * these tests used went with them — it had no other caller. It is in git history
+ * if the dialog is ever given an entry point again.
  *
  * Run on the mobile-chrome project (Pixel 7) — it needs the Chromium fake
  * capture device. See voice-e2e.yml.

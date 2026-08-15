@@ -29,15 +29,33 @@ const HEADER_ONLY = "these controls are hidden on the mobile layout (<720px)";
  * expose webkitSpeechRecognition. Dictation there falls through to recording +
  * the server's /v1/asr, and that path had no test: the button was enabled,
  * tapping it hit `if (!recognitionRef.current) return`, and nothing happened.
- * Deleting the API in Chromium is how we reach that branch while keeping the
+ * Removing the API in Chromium is how we reach that branch while keeping the
  * fake capture device, which Firefox has no equivalent of.
+ *
+ * defineProperty, not `delete`. Chromium exposes webkitSpeechRecognition as an
+ * IDL attribute on the Window *prototype*, so deleting it off the instance is a
+ * silent no-op: the prototype accessor still resolves, the app builds a real
+ * recognizer, and start() then never fires onstart because headless CI has no
+ * speech service. That is not hypothetical — it is exactly how these two tests
+ * failed on chromium. Shadowing with an own property is what actually hides it,
+ * and assertNoSpeechApi below makes a regression here loud instead of a
+ * timeout on an unrelated button label.
  */
 async function withoutSpeechApi(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
-    const w = window as unknown as Record<string, unknown>;
-    delete w.SpeechRecognition;
-    delete w.webkitSpeechRecognition;
+    for (const name of ["SpeechRecognition", "webkitSpeechRecognition"]) {
+      Object.defineProperty(window, name, { value: undefined, configurable: true });
+    }
   });
+}
+
+/** Fail on the precondition rather than timing out on a button label. */
+async function assertNoSpeechApi(page: import("@playwright/test").Page) {
+  const visible = await page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+  });
+  expect(visible, "Speech API still reachable — the fallback branch was not exercised").toBe(false);
 }
 
 test.describe("Voice STT/TTS (mocked)", () => {
@@ -132,6 +150,7 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await withoutSpeechApi(page);
     await mockBackend(page, { transcript: "how do I register for a TIN" });
     await page.goto("/");
+    await assertNoSpeechApi(page);
 
     // Not in voice mode: this is dictation, which fills the composer rather
     // than sending a turn.
@@ -154,6 +173,7 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await withoutSpeechApi(page);
     await mockBackend(page, { transcript: "and what about VAT" });
     await page.goto("/");
+    await assertNoSpeechApi(page);
 
     const box = page.getByLabel("Type your message");
     await box.fill("I registered last year");
