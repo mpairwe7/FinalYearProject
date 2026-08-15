@@ -198,6 +198,26 @@ class SemanticResolverTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIs(value, False)
 
+    def test_the_models_answer_is_read_as_tolerantly_as_a_persons(self):
+        """A phrased answer from the model counts, exactly as it would from a user.
+
+        This path used to require `== "yes"`, so "No." was accepted from a person
+        and rejected from the model. Qwen answers "unclear" for words it does not
+        know — which must still fall through — but it should not be punished for
+        a full stop.
+        """
+        for answer, expected in [("No.", False), ("the answer is no", False), ("Yes", True)]:
+            with self.subTest(answer=answer):
+                ok, value, _ = validate_slot("hmm", "boolean", lambda r, o, a=answer: a)
+                self.assertTrue(ok, answer)
+                self.assertIs(value, expected)
+
+    def test_unclear_from_the_model_still_falls_through(self):
+        """Observed live: Qwen3-8B answers "unclear" for Luganda "nedda"."""
+        ok, _, error = validate_slot("nedda", "boolean", lambda r, o: "unclear")
+        self.assertFalse(ok)
+        self.assertIn("yes or no", error)
+
     def test_unclear_falls_through_to_asking_again(self):
         ok, _, error = validate_slot("hmm not sure", KIND, lambda r, o: "unclear")
         self.assertFalse(ok)

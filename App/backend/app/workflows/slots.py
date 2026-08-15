@@ -248,6 +248,17 @@ _NEGATIVE = {
 }
 
 
+def _match_boolean(value: str) -> tuple[bool, bool | None]:
+    """(decided, verdict). Undecided when neither or both senses appear."""
+    words = set(_words(value))
+    yes, no = words & _AFFIRMATIVE, words & _NEGATIVE
+    if yes and not no:
+        return True, True
+    if no and not yes:
+        return True, False
+    return False, None
+
+
 def _validate_boolean(
     value: str,
     resolver: SlotResolver | None = None,
@@ -259,15 +270,10 @@ def _validate_boolean(
     rejected and the question repeated. Now any word in the reply decides it,
     and a reply carrying both ("yes and no") re-asks rather than picking.
     """
-    words = set(_words(value))
-    if not words:
-        return False, value, "Please answer yes or no."
-    yes, no = words & _AFFIRMATIVE, words & _NEGATIVE
-    if yes and not no:
-        return True, True, ""
-    if no and not yes:
-        return True, False, ""
-    if yes and no:
+    decided, verdict = _match_boolean(value)
+    if decided:
+        return True, verdict, ""
+    if verdict is None and set(_words(value)) & _AFFIRMATIVE and set(_words(value)) & _NEGATIVE:
         return False, value, "Was that a yes or a no?"
     if resolver is not None:
         # Same contract as the enum path: the model restates, code decides.
@@ -278,8 +284,16 @@ def _validate_boolean(
         except Exception:  # noqa: BLE001 — never let a resolver break the flow
             logger.debug("boolean resolver raised", exc_info=True)
             suggested = None
-        if suggested and str(suggested).strip().lower() in {"yes", "no"}:
-            return True, str(suggested).strip().lower() == "yes", ""
+        # Re-read the model's answer with the same word matching used on the
+        # user's, not `== "yes"`. The enum path already re-validates tolerantly;
+        # doing it strictly here meant "No." or "the answer is no" was accepted
+        # from a person and rejected from the model, for no reason anyone could
+        # have justified. "unclear" matches neither and falls through, which is
+        # what it is for.
+        if suggested:
+            decided, verdict = _match_boolean(str(suggested))
+            if decided:
+                return True, verdict, ""
     return False, value, "Please answer yes or no."
 
 
