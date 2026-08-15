@@ -130,15 +130,53 @@ jobs:
           [[ -n "$TOKEN" ]] || { echo "::error::Crane Cloud login returned no access_token after 3 attempts"; exit 1; }
           echo "✓ Logged in to Crane Cloud"
 
-          # 2. PATCH the app to the new image string
+          # 2. PATCH the app to the new image string.
+          #
+          #    Retried, for the same reason the login above is: the dependency
+          #    is flaky in a documented way. A PATCH carrying `image` makes
+          #    Crane Cloud re-validate the tag against hub.docker.com's web API
+          #    (CRANE_CLOUD_DEPLOYMENT.md §7.2), and when that lookup lags or
+          #    cannot resolve, the whole PATCH fails server-side and nothing is
+          #    applied — the image is already verified reachable a step above,
+          #    so a failure here says nothing about our artifact.
+          #
+          #    Setting an image to a fixed value is idempotent, so retrying is
+          #    safe. Backoff is 5s, 10s, 20s, 40s: ~75s total, enough to ride
+          #    out a blip without holding the runner open. A sustained outage
+          #    (the Jul 1-2 one lasted days) is NOT what this covers — that is
+          #    what ura-chatbot-cc-redeploy-retry.yml exists for.
           PATCH_BODY=$(python3 -c "import json,os; print(json.dumps({'image': os.environ['IMAGE']}))")
-          PATCH=$(curl -sS -X PATCH "$CRANE_CLOUD_API/apps/$CRANE_APP_ID" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H 'Content-Type: application/json' \
-            -d "$PATCH_BODY")
-          OK=$(printf '%s' "$PATCH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "parse_err")
+          OK=""
+          PATCH=""
+          for attempt in 1 2 3 4 5; do
+            RESPONSE=$(curl -sS -w $'\n%{http_code}' -X PATCH "$CRANE_CLOUD_API/apps/$CRANE_APP_ID" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H 'Content-Type: application/json' \
+              -d "$PATCH_BODY" || printf '\n000')
+            CODE=$(printf '%s' "$RESPONSE" | tail -n1)
+            PATCH=$(printf '%s' "$RESPONSE" | sed '$d')
+            OK=$(printf '%s' "$PATCH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "parse_err")
+            [[ "$OK" == "success" ]] && break
+
+            # Deterministic failures — a bad token, a wrong app id, a rejected
+            # body. Retrying repeats them, so stop and say so immediately.
+            case "$CODE" in
+              400|401|403|404|409|422)
+                echo "::error::PATCH /apps/$CRANE_APP_ID rejected (HTTP $CODE, status=$OK) — not retrying"
+                printf '%s\n' "$PATCH" | head -200
+                exit 1
+                ;;
+            esac
+
+            if [[ $attempt -lt 5 ]]; then
+              DELAY=$((5 * 2 ** (attempt - 1)))
+              echo "PATCH attempt $attempt/5 failed (HTTP $CODE, status=$OK) — retrying in ${DELAY}s…"
+              printf '%s\n' "$PATCH" | head -20
+              sleep "$DELAY"
+            fi
+          done
           if [[ "$OK" != "success" ]]; then
-            echo "::error::PATCH /apps/$CRANE_APP_ID failed: $OK"
+            echo "::error::PATCH /apps/$CRANE_APP_ID failed after 5 attempts: $OK"
             printf '%s\n' "$PATCH" | head -200
             exit 1
           fi
