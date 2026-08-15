@@ -176,7 +176,14 @@ jobs:
             case "$CODE" in
               400|401|403|409|422)
                 echo "::error::PATCH /apps/$CRANE_APP_ID rejected (HTTP $CODE, status=$OK) — not retrying"
-                printf '%s\n' "$PATCH" | head -200
+                # head <<< rather than printf | head. Under `set -euo pipefail`
+                # a large body makes head exit first, printf takes SIGPIPE, and
+                # the failing pipeline aborts the script. On 2026-08-15 Crane
+                # Cloud answered 500 with an HTML SQLAlchemy traceback and this
+                # very line — the one printing the diagnosis — ended the retry
+                # loop at attempt 2 of 5. A here-string is not a pipeline, so
+                # there is nothing for pipefail to catch.
+                head -200 <<< "$PATCH"
                 exit 1
                 ;;
             esac
@@ -184,13 +191,13 @@ jobs:
             if [[ $attempt -lt 5 ]]; then
               DELAY=$((5 * 2 ** (attempt - 1)))
               echo "PATCH attempt $attempt/5 failed (HTTP $CODE, status=$OK) — retrying in ${DELAY}s…"
-              printf '%s\n' "$PATCH" | head -20
+              head -20 <<< "$PATCH"
               sleep "$DELAY"
             fi
           done
           if [[ "$OK" != "success" ]]; then
             echo "::error::PATCH /apps/$CRANE_APP_ID failed after 5 attempts: $OK"
-            printf '%s\n' "$PATCH" | head -200
+            head -200 <<< "$PATCH"
             exit 1
           fi
           # The PATCH response sometimes omits the URL; GET /apps/<id>
