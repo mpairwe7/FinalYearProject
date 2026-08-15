@@ -594,9 +594,42 @@
 # failures being exactly the defect this image fixes. All 7 CI workflows green
 # on this commit.
 #
+# ---------------------------------------------------------------------------
+# sha-5b1b61b — the sign-in redirect works again.
+#
+# The defect this rolls out was reported from a real browser console:
+#
+#   Could not start the sign-in redirect: Unexpected token '<', "<!DOCTYPE "...
+#   is not valid JSON
+#
+# The service worker's "network-first for pages" branch had no origin check, so
+# it also caught cross-origin GETs — including the OIDC discovery document. It
+# re-issued that request from the worker's context, where a worker keeps the CSP
+# it was *installed* with: an instance registered before the provider's origin
+# was added to connect-src blocked it, while the page's own current CSP allowed
+# it. The worker then fell back through its cache to /offline.html, so the OIDC
+# client received an HTML page where it expected JSON. Hence the parse error,
+# and hence its intermittence — only browsers carrying a stale worker saw it.
+#
+# Cross-origin requests are now handed back to the browser untouched, and
+# CACHE_NAME goes v4 to v5 so anything stored under the old rules is dropped.
+# /sw.js is served max-age=0 and the worker calls skipWaiting() + clients.claim(),
+# so the replacement takes effect on the next page load rather than lingering.
+#
+# Also carried: the ASR chain no longer reports "All ASR backends failed" when a
+# transcriber ran and simply heard nothing, so /v1/voice/chat reaches its "No
+# speech detected" branch instead of naming five internal components at someone
+# who paused; and the composer says "Didn't catch that" rather than closing the
+# recording panel onto an empty box.
+#
+# Verified against this exact image pulled and run locally: 113/113 on
+# scripts/probe_deploy.py (TTS and STT across all five languages) and 34/34 on
+# e2e/verify-auth-flows.mjs (PKCE S256, state, prompt=create, a forged callback
+# refused, zero CSP violations). All CI green on this commit.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-255a56f
+FROM landwind/ura-chatbot:sha-5b1b61b
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
