@@ -119,6 +119,51 @@ class AmbiguityTests(unittest.TestCase):
         self.assertTrue(error)
 
 
+class MisspellingTests(unittest.TestCase):
+    """Answers typed quickly on a phone are still answers.
+
+    Everything above assumes the words are spelled the way the option is.
+    "individul" and "organistion" are not wrong answers; refusing them repeats
+    the original failure with a different cause.
+    """
+
+    def test_common_typos_resolve(self):
+        for reply, spec, expected in [
+            ("individul", KIND, "individual"),
+            ("indavidual", KIND, "individual"),
+            ("organistion", KIND, "organisation"),
+            ("organisatoin", KIND, "organisation"),
+            ("compnay", ENTITY, "company"),
+            ("corporaton tax", TAX, "corporation tax"),
+            ("witholding tax", TAX, "withholding tax"),
+        ]:
+            with self.subTest(reply=reply):
+                ok, value, _ = validate_slot(reply, spec)
+                self.assertTrue(ok, f"{reply!r} should resolve to {expected!r}")
+                self.assertEqual(value, expected)
+
+    def test_a_dropped_letter_picks_the_nearer_option(self):
+        """"mport" is import (0.91) not export (0.73) — the margin decides."""
+        ok, value, _ = validate_slot("mport", TRADE)
+        self.assertTrue(ok)
+        self.assertEqual(value, "import")
+
+    def test_equidistant_typo_is_refused(self):
+        """"port" scores 0.80 against both import and export. Do not pick."""
+        ok, _, error = validate_slot("port", TRADE)
+        self.assertFalse(ok)
+        self.assertIn("import", error)
+
+    def test_near_identical_options_are_never_split_by_a_hair(self):
+        ok, _, error = validate_slot("individua", "enum[individual,individuals]")
+        self.assertFalse(ok)
+        self.assertIn("Did you mean", error)
+
+    def test_short_replies_do_not_drift_into_an_option(self):
+        ok, _, _ = validate_slot("abc", KIND)
+        self.assertFalse(ok)
+
+
 class BooleanTests(unittest.TestCase):
     def test_natural_affirmatives(self):
         for reply in ("yes", "yeah", "yep", "sure", "ok", "yes please", "that's right"):

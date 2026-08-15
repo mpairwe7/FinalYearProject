@@ -7,6 +7,7 @@ dispatcher returns ``(is_valid, normalized_value, error_message)``.
 
 from __future__ import annotations
 
+import difflib
 import re
 
 from ..calculator_router import parse_ugx_amount
@@ -145,6 +146,33 @@ def _validate_enum(value: str, spec: str) -> tuple[bool, str, str]:
         return True, starts[0], ""
     if len(starts) > 1:
         return False, value, f"Did you mean {' or '.join(starts)}?"
+
+    # 4. Misspelling. Everything above assumes the words are spelled the way the
+    #    option is; "individul" and "organistion" are not wrong answers, they are
+    #    right answers typed quickly on a phone.
+    #
+    #    difflib rather than a fuzzy-matching dependency: it is stdlib, so it
+    #    works in the slim deploy image that ships no torch, and it costs
+    #    microseconds against option lists this size.
+    #
+    #    Three guards, because a wrong match here is worse than asking again:
+    #    a high cutoff, a minimum length so short replies cannot drift into an
+    #    option, and a required margin over the runner-up so two similar options
+    #    ("import"/"export" differ by two characters) can never be decided by a
+    #    hair. Failing those, it asks — it does not pick the closest.
+    phrase = " ".join(meaningful)
+    if len(phrase) >= 4:
+        scored = sorted(
+            ((difflib.SequenceMatcher(None, phrase, " ".join(w)).ratio(), opt)
+             for opt, w in opt_words.items()),
+            reverse=True,
+        )
+        best, runner_up = scored[0], (scored[1] if len(scored) > 1 else (0.0, ""))
+        if best[0] >= 0.82 and best[0] - runner_up[0] >= 0.12:
+            return True, best[1], ""
+        if best[0] >= 0.82:
+            near = [o for r, o in scored if r >= 0.82]
+            return False, value, f"Did you mean {' or '.join(near)}?"
 
     return False, value, f"Please choose one of: {', '.join(options)}"
 
