@@ -403,10 +403,39 @@ preferences stored for their own sake:
 | Tab | Controls | Written to |
 | --- | --- | --- |
 | General | Theme, response language | `lib/theme` (`ura-theme`), `useChatStore.locale` — the same values the header's theme button and language menu use |
-| Voice | Narrate replies, narration voice (+ sample playback) | page narration state, `useVoiceStore.voiceId` (read by every `/v1/tts` call) |
+| Voice | Narrate replies; a narration voice **per language**, each with its own preview | page narration state, `useVoiceStore.voiceByLocale` (read by every `/v1/tts` call site, keyed on the active locale) |
 | Tax profile | Display name, taxpayer type, industry, answer detail, record language, registered tax heads | `GET`/`PUT /v1/me/profile` — needs an account, and says so when signed out |
 | Privacy & data | Anonymous analytics; consent receipts; download or delete local conversations; export or erase account data | `ura_analytics_consent`, `/v1/me/consents` (grant/withdraw), `useChatStore`, `GET /v1/me/export`, `DELETE /v1/me` |
 | Account | Identity, role, tenant, provider subject; sign in / sign up / sign out; operations links for staff | `GET /v1/me`, the token store |
+
+### Narration voices
+
+A voice belongs to the language it speaks, so the choice is per language, not
+one global setting. Sunbird's catalog tags are language-scoped and the backend
+refuses one from another language rather than synthesising the wrong one —
+`sunbird.resolve_tts_voice` validates every requested speaker against that
+locale's catalog and falls back to its default.
+
+`GET /v1/speech/voices` serves the catalog; the client does not hardcode it,
+because only the backend knows whether this deployment can reach Sunbird at all.
+A deployment without a Sunbird key still lists the English (edge-tts) voices and
+says plainly that the Ugandan languages will fall back to an English speaker.
+
+| Language | Voices | Provider |
+| --- | --- | --- |
+| English | 3 edge-tts neural + Sunbird's last-resort `salt_eng_0001` | edge-tts serves English first |
+| Luganda | 8 | Sunbird, native speakers |
+| Acholi | 5 | Sunbird, native speakers |
+| Runyankole | 5 | Sunbird, native speakers |
+| Swahili | 2 | Sunbird, native speakers |
+
+Every tag was confirmed against the live `/tasks/audio/speech` before being
+offered — 21 requests, 21 with fetchable audio, 0 rejected. Re-verify before
+adding one: an unusable tag is not a loud failure but a voice a person can
+select and never hear, because the request 400s and the chain degrades to an
+English voice reading Luganda. The voices are numbered rather than given persona
+names; the catalog exposes opaque tags and nothing about the speakers, so a name
+and a character would be invented.
 
 Two deliberate omissions: `useVoiceStore` also persists `autoBargeIn`,
 `silenceTimeout` and `accentProfile`, which nothing currently reads, so they are

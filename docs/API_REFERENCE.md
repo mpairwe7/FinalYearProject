@@ -638,8 +638,51 @@ Content-Type: application/json
 |---|---|---|---|
 | `text` | string | (required) | 1-4000 chars |
 | `language` | string | `"en"` | ISO 639-1 |
-| `voice` | string | (auto by language) | `[a-zA-Z0-9_-]{1,64}` |
+| `voice` | string | (auto by language) | `[a-zA-Z0-9_-]{1,64}` — see below |
 | `streaming` | bool | `false` | Reserved for future use |
+
+`voice` names a speaker **for that language**. For English it is an edge-tts
+voice name (`en-US-AriaNeural`); for the Ugandan languages it is a Sunbird
+catalog tag (`waxal_lug_0004`), validated against `language` — a tag belonging
+to another language is replaced with that language's default rather than
+forwarded, since orpheus would otherwise reject it or synthesise the wrong
+language. List the choices with `GET /v1/speech/voices`; the response's `voice`
+field reports the speaker actually used.
+
+---
+
+### List Narration Voices
+
+```http
+GET /v1/speech/voices
+```
+
+Serves the per-language catalog a client should build its picker from, rather
+than hardcoding one: only the backend knows whether this deployment can reach
+Sunbird, and an unreachable voice would be offered and then silently replaced by
+an English fallback.
+
+**Response**
+```json
+{
+  "sunbird_configured": true,
+  "voices": {
+    "en": [
+      {"id": "en-US-AriaNeural", "provider": "edge_tts", "native": false, "default": true, "available": true}
+    ],
+    "lg": [
+      {"id": "salt_lug_0001", "provider": "sunbird", "native": true, "default": true, "available": true},
+      {"id": "waxal_lug_0004", "provider": "sunbird", "native": true, "default": false, "available": true}
+    ]
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `default` | The speaker used when a caller names none. Exactly one per language — the head of the list, which is what the synthesis chain reaches first. |
+| `native` | A native speaker of that language. False for English's Sunbird voice: Sunbird has no native English speaker, and that tag is the last resort edge-tts exists to avoid. |
+| `available` | False when this deployment cannot reach the provider (e.g. Sunbird voices with no API token). |
 
 **Response**
 ```json

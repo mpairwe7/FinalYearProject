@@ -841,7 +841,9 @@ Next.js 16 + React 19 PWA with SSE streaming, voice modal, and IEEE evaluation d
 
 **Voice capabilities (2026):**
 - Full-screen voice modal (Grok-style pulse rings + waveform + transcript)
-- Voice persona selection (5 voices: 3 English + 1 default + 1 Luganda)
+- Voice selection per language (24 speakers: 3 English edge-tts neural + 8
+  Luganda, 5 Acholi, 5 Runyankole, 2 Swahili native Sunbird speakers, each with
+  its own in-panel preview), served by `GET /v1/speech/voices`
 - Real TTS via edge-tts Microsoft neural / Sunbird native voices (fallback)
 - ASR via Whisper+LoRA (fine-tuned Luganda, local-first) + Sunbird cloud fallback
 - Translation via Qwen3-8B prompted MT (local) + Sunbird NLLB (fallback)
