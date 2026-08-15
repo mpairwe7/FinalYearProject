@@ -92,7 +92,7 @@ _APP_LOGGER.propagate = False
 # ---------------------------------------------------------------------------
 # Production environment validation (NIST SSDF PO.1.1)
 # ---------------------------------------------------------------------------
-_INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105
+_INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105  # pragma: allowlist secret
 
 # Wall-clock budget for the batch /v1/voice/chat pipeline. Once spent, the
 # reply-TTS leg is skipped (tts_skipped=True) so the text reply still beats

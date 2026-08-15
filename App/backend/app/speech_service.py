@@ -776,7 +776,18 @@ class SpeechModel:
             samples, sampling_rate=16000, return_tensors="pt",
         ).input_features.to(model.device, dtype=model.dtype)
 
+        # Scoped to this line, not the rule. ura-llm01 guards prompt injection
+        # (OWASP LLM01) by matching `.generate(` on user text; this is Whisper
+        # ASR and the argument is `input_features`, a mel spectrogram built from
+        # audio samples. There is no prompt for an instruction to be injected
+        # into, and InputGuard.check() takes a string, so it cannot be applied
+        # to a tensor. The transcript this produces IS guarded — downstream in
+        # service.generate(), whose first step is InputGuard.check(message).
+        #
+        # The directive has to sit on the line immediately above the match;
+        # anything between it and the code makes it inert.
         with torch.no_grad():
+            # nosemgrep: ura-llm01-raw-user-input-to-llm
             predicted_ids = model.generate(input_features, max_new_tokens=225)
         text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
 
@@ -874,8 +885,15 @@ class SpeechModel:
 
         # ⓪ Phrase cache — repeated short prompts (greetings, empathy openers,
         #    workflow questions) skip the whole backend chain.
+        #
+        #    usedforsecurity=False is not a suppression: this digest keys an
+        #    in-process cache, so it needs to be fast and stable, not
+        #    collision-resistant against an adversary. Saying so lets the hash
+        #    keep working where a FIPS-restricted build would otherwise refuse
+        #    SHA-1 outright, and tells Bandit (B324) the truth rather than
+        #    hiding the finding behind a nosec.
         cache_key = (
-            hashlib.sha1(text.encode("utf-8")).hexdigest(),
+            hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest(),
             voice,
             language,
         )

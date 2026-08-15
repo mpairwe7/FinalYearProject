@@ -105,7 +105,12 @@ jobs:
           CRANE_PASSWORD: ${{ secrets.CRANE_CLOUD_PASSWORD }}
           CRANE_APP_ID: ${{ secrets.CRANE_CLOUD_URA_APP_ID }}
           IMAGE: ${{ steps.img.outputs.image }}
-        run: |
+        # detect-secrets attributes a finding to the block-scalar line below:
+        # the script names CRANE_PASSWORD and builds a JSON body with a
+        # "password" key, which trips the keyword detector. No credential is
+        # written here — the value is read from env inside python and never
+        # expanded into a shell argv.
+        run: | # pragma: allowlist secret
           set -euo pipefail
 
           # 1. Login — body built via python -c so the password is read from
