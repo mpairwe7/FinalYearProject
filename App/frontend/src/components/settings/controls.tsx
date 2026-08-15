@@ -243,3 +243,43 @@ export function StatusNote({ kind, children }: { kind: NoteKind; children: React
     </p>
   );
 }
+
+/**
+ * Why a section has nothing to show, in the person's terms.
+ *
+ * Four different states all mean "not signed in", and they need different
+ * advice: wait, sign in, sign in AGAIN, or come back later. Returns null when
+ * signed in, so callers can render it unconditionally.
+ */
+export function IdentityGate({
+  status,
+  what,
+  children,
+}: {
+  status: string;
+  /** What is unavailable, e.g. "A profile". */
+  what: string;
+  /** Sign-in links, rendered only when signing in would actually help. */
+  children?: React.ReactNode;
+}) {
+  if (status === "signed-in") return null;
+  if (status === "checking") {
+    return <StatusNote kind="info">Checking your sign-in…</StatusNote>;
+  }
+  if (status === "unavailable") {
+    return (
+      <StatusNote kind="error">
+        {what} is stored against your account, and the backend cannot be reached
+        to load it right now. Nothing has been lost — try again shortly.
+      </StatusNote>
+    );
+  }
+  return (
+    <StatusNote kind="info">
+      {status === "rejected"
+        ? `${what} is stored against an account, and your saved sign-in is no longer valid. `
+        : `${what} is stored against an account, so this needs a sign-in. `}
+      {children}
+    </StatusNote>
+  );
+}

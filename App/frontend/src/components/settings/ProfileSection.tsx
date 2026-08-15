@@ -27,6 +27,7 @@ import {
 } from "../../services/accountApi";
 import {
   ActionButton,
+  IdentityGate,
   SegmentedOption,
   SelectControl,
   Segmented,
@@ -71,6 +72,20 @@ const PROFILE_LANGUAGES = [
   { value: "lg", label: "Luganda" },
 ];
 
+/**
+ * What the panel promises, kept to what the backend actually does.
+ *
+ * `service.py::_personalization_block` reads exactly four of these fields into
+ * the prompt — display_name, taxpayer_type, detail_level, registered_tax_types
+ * — and only when personalization consent is granted (it returns early on
+ * `snapshot.consent_granted`). `industry` and `primary_language` are stored and
+ * returned in the data export, but nothing reads them into an answer today, so
+ * this does not claim they change one.
+ */
+const DESCRIPTION =
+  "Shapes the answers you get — which taxes are mentioned, how technical the " +
+  "wording is — once \"Remember facts about me\" is granted under Privacy & data.";
+
 const EMPTY: Omit<UserProfile, "user_id" | "updated_at"> = {
   taxpayer_type: "unknown",
   industry: "",
@@ -81,7 +96,8 @@ const EMPTY: Omit<UserProfile, "user_id" | "updated_at"> = {
   display_name: "",
 };
 
-export default function ProfileSection({ signedIn }: { signedIn: boolean }) {
+export default function ProfileSection({ status }: { status: string }) {
+  const signedIn = status === "signed-in";
   const queryClient = useQueryClient();
   const [edits, setEdits] = useState<ProfilePatch>({});
   const [saved, setSaved] = useState(false);
@@ -127,15 +143,12 @@ export default function ProfileSection({ signedIn }: { signedIn: boolean }) {
 
   if (!signedIn) {
     return (
-      <SettingsSection
-        title="Tax profile"
-        description="Shapes the answers you get: which taxes are mentioned, how technical the wording is, which examples are used."
-      >
-        <StatusNote kind="info">
-          A profile is stored against an account, so this needs a sign-in.{" "}
-          <Link href="/signin">Sign in</Link> or <Link href="/signup">create an account</Link>.
-          The assistant answers questions either way.
-        </StatusNote>
+      <SettingsSection title="Tax profile" description={DESCRIPTION}>
+        <IdentityGate status={status} what="A profile">
+          <Link href="/signin">Sign in</Link> or{" "}
+          <Link href="/signup">create an account</Link>. The assistant answers
+          questions either way.
+        </IdentityGate>
       </SettingsSection>
     );
   }
@@ -146,7 +159,7 @@ export default function ProfileSection({ signedIn }: { signedIn: boolean }) {
   return (
     <SettingsSection
       title="Tax profile"
-      description="Shapes the answers you get: which taxes are mentioned, how technical the wording is, which examples are used."
+      description={DESCRIPTION}
     >
       {profileQuery.isPending && <StatusNote kind="info">Loading your profile…</StatusNote>}
 
@@ -179,7 +192,7 @@ export default function ProfileSection({ signedIn }: { signedIn: boolean }) {
 
       <SettingsRow
         label="Industry"
-        hint="Free text — e.g. retail, construction, transport, agriculture."
+        hint="Stored on your profile and included in your data export. Not used to shape answers yet."
         htmlFor="setv2-industry"
       >
         <TextControl
@@ -205,7 +218,7 @@ export default function ProfileSection({ signedIn }: { signedIn: boolean }) {
 
       <SettingsRow
         label="Preferred language for records"
-        hint="Stored on your profile. The chat's own response language is under General."
+        hint="Stored on your profile; the language answers are written in is under General."
         htmlFor="setv2-profile-lang"
       >
         <SelectControl
@@ -241,7 +254,7 @@ export default function ProfileSection({ signedIn }: { signedIn: boolean }) {
       {value.fiscal_year && (
         <SettingsRow
           label="Filing year"
-          hint="Set by the backend from the current URA fiscal calendar."
+          hint="Recorded on your profile. Read-only here — the backend sets it."
         >
           <span className="setv2-static">{value.fiscal_year}</span>
         </SettingsRow>

@@ -12,7 +12,7 @@ interface ConversationRailProps {
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   /** Account block at the foot of the rail — settings and sign-in live there. */
-  onOpenSettings: (tab?: 'account') => void;
+  onOpenSettings: () => void;
 }
 
 function formatTimestamp(timestamp: number) {

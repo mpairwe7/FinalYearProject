@@ -162,19 +162,54 @@ describe("SettingsDialog", () => {
   });
 
   it("does not claim a stale token is a signed-in session", async () => {
-    // A token the backend refuses: /v1/me answers `authenticated: false`.
+    // A token the backend refuses comes back as 401 from
+    // auth/dependencies.py, not as a 200 carrying `authenticated: false` —
+    // that body is only sent when no Authorization header was present.
     localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, "stale.jwt.value");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ authenticated: false, role: "public" }),
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: "invalid token: Signature has expired" }),
       } as Response),
     );
 
     renderDialog({ tab: "account" });
     expect(await screen.findByText(/does not accept it/i)).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not tell someone to sign in when the backend is simply down", async () => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, "good.jwt.value");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ detail: "auth not configured" }),
+      } as Response),
+    );
+
+    renderDialog({ tab: "profile" });
+    expect(await screen.findByText(/backend cannot be reached/i)).toBeInTheDocument();
+    expect(screen.queryByText(/needs a sign-in/i)).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("offers to retry, not to sign in again, when the backend is unreachable", async () => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, "good.jwt.value");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ detail: "auth not configured" }),
+      } as Response),
+    );
+
+    renderDialog({ tab: "account" });
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     vi.unstubAllGlobals();
   });
 });

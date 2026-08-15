@@ -28,8 +28,13 @@ import {
 } from "./Icons";
 
 interface AccountRailProps {
-  /** Opens the settings dialog, optionally straight onto the account tab. */
-  onOpenSettings: (tab?: "account") => void;
+  /**
+   * Opens the settings dialog on its default tab. Deliberately takes no tab
+   * argument: both entry points here — the signed-out Settings row and the
+   * account menu's Settings item — mean "settings", not "my account". The one
+   * caller that wants the Account tab is the landing page's own link.
+   */
+  onOpenSettings: () => void;
 }
 
 export default function AccountRail({ onOpenSettings }: AccountRailProps) {

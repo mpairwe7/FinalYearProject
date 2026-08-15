@@ -46,8 +46,8 @@ export interface SettingsDialogProps {
   onClose: () => void;
   /**
    * Which section is showing. Controlled by the caller so opening the dialog
-   * can land on a specific tab — the sidebar's account row opens Account —
-   * without this component resetting its own state in an effect.
+   * can land on a specific tab — the landing page's "Account & settings" link
+   * opens Account — without this component resetting its own state in an effect.
    */
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
@@ -158,7 +158,11 @@ export default function SettingsDialog({
     setConfirmReq(request);
   }, []);
 
-  const signedIn = identity.status === "signed-in";
+  // Deliberately NOT collapsed to a boolean before it reaches the sections:
+  // "checking", "rejected" and "unavailable" are all !signedIn, but telling
+  // someone whose backend is down that they need to sign in is wrong, and the
+  // in-flight case would flash that message on every open.
+  const identityStatus = identity.status;
 
   const body = useMemo(() => {
     switch (tab) {
@@ -173,11 +177,11 @@ export default function SettingsDialog({
           />
         );
       case "profile":
-        return <ProfileSection signedIn={signedIn} />;
+        return <ProfileSection status={identityStatus} />;
       case "privacy":
         return (
           <PrivacySection
-            signedIn={signedIn}
+            status={identityStatus}
             requestConfirm={requestConfirm}
             onSignedOut={identity.signOut}
           />
@@ -190,7 +194,7 @@ export default function SettingsDialog({
     autoNarrate,
     onAutoNarrateChange,
     speechReady,
-    signedIn,
+    identityStatus,
     requestConfirm,
     identity,
   ]);

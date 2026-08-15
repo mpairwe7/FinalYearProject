@@ -136,8 +136,9 @@ export default function Page() {
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(false);
 
-  // Settings dialog. `settingsTab` lets a caller open straight onto a section
-  // (the sidebar's account row opens Account, everything else opens General).
+  // Settings dialog. `settingsTab` lets a caller open straight onto a section —
+  // the landing page's "Account & settings" link opens Account; every other
+  // entry point (sidebar, header menu) opens General.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
   const openSettings = useCallback((tab: SettingsTab = 'general') => {
@@ -753,9 +754,9 @@ export default function Page() {
             action: () => deleteSession(id),
           });
         }}
-        onOpenSettings={(tab) => {
+        onOpenSettings={() => {
           setSidebarOpen(false);
-          openSettings(tab ?? 'general');
+          openSettings('general');
         }}
       />
 

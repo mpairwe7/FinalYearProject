@@ -21,7 +21,7 @@ import {
   subscribeAuthToken,
 } from "../lib/authSession";
 import { isStaffRole, roleLabel } from "../lib/roles";
-import { accountApi, type Identity } from "../services/accountApi";
+import { accountApi, ApiError, type Identity } from "../services/accountApi";
 
 export type IdentityStatus =
   /** No token in this browser. */
@@ -30,7 +30,15 @@ export type IdentityStatus =
   | "checking"
   /** Token accepted; `identity` is populated. */
   | "signed-in"
-  /** Token present but the backend does not accept it (expired, wrong secret). */
+  /**
+   * Token present and refused: `/v1/me` answered 401 (expired, wrong issuer,
+   * wrong secret). This is a 401, NOT a 200 carrying `authenticated: false` —
+   * `_resolve_bearer_context` in auth/dependencies.py raises HTTPException(401)
+   * for any token that fails verification, and the `authenticated: false` body
+   * is only ever returned when no Authorization header was sent at all. Reading
+   * that wrong is what made this state unreachable in the first cut, so an
+   * expired session reported itself as "the backend is down".
+   */
   | "rejected"
   /** The backend could not be reached, or auth is not configured (503). */
   | "unavailable";
@@ -94,9 +102,18 @@ export function useIdentity(): IdentityState {
 
     let status: IdentityStatus;
     if (!token) status = "anonymous";
-    else if (query.error) status = "unavailable";
-    else if (!query.data) status = "checking";
+    else if (query.error) {
+      // A refused token is a settled answer about THIS token; anything else
+      // (503 when auth is unconfigured, a network failure) is a statement about
+      // the backend, and the two need opposite advice: sign in again vs wait.
+      status =
+        query.error instanceof ApiError && query.error.status === 401
+          ? "rejected"
+          : "unavailable";
+    } else if (!query.data) status = "checking";
     else if (identity) status = "signed-in";
+    // A 200 with `authenticated: false` means the request carried no usable
+    // credential at all — treat it as refused rather than signed in.
     else status = "rejected";
 
     const name = identity?.email || identity?.external_id || "";

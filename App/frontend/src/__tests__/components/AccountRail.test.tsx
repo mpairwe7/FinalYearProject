@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AccountRail from "../../components/AccountRail";
 import { AUTH_TOKEN_STORAGE_KEY, getAuthToken } from "../../lib/authSession";
-import { accountApi, type Identity } from "../../services/accountApi";
+import { accountApi, ApiError, type Identity } from "../../services/accountApi";
 
 function renderRail() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -93,9 +93,23 @@ describe("AccountRail", () => {
 
   it("does not present an unverified token as a signed-in identity", async () => {
     localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, "stale.jwt.value");
-    vi.spyOn(accountApi, "me").mockResolvedValue({ authenticated: false, role: "public" });
+    // What the backend ACTUALLY does with an expired or wrong-issuer token:
+    // auth/dependencies.py raises HTTPException(401). The 200-with-
+    // `authenticated: false` body is only returned when no Authorization header
+    // was sent, so mocking that here would have tested an impossible response.
+    vi.spyOn(accountApi, "me").mockRejectedValue(
+      new ApiError(401, "invalid token: Signature has expired"),
+    );
     renderRail();
     expect(await screen.findByText(/no longer valid/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Sign in/ })).toBeInTheDocument();
+  });
+
+  it("tells a down backend apart from a refused token", async () => {
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, "good.jwt.value");
+    vi.spyOn(accountApi, "me").mockRejectedValue(new ApiError(503, "auth not configured"));
+    renderRail();
+    // Not "your sign-in is no longer valid" — the token was never judged.
+    expect(await screen.findByText(/Sign in to keep your conversations/i)).toBeInTheDocument();
   });
 });

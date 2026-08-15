@@ -1,11 +1,10 @@
 /**
  * Narration voices offered for text-to-speech.
  *
- * One list, two surfaces: the voice-settings modal and the Voice tab in
- * settings both pick from here, and `useVoiceStore.voiceId` is the single
- * value they write. The ids are what `/v1/tts` forwards to the speech
- * service — an id this list invents would synthesise with the server default
- * and quietly ignore the choice.
+ * The Voice tab in settings picks from here and writes `useVoiceStore.voiceId`,
+ * which is the single value every `/v1/tts` call site reads. The ids are what
+ * the endpoint forwards to the speech service — an id this list invents would
+ * synthesise with the server default and quietly ignore the choice.
  */
 
 import { authHeaders } from "./authSession";

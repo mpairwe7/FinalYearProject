@@ -28,6 +28,7 @@ import {
 import type { ConfirmRequest } from "../ConfirmDialog";
 import {
   ActionButton,
+  IdentityGate,
   SettingsRow,
   SettingsSection,
   StatusNote,
@@ -80,17 +81,18 @@ function downloadJson(filename: string, data: unknown): void {
 }
 
 interface PrivacySectionProps {
-  signedIn: boolean;
+  status: string;
   /** Routed through the dialog's ConfirmDialog so destructive rows get a step. */
   requestConfirm: (request: ConfirmRequest) => void;
   onSignedOut: () => void;
 }
 
 export default function PrivacySection({
-  signedIn,
+  status,
   requestConfirm,
   onSignedOut,
 }: PrivacySectionProps) {
+  const signedIn = status === "signed-in";
   const queryClient = useQueryClient();
   const conversations = useChatStore((s) => s.conversations);
   const clearAllSessions = useChatStore((s) => s.clearAllSessions);
@@ -159,6 +161,31 @@ export default function PrivacySection({
       conversations: useChatStore.getState().conversations,
     });
   }, []);
+
+  /**
+   * Withdrawing `personalization` is destructive server-side: the endpoint
+   * purges the memory built under that consent (main.py, UDPA — a withdrawal
+   * has to stop the processing, not just record an intention). Every other
+   * irreversible action in this panel asks first, so this one does too.
+   * Granting, and every other purpose, applies immediately.
+   */
+  const setConsent = useCallback(
+    (purpose: (typeof PURPOSES)[number], grant: boolean) => {
+      if (grant || purpose.value !== "personalization") {
+        consentMutation.mutate({ purpose: purpose.value, grant });
+        return;
+      }
+      requestConfirm({
+        title: "Withdraw this consent?",
+        message:
+          "Everything the assistant has learned about you — taxpayer type, industry, the facts it picked up from your conversations — is deleted from the server as well. Your profile and chat history are not affected.",
+        confirmLabel: "Withdraw and delete",
+        danger: true,
+        action: () => consentMutation.mutate({ purpose: purpose.value, grant: false }),
+      });
+    },
+    [consentMutation, requestConfirm],
+  );
 
   const confirmClearChats = useCallback(() => {
     requestConfirm({
@@ -229,12 +256,9 @@ export default function PrivacySection({
         title="Consent"
         description="What this service may do with your data, recorded as dated receipts you can withdraw at any time (UDPA 2019)."
       >
-        {!signedIn && (
-          <StatusNote kind="info">
-            Consent receipts belong to an account. Signed out, only the
-            browser-local choices above apply.
-          </StatusNote>
-        )}
+        <IdentityGate status={status} what="Consent receipts belong">
+          Signed out, only the browser-local choices above apply.
+        </IdentityGate>
 
         {signedIn && consentsQuery.error && (
           <StatusNote kind="error">
@@ -242,17 +266,23 @@ export default function PrivacySection({
           </StatusNote>
         )}
 
+        {/* Until the receipts arrive every toggle would render OFF, which reads
+            as "you have granted nothing" rather than "not known yet". Say which
+            it is. */}
+        {signedIn && consentsQuery.isPending && (
+          <StatusNote kind="info">Loading your consent receipts…</StatusNote>
+        )}
+
         {signedIn &&
           !consentsQuery.error &&
+          !consentsQuery.isPending &&
           PURPOSES.map((purpose) => (
             <SettingsRow key={purpose.value} label={purpose.label} hint={purpose.hint}>
               <Toggle
                 label={purpose.label}
                 checked={active.has(purpose.value)}
-                disabled={consentsQuery.isPending || consentMutation.isPending}
-                onChange={(next) =>
-                  consentMutation.mutate({ purpose: purpose.value, grant: next })
-                }
+                disabled={consentMutation.isPending}
+                onChange={(next) => setConsent(purpose, next)}
               />
             </SettingsRow>
           ))}
@@ -269,10 +299,10 @@ export default function PrivacySection({
         description="Rights under the Uganda Data Protection and Privacy Act, 2019 — a copy of everything held about you, or its removal."
       >
         {!signedIn ? (
-          <StatusNote kind="info">
+          <IdentityGate status={status} what="Your account data">
             Nothing is held server-side for an anonymous browser, so there is
             nothing to export or erase.
-          </StatusNote>
+          </IdentityGate>
         ) : (
           <>
             <SettingsRow
