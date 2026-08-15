@@ -17,6 +17,14 @@ on:
       - 'Data/**'
       - 'Model/**'
       - 'requirements.txt'
+      # This workflow's own test job runs `pytest tests/`, so a change to that
+      # suite has to trigger it. Without this the guards living there — the
+      # endpoint manifest, the coverage registry, the locked surface count —
+      # were only ever evaluated when some OTHER path changed, so a fix to them
+      # (or a break in them) could sit unverified until an unrelated commit.
+      - 'tests/**'
+      # pytest's configfile — it sets the rootdir and options this job runs under.
+      - 'pyproject.toml'
       - '.github/workflows/ci-ml-pipeline.yml'
   pull_request:
     branches: [main, dev, develop]
