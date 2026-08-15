@@ -1,87 +1,101 @@
 /**
- * Narration voices offered for text-to-speech.
+ * Narration voices, as served by the backend.
  *
- * The Voice tab in settings picks from here and writes `useVoiceStore.voiceId`,
- * which is the single value every `/v1/tts` call site reads. The ids are what
- * the endpoint forwards to the speech service — an id this list invents would
- * synthesise with the server default and quietly ignore the choice.
+ * The catalogue is FETCHED, not hardcoded, because the client cannot know which
+ * speakers a deployment can actually reach: the Ugandan voices are Sunbird
+ * catalog tags that only work when Sunbird is configured, and English is served
+ * by edge-tts, which needs no key. A baked-in list keeps offering voices after
+ * the backend loses the ability to serve them, and the person who picks one
+ * gets an English fallback reading Luganda with nothing to say why.
+ *
+ * Voices are per-language on purpose. A Sunbird tag is language-scoped — the
+ * backend refuses a Luganda speaker for Acholi rather than synthesising the
+ * wrong language — so "your voice" is really "your voice for this language".
  */
 
 import { authHeaders } from "./authSession";
 
 export interface VoiceOption {
+  /** What `/v1/tts` takes as `voice`: an edge-tts name or a Sunbird catalog tag. */
   id: string;
-  label: string;
-  description: string;
-  /** Locale the sample text is written in. */
-  language: string;
-  /** Preview line — short enough to synthesise inside the request timeout. */
-  sample: string;
+  provider: "sunbird" | "edge_tts" | string;
+  /** True when the speaker is a native speaker of the language, not a stand-in. */
+  native: boolean;
+  /** The speaker used when no choice is made. Exactly one per language. */
+  default: boolean;
+  /** False when this deployment cannot reach the provider (e.g. no Sunbird key). */
+  available: boolean;
 }
 
-export const VOICES: readonly VoiceOption[] = [
-  {
-    id: "en-US-AriaNeural",
-    label: "English — Female (Professional)",
-    description: "Clear, professional tone ideal for tax guidance",
-    language: "en",
-    sample: "Welcome to URA. How can I help you today?",
-  },
-  {
-    id: "en-US-GuyNeural",
-    label: "English — Male (Friendly)",
-    description: "Warm, approachable voice for general queries",
-    language: "en",
-    sample: "The VAT rate in Uganda is 18 percent.",
-  },
-  {
-    id: "en-GB-SoniaNeural",
-    label: "English — British (Formal)",
-    description: "Formal British accent for official communication",
-    language: "en",
-    sample: "Your TIN registration has been processed successfully.",
-  },
-  {
-    id: "en-default",
-    label: "English — Default",
-    description: "Standard voice for English responses",
-    language: "en",
-    sample: "Please visit URA dot go dot UG for more information.",
-  },
-  {
-    id: "lg-default",
-    label: "Luganda — Default",
-    description: "Voice for Luganda language responses",
-    language: "lg",
-    sample: "Tukusanyukidde. Oyinza okubuuza ku musolo.",
-  },
-];
+export interface VoiceCatalogue {
+  voices: Record<string, VoiceOption[]>;
+  sunbird_configured: boolean;
+}
 
-/** The label to show when nothing has been chosen (server picks per locale). */
-export const AUTOMATIC_VOICE_LABEL = "Automatic (match the response language)";
+/** Sample line per language, so a preview is heard in the language it belongs to. */
+export const VOICE_SAMPLES: Record<string, string> = {
+  en: "Welcome to URA. The standard VAT rate in Uganda is 18 percent.",
+  lg: "Tukusanyukidde. Omusolo gwa VAT mu Uganda guli ku bitundu 18.",
+  sw: "Karibu URA. Kiwango cha VAT nchini Uganda ni asilimia 18.",
+  nyn: "Tukwakiriza. Omusoro gwa VAT omuri Uganda ni ebicweka 18.",
+  ach: "Wabedo. Mucoro me VAT i Uganda tye i wi 18.",
+};
 
-export function voiceLabel(voiceId: string): string {
-  if (!voiceId) return AUTOMATIC_VOICE_LABEL;
-  return VOICES.find((v) => v.id === voiceId)?.label ?? voiceId;
+/**
+ * Display name for a speaker.
+ *
+ * Deliberately neutral. The catalog gives opaque tags (`waxal_lug_0004`) and
+ * nothing about the person behind them — inventing "Nakato, warm and friendly"
+ * would be asserting a gender and a character this app cannot know. Numbering
+ * them and letting the preview button do the describing is honest, and it is
+ * what the person actually chooses on: how it sounds.
+ */
+export function voiceDisplayName(locale: string, voice: VoiceOption, index: number): string {
+  if (voice.provider === "edge_tts") {
+    // edge-tts names are self-describing: en-GB-SoniaNeural -> "Sonia (en-GB)".
+    const parts = voice.id.split("-");
+    const name = parts[2]?.replace(/Neural$/, "") ?? voice.id;
+    const region = parts.slice(0, 2).join("-");
+    return `${name} (${region})`;
+  }
+  return `Voice ${index + 1}`;
+}
+
+export async function fetchVoiceCatalogue(): Promise<VoiceCatalogue> {
+  const res = await fetch("/api/v1/speech/voices", {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`Could not load voices (${res.status})`);
+  return res.json();
 }
 
 /**
- * Synthesise a voice's sample line and start playing it.
+ * Synthesise a sample in *locale* with *voiceId* and start playing it.
  *
- * Returns the playing element so the caller can stop it; throws if speech is
+ * Returns the playing element so the caller can stop it; throws when speech is
  * unavailable, which the caller shows as "preview unavailable" rather than
- * failing the whole settings panel.
+ * failing the whole panel.
  */
-export async function playVoiceSample(voice: VoiceOption): Promise<HTMLAudioElement> {
+export async function playVoiceSample(
+  locale: string,
+  voiceId: string,
+): Promise<HTMLAudioElement> {
   const res = await fetch("/api/v1/tts", {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ text: voice.sample, language: voice.language, voice: voice.id }),
-    signal: AbortSignal.timeout(15_000),
+    body: JSON.stringify({
+      text: VOICE_SAMPLES[locale] ?? VOICE_SAMPLES.en,
+      language: locale,
+      voice: voiceId,
+    }),
+    // A cold Sunbird speaker has been measured at ~25s; the default 15s cut
+    // previews off mid-warmup and reported it as a failure.
+    signal: AbortSignal.timeout(40_000),
   });
   if (!res.ok) throw new Error(`Speech synthesis failed (${res.status})`);
   const data = await res.json();
-  if (!data.audio_base64) throw new Error("Speech synthesis returned no audio");
+  if (!data.audio_base64) throw new Error(data.error || "Speech synthesis returned no audio");
   const audio = new Audio(`data:audio/wav;base64,${data.audio_base64}`);
   await audio.play();
   return audio;

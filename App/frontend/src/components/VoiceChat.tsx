@@ -122,7 +122,9 @@ function VoiceChatInner({ open, locale, conversationId, onClose }: VoiceChatProp
   // ── Connect WebSocket when panel opens ─────────────────────────
   useEffect(() => {
     if (open) {
-      const voiceId = useVoiceStore.getState().voiceId;
+      // Per-language: a Sunbird speaker only exists within its own
+      // language, and the backend refuses a tag from another one.
+      const voiceId = useVoiceStore.getState().voiceByLocale[locale];
       connect({
         language: locale,
         conversation_id: conversationId,

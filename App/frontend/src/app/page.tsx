@@ -322,7 +322,7 @@ export default function Page() {
       const result = await ttsMutation.mutateAsync({
         text,
         language: locale,
-        voice: useVoiceStore.getState().voiceId || undefined,
+        voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
       });
       setTtsLoading(null);
       if (result.error || !result.audio_base64) {
@@ -624,7 +624,7 @@ export default function Page() {
               language: locale,
               conversationId,
               ttsEnabled: autoNarrate,
-              voice: useVoiceStore.getState().voiceId || undefined,
+              voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
               sessionId: getAnalyticsSessionId(),
             });
             if (r.error && !r.transcript) { addTurns([createTurn('assistant', `Voice error: ${r.error}`)]); trackErrorOccurred('voice_chat_failed'); return; }

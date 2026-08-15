@@ -54,7 +54,18 @@ interface VoiceState {
   // Settings (persisted)
   autoBargeIn: boolean;
   silenceTimeout: number;
-  voiceId: string;
+  /**
+   * Chosen narration speaker per locale, e.g. `{ lg: "waxal_lug_0004" }`.
+   *
+   * Per-locale rather than one id, because a voice only exists within its own
+   * language: Sunbird's catalog tags are language-scoped (the backend refuses a
+   * Luganda tag for Acholi), and English is served by different infrastructure
+   * again (edge-tts neural names). One global id meant switching language
+   * silently carried a voice that could not synthesise the new one.
+   *
+   * A locale absent here means "whatever the backend serves by default".
+   */
+  voiceByLocale: Record<string, string>;
   accentProfile: string;
 
   // Camera
@@ -93,7 +104,7 @@ interface VoiceActions {
   // Settings
   setAutoBargeIn: (enabled: boolean) => void;
   setSilenceTimeout: (ms: number) => void;
-  setVoiceId: (id: string) => void;
+  setVoiceForLocale: (locale: string, id: string) => void;
   setAccentProfile: (profile: string) => void;
 
   // Camera
@@ -113,6 +124,21 @@ interface VoiceActions {
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
+
+/** Exactly what `partialize` keeps — the shape `migrate` must return. */
+type PersistedVoiceState = Pick<
+  VoiceState,
+  | 'pendingSync'
+  | 'autoBargeIn'
+  | 'silenceTimeout'
+  | 'voiceByLocale'
+  | 'accentProfile'
+  | 'offlineMode'
+  | 'offlineBundleVersion'
+  | 'lastSyncAt'
+  | 'voiceFirstEnabled'
+  | 'voiceVisionEnabled'
+>;
 
 export const useVoiceStore = create<VoiceState & VoiceActions>()(
   persist(
@@ -156,11 +182,20 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(
       // ── Settings ──
       autoBargeIn: false,
       silenceTimeout: 2000,
-      voiceId: '',
+      voiceByLocale: {},
       accentProfile: '',
       setAutoBargeIn: (autoBargeIn) => set({ autoBargeIn }),
       setSilenceTimeout: (silenceTimeout) => set({ silenceTimeout }),
-      setVoiceId: (voiceId) => set({ voiceId }),
+      setVoiceForLocale: (locale, id) =>
+        set((s) => {
+          const next = { ...s.voiceByLocale };
+          // An empty id means "back to the default", which is the ABSENCE of a
+          // choice rather than a choice of "". Storing "" would pin the locale
+          // to a voice that does not exist.
+          if (id) next[locale] = id;
+          else delete next[locale];
+          return { voiceByLocale: next };
+        }),
       setAccentProfile: (accentProfile) => set({ accentProfile }),
 
       // ── Camera ──
@@ -185,14 +220,37 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(
     }),
     {
       name: 'ura-voice-store',
-      version: 1,
+      version: 2,
       skipHydration: true,
+      /**
+       * v1 stored a single `voiceId` for every language. Carrying it forward
+       * blindly would pin EVERY locale to it — including a Luganda tag on
+       * English — so it is only kept for the language it could have been
+       * chosen for. In practice that is English: it is the only language whose
+       * voice selection worked before this version, because the Sunbird path
+       * ignored the caller's voice entirely.
+       */
+      migrate: (persisted, version) => {
+        const state = (persisted ?? {}) as Record<string, unknown>;
+        if (version >= 2 || state.voiceByLocale) {
+          return state as PersistedVoiceState;
+        }
+        const legacy = typeof state.voiceId === 'string' ? state.voiceId : '';
+        const rest = { ...state };
+        delete rest.voiceId;
+        return {
+          ...rest,
+          // Only edge-tts English names were ever honoured, and they are the
+          // only ids that identify themselves as English.
+          voiceByLocale: legacy.startsWith('en-') ? { en: legacy } : {},
+        } as PersistedVoiceState;
+      },
       // Only persist settings + offline queue
       partialize: (state) => ({
         pendingSync: state.pendingSync,
         autoBargeIn: state.autoBargeIn,
         silenceTimeout: state.silenceTimeout,
-        voiceId: state.voiceId,
+        voiceByLocale: state.voiceByLocale,
         accentProfile: state.accentProfile,
         offlineMode: state.offlineMode,
         offlineBundleVersion: state.offlineBundleVersion,

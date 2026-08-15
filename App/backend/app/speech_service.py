@@ -228,6 +228,18 @@ LOCAL_TTS_VOICES: dict[str, str] = {
     "lg": DEFAULT_LG_VOICE,
 }
 
+# English speakers a caller may choose. edge-tts takes a voice name directly, so
+# unlike the Sunbird catalog these need no lookup — but they must be REAL edge
+# voice names. en-UG-MaleNeural was not (edge-tts has no Uganda locale at all)
+# and every call raised "No audio was received", which is why this list is
+# limited to voices already serving in production rather than plausible-looking
+# additions. Verify with `edge-tts --list-voices` before extending it.
+EN_EDGE_VOICE_CHOICES: tuple[str, ...] = (
+    "en-US-AriaNeural",
+    "en-US-GuyNeural",
+    "en-GB-SoniaNeural",
+)
+
 
 def _sunbird_has_native_voice(locale: str) -> bool:
     """True when Sunbird ships a native speaker for *locale*."""
@@ -917,7 +929,12 @@ class SpeechModel:
                     return None
 
                 def _fetch():
-                    tts_result = sunbird.text_to_speech(text, locale=language)
+                    # Forward the requested speaker. `voice` here is whatever the
+                    # caller asked for (or this locale's local default, filled in
+                    # by synthesize); sunbird validates it against its own
+                    # per-locale catalog and ignores anything foreign, so a Piper
+                    # or edge-tts voice name arriving here cannot be forwarded.
+                    tts_result = sunbird.text_to_speech(text, locale=language, voice=voice)
                     if not tts_result or not tts_result.get("audio_url"):
                         return None
                     import httpx
@@ -940,7 +957,11 @@ class SpeechModel:
                         duration_s=duration,
                         latency_s=round(time.perf_counter() - t_sunbird, 3),
                         backend="sunbird_cloud",
-                        voice=f"sunbird_{language}",
+                        # The speaker actually used, not just the language. With
+                        # a catalog of eight Luganda voices, "sunbird_lg" cannot
+                        # answer "which one did I hear?" — the field a caller
+                        # checks after choosing one.
+                        voice=sunbird.resolve_tts_voice(language, voice) or f"sunbird_{language}",
                     )
                 logger.warning(
                     "Sunbird TTS returned non-audio payload (status=%s, %d bytes)",

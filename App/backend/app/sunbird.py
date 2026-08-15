@@ -71,9 +71,7 @@ LOCALE_TO_SUNBIRD: dict[str, str] = {
 # non-English voice failed even after the endpoint itself was corrected.
 #
 # `salt_*_0001` is each language's first catalog voice and is used as the
-# default. Other tags exist per language (waxal_lug_0002..0008,
-# waxal_ach_0001/0005/0006/0008, waxal_nyn_0003/0004/0007/0008,
-# waxal_swa_0007) if a different speaker is ever wanted.
+# default when the caller asks for no particular speaker.
 TTS_VOICES: dict[str, str] = {
     "lg": "salt_lug_0001",    # Luganda
     "nyn": "salt_nyn_0001",   # Runyankole
@@ -81,6 +79,49 @@ TTS_VOICES: dict[str, str] = {
     "sw": "waxal_swa_0006",   # Swahili — the catalog exposes no salt_swa_* tag
     "en": "salt_eng_0001",    # last-resort only; edge-tts serves English first
 }
+
+# Every speaker a caller may choose, per locale. The first entry is the default
+# above; the rest are the alternates the catalog exposes.
+#
+# Each tag here was confirmed against the live /tasks/audio/speech endpoint —
+# 21 requests, 21 with a fetchable audio url, 0 rejected. That matters because
+# an unusable tag would surface as a voice you can pick and never hear: the
+# request 400s and the chain degrades to a generic English voice reading
+# Ugandan text, which is exactly the failure this catalog exists to prevent.
+# Re-verify before adding one; the model's catalog is not a stable contract.
+TTS_VOICE_CATALOG: dict[str, tuple[str, ...]] = {
+    "lg": (
+        "salt_lug_0001",
+        "waxal_lug_0002", "waxal_lug_0003", "waxal_lug_0004", "waxal_lug_0005",
+        "waxal_lug_0006", "waxal_lug_0007", "waxal_lug_0008",
+    ),
+    "ach": (
+        "salt_ach_0001",
+        "waxal_ach_0001", "waxal_ach_0005", "waxal_ach_0006", "waxal_ach_0008",
+    ),
+    "nyn": (
+        "salt_nyn_0001",
+        "waxal_nyn_0003", "waxal_nyn_0004", "waxal_nyn_0007", "waxal_nyn_0008",
+    ),
+    "sw": ("waxal_swa_0006", "waxal_swa_0007"),
+    "en": ("salt_eng_0001",),
+}
+
+
+def resolve_tts_voice(locale: str, voice: str | None = None) -> str | None:
+    """The catalog tag to synthesise *locale* with, honouring a requested voice.
+
+    A requested tag is used only when the catalog lists it FOR THAT LOCALE.
+    Anything else — a tag from another language, a stale tag, an edge-tts voice
+    name that reached here by mistake — falls back to the locale's default
+    rather than being forwarded. Sending a foreign tag does not fail loudly: the
+    endpoint either 400s or synthesises the wrong language, and both are worse
+    than quietly using the right default.
+    """
+    default = TTS_VOICES.get(locale)
+    if not voice:
+        return default
+    return voice if voice in TTS_VOICE_CATALOG.get(locale, ()) else default
 # Ateso (teo) has salt_teo_0001 available but is not in the UI's locale picker.
 # Lugbara (lgg) is in the model's training mix but exposes NO voice id, so it
 # would have no narration even if it were offered.
@@ -331,9 +372,17 @@ def speech_to_text(
 def text_to_speech(
     text: str,
     locale: str = "en",
+    voice: str | None = None,
 ) -> dict[str, Any] | None:
-    """Convert text to speech via Sunbird native voices."""
-    voice = TTS_VOICES.get(locale)
+    """Convert text to speech via Sunbird native voices.
+
+    *voice* names a catalog speaker for this locale; it is validated by
+    `resolve_tts_voice` and ignored when it does not belong to *locale*. Until
+    this parameter existed the caller's choice was dropped here, so picking a
+    voice worked for English (edge-tts honours it) and silently did nothing for
+    every Ugandan language.
+    """
+    voice = resolve_tts_voice(locale, voice)
     if not is_available() or not voice:
         return None
     lang_code = LOCALE_TO_SUNBIRD.get(locale)

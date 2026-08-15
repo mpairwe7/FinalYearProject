@@ -1156,6 +1156,76 @@ def speech_health(
     )
 
 
+@app.get("/v1/speech/voices", tags=["speech"])
+def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
+    """The narration voices a caller may choose, per locale.
+
+    Served rather than hardcoded in the client for one reason: the client cannot
+    know which speakers this deployment can actually reach. The Ugandan voices
+    come from Sunbird's catalog and only work when Sunbird is configured; the
+    English ones are edge-tts neural voices that need no key. A picker built
+    from a hardcoded list would keep offering voices after the backend lost the
+    ability to serve them, and the person choosing one would get an English
+    fallback reading Luganda with nothing to say why.
+
+    `default: true` marks the speaker used when a caller names none.
+    """
+    from . import sunbird
+    from .speech_service import EN_EDGE_VOICE_CHOICES, SPEECH_EN_EDGE_VOICE
+
+    sunbird_ready = sunbird.is_available()
+    voices: dict[str, list[dict]] = {}
+
+    for locale, tags in sunbird.TTS_VOICE_CATALOG.items():
+        # Sunbird's speakers are native for the Ugandan languages it is trained
+        # on — not for English, where `salt_eng_0001` is the last-resort voice
+        # edge-tts exists to avoid (see speech_service). Advertising it as a
+        # native English speaker would recommend the worst option on offer.
+        native = locale != "en"
+        entries = [
+            {
+                "id": tag,
+                "provider": "sunbird",
+                "native": native,
+                "default": False,  # decided once per locale, below
+                "available": sunbird_ready,
+            }
+            for tag in tags
+        ]
+        if entries:
+            voices.setdefault(locale, []).extend(entries)
+
+    # English also has the edge-tts neural voices, which are what actually
+    # serves English (Sunbird's English voice is a last resort) — so they are
+    # listed first and one of them is the English default.
+    # The deployment's configured voice leads, then the rest of the choices.
+    # dict.fromkeys dedupes while keeping that order, since the configured one
+    # is usually also in the list.
+    edge_entries = [
+        {
+            "id": name,
+            "provider": "edge_tts",
+            "native": False,
+            "default": False,
+            "available": True,
+        }
+        for name in dict.fromkeys((SPEECH_EN_EDGE_VOICE, *EN_EDGE_VOICE_CHOICES))
+        if name
+    ]
+    voices["en"] = edge_entries + voices.get("en", [])
+
+    # Exactly one default per locale, decided here rather than per-provider.
+    # Marking each provider's own default gave English two (edge's Aria and
+    # Sunbird's salt_eng_0001), and a picker showing two "default" chips has to
+    # pick one arbitrarily. The head of the list is the speaker the synthesis
+    # chain actually reaches first, which is what "default" has to mean.
+    for entries in voices.values():
+        for i, entry in enumerate(entries):
+            entry["default"] = i == 0
+
+    return {"voices": voices, "sunbird_configured": sunbird_ready}
+
+
 @app.post("/v1/voice/chat", response_model=VoiceChatResponse, tags=["speech"])
 @limiter.limit(_RATE_LIMIT)
 async def voice_chat(

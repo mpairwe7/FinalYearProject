@@ -51,7 +51,7 @@ beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
   useChatStore.setState({ locale: "en", conversations: [] });
-  useVoiceStore.setState({ voiceId: "" });
+  useVoiceStore.setState({ voiceByLocale: {} });
 });
 
 describe("SettingsDialog", () => {
@@ -92,12 +92,45 @@ describe("SettingsDialog", () => {
     expect(useChatStore.getState().locale).toBe("lg");
   });
 
-  it("saves the narration voice for the next TTS call", () => {
+  it("saves a narration voice against the language it belongs to", async () => {
+    // The catalogue is served, not hardcoded — a deployment without Sunbird
+    // offers fewer voices, and the panel has to reflect that.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          sunbird_configured: true,
+          voices: {
+            en: [
+              { id: "en-US-AriaNeural", provider: "edge_tts", native: false, default: true, available: true },
+              { id: "en-GB-SoniaNeural", provider: "edge_tts", native: false, default: false, available: true },
+            ],
+            lg: [
+              { id: "salt_lug_0001", provider: "sunbird", native: true, default: true, available: true },
+              { id: "waxal_lug_0004", provider: "sunbird", native: true, default: false, available: true },
+            ],
+          },
+        }),
+      } as Response),
+    );
+
     renderDialog({ tab: "voice" });
-    fireEvent.change(screen.getByLabelText("Narration voice"), {
-      target: { value: "en-GB-SoniaNeural" },
+
+    // Luganda's second speaker is stored under `lg`, not globally — an English
+    // narration must not inherit a Luganda voice it cannot synthesise.
+    const luganda = await screen.findByRole("radiogroup", {
+      name: "Narration voice for Luganda",
     });
-    expect(useVoiceStore.getState().voiceId).toBe("en-GB-SoniaNeural");
+    fireEvent.click(within(luganda).getByRole("radio", { name: /Voice 2/ }));
+    expect(useVoiceStore.getState().voiceByLocale).toEqual({ lg: "waxal_lug_0004" });
+
+    // Re-picking the default clears the choice rather than pinning it, so the
+    // locale keeps following the backend if that default ever moves.
+    fireEvent.click(within(luganda).getByRole("radio", { name: /Voice 1/ }));
+    expect(useVoiceStore.getState().voiceByLocale).toEqual({});
+    vi.unstubAllGlobals();
   });
 
   it("hands narration changes back to the page that owns the state", () => {

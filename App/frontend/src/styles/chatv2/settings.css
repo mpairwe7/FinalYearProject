@@ -930,6 +930,145 @@
 }
 
 
+/* ---------------------------------------------------------------------------
+ * Voice picker — one group per language, a row per speaker.
+ *
+ * A radio list rather than a <select>: the choice is made by LISTENING, so the
+ * preview button has to sit beside each option instead of behind a dropdown
+ * that hides every alternative while you audition one.
+ * ------------------------------------------------------------------------- */
+.chatv2 .setv2-voicegroup {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-0);
+}
+
+.chatv2 .setv2-voicegroup:last-child {
+  border-bottom: none;
+}
+
+.chatv2 .setv2-voicegroup-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.chatv2 .setv2-voicegroup-name {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text-0);
+}
+
+.chatv2 .setv2-voicegroup-native {
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.chatv2 .setv2-voicegroup-current {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--cv2-accent-soft);
+  color: var(--cv2-accent);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+:root[data-theme="dark"] .chatv2 .setv2-voicegroup-current {
+  color: var(--text-0);
+}
+
+.chatv2 .setv2-voicelist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.chatv2 .setv2-voice {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+.chatv2 .setv2-voice-on {
+  border-color: var(--cv2-accent);
+  background: var(--cv2-accent-soft);
+}
+
+.chatv2 .setv2-voice-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  border: none;
+  background: none;
+  color: var(--text-0);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chatv2 .setv2-voice-pick:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.chatv2 .setv2-voice-on .setv2-voice-pick:hover:not(:disabled) {
+  background: transparent;
+}
+
+.chatv2 .setv2-voice-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chatv2 .setv2-voice-meta {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.chatv2 .setv2-voice-on .setv2-voice-meta {
+  color: var(--text-1);
+}
+
+/* The audition control. Kept visually quiet but a full target — it is pressed
+   far more often than the row itself while comparing speakers. */
+.chatv2 .setv2-voice-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  flex-shrink: 0;
+  border: none;
+  border-left: 1px solid var(--border-0);
+  background: none;
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.chatv2 .setv2-voice-play:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+.chatv2 .setv2-voice-pick:disabled,
+.chatv2 .setv2-voice-play:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .chatv2 .setv2-voicelist {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ===========================================================================
  * Touch sizing — LAST in this file on purpose.
  *
