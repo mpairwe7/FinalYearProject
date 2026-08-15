@@ -567,9 +567,36 @@
 # voice picker driven in a browser on desktop and phone. All 8 CI workflows
 # green on this commit.
 #
+# ---------------------------------------------------------------------------
+# sha-255a56f — the English narration voices, live dictation, and one speech
+# surface.
+#
+# The defect this rolls out was found by running the e2e suite against the
+# previous image: /v1/speech/voices advertised four English voices and the
+# settings picker offered all four, but _synthesize_edge_tts ignored the
+# requested one, so every English voice played as en-US-AriaNeural. Nothing
+# failed, because every frontend spec mocks /api/** and the backend tests stop
+# at the layer above the edge call. scripts/probe_deploy.py exists so that class
+# of thing cannot hide again — unmocked HTTP at a running deployment, and the
+# one to run after this roll.
+#
+# Also here: dictation now transcribes live (interimResults + continuous were
+# off, so the composer filled in one jump at the end); the Dictate button did
+# nothing at all where the browser has no Speech API, which is Firefox and
+# Chromium on several platforms; the recording panel's checkmark said "Send
+# recording" while dictating, when it inserts text rather than sending; and the
+# header's "Voice ready" pill and voice-overlay mic are gone, leaving one place
+# to start speaking.
+#
+# Verified: 1393 backend tests, 743 repo-root, 141 frontend, e2e at the
+# documented 64/5 firefox baseline, the voice specs confirmed on real chromium,
+# axe clean, and the live probe at 58/60 against the previous image — the two
+# failures being exactly the defect this image fixes. All 7 CI workflows green
+# on this commit.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-3990a66
+FROM landwind/ura-chatbot:sha-255a56f
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
