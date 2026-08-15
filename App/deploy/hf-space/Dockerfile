@@ -478,9 +478,54 @@
 # full device matrix, 62/67 Playwright (5 failures are a documented Firefox/
 # StaffGuard environment gap in the sandbox this was built in, not the code).
 #
+# sha-6332de0 gives every language its own narration voice, and fixes the
+# reason that could not work before.
+#
+# `sunbird.text_to_speech` took only a locale and looked its speaker up from
+# TTS_VOICES[locale], so the `voice` a caller sent to /v1/tts was dropped before
+# the request was built. English hid it — edge-tts serves English and takes a
+# voice name directly — so picking a voice appeared to work while lg/nyn/ach/sw
+# silently always used one speaker.
+#
+# The catalog has far more than the one speaker per language the code used, and
+# every tag it documents is now offered: 8 Luganda, 5 Acholi, 5 Runyankole, 2
+# Swahili, plus English. Each was confirmed against the live
+# /tasks/audio/speech before shipping — 21 requests, 21 with fetchable audio, 0
+# rejected. That check is the point rather than diligence for its own sake: an
+# unusable tag is not a loud failure but a voice a person can select and never
+# hear, because the request 400s and the chain degrades to an English speaker
+# reading Luganda.
+#
+# A requested speaker is validated against its own locale's catalog. A tag from
+# another language is NOT forwarded — orpheus either rejects it or synthesises
+# the wrong language, both worse than quietly using the right default — and
+# neither are the Piper/edge names `synthesize` fills in when no voice is named.
+# GET /v1/speech/voices serves the catalog so the client never hardcodes it;
+# this Space HAS a Sunbird key, so it reports sunbird_configured true and all
+# 24 voices are selectable here.
+#
+# Frontend: the store moved from one global `voiceId` to `voiceByLocale` with a
+# persist migration, because a voice only exists inside its own language and one
+# id meant switching language carried a speaker that could not synthesise the
+# new one. The Voice tab lists speakers per language, current language first,
+# each with its own preview button. Voices are numbered rather than given
+# invented personas — the catalog exposes opaque tags and nothing about the
+# people behind them.
+#
+# Also in this image, from the settings work that preceded it: the refused-token
+# state is now reachable (an expired token returns 401, which the UI read as
+# "backend unreachable" and reported backwards), the tax-profile panel no longer
+# claims that fields nothing reads will shape answers, consent receipts show a
+# loading state instead of five toggles that all read "off" while in flight, and
+# withdrawing personalization — which purges server-side memory — asks first.
+#
+# Verified: 1381 backend tests, 743 repo-root, 133 frontend, 12 Playwright; the
+# picker driven in a browser on desktop and phone; axe clean and every control
+# at or above the touch floor across phone/tablet/desktop in both themes.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-c1f8d99
+FROM landwind/ura-chatbot:sha-6332de0
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
