@@ -523,9 +523,53 @@
 # picker driven in a browser on desktop and phone; axe clean and every control
 # at or above the touch floor across phone/tablet/desktop in both themes.
 #
+# sha-3990a66 is a correctness and consistency pass over the sign-up/settings
+# and per-language-voice work, plus the repo's security guards.
+#
+# User-facing:
+#   * /signin was titled "Staff sign-in". Five entry points now send ordinary
+#     taxpayers there — the sidebar account block, the header pair, the landing
+#     note, Settings > Account and the tax-profile panel — so most people
+#     arriving were told, in the largest text on the page, that they were in the
+#     wrong place. Staff use the same OIDC redirect; what differs is the role
+#     their token carries, resolved after the exchange.
+#   * The analytics switch in Privacy & data snapshotted consent on open and
+#     never subscribed. The privacy banner writes the same key and renders ABOVE
+#     the dialog, so accepting it with settings open left the switch reading
+#     "off" while storage said otherwise. It subscribes now.
+#   * Narration and voice mode were coupled one way only: the composer set both,
+#     the settings toggle wrote narration alone, so turning it off there left
+#     voice mode listening with nothing to say back. Both go through one owner.
+#
+# Consistency: the landing page linked to /signin and /signup with raw anchors
+# while four other call sites used next/link; the OIDC callback still inlined
+# role checks instead of the shared table; accountApi typed the withdraw
+# response as a list when the backend returns a {purpose: bool} dict; and the
+# consent panel filtered receipts on a field the endpoint never returns (it
+# filters server-side) while describing them as "dated" when no date is shown.
+#
+# Security guards, which had been failing on pre-existing findings and are now
+# green — none by blanket suppression:
+#   * Bandit B324: SHA-1 in the phrase cache is declared usedforsecurity=False.
+#     It keys an in-process cache, so it needs speed and stability rather than
+#     collision resistance, and this keeps it working on FIPS-restricted builds.
+#   * Semgrep ura-llm01 flagged Whisper ASR's model.generate(input_features) as
+#     unguarded user input to an LLM. The argument is a mel spectrogram, so
+#     there is no prompt to inject into; the transcript it produces IS guarded,
+#     downstream in service.generate() whose first step is InputGuard.check().
+#     Suppressed per-line, rule named, reasoning recorded.
+#   * detect-secrets: two keyword false positives given the hook's documented
+#     pragma.
+#
+# Verified: 1381 backend tests, 743 repo-root, 134 frontend, 62/67 Playwright
+# (the 5 are a documented Firefox/StaffGuard sandbox gap, each cause confirmed
+# to match the baseline), axe clean, all contrast at or above 4.5:1, and the
+# voice picker driven in a browser on desktop and phone. All 8 CI workflows
+# green on this commit.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-6332de0
+FROM landwind/ura-chatbot:sha-3990a66
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
