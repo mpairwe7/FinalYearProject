@@ -181,6 +181,10 @@ ignore = [
 "__init__.py" = ["F401"]
 # ML scripts & pipelines are CLI tools that use print() for output
 "ml/scripts/**" = ["T201", "S311", "S110", "S112", "S310", "S324", "E402", "E741"]
+# Operator tooling under scripts/ is the same shape — stdout IS the interface.
+# Only T201, unlike the blanket list above: the security and correctness lints
+# stay on, because these run against live deployments and real credentials.
+"scripts/**" = ["T201"]
 "ml/pipelines/**" = ["T201", "S311", "S110", "S112", "S310", "E741"]
 "ml/plots/**" = ["T201", "E741"]
 "ml/huggingface/**" = ["T201"]

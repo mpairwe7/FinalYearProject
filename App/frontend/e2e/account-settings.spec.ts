@@ -11,7 +11,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { clearChatStore, mockBackend, seedConsent } from "./helpers";
+import { clearChatStore, expectAuthCta, mockBackend, seedConsent } from "./helpers";
 
 async function anonymous(page: Page) {
   await seedConsent(page);
@@ -57,11 +57,7 @@ test.describe("Auth entry points", () => {
     await page.goto("/signup");
 
     await expect(page.getByRole("heading", { name: "Create an account" })).toBeVisible();
-    // NEXT_PUBLIC_OIDC_* is unset in CI, so the button must say so rather than
-    // redirect to a URL built from empty strings.
-    const cta = page.getByRole("button", { name: /Identity provider not configured/ });
-    await expect(cta).toBeVisible();
-    await expect(cta).toBeDisabled();
+    await expectAuthCta(page, /Continue to registration/);
     // Neither auth route is a dead end.
     await expect(page.locator('.signin-switch a[href="/signin"]')).toBeVisible();
     await expect(page.locator('.signin-switch a[href="/"]')).toBeVisible();

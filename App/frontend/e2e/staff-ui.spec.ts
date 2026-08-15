@@ -13,7 +13,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedConsent } from "./helpers";
+import { expectAuthCta, seedConsent } from "./helpers";
 
 const ADMIN_ID = "tkt-admin-1";
 
@@ -351,17 +351,13 @@ test.describe("Staff UI on Chromium", () => {
   });
 
   test.describe("/signin", () => {
-    test("offers the OIDC path and disables it when unconfigured", async ({ page }) => {
+    test("offers the OIDC path, live or disabled to match the deployment", async ({ page }) => {
       await seedConsent(page);
       await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
       await page.goto("/signin");
       await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
 
-      // Neither NEXT_PUBLIC_OIDC_* is set in CI, so the button must state that
-      // plainly rather than redirecting into a broken URL.
-      const button = page.getByRole("button", { name: /Identity provider not configured/ });
-      await expect(button).toBeVisible();
-      await expect(button).toBeDisabled();
+      await expectAuthCta(page, /Continue with URA identity provider/);
     });
 
     test("dark and light both render the card readably", async ({ page }) => {

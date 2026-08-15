@@ -1171,7 +1171,7 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
     `default: true` marks the speaker used when a caller names none.
     """
     from . import sunbird
-    from .speech_service import EN_EDGE_VOICE_CHOICES, SPEECH_EN_EDGE_VOICE
+    from .speech_service import en_edge_voice_choices
 
     sunbird_ready = sunbird.is_available()
     voices: dict[str, list[dict]] = {}
@@ -1199,8 +1199,8 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
     # serves English (Sunbird's English voice is a last resort) — so they are
     # listed first and one of them is the English default.
     # The deployment's configured voice leads, then the rest of the choices.
-    # dict.fromkeys dedupes while keeping that order, since the configured one
-    # is usually also in the list.
+    # This is the same list resolve_edge_voice() accepts, so every English voice
+    # offered here is one synthesis will actually use.
     edge_entries = [
         {
             "id": name,
@@ -1209,8 +1209,7 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
             "default": False,
             "available": True,
         }
-        for name in dict.fromkeys((SPEECH_EN_EDGE_VOICE, *EN_EDGE_VOICE_CHOICES))
-        if name
+        for name in en_edge_voice_choices()
     ]
     voices["en"] = edge_entries + voices.get("en", [])
 

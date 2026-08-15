@@ -241,6 +241,36 @@ EN_EDGE_VOICE_CHOICES: tuple[str, ...] = (
 )
 
 
+def en_edge_voice_choices() -> tuple[str, ...]:
+    """The English edge speakers this deployment offers, configured one first.
+
+    The set that /v1/speech/voices advertises and the set :func:`resolve_edge_voice`
+    accepts have to be the same set, or a deployment that points
+    ``SPEECH_EN_EDGE_VOICE`` at a voice outside the tuple above would offer a
+    speaker it then refuses to use. Deriving both from here keeps that honest;
+    ``dict.fromkeys`` dedupes while preserving order, since the configured voice
+    is usually also one of the choices.
+    """
+    return tuple(dict.fromkeys(v for v in (SPEECH_EN_EDGE_VOICE, *EN_EDGE_VOICE_CHOICES) if v))
+
+
+def resolve_edge_voice(language: str, voice: str | None = None) -> str:
+    """The edge-tts speaker for *language*, honouring the caller's pick.
+
+    Only English is a real choice. edge-tts has no Ugandan-language voice at
+    all, so for those locales this returns the configured English stand-in and
+    ignores *voice* — which by that point in the chain is a Sunbird catalog tag
+    naming a speaker edge cannot produce. Forwarding it would raise "No audio
+    was received" and lose the fallback that exists precisely because Sunbird
+    was unreachable.
+    """
+    if (language or "en") == "en":
+        return voice if voice in en_edge_voice_choices() else SPEECH_EN_EDGE_VOICE
+    if language == "lg":
+        return SPEECH_LG_EDGE_VOICE
+    return SPEECH_EN_EDGE_VOICE
+
+
 def _sunbird_has_native_voice(locale: str) -> bool:
     """True when Sunbird ships a native speaker for *locale*."""
     try:
@@ -1042,8 +1072,12 @@ class SpeechModel:
                 return result
 
         # ② edge-tts (Microsoft neural voices — needs internet, no API key)
+        #    `voice` is forwarded so an English caller's pick is honoured here
+        #    too. Without it the four English speakers /v1/speech/voices
+        #    advertises all synthesized as Aria: the picker moved, nothing else
+        #    did. resolve_edge_voice drops a pick edge cannot serve.
         try:
-            result = _cloud_call("edge-tts", self._synthesize_edge_tts, text, language)
+            result = _cloud_call("edge-tts", self._synthesize_edge_tts, text, language, voice)
             if result and result.audio:
                 return result
         except Exception:
@@ -1111,7 +1145,9 @@ class SpeechModel:
             language,
         )
 
-    def _synthesize_edge_tts(self, text: str, language: str) -> SynthesizeResult | None:
+    def _synthesize_edge_tts(
+        self, text: str, language: str, voice: str | None = None
+    ) -> SynthesizeResult | None:
         """TTS via edge-tts (Microsoft neural voices, free, needs internet).
 
         Runs the async edge_tts.Communicate in a dedicated event loop on a
@@ -1124,11 +1160,7 @@ class SpeechModel:
         except ImportError:
             return None
 
-        voice_map = {
-            "lg": SPEECH_LG_EDGE_VOICE,
-            "en": SPEECH_EN_EDGE_VOICE,
-        }
-        voice_id = voice_map.get(language, SPEECH_EN_EDGE_VOICE)
+        voice_id = resolve_edge_voice(language, voice)
         t0 = time.perf_counter()
 
         def _generate_sync() -> bytes:

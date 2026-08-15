@@ -417,7 +417,17 @@ A voice belongs to the language it speaks, so the choice is per language, not
 one global setting. Sunbird's catalog tags are language-scoped and the backend
 refuses one from another language rather than synthesising the wrong one —
 `sunbird.resolve_tts_voice` validates every requested speaker against that
-locale's catalog and falls back to its default.
+locale's catalog and falls back to its default. `speech_service.resolve_edge_voice`
+does the same for the English edge-tts voices, and both providers' lists come
+from the same functions the endpoint advertises, so an offered voice is always
+one synthesis will use.
+
+That second resolver was missing at first: the picker sent a voice, `synthesize`
+accepted it, and `_synthesize_edge_tts` ignored it, so all four English voices
+played as `en-US-AriaNeural`. Nothing in the suite caught it because every
+frontend spec mocks `/api/**` and the backend tests stopped at the layer above
+the edge call. `scripts/probe_deploy.py` exists because of this — it drives a
+running deployment unmocked, which is what found it.
 
 `GET /v1/speech/voices` serves the catalog; the client does not hardcode it,
 because only the backend knows whether this deployment can reach Sunbird at all.

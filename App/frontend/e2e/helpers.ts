@@ -6,9 +6,35 @@
  * `**​/api/**` with page.route. The analytics consent banner (role=alertdialog)
  * overlays on first load and can intercept clicks, so tests seed a decision.
  */
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 import { TINY_WAV_B64 } from "./fixtures";
+
+/**
+ * Assert the auth call-to-action is coherent, whichever way the target is wired.
+ *
+ * CI runs without NEXT_PUBLIC_OIDC_*, so the button has to say "Identity
+ * provider not configured" and stay disabled rather than redirect into a URL
+ * built from empty strings. A real deployment has an IdP, so the same button
+ * has to be live and labelled with the action.
+ *
+ * Both specs that use this asserted only the CI shape, which meant a clean run
+ * against the deployed Space reported two failures for a reason that was not a
+ * defect — the deployment simply had OIDC configured. Skipping there would have
+ * traded a false alarm for a blind spot; branching keeps a real assertion on
+ * both. Only the disabled state has a fixed label, so callers pass the live one.
+ */
+export async function expectAuthCta(page: Page, liveName: RegExp) {
+  const unconfigured = page.getByRole("button", { name: /Identity provider not configured/ });
+  const live = page.getByRole("button", { name: liveName });
+
+  await expect(unconfigured.or(live).first()).toBeVisible();
+  if ((await unconfigured.count()) > 0) {
+    await expect(unconfigured).toBeDisabled();
+  } else {
+    await expect(live).toBeEnabled();
+  }
+}
 
 /** Seed an analytics-consent decision so the banner never renders.
  * The store reads "true"/"false" (see lib/analyticsConsent); anything else is

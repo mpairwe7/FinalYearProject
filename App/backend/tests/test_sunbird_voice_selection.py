@@ -2,9 +2,13 @@
 
 `text_to_speech` looked its speaker up from `TTS_VOICES[locale]` and took no
 voice argument at all, so the `voice` a caller sent to /v1/tts was dropped on
-the floor for every Ugandan language. English hid it: edge-tts serves English
-and honours the voice name directly, so picking a voice appeared to work while
-lg/nyn/ach/sw silently always used one speaker.
+the floor for every Ugandan language.
+
+An earlier version of this docstring said English was unaffected because
+"edge-tts honours the voice name directly". That was an assumption, not a
+finding, and it was wrong: `_synthesize_edge_tts` ignored the argument too, so
+all four English voices synthesized as en-US-AriaNeural. It took a live probe of
+the deployment to catch. See test_edge_voice_selection.py for that half.
 
 The catalog it now validates against was confirmed against the live
 /tasks/audio/speech endpoint — 21 tags, 21 with fetchable audio, 0 rejected.

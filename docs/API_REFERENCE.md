@@ -646,8 +646,12 @@ voice name (`en-US-AriaNeural`); for the Ugandan languages it is a Sunbird
 catalog tag (`waxal_lug_0004`), validated against `language` — a tag belonging
 to another language is replaced with that language's default rather than
 forwarded, since orpheus would otherwise reject it or synthesise the wrong
-language. List the choices with `GET /v1/speech/voices`; the response's `voice`
-field reports the speaker actually used.
+language. English is validated the same way, against the edge voices this
+deployment offers; a name outside that list falls back to `SPEECH_EN_EDGE_VOICE`.
+A Sunbird tag is never forwarded to edge-tts — edge has no such speaker and the
+call would return no audio, losing the fallback. List the choices with
+`GET /v1/speech/voices`; the response's `voice` field reports the speaker
+actually used, so a caller can tell a honoured pick from a fallback.
 
 ---
 
