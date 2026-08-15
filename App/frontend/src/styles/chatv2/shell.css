@@ -160,8 +160,15 @@
 /* ---------------------------------------------------------------------------
  * Sidebar (legacy .conversation-rail markup, restyled).
  * ------------------------------------------------------------------------- */
+/* The background here is the opaque base; canvas.css (loaded last) drops it to
+   transparent so the rail shares the conversation's canvas — same layering as
+   .app-main-col, which is --bg-0 here and transparent there. Keeping the base
+   means the rail is still legible if the canvas layer is ever removed.
+
+   The border is what separates the two surfaces now that they share a ground,
+   so it lives here rather than being folded into the canvas rule. */
 .chatv2 .conversation-rail {
-  background: var(--bg-1);
+  background: var(--bg-0);
   border-right: 1px solid var(--border-0);
 }
 
@@ -183,8 +190,11 @@
   transform: none;
 }
 
+/* The search field was --bg-0 on a --bg-1 rail, so the rail itself supplied the
+   contrast that made it look like an input. Now that they share a background it
+   has to carry its own, or it reads as a bordered rectangle of nothing. */
 .chatv2 .rail-search {
-  background: var(--bg-0);
+  background: var(--surface-1);
   border: 1px solid var(--border-0);
   border-radius: 8px;
 }

@@ -501,7 +501,7 @@ VoiceSession (voice_stream.py):
 
 | Module | File | Purpose |
 |--------|------|---------|
-| `VoiceChat.tsx` | `frontend/src/components/` | Full-screen voice-first mobile interface |
+| `VoiceChat.tsx` | `frontend/src/components/` | Full-screen voice-first mobile interface. **No longer mounted** — its only entry point was a header mic that duplicated the composer's; still on disk, see PROJECT_SETUP "Speaking to the assistant" |
 | `voiceWebSocket.ts` | `frontend/src/services/` | WebSocket client (auto-reconnect, binary frames) |
 | `useVoiceStore.ts` | `frontend/src/store/` | Zustand store for voice state |
 | `useVoiceWebSocket.ts` | `frontend/src/hooks/` | React hook wiring WS events to store |

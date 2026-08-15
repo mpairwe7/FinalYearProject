@@ -133,4 +133,37 @@ describe("ChatInput attachments", () => {
     expect(screen.getByText("Over the 10 MB limit")).toBeInTheDocument();
     expect(screen.getByLabelText("Analysing attachment...")).toBeDisabled();
   });
+
+  /**
+   * `processing` is the gap between "I stopped recording" and "the transcript
+   * arrived", which only exists on the server-ASR dictation path. The mic has
+   * to stop claiming it is listening and stop accepting taps: the audio is
+   * already uploaded, so a second tap cancels nothing and only reads as broken.
+   */
+  describe("dictation states", () => {
+    it("reads as listening and offers to stop while recording", () => {
+      render(<ChatInput {...defaults} speechState="listening" />);
+      const mic = screen.getByLabelText("Stop listening");
+      expect(mic).toBeEnabled();
+      expect(mic.className).toContain("btn-recording");
+    });
+
+    it("reads as transcribing and refuses taps while the transcript is in flight", () => {
+      const onMicClick = vi.fn();
+      render(<ChatInput {...defaults} speechState="processing" onMicClick={onMicClick} />);
+      const mic = screen.getByLabelText("Transcribing");
+      expect(mic).toBeDisabled();
+      // Not the red recording pulse — the mic is no longer listening.
+      expect(mic.className).not.toContain("btn-recording");
+      expect(mic.className).toContain("is-processing");
+      expect(mic).toHaveAttribute("data-tip", "Transcribing…");
+    });
+
+    it("returns to the plain dictate affordance when idle", () => {
+      render(<ChatInput {...defaults} speechState="idle" />);
+      const mic = screen.getByLabelText("Start speaking");
+      expect(mic).toBeEnabled();
+      expect(mic).toHaveAttribute("data-tip", "Dictate");
+    });
+  });
 });

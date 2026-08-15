@@ -8,10 +8,8 @@ import LanguageMenu, { LanguageOption } from './LanguageMenu';
 import { useIdentity } from '../hooks/useIdentity';
 import {
   BookIcon,
-  HeadphonesIcon,
   KebabIcon,
   MenuIcon,
-  MicIcon,
   PanelLeftIcon,
   PlusIcon,
   SettingsIcon,
@@ -20,11 +18,19 @@ import {
 
 /**
  * chatv2 header: sidebar toggles, brand, then a compact action cluster.
- * Conversation-level controls (language, Voice, Narrate, attach) live in the
- * composer; the header keeps navigation, theme, the voice-overlay entry, the
- * speech-health status pill, and an overflow menu with Settings, Clear and the
- * blog link. All aria-labels match the legacy header so tests and AT behavior
- * carry over.
+ * Conversation-level controls (language, voice, attach) live in the composer;
+ * the header keeps navigation, theme, and an overflow menu with Settings, Clear
+ * and the blog link. All aria-labels match the legacy header so tests and AT
+ * behavior carry over.
+ *
+ * Two speech controls used to sit here and no longer do. The "Voice ready"
+ * status pill reported a backend detail continuously in the corner of every
+ * screen — it earned its space only in the seconds after a failure, and the
+ * composer's mic already goes quiet and explains itself when speech is
+ * unreachable, which is where someone is looking when it matters. The
+ * voice-overlay mic was a second, differently-shaped entry into speech sitting
+ * a few centimetres from the composer's own: two mics in one viewport, neither
+ * saying which was which. Speech now has one home, in the composer.
  *
  * Signed out, the header also carries the Sign in / Sign up pair. The sidebar's
  * account block is the primary home for those, but it is behind the hamburger
@@ -37,12 +43,8 @@ interface ChatHeaderProps {
   onNewChat: () => void;
   /** Already confirm-wrapped by the page. */
   onRequestClear: () => void;
-  voiceChatOpen: boolean;
-  onToggleVoiceChat: () => void;
   onOpenSettings: () => void;
   blogUrl: string;
-  healthOk: boolean;
-  healthLabel: string;
   /* Language is a session-level setting — it governs the reply language, the
      TTS voice and STT recognition for the whole conversation — so it sits with
      the other settings here rather than in the composer toolbar. */
@@ -57,12 +59,8 @@ export default function ChatHeader({
   onToggleRailCollapse,
   onNewChat,
   onRequestClear,
-  voiceChatOpen,
-  onToggleVoiceChat,
   onOpenSettings,
   blogUrl,
-  healthOk,
-  healthLabel,
   locale,
   localeOptions,
   onLocaleChange,
@@ -134,22 +132,7 @@ export default function ChatHeader({
         options={localeOptions}
         onLocaleChange={onLocaleChange}
       />
-      <button
-        className="top-bar-icon-btn"
-        onClick={onToggleVoiceChat}
-        aria-label={voiceChatOpen ? 'Close voice chat' : 'Open voice chat'}
-        title="Voice-first mode"
-        style={voiceChatOpen ? { color: 'var(--cv2-accent, #00a88f)' } : undefined}
-      >
-        <MicIcon />
-      </button>
       <ThemeToggle />
-      <div
-        className={`pill-sm ${healthOk ? 'pill-ok' : 'pill-warn'}`}
-        aria-live="polite"
-      >
-        <HeadphonesIcon /> <span className="pill-sm-label">{healthLabel}</span>
-      </div>
       {!signedIn && (
         <div className="hdrv2-auth">
           <Link className="hdrv2-signin" href="/signin">

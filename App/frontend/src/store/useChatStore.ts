@@ -42,7 +42,10 @@ export interface Conversation {
   updatedAt: number;
 }
 
-export type SpeechState = 'idle' | 'listening' | 'unavailable' | 'error';
+/** `processing` = recording stopped, transcription in flight. Only the
+ *  server-ASR dictation path reaches it; the browser Speech API returns its
+ *  transcript synchronously in onresult and goes straight back to `idle`. */
+export type SpeechState = 'idle' | 'listening' | 'processing' | 'unavailable' | 'error';
 
 interface ChatStore {
   message: string;

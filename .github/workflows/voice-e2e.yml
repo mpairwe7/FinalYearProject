@@ -126,6 +126,15 @@ jobs:
       - name: Run voice.mobile.spec.ts (mobile-chrome)
         run: bunx playwright test e2e/voice.mobile.spec.ts --project=mobile-chrome
 
+      # Live dictation drives a scripted SpeechRecognition, so unlike the voice
+      # specs it needs no fake capture device — but this job only installs
+      # chromium, so it runs on the two chromium projects. Nothing is lost by
+      # leaving firefox out: these tests inject their own recognizer, so they
+      # never depend on what the browser ships. The no-Speech-API branch is
+      # covered in voice.spec.ts, which deletes the API in chromium instead.
+      - name: Run dictation.spec.ts (live transcription — chromium + mobile-chrome)
+        run: bunx playwright test e2e/dictation.spec.ts --project=chromium --project=mobile-chrome
+
       - name: Run ui-theme.spec.ts (copy + theme — chromium + mobile-chrome)
         run: bunx playwright test e2e/ui-theme.spec.ts --project=chromium --project=mobile-chrome
 

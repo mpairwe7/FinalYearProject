@@ -81,7 +81,6 @@
  *    on inheritance so a future transparent-background change to the shell
  *    cannot silently put a gradient under a paragraph.
  * ------------------------------------------------------------------------- */
-.chatv2 .conversation-rail,
 .chatv2 .composer.cmpv2,
 .chatv2 .hdrv2-menu,
 .chatv2 .lmv2,
@@ -91,8 +90,29 @@
 .chatv2 .landing-chip {
   background: var(--bg-0);
 }
-:root[data-theme="dark"] .chatv2 .conversation-rail {
-  background: var(--bg-1);
+
+/* The sidebar is the exception to §3, and deliberately.
+ *
+ * It used to be an opaque --bg-0 slab (--bg-1 in dark), which made it the one
+ * surface that did not sit on the same ground as the conversation: a visible
+ * tonal seam down the left of every screen, and on a phone — where the rail is
+ * a drawer over that same conversation — a drawer that looked like a different
+ * app. Sharing the canvas is the whole point of the request; painting it "the
+ * same colour" is not possible anyway, since the canvas is a gradient.
+ *
+ * §3's rule is that no glyph renders directly on a moving gradient, and this
+ * does not break it, because of what the mesh actually is: a linear-gradient
+ * between --bg-0 and --bg-1 with radial tints riding on top at 8% (light) and
+ * 22% (dark). Rail text is --text-0/--text-1, specified against exactly those
+ * two values, so the worst case is text on --bg-1 — a background it is already
+ * contrast-checked against. Measured in-browser after the change, compositing
+ * each label onto the ground that actually paints behind it: conversation
+ * titles 8.59:1 light / 7.60:1 dark, "New chat" 11.85:1 / 13.63:1. The floor is
+ * 4.5:1, and the axe suite re-checks it on every run.
+ *
+ * The hairline border-right in shell.css is what separates the two now. */
+.chatv2 .conversation-rail {
+  background: transparent;
 }
 .chatv2 .bubble.user {
   background: var(--cv2-user-bubble);

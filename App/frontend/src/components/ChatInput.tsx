@@ -204,18 +204,34 @@ function ChatInputInner({
             </>
           )}
           <div className="cmpv2-spacer" />
-          {/* Dictation — fills the textarea. Stays put in both states so it
-              never moves under a thumb that is already reaching for it. */}
+          {/* Dictation — fills the textarea. Stays put in all three states so
+              it never moves under a thumb that is already reaching for it.
+              `processing` only appears on the server-ASR path, where the
+              transcript arrives over the network: without it the button just
+              sat there looking idle while the upload was in flight, and the
+              second tap that invites cancels nothing and loses the recording. */}
           <button
-            className={`composer-circle-btn mic-circle-btn ${speechState === 'listening' ? 'btn-recording' : ''}`}
+            className={`composer-circle-btn mic-circle-btn ${speechState === 'listening' ? 'btn-recording' : ''} ${speechState === 'processing' ? 'is-processing' : ''}`}
             onClick={onMicClick}
-            disabled={speechUnavailable || isLoading || isTransitioning}
-            aria-label={speechState === 'listening' ? 'Stop listening' : 'Start speaking'}
+            disabled={speechUnavailable || isLoading || isTransitioning || speechState === 'processing'}
             /* The tip says "Dictate" while the accessible name stays "Start
                speaking": two speech controls sit side by side here, and the
                one thing a user must not have to guess is which one types and
                which one talks back. */
-            data-tip={speechState === 'listening' ? 'Stop listening' : 'Dictate'}
+            aria-label={
+              speechState === 'listening'
+                ? 'Stop listening'
+                : speechState === 'processing'
+                  ? 'Transcribing'
+                  : 'Start speaking'
+            }
+            data-tip={
+              speechState === 'listening'
+                ? 'Stop listening'
+                : speechState === 'processing'
+                  ? 'Transcribing…'
+                  : 'Dictate'
+            }
           >
             <MicIcon />
           </button>

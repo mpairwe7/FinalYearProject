@@ -22,6 +22,7 @@ import {
   playAudioBase64,
   stopPlayback,
   isPlaying,
+  transcribe,
   voiceChat,
 } from '../services/voiceService';
 import { authHeaders } from '../lib/authSession';
@@ -35,9 +36,6 @@ import ChatInput from '../components/ChatInput';
 import ConfirmDialog, { ConfirmRequest } from '../components/ConfirmDialog';
 import ConversationRail from '../components/ConversationRail';
 import SettingsDialog, { SettingsTab } from '../components/settings/SettingsDialog';
-import { VoiceChat } from '../components/VoiceChat';
-import { VoiceFirstChat } from '../components/VoiceFirstChat';
-import { VoiceVisionMode } from '../components/VoiceVisionMode';
 import ChatHeader from '../components/ChatHeader';
 import { BotIcon } from '../components/Icons';
 import { useIdentity } from '../hooks/useIdentity';
@@ -47,13 +45,28 @@ import { useIdentity } from '../hooks/useIdentity';
 // ---------------------------------------------------------------------------
 interface SpeechRecognition extends EventTarget {
   lang: string; continuous: boolean; interimResults: boolean;
-  onstart: (() => void) | null; onerror: ((e: Event) => void) | null;
+  onstart: (() => void) | null; onerror: ((e: SpeechRecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
   onresult: ((e: SpeechRecognitionEvent) => void) | null;
   start: () => void; stop: () => void; abort: () => void;
 }
 interface SpeechRecognitionEvent extends Event {
+  /** Index of the first result changed by this event — everything before it is
+   *  already accounted for, so only the tail is re-read. */
+  resultIndex: number;
   results: { [i: number]: { 0: { transcript: string }; isFinal: boolean; length: number }; length: number };
+}
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+}
+
+/** Join what was already in the composer with what has been dictated. */
+function joinDictated(base: string, spoken: string): string {
+  const b = base.trimEnd();
+  const s = spoken.trimStart();
+  if (!b) return s;
+  if (!s) return b;
+  return `${b} ${s}`;
 }
 
 // All API calls go through the Next.js rewrite proxy at /api/*
@@ -121,6 +134,17 @@ export default function Page() {
   const saveCurrentSession = useChatStore((s) => s.saveCurrentSession);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // Live-dictation bookkeeping — see the recognition effect below.
+  const dictationBaseRef = useRef('');
+  const dictationFinalRef = useRef('');
+  const dictationActiveRef = useRef(false);
+  // Restart-loop guard. `onend` restarting the recognizer is what keeps the mic
+  // alive across a pause, but if the engine ends immediately every time — no
+  // mic permission, device pulled, tab backgrounded — that same line is an
+  // unthrottled loop hammering start() forever. Count only the ends that come
+  // back too fast to be a real utterance; any session that lasted resets it.
+  const dictationStartedAtRef = useRef(0);
+  const dictationRapidEndsRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -162,9 +186,6 @@ export default function Page() {
   const [playingTurnId, setPlayingTurnId] = useState<string | null>(null);
   const [ttsLoading, setTtsLoading] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState(false);
-  const [voiceChatMode, setVoiceChatMode] = useState(false);
-  const [voiceFirstMode, setVoiceFirstMode] = useState(false);
-  const [voiceVisionMode, setVoiceVisionMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -282,9 +303,32 @@ export default function Page() {
     };
   }, []);
 
-  // Browser Speech Recognition (re-created on locale change)
+  /**
+   * Browser Speech Recognition — live transcription, re-created on locale change.
+   *
+   * `interimResults` is the whole point: with it off (as it was) the composer
+   * stayed empty for the length of an utterance and then filled in one jump, so
+   * there was no way to tell dictation was working, or that it had misheard the
+   * first sentence, until it was over. With it on, words land as they are
+   * spoken and a mistake is visible while it is still worth restarting.
+   *
+   * `continuous` goes with it. Non-continuous recognition ends at the first
+   * pause, which turns a two-sentence question into one sentence and a stopped
+   * mic. The engines still end sessions on their own — Chrome does it after a
+   * few seconds of silence regardless — so `onend` restarts while the user has
+   * not tapped stop. That is what makes the mic stay live rather than dying
+   * mid-thought.
+   *
+   * Three refs, because a re-render must not disturb an in-flight utterance:
+   *   base   — what was in the composer when dictation started, so dictating
+   *            into a half-typed question appends instead of erasing it
+   *   final  — segments the engine has committed this session
+   *   active — the user's intent, which is what decides whether `onend` is a
+   *            silence timeout to recover from or a real stop
+   */
   useEffect(() => {
     if (recognitionRef.current) {
+      dictationActiveRef.current = false;
       recognitionRef.current.abort();
       recognitionRef.current = null;
     }
@@ -296,17 +340,62 @@ export default function Page() {
     }
     const recog: SpeechRecognition = new Impl();
     recog.lang = LOCALE_OPTIONS.find((l) => l.value === locale)?.speechLang ?? 'en-US';
-    recog.continuous = false;
-    recog.interimResults = false;
-    recog.onstart = () => setSpeechState('listening');
-    recog.onerror = () => setSpeechState('error');
-    recog.onend = () => setSpeechState('idle');
+    recog.continuous = true;
+    recog.interimResults = true;
+    recog.onstart = () => {
+      dictationStartedAtRef.current = Date.now();
+      setSpeechState('listening');
+    };
+    recog.onerror = (event) => {
+      // "no-speech" is a pause, not a failure: the engine gives up on silence
+      // and onend restarts it. Treating it as an error put the mic in a red
+      // state for thinking. "aborted" is our own stop() or teardown.
+      if (event.error === 'no-speech' || event.error === 'aborted') return;
+      dictationActiveRef.current = false;
+      setSpeechState('error');
+    };
+    recog.onend = () => {
+      if (dictationActiveRef.current) {
+        // A session that ran for a while and then ended is a silence timeout —
+        // pick it straight back up. One that ends within a few hundred ms never
+        // really started, so count it; three in a row means the engine cannot
+        // run here and retrying is just a spin.
+        const ranFor = Date.now() - dictationStartedAtRef.current;
+        dictationRapidEndsRef.current = ranFor < 300 ? dictationRapidEndsRef.current + 1 : 0;
+        if (dictationRapidEndsRef.current < 3) {
+          try {
+            recog.start();
+            return;
+          } catch {
+            // start() throws if the previous session is still tearing down.
+            dictationActiveRef.current = false;
+          }
+        } else {
+          dictationActiveRef.current = false;
+          dictationRapidEndsRef.current = 0;
+          setSpeechState('error');
+          return;
+        }
+      }
+      dictationRapidEndsRef.current = 0;
+      setSpeechState('idle');
+    };
     recog.onresult = (event) => {
-      const t = event.results?.[0]?.[0]?.transcript;
-      if (t) setMessage(t);
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const segment = event.results[i];
+        const text = segment?.[0]?.transcript ?? '';
+        if (segment?.isFinal) dictationFinalRef.current += text;
+        else interim += text;
+      }
+      // Interim text is rendered too, then replaced as the engine commits it.
+      setMessage(joinDictated(dictationBaseRef.current, dictationFinalRef.current + interim));
     };
     recognitionRef.current = recog;
-    return () => { recog.abort(); };
+    return () => {
+      dictationActiveRef.current = false;
+      recog.abort();
+    };
   }, [locale, hasMediaRecorder, setSpeechState, setMessage]);
 
   // Auto-narrate new assistant messages
@@ -419,6 +508,16 @@ export default function Page() {
     if (!text || isLoading) return;
     // Enter can fire while an upload is analysing — wait for it to settle.
     if (pendingAttachments.some((a) => a.status === 'uploading')) return;
+    // Sending ends the dictation session. Without this the recognizer keeps
+    // running against a composer that has just been cleared, and its next
+    // result — interim or final — refills the box with the question that was
+    // already sent, on top of whatever the person started typing next.
+    if (dictationActiveRef.current) {
+      dictationActiveRef.current = false;
+      dictationBaseRef.current = '';
+      dictationFinalRef.current = '';
+      recognitionRef.current?.stop();
+    }
     const sentAttachments = pendingAttachments
       .filter((a) => a.status === 'ready' && a.documentId)
       .map((a) => ({ id: a.documentId as string, name: a.name, docType: a.docType }));
@@ -657,12 +756,87 @@ export default function Page() {
       } finally { setIsTransitioning(false); }
       return;
     }
-    // Browser Speech API
-    if (!recognitionRef.current) return;
-    if (speechState === 'listening') { recognitionRef.current.stop(); return; }
-    trackVoiceUsed();
-    recognitionRef.current.start();
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, handleListenToReply]);
+    // Dictation. The browser Speech API is both the cheap path — no upload, no
+    // server round-trip — and the only one that can transcribe *while* someone
+    // is speaking, so it is tried first wherever it exists.
+    if (recognitionRef.current) {
+      if (speechState === 'listening') {
+        // Clearing intent before stop() so onend does not read the stop as a
+        // silence timeout and immediately restart the session.
+        dictationActiveRef.current = false;
+        recognitionRef.current.stop();
+        return;
+      }
+      // Read the composer from the store rather than the closure: this handler
+      // would otherwise have to depend on `message` and be rebuilt on every
+      // keystroke, and a stale closure here would silently erase whatever was
+      // typed between renders.
+      dictationBaseRef.current = useChatStore.getState().message;
+      dictationFinalRef.current = '';
+      dictationActiveRef.current = true;
+      dictationRapidEndsRef.current = 0;
+      trackVoiceUsed();
+      try {
+        recognitionRef.current.start();
+      } catch {
+        // start() throws if a previous session has not finished tearing down.
+        dictationActiveRef.current = false;
+        setSpeechState('error');
+      }
+      return;
+    }
+
+    // No Speech API. Firefox has never shipped one and Chrome does not expose it
+    // on every platform, so this is the common case, not the edge: roughly
+    // "everyone not on Chrome or Safari". The button used to fall off the end of
+    // this function and return silently — enabled, tappable, doing nothing —
+    // because `speechUnavailable` only covers the case where MediaRecorder is
+    // *also* missing. Record and let the server's ASR transcribe instead; the
+    // endpoint is already there and voice mode has been using it all along.
+    if (!hasMediaRecorder) return;
+    setIsTransitioning(true);
+    try {
+      if (isRecording) {
+        const rec = recorderRef.current;
+        if (!rec) return;
+        recorderRef.current = null;
+        setIsRecording(false);
+        setSpeechState('idle');
+        const pcm16 = await rec.stop();
+        if (pcm16.byteLength === 0) return;
+        setSpeechState('processing');
+        try {
+          const r = await transcribe(pcm16, locale);
+          // Append rather than replace: dictation is a way to fill the
+          // composer, and someone who typed half a question then tapped the
+          // mic means to finish it, not to lose it. Read from the store, not
+          // the closure — this resolves after a network round-trip, by which
+          // time a captured `message` is whatever it was when recording began.
+          if (r.text) {
+            setMessage(joinDictated(useChatStore.getState().message, r.text));
+          }
+          setSpeechState(r.text ? 'idle' : 'error');
+        } catch {
+          setSpeechState('error');
+          trackErrorOccurred('dictation_transcribe_failed');
+        }
+      } else {
+        try {
+          const rec = new AudioRecorder();
+          recorderRef.current = rec;
+          await rec.start();
+          setIsRecording(true);
+          setSpeechState('listening');
+          trackVoiceUsed();
+        } catch {
+          recorderRef.current = null;
+          setSpeechState('error');
+        }
+      }
+    } finally {
+      setIsTransitioning(false);
+    }
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {
@@ -701,11 +875,6 @@ export default function Page() {
   }, []);
 
   // ---- Derived state ----
-
-  const healthLabel = useMemo(() => {
-    if (!speechHealth) return 'Checking...';
-    return speechHealth.status === 'ready' ? 'Voice ready' : 'Voice unavailable';
-  }, [speechHealth]);
 
   const serverReady = speechHealth?.status === 'ready';
   // Memoize user query lookup per turn for ChatMessage
@@ -795,12 +964,8 @@ export default function Page() {
             action: () => reset(),
           })
         }
-        voiceChatOpen={voiceChatMode}
-        onToggleVoiceChat={() => setVoiceChatMode((v) => !v)}
         onOpenSettings={() => openSettings()}
         blogUrl={BLOG_URL}
-        healthOk={speechHealth?.status === 'ready'}
-        healthLabel={healthLabel}
         locale={locale}
         localeOptions={LOCALE_OPTIONS}
         onLocaleChange={setLocale}
@@ -946,37 +1111,13 @@ export default function Page() {
       </div>{/* end .app-main-col */}
     </div>{/* end .app-shell.chatv2 */}
 
-    {/* Overlays render OUTSIDE the .chatv2 scope so they keep the legacy
-        :root token values (the voice overlay is styled by globals.css and is
-        out of the redesign's scope). */}
-
-    {/* Voice-first overlay (Phase 23) */}
-    <VoiceChat
-      open={voiceChatMode}
-      locale={locale}
-      conversationId={activeConversationId ?? undefined}
-      onClose={() => setVoiceChatMode(false)}
-    />
-
-    {/* Voice-first primary interface (Phase 27) */}
-    {voiceFirstMode && (
-      <VoiceFirstChat
-        locale={locale}
-        onClose={() => setVoiceFirstMode(false)}
-        onOpenVision={() => {
-          setVoiceFirstMode(false);
-          setVoiceVisionMode(true);
-        }}
-      />
-    )}
-
-    {/* Voice + Vision mode (Phase 27) */}
-    {voiceVisionMode && (
-      <VoiceVisionMode
-        locale={locale}
-        onClose={() => setVoiceVisionMode(false)}
-      />
-    )}
+    {/* The three voice overlays (VoiceChat, VoiceFirstChat, VoiceVisionMode)
+        used to mount here. VoiceChat's only entry point was the header mic that
+        this change removes; VoiceFirstChat and VoiceVisionMode had no entry
+        point at all — no caller ever set their flags, so they had been
+        unreachable since they were added. Keeping the state and the renders
+        would have left three overlays that can never open and four pieces of
+        page state that nothing can change. The components are still on disk. */}
     </>
   );
 }

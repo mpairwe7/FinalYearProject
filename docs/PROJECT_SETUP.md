@@ -272,7 +272,7 @@ would refuse them.
 Both entry points are reachable from the assistant without going looking for
 them: the sidebar's account block carries Sign in, Sign up and Settings; the
 header carries the pair while signed out, though below 720px only *Sign up*
-stays (the header still has to fit the brand, language, mic and theme, and the
+stays (the header still has to fit the brand, language and theme, and the
 sidebar carries both anyway); and the landing hero says what an account adds.
 Nothing above those is gated — questions, document checks and voice all work
 signed out.
@@ -449,6 +449,52 @@ select and never hear, because the request 400s and the chain degrades to an
 English voice reading Luganda. The voices are numbered rather than given persona
 names; the catalog exposes opaque tags and nothing about the speakers, so a name
 and a character would be invented.
+
+### Speaking to the assistant
+
+Speech has one home: the composer. Two controls sit there and nothing else in
+the chrome duplicates them.
+
+| Control | What it does |
+| --- | --- |
+| **Dictate** (mic) | Fills the composer with what you say. Does not send. |
+| **Enter voice mode** (waveform) | Holds a spoken conversation — records, sends, and reads the reply back. Carries narration with it. |
+
+**Dictation transcribes live.** Words appear as they are spoken rather than
+after you stop, because the recognizer runs with `interimResults` and
+`continuous` both on. Interim guesses render and are replaced when the engine
+commits them, so a mishearing is visible while it is still worth restarting.
+`continuous` is what keeps the mic alive across the pause between two
+sentences: the engines end sessions on silence anyway, so `onend` restarts one
+whenever the person has not tapped stop. Dictating into a half-typed question
+appends to it — the composer's contents when dictation started are the base
+every result is joined onto, so a session never erases what was already there,
+and sending mid-utterance ends the session rather than letting a late result
+refill the box.
+
+Where the browser has no Speech API — Firefox, and Chromium on some platforms —
+dictation records and posts to `/v1/asr` instead. That path cannot stream, so
+the mic shows a distinct *Transcribing* state while the audio is in flight
+rather than pretending to still be listening. It is not the red recording pulse
+and it does not accept taps: the audio is already uploaded, so a second tap
+would cancel nothing.
+
+The v2 WebSocket (`/v2/voice/chat/stream`) does emit `partial_transcript`, and
+would give the server path the same live behaviour. It is not wired in, because
+it is gated behind the `native_voice` flag, which defaults off and needs a
+CosyVoice2 model that is not in the deploy image — wiring it today would ship a
+live-transcription path that is inert in production.
+
+Two things the header used to carry and no longer does. The **"Voice ready"
+pill** reported a backend detail continuously in the corner of every screen; it
+earned its space only in the seconds after a failure, and the composer's own
+controls already go quiet and explain themselves when speech is unreachable,
+which is where someone is looking when it matters. The **voice-overlay mic**
+was a second, differently-shaped entry into speech a few centimetres from the
+composer's — two mics in one viewport, neither saying which was which. Removing
+it left `VoiceChat.tsx` with no entry point; `VoiceFirstChat.tsx` and
+`VoiceVisionMode.tsx` never had one. All three still exist on disk but are no
+longer mounted.
 
 Two deliberate omissions: `useVoiceStore` also persists `autoBargeIn`,
 `silenceTimeout` and `accentProfile`, which nothing currently reads, so they are

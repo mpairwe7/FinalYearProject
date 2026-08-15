@@ -130,6 +130,27 @@
   border-radius: 50%;
 }
 
+/* Transcribing: recording has stopped and the audio is on its way to the
+   server's ASR. Deliberately not the red .btn-recording pulse — that means "I
+   am listening to you", and the mic is no longer listening. A slow breathe on
+   the accent says "working" without inviting a tap; the button is disabled for
+   the same reason, since a second tap has nothing to cancel and the audio is
+   already gone. Only the server-ASR dictation path produces this state. */
+.chatv2 .cmpv2-bar .mic-circle-btn.is-processing {
+  color: var(--cv2-accent);
+  opacity: 1;
+  animation: cv2-mic-processing 1.4s ease-in-out infinite;
+}
+@keyframes cv2-mic-processing {
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chatv2 .cmpv2-bar .mic-circle-btn.is-processing {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
 /* Voice / Narrate: same checkbox semantics as the old header (role=checkbox,
    accessible names "Voice"/"Narrate"), restyled as quiet toolbar toggles. */
 .chatv2 .cmpv2-bar .voice-toggle {

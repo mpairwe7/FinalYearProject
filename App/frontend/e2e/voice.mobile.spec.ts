@@ -1,59 +1,67 @@
 /**
- * Voice E2E — Tier A, mobile-dialog-specific (mocked backend).
+ * Voice E2E — Tier A, mobile composer (mocked backend).
  *
- * On the mobile layout (≤720px) the header voice toggles + health pill are
- * hidden by CSS; the voice surface is the full-screen voice-first DIALOG
- * (VoiceChat.tsx), which drives ASR/TTS over the /v1/voice/chat/stream
- * WebSocket. These tests cover the parts unique to that dialog — the orb state
- * machine and the WS round-trip. The viewport-agnostic flows (opening the
- * dialog, message-level TTS narration) are covered by voice.spec.ts, which also
- * runs on mobile-chrome.
+ * This file used to drive the full-screen VoiceChat dialog and its
+ * /v1/voice/chat/stream WebSocket, opened from a mic in the header. That mic is
+ * gone — it was a second entry into speech sitting beside the composer's own —
+ * so the dialog has no way in and those tests could only have been kept alive
+ * by re-adding the control they were written to reach.
  *
- * Run on the mobile-chrome project (Pixel 7). See voice-e2e.yml.
+ * The capability did not go anywhere: the composer's voice mode records,
+ * POSTs /v1/voice/chat, and renders transcript + reply, which is what the
+ * dialog did. So the coverage moves here rather than being deleted. The
+ * round-trip is REST now, not the WS stream, which is why mockVoiceWebSocket is
+ * no longer needed.
+ *
+ * Run on the mobile-chrome project (Pixel 7) — it needs the Chromium fake
+ * capture device. See voice-e2e.yml.
  */
 import { expect, test } from "@playwright/test";
 
-import { clearChatStore, mockBackend, mockVoiceWebSocket, seedConsent } from "./helpers";
+import { clearChatStore, mockBackend, seedConsent } from "./helpers";
 
-test.describe("Voice STT/TTS — mobile dialog (mocked)", () => {
+test.describe("Voice STT/TTS — mobile composer (mocked)", () => {
   test.beforeEach(async ({ page }) => {
     await seedConsent(page);
     await clearChatStore(page);
   });
 
-  test("tapping the orb starts on-device capture (idle → listening)", async ({ page }) => {
+  test("entering voice mode arms the mic on a phone", async ({ page }) => {
     await mockBackend(page);
-    await mockVoiceWebSocket(page);
     await page.goto("/");
-    await page.getByRole("button", { name: "Open voice chat" }).click();
 
-    // Dialog opens at the idle orb, then the tap kicks off real capture.
-    await expect(page.getByRole("dialog", { name: "Voice chat" })).toBeVisible();
-    await page.getByRole("button", { name: "Tap to speak" }).click();
-    // getUserMedia + MediaRecorder.start succeeded → orb reflects the listening phase.
-    await expect(page.getByRole("button", { name: "Listening..." })).toBeVisible({
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    // Voice mode is a toggle, not a mode switch that hides the composer: the
+    // textarea stays, and says so.
+    await expect(page.getByPlaceholder(/Voice mode on/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Exit voice mode" })).toBeVisible();
+
+    // Tap the mic → getUserMedia + MediaRecorder.start succeeded.
+    await page.getByRole("button", { name: "Start speaking" }).click();
+    await expect(page.getByRole("button", { name: "Stop listening" })).toBeVisible({
       timeout: 10_000,
     });
   });
 
-  test("full mobile round-trip: capture → WS → transcript + reply render", async ({ page }) => {
+  test("full mobile round-trip: capture → /v1/voice/chat → transcript + reply", async ({
+    page,
+  }) => {
     test.slow(); // real capture window
     await mockBackend(page);
-    await mockVoiceWebSocket(page);
     await page.goto("/");
-    await page.getByRole("button", { name: "Open voice chat" }).click();
 
-    await page.getByRole("button", { name: "Tap to speak" }).click();
-    await expect(page.getByRole("button", { name: "Listening..." })).toBeVisible({
+    await page.getByRole("button", { name: "Enter voice mode" }).click();
+    await page.getByRole("button", { name: "Start speaking" }).click();
+    await expect(page.getByRole("button", { name: "Stop listening" })).toBeVisible({
       timeout: 10_000,
     });
     await page.waitForTimeout(1500); // let the fake device feed the recorder
 
-    // Second tap stops + sends the utterance → stubbed WS emits transcript + reply.
-    await page.getByRole("button", { name: "Listening..." }).click();
+    // Second tap stops + sends the utterance → the stub answers with both.
+    await page.getByRole("button", { name: "Stop listening" }).click();
 
-    await expect(page.locator(".voice-reply-text")).toContainText("18%", { timeout: 15_000 });
-    await expect(page.locator(".voice-transcript-text")).toContainText(/VAT/i, {
+    await expect(page.locator(".message-row-user")).toContainText(/VAT/i, { timeout: 15_000 });
+    await expect(page.locator(".message-row-assistant")).toContainText("18%", {
       timeout: 15_000,
     });
   });

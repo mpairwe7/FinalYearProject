@@ -30,9 +30,14 @@ test.describe("Voice STT/TTS — real backend (integration)", () => {
     await clearChatStore(page);
   });
 
-  test("real /v1/speech/health reports the pipeline ready", async ({ page }) => {
+  test("a real /v1/speech/health leaves the composer's speech controls usable", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByText("Voice ready")).toBeVisible({ timeout: 20_000 });
+    // The header's "Voice ready" pill this used to read is gone; the controls
+    // its status governed are the observable consequence, so assert those.
+    await expect(page.getByRole("button", { name: "Start speaking" })).toBeEnabled({
+      timeout: 20_000,
+    });
+    await expect(page.getByRole("button", { name: "Enter voice mode" })).toBeEnabled();
   });
 
   test("real voice round-trip: capture → /v1/voice/chat (200) → graceful reply", async ({
