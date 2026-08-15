@@ -627,9 +627,35 @@
 # e2e/verify-auth-flows.mjs (PKCE S256, state, prompt=create, a forged callback
 # refused, zero CSP violations). All CI green on this commit.
 #
+# ---------------------------------------------------------------------------
+# sha-d8037c8 — registration works from inside this Space.
+#
+# Reported here: "dev-….auth0.com refused to connect." on the registration CTA.
+#
+# The authorize request was correct — reproduced against the real
+# huggingface.co page, it reaches Auth0's /u/signup with prompt=create intact.
+# It arrived in the wrong kind of window. This Space embeds the app in an
+# iframe, the flow called window.location.assign, and that navigates the frame;
+# identity providers refuse to be framed, so Auth0's X-Frame-Options turned the
+# redirect into "refused to connect".
+#
+# Escaping in place is not available: the Space's iframe sandbox grants
+# allow-popups and allow-popups-to-escape-sandbox but NOT allow-top-navigation.
+# A popup can reach the provider, but window.open returns null there, so it
+# inherits no sessionStorage — and the PKCE verifier lives there, so the
+# callback would have nothing to exchange.
+#
+# So the flow moves to a new top-level tab that starts it itself, with its own
+# sessionStorage, exactly as an unframed visit does. The frame stays put and
+# says where it went.
+#
+# Verified under this Space's real sandbox tokens: framed click opens a
+# top-level tab, that tab auto-starts and lands on /authorize. Unframed is
+# unchanged, 34/34 on e2e/verify-auth-flows.mjs. All 8 CI workflows green.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-5b1b61b
+FROM landwind/ura-chatbot:sha-d8037c8
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
