@@ -29,7 +29,7 @@
  * OIDC Core 1.0 §3.1; WCAG 2.2 AA for the form semantics.
  */
 import Link from "next/link";
-import React, { useCallback, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   setAuthToken,
   getAuthToken,
@@ -37,7 +37,7 @@ import {
   getServerAuthToken,
   subscribeAuthToken,
 } from "../../lib/authSession";
-import { beginOidcFlow, OIDC_CONFIGURED } from "../../lib/oidcFlow";
+import { beginOidcFlow, isEmbedded, OIDC_CONFIGURED } from "../../lib/oidcFlow";
 import { isStaffRole } from "../../lib/roles";
 import "./signin.css";
 
@@ -67,6 +67,14 @@ export default function SignInPage() {
     if (!OIDC_CONFIGURED) return;
     try {
       await beginOidcFlow({ mode: "signin" });
+      if (isEmbedded()) {
+        // See the signup page: framed, the flow moves to a new top-level tab.
+        setStatus({
+          kind: "ok",
+          message:
+            "Sign-in opened in a new tab — your identity provider will not display inside an embedded page.",
+        });
+      }
     } catch (err) {
       setStatus({
         kind: "error",
@@ -74,6 +82,28 @@ export default function SignInPage() {
       });
     }
   }, []);
+
+  // Auto-start when the embedded page handed the flow to this tab.
+  //
+  // beginOidcFlow opens `?continue=signin` in a new top-level tab when it is
+  // framed, because identity providers refuse to render in a frame. Without
+  // this the person would have to press the same button a second time in a tab
+  // they did not ask for, which reads as the first press having failed.
+  //
+  // Guarded on not being embedded, so a framed page carrying the parameter
+  // cannot loop itself opening tabs.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isEmbedded() || !OIDC_CONFIGURED) return;
+    if (new URLSearchParams(window.location.search).get("continue") !== "signin") return;
+    // queueMicrotask, not a bare call: startOidc sets its pending state before
+    // its first await, and doing that synchronously inside an effect cascades a
+    // render. Deferring past commit avoids the cascade rather than suppressing
+    // the warning about it.
+    queueMicrotask(() => void startOidc());
+    // Once only: the parameter is stripped so a reload does not redirect again.
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [startOidc]);
 
   const useDevToken = useCallback(async () => {
     const token = devToken.trim();

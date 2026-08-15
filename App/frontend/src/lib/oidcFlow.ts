@@ -78,12 +78,59 @@ interface BeginOidcOptions {
  * guesses. The PKCE verifier and CSRF state go to sessionStorage: they must
  * survive the redirect but die with the tab.
  */
+/**
+ * True when this document is inside a frame it cannot navigate out of.
+ *
+ * Reading `window.top.location` throws cross-origin, which is exactly the
+ * embedded case; a same-origin frame would read fine and does not matter here.
+ */
+export function isEmbedded(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true; // cross-origin access threw — definitely framed
+  }
+}
+
 export async function beginOidcFlow({
   mode = "signin",
   returnTo,
 }: BeginOidcOptions = {}): Promise<void> {
   if (!OIDC_CONFIGURED) {
     throw new Error("No identity provider is configured for this deployment.");
+  }
+
+  // Embedded (the Hugging Face Space frames this app): hand the flow to a new
+  // top-level tab instead of redirecting here.
+  //
+  // Identity providers refuse to be framed — Auth0 serves its Universal Login
+  // with X-Frame-Options, so redirecting inside the frame produced
+  // "dev-….auth0.com refused to connect." The authorize request itself was
+  // correct: it reached /u/signup with prompt=create. It just arrived in a
+  // window the provider will not draw in.
+  //
+  // Escaping the frame directly is not available. The Space's iframe sandbox is
+  // `allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts
+  // …` with **no** allow-top-navigation, so window.top.location is blocked.
+  //
+  // A popup could load the provider — verified, it escapes the sandbox — but
+  // window.open() returns null there, so the opener link is severed and the new
+  // context does not inherit sessionStorage. The PKCE verifier lives in
+  // sessionStorage, so the callback would land with nothing to exchange. Moving
+  // it to localStorage to work around that would widen a single-use secret's
+  // lifetime beyond the tab for every user, framed or not.
+  //
+  // So the new tab starts its own flow: it loads this page top-level, where the
+  // ordinary same-tab redirect works exactly as it does for everyone else, with
+  // its own sessionStorage. `?continue=` tells it to begin without a second
+  // click.
+  if (isEmbedded()) {
+    const target = new URL(mode === "signup" ? "/signup" : "/signin", window.location.origin);
+    target.searchParams.set("continue", mode);
+    if (returnTo) target.searchParams.set("returnTo", returnTo);
+    window.open(target.toString(), "_blank", "noopener");
+    return;
   }
 
   // Ask the provider where its endpoints are rather than assuming a vendor's

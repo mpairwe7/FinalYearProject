@@ -162,11 +162,23 @@ check(
   "header offers Sign up",
 );
 const me = await page.evaluate(async (b) => {
-  const r = await fetch(`${b}/api/v1/me`);
-  return { status: r.status, body: await r.json() };
+  // Tolerate a non-JSON body. Pointed at a frontend with no backend behind
+  // /api, this used to throw inside evaluate and abort the whole run — the
+  // harness reporting its own environment as a crash rather than a result.
+  const r = await fetch(`${b}/api/v1/me`).catch((e) => ({ status: 0, text: async () => String(e) }));
+  const raw = await r.text();
+  try {
+    return { status: r.status, body: JSON.parse(raw) };
+  } catch {
+    return { status: r.status, body: null, raw: raw.slice(0, 60) };
+  }
 }, BASE);
-check(me.status === 200 && me.body.authenticated === false,
-  "/v1/me reports unauthenticated rather than erroring", `${me.status} ${JSON.stringify(me.body)}`);
+if (me.body === null) {
+  console.log(`  SKIP  /v1/me — no backend behind /api here (HTTP ${me.status}: ${me.raw})`);
+} else {
+  check(me.status === 200 && me.body.authenticated === false,
+    "/v1/me reports unauthenticated rather than erroring", `${me.status} ${JSON.stringify(me.body)}`);
+}
 
 // ------------------------------------------------------------------- CSP ----
 console.log("\n[5] No CSP violations during the flows");

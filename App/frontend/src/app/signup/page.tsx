@@ -18,13 +18,13 @@
  */
 
 import Link from "next/link";
-import React, { useCallback, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   getAuthToken,
   getServerAuthToken,
   subscribeAuthToken,
 } from "../../lib/authSession";
-import { beginOidcFlow, OIDC_CONFIGURED } from "../../lib/oidcFlow";
+import { beginOidcFlow, isEmbedded, OIDC_CONFIGURED } from "../../lib/oidcFlow";
 import "../signin/signin.css";
 
 const BENEFITS = [
@@ -43,7 +43,7 @@ const BENEFITS = [
 ] as const;
 
 export default function SignUpPage() {
-  const [status, setStatus] = useState<{ kind: "idle" | "error"; message: string }>({
+  const [status, setStatus] = useState<{ kind: "idle" | "info" | "error"; message: string }>({
     kind: "idle",
     message: "",
   });
@@ -59,6 +59,17 @@ export default function SignUpPage() {
       // Registration usually ends on a taxpayer account with no dashboard, so
       // the callback sends them back to the assistant rather than to /admin.
       await beginOidcFlow({ mode: "signup", returnTo: "/" });
+      if (isEmbedded()) {
+        // beginOidcFlow opened a new tab rather than redirecting: identity
+        // providers refuse to render inside a frame. Say where it went — the
+        // button would otherwise spin on a page that is never going to move.
+        setStarting(false);
+        setStatus({
+          kind: "info",
+          message:
+            "Registration opened in a new tab — your identity provider will not display inside an embedded page.",
+        });
+      }
     } catch (err) {
       setStarting(false);
       setStatus({
@@ -67,6 +78,28 @@ export default function SignUpPage() {
       });
     }
   }, []);
+
+  // Auto-start when the embedded page handed the flow to this tab.
+  //
+  // beginOidcFlow opens `?continue=signup` in a new top-level tab when it is
+  // framed, because identity providers refuse to render in a frame. Without
+  // this the person would have to press the same button a second time in a tab
+  // they did not ask for, which reads as the first press having failed.
+  //
+  // Guarded on not being embedded, so a framed page carrying the parameter
+  // cannot loop itself opening tabs.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isEmbedded() || !OIDC_CONFIGURED) return;
+    if (new URLSearchParams(window.location.search).get("continue") !== "signup") return;
+    // queueMicrotask, not a bare call: startSignUp sets its pending state before
+    // its first await, and doing that synchronously inside an effect cascades a
+    // render. Deferring past commit avoids the cascade rather than suppressing
+    // the warning about it.
+    queueMicrotask(() => void startSignUp());
+    // Once only: the parameter is stripped so a reload does not redirect again.
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [startSignUp]);
 
   return (
     <main className="signin-page">
@@ -129,7 +162,13 @@ export default function SignUpPage() {
         )}
 
         {status.message && (
-          <p className="signin-status error" role="alert">
+          // Kind-driven, not hardcoded: this slot now also carries the "opened
+          // in a new tab" notice, and styling that as an error — announced with
+          // role=alert — would report a working redirect as a failure.
+          <p
+            className={`signin-status ${status.kind === "error" ? "error" : "ok"}`}
+            role={status.kind === "error" ? "alert" : "status"}
+          >
             {status.message}
           </p>
         )}
