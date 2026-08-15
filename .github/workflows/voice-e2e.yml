@@ -63,6 +63,13 @@ on:
       - "App/frontend/src/lib/oidcFlow.ts"
       - "App/frontend/src/lib/roles.ts"
       - "App/backend/app/speech_service.py"
+      # languages.spec.ts walks every configured locale through narration and
+      # dictation, so the locale table and the picker that reads it have to
+      # trigger it — adding a language without a voice, or changing a BCP-47
+      # tag, is exactly the change that spec exists to catch.
+      - "App/frontend/src/lib/locales.ts"
+      - "App/frontend/src/lib/voices.ts"
+      - "App/frontend/src/components/LanguageMenu.tsx"
       - ".github/workflows/voice-e2e.yml"
   pull_request:
     paths: *voice_paths
@@ -134,6 +141,13 @@ jobs:
       # covered in voice.spec.ts, which deletes the API in chromium instead.
       - name: Run dictation.spec.ts (live transcription — chromium + mobile-chrome)
         run: bunx playwright test e2e/dictation.spec.ts --project=chromium --project=mobile-chrome
+
+      # Every configured language through the UI: narration, dictation and the
+      # voice round-trip each have to carry the locale the person picked. Only
+      # English was covered before, so a language silently falling back to an
+      # English voice looked identical to it working.
+      - name: Run languages.spec.ts (TTS + STT per locale — chromium + mobile-chrome)
+        run: bunx playwright test e2e/languages.spec.ts --project=chromium --project=mobile-chrome
 
       - name: Run ui-theme.spec.ts (copy + theme — chromium + mobile-chrome)
         run: bunx playwright test e2e/ui-theme.spec.ts --project=chromium --project=mobile-chrome

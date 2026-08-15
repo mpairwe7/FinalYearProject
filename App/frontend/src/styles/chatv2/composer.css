@@ -251,6 +251,15 @@
   color: var(--text-2);
 }
 
+/* A dictation result in the hint slot. Slightly stronger than the standing
+   disclaimer it replaces, because it is about something that just happened and
+   is gone on the next attempt — but not an alarm colour: "didn't catch that" is
+   an ordinary outcome of speaking, not a fault. --text-1, not --danger. */
+.chatv2 .composer-hint-notice {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
 /* ---------------------------------------------------------------------------
  * Toolbar tooltips (data-tip attribute) — a custom-styled label that replaces
  * the native browser title tooltip on icon-only buttons: consistent across

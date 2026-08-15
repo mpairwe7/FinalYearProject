@@ -479,6 +479,37 @@ rather than pretending to still be listening. It is not the red recording pulse
 and it does not accept taps: the audio is already uploaded, so a second tap
 would cancel nothing.
 
+**Hearing nothing is not an outage.** The ASR chain advances on a non-empty
+transcript, so a backend that ran fine and heard silence used to be
+indistinguishable from one that crashed: the chain ended on *"All ASR backends
+failed (Whisper+LoRA, Sherpa, faster-whisper, Sunbird, Workers AI)"*, and
+`/v1/voice/chat` surfaced that verbatim — a list of component names in reply to
+a moment of quiet. `/v1/voice/chat` already had the right branch (*"No speech
+detected. Please speak clearly and try again."*), but it is gated on `error`
+being unset, so the failure branch always won. The chain now leaves `error`
+unset when a transcriber ran and returned nothing, and names the backend that
+answered. The composer says so too, rather than closing the recording panel onto
+an empty box: *"Didn't catch that. Try again, or type your question."*
+
+### Testing speech across the languages
+
+Three layers, because each catches something the others cannot:
+
+| Layer | What it covers |
+| --- | --- |
+| `App/backend/tests/` | The resolvers and the chain's branch logic, including that silence is not an error |
+| `e2e/languages.spec.ts` | Every locale through the UI — narration, dictation and the voice round-trip each carry the locale the person picked |
+| `scripts/probe_deploy.py` | The deployed backend, unmocked: TTS per locale honours both a default and an alternate voice, and STT transcribes real speech |
+
+The probe's STT round-trip synthesizes each language with the deployment's own
+TTS and feeds the audio back to `/v1/asr`. That is deliberate — an earlier
+version posted silence, which proved nothing about transcription and produced
+the misleading "all backends failed" that led to the fix above. The Sunbird
+locales return WAV, which the stdlib can unwrap, and `/v1/asr` accepts any rate
+in `[8000, 48000]`, so the audio goes back at its native 24 kHz. English
+narration is edge-tts MP3, which needs a decoder the script does not have, so
+English is contract-only there and its accuracy lives in the ML evals.
+
 The v2 WebSocket (`/v2/voice/chat/stream`) does emit `partial_transcript`, and
 would give the server path the same live behaviour. It is not wired in, because
 it is gated behind the `native_voice` flag, which defaults off and needs a

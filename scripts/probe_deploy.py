@@ -28,16 +28,31 @@ Two rules for anything added here:
 from __future__ import annotations
 
 import argparse
+import base64
+import io
 import json
 import sys
 import time
 import urllib.error
 import urllib.request
+import wave
 
 DEFAULT_BASE = "https://landwind22-ura-chatbot.hf.space"
 
 # Locales whose narration comes from Sunbird's native speakers.
 NATIVE_LOCALES = ("lg", "ach", "nyn", "sw")
+
+# One phrase per configured locale, in that language where the project already
+# uses it. Synthesising English text through a Luganda speaker still returns
+# audio, so it would not catch a locale wired to the wrong voice — the text has
+# to belong to the language for the check to mean anything to a listener.
+LOCALE_PHRASES: dict[str, str] = {
+    "en": "The tax year",
+    "lg": "Emisolo gy'eggwanga",
+    "sw": "Kodi ya taifa",
+    "nyn": "Omusoro gw'eihanga",
+    "ach": "Mucoro me lobo",
+}
 
 
 class Probe:
@@ -56,17 +71,32 @@ class Probe:
         self.nonce = str(int(time.time()))
 
     # -- plumbing ----------------------------------------------------------
-    def call(self, method: str, path: str, body: dict | None = None, timeout: int | None = None):
-        """Return (status, parsed-or-text, elapsed). Never raises on HTTP error."""
+    def call(
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        timeout: int | None = None,
+        raw: bytes | None = None,
+    ):
+        """Return (status, parsed-or-text, elapsed). Never raises on HTTP error.
+
+        `raw` posts bytes with an octet-stream content type — /v1/asr takes
+        PCM16 audio as its body, not JSON.
+        """
         url = path if path.startswith("http") else f"{self.api}{path}"
-        data = json.dumps(body).encode() if body is not None else None
+        data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
         req = urllib.request.Request(url, data=data, method=method)  # noqa: S310 — scheme checked below
         if req.type not in ("http", "https"):
             # urllib would happily open file:// or ftp://. The base URL comes
             # from argv, and this prints response bodies, so a mistyped scheme
             # would dump local files to the terminal.
             raise ValueError(f"refusing non-HTTP scheme: {req.type}")
-        if data:
+        if raw is not None:
+            req.add_header("Content-Type", "application/octet-stream")
+            # The backend gates ASR on an explicit voice-consent header.
+            req.add_header("X-Voice-Consent", "true")
+        elif data:
             req.add_header("Content-Type", "application/json")
         started = time.monotonic()
         try:
@@ -141,9 +171,9 @@ class Probe:
         train everyone to ignore it. It is reported as a degradation instead;
         only a provider that answered and used the wrong speaker is a failure.
         """
-        print("\n[3] TTS honours the selected voice")
+        print("\n[3] TTS honours the selected voice, per language")
         voices = cat.get("voices", {})
-        for locale, phrase in (("lg", "Emisolo gy'eggwanga"), ("en", "The tax year")):
+        for locale, phrase in LOCALE_PHRASES.items():
             opts = [o["id"] for o in voices.get(locale, [])]
             owner = {o["id"]: o.get("provider") for o in voices.get(locale, [])}
             if len(opts) < 2:
@@ -193,8 +223,94 @@ class Probe:
                     str(payload.get("voice")),
                 )
 
+    def speech_to_text(self) -> None:
+        """STT, per language, with real speech — not silence.
+
+        The first version of this posted silence and asserted "no error". That
+        was wrong twice over. Silence is not speech, so it proved nothing about
+        transcription; and the deployment answered "All ASR backends failed",
+        which read as an outage and was not one — a backend had run and simply
+        heard nothing. Chasing that produced the fix now guarded below.
+
+        So this generates real speech in each language using the deployment's
+        own TTS and feeds it back. The Sunbird locales return WAV, which the
+        stdlib can unwrap, and /v1/asr accepts any rate in [8000, 48000] — so
+        the audio goes back at its native 24 kHz with no resampling and no
+        numpy. English narration comes from edge-tts as MP3, which needs a
+        decoder this script does not have, so English is contract-only here;
+        its transcription is covered by the ML evals.
+        """
+        print("\n[4] STT, per language")
+        # 0.5s of 16 kHz silence — for the contract checks, where it is the point.
+        silence = b"\x00\x00" * 8000
+
+        for locale in LOCALE_PHRASES:
+            code, payload, dt = self.call(
+                "POST", f"/v1/asr?sample_rate=16000&language={locale}", raw=silence, timeout=180
+            )
+            if not self.check(code == 200, f"{locale}: POST /v1/asr -> 200", f"{code}, {dt:.1f}s"):
+                continue
+            self.check(
+                isinstance(payload, dict) and isinstance(payload.get("text"), str),
+                f"{locale}: returns a string transcript field",
+                f"backend={payload.get('backend')!s}",
+            )
+            # The regression: a backend that ran and heard nothing must not be
+            # reported as every backend failing. /v1/voice/chat's "No speech
+            # detected" branch is gated on this being unset.
+            self.check(
+                not payload.get("error"),
+                f"{locale}: silence is not reported as a backend failure",
+                str(payload.get("error"))[:60],
+            )
+
+        code, _, _ = self.call(
+            "POST", "/v1/asr?sample_rate=16000&language=not-a-language", raw=silence, timeout=60
+        )
+        self.check(code == 400, "an invalid language code is rejected -> 400", str(code))
+
+        # Round-trip: synthesize the language, then transcribe it back.
+        for locale, phrase in LOCALE_PHRASES.items():
+            if locale == "en":
+                continue  # edge-tts returns MP3; see the docstring
+            # No nonce here, unlike §3. The cache-buster is spoken aloud — a
+            # long number in the middle of the sentence — which the transcript
+            # then has to contain, and it does not help: this section tests ASR,
+            # so a cached TTS response is not just acceptable but preferable.
+            code, tts, dt = self.call(
+                "POST", "/v1/tts", {"text": phrase, "language": locale}, 240
+            )
+            if code != 200 or not (tts or {}).get("audio_base64"):
+                self.note(f"{locale}: no audio to round-trip (TTS {code}) — STT round-trip skipped")
+                continue
+            wav = base64.b64decode(tts["audio_base64"])
+            if wav[:4] != b"RIFF":
+                self.note(f"{locale}: TTS returned {wav[:4]!r}, not WAV — STT round-trip skipped")
+                continue
+            try:
+                with wave.open(io.BytesIO(wav), "rb") as w:
+                    rate, frames = w.getframerate(), w.readframes(w.getnframes())
+            except wave.Error as exc:
+                self.check(False, f"{locale}: TTS audio is a readable WAV", str(exc))
+                continue
+            code, asr, dt = self.call(
+                "POST", f"/v1/asr?sample_rate={rate}&language={locale}", raw=frames, timeout=240
+            )
+            if not self.check(
+                code == 200, f"{locale}: transcribe its own speech -> 200", f"{code}, {dt:.1f}s"
+            ):
+                continue
+            text = (asr or {}).get("text") or ""
+            self.check(
+                bool(text.strip()),
+                f"{locale}: real speech produces a transcript",
+                f"{text[:44]!r} via {asr.get('backend')}",
+            )
+            self.check(not asr.get("error"), f"{locale}: no error on real speech",
+                       str(asr.get("error"))[:60])
+
     def inference(self) -> None:
-        print("\n[4] Inference")
+        print("\n[5] Inference")
         code, payload, dt = self.call("POST", "/classify", {"text": "How do I file my VAT return?"})
         if self.check(code == 200, "POST /classify -> 200", f"{dt:.1f}s"):
             self.check(bool(payload.get("predictions")), "classifier returns predictions")
@@ -216,7 +332,7 @@ class Probe:
 
     def auth_gates(self) -> None:
         """Endpoints that must not answer without a token, on this deployment."""
-        print("\n[5] Auth gates")
+        print("\n[6] Auth gates")
         # /v1/me is deliberately public — it is the "who am I" probe the client
         # calls before it has a session, and it answers authenticated:false.
         # Its sub-resources, which return personal data, are the gated ones.
@@ -237,7 +353,7 @@ class Probe:
             self.check(code in (401, 403, 503), f"GET {path} is not open -> {code}", "")
 
     def frontend(self) -> None:
-        print("\n[6] Frontend routes")
+        print("\n[7] Frontend routes")
         for path, needle in (("/", "URA"), ("/signin", "Sign in"), ("/signup", "Create an account")):
             code, html, _ = self.call("GET", f"{self.base}{path}")
             if self.check(code == 200, f"GET {path} -> 200", str(code)):
@@ -254,6 +370,7 @@ class Probe:
         cat = self.voice_catalogue()
         if cat:
             self.voice_selection(cat)
+        self.speech_to_text()
         self.inference()
         self.auth_gates()
         self.frontend()

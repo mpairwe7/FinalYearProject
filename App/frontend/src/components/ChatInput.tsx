@@ -45,6 +45,10 @@ interface ChatInputProps {
      by itself, so the capability survives without the controls. */
   onVoiceModeChange?: (on: boolean) => void;
   voiceModeDisabled?: boolean;
+  /* A one-line result from the last dictation attempt, shown in the hint slot.
+     Without it, dictation that heard nothing was a dead end: the recording
+     panel closed, the composer stayed empty, and nothing said why. */
+  dictationNotice?: string | null;
 }
 
 /** Inline waveform — 5 animated bars */
@@ -74,6 +78,7 @@ function ChatInputInner({
   onRemoveAttachment,
   onVoiceModeChange,
   voiceModeDisabled,
+  dictationNotice,
 }: ChatInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -278,11 +283,16 @@ function ChatInputInner({
         </div>
       </div>
       {/* The hint carries what the removed toggles used to say — that voice
-          mode answers aloud — so nothing is only discoverable by tooltip. */}
-      <p className="composer-hint">
-        {voiceMode
-          ? 'Voice mode: tap the mic to speak, and replies are read back to you.'
-          : 'URA Assistant can make mistakes. Verify important tax information at ura.go.ug.'}
+          mode answers aloud — so nothing is only discoverable by tooltip. A
+          dictation result takes the slot while it is there: it is about the
+          thing that just happened, so it outranks a standing disclaimer.
+          role=status announces it without stealing focus from the composer. */}
+      <p className={`composer-hint${dictationNotice ? ' composer-hint-notice' : ''}`} role="status">
+        {dictationNotice
+          ? dictationNotice
+          : voiceMode
+            ? 'Voice mode: tap the mic to speak, and replies are read back to you.'
+            : 'URA Assistant can make mistakes. Verify important tax information at ura.go.ug.'}
       </p>
     </>
   );

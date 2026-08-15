@@ -641,6 +641,14 @@ Content-Type: application/json
 | `voice` | string | (auto by language) | `[a-zA-Z0-9_-]{1,64}` — see below |
 | `streaming` | bool | `false` | Reserved for future use |
 
+`/v1/asr` distinguishes hearing nothing from being unable to hear. A backend
+that ran and returned an empty transcript answers `200` with `text: ""`,
+`error: null`, and `backend` naming the one that answered — callers should treat
+that as "no speech detected", which is what `/v1/voice/chat` does. Only when no
+backend could run at all is `error` set, with `backend: "unavailable"`. The two
+were conflated until 2026-08, so a moment of silence was reported to users as
+every ASR backend having failed.
+
 `voice` names a speaker **for that language**. For English it is an edge-tts
 voice name (`en-US-AriaNeural`); for the Ugandan languages it is a Sunbird
 catalog tag (`waxal_lug_0004`), validated against `language` — a tag belonging

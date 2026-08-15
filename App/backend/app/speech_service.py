@@ -561,6 +561,18 @@ class SpeechModel:
         if not self.enabled:
             return TranscribeResult(text="", backend="disabled", error="SPEECH_ENABLED=false")
 
+        # Name of a backend that ran fine and simply heard nothing — silence, a
+        # mis-tap, background noise. Every tier below advances only on
+        # `result.text`, so an empty transcript used to be indistinguishable
+        # from a crash and the chain ended on "All ASR backends failed". That
+        # string reached users: /v1/voice/chat has a "No speech detected" branch
+        # for exactly this case, but it is gated on `error` being unset, so the
+        # failure branch fired first and the reply read "Voice error: ASR
+        # failed: All ASR backends failed (Whisper+LoRA, Sherpa, faster-whisper,
+        # Sunbird, Workers AI)" — untrue, and a list of component names no
+        # taxpayer should ever see.
+        heard_nothing: str | None = None
+
         # ⓪ Accent detection — route to the best Whisper adapter automatically
         if (
             self._accent_detector is not None
@@ -599,6 +611,8 @@ class SpeechModel:
                 )
                 if result and result.text:
                     return result
+                if result:
+                    heard_nothing = heard_nothing or result.backend
             except Exception:
                 logger.debug("Whisper+LoRA failed", exc_info=True)
 
@@ -624,6 +638,8 @@ class SpeechModel:
             result = self._transcribe_faster_whisper(audio_bytes, sample_rate, language)
             if result and result.text:
                 return result
+            if result:
+                heard_nothing = heard_nothing or result.backend
         except Exception:
             logger.debug("faster-whisper failed", exc_info=True)
 
@@ -672,6 +688,9 @@ class SpeechModel:
                         language=stt_result.get("language", language or "en"),
                         backend="sunbird_cloud",
                     )
+                if stt_result is not None:
+                    # The API answered; it just did not hear words.
+                    heard_nothing = heard_nothing or "sunbird_cloud"
         except Exception:
             logger.debug("Sunbird STT fallback also failed")
 
@@ -685,6 +704,15 @@ class SpeechModel:
         if cf_text:
             return TranscribeResult(
                 text=cf_text, language=language or "en", backend="cf_workers_ai"
+            )
+
+        if heard_nothing:
+            # A backend ran and returned nothing. Not an error — the caller's
+            # empty-transcript branch is the right one, and it phrases this for
+            # a person ("No speech detected. Please speak clearly and try
+            # again.") instead of naming five internal components.
+            return TranscribeResult(
+                text="", language=language or "en", backend=heard_nothing, error=None,
             )
 
         return TranscribeResult(

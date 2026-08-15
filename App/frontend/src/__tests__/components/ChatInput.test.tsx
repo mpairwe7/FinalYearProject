@@ -204,6 +204,20 @@ describe("ChatInput attachments", () => {
      * Three e2e tests waited on that label and timed out. Pinning it here means
      * the next person writing a recording test sees why it is not there.
      */
+    it("shows a dictation result in place of the standing disclaimer", () => {
+      const { rerender } = render(<ChatInput {...defaults} />);
+      // Nothing to report yet — the usual footer.
+      expect(screen.getByText(/can make mistakes/)).toBeInTheDocument();
+
+      // Dictation heard nothing. Before this the composer just sat there empty
+      // with no explanation, which reads as the button being broken.
+      rerender(<ChatInput {...defaults} dictationNotice="Didn't catch that. Try again, or type your question." />);
+      const notice = screen.getByText(/Didn't catch that/);
+      expect(notice).toBeInTheDocument();
+      expect(notice).toHaveAttribute("role", "status");
+      expect(screen.queryByText(/can make mistakes/)).not.toBeInTheDocument();
+    });
+
     it("has no mic button while recording, in either flow", () => {
       for (const voiceMode of [true, false]) {
         const { unmount } = render(

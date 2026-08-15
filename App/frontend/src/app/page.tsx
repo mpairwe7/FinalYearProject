@@ -145,6 +145,8 @@ export default function Page() {
   // back too fast to be a real utterance; any session that lasted resets it.
   const dictationStartedAtRef = useRef(0);
   const dictationRapidEndsRef = useRef(0);
+  // One line about the last dictation attempt, shown under the composer.
+  const [dictationNotice, setDictationNotice] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -771,6 +773,7 @@ export default function Page() {
       // would otherwise have to depend on `message` and be rebuilt on every
       // keystroke, and a stale closure here would silently erase whatever was
       // typed between renders.
+      setDictationNotice(null);
       dictationBaseRef.current = useChatStore.getState().message;
       dictationFinalRef.current = '';
       dictationActiveRef.current = true;
@@ -794,6 +797,7 @@ export default function Page() {
     // *also* missing. Record and let the server's ASR transcribe instead; the
     // endpoint is already there and voice mode has been using it all along.
     if (!hasMediaRecorder) return;
+    setDictationNotice(null);
     setIsTransitioning(true);
     try {
       if (isRecording) {
@@ -814,9 +818,23 @@ export default function Page() {
           // time a captured `message` is whatever it was when recording began.
           if (r.text) {
             setMessage(joinDictated(useChatStore.getState().message, r.text));
+            setSpeechState('idle');
+            return;
           }
-          setSpeechState(r.text ? 'idle' : 'error');
+          // Nothing came back. Two different things, and saying so is the
+          // whole point: the backend now leaves `error` unset when a
+          // transcriber ran and simply heard nothing, so silence stops being
+          // reported as an outage. Either way the composer must not just sit
+          // there empty with no explanation, which is what it used to do.
+          setDictationNotice(
+            r.error
+              ? 'Speech recognition is unavailable right now — you can type instead.'
+              : "Didn't catch that. Try again, or type your question.",
+          );
+          setSpeechState('idle');
+          if (r.error) trackErrorOccurred('dictation_unavailable');
         } catch {
+          setDictationNotice('Speech recognition is unavailable right now — you can type instead.');
           setSpeechState('error');
           trackErrorOccurred('dictation_transcribe_failed');
         }
@@ -917,6 +935,7 @@ export default function Page() {
     // leaving turns it off, which is what ticking both boxes used to do.
     onVoiceModeChange: setVoiceModeWithNarration,
     voiceModeDisabled: !serverReady && !hasMediaRecorder,
+    dictationNotice,
   };
 
   // ---- Render ----
