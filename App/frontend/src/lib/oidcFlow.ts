@@ -110,6 +110,20 @@ export async function beginOidcFlow({
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  // No `nonce`, deliberately. It is OPTIONAL for the authorization-code flow
+  // (OIDC Core 1.0 §3.1.2.1) and its job is to bind an *ID token* to this
+  // browser session so a stolen one cannot be replayed. This client never
+  // accepts an ID token: the callback reads `access_token` and nothing else,
+  // and identity comes from /v1/me, which the backend answers only after
+  // verifying that token against the provider's JWKS. So a nonce here would be
+  // sent, never checked, and prove nothing — the same shape of dead control as
+  // a setting that changes no behaviour.
+  //
+  // CSRF is covered by `state` (the callback refuses a mismatch) and code
+  // interception by PKCE S256 above.
+  //
+  // Add it the moment anything starts reading the id_token — and validate the
+  // claim in the callback in the same change, or it is still decoration.
   if (OIDC_AUDIENCE) url.searchParams.set("audience", OIDC_AUDIENCE);
   if (mode === "signup") {
     url.searchParams.set("prompt", "create");

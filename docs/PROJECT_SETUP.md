@@ -500,6 +500,21 @@ Three layers, because each catches something the others cannot:
 | `App/backend/tests/` | The resolvers and the chain's branch logic, including that silence is not an error |
 | `e2e/languages.spec.ts` | Every locale through the UI — narration, dictation and the voice round-trip each carry the locale the person picked |
 | `scripts/probe_deploy.py` | The deployed backend, unmocked: TTS per locale honours both a default and an alternate voice, and STT transcribes real speech |
+| `App/frontend/e2e/verify-auth-flows.mjs` | Registration and sign-in against a running instance: the authorize URL's PKCE/state/prompt contract, and that a forged callback yields no session |
+
+`verify-auth-flows.mjs` is deliberately not a `.spec.ts`. Its assertions only
+mean anything where an identity provider is configured, and `NEXT_PUBLIC_OIDC_*`
+is inlined at build time — CI builds without one, so there the CTA is correctly
+disabled and there is no authorize URL to inspect. Run it by hand against a
+deployment, or against a container built with an IdP:
+
+```bash
+BASE=http://localhost:18080 node e2e/verify-auth-flows.mjs
+```
+
+It stops at the IdP boundary rather than filling in a login form: completing one
+needs a real account, and what can break on this side is everything before the
+redirect and everything after the callback.
 
 The probe's STT round-trip synthesizes each language with the deployment's own
 TTS and feeds the audio back to `/v1/asr`. That is deliberate — an earlier
