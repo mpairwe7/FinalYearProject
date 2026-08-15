@@ -70,7 +70,7 @@ test.describe("Auth entry points", () => {
   test("/signin links to /signup", async ({ page }) => {
     await anonymous(page);
     await page.goto("/signin");
-    await expect(page.getByRole("heading", { name: "Staff sign-in" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     await expect(page.locator('.signin-switch a[href="/signup"]')).toBeVisible();
   });
 

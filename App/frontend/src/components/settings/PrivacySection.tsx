@@ -15,9 +15,14 @@
  *     `DELETE /v1/me` is the right-to-erasure call and is irreversible.
  */
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getAnalyticsConsent, setAnalyticsConsent } from "../../lib/analyticsConsent";
+import {
+  ANALYTICS_CONSENT_EVENT,
+  ANALYTICS_CONSENT_KEY,
+  getAnalyticsConsent,
+  setAnalyticsConsent,
+} from "../../lib/analyticsConsent";
 import { clearAnalyticsQueue, initAnalytics } from "../../store/useAnalyticsStore";
 import { useChatStore } from "../../store/useChatStore";
 import {
@@ -69,6 +74,29 @@ const PURPOSES: readonly { value: ConsentPurpose; label: string; hint: string }[
   },
 ];
 
+/**
+ * `useSyncExternalStore` adapters for the analytics-consent key.
+ *
+ * The same three pieces ConsentBanner uses: the custom event for same-tab
+ * writes, and `storage` for another tab (a null key means the whole store was
+ * cleared).
+ */
+function subscribeAnalyticsConsent(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === null || e.key === ANALYTICS_CONSENT_KEY) onChange();
+  };
+  window.addEventListener(ANALYTICS_CONSENT_EVENT, onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(ANALYTICS_CONSENT_EVENT, onChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+const getAnalyticsSnapshot = () => getAnalyticsConsent() === true;
+const getServerAnalyticsSnapshot = () => false;
+
 function downloadJson(filename: string, data: unknown): void {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -96,9 +124,15 @@ export default function PrivacySection({
   const queryClient = useQueryClient();
   const conversations = useChatStore((s) => s.conversations);
   const clearAllSessions = useChatStore((s) => s.clearAllSessions);
-  // Consent is read once per open rather than subscribed: this panel is the
-  // only thing that changes it while it is on screen.
-  const [analytics, setAnalytics] = useState<boolean>(() => getAnalyticsConsent() === true);
+  // Subscribed, not snapshotted. The privacy banner writes the same key and
+  // renders ABOVE this dialog (z-index 800 vs 370), so a first-time visitor can
+  // accept it while Privacy & data is open — with a snapshot the toggle kept
+  // reading "off" until the section remounted, disagreeing with storage.
+  const analytics = useSyncExternalStore(
+    subscribeAnalyticsConsent,
+    getAnalyticsSnapshot,
+    getServerAnalyticsSnapshot,
+  );
   const [note, setNote] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
 
   const consentsQuery = useQuery({
@@ -149,7 +183,8 @@ export default function PrivacySection({
   });
 
   const toggleAnalytics = useCallback((next: boolean) => {
-    setAnalytics(next);
+    // No local mirror: setAnalyticsConsent fires the event this component is
+    // subscribed to, so the switch follows the store either way.
     setAnalyticsConsent(next);
     if (next) initAnalytics();
     else clearAnalyticsQueue();

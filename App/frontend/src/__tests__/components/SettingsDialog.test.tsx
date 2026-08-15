@@ -12,11 +12,15 @@
  */
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import SettingsDialog from "../../components/settings/SettingsDialog";
-import { ANALYTICS_CONSENT_KEY, getAnalyticsConsent } from "../../lib/analyticsConsent";
+import {
+  ANALYTICS_CONSENT_KEY,
+  getAnalyticsConsent,
+  setAnalyticsConsent,
+} from "../../lib/analyticsConsent";
 import { AUTH_TOKEN_STORAGE_KEY } from "../../lib/authSession";
 import { getThemePref } from "../../lib/theme";
 import { useChatStore } from "../../store/useChatStore";
@@ -131,6 +135,21 @@ describe("SettingsDialog", () => {
     fireEvent.click(within(luganda).getByRole("radio", { name: /Voice 1/ }));
     expect(useVoiceStore.getState().voiceByLocale).toEqual({});
     vi.unstubAllGlobals();
+  });
+
+  it("follows the consent banner while the panel is open", () => {
+    renderDialog({ tab: "privacy" });
+    const toggle = screen.getByRole("switch", { name: "Anonymous product analytics" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    // The banner renders above this dialog and writes the same key, so a
+    // first-time visitor can accept it without closing settings. A snapshot
+    // taken on open would leave this switch disagreeing with storage.
+    act(() => setAnalyticsConsent(true));
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    act(() => setAnalyticsConsent(false));
+    expect(toggle).toHaveAttribute("aria-checked", "false");
   });
 
   it("hands narration changes back to the page that owns the state", () => {

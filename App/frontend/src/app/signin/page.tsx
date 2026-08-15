@@ -1,7 +1,14 @@
 "use client";
 
 /**
- * Staff sign-in.
+ * Sign-in.
+ *
+ * Titled plainly rather than "Staff sign-in": the sidebar account block, the
+ * header pair, the landing note, Settings › Account and the tax-profile panel
+ * all send ordinary taxpayers here, and a page announcing itself as staff-only
+ * tells most of the people who arrive that they are in the wrong place. Staff
+ * are served by the same OIDC redirect — the difference is the role their token
+ * carries, resolved after the exchange, not a different door.
  *
  * The backend VERIFIES tokens; it does not issue them. There is no credential
  * store and no `/auth/login` — `auth/jwt_auth.py` does HS256 (dev shared
@@ -117,9 +124,9 @@ export default function SignInPage() {
           <div className="signin-mark" aria-hidden="true">
             URA
           </div>
-          <h1>Staff sign-in</h1>
+          <h1>Sign in</h1>
           <p className="signin-sub">
-            Uganda Revenue Authority — Tax Assistant operations
+            Uganda Revenue Authority — Tax Assistant
           </p>
         </header>
 

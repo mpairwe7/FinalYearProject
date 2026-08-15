@@ -678,6 +678,27 @@ export default function Page() {
     sendMessage(prompt);
   }, [sendMessage]);
 
+  /**
+   * Voice mode and narration move together, in both directions.
+   *
+   * Entering voice mode turns narration on — a voice mode that listens but
+   * answers in silence is not what anyone means by it. The reverse also has to
+   * hold: turning narration off in Settings while voice mode is on used to
+   * leave `voiceMode=true, autoNarrate=false`, the exact pair this coupling
+   * exists to prevent, because the composer owned the rule and the settings
+   * toggle wrote past it. Both entry points now go through these.
+   */
+  const setVoiceModeWithNarration = useCallback((on: boolean) => {
+    setVoiceMode(on);
+    setAutoNarrate(on);
+  }, []);
+
+  const setNarration = useCallback((on: boolean) => {
+    setAutoNarrate(on);
+    // Silencing narration leaves voice mode listening with nothing to say back.
+    if (!on) setVoiceMode(false);
+  }, []);
+
   // ---- Derived state ----
 
   const healthLabel = useMemo(() => {
@@ -724,10 +745,7 @@ export default function Page() {
     // and a voice mode that listens but answers in silence is not the thing
     // anyone means by voice mode — so entering turns auto-narrate on and
     // leaving turns it off, which is what ticking both boxes used to do.
-    onVoiceModeChange: (on: boolean) => {
-      setVoiceMode(on);
-      setAutoNarrate(on);
-    },
+    onVoiceModeChange: setVoiceModeWithNarration,
     voiceModeDisabled: !serverReady && !hasMediaRecorder,
   };
 
@@ -919,7 +937,7 @@ export default function Page() {
         tab={settingsTab}
         onTabChange={setSettingsTab}
         autoNarrate={autoNarrate}
-        onAutoNarrateChange={setAutoNarrate}
+        onAutoNarrateChange={setNarration}
         speechReady={Boolean(serverReady)}
         blogUrl={BLOG_URL}
       />

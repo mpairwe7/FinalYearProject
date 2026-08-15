@@ -1,4 +1,4 @@
-/* Staff sign-in — uses the app's existing tokens from globals.css so this page
+/* Sign-in / sign-up — uses the app's existing tokens from globals.css so this page
    sits inside the same design system rather than beside it. */
 
 .signin-page {

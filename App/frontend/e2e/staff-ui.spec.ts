@@ -355,7 +355,7 @@ test.describe("Staff UI on Chromium", () => {
       await seedConsent(page);
       await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
       await page.goto("/signin");
-      await expect(page.getByRole("heading", { name: "Staff sign-in" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
 
       // Neither NEXT_PUBLIC_OIDC_* is set in CI, so the button must state that
       // plainly rather than redirecting into a broken URL.

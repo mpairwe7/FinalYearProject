@@ -151,7 +151,7 @@ export default function OidcCallbackPage() {
             URA
           </div>
           <h1>{phase === "working" ? "Signing you in" : phase === "done" ? "Signed in" : "Sign-in failed"}</h1>
-          <p className="signin-sub">Uganda Revenue Authority — Tax Assistant operations</p>
+          <p className="signin-sub">Uganda Revenue Authority — Tax Assistant</p>
         </header>
 
         <p
