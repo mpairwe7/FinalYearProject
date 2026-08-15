@@ -151,6 +151,11 @@ export const accountApi = {
   updateProfile: (patch: ProfilePatch) =>
     request<UserProfile>("/v1/me/profile", { method: "PUT", json: patch }),
 
+  /**
+   * ACTIVE receipts only — `get_active_consents` filters on
+   * `withdrawn_at IS NULL`, so a withdrawn purpose is absent rather than
+   * present-and-flagged, and withdrawal history is not retrievable here.
+   */
   consents: () =>
     request<{ user_id: string; consents: ConsentReceipt[] }>("/v1/me/consents"),
 
@@ -160,11 +165,12 @@ export const accountApi = {
       json: { purposes, version: CONSENT_VERSION },
     }),
 
+  /** `withdrawn` maps each purpose to whether a receipt was actually closed. */
   withdrawConsents: (purposes: ConsentPurpose[]) =>
-    request<{ user_id: string; withdrawn: unknown[] }>("/v1/me/consents/withdraw", {
-      method: "POST",
-      json: { purposes },
-    }),
+    request<{ user_id: string; withdrawn: Record<string, boolean> }>(
+      "/v1/me/consents/withdraw",
+      { method: "POST", json: { purposes } },
+    ),
 
   /** UDPA 2019 data-portability export: identity, profile, consents, chats. */
   export: () => request<Record<string, unknown>>("/v1/me/export"),

@@ -143,10 +143,11 @@ export default function PrivacySection({
     retry: false,
   });
 
+  // No withdrawn-at filter: /v1/me/consents returns active receipts only, so
+  // anything that comes back is granted. Filtering here read as though
+  // withdrawn rows could arrive, which they cannot.
   const active = new Set(
-    (consentsQuery.data?.consents ?? [])
-      .filter((c: ConsentReceipt) => c.withdrawn_at === null)
-      .map((c: ConsentReceipt) => c.purpose),
+    (consentsQuery.data?.consents ?? []).map((c: ConsentReceipt) => c.purpose),
   );
 
   const consentMutation = useMutation({
@@ -289,7 +290,7 @@ export default function PrivacySection({
 
       <SettingsSection
         title="Consent"
-        description="What this service may do with your data, recorded as dated receipts you can withdraw at any time (UDPA 2019)."
+        description="What this service may do with your data. Each grant is recorded as a consent receipt you can withdraw at any time (UDPA 2019)."
       >
         <IdentityGate status={status} what="Consent receipts belong">
           Signed out, only the browser-local choices above apply.

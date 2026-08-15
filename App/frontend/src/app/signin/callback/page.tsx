@@ -25,7 +25,7 @@ import {
   OIDC_STATE_KEY,
   PKCE_VERIFIER_KEY,
 } from "../../../lib/oidcFlow";
-import { isStaffRole, staffLandingPath } from "../../../lib/roles";
+import { isStaffRole, staffDestinationsFor, staffLandingPath } from "../../../lib/roles";
 import "../signin.css";
 
 type Phase = "working" | "error" | "done";
@@ -164,10 +164,16 @@ export default function OidcCallbackPage() {
 
         {phase !== "working" && (
           <nav className="signin-onward" aria-label="Continue to">
-            {role === "ura_staff" && <a href="/agent">My queue</a>}
-            {(role === "ura_admin" || role === "ura_auditor") && <a href="/admin">Operations overview</a>}
+            {/* Built from the shared role table rather than inlined checks —
+                lib/roles exists so "which pages may this role open" is answered
+                in one place, and the account menu already reads it. */}
+            {staffDestinationsFor(role).map((d) => (
+              <a key={d.href} href={d.href}>
+                {d.label}
+              </a>
+            ))}
             <Link href="/">The assistant</Link>
-            <a href="/signin">Back to sign-in</a>
+            <Link href="/signin">Back to sign-in</Link>
           </nav>
         )}
       </div>

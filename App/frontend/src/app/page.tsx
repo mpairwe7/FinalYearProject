@@ -1,6 +1,7 @@
 "use client";
 
 import Image from 'next/image';
+import Link from 'next/link';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useChatStore, ChatTurn, createTurn, cleanResponse } from '../store/useChatStore';
 import { useVoiceStore } from '../store/useVoiceStore';
@@ -852,9 +853,9 @@ export default function Page() {
                 </p>
               ) : (
                 <p className="landing-auth">
-                  <a className="landing-auth-link" href="/signin">Sign in</a>
+                  <Link className="landing-auth-link" href="/signin">Sign in</Link>
                   {' or '}
-                  <a className="landing-auth-link" href="/signup">create an account</a>
+                  <Link className="landing-auth-link" href="/signup">create an account</Link>
                   {' to save conversations and keep a tax profile — or just start asking.'}
                 </p>
               )}
