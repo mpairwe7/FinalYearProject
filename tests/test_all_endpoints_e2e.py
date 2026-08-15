@@ -95,6 +95,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/tts"),
     ("POST", "/v1/translate"),
     ("GET", "/v1/speech/health"),
+    ("GET", "/v1/speech/voices"),
     ("POST", "/v1/voice/chat"),
     ("POST", "/v1/voice/vision/chat"),
     # --- Feedback ---
@@ -167,6 +168,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/tts"): "this:test_tts_synthesizes_audio",
     ("POST", "/v1/translate"): "this:test_translate_passthrough + test_translate_en_to_lg",
     ("GET", "/v1/speech/health"): "test_api_endpoints.SpeechEndpoints",
+    ("GET", "/v1/speech/voices"): "this:test_speech_voices_catalogue",
     ("POST", "/v1/voice/chat"): "this:test_voice_chat_asr_branch",
     ("POST", "/v1/voice/vision/chat"): "test_api_endpoints.SpeechEndpoints + test_native_voice",
     ("POST", "/v1/feedback"): "this:test_feedback_comment_roundtrip + test_api_endpoints",
@@ -338,10 +340,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (52 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (53 HTTP + 4 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 52, f"expected 52 HTTP endpoints, found {len(http)}"
+    assert len(http) == 53, f"expected 53 HTTP endpoints, found {len(http)}"
     assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
 
 
@@ -386,6 +388,47 @@ def test_translate_en_to_lg():
     assert body["text"] == "omusolo gwa VAT guli ki"
     assert body["backend"] == "stub-mt"
     assert body["target_lang"] == "lg"
+
+
+def test_speech_voices_catalogue():
+    """The picker is built from this, so its invariants are load-bearing.
+
+    Exactly one default per language: the client marks the head of each list,
+    and two "default" chips would force it to choose arbitrarily. Language
+    scoping matters just as much — a Luganda tag offered under Acholi would be
+    refused by the backend and degrade to an English voice reading Acholi.
+    """
+    c = _client(speech=True)
+    r = c.get("/v1/speech/voices")
+    assert r.status_code == 200
+    body = r.json()
+    assert "sunbird_configured" in body
+
+    voices = body["voices"]
+    assert {"en", "lg", "ach", "nyn", "sw"} <= set(voices)
+
+    seen_ids: dict[str, str] = {}
+    for locale, entries in voices.items():
+        assert entries, f"{locale} has no voices"
+        defaults = [e for e in entries if e["default"]]
+        assert len(defaults) == 1, f"{locale} must have exactly one default, got {len(defaults)}"
+        assert entries[0]["default"], f"{locale}'s default must lead the list"
+
+        ids = [e["id"] for e in entries]
+        assert len(set(ids)) == len(ids), f"{locale} repeats a voice id"
+        for vid in ids:
+            assert vid not in seen_ids, f"{vid} offered for both {seen_ids[vid]} and {locale}"
+            seen_ids[vid] = locale
+
+        for entry in entries:
+            assert entry["provider"] in {"sunbird", "edge_tts"}
+            assert isinstance(entry["available"], bool)
+
+    # Sunbird has no native English speaker; salt_eng_0001 is the last resort
+    # edge-tts exists to avoid, so it must not be advertised as one.
+    assert all(not e["native"] for e in voices["en"] if e["provider"] == "sunbird")
+    # English is served by edge-tts first, so an edge voice leads it.
+    assert voices["en"][0]["provider"] == "edge_tts"
 
 
 def test_asr_transcribes_audio():
