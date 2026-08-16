@@ -653,9 +653,39 @@
 # top-level tab, that tab auto-starts and lands on /authorize. Unframed is
 # unchanged, 34/34 on e2e/verify-auth-flows.mjs. All 8 CI workflows green.
 #
+# ---------------------------------------------------------------------------
+# sha-3431644 — the pod now reports its own network reality, and /ready stops
+# overstating retrieval.
+#
+# Answering "does Cloudflare work from this Space?" turned out to be impossible
+# from outside. The only evidence was one line — "gateway.ai.cloudflare.com
+# unreachable (ConnectError)" — which appears only when a request happens to
+# take that path, and Crane Cloud exposes no log API at all. Both deployments
+# generate (Space ~20s, Crane Cloud ~8s) and nobody could follow up the gap.
+#
+# So startup now states whether DoH activated and which of
+# gateway.ai.cloudflare.com, api.cloudflare.com, the Gemini endpoint and
+# VLLM_BASE_URL's host actually resolve. DNS is the right thing to report: it is
+# the failure mode doh_resolver already exists for — outbound 443 open, no
+# upstream resolver, every hostname failing before TCP connect. Milliseconds, no
+# credentials, and never fatal.
+#
+# /ready also stops reporting "hybrid" when dense retrieval is off. It read
+# _retriever_ready alone and never the retriever's own _sparse_only, so a
+# collection with no embedder stamp — what this Space logs — still looked
+# healthy. It reports "sparse" now, which likely also explains abstention on
+# questions the knowledge base should cover.
+#
+# Also carried since sha-d8037c8: workflow slot answers are read for intent
+# rather than string-matched ("as an individual", "organization", "individul",
+# "sole trader"), prompted translation guards its own input, and the ASR chain
+# distinguishes hearing nothing from every backend failing.
+#
+# All CI green on this commit; merged to main as 34316440cc.
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-d8037c8
+FROM landwind/ura-chatbot:sha-3431644
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
