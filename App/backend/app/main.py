@@ -5,6 +5,7 @@ ISO/IEC 42001:2023 security controls.  Includes analytics, feedback,
 and Prometheus-compatible metrics (2026 observability standards).
 """
 
+import contextlib
 import datetime
 import json
 import logging
@@ -14,22 +15,23 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
-from starlette.websockets import WebSocket
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
+from starlette.websockets import WebSocket
 
 from . import database as db
 from . import documents
 from .analytics import AnalyticsMiddleware, metrics
-from .authority import authority_required, get_authority_status
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
 from .auth.models import ConsentGrantRequest, ConsentWithdrawRequest, ProfileUpdateRequest
+from .authority import authority_required, get_authority_status
 from .escalation_notify import known_teams
 from .models import (
     AnalyticsDashboard,
@@ -353,6 +355,56 @@ def _require_voice_processing_consent(request: Request, ctx: AuthContext) -> Non
     raise HTTPException(status_code=403, detail="anonymous voice consent header required")
 
 
+def _log_egress_reachability() -> None:
+    """Record, once at startup, which external hosts this pod can resolve.
+
+    Diagnosing this from outside was guesswork. A single log line —
+    "Gemini: gateway.ai.cloudflare.com unreachable (ConnectError)" — was the
+    only evidence that the Cloudflare AI Gateway was unavailable on the Space,
+    and it appeared only when a request happened to take that path. Crane Cloud
+    exposes no log API at all, so there the same question could not be answered
+    even in principle.
+
+    DNS is the thing worth reporting, because that is the documented failure
+    mode this deployment already carries a workaround for: doh_resolver's own
+    docstring describes a pod with outbound TCP/443 open and no working upstream
+    resolver, where every hostname fails before TCP connect. Resolution succeeds
+    or fails in milliseconds and needs no credentials, so it is cheap enough to
+    run unconditionally and says which side of that line this pod is on.
+
+    Never fatal: a diagnostic that can stop startup is worse than no diagnostic.
+    """
+    import socket  # noqa: PLC0415 — startup-only
+
+    hosts = [
+        "gateway.ai.cloudflare.com",   # CF AI Gateway (Gemini, Workers AI)
+        "api.cloudflare.com",          # Vectorize, Workers AI direct
+        "generativelanguage.googleapis.com",  # Gemini direct — the working path today
+    ]
+    vllm = os.getenv("VLLM_BASE_URL", "")
+    if vllm:
+        with contextlib.suppress(Exception):
+            host = urlparse(vllm).hostname
+            if host:
+                hosts.append(host)
+
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(3.0)
+    try:
+        for host in hosts:
+            t0 = time.perf_counter()
+            try:
+                socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+                logger.info("egress: %s resolves (%.0fms)", host, (time.perf_counter() - t0) * 1000)
+            except Exception as exc:  # noqa: BLE001 — the failure IS the finding
+                logger.warning(
+                    "egress: %s does NOT resolve (%s) — anything routed through it will fail",
+                    host, type(exc).__name__,
+                )
+    finally:
+        socket.setdefaulttimeout(previous)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down the ChatModel singleton."""
@@ -365,8 +417,13 @@ async def lifespan(app: FastAPI):
 
         if doh_resolver.is_enabled():
             doh_resolver.activate()
+            logger.info("DoH: enabled (USE_DOH=true) — external names resolve via 1.1.1.1")
+        else:
+            logger.info("DoH: disabled (USE_DOH is not true) — using the pod resolver")
     except Exception:
         logger.warning("DoH resolver activation skipped", exc_info=True)
+
+    _log_egress_reachability()
 
     # Production safety gate — blocks startup on insecure config
     _validate_production_env()
@@ -610,7 +667,18 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
 
     Checks both FAQ index AND Qdrant retriever health.
     """
-    retrieval_mode = "hybrid" if model._retriever_ready else "keyword"
+    # "hybrid" only when dense vectors are actually in play. A retriever that
+    # fell back to SPARSE-ONLY — no embedder stamp on the collection, or no
+    # sentence-transformers in the image — still had _retriever_ready True, so
+    # this reported "hybrid" while BM25 did all the work. That is the field
+    # operators read to decide whether retrieval is healthy, and on the
+    # deployed Space it was saying yes while dense was off.
+    if not model._retriever_ready:
+        retrieval_mode = "keyword"
+    elif getattr(model._retriever, "_sparse_only", False):
+        retrieval_mode = "sparse"
+    else:
+        retrieval_mode = "hybrid"
     qdrant_healthy = model._retriever.is_ready if model._retriever_ready else False
     return HealthResponse(
         status="ready" if qdrant_healthy else "degraded",
@@ -2011,9 +2079,9 @@ def voice_audit_endpoint(
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Voice audit log for regulatory compliance and admin review."""
-    from .voice_consent import get_voice_audit_log, voice_audit_stats
-
     import time as _time
+
+    from .voice_consent import get_voice_audit_log, voice_audit_stats
 
     since = _time.time() - (days * 86400) if days > 0 else None
     entries = get_voice_audit_log(
