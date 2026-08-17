@@ -685,7 +685,7 @@
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-284f500
+FROM landwind/ura-chatbot:sha-126089b
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
