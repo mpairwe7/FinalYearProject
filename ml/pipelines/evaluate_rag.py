@@ -315,7 +315,11 @@ def compute_abstention_precision(
 ) -> float:
     """For samples with no valid answer, checks whether the system would abstain.
 
-    Uses faithfulness as a proxy — if faithfulness < threshold, the system should abstain.
+    An empty ``answer`` is itself direct evidence of abstention. Faithfulness
+    is only a fallback proxy for a non-empty answer that hedges or deflects
+    without asserting anything — ``compute_faithfulness("", ...)`` vacuously
+    returns 1.0 (no sentences to score = "fully faithful"), which is exactly
+    backwards for an abstention check.
     """
     unanswerable = [s for s in eval_data if not s.get("ground_truth", "").strip()]
     if not unanswerable:
@@ -323,7 +327,11 @@ def compute_abstention_precision(
 
     correct_abstentions = 0
     for s in unanswerable:
-        faith = compute_faithfulness(s.get("answer", ""), s.get("contexts", []))
+        answer = s.get("answer", "")
+        if not answer.strip():
+            correct_abstentions += 1
+            continue
+        faith = compute_faithfulness(answer, s.get("contexts", []))
         if faith < abstention_threshold:
             correct_abstentions += 1
     return correct_abstentions / len(unanswerable)
@@ -395,6 +403,16 @@ def evaluate_rag(eval_data: list[dict[str, Any]]) -> dict[str, Any]:
         answer = sample.get("answer", "")
         contexts = sample.get("contexts", [])
         ground_truth = sample.get("ground_truth", "")
+
+        # Rows with no ground truth are the unanswerable/should-abstain set —
+        # compute_abstention_precision() below scores those on its own terms
+        # (did the system correctly withhold an answer). Scoring them here
+        # too double-counts them through metrics built for answerable Q&A
+        # pairs: an empty answer trivially tanks answer_relevancy (nothing to
+        # embed) while vacuously *passing* faithfulness (no sentences to
+        # score), which is backwards for what these rows exist to test.
+        if not ground_truth.strip():
+            continue
 
         row_metrics = {
             "faithfulness": compute_faithfulness(answer, contexts),
