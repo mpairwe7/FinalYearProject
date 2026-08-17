@@ -204,9 +204,10 @@ class SpeculativePrefetcher:
         t0 = time.perf_counter()
         try:
             loop = asyncio.get_running_loop()
+            search = getattr(self._retriever, "search_planned", self._retriever.search)
             hits = await loop.run_in_executor(
                 None,
-                lambda: self._retriever.search(
+                lambda: search(
                     query,
                     top_k=self._top_k,
                     prefetch_limit=self._prefetch_limit,

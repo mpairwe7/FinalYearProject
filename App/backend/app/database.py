@@ -226,6 +226,15 @@ def init_db() -> None:
             created_at      REAL NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS conversation_topics (
+            conversation_id TEXT PRIMARY KEY,
+            topic_id        TEXT NOT NULL,
+            label           TEXT NOT NULL,
+            tax_type        TEXT DEFAULT '',
+            confidence      REAL DEFAULT 0,
+            updated_at      REAL NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS workflow_sessions (
             conversation_id TEXT PRIMARY KEY,
             workflow_id     TEXT NOT NULL,
@@ -344,6 +353,13 @@ def init_db() -> None:
             staff_note     TEXT DEFAULT '',
             created_at     REAL NOT NULL,
             updated_at     REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS ticket_presence (
+            ticket_id  TEXT NOT NULL,
+            viewer     TEXT NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (ticket_id, viewer)
         );
 
         -- Memory + audit tables (memory/semantic.py, memory/episodic.py,
@@ -499,6 +515,8 @@ def init_db() -> None:
     # /v1/me export + erasure can reach it.  Empty string for anonymous turns.
     _ensure_column(conn, "conversations", "user_id", "TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)")
+    _ensure_column(conn, "conversations", "flag_variants", "TEXT DEFAULT '{}'")
+    _ensure_column(conn, "conversations", "locale", "TEXT DEFAULT ''")
 
     # Seed the default tenant if missing
     conn.execute(
@@ -527,6 +545,8 @@ def cleanup_expired_data() -> dict[str, int]:
         ("feedback", _FEEDBACK_TTL_DAYS),
         ("sessions", _SESSION_TTL_DAYS),
         ("workflow_sessions", _CONVERSATION_TTL_DAYS),
+        ("conversation_topics", _CONVERSATION_TTL_DAYS),
+        ("ticket_presence", 1),
     ]
     ts_col = {
         "conversations": "created_at",
@@ -534,6 +554,8 @@ def cleanup_expired_data() -> dict[str, int]:
         "feedback": "created_at",
         "sessions": "last_active_at",
         "workflow_sessions": "updated_at",
+        "conversation_topics": "updated_at",
+        "ticket_presence": "updated_at",
     }
 
     for table, ttl_days in ttls:
@@ -738,6 +760,8 @@ def log_conversation(
     confidence: float = 0,
     topic_tag: str = "",
     user_id: str = "",
+    flag_variants: str = "{}",
+    locale: str = "",
 ) -> str:
     """Log a conversation turn and return the stable thread id.
 
@@ -751,8 +775,9 @@ def log_conversation(
         conn.execute(
             """INSERT INTO conversations
                (id, conversation_id, session_id, user_message, bot_reply, sources,
-                contexts, response_time_ms, confidence, topic_tag, created_at, user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                contexts, response_time_ms, confidence, topic_tag, created_at, user_id,
+                flag_variants, locale)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row_id,
                 thread_id,
@@ -766,6 +791,8 @@ def log_conversation(
                 topic_tag,
                 time.time(),
                 user_id,
+                flag_variants or "{}",
+                locale or "",
             ),
         )
         conn.commit()
@@ -805,6 +832,65 @@ def get_recent_turns(
     return [
         {"user_message": r["user_message"], "bot_reply": r["bot_reply"]} for r in reversed(rows)
     ]
+
+
+def get_conversation_topic(conversation_id: str) -> dict[str, Any] | None:
+    """Return the persisted current task for *conversation_id*, or None."""
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return None
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT conversation_id, topic_id, label, tax_type, confidence, updated_at
+           FROM conversation_topics WHERE conversation_id = ?""",
+        (cid,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "conversation_id": row["conversation_id"],
+        "topic_id": row["topic_id"],
+        "label": row["label"],
+        "tax_type": row["tax_type"] or "",
+        "confidence": float(row["confidence"] or 0),
+        "updated_at": float(row["updated_at"] or 0),
+    }
+
+
+def upsert_conversation_topic(
+    conversation_id: str,
+    *,
+    topic_id: str,
+    label: str,
+    tax_type: str = "",
+    confidence: float = 0.0,
+) -> None:
+    cid = (conversation_id or "").strip()
+    if not cid or not topic_id:
+        return
+    conn = _get_connection()
+    conn.execute(
+        """INSERT INTO conversation_topics
+           (conversation_id, topic_id, label, tax_type, confidence, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(conversation_id) DO UPDATE SET
+             topic_id = excluded.topic_id,
+             label = excluded.label,
+             tax_type = excluded.tax_type,
+             confidence = excluded.confidence,
+             updated_at = excluded.updated_at""",
+        (cid, topic_id, label, tax_type or "", float(confidence), time.time()),
+    )
+    conn.commit()
+
+
+def clear_conversation_topic(conversation_id: str) -> None:
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return
+    conn = _get_connection()
+    conn.execute("DELETE FROM conversation_topics WHERE conversation_id = ?", (cid,))
+    conn.commit()
 
 
 def get_conversation_transcript(
@@ -1022,7 +1108,8 @@ def export_eval_samples(days: int = 30, limit: int = 200) -> list[dict[str, Any]
     """
     cutoff = time.time() - (days * 86400)
     return query_all(
-        """SELECT user_message AS user_query, bot_reply, contexts, created_at
+        """SELECT user_message AS user_query, bot_reply, contexts, created_at,
+                  topic_tag, locale, flag_variants
            FROM conversations
            WHERE created_at >= ?
              AND contexts IS NOT NULL
@@ -1225,19 +1312,33 @@ def mark_reply_delivered(ticket_id: str) -> bool:
         return False
 
 
-def sla_stats(days: int = 30) -> dict[str, Any]:
-    """Time-to-first-response and time-to-resolution over *days*.
+#: First-response and next-reply clocks use the same public-sector day.
+SLA_BREACH_SECONDS = 24 * 3600
+PRESENCE_TTL_SECONDS = 45
 
-    Medians rather than means: one ticket left open over a holiday
-    weekend would otherwise make the whole queue look broken.
+
+def compose_sla_stats(
+    *,
+    period_rows: list[Any],
+    open_rows: list[Any],
+    days: int,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Build the SLA payload from already-fetched rows.
+
+    Medians stay period-scoped. Breach / awaiting-next counts use the
+    live open+assigned population so a 20-row queue sample cannot
+    under-count.
     """
-    conn = _get_connection()
-    cutoff = time.time() - (days * 86400)
-    rows = conn.execute(
-        """SELECT created_at, first_response_at, resolved_at, priority
-           FROM tickets WHERE created_at >= ?""",
-        (cutoff,),
-    ).fetchall()
+    now = now if now is not None else time.time()
+
+    def _get(row: Any, key: str, index: int) -> float:
+        if isinstance(row, dict):
+            return float(row.get(key) or 0)
+        try:
+            return float(row[key] or 0)
+        except (KeyError, TypeError, IndexError):
+            return float(row[index] or 0)
 
     def _median(values: list[float]) -> float | None:
         if not values:
@@ -1249,20 +1350,101 @@ def sla_stats(days: int = 30) -> dict[str, Any]:
         return round((ordered[mid - 1] + ordered[mid]) / 2, 1)
 
     response = [
-        r["first_response_at"] - r["created_at"]
-        for r in rows
-        if r["first_response_at"]
+        _get(r, "first_response_at", 1) - _get(r, "created_at", 0)
+        for r in period_rows
+        if _get(r, "first_response_at", 1)
     ]
-    resolution = [r["resolved_at"] - r["created_at"] for r in rows if r["resolved_at"]]
+    resolution = [
+        _get(r, "resolved_at", 2) - _get(r, "created_at", 0)
+        for r in period_rows
+        if _get(r, "resolved_at", 2)
+    ]
+    next_replies = [
+        _get(r, "reply_at", 3) - _get(r, "first_response_at", 1)
+        for r in period_rows
+        if _get(r, "reply_at", 3) and _get(r, "first_response_at", 1)
+        and _get(r, "reply_at", 3) > _get(r, "first_response_at", 1)
+    ]
+
+    breaching_first = 0
+    breaching_next = 0
+    awaiting_next = 0
+    for r in open_rows:
+        created = _get(r, "created_at", 0)
+        first = _get(r, "first_response_at", 1)
+        reply = _get(r, "reply_at", 2)
+        if not first:
+            if now - created >= SLA_BREACH_SECONDS:
+                breaching_first += 1
+            continue
+        awaiting_next += 1
+        last_touch = reply or first
+        if now - last_touch >= SLA_BREACH_SECONDS:
+            breaching_next += 1
+
     return {
         "period_days": days,
-        "tickets": len(rows),
+        "tickets": len(period_rows),
         "responded": len(response),
         "resolved": len(resolution),
-        "awaiting_first_response": sum(1 for r in rows if not r["first_response_at"]),
+        "awaiting_first_response": sum(1 for r in open_rows if not _get(r, "first_response_at", 1)),
+        "awaiting_next_response": awaiting_next,
         "median_response_seconds": _median(response),
         "median_resolution_seconds": _median(resolution),
+        "median_next_reply_seconds": _median(next_replies),
+        "breaching_first_response": breaching_first,
+        "breaching_next_reply": breaching_next,
+        "breaching": breaching_first + breaching_next,
     }
+
+
+def sla_stats(days: int = 30) -> dict[str, Any]:
+    """Time-to-first-response, next-reply, and live breach counts."""
+    conn = _get_connection()
+    now = time.time()
+    cutoff = now - (days * 86400)
+    period = conn.execute(
+        """SELECT created_at, first_response_at, resolved_at, reply_at
+           FROM tickets WHERE created_at >= ?""",
+        (cutoff,),
+    ).fetchall()
+    opened = conn.execute(
+        """SELECT created_at, first_response_at, reply_at, status
+           FROM tickets WHERE status IN ('open', 'assigned')""",
+    ).fetchall()
+    return compose_sla_stats(period_rows=period, open_rows=opened, days=days, now=now)
+
+
+def heartbeat_ticket_presence(ticket_id: str, viewer: str) -> None:
+    """Record that *viewer* has this case open. TTL is enforced on read."""
+    cid = (ticket_id or "").strip()
+    who = (viewer or "").strip()[:128]
+    if not cid or not who:
+        return
+    conn = _get_connection()
+    now = time.time()
+    conn.execute(
+        """INSERT INTO ticket_presence (ticket_id, viewer, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(ticket_id, viewer) DO UPDATE SET updated_at = excluded.updated_at""",
+        (cid, who, now),
+    )
+    conn.commit()
+
+
+def list_ticket_viewers(ticket_id: str, max_age: float = PRESENCE_TTL_SECONDS) -> list[str]:
+    cid = (ticket_id or "").strip()
+    if not cid:
+        return []
+    conn = _get_connection()
+    cutoff = time.time() - max_age
+    rows = conn.execute(
+        """SELECT viewer FROM ticket_presence
+           WHERE ticket_id = ? AND updated_at >= ?
+           ORDER BY updated_at DESC""",
+        (cid, cutoff),
+    ).fetchall()
+    return [str(r["viewer"] if not isinstance(r, tuple) else r[0]) for r in rows]
 
 
 def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
@@ -1910,6 +2092,15 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
             logger.exception("delete_user_cascade: tickets")
             counts["tickets"] = -1
         try:
+            if conv_ids:
+                ph = ",".join("?" * len(conv_ids))
+                execute(
+                    f"DELETE FROM conversation_topics WHERE conversation_id IN ({ph})",  # noqa: S608
+                    tuple(conv_ids),
+                )
+        except Exception:
+            logger.exception("delete_user_cascade: conversation_topics")
+        try:
             counts["conversations"] = execute(
                 "DELETE FROM conversations WHERE user_id = ?", (external_id,)
             )
@@ -1982,6 +2173,9 @@ if ANALYTICS_BACKEND == "postgres":
         get_session_stats = _pg.get_session_stats  # type: ignore
         log_conversation = _pg.log_conversation  # type: ignore
         get_recent_turns = _pg.get_recent_turns  # type: ignore
+        get_conversation_topic = _pg.get_conversation_topic  # type: ignore
+        upsert_conversation_topic = _pg.upsert_conversation_topic  # type: ignore
+        clear_conversation_topic = _pg.clear_conversation_topic  # type: ignore
         get_conversation_transcript = _pg.get_conversation_transcript  # type: ignore
         get_conversation_stats = _pg.get_conversation_stats  # type: ignore
         export_review_feedback = _pg.export_review_feedback  # type: ignore
@@ -1999,6 +2193,8 @@ if ANALYTICS_BACKEND == "postgres":
         pending_officer_reply = _pg.pending_officer_reply  # type: ignore
         mark_reply_delivered = _pg.mark_reply_delivered  # type: ignore
         sla_stats = _pg.sla_stats  # type: ignore
+        heartbeat_ticket_presence = _pg.heartbeat_ticket_presence  # type: ignore
+        list_ticket_viewers = _pg.list_ticket_viewers  # type: ignore
         # Identity, consent and workflow state.  Left on SQLite these
         # are per-replica: a consent withdrawal reaches one pod while
         # every other keeps processing the taxpayer as consenting.

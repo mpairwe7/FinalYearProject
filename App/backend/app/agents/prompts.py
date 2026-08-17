@@ -77,3 +77,28 @@ def specialist_prompt(agent_role: str) -> str:
 def specialist_roles() -> list[str]:
     """Roles that carry their own instructions, for introspection."""
     return sorted(_SPECIALIST_PROMPTS)
+
+
+_DETAIL_LEVEL_PROMPTS: dict[str, str] = {
+    "beginner": (
+        "## Explanation depth: beginner\n"
+        "Assume no tax vocabulary. Define every acronym the first time you "
+        "use it. Prefer short sentences and one concrete example. Skip "
+        "statutory section numbers unless the user asks."
+    ),
+    "expert": (
+        "## Explanation depth: expert\n"
+        "Use statutory names, form codes, and fiscal-year labels. Do not "
+        "define VAT, PAYE, or TIN. Prefer precise figures over analogies."
+    ),
+}
+
+
+def detail_level_prompt(level: str | None) -> str:
+    """Extra system instructions for a profile ``detail_level`` (G24).
+
+    Intermediate (the default) adds nothing — the base prompt already
+    matches that register. Unknown values are ignored so a bad profile
+    field cannot inject prompt text.
+    """
+    return _DETAIL_LEVEL_PROMPTS.get((level or "").strip().lower(), "")

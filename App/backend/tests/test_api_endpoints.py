@@ -233,7 +233,8 @@ class AdminEndpoints(_Base):
         c = _client()
         staff = make_dev_token("a", role="ura_staff")
         for path in ("/v1/admin/tickets", "/v1/admin/tickets/stats",
-                     "/v1/admin/voice_audit", "/v1/admin/offline_stats"):
+                     "/v1/admin/voice_audit", "/v1/admin/offline_stats",
+                     "/v1/admin/flags"):
             self.assertIn(c.get(path).status_code, (401, 403, 503), path)
             self.assertEqual(c.get(path, headers=_bearer(staff)).status_code, 200, path)
 
@@ -241,6 +242,58 @@ class AdminEndpoints(_Base):
         staff = make_dev_token("a", role="ura_staff")
         r = _client().get("/v1/admin/tickets/" + "a" * 36, headers=_bearer(staff))
         self.assertIn(r.status_code, (404, 200))  # 404 unknown id; 200 if empty payload
+
+    def test_presence_heartbeats_the_viewer(self):
+        staff = make_dev_token("a", role="ura_staff", email="officer@ura.go.ug")
+        ticket = db.create_ticket(reason="presence")
+        c = _client()
+        r = c.post(
+            f"/v1/admin/tickets/{ticket['id']}/presence",
+            headers=_bearer(staff),
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("officer@ura.go.ug", r.json()["viewers"])
+        got = c.get(f"/v1/admin/tickets/{ticket['id']}", headers=_bearer(staff))
+        self.assertEqual(got.status_code, 200)
+        self.assertIn("officer@ura.go.ug", got.json().get("viewers") or [])
+
+    def test_flags_list_includes_protection(self):
+        staff = make_dev_token("a", role="ura_staff")
+        r = _client().get("/v1/admin/flags", headers=_bearer(staff))
+        self.assertEqual(r.status_code, 200, r.text)
+        payload = r.json()
+        self.assertTrue(payload["overrides_are_ephemeral"])
+        names = {row["name"] for row in payload["flags"]}
+        self.assertIn("hyde", names)
+        protected = {row["name"] for row in payload["flags"] if row["protected"]}
+        self.assertIn("auth_required", protected)
+
+    def test_auditor_cannot_toggle_flags(self):
+        auditor = make_dev_token("aud", role="ura_auditor")
+        r = _client().patch(
+            "/v1/admin/flags/hyde?enabled=true",
+            headers=_bearer(auditor),
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_protected_flags_cannot_be_toggled(self):
+        admin = make_dev_token("ops", role="ura_admin")
+        r = _client().patch(
+            "/v1/admin/flags/auth_required?enabled=false",
+            headers=_bearer(admin),
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_admin_can_set_an_ephemeral_flag(self):
+        admin = make_dev_token("ops", role="ura_admin")
+        c = _client()
+        try:
+            r = c.patch("/v1/admin/flags/hyde?enabled=true", headers=_bearer(admin))
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["enabled"])
+            self.assertTrue(r.json()["ephemeral"])
+        finally:
+            flags.clear("hyde")
 
 
 # ---------------------------------------------------------------------------

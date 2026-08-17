@@ -78,6 +78,17 @@
     opacity: 1;
   }
 }
+.chatv2 .bubble-actions-user {
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+@media (max-width: 720px) {
+  .chatv2 .bubble-actions-user .copy-btn {
+    min-height: 32px;
+    padding: 0.2rem 0.55rem;
+    font-size: 12px;
+  }
+}
 
 .chatv2 .listen-btn,
 .chatv2 .copy-btn {
@@ -277,18 +288,21 @@
 /* ---------------------------------------------------------------------------
  * Landing — input-first hierarchy (small brand h1, question h2, composer,
  * categorized chips). Legacy classes stay for the e2e/smoke text queries.
+ * Children are direct (no wrapper) so the composer can leave the flow and
+ * become the same thumb-dock used in-chat on phones.
  * ------------------------------------------------------------------------- */
 .chatv2 .landing {
   justify-content: flex-start;
+  align-items: center;
   gap: 0;
   overflow-y: auto;
+  padding-top: max(40px, 14vh);
 }
-.chatv2 .ldv2-block {
+.chatv2 .landing-brand,
+.chatv2 .landing-composer,
+.chatv2 .landing-prompts,
+.chatv2 .landing-auth {
   width: min(720px, 100%);
-  margin-top: max(40px, 14vh);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
 }
 .chatv2 .ldv2-brand {
   display: flex;
@@ -359,21 +373,29 @@
   .chatv2 .landing-prompts {
     grid-template-columns: 1fr;
   }
-  .chatv2 .ldv2-block {
-    margin-top: max(24px, 8vh);
+}
+@media (max-width: 720px) {
+  /* Brand + chips + auth scroll; composer is the fixed .chat-dock. */
+  .chatv2 .landing {
+    padding-top: max(24px, 8vh);
+    padding-bottom: calc(var(--chat-dock-height, 92px) + var(--keyboard-inset, 0px) + 1.25rem);
   }
+  .chatv2 .landing-brand { order: 1; }
+  .chatv2 .landing-prompts { order: 2; }
+  .chatv2 .landing-auth { order: 3; margin-top: 14px; }
+  .chatv2 .landing-composer { order: 4; }
 }
 @media (max-height: 600px) {
-  .chatv2 .ldv2-block {
-    margin-top: 20px;
+  .chatv2 .landing {
+    padding-top: 20px;
   }
 }
 /* A phone turned sideways leaves ~390px of height for the header, the hero and
    the composer. Tighten the hero rather than the input: the input carries the
    44px thumb target, and it is what the whole screen is for. */
 @media (max-height: 430px) {
-  .chatv2 .ldv2-block {
-    margin-top: 12px;
+  .chatv2 .landing {
+    padding-top: 12px;
   }
   .chatv2 .ldv2-brand {
     margin-bottom: 2px;

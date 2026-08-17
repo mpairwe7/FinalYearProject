@@ -8,6 +8,7 @@ import {
   FileIcon,
   LoadingDots,
   VoiceWaveIcon,
+  StopIcon,
 } from './Icons';
 import {
   ATTACHMENT_ACCEPT,
@@ -49,6 +50,8 @@ interface ChatInputProps {
      Without it, dictation that heard nothing was a dead end: the recording
      panel closed, the composer stayed empty, and nothing said why. */
   dictationNotice?: string | null;
+  /** Abort an in-flight reply. When set, the primary slot becomes Stop while loading. */
+  onStop?: () => void;
 }
 
 /** Inline waveform — 5 animated bars */
@@ -79,6 +82,7 @@ function ChatInputInner({
   onVoiceModeChange,
   voiceModeDisabled,
   dictationNotice,
+  onStop,
 }: ChatInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -258,7 +262,16 @@ function ChatInputInner({
               can actually do (talk); typing replaces it with send. Rendering
               both at once would leave a disabled send button sitting next to
               the mic for the whole of an empty composer. */}
-          {canSend || !onVoiceModeChange ? (
+          {isLoading && onStop ? (
+            <button
+              className="composer-circle-btn send-circle-btn stop-circle-btn"
+              onClick={onStop}
+              aria-label="Stop generating"
+              data-tip="Stop"
+            >
+              <StopIcon />
+            </button>
+          ) : canSend || !onVoiceModeChange ? (
             <button
               className="composer-circle-btn send-circle-btn"
               onClick={() => onSend()}

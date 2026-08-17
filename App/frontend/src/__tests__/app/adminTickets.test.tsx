@@ -15,7 +15,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import StaffTicketQueue from "../../app/admin/tickets/page";
+import { StaffTicketQueue } from "../../app/admin/tickets/page";
 import { analyticsApi } from "../../services/analyticsApi";
 
 const TICKET = {
@@ -60,6 +60,7 @@ function renderPage() {
 
 describe("StaffTicketQueue", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", "/admin/tickets");
     vi.restoreAllMocks();
     vi.spyOn(analyticsApi, "tickets").mockResolvedValue({
       count: 1,
@@ -80,6 +81,7 @@ describe("StaffTicketQueue", () => {
       median_resolution_seconds: 7200,
     });
     vi.spyOn(analyticsApi, "updateTicket").mockResolvedValue({ status: "ok" });
+    vi.spyOn(analyticsApi, "heartbeatPresence").mockResolvedValue({ status: "ok", viewers: [] });
   });
 
   it("lists queued tickets with their priority", async () => {
@@ -145,6 +147,40 @@ describe("StaffTicketQueue", () => {
     );
   });
 
+  it("inserts a canned reply without sending it", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByText(/User explicitly asked for a human/));
+    fireEvent.click(await screen.findByRole("button", { name: "Acknowledge the wait" }));
+    const box = screen.getByLabelText("Reply to the taxpayer") as HTMLTextAreaElement;
+    expect(box.value).toMatch(/Thank you for waiting/);
+    expect(analyticsApi.updateTicket).not.toHaveBeenCalled();
+  });
+
+  it("blocks a reply when the case is assigned to someone else", async () => {
+    vi.spyOn(analyticsApi, "ticket").mockResolvedValue({
+      ...DETAIL,
+      assignee: "other@ura.go.ug",
+    });
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: { queries: { retry: false, refetchInterval: false } },
+          })
+        }
+      >
+        <StaffTicketQueue
+          who={{ authenticated: true, role: "ura_staff", email: "officer@ura.go.ug" }}
+        />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByText(/User explicitly asked for a human/));
+    expect(await screen.findByText(/Assigned to other@ura.go.ug/)).toBeInTheDocument();
+    const box = await screen.findByLabelText("Reply to the taxpayer");
+    fireEvent.change(box, { target: { value: "Your TIN was reactivated." } });
+    expect(screen.getByRole("button", { name: /send reply/i })).toBeDisabled();
+  });
+
   it("will not send an empty reply", async () => {
     renderPage();
     fireEvent.click(await screen.findByText(/User explicitly asked for a human/));
@@ -158,7 +194,7 @@ describe("StaffTicketQueue", () => {
     // a status filter in the toolbar.
     await screen.findByText("Let me check.");
     const detail = screen.getByLabelText("Ticket detail");
-    fireEvent.click(within(detail).getByRole("button", { name: "resolved" }));
+    fireEvent.click(within(detail).getByRole("button", { name: /resolved/i }));
     await waitFor(() =>
       expect(analyticsApi.updateTicket).toHaveBeenCalledWith("tkt-1", { status: "resolved" }),
     );
@@ -201,6 +237,45 @@ describe("StaffTicketQueue", () => {
     });
     renderPage();
     expect(await screen.findByText("Nothing waiting.")).toBeInTheDocument();
+  });
+
+  it("filters the queue by search text", async () => {
+    renderPage();
+    await screen.findByText(/User explicitly asked for a human/);
+    fireEvent.change(screen.getByLabelText("Search tickets"), {
+      target: { value: "no-such-case" },
+    });
+    expect(screen.getByText("Nothing waiting.")).toBeInTheDocument();
+  });
+
+  it("claims a ticket for the signed-in officer", async () => {
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: { queries: { retry: false, refetchInterval: false } },
+          })
+        }
+      >
+        <StaffTicketQueue
+          who={{ authenticated: true, role: "ura_staff", email: "officer@ura.go.ug" }}
+        />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByText(/User explicitly asked for a human/));
+    fireEvent.click(await screen.findByRole("button", { name: /assign to me/i }));
+    await waitFor(() =>
+      expect(analyticsApi.updateTicket).toHaveBeenCalledWith("tkt-1", {
+        assignee: "officer@ura.go.ug",
+        status: "assigned",
+      }),
+    );
+  });
+
+  it("opens a ticket from the URL without a second click", async () => {
+    window.history.replaceState(null, "", "/admin/tickets?ticket=tkt-1");
+    renderPage();
+    expect(await screen.findByText("Let me check.")).toBeInTheDocument();
   });
 
   it("does not claim a transcript it was not given", async () => {

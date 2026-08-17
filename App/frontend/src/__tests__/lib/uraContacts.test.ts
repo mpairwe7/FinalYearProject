@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PHONE_RE, sourceUrl, telDigits, URA_CONTACTS } from "../../lib/uraContacts";
+import { PHONE_RE, citationHref, sourceUrl, telDigits, URA_CONTACTS } from "../../lib/uraContacts";
 
 describe("uraContacts", () => {
   it("maps any non-empty source to the official portal, null otherwise", () => {
@@ -20,6 +20,16 @@ describe("uraContacts", () => {
   it("reduces a display number to a dialable value", () => {
     expect(telDigits("0800 117 000")).toBe("0800117000");
     expect(telDigits("+256-414-270-975")).toBe("+256414270975");
+  });
+
+  it("prefers an https citation URL over the portal fallback", () => {
+    expect(
+      citationHref({ url: "https://ura.go.ug/en/domestic-taxes", source: "crawl.jsonl" }),
+    ).toBe("https://ura.go.ug/en/domestic-taxes");
+    expect(citationHref({ url: "javascript:alert(1)", source: "faq.csv" })).toBe(
+      "https://ura.go.ug",
+    );
+    expect(citationHref({ source: "faq.csv" })).toBe("https://ura.go.ug");
   });
 
   it("exposes verified contact constants", () => {

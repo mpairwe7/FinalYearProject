@@ -127,6 +127,12 @@ class TestSupervisorPassesTheGoldenSet:
         # should not be.
         assert run_routing_eval().accuracy >= 0.95
 
+    def test_agentic_mode_gate_passes_on_the_english_set(self):
+        from app.agents.eval_routing import agentic_mode_gate
+
+        ok, reason = agentic_mode_gate()
+        assert ok, reason
+
 
 def _report_for(accuracy: float) -> RoutingReport:
     return RoutingReport(total=10, correct=int(accuracy * 10), duration_ms=1.0)

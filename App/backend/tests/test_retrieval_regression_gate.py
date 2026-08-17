@@ -9,9 +9,10 @@ none of them would have been caught by the existing suite:
   * the follow-up suggestion looked up a FAQ tag in a field carrying a PDF
     document heading, so it never fired at all — 0 of 40 replies.
 
-Each was found by asking production questions by hand. The RAG evaluation in
-CI runs against 21 English questions and none of the three appear in it, so
-all three would ship again today.
+Each was found by asking production questions by hand. Those three cases
+now also live in ``Data/eval/rag_eval.jsonl`` (``reg-how-file-returns``,
+``reg-how-submit-yearly``, ``reg-efris-what``) so the offline eval set
+and this keyword gate cannot drift apart.
 
 This asks every indexed FAQ its own question and checks the corpus answers
 itself. It needs no network, no model and no Qdrant — it exercises the

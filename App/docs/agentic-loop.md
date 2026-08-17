@@ -75,9 +75,12 @@ now consults it whenever `FLAG_TOOL_RAG` is on, exposing the top
 `TOOL_RAG_TOP_K` (default 5) tools plus the mandatory rails
 (`search_ura_knowledge_base`, `escalate_to_human`).
 
-The fallbacks are deliberately asymmetric: flag off, empty selection, or
-a selector exception all expose the **full** eligible set. An agent with
-too many tools is merely expensive; an agent with none cannot act.
+The fallbacks are asymmetric on purpose. Flag off or a selector
+exception still expose the **full** eligible set (an agent with no
+tools cannot act). A scored miss no longer pastes every schema — it
+keeps the mandatory rails only. The retriever injects its dense
+embedder into Tool RAG when one is already loaded; tests and hosts
+without a model stay on token overlap.
 
 Security trimming is unaffected — selection runs over the post-authz
 whitelist from `MCPClient.available_for`, never over the raw registry.
@@ -97,11 +100,17 @@ user would have been handed *"amount: required property is missing"* as
 their answer. Synthesis now considers only observations with
 `ok != false`, and abstains rather than emitting a raw dict.
 
+`node_act` always hands to `node_observe`. Failed or unfillable tools
+are not evidence: observe hands off once to `retrieve`
+(`max_handoffs=1`) or synthesises an empty plan.
+
 `node_reflect` computes faithfulness and now acts on it: a RAG reply
 below `REFLECT_FAITHFULNESS_FLOOR` (0.50, the same scale and threshold
-as `CORRECTIVE_RAG_THRESHOLD_NORM`) goes back through retrieval once
-with an expanded query. `max_reflections` bounds that, so the loop
-cannot become the thrash it exists to correct. Tool-only answers are
+as `CORRECTIVE_RAG_THRESHOLD_NORM`) **or** a reasoning miss (reply
+shares fewer than 20% of the question's content terms) goes back
+through retrieval once. Query expand is best-effort — identity expand
+still retries. `max_reflections` bounds that, so the loop cannot
+become the thrash it exists to correct. Tool-only answers are
 grounded in their own computation, not in passages, so they never
 re-retrieve.
 

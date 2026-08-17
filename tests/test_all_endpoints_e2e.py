@@ -4,7 +4,7 @@ This module is the completeness guarantee for the HTTP/WS API surface. It has
 three jobs:
 
 1. **Drift guard** (``test_route_table_matches_manifest``) — enumerates the live
-   ``app.routes`` table and asserts it equals a hand-declared manifest of all 54
+   ``app.routes`` table and asserts it equals a hand-declared manifest of all 60
    application endpoints. Add or remove a route without updating the manifest and
    this test fails, so the surface can never silently grow untested.
 
@@ -114,6 +114,9 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("WS", "/v1/admin/tickets/stream"),
     ("GET", "/v1/admin/tickets/{ticket_id}"),
     ("PATCH", "/v1/admin/tickets/{ticket_id}"),
+    ("POST", "/v1/admin/tickets/{ticket_id}/presence"),
+    ("GET", "/v1/admin/flags"),
+    ("PATCH", "/v1/admin/flags/{name}"),
     ("GET", "/v1/admin/voice_audit"),
     ("GET", "/v1/admin/offline_stats"),
     # --- Ops-key gated ---
@@ -184,6 +187,9 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("WS", "/v1/admin/tickets/stream"): "test_ticket_events.TestStaffOnlyAccess",
     ("GET", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status",
     ("PATCH", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status + test_patch_ticket_noop_400",
+    ("POST", "/v1/admin/tickets/{ticket_id}/presence"): "test_api_endpoints.AdminEndpoints.test_presence_heartbeats_the_viewer",
+    ("GET", "/v1/admin/flags"): "test_api_endpoints.AdminEndpoints.test_flags_list_includes_protection",
+    ("PATCH", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_admin_can_set_an_ephemeral_flag",
     ("GET", "/v1/admin/voice_audit"): "test_api_endpoints.AdminEndpoints",
     ("GET", "/v1/admin/offline_stats"): "test_api_endpoints.AdminEndpoints",
     ("POST", "/v1/index"): "test_api_endpoints.OpsKeyEndpoints",

@@ -7,6 +7,9 @@ export interface Citation {
   page?: string;
   section?: string;
   passage?: string;
+  url?: string;
+  effective_date?: string;
+  title?: string;
 }
 
 /** A document attached to a user turn (analysed via /v1/documents/analyze). */

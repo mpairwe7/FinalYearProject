@@ -116,6 +116,24 @@ _REGISTRY: dict[str, Flag] = {
         Flag("corrective_rag", True, "Re-retrieve on low initial quality"),
         Flag("semantic_cache", True, "Cache semantically similar queries"),
         Flag("query_rewrite", True, "Spelling / abbreviation / coreference"),
+        Flag(
+            "query_decomposition",
+            True,
+            "Split multi-intent questions into parallel retrieval queries",
+        ),
+        Flag(
+            "hyde",
+            False,
+            "Hypothetical Document Embeddings on the dense leg only "
+            "(template by default; HYDE_LLM=true spends one short generation)",
+        ),
+        Flag(
+            "translate_retrieve",
+            True,
+            "For non-English questions, also search an English translation "
+            "against the English corpus (generate still uses the user locale). "
+            "No re-index. Off = original query only.",
+        ),
         Flag("reranker", True, "Cross-encoder reranking"),
         Flag(
             "cloudflare_fallback",
@@ -123,11 +141,17 @@ _REGISTRY: dict[str, Flag] = {
             "Route to Cloudflare Workers AI / Vectorize / R2 + Gemini when primaries are down/over-budget",
         ),
         Flag("eval_auto_run", False, "Run evaluation harness on every Nth request"),
-        # Phase 14 — agentic workflows (feature-flagged off by default)
+        # Phase 14 — agentic workflows (tool_use / tickets stay off)
         Flag(
             "tool_use", False, "Allow the LLM to call registered tools via Qwen2.5 function-calling"
         ),
-        Flag("agentic_mode", False, "Route requests through the supervisor-specialist agent graph"),
+        Flag(
+            "agentic_mode",
+            True,
+            "Route requests through the supervisor-specialist agent graph. "
+            "Default on after EN golden-set accuracy >= 0.95 "
+            "(app.agents.eval_routing.agentic_mode_gate).",
+        ),
         Flag("ticket_queue", False, "Persist escalations to the tickets table for human follow-up"),
         # Phase 14 (2026) — identity & consent
         Flag("auth_required", False, "Reject unauthenticated /v1/* requests"),
@@ -487,6 +511,31 @@ class FeatureFlags:
         """
         return "on" if self.is_enabled(name, subject=subject, cohorts=cohorts) else "off"
 
+    def logged_variants(self, subject: str | None = None) -> dict[str, str]:
+        """Per-turn on/off labels for the flags that change retrieval or answers (G26)."""
+        return {
+            name: self.variant_for(name, subject=subject)
+            for name in (
+                "hyde",
+                "graph_fusion",
+                "translate_retrieve",
+                "corrective_rag",
+                "query_decomposition",
+                "evaluator_optimizer",
+            )
+        }
+
+    def experiment_log_fields(
+        self, subject: str | None = None, locale: str = ""
+    ) -> dict[str, str]:
+        """kwargs for ``log_conversation`` (flag_variants JSON + locale)."""
+        import json
+
+        return {
+            "flag_variants": json.dumps(self.logged_variants(subject=subject)),
+            "locale": locale or "",
+        }
+
     def set(self, name: str, enabled: bool) -> None:
         """Programmatic override (e.g. from an admin API).
 
@@ -529,6 +578,11 @@ class FeatureFlags:
                 else None
             ),
         }
+
+
+def is_protected(name: str) -> bool:
+    """Safety flags that the admin UI must not flip off from a browser."""
+    return name in _PRODUCTION_ON_FLAGS
 
 
 flags = FeatureFlags()

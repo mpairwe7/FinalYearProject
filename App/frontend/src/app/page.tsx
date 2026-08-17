@@ -191,6 +191,8 @@ export default function Page() {
   const [isRecording, setIsRecording] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const recorderRef = useRef<AudioRecorder | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const userStoppedRef = useRef(false);
 
   // TanStack Query — cached speech health (auto-refreshes every 60s)
   const { data: speechHealth } = useSpeechHealth();
@@ -284,6 +286,64 @@ export default function Page() {
       window.visualViewport?.removeEventListener('scroll', updateMobileViewportVars);
     };
   }, [hasStartedChat, isLoading, isRecording]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSidebarOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    const EDGE = 28;
+    const THRESHOLD = 56;
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+
+    const onStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('textarea, input, [contenteditable="true"]')) return;
+      const x = event.touches[0].clientX;
+      const y = event.touches[0].clientY;
+      if (sidebarOpen || x <= EDGE) {
+        tracking = true;
+        startX = x;
+        startY = y;
+      }
+    };
+    const onMove = (event: TouchEvent) => {
+      if (!tracking) return;
+      const dx = event.touches[0].clientX - startX;
+      const dy = event.touches[0].clientY - startY;
+      if (Math.abs(dy) > 48 && Math.abs(dy) > Math.abs(dx)) {
+        tracking = false;
+        return;
+      }
+      if (!sidebarOpen && dx > THRESHOLD) {
+        setSidebarOpen(true);
+        tracking = false;
+      } else if (sidebarOpen && dx < -THRESHOLD) {
+        setSidebarOpen(false);
+        tracking = false;
+      }
+    };
+    const onEnd = () => {
+      tracking = false;
+    };
+
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onEnd);
+    return () => {
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+    };
+  }, [sidebarOpen]);
 
   useEffect(() => {
     if (!hasStartedChat) return;
@@ -536,6 +596,8 @@ export default function Page() {
     trackChatSent(text.length);
     const t0 = Date.now();
     const ac = new AbortController();
+    streamAbortRef.current = ac;
+    userStoppedRef.current = false;
     const timeout = setTimeout(() => ac.abort(), 120_000);
     const requestBody = JSON.stringify({
       message: text,
@@ -688,18 +750,29 @@ export default function Page() {
     } catch {
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
-      if (last?.role === 'assistant' && last?.content === '') {
+      if (userStoppedRef.current) {
+        if (last?.role === 'assistant' && !last.content.trim()) {
+          updateLastTurn((t) => ({ ...t, content: 'Stopped.' }));
+        }
+      } else if (last?.role === 'assistant' && last?.content === '') {
         updateLastTurn((t) => ({ ...t, content: 'Sorry, I could not reach the URA knowledge base. Please try again shortly.' }));
-      } else {
+      } else if (!userStoppedRef.current) {
         addTurns([createTurn('assistant', 'Sorry, I could not reach the URA knowledge base. Please try again shortly.')]);
       }
-      trackErrorOccurred('chat_fetch_failed');
+      if (!userStoppedRef.current) trackErrorOccurred('chat_fetch_failed');
     } finally {
       clearTimeout(timeout);
+      streamAbortRef.current = null;
+      userStoppedRef.current = false;
       setIsLoading(false);
       saveCurrentSession();
     }
   }, [message, isLoading, locale, activeConversationId, pendingAttachments, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
+
+  const stopGeneration = useCallback(() => {
+    userStoppedRef.current = true;
+    streamAbortRef.current?.abort();
+  }, []);
 
   // ---- Voice input ----
 
@@ -936,6 +1009,7 @@ export default function Page() {
     onVoiceModeChange: setVoiceModeWithNarration,
     voiceModeDisabled: !serverReady && !hasMediaRecorder,
     dictationNotice,
+    onStop: stopGeneration,
   };
 
   // ---- Render ----
@@ -994,56 +1068,52 @@ export default function Page() {
         {!hasStartedChat ? (
           /* ── Landing state — input-first hierarchy (chatv2) ── */
           <div className="landing">
-            <div className="ldv2-block">
-              <div className="landing-brand">
-                <h1 className="ldv2-brand">
-                  <Image
-                    src="/ura-assistant-logo.svg"
-                    alt=""
-                    aria-hidden="true"
-                    width={34}
-                    height={34}
-                    priority
-                  />
-                  URA Tax Assistant
-                </h1>
-                <h2 className="ldv2-headline">How can I help with your taxes?</h2>
-                <p className="landing-sub">
-                  Official AI-powered assistant for Uganda Revenue Authority
-                </p>
-              </div>
-
-              <div className="landing-composer">
-                <ChatInput {...composerProps} />
-              </div>
-
-              <div className="landing-prompts" role="group" aria-label="Suggested questions">
-                {STARTER_PROMPTS.map((p) => (
-                  <button key={p.label} className="landing-chip" onClick={() => handleStarterPrompt(p.label)}>
-                    <span className="ldv2-cat">{p.category}</span>
-                    <span>{p.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Auth entry points, stated as what they add rather than as a
-                  gate: nothing above this line needs an account. */}
-              {identityStatus === 'signed-in' ? (
-                <p className="landing-auth landing-auth-signed">
-                  Signed in as <strong>{identityName}</strong>.{' '}
-                  <button type="button" className="landing-auth-link" onClick={() => openSettings('account')}>
-                    Account &amp; settings
-                  </button>
-                </p>
-              ) : (
-                <p className="landing-auth">
-                  <Link className="landing-auth-link" href="/signin">Sign in</Link>
-                  {' or '}
-                  <Link className="landing-auth-link" href="/signup">create an account</Link>
-                  {' to save conversations and keep a tax profile — or just start asking.'}
-                </p>
-              )}
+            <div className="landing-brand">
+              <h1 className="ldv2-brand">
+                <Image
+                  src="/ura-assistant-logo.svg"
+                  alt=""
+                  aria-hidden="true"
+                  width={34}
+                  height={34}
+                  priority
+                />
+                URA Tax Assistant
+              </h1>
+              <h2 className="ldv2-headline">How can I help with your taxes?</h2>
+              <p className="landing-sub">
+                Official AI-powered assistant for Uganda Revenue Authority
+              </p>
             </div>
+
+            <div ref={chatDockRef} className="landing-composer landing-dock chat-dock">
+              <ChatInput {...composerProps} />
+            </div>
+
+            <div className="landing-prompts" role="group" aria-label="Suggested questions">
+              {STARTER_PROMPTS.map((p) => (
+                <button key={p.label} className="landing-chip" onClick={() => handleStarterPrompt(p.label)}>
+                  <span className="ldv2-cat">{p.category}</span>
+                  <span>{p.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {identityStatus === 'signed-in' ? (
+              <p className="landing-auth landing-auth-signed">
+                Signed in as <strong>{identityName}</strong>.{' '}
+                <button type="button" className="landing-auth-link" onClick={() => openSettings('account')}>
+                  Account &amp; settings
+                </button>
+              </p>
+            ) : (
+              <p className="landing-auth">
+                <Link className="landing-auth-link" href="/signin">Sign in</Link>
+                {' or '}
+                <Link className="landing-auth-link" href="/signup">create an account</Link>
+                {' to save conversations and keep a tax profile — or just start asking.'}
+              </p>
+            )}
           </div>
         ) : (
           /* ── Chat state — full-width messages ── */

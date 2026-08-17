@@ -66,6 +66,7 @@ REQUIRED_CONTENT: dict[str, list[str]] = {
         "nist_ai_rmf",
         "iso_42001",
         "owasp_llm",
+        "owasp_llm_2026_crosswalk",
         "eu_ai_act",
         "LLM06",
         "LLM07",

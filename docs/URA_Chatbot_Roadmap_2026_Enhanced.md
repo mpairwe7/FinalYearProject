@@ -1,7 +1,12 @@
 # URA Chatbot — 2026 Production Gap Analysis & Enhanced Agentic Roadmap
 
 > **Version:** 2.0 Enhanced (April 2026)
-> **Supersedes:** `docs/GAPS_AND_AGENTIC_ROADMAP.md` (v1.0)
+> **Traceability (2026-08-17):** This file is a **dated proposal**. It does
+> **not** supersede `docs/GAPS_AND_AGENTIC_ROADMAP.md`. The living gap
+> register is GAPS. Serving-path retrieval decisions:
+> `App/docs/traceability/retrieval-agentic-upgrade-2026-08-17.md`.
+> Rows below that still call G16/G17/G21/G27 “unstarted”, “partial”,
+> or “critical” are historical; do not cite them as current status.
 > **Companions:**
 > - `App/README.md` — Phases 1–13 (hardened RAG stack)
 > - `docs/AGENT_ARCHITECTURE.md` — Phase 14 A-D (in-process agent runtime)
@@ -104,7 +109,7 @@ considered insufficient.
 | # | Gap | 2026 rating | 2026-enhanced recommendation | Modernized code surface | Effort |
 |---|---|:---:|---|---|:---:|
 | G5 | No long-term memory | 🔴 **Critical Gap** | **Mem0 / Zep-style memory service** with three tiers: **working** (current turn, Redis), **episodic** (session summaries with temporal decay), **semantic** (user knowledge graph with provenance + confidence). Use **Letta/MemGPT patterns** for virtual context management when the personal graph grows. Facts have *decay half-life* per category (tax year facts decay slowly, session prefs fast). | `backend/app/memory/{working,episodic,semantic}.py`, `workers/memory_extractor.py`, new Neo4j or Kùzu node for personal graphs | L |
-| G6 | No topic persistence | Needs Upgrade | **Workflow state machine via LangGraph `StateGraph`** with `interrupt_before` for slot filling. Each topic = a `ConversationThread` with its own sub-graph. Topic classifier is a small LLM call, not a regex. Surface current topic in the UI as a pinned context chip. | `backend/app/agents/graphs/`, `TopicChip.tsx` | M |
+| G6 🟢 | **~~No topic persistence.~~** Catalog classifier shipped 2026-08-17 (`topics.py` + `conversation_topics`). Follow-ups inherit the current task; prompt sees catalog labels only. | Good | Remaining upgrade: LangGraph `StateGraph` per topic + UI `TopicChip`. Classifier stays catalog/regex (LLM01 — no raw user text in the system prompt). | `backend/app/topics.py`, `TopicChip.tsx` | M |
 | G7 🟢 | No temporal grounding | Good | **SHIPPED.** 2026 upgrade: promote `get_current_date` + `get_next_deadlines` to an MCP server `mcp_calendar` so other tenants/tools can call it via the protocol. Also add **locale-aware date formatting** (Luganda: "enaku 15 za Mukakaro 2026"). | — | S |
 | G8 | Not an audit log | 🔴 **Critical Gap** | **Append-only hash-chained `audit_events`** (Merkle tree for batch verification), hourly anchoring to **AWS QLDB / Google Cloud CAS / on-prem equivalent**. Every row: `prev_hash, payload_hash, tenant_id, user_id, agent_id, tool_name, tool_args_sha256, tool_result_sha256, policy_version, model_rev, index_snapshot_id, ts_utc, sig`. Supports **regulatory replay** = reconstruct state at any past timestamp. | `backend/app/audit/ledger.py`, `audit_events` Postgres table with BRIN on ts_utc, nightly Merkle root anchor | L |
 
@@ -154,8 +159,8 @@ considered insufficient.
 | # | Gap | 2026 rating | 2026-enhanced recommendation | Modernized code surface | Effort |
 |---|---|:---:|---|---|:---:|
 | G30 | Single tenant | 🔴 **Critical Gap** | **Strict tenant isolation**: `tenant_id` on every row; **Postgres Row-Level Security (RLS)** policies with session variables; per-tenant **Qdrant collections** (or payload filters with mandatory predicate); per-tenant rate-limit buckets in Redis; per-tenant model registry entries (fine-tunes and prompts are tenant-scoped). | Schema-wide change; `backend/app/tenancy.py`; RLS migrations | L |
-| G31 | No admin UI | Needs Upgrade | **Next.js 16 `/admin/*` route group** with **React Server Components** for everything except interactivity. RBAC via Cedar. Features: ticket queue, content curation, prompt editor (Git-backed), flag toggles (via GrowthBook SDK), tenant management, drift alerts. | `frontend/src/app/admin/`, `useAdminStore.ts` | L |
-| G32 🟡 | HITL queue backend | Good | Backend shipped. 2026 upgrade: **WebSocket + Server-Sent Events hybrid** for real-time ticket push; **Temporal.io workflow** for SLA enforcement (time-to-first-response, escalation on breach); **co-pilot mode** for staff (bot drafts reply, human edits + sends). | `frontend/src/app/admin/tickets/`, `backend/app/ws/tickets.py`, Temporal workflows | M |
+| G31 🟡 | No admin UI | Partial | **Shipped 2026-08-17:** `/admin/flags` + `GET/PATCH /v1/admin/flags` (in-process, ephemeral; safety flags protected). 2026 upgrade still open: content curation, Git-backed prompt editor, GrowthBook, tenant management. | `frontend/src/app/admin/flags/`, `backend/app/flags.py` | L |
+| G32 🟢 | HITL queue | Good | **Shipped 2026-08-17:** staff workbench + `WS /v1/admin/tickets/stream` wired in the UI, collision presence, canned replies, first- and next-reply SLA with population breach counts. 2026 upgrade still open: Temporal SLA workflows, co-pilot draft. | `frontend/src/app/admin/tickets/`, `ticket_ws.py`, `ticket_presence` | M |
 | G33 | No SLO autoscaling | Needs Upgrade | **KEDA** with three scalers: Redis queue depth (LLM inflight), Prometheus p95 latency, GPU utilization (custom exporter). HPA fallback for non-LLM pods. **PodDisruptionBudget** + **PriorityClass** for LLM pods. Cluster-wide: **Karpenter** for spot/reserved mixing. | `k8s/base/`, `k8s/overlays/{dev,stage,prod}/`, Kustomize | M |
 | G34 | No chaos drills | Needs Upgrade | **Chaos Mesh** experiments gated per-environment: kill Redis, add 200ms latency to Qdrant, kill an LLM pod, trigger circuit breaker. Tied to **GameDay** cadence (monthly). Results fed into SLO error budgets. | `chaos/`, `tests/chaos/*.yaml` | M |
 

@@ -25,7 +25,7 @@ Design invariants:
 
 - **Zero new runtime dependencies** — the wire protocol is JSON-RPC 2.0
   over HTTP or stdio, implemented directly; Tool RAG uses token overlap
-  until a dense embedder is injected.
+  until the retriever injects its already-loaded dense embedder.
 - **Declaration-driven authorization** — a tool states its required
   consent scopes and roles; the policy denies by default rather than
   inferring permissions from the tool's name.
@@ -40,8 +40,8 @@ from __future__ import annotations
 from .client import MCPCallResult, MCPClient, get_client, reset_client
 from .policy import authorize_tool_call
 from .tool_rag import ToolRAGSelector, ToolSelection
+from .protocol import MCP_PROTOCOL_VERSION, request_meta
 from .transport import (
-    MCP_PROTOCOL_VERSION,
     HttpTransport,
     InProcessTransport,
     ToolTransport,
@@ -60,5 +60,6 @@ __all__ = [
     "TransportError",
     "authorize_tool_call",
     "get_client",
+    "request_meta",
     "reset_client",
 ]

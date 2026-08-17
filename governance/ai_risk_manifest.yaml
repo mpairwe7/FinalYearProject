@@ -1,7 +1,7 @@
 # =============================================================================
 # AI Risk Manifest — NIST AI RMF 1.0 + ISO/IEC 42001:2023 + EU AI Act
 # URA AI Chatbot — Retrieval-Augmented Generation System
-# Updated: 2026-03-10
+# Updated: 2026-08-17
 # =============================================================================
 
 system:
@@ -121,8 +121,12 @@ iso_42001:
     evidence: "App/backend/app/main.py (feedback loop), ml/pipelines/ (retraining)"
 
 # =============================================================================
-# OWASP LLM Top 10 (2025)
-# Reference: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+# OWASP LLM Top 10 (2025 IDs — living registry still uses this numbering)
+# 2026 edition (published 2026-08-04) remumbers several entries; see
+# owasp_llm_2026_crosswalk below. Do not treat LLM06 here as 2026
+# Unbounded Consumption.
+# Reference (archive): https://owasp.org/www-project-top-10-for-large-language-model-applications/
+# Current: https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/
 # =============================================================================
 owasp_llm:
   - id: "LLM01"
@@ -148,18 +152,18 @@ owasp_llm:
   - id: "LLM05"
     name: "Improper Output Handling"
     status: "mitigated"
-    evidence: "App/backend/app/guardrails.py:OutputGuard.sanitize()"
-    controls: "HTML/script stripping, malicious link removal"
+    evidence: "App/backend/app/guardrails.py:OutputGuard.sanitize(), App/frontend/src/components/Markdown.tsx"
+    controls: "Backend HTML/script strip + PII redact; frontend Markdown is React nodes with an http(s)/mailto/tel URL allowlist (javascript: rejected)"
   - id: "LLM06"
     name: "Excessive Agency"
     status: "mitigated"
-    evidence: "App/backend/app/service.py (read-only retrieval, no tool/action execution)"
-    controls: "System is retrieval-only with no write actions, no external API calls, no code execution. Responses constrained to URA knowledge base content."
+    evidence: "App/backend/app/mcp/policy.py, App/backend/app/flags.py, threat-model T28"
+    controls: "MCP allowlist, unknown-tool errors without registry leak, bounded ReAct (one retrieve hop). FLAG_TOOL_USE / FLAG_AGENTIC_MODE / FLAG_TOOL_RAG default off. Calculators and workflows are deterministic, not model-chosen write actions."
   - id: "LLM07"
     name: "System Prompt Leakage"
     status: "mitigated"
-    evidence: "App/backend/app/guardrails.py:InputGuard (prompt extraction patterns)"
-    controls: "Regex detection blocks 'reveal your system prompt', 'show instructions' patterns. No system prompt used in retrieval-only architecture."
+    evidence: "App/backend/app/guardrails.py:InputGuard + OutputGuard.check_prompt_leakage()"
+    controls: "Blocks reveal-prompt probes; scrubs signature phrases from replies. A system prompt IS used (llm.py) — confidentiality of that prompt is not treated as a security boundary (OWASP LLM08:2026 Hidden Context)."
   - id: "LLM08"
     name: "Vector and Embedding Weaknesses"
     status: "mitigated"
@@ -175,6 +179,47 @@ owasp_llm:
     status: "mitigated"
     evidence: "App/backend/app/main.py (INDEX_API_KEY auth), App/backend/app/models.py (input limits)"
     controls: "Input length capped at 2000 chars, top_k bounded 1-10, index endpoint requires auth token, request timeouts enforced"
+
+# 2026-08-04 remumbering. Same controls; different official IDs.
+# https://github.com/GenAI-Security-Project/GenAI-LLM-Top10/blob/main/2026/README.md
+owasp_llm_2026_crosswalk:
+  edition: "OWASP GenAI LLM Top 10 2026"
+  published: "2026-08-04"
+  note: >
+    Registry and owasp_llm[] above keep 2025 IDs so CI
+    (validate_threats.py, compliance_check.py) stays stable. This table
+    is the examiner-facing map to the current list.
+  map:
+    - from_2025: "LLM01 Prompt Injection"
+      to_2026: "LLM01:2026 Prompt Injection"
+      project_status: "mitigated"
+    - from_2025: "LLM02 Sensitive Information Disclosure"
+      to_2026: "LLM02:2026 Sensitive Information Disclosure"
+      project_status: "mitigated"
+    - from_2025: "LLM06 Excessive Agency"
+      to_2026: "LLM03:2026 Excessive Agency"
+      project_status: "mitigated (tools exist; flags default off; MCP allowlist)"
+    - from_2025: "LLM03 Supply Chain"
+      to_2026: "LLM04:2026 Supply Chain"
+      project_status: "mitigated"
+    - from_2025: "LLM04 Data and Model Poisoning"
+      to_2026: "LLM05:2026 Data and Model Poisoning"
+      project_status: "mitigated (PDF structural guards + hash manifest; no ClamAV)"
+    - from_2025: "LLM10 Unbounded Consumption"
+      to_2026: "LLM06:2026 Unbounded Consumption"
+      project_status: "mitigated"
+    - from_2025: "LLM09 Misinformation"
+      to_2026: "LLM07:2026 Misinformation"
+      project_status: "mitigated"
+    - from_2025: "LLM07 System Prompt Leakage"
+      to_2026: "LLM08:2026 Hidden Context Exposure"
+      project_status: "partial — leakage scrub exists; prompt/tool schemas are not secrets; no credentials in prompts"
+    - from_2025: "LLM08 Vector and Embedding Weaknesses"
+      to_2026: "LLM09:2026 Vector and Embedding Weaknesses"
+      project_status: "partial — trusted index + rerank + freshness hash; no embedding encryption/DP"
+    - from_2025: "LLM05 Improper Output Handling"
+      to_2026: "LLM10:2026 Improper Output Handling"
+      project_status: "mitigated"
 
 # =============================================================================
 # EU AI Act Compliance (full applicability 2 Aug 2026)
@@ -216,13 +261,14 @@ devsecops_threat_modelling:
       description: >
         Automated threat model as code generating DFDs, STRIDE per-element
         threat analysis, and sequence diagrams from architecture definition.
-    - framework: "OWASP LLM Top 10 (2025)"
+    - framework: "OWASP LLM Top 10 (2025 IDs; 2026 crosswalk in this file)"
       tool: "Custom threat registry + Semgrep rules"
       status: "implemented"
       evidence: "threat-model/validate_threats.py, .semgrep/ura-chatbot-rules.yaml"
       description: >
-        21 threats mapped to OWASP LLM categories with evidence-based
-        mitigation validation in CI.
+        28 threats mapped to OWASP LLM 2025 categories with evidence-based
+        mitigation validation in CI (10/10 LLM IDs; T21 accepted).
+        2026 remumbering is documented in owasp_llm_2026_crosswalk.
     - framework: "MITRE ATLAS"
       tool: "Threat registry with ATLAS technique IDs"
       status: "implemented"
@@ -304,11 +350,12 @@ devsecops_threat_modelling:
       evidence: ".pre-commit-config.yaml, .github/workflows/secret-scanning.yml"
 
   threat_registry:
-    total_threats: 21
+    total_threats: 28
     stride_coverage: "6/6 categories"
-    owasp_llm_coverage: "9/10 (LLM06 N/A — no excessive agency)"
-    mitre_atlas_techniques: 12
+    owasp_llm_coverage: "10/10 (LLM06 → T28)"
+    mitre_atlas_techniques: 10
+    mitre_atlas_mappings: 19
     statuses:
-      mitigated: 20
+      mitigated: 27
       accepted: 1
     validation: "CI gate in .github/workflows/devsecops-sast-dast.yml (threat-model job)"

@@ -102,7 +102,21 @@ class CurrentDateTool(Tool):
                 "'today', 'this year', 'next month', or any date-relative "
                 "concept — the model does not know the real date."
             ),
-            parameters={"type": "object", "properties": {}, "required": []},
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "today": {"type": "string"},
+                    "fiscal_year": {"type": "string"},
+                    "error": {"type": "string"},
+                },
+            },
             risk="low",
             namespace="calendar",
         )
@@ -154,11 +168,23 @@ class NextDeadlineTool(Tool):
                     },
                     "scope": {
                         "type": "string",
+                        "enum": ["all", "individual", "company"],
                         "description": "Filter to 'individual', 'company', or 'all' (default).",
                         "default": "all",
                     },
                 },
                 "required": [],
+                "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "today": {"type": "string"},
+                    "count": {"type": "integer"},
+                    "deadlines": {"type": "array"},
+                    "error": {"type": "string"},
+                },
             },
             risk="low",
             namespace="calendar",

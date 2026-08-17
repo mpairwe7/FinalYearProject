@@ -139,7 +139,7 @@ Metrics (8 total):
 - Abstention Precision (correct refusal rate)
 
 Eval Sets:
-- Data/eval/rag_eval.jsonl (21 English samples)
+- Data/eval/rag_eval.jsonl (30 English samples, including `reg-*` regression ids)
 - Data/eval/rag_eval_lg.jsonl (12 Luganda samples)
 
 Script: ml/pipelines/evaluate_rag.py
@@ -356,7 +356,7 @@ FinalYearProject/
 └── Data/
     ├── dataset/                   # Training CSV files
     └── eval/                      # RAG evaluation datasets
-        ├── rag_eval.jsonl         # English (21 samples)
+        ├── rag_eval.jsonl         # English (30 samples, incl. reg-* ids)
         └── rag_eval_lg.jsonl      # Luganda (12 samples)
 ```
 
@@ -481,6 +481,23 @@ Each job posts summaries to the GitHub Actions summary tab:
 - Evaluation results
 - Deployment URLs
 - Error reports
+
+### Index freshness (G27)
+
+GitHub Action `.github/workflows/index-freshness.yml` runs at 02:15 UTC.
+Exit 1 (drift) fails the workflow; exit 2 (no snapshot) is a skip.
+`--notify` POSTs to `FRESHNESS_SLACK_WEBHOOK` when that secret is set
+(https only). The action does **not** `--enqueue` and does **not** re-index.
+
+The serving host may also run a nightly check. It does **not** auto-reindex.
+
+```cron
+15 2 * * * cd /path/to/App/backend && python -m app.freshness --check --write-status --notify --enqueue
+```
+
+`--enqueue` writes `index_reindex_requested.json`. Exit 1 = drift
+(re-index in an ops window: `python -m app.indexer --recreate`).
+`GET /v1/index/freshness` reads the status file and does not re-hash the corpus.
 
 ---
 

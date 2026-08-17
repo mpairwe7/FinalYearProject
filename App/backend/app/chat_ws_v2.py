@@ -651,6 +651,10 @@ def _log_ws_turn(
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             user_id=user_id,
+            **flags.experiment_log_fields(
+                subject=user_id or None,
+                locale=str(result.get("locale") or ""),
+            ),
         )
     except Exception:
         logger.warning("chat WS conversation logging failed", exc_info=True)

@@ -23,6 +23,7 @@ import {
   subscribeAuthToken,
 } from "../lib/authSession";
 import { isStaffRole, roleLabel } from "../lib/roles";
+import { TicketLiveBanner } from "./staff/TicketLiveBanner";
 import "./staffGuard.css";
 
 export interface StaffIdentity {
@@ -49,12 +50,16 @@ const NAV = [
   { href: "/admin", label: "Overview", roles: ["ura_admin", "ura_auditor"] },
   { href: "/agent", label: "My queue", roles: ["ura_staff", "ura_admin"] },
   { href: "/admin/tickets", label: "All tickets", roles: ["ura_staff", "ura_admin", "ura_auditor"] },
+  { href: "/admin/flags", label: "Flags", roles: ["ura_admin", "ura_auditor"] },
   { href: "/analytics", label: "Analytics", roles: ["ura_admin", "ura_auditor"] },
 ];
 
 export function StaffNav({ who, current }: { who: StaffIdentity; current: string }) {
   return (
     <nav className="staff-nav" aria-label="Operations">
+      <a className="staff-skip" href="#staff-main">
+        Skip to content
+      </a>
       <span className="staff-brand">
         <span className="staff-brand-mark" aria-hidden="true">
           URA
@@ -166,6 +171,7 @@ export default function StaffGuard({
   return (
     <>
       <StaffNav who={state.who} current={current} />
+      <TicketLiveBanner />
       {children(state.who)}
     </>
   );

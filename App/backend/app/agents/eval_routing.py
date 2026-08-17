@@ -248,6 +248,26 @@ def run_routing_eval(
 #: is a regression introduced by a locale extension.
 LOCALE_GATE_THRESHOLD = 0.90
 
+#: Floor that must hold for ``FLAG_AGENTIC_MODE`` to stay default-on.
+#: Same number the CI golden-set test already asserts.
+AGENTIC_MODE_GATE_THRESHOLD = 0.95
+
+
+def agentic_mode_gate() -> tuple[bool, str]:
+    """Whether English supervisor accuracy is high enough to serve agentic routing.
+
+    Measured, offline, and deterministic — the same harness as the locale
+    gate. A drop below the floor is a regression, not a reason to keep
+    the flag off forever.
+    """
+    report = run_routing_eval(GOLDEN_SET, locale="en")
+    if report.accuracy < AGENTIC_MODE_GATE_THRESHOLD:
+        return False, (
+            f"en accuracy {report.accuracy:.2f} below {AGENTIC_MODE_GATE_THRESHOLD:.2f} "
+            f"({len(report.misses)} miss(es))"
+        )
+    return True, f"en accuracy {report.accuracy:.2f} ({report.correct}/{report.total})"
+
 
 def locale_gate(locale: str) -> tuple[bool, str]:
     """Whether *locale* may be served, and why not when it may not.

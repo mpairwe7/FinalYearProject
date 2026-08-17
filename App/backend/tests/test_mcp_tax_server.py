@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 
+from app.mcp.protocol import request_meta
 from app.mcp.servers.tax_calculator import server
 
 
@@ -11,8 +12,14 @@ def _rpc(method: str, params: dict | None = None, request_id: int | None = 1, he
     body: dict = {"jsonrpc": "2.0", "method": method}
     if request_id is not None:
         body["id"] = request_id
-    if params is not None:
-        body["params"] = params
+    merged = dict(params or {})
+    if method in ("tools/list", "tools/call", "server/info"):
+        meta = dict(merged.get("_meta") or {})
+        for key, value in request_meta().items():
+            meta.setdefault(key, value)
+        merged["_meta"] = meta
+    if merged:
+        body["params"] = merged
     return server.handle_request(body, headers)
 
 
@@ -108,9 +115,39 @@ class EnvelopeTests(unittest.TestCase):
         )["error"]
         self.assertEqual(error["code"], server.INVALID_REQUEST)
 
+    def test_header_name_must_match_the_body_tool(self) -> None:
+        error = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "calculate_vat",
+                    "arguments": {"amount": 1},
+                    "_meta": request_meta(),
+                },
+            },
+            {"Mcp-Method": "tools/call", "Mcp-Name": "ura_action_proposal"},
+        )["error"]
+        self.assertEqual(error["code"], server.INVALID_REQUEST)
+        self.assertIn("Mcp-Name", error["message"])
+
+    def test_missing_required_meta_is_invalid_params(self) -> None:
+        error = server.handle_request(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )["error"]
+        self.assertEqual(error["code"], server.INVALID_PARAMS)
+        self.assertIn("io.modelcontextprotocol/protocolVersion", error["message"])
+
     def test_matching_header_is_accepted(self) -> None:
         response = server.handle_request(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, {"mcp-method": "tools/list"}
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": request_meta()},
+            },
+            {"mcp-method": "tools/list"},
         )
         self.assertIn("result", response)
 

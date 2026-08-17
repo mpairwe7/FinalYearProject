@@ -1,0 +1,42 @@
+# Nightly corpus-hash check (G27). Does not re-index.
+name: Index freshness
+
+on:
+  schedule:
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: index-freshness
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: App/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compare sources to last snapshot
+        env:
+          FRESHNESS_SLACK_WEBHOOK: ${{ secrets.FRESHNESS_SLACK_WEBHOOK }}
+        run: |
+          set +e
+          python -m app.freshness --check --write-status --notify
+          code=$?
+          if [ "$code" -eq 1 ]; then
+            echo "Index sources drifted — re-index in an ops window (python -m app.indexer --recreate)"
+            exit 1
+          fi
+          if [ "$code" -eq 2 ]; then
+            echo "No snapshot in this checkout; write one after the next indexer run."
+            exit 0
+          fi
+          exit "$code"

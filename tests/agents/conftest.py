@@ -50,9 +50,9 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.setdefault("QDRANT_ENABLED", "false")
     os.environ.setdefault("SPEECH_ENABLED", "false")
     os.environ.setdefault("CORS_ORIGINS", "http://localhost:13000")
-    # Flags default OFF — individual tests flip them on as needed.
-    for f in ("TOOL_USE", "AGENTIC_MODE", "TICKET_QUEUE", "SELF_REFLECT",
-              "STRUCTURED_OUTPUT"):
+    # tool_use / tickets stay off in this suite. agentic_mode uses the
+    # production default (on) so routing tests exercise the live path.
+    for f in ("TOOL_USE", "TICKET_QUEUE", "SELF_REFLECT", "STRUCTURED_OUTPUT"):
         os.environ.setdefault(f"FLAG_{f}", "false")
 
 

@@ -160,6 +160,17 @@ llm_inference = Server("LLM Inference (Qwen2.5-3B)")
 llm_inference.inBoundary = backend_container
 llm_inference.isEncrypted = False
 
+pdf_guards = Server("PDF / document guards")
+pdf_guards.inBoundary = backend_container
+pdf_guards.sanitizesInput = True
+pdf_guards.hasAccessControl = True
+
+ocr_sidecar = Server("Local OCR sidecar")
+ocr_sidecar.inBoundary = backend_container
+ocr_sidecar.port = 8100
+ocr_sidecar.protocol = "HTTP"
+ocr_sidecar.sanitizesInput = True
+
 # =============================================================================
 # Datastores
 # =============================================================================
@@ -190,6 +201,13 @@ model_artifacts.protocol = "HTTPS"
 vector_index = Datastore("Qdrant Vector Index")
 vector_index.inBoundary = backend_container
 vector_index.isEncrypted = False
+
+document_spool = Datastore("Ephemeral document spool (TTL)")
+document_spool.inBoundary = backend_container
+document_spool.isEncrypted = False
+document_spool.isSQL = False
+document_spool.storesPII = True
+document_spool.storesLogData = False
 
 # =============================================================================
 # Lambdas (Serverless / CI Functions)
@@ -288,6 +306,29 @@ retriever_to_vectors = Dataflow(
 # --- Data Ingestion ---
 csv_to_retriever = Dataflow(faq_csv, retriever, "FAQ data ingestion")
 pdf_to_retriever = Dataflow(ura_pdfs, retriever, "PDF data ingestion")
+pdf_to_guards = Dataflow(ura_pdfs, pdf_guards, "Index-time PDF structural inspect")
+
+# --- Query-time document upload ---
+user_to_fe_upload = Dataflow(taxpayer, nextjs, "Document upload (HTTPS multipart)")
+user_to_fe_upload.protocol = "HTTPS"
+user_to_fe_upload.isEncrypted = True
+user_to_fe_upload.sanitizesInput = False
+
+fe_to_api_upload = Dataflow(nextjs, fastapi, "POST /v1/documents/analyze")
+fe_to_api_upload.protocol = "HTTP"
+fe_to_api_upload.sanitizesInput = True
+
+api_to_pdf_guards = Dataflow(fastapi, pdf_guards, "Untrusted file bytes")
+api_to_pdf_guards.sanitizesInput = False
+
+pdf_guards_to_ocr = Dataflow(pdf_guards, ocr_sidecar, "Bounded page raster (private net)")
+pdf_guards_to_ocr.protocol = "HTTP"
+
+pdf_guards_to_spool = Dataflow(pdf_guards, document_spool, "TTL analysis record (no source bytes)")
+pdf_guards_to_spool.storesPII = True
+
+spool_to_retriever = Dataflow(document_spool, retriever, "Attachment passages (LLM01-scrubbed)")
+spool_to_retriever.sanitizesInput = True
 
 # --- ML Pipeline ---
 admin_to_github = Dataflow(admin, github, "Git push (signed commits)")
@@ -351,7 +392,8 @@ ci_to_docker.isEncrypted = True
 tm.assumptions = [
     "TLS 1.3 terminates at the edge load balancer; internal traffic is HTTP on Docker bridge",
     "Qdrant does not enforce authentication (trusts Docker network isolation)",
-    "Training data sources are trusted (official URA website and handbooks)",
+    "Training data sources are trusted (official URA website and handbooks); query-time uploads are untrusted and fail-closed",
+    "PDF JavaScript, Launch, embedded files, and encryption are rejected before extract/OCR",
     "GitHub Actions runners are ephemeral and GitHub-hosted (not self-hosted)",
     "Rate limiting is enforced at the FastAPI application layer (slowapi)",
 ]

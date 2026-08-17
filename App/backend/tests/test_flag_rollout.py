@@ -16,7 +16,7 @@ import os
 import unittest
 from unittest import mock
 
-from app.flags import _REGISTRY, FeatureFlags, Flag, Rollout, _bucket_of
+from app.flags import _REGISTRY, FeatureFlags, Flag, Rollout, _bucket_of, is_protected
 
 
 class BucketingTests(unittest.TestCase):
@@ -239,6 +239,16 @@ class VariantAndDescribeTests(_FlagHarness):
         self.assertIsNone(self.flags.describe("_test_flag")["rollout"])
 
 
+class ProtectedFlagTests(unittest.TestCase):
+    def test_safety_flags_cannot_be_toggled_from_the_ui(self) -> None:
+        for name in ("auth_required", "multi_tenant", "audit_ledger", "voice_consent"):
+            self.assertTrue(is_protected(name), name)
+
+    def test_retrieval_flags_are_not_protected(self) -> None:
+        self.assertFalse(is_protected("hyde"))
+        self.assertFalse(is_protected("unknown_flag"))
+
+
 class RegistryIntegrityTests(unittest.TestCase):
     def test_every_phase_30_flag_defaults_off(self) -> None:
         """Nothing from this increment may be on before its gate passes."""
@@ -250,6 +260,7 @@ class RegistryIntegrityTests(unittest.TestCase):
             "tax_graph",
             "graph_fusion",
             "mcp_tasks",
+            "hyde",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)

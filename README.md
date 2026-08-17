@@ -55,7 +55,7 @@ FinalYearProject/
 │   ├── dataset/          # 41 CSV FAQ files
 │   ├── pdfs/             # PDF documents
 │   └── eval/             # RAG evaluation sets
-│       ├── rag_eval.jsonl      # English eval (21 samples)
+│       ├── rag_eval.jsonl      # English eval (30 samples, incl. reg-* regression ids)
 │       └── rag_eval_lg.jsonl   # Luganda eval (12 samples)
 ├── governance/            # AI governance framework
 │   ├── ai_risk_manifest.yaml   # NIST AI RMF + ISO 42001 + OWASP + EU AI Act

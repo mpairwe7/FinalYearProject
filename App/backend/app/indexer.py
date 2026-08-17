@@ -396,6 +396,12 @@ def main() -> None:
     annotate_fiscal_year(documents)
 
     build_index(documents, recreate=args.recreate)
+    try:
+        from .freshness import write_snapshot
+
+        write_snapshot()
+    except Exception:
+        logger.warning("Could not write index freshness snapshot", exc_info=True)
 
 
 if __name__ == "__main__":

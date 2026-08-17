@@ -5,9 +5,10 @@
 > `feat/agentic-workflows` branch actually *ships* (Phases A-D of
 > the broader Phase 14 work).
 
-Every new capability below is **gated behind a feature flag that
-defaults OFF**. Merging this branch is a no-op on the existing
-request path until an operator flips one of:
+Most capabilities below are **gated behind a feature flag**.
+`FLAG_TOOL_USE` and `FLAG_TICKET_QUEUE` default OFF.
+`FLAG_AGENTIC_MODE` defaults ON after the English routing golden set
+holds ≥ 0.95 (`agentic_mode_gate`).
 
 | Flag | Purpose |
 |---|---|
@@ -576,19 +577,19 @@ integrations haven't been built yet:
 | G2 — User profile | 🟢 **Landed in Phase 14** — `users` + `user_profiles` + `consent_receipts` tables + /v1/me/* endpoints. |
 | G5 — Long-term memory | 🟢 **Landed in Phase 16** — three-tier (working + episodic + semantic) with consent-gated retrieval + temporal decay. |
 | G8 — Audit ledger | 🟢 **Landed in Phase 21 subset** — hash-chained `audit_events` + Merkle anchoring + `verify_chain` CLI. |
-| G13 — Document uploads | 🟢 **Landed (#222)** — `POST /v1/documents/analyze` + `GET /v1/documents/{id}/report`, backed by `documents.py`, `ocr_service.py` and `vision/`. |
+| G13 — Document uploads | 🟢 **Landed (#222)** — `POST /v1/documents/analyze` + `GET /v1/documents/{id}/report`, backed by `documents.py`, `ocr_service.py` and `vision/`. **2026-08-17:** `pdf_guards.py` fail-closed intake (header, encryption, JS/Launch/embedded files, xref/page caps), Office zip-slip/macro reject, LLM01 scrub + `<untrusted_user_document>` wrap. No ClamAV; no `mcp_document_parser`. |
 | G14 — Notifications | ⚪ Scheduler for deadline reminders via email / SMS / in-app.  Phase 20 (scaffolded). |
-| G16 — Knowledge graph | 🟡 **Measurement landed (#227)** — `agents/eval_multihop.py` holds the 12-case multi-hop golden set, tied to the live rate tables.  The graph itself is not built; `FLAG_TAX_GRAPH` / `FLAG_GRAPH_FUSION` are registered and off. |
-| G18 — Multilingual | 🟡 **Routing landed (#224)** — locale-keyed supervisor tables (`agents/patterns/`), Luganda 23/23 with `FLAG_MULTILINGUAL_ROUTING` on.  Retrieval is still English-indexed. |
-| G21 — Self-correction | 🟢 **Landed (#226, #229)** — `agents/evaluator.py` recomputes money answers deterministically; a rejected figure gets one budgeted revision that is told the recomputed number, and the revision is re-verified before it is published.  A revision that does not fix the figure is discarded and the escalation stands. |
+| G16 — Knowledge graph | 🟡 **Graph + RRF fusion code shipped 2026-08-17** — `app/graph/` projects the rate tables; REST/stream fuse it as a third RRF leg. `FLAG_TAX_GRAPH` / `FLAG_GRAPH_FUSION` stay default off until unseen multi-hop ≥ 75%. Fusion is rank-level, not passage-id linked. Golden set: `agents/eval_multihop.py`. |
+| G18 — Multilingual | 🟢 **Translate-retrieve 2026-08-17** — corpus stays English; `FLAG_TRANSLATE_RETRIEVE` merges an English hybrid pass. Generation stays in the user locale. Routing (#224) unchanged. |
+| G21 — Self-correction | 🟢 **Bounded ReAct 2026-08-17** — money path (#226, #229) plus LangGraph `act → observe → synthesize → reflect`. One retrieve handoff when tools produce no evidence; one re-retrieve on low faithfulness or a reasoning miss. Not unbounded ReAct. |
 | G22 — Specialist prompts | 🟢 **Landed (#218)** — `agents/prompts.py` gives `tax_specialist`, `customs_specialist` and `tool_specialist` their own instructions, appended to the shared base prompt so safety rules stay first. |
-| G26 — A/B testing | 🟡 **Targeting landed (#223)** — `flags.py` carries percentage / cohort / allowlist rollout with stable bucketing.  The variant is not yet persisted per conversation. |
+| G26 — A/B testing | 🟢 **Variant logging 2026-08-17** — rollout targeting (#223) plus `flag_variants` / `locale` on each conversation turn. Eval reports `by_segment.variant`. |
 | G32 — HITL staff UI | 🟢 **Landed (#215)** — `App/frontend/src/app/admin/tickets/page.tsx`, with live escalation events pushed to staff (#217). |
 
-The remaining gaps (G12 URA DMZ, G14 notifications, and the graph half
-of G16) are scaffolded with README files under
-`backend/app/mcp/servers/`, `backend/app/workflows/`, and
-`backend/app/scheduler/` so follow-up PRs have clear landing spots.
+The remaining gaps (G12 URA DMZ, G14 notifications, and G16 *measurement*
+— expand unseen multi-hop before turning fusion on) are scaffolded with
+README files under `backend/app/mcp/servers/`, `backend/app/workflows/`,
+and `backend/app/scheduler/` so follow-up PRs have clear landing spots.
 
 ---
 

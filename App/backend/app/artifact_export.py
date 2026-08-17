@@ -244,7 +244,12 @@ def export_rag_distribution(rag_data: dict, out: Path) -> None:
     ax.set_xticklabels(names, fontsize=7)
     ax.set_ylabel("Score")
     ax.set_ylim(0, 1.25)
-    ax.set_title("RAG Metric Distribution (n=21)", fontweight="bold")
+    sample_n = next(
+        (v.get("n") or v.get("count") or v.get("samples") for v in available.values()),
+        None,
+    )
+    n_label = f" (n={sample_n})" if sample_n else ""
+    ax.set_title(f"RAG Metric Distribution{n_label}", fontweight="bold")
     _save(fig, out / "fig_rag_distribution.png", "RAG Distribution")
 
 

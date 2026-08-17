@@ -4,6 +4,13 @@
 Runs as a CI gate to ensure the threat model stays in sync with
 the actual security controls implemented in the codebase.
 
+``owasp_llm`` IDs in this registry are the **2025** Top 10 labels
+(LLM01 injection … LLM10 unbounded consumption). OWASP published the
+2026 edition on 2026-08-04 and **renumbered** several entries
+(agency is now LLM03:2026; output handling is LLM10:2026; hidden
+context is the new LLM08:2026). Coverage is still 10/10 of the 2025
+list. See ``governance/ai_risk_manifest.yaml`` ``owasp_llm_2026_crosswalk``.
+
 Usage:
     python threat-model/validate_threats.py
 
@@ -178,6 +185,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "OutputGuard HTML/script stripping, frontend output encoding",
         "evidence": [
             "App/backend/app/guardrails.py",
+            "App/frontend/src/components/Markdown.tsx",
         ],
         "status": "mitigated",
     },
@@ -228,6 +236,7 @@ THREAT_REGISTRY: list[dict] = [
         "mitigation": "Pydantic input validation with max_length, Docker resource limits, read-only filesystem",
         "evidence": [
             "App/backend/app/models.py",
+            "App/backend/app/documents.py",
             "docker-compose.yml",
         ],
         "status": "mitigated",
@@ -281,6 +290,111 @@ THREAT_REGISTRY: list[dict] = [
         "evidence": [
             ".github/workflows/devsecops-sast-dast.yml",
             "requirements.txt",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T21",
+        "category": "Information Disclosure",
+        "description": "Mobile model extraction via APK reverse engineering",
+        "owasp_llm": "LLM03",
+        "mitre_atlas": "AML.T0044",
+        "mitigation": "No on-device model APK; inference stays server-side. Residual risk accepted for any future mobile client.",
+        "evidence": [
+            "docs/capstone/week06-threat-model-security.md",
+            "App/README.md",
+        ],
+        "status": "accepted",
+    },
+    {
+        "id": "T22",
+        "category": "Elevation of Privilege",
+        "description": "Malicious PDF active content (JavaScript, Launch, embedded files) executes in the API worker",
+        "owasp_llm": "LLM04",
+        "mitre_atlas": None,
+        "mitigation": "Fail-closed PDF guards reject encryption, JS/Launch/GoToR/XFA/embedded files before extract or OCR",
+        "evidence": [
+            "App/backend/app/pdf_guards.py",
+            "App/backend/app/documents.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T23",
+        "category": "Denial of Service",
+        "description": "PDF/image resource bomb (xref objects, page dimensions, pixels, zip-slip, macros)",
+        "owasp_llm": "LLM10",
+        "mitre_atlas": "AML.T0029",
+        "mitigation": "Header/magic checks, xref and page-edge caps, Office zip-slip/macro/encryption reject, Pillow pixel cap, OCR sidecar magic + concurrency",
+        "evidence": [
+            "App/backend/app/pdf_guards.py",
+            "App/backend/app/documents.py",
+            "App/backend/app/ocr_service.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T24",
+        "category": "Elevation of Privilege",
+        "description": "Indirect prompt injection via uploaded document or retrieved PDF text",
+        "owasp_llm": "LLM01",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": "scan_retrieved_text on extract and on prompt assembly; untrusted_user_document wrappers; system rule that uploads are evidence only",
+        "evidence": [
+            "App/backend/app/documents.py",
+            "App/backend/app/guardrails.py",
+            "App/backend/app/llm.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T25",
+        "category": "Information Disclosure",
+        "description": "Document-store IDOR — attacker fetches another session's upload by document id",
+        "owasp_llm": "LLM02",
+        "mitre_atlas": None,
+        "mitigation": "Session/user binding, unguessable ids, TTL spool, no path built from user ids, analytics redacts attachment text",
+        "evidence": [
+            "App/backend/app/documents.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T26",
+        "category": "Tampering",
+        "description": "Polyglot upload (HTML/JS/ZIP) declared as PDF or Office to bypass type checks",
+        "owasp_llm": "LLM04",
+        "mitre_atlas": "AML.T0020",
+        "mitigation": "PDF header must be %PDF- at start; Office ZIP must contain Content_Types + word/ or xl/; images verified by Pillow; client MIME is untrusted",
+        "evidence": [
+            "App/backend/app/pdf_guards.py",
+            "App/backend/app/documents.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T27",
+        "category": "Tampering",
+        "description": "Index-time PDF poisoning — unsafe extract of a planted handbook during corpus export",
+        "owasp_llm": "LLM04",
+        "mitre_atlas": "AML.T0020",
+        "mitigation": "Same structural PDF guards on export; SHA-256 manifest; ingest rejects hash drift; injection scrub on retrieved chunks",
+        "evidence": [
+            "App/backend/app/pdf_corpus.py",
+            "App/backend/app/pdf_guards.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T28",
+        "category": "Elevation of Privilege",
+        "description": "Excessive agency — prompt-injected model invokes tools or MCP servers it was not shown",
+        "owasp_llm": "LLM06",
+        "mitre_atlas": "AML.T0051",
+        "mitigation": "MCP policy allowlist, unknown-tool errors without registry leak, bounded ReAct (one retrieve hop), FLAG_TOOL_RAG default off",
+        "evidence": [
+            "App/backend/app/mcp/policy.py",
+            "App/backend/app/flags.py",
         ],
         "status": "mitigated",
     },

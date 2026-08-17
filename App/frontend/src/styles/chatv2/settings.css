@@ -886,10 +886,12 @@
   color: var(--cv2-accent-contrast);
 }
 
-/* Narrow screens keep one button: the sidebar's account block carries both,
-   and the header still has to fit the brand, language, mic and theme. */
+/* Phones: auth lives on the landing and in the rail; theme lives in the
+   kebab. Keeping both in the header crowded the 44px cluster next to
+   language and overflow. */
 @media (max-width: 720px) {
-  .chatv2 a.hdrv2-signin {
+  .chatv2 .hdrv2-auth,
+  .chatv2 .hdrv2-theme {
     display: none;
   }
 }

@@ -38,6 +38,18 @@ class UraActionProposalTool(Tool):
                     },
                 },
                 "required": ["action_type", "payload", "idempotency_key"],
+                "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "submitted": {"type": "boolean"},
+                    "configured": {"type": "boolean"},
+                    "proposal": {"type": "object"},
+                    "message": {"type": "string"},
+                    "error": {"type": "string"},
+                },
             },
             risk="critical",
             requires_confirmation=True,
