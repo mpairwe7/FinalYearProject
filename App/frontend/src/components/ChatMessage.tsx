@@ -1,6 +1,6 @@
 import React, { lazy, memo, Suspense, useCallback, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
-import { URA_CONTACTS, sourceLabel, sourceUrl, telDigits } from '../lib/uraContacts';
+import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
 import { formatDocType } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { localeLabel } from '../lib/locales';
@@ -12,7 +12,7 @@ import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, Co
 const Markdown = lazy(() => import('./Markdown'));
 
 /** Copy an assistant reply to the clipboard with a brief confirmation. */
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, noun = 'reply' }: { text: string; noun?: string }) {
   const [copied, setCopied] = useState(false);
   const onCopy = useCallback(async () => {
     try {
@@ -28,7 +28,7 @@ function CopyButton({ text }: { text: string }) {
       type="button"
       className={`copy-btn ${copied ? 'copied' : ''}`}
       onClick={onCopy}
-      aria-label={copied ? 'Reply copied' : 'Copy reply'}
+      aria-label={copied ? `${noun.charAt(0).toUpperCase()}${noun.slice(1)} copied` : `Copy ${noun}`}
     >
       {copied ? <><CheckIcon /> Copied</> : <><CopyIcon /> Copy</>}
     </button>
@@ -116,6 +116,12 @@ function ChatMessageInner({
           )}
         </div>
 
+        {!isAssistant && turn.content && (
+          <div className="bubble-actions bubble-actions-user">
+            <CopyButton text={turn.content} noun="message" />
+          </div>
+        )}
+
         {!isAssistant && turn.attachments && turn.attachments.length > 0 && (
           <div className="msg-attachments">
             {turn.attachments.map((a) => (
@@ -173,7 +179,8 @@ function ChatMessageInner({
             </summary>
             <ol>
               {turn.citations.map((c: Citation) => {
-                const href = sourceUrl(c.source);
+                const href = citationHref(c);
+                const label = c.title?.trim() || sourceLabel(c.source);
                 return (
                   <li key={c.ref}>
                     {href ? (
@@ -182,13 +189,14 @@ function ChatMessageInner({
                         href={href}
                         target="_blank"
                         rel="noopener noreferrer nofollow"
-                        title={`${c.source} — find official URA documents at ura.go.ug`}
+                        title={c.url || `${c.source} — official URA documents`}
                       >
-                        <strong>{sourceLabel(c.source)}</strong>
+                        <strong>{label}</strong>
                       </a>
                     ) : (
-                      <strong title={c.source}>{sourceLabel(c.source)}</strong>
+                      <strong title={c.source}>{label}</strong>
                     )}
+                    {c.effective_date ? ` (${c.effective_date})` : ''}
                     {c.page ? ` p.${c.page}` : ''}
                     {c.section ? ` ${c.section}` : ''}
                     {c.passage && (
@@ -229,7 +237,7 @@ function ChatMessageInner({
 
 function citationSignature(citations: Citation[] | undefined): string {
   return (citations ?? [])
-    .map((c) => [c.ref, c.source, c.page ?? '', c.section ?? '', c.passage ?? ''].join('\u001f'))
+    .map((c) => [c.ref, c.source, c.page ?? '', c.section ?? '', c.passage ?? '', c.url ?? '', c.effective_date ?? ''].join('\u001f'))
     .join('\u001e');
 }
 

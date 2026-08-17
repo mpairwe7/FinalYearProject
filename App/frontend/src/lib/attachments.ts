@@ -24,7 +24,7 @@ export const MAX_ATTACHMENTS = 3;
 /** Mirrors backend `documents.MAX_FILE_BYTES` (10 MiB). */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 /** Mirrors backend `documents.SUPPORTED_EXTENSIONS`. */
-export const ATTACHMENT_ACCEPT = '.pdf,.docx,.xlsx,.xlsm,.csv,.txt,image/*';
+export const ATTACHMENT_ACCEPT = '.pdf,.docx,.xlsx,.csv,.txt,image/*';
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   receipt: 'Receipt',

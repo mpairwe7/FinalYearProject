@@ -76,7 +76,9 @@
 
 ## Evaluation Results
 
-### RAG Quality (English, 21 test samples)
+### RAG Quality (English, 21-sample historical table)
+
+The live English eval file is now **30** rows (`Data/eval/rag_eval.jsonl`), including `reg-*` regression ids. Figures below were measured on the original 21-sample slice and are retained for audit continuity. Re-run `ml/pipelines/evaluate_rag.py` before quoting them as current.
 
 | Metric | Threshold | Achieved |
 |--------|-----------|----------|

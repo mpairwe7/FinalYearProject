@@ -132,6 +132,8 @@ _QUERY_CACHE_SIZE = int(os.getenv("RETRIEVER_QUERY_CACHE_SIZE", "256"))
 _RERANK_CHARS = int(os.getenv("RETRIEVER_RERANK_CHARS", "1200"))
 #: Jaccard overlap above which two candidates are treated as duplicates.
 _DEDUPE_THRESHOLD = float(os.getenv("RETRIEVER_DEDUPE_THRESHOLD", "0.9"))
+#: RRF constant shared by Qdrant, the Vectorize client, and the graph leg.
+RRF_K = int(os.getenv("RRF_K", "60"))
 
 
 def _shingles(text: str) -> frozenset[str]:
@@ -143,6 +145,38 @@ def _shingles(text: str) -> frozenset[str]:
 
 
 _FY_RANK_RE = re.compile(r"FY(\d{4})-\d{2}")
+
+
+def canonical_source_url(source: str, existing: str = "") -> str:
+    """HTTPS URL for a citation: stored URL, else the URA portal for URA files (G19)."""
+    raw = (existing or "").strip()
+    if raw.startswith("https://") or raw.startswith("http://"):
+        return raw
+    name = (source or "").strip().lower()
+    if name.startswith("ura") and name.endswith((".csv", ".pdf", ".jsonl", ".json")):
+        return "https://ura.go.ug"
+    return ""
+
+
+def _provenance_fields(payload: dict[str, Any]) -> dict[str, str]:
+    """Canonical URL + effective date copied from the index payload (G19)."""
+    url = canonical_source_url(
+        str(payload.get("source") or ""),
+        str(payload.get("url") or payload.get("source_url") or ""),
+    )
+    effective = str(
+        payload.get("effective_from")
+        or payload.get("effective_date")
+        or payload.get("fiscal_year")
+        or payload.get("crawled_at")
+        or ""
+    ).strip()
+    return {
+        "url": url,
+        "title": str(payload.get("title") or "").strip(),
+        "effective_date": effective,
+        "crawled_at": str(payload.get("crawled_at") or "").strip(),
+    }
 
 
 def fiscal_year_rank(value: object) -> int | None:
@@ -324,6 +358,134 @@ def lexical_relevance(
     if total <= 0:
         return 0.0
     return sum(w for term, w in weights.items() if term in present) / total
+
+
+def apply_preference_boost(
+    hits: list[dict[str, Any]],
+    prefer: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Soft-boost hits that match query-time metadata preferences (G17).
+
+    Hard filters can empty the result set when the preferred edition is
+    missing from the collection. A small additive boost keeps recall and
+    still surfaces the current FY / mentioned tax type first.
+    """
+    if not hits or not prefer:
+        return hits
+    want_fy = str(prefer.get("fiscal_year") or "").strip()
+    want_tax = str(prefer.get("tax_type") or "").strip().lower()
+    if not want_fy and not want_tax:
+        return hits
+
+    for hit in hits:
+        boost = 0.0
+        if want_fy and str(hit.get("fiscal_year") or "") == want_fy:
+            boost += 0.08
+        if want_tax:
+            blob = " ".join(
+                str(hit.get(field) or "")
+                for field in ("tax_type", "tag", "section", "source", "text", "question")
+            ).lower()
+            if want_tax in blob:
+                boost += 0.05
+        if not boost:
+            continue
+        if hit.get("score_norm") is not None:
+            try:
+                hit["score_norm"] = min(1.0, float(hit["score_norm"]) + boost)
+            except (TypeError, ValueError):
+                pass
+        try:
+            hit["score_rrf"] = float(hit.get("score_rrf") or 0.0) + boost
+        except (TypeError, ValueError):
+            hit["score_rrf"] = boost
+
+    hits.sort(
+        key=lambda h: (
+            1 if hit_relevance(h) is not None else 0,
+            hit_relevance(h) or 0.0,
+            float(h.get("score_rrf") or 0.0),
+        ),
+        reverse=True,
+    )
+    return hits
+
+
+def hit_identity(hit: dict[str, Any]) -> str:
+    """Stable id for fusing ranked lists from different retrieval legs."""
+    return (
+        str(hit.get("id") or "")
+        or str(hit.get("chunk_id") or "")
+        or (hit.get("text") or "")[:80]
+    )
+
+
+def rrf_fuse_ranked_lists(
+    *lists: list[dict[str, Any]],
+    k: int | None = None,
+    top_k: int | None = None,
+) -> list[dict[str, Any]]:
+    """Reciprocal-rank fusion over independently ranked retrieval legs.
+
+    Each list is already ordered best-first. A hit that appears in two
+    lists accumulates ``1/(k+rank)`` from each; a graph-only or
+    passage-only hit keeps the contribution from its own list. This is
+    the same combinator Qdrant uses for dense+BM25, applied here so the
+    statutory graph is a third leg rather than an unconditional prepend.
+    """
+    k = RRF_K if k is None else k
+    scores: dict[str, float] = {}
+    kept: dict[str, dict[str, Any]] = {}
+    for ranked in lists:
+        if not ranked:
+            continue
+        for rank, hit in enumerate(ranked):
+            hid = hit_identity(hit)
+            if not hid:
+                continue
+            scores[hid] = scores.get(hid, 0.0) + 1.0 / (k + rank)
+            incoming = dict(hit)
+            existing = kept.get(hid)
+            if existing is None or incoming.get("doc_type") == "graph":
+                kept[hid] = incoming
+    fused: list[dict[str, Any]] = []
+    for hid, hit in kept.items():
+        hit["score_rrf"] = scores[hid]
+        fused.append(hit)
+    fused.sort(
+        key=lambda h: (
+            1 if hit_relevance(h) is not None else 0,
+            hit_relevance(h) or 0.0,
+            float(h.get("score_rrf") or 0.0),
+        ),
+        reverse=True,
+    )
+    if top_k is not None:
+        fused = fused[:top_k]
+    return fused
+
+
+def merge_retrieval_hits(
+    batches: list[list[dict[str, Any]]],
+    *,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """Dedupe and re-rank hits from parallel sub-query searches."""
+    merged: list[dict[str, Any]] = []
+    for batch in batches:
+        merged.extend(batch)
+    if not merged:
+        return []
+    merged = _dedupe_candidates(merged)
+    merged.sort(
+        key=lambda h: (
+            1 if hit_relevance(h) is not None else 0,
+            hit_relevance(h) or 0.0,
+            float(h.get("score_rrf") or 0.0),
+        ),
+        reverse=True,
+    )
+    return prune_context(merged[:top_k])
 
 
 def prune_context(
@@ -722,6 +884,13 @@ class HybridRetriever:
                     self._reranker = CrossEncoder(RERANKER_MODEL_NAME, device="cpu")
 
             self._ready = True
+            if self._dense_model is not None:
+                try:
+                    from .mcp.tool_rag import inject_dense_model
+
+                    inject_dense_model(self._dense_model)
+                except Exception:
+                    logger.debug("Tool RAG dense inject skipped", exc_info=True)
             logger.info(
                 "HybridRetriever ready (url=%s collection=%s dense_device=%s rerank=%s reranker_device=%s)",
                 QDRANT_URL,
@@ -779,6 +948,7 @@ class HybridRetriever:
         top_k: int,
         prefetch_limit: int,
         filters: dict[str, Any] | None,
+        subject: str | None = None,
     ) -> list[dict[str, Any]]:
         """Dense retrieval via Workers AI bge-m3 -> Vectorize, fused client-side
         with a lexical (BM25-lite) re-score via RRF.  CPU-only hybrid."""
@@ -794,7 +964,9 @@ class HybridRetriever:
             logger.info("Workers AI neuron budget exhausted — skipping dense fallback")
             return []
         try:
-            dense_vec = _gw.workers_ai_embed([query])[0]
+            from .hyde import dense_query_text
+
+            dense_vec = _gw.workers_ai_embed([dense_query_text(query, subject=subject)])[0]
             vfilter = None
             if filters:
                 eqs = {k: {"$eq": v} for k, v in filters.items() if not isinstance(v, list)}
@@ -823,7 +995,7 @@ class HybridRetriever:
         lex_order = sorted(
             range(len(hits)), key=lambda i: _lexical(hits[i].get("text", "")), reverse=True
         )
-        k = 60
+        k = RRF_K
         rrf = [0.0] * len(hits)
         for dense_rank in range(len(hits)):  # Vectorize returns best-first
             rrf[dense_rank] += 1.0 / (k + dense_rank)
@@ -843,6 +1015,9 @@ class HybridRetriever:
                 "section": hits[i].get("section", ""),
                 "doc_type": hits[i].get("doc_type", ""),
                 "fiscal_year": hits[i].get("fiscal_year", ""),
+                "tax_type": hits[i].get("tax_type", ""),
+                "tag": hits[i].get("tag", ""),
+                **_provenance_fields(hits[i]),
                 "score_rrf": float(rrf[i]),
             }
             for i in order
@@ -853,8 +1028,10 @@ class HybridRetriever:
         # one on dense score alone.
         candidates = _dedupe_candidates(candidates)
         self._attach_lexical_relevance(query, candidates)
+        if self._reranker and candidates:
+            self._rerank(query, candidates)
         self._ready = True
-        return candidates[:top_k]
+        return prune_context(candidates[:top_k])
 
     def _attach_lexical_relevance(self, query: str, candidates: list[dict[str, Any]]) -> None:
         """Stamp each candidate with ``score_lexical``, in place.
@@ -1019,14 +1196,18 @@ class HybridRetriever:
         top_k: int = 4,
         prefetch_limit: int = 20,
         filters: dict[str, Any] | None = None,
+        *,
+        subject: str | None = None,
     ) -> list[dict[str, Any]]:
         """Hybrid search with RRF fusion + optional cross-encoder rerank.
 
         *filters* accepts Qdrant payload filter keys, e.g.
         ``{"doc_type": "pdf", "tag": "vat"}``.
+        *subject* buckets ``FLAG_HYDE_PERCENT``; omit it and HyDE stays
+        at the registry default (off).
         """
         if self._vectorize_mode:
-            return self._search_vectorize(query, top_k, prefetch_limit, filters)
+            return self._search_vectorize(query, top_k, prefetch_limit, filters, subject=subject)
 
         if not self._ready or self._client is None:
             return []
@@ -1042,7 +1223,14 @@ class HybridRetriever:
         try:
             from qdrant_client import models
 
-            dense_vec = None if self._sparse_only else self._encode_query(query)
+            from .hyde import dense_query_text
+
+            # HyDE (when flagged) rewrites only the dense embedding. BM25
+            # and the cross-encoder stay on the taxpayer's own words so a
+            # hallucinated hypothetical cannot change lexical matching.
+            dense_vec = (
+                None if self._sparse_only else self._encode_query(dense_query_text(query, subject=subject))
+            )
             sparse_idx, sparse_val = self._sparse_encoder.encode(query)
             if self._sparse_only and not sparse_idx:
                 # No query term is in the BM25 vocabulary, and there is no dense
@@ -1111,6 +1299,9 @@ class HybridRetriever:
                         # Edition of the source document, used to prefer current
                         # guidance over a superseded restatement of it.
                         "fiscal_year": p.get("fiscal_year", ""),
+                        "tax_type": p.get("tax_type", ""),
+                        "tag": p.get("tag", ""),
+                        **_provenance_fields(p),
                         "score_rrf": float(pt.score) if pt.score else 0.0,
                     }
                 )
@@ -1140,6 +1331,99 @@ class HybridRetriever:
             # controls availability via allow_request(). Setting _ready=False
             # here would prevent auto-recovery when Qdrant comes back.
             return []
+
+    def search_planned(
+        self,
+        query: str,
+        top_k: int = 4,
+        prefetch_limit: int = 20,
+        filters: dict[str, Any] | None = None,
+        *,
+        locale: str | None = None,
+        subject: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search with query-time filters, multi-intent split, and soft boosts.
+
+        Shared by REST, streaming, the RAG tool, LangGraph, and voice prefetch
+        so those paths cannot drift (agentic retrieve-as-tool + G17).
+        *locale* triggers a merged English translation pass when the corpus
+        is English and the question is not (G18).
+        *subject* buckets HyDE percent rollout on the dense leg.
+        """
+        from .flags import flags
+        from .query import plan_retrieval
+
+        plan = plan_retrieval(query)
+        merged_filters = {k: v for k, v in (filters or {}).items() if v not in (None, "", "any")}
+        merged_filters.update(plan["filters"])
+        subqueries = plan["subqueries"]
+        use_decompose = flags.is_enabled("query_decomposition") and len(subqueries) > 1
+
+        if use_decompose:
+            batches = [
+                self.search(
+                    sub,
+                    top_k=top_k,
+                    prefetch_limit=prefetch_limit,
+                    filters=merged_filters or None,
+                    subject=subject,
+                )
+                for sub in subqueries
+            ]
+            hits = merge_retrieval_hits(batches, top_k=top_k)
+        else:
+            hits = self.search(
+                query,
+                top_k=top_k,
+                prefetch_limit=prefetch_limit,
+                filters=merged_filters or None,
+                subject=subject,
+            )
+        hits = apply_preference_boost(hits, plan["prefer"])
+        return self._merge_translated_leg(
+            query,
+            hits,
+            top_k=top_k,
+            prefetch_limit=prefetch_limit,
+            filters=merged_filters or None,
+            prefer=plan["prefer"],
+            locale=locale,
+            subject=subject,
+        )
+
+    def _merge_translated_leg(
+        self,
+        query: str,
+        hits: list[dict[str, Any]],
+        *,
+        top_k: int,
+        prefetch_limit: int,
+        filters: dict[str, Any] | None,
+        prefer: dict[str, Any],
+        locale: str | None,
+        subject: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Second hybrid pass on an English translation (G18). Never displaces a first pass that already worked well — merge only."""
+        from .flags import flags
+        from .query import english_retrieval_query
+
+        loc = (locale or "en").strip().lower().split("-")[0]
+        if not flags.is_enabled("translate_retrieve") or loc in ("", "en"):
+            return hits
+        english = english_retrieval_query(query, locale)
+        if not english or english.casefold() == (query or "").strip().casefold():
+            return hits
+        en_hits = self.search(
+            english,
+            top_k=top_k,
+            prefetch_limit=prefetch_limit,
+            filters=filters,
+            subject=subject,
+        )
+        if not en_hits:
+            return hits
+        merged = merge_retrieval_hits([hits, en_hits], top_k=top_k)
+        return apply_preference_boost(merged, prefer)
 
     # -- Grounding helpers ---------------------------------------------------
     @staticmethod
@@ -1187,6 +1471,13 @@ class HybridRetriever:
                 cit["page"] = str(hit["page"])
             if hit.get("section"):
                 cit["section"] = str(hit["section"])
+            url = canonical_source_url(str(hit.get("source") or ""), str(hit.get("url") or ""))
+            if url:
+                cit["url"] = url
+            if hit.get("effective_date"):
+                cit["effective_date"] = str(hit["effective_date"])
+            if hit.get("title"):
+                cit["title"] = str(hit["title"])
             passage = hit.get("text") or hit.get("answer") or ""
             cit["passage"] = passage[:500]
             citations.append(cit)

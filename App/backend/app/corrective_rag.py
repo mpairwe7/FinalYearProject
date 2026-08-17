@@ -114,7 +114,9 @@ def should_correct(hits: list[dict[str, Any]]) -> bool:
     available the relevance is incomparable, so we do not trigger correction on
     a raw RRF score (which would spuriously fire on nearly every query).
     """
-    if not CORRECTIVE_ENABLED:
+    from .flags import flags
+
+    if not CORRECTIVE_ENABLED or not flags.is_enabled("corrective_rag"):
         return False
     if not hits:
         return True
@@ -129,6 +131,8 @@ def corrective_retrieve(
     retriever: Any,
     initial_hits: list[dict[str, Any]],
     top_k: int = 4,
+    filters: dict[str, Any] | None = None,
+    subject: str | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Run corrective re-retrieval if initial results are poor.
 
@@ -144,7 +148,23 @@ def corrective_retrieve(
     )
 
     expanded = _expand_query(query)
-    new_hits = retriever.search(expanded, top_k=top_k + 2, prefetch_limit=30)
+    search = getattr(retriever, "search_planned", None) or retriever.search
+    if search is retriever.search:
+        new_hits = retriever.search(
+            expanded,
+            top_k=top_k + 2,
+            prefetch_limit=30,
+            filters=filters,
+            subject=subject,
+        )
+    else:
+        new_hits = retriever.search_planned(
+            expanded,
+            top_k=top_k + 2,
+            prefetch_limit=30,
+            filters=filters,
+            subject=subject,
+        )
 
     if not new_hits:
         return initial_hits, False

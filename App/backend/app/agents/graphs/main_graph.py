@@ -83,9 +83,9 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
         granted_purposes=state.granted_purposes,
     )
 
-    import os
+    from ...flags import flags
 
-    if os.getenv("FLAG_TOOL_RAG", "false").lower() != "true":
+    if not flags.is_enabled("tool_rag"):
         # Flag off → accept the supervisor's raw whitelist
         state.plan = [t for t in state.plan if t in eligible]
         return NodeResult(next_node="act")
@@ -109,19 +109,64 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
 
 
 def node_retrieve(state: AgentGraphState) -> NodeResult:
-    """Phase 1-13 hybrid retrieval — kept as the RAG-path node."""
+    """Hybrid retrieval with the same plan/corrective gates as REST."""
     # Deferred import to avoid the heavy retriever at module load
+    from ...corrective_rag import corrective_retrieve
     from ...retriever import HybridRetriever
 
     retriever = HybridRetriever()
+    query = state.rewritten_query or state.query
     if retriever.initialize():
-        hits = retriever.search(state.rewritten_query or state.query, top_k=state.top_k)
+        search = getattr(retriever, "search_planned", retriever.search)
+        subject = state.user_id or None
+        try:
+            hits = search(query, top_k=state.top_k, locale=state.locale, subject=subject)
+        except TypeError:
+            try:
+                hits = search(query, top_k=state.top_k, locale=state.locale)
+            except TypeError:
+                hits = search(query, top_k=state.top_k)
         if hits:
+            hits, was_corrected = corrective_retrieve(
+                query, retriever, hits, top_k=state.top_k, subject=subject
+            )
+            hits = _fuse_graph_leg(query, hits)
+            hits = _apply_faq_gates(query, hits)
             state.hits = hits
-            state.retrieval_mode = "hybrid"
+            state.retrieval_mode = "hybrid_corrected" if was_corrected else "hybrid"
             state.sources = list({h.get("source", "") for h in hits if h.get("source")})
             state.citations = HybridRetriever.build_citations(hits)
     return NodeResult(next_node="synthesize")
+
+
+def _apply_faq_gates(query: str, hits: list) -> list:
+    """Same unbound-FAQ filter + exact-FAQ promote REST uses after blend."""
+    try:
+        from ...service import _filter_unbound_faq_hits, _promote_equivalent_faq_hits
+    except Exception:
+        logger.debug("graph: FAQ gates unavailable", exc_info=True)
+        return hits
+    hits = _filter_unbound_faq_hits(query, hits)
+    return _promote_equivalent_faq_hits(query, hits)
+
+
+def _fuse_graph_leg(query: str, hits: list) -> list:
+    """Same rank-level RRF fuse REST uses; no-op when flags are off."""
+    from ...flags import flags
+    from ...retriever import rrf_fuse_ranked_lists
+
+    if not (flags.is_enabled("graph_fusion") and flags.is_enabled("tax_graph")):
+        return hits
+    try:
+        from ...graph.shadow import graph_hit_for
+
+        hit = graph_hit_for(query)
+    except Exception:
+        logger.debug("graph: fusion skipped", exc_info=True)
+        return hits
+    if not hit:
+        return hits
+    return rrf_fuse_ranked_lists(hits, [hit])
 
 
 #: Parameter names a free-text query can legitimately be bound to.
@@ -206,6 +251,31 @@ def node_act(state: AgentGraphState) -> NodeResult:
         )
         state.observations.append(result.result)
 
+    return NodeResult(next_node="observe")
+
+
+def _usable_observations(state: AgentGraphState) -> list:
+    return [
+        obs
+        for obs in state.observations
+        if isinstance(obs, dict) and obs.get("ok", True)
+    ]
+
+
+def node_observe(state: AgentGraphState) -> NodeResult:
+    """ReAct observe: keep, retrieve once, or synthesise an empty plan.
+
+    Industry 2026 practice caps this at one hop (``max_handoffs``). Failed
+    or unfillable tools are not evidence — they hand off to retrieve.
+    """
+    if _usable_observations(state) or state.hits:
+        return NodeResult(next_node="synthesize")
+    if state.handoff_count < state.max_handoffs:
+        state.handoff_count += 1
+        state.handoff_from = "observe"
+        state.handoff_reason = "tools produced no usable evidence"
+        logger.info("graph: observe handoff to retrieve (%s)", state.handoff_reason)
+        return NodeResult(next_node="retrieve", note="observe handoff to retrieve")
     return NodeResult(next_node="synthesize")
 
 
@@ -272,23 +342,42 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
 
     state.reflect_count += 1
 
-    if (
+    weak_grounding = (
         state.faithfulness is not None
         and state.faithfulness < REFLECT_FAITHFULNESS_FLOOR
+    )
+    reasoning_miss = _is_reasoning_miss(state)
+    if (
+        state.hits
         and state.reflect_count <= state.max_reflections
+        and (weak_grounding or reasoning_miss)
     ):
         from ...corrective_rag import _expand_query
 
-        expanded = _expand_query(state.rewritten_query or state.query)
-        state.reflections.append(
-            f"faithfulness={state.faithfulness:.2f} below "
-            f"{REFLECT_FAITHFULNESS_FLOOR:.2f}; re-retrieving with an expanded query"
-        )
-        if expanded != (state.rewritten_query or state.query):
+        query = state.rewritten_query or state.query
+        expanded = _expand_query(query)
+        if expanded != query:
             state.rewritten_query = expanded
-            return NodeResult(next_node="retrieve", note="reflexion re-retrieval")
+        why = (
+            f"faithfulness={state.faithfulness:.2f}"
+            if weak_grounding
+            else "reply shares too few question terms"
+        )
+        state.reflections.append(f"{why}; re-retrieving once")
+        return NodeResult(next_node="retrieve", note="reflexion re-retrieval")
 
     return NodeResult(next_node="respond")
+
+
+def _is_reasoning_miss(state: AgentGraphState) -> bool:
+    """True when the reply ignores the question's content terms (G21)."""
+    from ...text_signals import content_tokens
+
+    asked = content_tokens(state.rewritten_query or state.query)
+    answered = content_tokens(state.reply)
+    if not asked or not answered:
+        return False
+    return (len(asked & answered) / len(asked)) < 0.20
 
 
 def node_respond(state: AgentGraphState) -> NodeResult:
@@ -313,9 +402,10 @@ def build_main_graph() -> GraphRuntime:
         "route": node_route,
         "tool_rag_select": node_tool_rag_select,
         "act": node_act,
+        "observe": node_observe,
         "retrieve": node_retrieve,
         "synthesize": node_synthesize,
         "reflect": node_reflect,
         "respond": node_respond,
     }
-    return GraphRuntime(nodes=nodes, entry="route", max_steps=10)
+    return GraphRuntime(nodes=nodes, entry="route", max_steps=12)

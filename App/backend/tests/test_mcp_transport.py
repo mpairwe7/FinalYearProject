@@ -38,7 +38,13 @@ class RecordingTransport:
         return next((d for d in self._descriptors() if d["name"] == tool_name), None)
 
     def call(
-        self, tool_name: str, arguments: dict[str, Any], *, meta: dict[str, Any], timeout_s: float
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        meta: dict[str, Any],
+        timeout_s: float,
+        **_: Any,
     ) -> dict[str, Any]:
         self.calls.append((tool_name, arguments, meta))
         if self.fail:
@@ -77,7 +83,10 @@ class RoutingTests(unittest.TestCase):
             "calculate_vat", {"amount": 1000}, tenant_id="t-1", user_id="u-1", user_role="ura_staff"
         )
         _name, _args, meta = remote.calls[0]
-        self.assertEqual(meta["protocolVersion"], MCP_PROTOCOL_VERSION)
+        self.assertEqual(
+            meta["io.modelcontextprotocol/protocolVersion"], MCP_PROTOCOL_VERSION
+        )
+        self.assertIn("io.modelcontextprotocol/clientCapabilities", meta)
         self.assertEqual(meta["ug.go.ura.chatbot/tenantId"], "t-1")
         self.assertEqual(meta["ug.go.ura.chatbot/userRole"], "ura_staff")
 
@@ -125,10 +134,11 @@ class ArgumentValidationTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.result["paye"], 202_000.0)
 
-    def test_unknown_tool_lists_what_exists(self) -> None:
+    def test_unknown_tool_does_not_enumerate_the_registry(self) -> None:
         result = self.client.call_tool("calculate_moon_phase", {})
         self.assertFalse(result.ok)
-        self.assertIn("calculate_vat", result.result["available_tools"])
+        self.assertIn("Unknown tool", result.result["error"])
+        self.assertNotIn("available_tools", result.result)
 
 
 class FallbackValidatorTests(unittest.TestCase):
@@ -231,6 +241,15 @@ class CircuitBreakerTests(unittest.TestCase):
         self.assertTrue(blocked.result["retryable"])
         self.assertEqual(len(remote.calls), 3, "open circuit must not reach the transport")
 
+    def test_tool_level_ok_false_does_not_open_the_circuit(self) -> None:
+        client = MCPClient()
+        for _ in range(4):
+            result = client.call_tool("calculate_vat", {"amount": -1})
+            self.assertFalse(result.ok)
+        again = client.call_tool("calculate_vat", {"amount": 1000})
+        self.assertTrue(again.ok)
+        self.assertNotIn("circuit open", again.result.get("error", ""))
+
     def test_one_namespace_failing_does_not_block_another(self) -> None:
         failing = RecordingTransport(fail=True)
         client = MCPClient({"tax_calculator": failing, "rates": InProcessTransport()})
@@ -282,8 +301,9 @@ class HttpTransportTests(unittest.TestCase):
 
     def test_request_meta_is_self_describing(self) -> None:
         meta = request_meta(tenant_id="t", user_id="u", user_role="public", call_id="c")
-        self.assertEqual(meta["protocolVersion"], MCP_PROTOCOL_VERSION)
-        self.assertIn("clientInfo", meta)
+        self.assertEqual(meta["io.modelcontextprotocol/protocolVersion"], MCP_PROTOCOL_VERSION)
+        self.assertIn("io.modelcontextprotocol/clientInfo", meta)
+        self.assertIn("io.modelcontextprotocol/clientCapabilities", meta)
 
 
 class AuditTests(unittest.TestCase):

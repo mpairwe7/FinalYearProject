@@ -5,7 +5,8 @@ through `app.mcp.MCPClient`, which routes, authorizes, validates and
 guards it. That indirection is what lets a tool move out of the process
 without a single caller changing.
 
-Protocol baseline: **MCP `2026-07-28`**.
+Protocol baseline: **MCP `2026-07-28`**. Hardening and decision log:
+[traceability/mcp-hardening-2026-08-17.md](traceability/mcp-hardening-2026-08-17.md).
 
 ## The path of one call
 
@@ -197,17 +198,31 @@ address.
 - **Header routing.** `Mcp-Method` / `Mcp-Name` duplicate method and
   tool name into headers. A header that disagrees with the body is
   rejected — otherwise a gateway could authorize one method while the
-  server runs another.
+  server runs another. `mcp_tax_calculator` checks both headers.
+- **Required `_meta`.** Every `tools/list`, `tools/call`, and
+  `server/info` request must carry
+  `io.modelcontextprotocol/protocolVersion` and
+  `io.modelcontextprotocol/clientCapabilities`. Missing fields are
+  JSON-RPC `-32602`. Vendor identity stays under `ug.go.ura.chatbot/`.
 - **Cacheable lists.** `tools/list` returns `ttlMs` (1h) and
-  `cacheScope: "server"`; these calculators are public and identical for
-  every caller.
+  `cacheScope: "server"`. `HttpTransport` honours `ttlMs` instead of
+  caching for process life.
 - **Full JSON Schema 2020-12** on input and output, and
   `structuredContent` on results alongside a human-readable `content`
-  text block.
+  text block. Every registered tool sets `additionalProperties: false`.
 - **Multi Round-Trip Requests** replace server-initiated requests.
-  `HttpTransport` surfaces `resultType: "input_required"` verbatim with
-  its `elicitations` and `requestState`, so a caller can elicit and
-  replay instead of treating it as a failure.
+  `HttpTransport` normalizes `inputRequests` (legacy `elicitations`
+  still parsed). `requestState` is HMAC-SHA256 when
+  `MCP_REQUEST_STATE_SECRET` is set. The agent loop emits
+  `tool_call.input_required` and retries once when the caller supplies
+  `inputResponses`.
+- **Unknown tools** return `Unknown tool: <name>` only — they do not
+  enumerate the registry.
+- **Circuit breaker** trips on transport failures, not on tool-level
+  `ok: false` (bad taxpayer input is not a sick server).
+- **Idempotency** is tenant-scoped. When `REDIS_URL` is set the replay
+  cache is shared across replicas (`MCP_IDEMPOTENCY_TTL_S`, default 1
+  day); otherwise it is the in-process 512-entry map.
 
 ## Long-running work (`tasks`)
 

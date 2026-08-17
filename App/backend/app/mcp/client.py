@@ -23,7 +23,9 @@ The agent layer never imports :mod:`app.tools` directly.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -32,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..resilience import CircuitBreaker
+from .mrtr import parse_input_required, unwrap_request_state
 from .policy import authorize_tool_call
 from .transport import (
     MCP_PROTOCOL_VERSION,
@@ -47,8 +50,33 @@ logger = logging.getLogger(__name__)
 
 #: Soft deadline for a single tool call.
 DEFAULT_TIMEOUT_S = 15.0
-#: How many completed critical calls to remember for replay.
+#: How many completed critical calls to remember for replay (in-process fallback).
 _IDEMPOTENCY_CACHE_SIZE = 512
+_IDEMPOTENCY_REDIS_PREFIX = "mcp:idem:"
+_IDEMPOTENCY_REDIS_TTL_S = int(os.getenv("MCP_IDEMPOTENCY_TTL_S", "86400"))
+_redis = None
+_redis_tried = False
+
+
+def _shared_store():
+    """Redis when ``REDIS_URL`` is up; otherwise ``None`` (in-process cache)."""
+    global _redis, _redis_tried
+    if _redis_tried:
+        return _redis
+    _redis_tried = True
+    url = os.getenv("REDIS_URL", "")
+    if not url:
+        return None
+    try:
+        import redis  # noqa: PLC0415 — optional
+
+        client = redis.from_url(url, socket_timeout=2)
+        client.ping()
+        _redis = client
+    except Exception:
+        logger.info("MCP idempotency: Redis unavailable; using in-process cache")
+        _redis = None
+    return _redis
 
 
 @dataclass
@@ -249,6 +277,8 @@ class MCPClient:
         idempotency_key: str = "",
         iteration: int = 0,
         timeout_s: float = DEFAULT_TIMEOUT_S,
+        input_responses: list[Any] | None = None,
+        request_state: Any = None,
     ) -> MCPCallResult:
         """Call a tool and return a structured result.
 
@@ -290,11 +320,7 @@ class MCPClient:
 
         if descriptor is None or transport is None:
             return finish(
-                {
-                    "ok": False,
-                    "error": f"Unknown tool: {name}",
-                    "available_tools": [t["name"] for t in self.list_mcp_tools()],
-                },
+                {"ok": False, "error": f"Unknown tool: {name}"},
                 ok=False,
             )
 
@@ -364,8 +390,31 @@ class MCPClient:
         meta = request_meta(
             tenant_id=tenant_id, user_id=user_id, user_role=user_role, call_id=call_id
         )
+        if (
+            isinstance(request_state, dict)
+            and ("alg" in request_state or "sig" in request_state)
+            and unwrap_request_state(request_state) is None
+        ):
+            return finish(
+                {
+                    "ok": False,
+                    "error": "requestState integrity check failed",
+                    "policy": policy,
+                },
+                ok=False,
+                risk=risk,
+                namespace=namespace,
+            )
+
         try:
-            raw = transport.call(name, args, meta=meta, timeout_s=timeout_s)
+            raw = transport.call(
+                name,
+                args,
+                meta=meta,
+                timeout_s=timeout_s,
+                input_responses=input_responses,
+                request_state=request_state,
+            )
         except TransportError as exc:
             breaker.record_failure()
             return finish(
@@ -386,15 +435,18 @@ class MCPClient:
 
         if not isinstance(raw, dict):
             raw = {"ok": True, "result": raw}
+        required = parse_input_required(raw)
+        if required is not None and not input_responses:
+            raw = required
+        elif required is not None and input_responses:
+            # Already retried with responses; do not loop.
+            raw = required
         raw.setdefault("policy", policy)
         ok = bool(raw.get("ok", True))
         if ok:
             breaker.record_success()
-        else:
-            # A tool returning ok=false for bad user input is not a sick
-            # dependency, but the breaker only trips after a run of them,
-            # so a genuinely failing server is still caught.
-            breaker.record_failure()
+        # Tool-level ok=false (bad args, missing figures) is not a sick
+        # dependency. Only transport exceptions trip the breaker.
 
         drift = result_matches_schema(descriptor.get("outputSchema"), raw)
         if drift:
@@ -414,6 +466,15 @@ class MCPClient:
         return f"{tenant_id}:{name}:{idempotency_key}"
 
     def _replay_lookup(self, key: str) -> dict[str, Any] | None:
+        store = _shared_store()
+        if store is not None:
+            try:
+                raw = store.get(_IDEMPOTENCY_REDIS_PREFIX + key)
+                if raw:
+                    data = json.loads(raw)
+                    return data if isinstance(data, dict) else None
+            except Exception:
+                logger.debug("MCP idempotency redis get failed", exc_info=True)
         with self._lock:
             cached = self._idempotency.get(key)
             if cached is not None:
@@ -421,8 +482,19 @@ class MCPClient:
             return dict(cached) if cached is not None else None
 
     def _replay_store(self, key: str, result: dict[str, Any]) -> None:
+        payload = dict(result)
+        store = _shared_store()
+        if store is not None:
+            try:
+                store.setex(
+                    _IDEMPOTENCY_REDIS_PREFIX + key,
+                    _IDEMPOTENCY_REDIS_TTL_S,
+                    json.dumps(payload, default=str),
+                )
+            except Exception:
+                logger.debug("MCP idempotency redis set failed", exc_info=True)
         with self._lock:
-            self._idempotency[key] = dict(result)
+            self._idempotency[key] = payload
             self._idempotency.move_to_end(key)
             while len(self._idempotency) > _IDEMPOTENCY_CACHE_SIZE:
                 self._idempotency.popitem(last=False)

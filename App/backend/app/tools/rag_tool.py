@@ -101,6 +101,17 @@ class SearchKnowledgeBaseTool(Tool):
                     },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "query": {"type": "string"},
+                    "count": {"type": "integer"},
+                    "results": {"type": "array"},
+                    "error": {"type": "string"},
+                },
             },
             risk="low",
             namespace="rag",
@@ -130,11 +141,19 @@ class SearchKnowledgeBaseTool(Tool):
             filters["tag"] = filter_tag
 
         try:
-            hits = retriever.search(
-                query,
-                top_k=top_k,
-                filters=filters or None,
-            )
+            from ..query import detect_language
+
+            locale = detect_language(query)
+            search = getattr(retriever, "search_planned", retriever.search)
+            try:
+                hits = search(
+                    query,
+                    top_k=top_k,
+                    filters=filters or None,
+                    locale=locale,
+                )
+            except TypeError:
+                hits = search(query, top_k=top_k, filters=filters or None)
         except Exception as e:  # noqa: BLE001
             logger.exception("RAG tool: search failed")
             return {"ok": False, "error": f"search failed: {e}", "results": []}
@@ -149,6 +168,8 @@ class SearchKnowledgeBaseTool(Tool):
                     "section": h.get("section", ""),
                     "page": h.get("page", ""),
                     "doc_type": h.get("doc_type", ""),
+                    "url": h.get("url", ""),
+                    "effective_date": h.get("effective_date", ""),
                     "score": round(
                         float(h.get("score_rerank") or h.get("score_rrf") or 0.0),
                         4,

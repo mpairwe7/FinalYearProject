@@ -19,13 +19,17 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from typing import Any, Protocol
 
-logger = logging.getLogger(__name__)
+from .protocol import (  # noqa: F401 — re-exported for existing imports
+    CLIENT_NAME,
+    MCP_PROTOCOL_VERSION,
+    request_meta,
+)
 
-MCP_PROTOCOL_VERSION = "2026-07-28"
-CLIENT_NAME = "ura-chatbot"
+logger = logging.getLogger(__name__)
 
 #: ``MCP_SERVER_URL_<NAMESPACE>`` binds a namespace to a remote server.
 _URL_ENV_PREFIX = "MCP_SERVER_URL_"
@@ -54,6 +58,8 @@ class ToolTransport(Protocol):
         *,
         meta: dict[str, Any],
         timeout_s: float,
+        input_responses: list[Any] | None = None,
+        request_state: Any = None,
     ) -> dict[str, Any]:
         """Execute the tool and return its JSON-serialisable result."""
 
@@ -86,6 +92,8 @@ class InProcessTransport:
         *,
         meta: dict[str, Any],
         timeout_s: float,
+        input_responses: list[Any] | None = None,
+        request_state: Any = None,
     ) -> dict[str, Any]:
         from ..tools import ToolRegistry
 
@@ -105,6 +113,7 @@ class HttpTransport:
         self.base_url = base_url.rstrip("/")
         self._token = token
         self._tools: list[dict[str, Any]] | None = None
+        self._tools_expires_at: float = 0.0
 
     # -- wire ----------------------------------------------------------
     def _headers(self, method: str, tool_name: str = "") -> dict[str, str]:
@@ -163,10 +172,17 @@ class HttpTransport:
 
     # -- ToolTransport -------------------------------------------------
     def list_tools(self) -> list[dict[str, Any]]:
-        if self._tools is None:
-            result = self._request("tools/list", {})
+        now = time.monotonic()
+        if self._tools is None or now >= self._tools_expires_at:
+            result = self._request("tools/list", {"_meta": request_meta()})
             tools = result.get("tools", [])
             self._tools = [t for t in tools if isinstance(t, dict)]
+            ttl_ms = result.get("ttlMs")
+            try:
+                ttl_s = max(1.0, float(ttl_ms) / 1000.0) if ttl_ms is not None else 3600.0
+            except (TypeError, ValueError):
+                ttl_s = 3600.0
+            self._tools_expires_at = now + ttl_s
         return list(self._tools)
 
     def describe(self, tool_name: str) -> dict[str, Any] | None:
@@ -179,23 +195,29 @@ class HttpTransport:
         *,
         meta: dict[str, Any],
         timeout_s: float,
+        input_responses: list[Any] | None = None,
+        request_state: Any = None,
     ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "name": tool_name,
+            "arguments": arguments,
+            "_meta": meta,
+        }
+        if input_responses:
+            params["inputResponses"] = input_responses
+        if request_state is not None:
+            params["requestState"] = request_state
         result = self._request(
             "tools/call",
-            {"name": tool_name, "arguments": arguments, "_meta": meta},
+            params,
             tool_name=tool_name,
             timeout_s=timeout_s,
         )
-        if result.get("resultType") == "input_required":
-            # Multi Round-Trip Requests: the server wants more input
-            # before it can act.  Surfaced verbatim so the caller can
-            # elicit and retry rather than treating it as a failure.
-            return {
-                "ok": False,
-                "input_required": True,
-                "elicitations": result.get("elicitations", []),
-                "requestState": result.get("requestState"),
-            }
+        from .mrtr import parse_input_required
+
+        required = parse_input_required(result)
+        if required is not None:
+            return required
         structured = result.get("structuredContent")
         if isinstance(structured, dict):
             structured.setdefault("ok", not result.get("isError", False))
@@ -204,28 +226,6 @@ class HttpTransport:
             "ok": not result.get("isError", False),
             "content": result.get("content", []),
         }
-
-
-def request_meta(
-    *,
-    tenant_id: str,
-    user_id: str,
-    user_role: str,
-    call_id: str,
-) -> dict[str, Any]:
-    """The ``_meta`` block every stateless request carries.
-
-    Replaces what the removed ``initialize`` handshake used to establish
-    once per session.
-    """
-    return {
-        "protocolVersion": MCP_PROTOCOL_VERSION,
-        "clientInfo": {"name": CLIENT_NAME, "version": "2.0"},
-        "ug.go.ura.chatbot/tenantId": tenant_id,
-        "ug.go.ura.chatbot/userId": user_id,
-        "ug.go.ura.chatbot/userRole": user_role,
-        "ug.go.ura.chatbot/callId": call_id,
-    }
 
 
 def build_transports() -> dict[str, ToolTransport]:

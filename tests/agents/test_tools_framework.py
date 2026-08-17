@@ -43,7 +43,7 @@ def test_registry_call_unknown_tool_returns_structured_error(fresh_registry):
     result = fresh_registry.call("nonexistent", {})
     assert result["ok"] is False
     assert "Unknown tool" in result["error"]
-    assert "available_tools" in result
+    assert "available_tools" not in result
 
 
 def test_registry_call_captures_exceptions(fresh_registry):

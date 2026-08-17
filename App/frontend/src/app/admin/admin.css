@@ -169,14 +169,47 @@
 }
 
 .ov-queue li {
+  padding: 0;
+  border: 1px solid var(--border-0);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+}
+
+.ov-q-link {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--border-0);
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
+  text-decoration: none;
+  color: inherit;
+  border-radius: inherit;
+}
+
+.ov-q-link:hover {
+  background: var(--surface-2);
+}
+
+.ov-q-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ov-metric-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.ov-metric-link:hover {
+  border-color: var(--border-2);
+}
+
+.ov-q-wait.is-warn {
+  color: var(--warning);
+}
+
+.ov-q-wait.is-breach {
+  color: var(--danger);
 }
 
 .ov-pri {
@@ -302,6 +335,48 @@
   text-decoration: underline;
 }
 
+.flag-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface-ink);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md, 14px);
+  overflow: hidden;
+}
+
+.flag-table th,
+.flag-table td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-0);
+  font-size: 13px;
+  color: var(--text-1);
+  vertical-align: top;
+}
+
+.flag-table th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+
+.flag-table button {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-1);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.flag-table button.is-active {
+  color: var(--success);
+  border-color: var(--success);
+}
+
 @media (max-width: 900px) {
   .ov-cols {
     grid-template-columns: 1fr;
@@ -315,7 +390,7 @@
   .ov-metric-value {
     font-size: 22px;
   }
-  .ov-queue li {
+  .ov-q-link {
     grid-template-columns: auto 1fr;
   }
   .ov-q-wait {

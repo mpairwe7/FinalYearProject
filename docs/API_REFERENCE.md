@@ -1020,6 +1020,57 @@ PATCH /v1/admin/tickets/{ticket_id}
 
 ---
 
+#### Ticket SLA
+
+```http
+GET /v1/admin/tickets/sla?days=30
+```
+
+Medians (`median_response_seconds`, `median_resolution_seconds`,
+`median_next_reply_seconds`) are period-scoped. `breaching`,
+`breaching_first_response`, `breaching_next_reply`,
+`awaiting_first_response`, and `awaiting_next_response` count every
+`open`/`assigned` ticket, not a queue page.
+
+---
+
+#### Ticket presence (collision lock)
+
+```http
+POST /v1/admin/tickets/{ticket_id}/presence
+```
+
+Heartbeat that this officer has the case open. Viewers older than 45s
+are dropped. `GET /v1/admin/tickets/{ticket_id}` includes the live
+`viewers` list.
+
+---
+
+#### Live ticket stream
+
+```http
+WS /v1/admin/tickets/stream
+```
+
+Staff-only, read-only. Pushes `escalation.created` triage metadata
+(no transcript). The staff UI invalidates the queue on each event.
+
+---
+
+#### Feature flags (G31 slice)
+
+```http
+GET /v1/admin/flags
+PATCH /v1/admin/flags/{name}?enabled=true
+```
+
+`GET` lists the replica registry (`enabled`, `protected`, rollout size).
+`PATCH` is `ura_admin` only, in-process, and ephemeral. Safety flags
+(`auth_required`, `multi_tenant`, `audit_ledger`, `voice_consent`)
+return 400.
+
+---
+
 ### Identity & Profile (Phase 14)
 
 User identity, profile preferences, and UDPA 2019 data-subject rights. All endpoints under `/v1/me` require JWT authentication unless otherwise noted.
@@ -1436,6 +1487,7 @@ class ChatResponse(BaseModel):
     locale: str = "en"
     escalation_required: bool = False
     escalation_reason: str = ""
+    current_topic: str = ""  # G6 persisted task id, empty when none
 ```
 
 ### FeedbackRequest
@@ -1806,7 +1858,7 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `SUNBIRD_RETRIES` | Attempts per Sunbird account before failover (429/5xx/timeouts only) | `2` |
 | **Feature Flags** | | |
 | `FLAG_TOOL_USE` | Enable LLM tool-calling loop | `false` |
-| `FLAG_AGENTIC_MODE` | Enable agentic supervisor routing | `false` |
+| `FLAG_AGENTIC_MODE` | Enable agentic supervisor routing (EN golden-set gate ≥ 0.95) | `true` |
 | `FLAG_WORKFLOWS` | Enable YAML-driven guided workflows | `true` |
 | `FLAG_AUTH_REQUIRED` | Require JWT authentication on protected endpoints | `false` |
 | `FLAG_AUDIT_LEDGER` | Enable hash-chained audit ledger | `false` |

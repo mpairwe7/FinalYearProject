@@ -22,7 +22,7 @@
 
 ## Runtime Database Schema (SQLite / PostgreSQL)
 
-The backend maintains 11 tables in SQLite (default, WAL mode) or PostgreSQL (opt-in via `ANALYTICS_BACKEND=postgres`). Forward-compatible migrations are applied on startup.
+The backend maintains 16 tables in SQLite (default, WAL mode) or PostgreSQL (opt-in via `ANALYTICS_BACKEND=postgres`). Forward-compatible migrations are applied on startup.
 
 - **feedback**: User thumbs-up/down on chatbot responses.
   - id (PK), message_id, session_id, rating (up|down), comment, user_query, bot_reply, created_at.
@@ -39,6 +39,10 @@ The backend maintains 11 tables in SQLite (default, WAL mode) or PostgreSQL (opt
 - **conversations**: Chat turns (multi-turn history).
   - id (PK), conversation_id, session_id, user_message, bot_reply, sources (JSON), response_time_ms, confidence, topic_tag, created_at.
   - Indexes: session_id, conversation_id, created_at. Retention: `CONVERSATION_TTL_DAYS` (default: 7).
+
+- **conversation_topics**: Current task for a thread (G6, 2026-08-17).
+  - conversation_id (PK), topic_id, label (catalog only), tax_type, confidence, updated_at.
+  - Retention: same `CONVERSATION_TTL_DAYS` on `updated_at`. Prompt sees the catalog label, never raw user text.
 
 - **workflow_sessions**: Guided workflow state (Phase 15).
   - conversation_id (PK), workflow_id, status (active|completed|cancelled), current_step_idx, slots_json, last_prompt, created_at, updated_at.
@@ -179,11 +183,12 @@ retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registrat
 | **Abstention Precision** | Faithfulness < threshold on unanswerable | Correct refusal rate |
 
 ### Evaluation Datasets
-- `Data/eval/rag_eval.jsonl` — English eval set (21 samples), JSONL format:
+- `Data/eval/rag_eval.jsonl` — English eval set (30 samples), JSONL format:
   ```json
   {"question": "...", "ground_truth": "...", "contexts": ["..."], "answer": "..."}
   ```
-  Covers: TIN, VAT, penalties, EFRIS, withholding tax, customs, income tax, corporate tax, exemptions, excise duty, PAYE, online payments, rental tax, digital stamps, objections, refunds, stamp duty, amendments, online businesses.
+  Optional audit fields on regression rows: `case_id`, `tags`, `should_abstain`.
+  Covers: TIN, VAT, penalties, EFRIS, withholding tax, customs, income tax, corporate tax, exemptions, excise duty, PAYE, online payments, rental tax, digital stamps, objections, refunds, stamp duty, amendments, online businesses, plus `reg-*` cases (procedure-vs-definition, FY filters, multi-intent, off-domain abstention). Completeness is gated by `App/backend/tests/test_eval_set_completeness.py`.
 
 - `Data/eval/rag_eval_lg.jsonl` — Luganda eval set (12 samples), same format:
   Covers: TIN, VAT, penalties, e-services, EFRIS, mobile payments, withholding tax, tax clearance, VAT exemptions, late filing, corporate tax, objections. Evaluated as a blocking CI step.

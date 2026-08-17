@@ -631,7 +631,10 @@ Admin endpoints for ticket management:
        queue view — urgent first, then longest-waiting; no transcript
   GET  /v1/admin/tickets/stats?days=30
   GET  /v1/admin/tickets/{id}
-       detail view — includes the full conversation transcript
+       detail view — includes the full conversation transcript and viewers
+  POST /v1/admin/tickets/{id}/presence
+  GET  /v1/admin/flags
+  PATCH /v1/admin/flags/{name}?enabled=
   PATCH /v1/admin/tickets/{id}  (status/assignee/note/priority)
 ```
 
@@ -794,9 +797,19 @@ SPEECH_ENABLED=false uvicorn app.main:app --reload --port 8887
 | `OCR_SERVICE_URL` | (empty) | Local OCR sidecar URL; `auto` uses it when set |
 | `OCR_SERVICE_MAX_CONCURRENT` | `2` | Concurrent OCR-sidecar calls made by the API |
 | `OCR_SERVICE_TIMEOUT_SECONDS` | `6` | Per-page sidecar deadline; keep below document OCR budget |
+| `OCR_SERVICE_MAX_BYTES` | `12582912` | Sidecar request-body cap |
+| `OCR_SERVICE_MAX_PIXELS` | `20000000` | Sidecar Pillow decode cap |
+| `OCR_INFERENCE_MAX_CONCURRENT` | `1` | Sidecar in-process OCR concurrency |
 | `DOCUMENT_MAX_BYTES` | `10485760` | Maximum uploaded source file size (10 MiB) |
+| `DOCUMENT_MAX_PDF_XREFS` | `20000` | Query-time PDF object-count cap |
+| `DOCUMENT_MAX_PDF_PAGE_EDGE_PT` | `14400` | Max page width/height in points (200 in) |
+| `DOCUMENT_MAX_IMAGE_PIXELS` | `20000000` | Pillow decode cap for uploaded images |
 | `DOCUMENT_OCR_TIMEOUT_SECONDS` | `20` | Wall-clock budget for OCR across a scanned PDF |
 | `DOCUMENT_MAX_PDF_RENDER_PIXELS` | `12000000` | Per-page raster cap before OCR |
+| `DOCUMENT_MAX_ARCHIVE_ENTRIES` | `1000` | Max ZIP entries in an Office upload |
+| `DOCUMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES` | `52428800` | Max uncompressed Office ZIP size |
+| `DOCUMENT_MAX_ARCHIVE_COMPRESSION_RATIO` | `100` | Max per-entry compression ratio |
+| `PDF_CORPUS_MAX_XREFS` | `250000` | Index-time handbook xref cap |
 | `EXPORT_RATE_LIMIT` | `10/minute` | Rate limit for PDF exports |
 | `TAX_RATES_REQUIRE_CONFIRMED` | `true` in production, else `false` | Fail closed instead of quoting a rate table still marked `provisional`; see [`docs/tax-rate-tables.md`](docs/tax-rate-tables.md) |
 | `MCP_SERVER_URL_<NAMESPACE>` | (empty) | Bind an MCP namespace to a deployed server (e.g. `MCP_SERVER_URL_TAX_CALCULATOR`); unset namespaces stay in-process |
@@ -1064,14 +1077,14 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_RERANKER` | Cross-encoder reranking | `true` |
 | **Agentic flags (Phase 14–18)** | | |
 | `FLAG_TOOL_USE` | Allow registered tools through the bounded agentic loop | `false` |
-| `FLAG_AGENTIC_MODE` | Enable supervisor routing for tools / specialists | `false` |
+| `FLAG_AGENTIC_MODE` | Enable supervisor routing for tools / specialists (EN golden-set gate ≥ 0.95) | `true` |
 | `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
 | `ESCALATION_WEBHOOK_URL` | POST target notified when an escalation ticket is created; unset disables delivery | _(unset)_ |
 | `ESCALATION_WEBHOOK_TOKEN` | Bearer token for that webhook, sent as a header | _(unset)_ |
 | `ESCALATION_WEBHOOK_TIMEOUT` | Webhook timeout in seconds | `5` |
 | `ESCALATION_WEBHOOK_MIN_PRIORITY` | Lowest ticket priority worth notifying | `normal` |
 | `ESCALATION_TEAM_<TOPIC>` | Override the team that owns a handoff topic, e.g. `ESCALATION_TEAM_CUSTOMS=border-ops` | per-topic defaults |
-| `FLAG_TOOL_RAG` | Expose only the top-k relevant tool schemas per query instead of every registered one | `false` |
+| `FLAG_TOOL_RAG` | Expose top-k tool schemas plus rails. A scored miss keeps rails only. Default off; `FLAG_TOOL_RAG_PERCENT` for a canary | `false` |
 | `TOOL_RAG_TOP_K` | Tools selected when `FLAG_TOOL_RAG` is on (rails are always added) | `5` |
 | `TOOL_MAX_CALLS_PER_TURN` | Total tool dispatches allowed in one turn | `8` |
 | `TOOL_MAX_CALLS_PER_ITERATION` | Fan-out ceiling for a single generation round | `4` |
@@ -1703,16 +1716,22 @@ an operator flips a flag.
     view, ordered urgent-first then longest-waiting; omits the transcript
   - `GET /v1/admin/tickets/stats?days=30`
   - `GET /v1/admin/tickets/{id}` — detail view, includes the full
-    conversation transcript captured when the ticket was raised
-  - `GET /v1/admin/tickets/sla?days=30` — median time-to-first-response
-    and time-to-resolution
+    conversation transcript captured when the ticket was raised, plus
+    live `viewers`
+  - `POST /v1/admin/tickets/{id}/presence` — collision heartbeat
+  - `GET /v1/admin/tickets/sla?days=30` — medians plus population
+    first-response / next-reply breach counts
+  - `GET /v1/admin/flags` / `PATCH /v1/admin/flags/{name}` — replica
+    registry; toggles are in-process and ephemeral
   - `PATCH /v1/admin/tickets/{id}` (status / assignee / note / priority /
     `officer_reply`). `officer_reply` is delivered to the **taxpayer** on
     their next turn; `staff_note` stays internal
 - Staff UI at `/admin/tickets` (Next.js) — the queue in backend order
   (urgent first, then longest-waiting), the full transcript per ticket,
-  and separate controls for the taxpayer-facing reply and the internal
-  note
+  live arrival via `WS /v1/admin/tickets/stream`, canned replies,
+  assignment lock, and separate controls for the taxpayer-facing reply
+  and the internal note
+- Flags console at `/admin/flags`
 - `ticket_id` surfaced in `ChatResponse` so the frontend can show
   "ticket 1234abcd" to the user
 
@@ -1750,10 +1769,11 @@ tool — see:
   Dispatches tool calls via `ToolRegistry.call()`, feeds results back,
   bounded by `max_iterations`. Added `_strip_thinking()` to remove
   Qwen3's `<think>` reasoning blocks from all output paths.
-- `App/backend/app/flags.py` — `tool_use` and `agentic_mode` remain
-  feature-flagged off by default. Agentic tool-calling only activates
-  when the supervisor explicitly routes to TOOLS/SPECIALIST or when the
-  deployment enables those flags for a controlled rollout.
+- `App/backend/app/flags.py` — `tool_use` stays off by default.
+  `agentic_mode` defaults **on** after the English routing golden set
+  holds ≥ 0.95 (`agentic_mode_gate`). Tool-calling still activates only
+  when the supervisor routes to TOOLS/SPECIALIST (`force_agentic`) or
+  when a deployment turns `FLAG_TOOL_USE` on.
 - `App/backend/app/service.py` — Fixed `use_agentic` logic: now only
   `force_agentic` (supervisor decision), not `FLAG_TOOL_USE` alone,
   triggers the tool-calling path. This prevents double-search degradation

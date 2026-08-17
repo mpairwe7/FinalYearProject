@@ -86,15 +86,57 @@ def _render_value(value: Any) -> str:
     return str(value)
 
 
+GRAPH_HIT_ID = "graph:statutory"
+#: Calibrated [0,1] so the graph leg can compete with reranked passages
+#: instead of being blindly prepended. Unverified figures sit lower.
+GRAPH_AUTHORITY_NORM = 0.84
+GRAPH_UNVERIFIED_NORM = 0.70
+
+
 def graph_answer_for(question: str) -> str:
     """``question -> rendered claims``, for the multi-hop harness."""
+    hit = graph_hit_for(question)
+    return (hit or {}).get("answer", "")
+
+
+def graph_hit_for(question: str) -> dict[str, Any] | None:
+    """One retrieval-shaped hit for the statutory graph, or ``None``.
+
+    Carries a calibrated ``score_norm`` and a rank-0 RRF contribution so
+    callers can fuse it with dense/BM25 hits instead of prepending it.
+    """
+    from ..retriever import RRF_K
     from .query import resolve
 
     try:
-        return render(resolve(question, default_fiscal_year=DEFAULT_FY))
+        answer = resolve(question, default_fiscal_year=DEFAULT_FY)
     except Exception as exc:
         logger.warning("graph shadow: %s", exc)
-        return ""
+        return None
+    rendered = render(answer)
+    if not rendered.strip():
+        return None
+    unverified = any(getattr(c, "unverified", False) for c in answer.claims)
+    fiscal_year = next((c.fiscal_year for c in answer.claims if c.fiscal_year), "")
+    return {
+        "id": GRAPH_HIT_ID,
+        "text": (
+            "Statutory rate positions (from the effective-dated URA "
+            "rate tables, with the Act behind each figure):\n" + rendered
+        ),
+        "question": "",
+        "answer": rendered,
+        "source": "URA rate tables (statutory graph)",
+        "chunk_id": GRAPH_HIT_ID,
+        "page": "",
+        "section": "statutory-graph",
+        "doc_type": "graph",
+        "fiscal_year": fiscal_year,
+        "score_rrf": 1.0 / (RRF_K + 0),
+        "score_norm": GRAPH_UNVERIFIED_NORM if unverified else GRAPH_AUTHORITY_NORM,
+        "graph_hops": list(answer.hops),
+        "graph_unverified": unverified,
+    }
 
 
 def score() -> dict[str, Any]:

@@ -72,6 +72,11 @@ class AgentGraphState:
     reflections: list[str] = field(default_factory=list)
     reflect_count: int = 0
     max_reflections: int = 1
+    #: One specialist → retrieve hop when tools produced no evidence (G21/G23).
+    handoff_count: int = 0
+    max_handoffs: int = 1
+    handoff_from: str = ""
+    handoff_reason: str = ""
 
     # -- Response --
     reply: str = ""

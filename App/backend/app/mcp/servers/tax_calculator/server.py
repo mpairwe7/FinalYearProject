@@ -26,6 +26,7 @@ from typing import Any
 
 from ....tools import ToolRegistry
 from ...policy import authorize_tool_call
+from ...protocol import missing_required_meta
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,23 @@ def handle_request(body: Any, headers: dict[str, str] | None = None) -> dict[str
             INVALID_REQUEST,
             f"Mcp-Method header '{header_method}' does not match body method '{method}'",
         )
+    header_name = normalized.get("mcp-name")
+    body_name = str(params.get("name", "")) if method == "tools/call" else ""
+    if header_name and method == "tools/call" and header_name != body_name:
+        return _error(
+            request_id,
+            INVALID_REQUEST,
+            f"Mcp-Name header '{header_name}' does not match body tool '{body_name}'",
+        )
+
+    if method in ("tools/list", "tools/call", "server/info"):
+        missing = missing_required_meta(params.get("_meta") if isinstance(params, dict) else None)
+        if missing:
+            return _error(
+                request_id,
+                INVALID_PARAMS,
+                "missing required _meta fields: " + ", ".join(missing),
+            )
 
     if request_id is None and method.startswith("notifications/"):
         return None

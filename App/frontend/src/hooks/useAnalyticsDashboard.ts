@@ -73,6 +73,7 @@ export function useTicket(id: string | null) {
     queryFn: () => analyticsApi.ticket(id as string),
     enabled: Boolean(id),
     staleTime: 5_000,
+    refetchInterval: 10_000,
     retry: 1,
   });
 }

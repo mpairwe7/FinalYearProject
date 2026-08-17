@@ -52,6 +52,16 @@ export function sourceUrl(source?: string | null): string | null {
   return URA_CONTACTS.website;
 }
 
+/** Prefer the index-stored canonical URL; otherwise the portal fallback. */
+export function citationHref(citation: {
+  url?: string | null;
+  source?: string | null;
+}): string | null {
+  const raw = (citation.url || "").trim();
+  if (/^https?:\/\/[^\s]+$/i.test(raw)) return raw;
+  return sourceUrl(citation.source);
+}
+
 /** Words that must not be title-cased when a filename becomes a label. */
 const SOURCE_ACRONYMS: Record<string, string> = {
   ura: 'URA',

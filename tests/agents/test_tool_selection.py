@@ -40,10 +40,14 @@ class TestToolSelection:
                 assert rail in selected
 
     def test_selection_never_returns_an_empty_tool_set(self, clean_flags, eligible):
-        # An agent with no tools cannot act; falling back to all of them
-        # is merely expensive.
+        # A miss keeps the safety rails rather than pasting every schema.
         clean_flags.set("tool_rag", True)
-        assert _select_tools_for_query("zzzz qqqq wwww", eligible)
+        selected = _select_tools_for_query("zzzz qqqq wwww", eligible)
+        assert selected
+        assert len(selected) < len(eligible)
+        for rail in MANDATORY_RAILS:
+            if rail in eligible:
+                assert rail in selected
 
     def test_an_empty_eligible_set_stays_empty(self, clean_flags):
         clean_flags.set("tool_rag", True)

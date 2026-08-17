@@ -1,61 +1,47 @@
 "use client";
 
 /**
- * Operations overview — the admin landing page.
+ * Operations overview — what needs attention right now.
  *
- * Deliberately does not duplicate what exists: `/admin/tickets` is a 386-line
- * staff console and `/analytics` is a full observability dashboard. This page
- * answers one question — what needs attention right now — and links to them.
- *
- * Every figure comes from an endpoint that already ships:
- * `/v1/admin/tickets/stats`, `/tickets/sla`, `/tickets` (existing hooks) and
- * `/v1/authority/status`, which had no UI at all despite gating whether the
- * assistant will quote a rate.
- *
- * Standards: ISO/IEC 25010:2023 §4 (Interaction Capability), WCAG 2.2 AA.
+ * `/admin/tickets` is the workbench and `/analytics` is observability.
+ * This page is the morning board: SLA, authority, and the cases waiting
+ * longest — each one a deep link into the queue.
  */
 import React, { useEffect, useState } from "react";
 import StaffGuard from "../../components/StaffGuard";
-import { useTicketQueue, useTicketSla, useTicketStats } from "../../hooks/useAnalyticsDashboard";
+import { useTicketQueueFull, useTicketSla, useTicketStats } from "../../hooks/useAnalyticsDashboard";
 import { authHeaders } from "../../lib/authSession";
+import { formatDuration, waitingFor, waitTone } from "../../lib/ticketUi";
 import "./admin.css";
-
-/** Seconds → a duration an officer reads at a glance, not 4,920. */
-function humanDuration(seconds: number | null | undefined): string {
-  if (seconds == null) return "—";
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const m = Math.round(seconds / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
-
-function waitingFor(createdAt: number): string {
-  const mins = Math.max(0, Math.round((Date.now() / 1000 - createdAt) / 60));
-  if (mins < 60) return `${mins}m`;
-  const h = Math.floor(mins / 60);
-  if (h < 24) return `${h}h ${mins % 60}m`;
-  return `${Math.floor(h / 24)}d ${h % 24}h`;
-}
 
 function Metric({
   label,
   value,
   hint,
   tone,
+  href,
 }: {
   label: string;
   value: string;
   hint?: string;
   tone?: "warn" | "danger" | "good";
+  href?: string;
 }) {
-  return (
-    <div className={`ov-metric${tone ? ` ov-${tone}` : ""}`}>
+  const inner = (
+    <>
       <span className="ov-metric-label">{label}</span>
       <strong className="ov-metric-value">{value}</strong>
       {hint && <span className="ov-metric-hint">{hint}</span>}
-    </div>
+    </>
   );
+  if (href) {
+    return (
+      <a className={`ov-metric ov-metric-link${tone ? ` ov-${tone}` : ""}`} href={href}>
+        {inner}
+      </a>
+    );
+  }
+  return <div className={`ov-metric${tone ? ` ov-${tone}` : ""}`}>{inner}</div>;
 }
 
 interface AuthorityStatus {
@@ -68,7 +54,6 @@ interface AuthorityStatus {
   detail?: string;
 }
 
-/** The manifest that decides whether the assistant may quote a rate at all. */
 function useAuthorityStatus() {
   const [state, setState] = useState<{ loading: boolean; data?: AuthorityStatus; error?: string }>({
     loading: true,
@@ -89,15 +74,17 @@ function useAuthorityStatus() {
 function Overview() {
   const { data: stats, isLoading: statsLoading } = useTicketStats(30);
   const { data: sla } = useTicketSla(30);
-  const { data: queue } = useTicketQueue("open", 6);
+  const { data: queue } = useTicketQueueFull("open", "", "", 20);
   const authority = useAuthorityStatus();
 
   const items = queue?.tickets ?? [];
   const urgent = items.filter((t) => t.priority === "urgent").length;
   const awaiting = sla?.awaiting_first_response ?? 0;
+  const breaching = sla?.breaching ?? 0;
+  const unassigned = items.filter((t) => !t.assignee).length;
 
   return (
-    <main className="ov-page">
+    <main className="ov-page" id="staff-main">
       <header className="ov-head">
         <div>
           <h1>Operations overview</h1>
@@ -113,21 +100,37 @@ function Overview() {
           label="Open escalations"
           value={statsLoading ? "…" : String(stats?.open ?? 0)}
           hint={`${stats?.total ?? 0} raised in the period`}
+          href="/admin/tickets?status=open"
         />
         <Metric
           label="Awaiting first response"
           value={String(awaiting)}
           hint="nobody has replied yet"
           tone={awaiting > 0 ? "warn" : "good"}
+          href="/admin/tickets?status=open"
+        />
+        <Metric
+          label="Past 24-hour SLA"
+          value={String(breaching)}
+          hint="open or in progress, first- or next-reply over 24h"
+          tone={breaching > 0 ? "danger" : "good"}
+          href="/admin/tickets?status=open"
+        />
+        <Metric
+          label="Unassigned"
+          value={String(unassigned)}
+          hint="waiting to be claimed"
+          tone={unassigned > 0 ? "warn" : "good"}
+          href="/admin/tickets?status=open"
         />
         <Metric
           label="Median first response"
-          value={humanDuration(sla?.median_response_seconds)}
+          value={formatDuration(sla?.median_response_seconds)}
           hint={`${sla?.responded ?? 0} of ${sla?.tickets ?? 0} answered`}
         />
         <Metric
           label="Median time to resolve"
-          value={humanDuration(sla?.median_resolution_seconds)}
+          value={formatDuration(sla?.median_resolution_seconds)}
           hint={`${stats?.resolved ?? 0} resolved`}
         />
       </section>
@@ -140,18 +143,26 @@ function Overview() {
           </div>
           {items.length > 0 ? (
             <ul className="ov-queue">
-              {items.map((t) => (
-                <li key={t.id}>
-                  <span className={`ov-pri ov-pri-${t.priority}`}>{t.priority}</span>
-                  <span className="ov-q-body">
-                    <span className="ov-q-topic">{t.handoff?.topic || t.reason || "Escalation"}</span>
-                    <span className="ov-q-query">{t.user_query}</span>
-                  </span>
-                  <span className="ov-q-wait" title="Waiting since escalation">
-                    {waitingFor(t.created_at)}
-                  </span>
-                </li>
-              ))}
+              {items.map((t) => {
+                const tone = waitTone(t.created_at, t.first_response_at, t.reply_at);
+                return (
+                  <li key={t.id}>
+                    <a className="ov-q-link" href={`/admin/tickets?ticket=${encodeURIComponent(t.id)}`}>
+                      <span className={`ov-pri ov-pri-${t.priority}`}>{t.priority}</span>
+                      <span className="ov-q-body">
+                        <span className="ov-q-topic">{t.handoff?.topic || t.reason || "Escalation"}</span>
+                        <span className="ov-q-query">{t.user_query}</span>
+                      </span>
+                      <span
+                        className={`ov-q-wait${tone === "ok" ? "" : ` is-${tone}`}`}
+                        title="Waiting since escalation"
+                      >
+                        {waitingFor(t.created_at)}
+                      </span>
+                    </a>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="ov-empty">
@@ -201,6 +212,7 @@ function Overview() {
             </dl>
           )}
           <nav className="ov-links" aria-label="More">
+            <a href="/agent">Agent queue</a>
             <a href="/analytics">Analytics dashboard</a>
             <a href="/analytics/evaluation">Answer evaluation</a>
           </nav>

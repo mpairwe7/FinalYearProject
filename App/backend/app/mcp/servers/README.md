@@ -56,7 +56,10 @@ Check what a running process resolved with `MCPClient.health()`:
 - **Header-based routing.** `Mcp-Method` and `Mcp-Name` duplicate the
   method and tool name into headers so gateways route and authorize
   without parsing the body. Servers must reject a header that disagrees
-  with the body.
+  with the body (`mcp_tax_calculator` checks both).
+- **Required `_meta`.** `io.modelcontextprotocol/protocolVersion` and
+  `io.modelcontextprotocol/clientCapabilities` on every `tools/*` and
+  `server/info` request. Missing fields are `-32602`.
 - **Cacheable lists.** `tools/list` returns `ttlMs` and `cacheScope`.
 - **Full JSON Schema 2020-12** for `inputSchema` / `outputSchema`, and
   `structuredContent` on results.

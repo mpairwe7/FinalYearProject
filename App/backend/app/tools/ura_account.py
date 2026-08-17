@@ -37,6 +37,16 @@ class UraAccountProfileTool(Tool):
                     }
                 },
                 "required": ["taxpayer_id"],
+                "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "configured": {"type": "boolean"},
+                    "profile": {"type": "object"},
+                    "error": {"type": "string"},
+                },
             },
             risk="high",
             namespace="ura_account",

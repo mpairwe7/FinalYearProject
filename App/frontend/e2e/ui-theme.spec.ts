@@ -63,7 +63,14 @@ test.describe("Theme toggle", () => {
   test("cycles Auto → Light → Dark → Auto and persists the choice", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");
-    const toggle = page.getByRole("button", { name: /^Theme:/ });
+    // The header's own ThemeToggle is `display: none` below 720px
+    // (settings.css), moved into the kebab so it doesn't crowd the 44px
+    // cluster next to language/overflow. The kebab's "Theme: …" menuitem is
+    // reachable at every width — same trade-off as openSettings() in
+    // helpers.ts — and clicking it doesn't close the menu, so one locator
+    // covers all three clicks below.
+    await page.getByRole("button", { name: "More options" }).click();
+    const toggle = page.getByRole("menuitem", { name: /^Theme:/ });
 
     await expect(toggle).toHaveAttribute("aria-label", /Auto/);
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light"); // auto → light OS

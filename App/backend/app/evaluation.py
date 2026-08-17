@@ -254,6 +254,9 @@ def collect_samples(
                 "question": question,
                 "answer": answer,
                 "contexts": contexts,
+                "topic_tag": str(row.get("topic_tag") or ""),
+                "locale": str(row.get("locale") or ""),
+                "flag_variants": row.get("flag_variants") or "{}",
             }
         )
         if len(samples) >= sample_size:
@@ -326,76 +329,123 @@ def run_evaluation(
         backend=backend,
     )
 
-    # Phase 21 — per-segment breakdown.  Segments are inferred from
-    # each sample's top_topic field.  When we have user profiles
-    # (Phase 14 users table), we can key on taxpayer_type and locale
-    # here too.
     report.by_segment = _compute_by_segment(samples, backend)
     return report
+
+
+_TOPIC_KEYWORDS = {
+    "vat": ["vat", "value added"],
+    "paye": ["paye", "salary"],
+    "cit": ["corporation", "corporate tax"],
+    "customs": ["import", "customs", "cif", "tariff"],
+    "registration": ["register", "tin"],
+    "escalation": ["dispute", "appeal", "human", "officer"],
+}
+_TAXPAYER_KEYWORDS = {
+    "individual": ["individual", "salary", "paye", "personal"],
+    "company": ["company", "corporation", "corporate"],
+    "customs_agent": ["import", "customs", "cif", "tariff", "hs code"],
+}
+
+
+def _topic_of(sample: dict[str, Any]) -> str:
+    tagged = str(sample.get("topic_tag") or "").strip().lower()
+    if tagged:
+        return tagged
+    q = (sample.get("question", "") or "").lower()
+    for tag, keywords in _TOPIC_KEYWORDS.items():
+        if any(k in q for k in keywords):
+            return tag
+    return "general"
+
+
+def _taxpayer_type_of(sample: dict[str, Any]) -> str:
+    tagged = str(sample.get("taxpayer_type") or "").strip().lower()
+    if tagged:
+        return tagged
+    q = (sample.get("question", "") or "").lower()
+    for tag, keywords in _TAXPAYER_KEYWORDS.items():
+        if any(k in q for k in keywords):
+            return tag
+    return "unknown"
+
+
+def _locale_of(sample: dict[str, Any]) -> str:
+    loc = str(sample.get("locale") or "").strip().lower().split("-")[0]
+    return loc or "en"
+
+
+def _variant_keys(sample: dict[str, Any]) -> list[str]:
+    raw = sample.get("flag_variants") or "{}"
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        try:
+            import json as _json
+
+            data = _json.loads(raw) if raw else {}
+        except (ValueError, TypeError):
+            data = {}
+    if not isinstance(data, dict):
+        return []
+    return [f"{name}:{value}" for name, value in sorted(data.items()) if value]
+
+
+def _metrics_for_group(group: list[dict[str, Any]]) -> list[EvalMetric]:
+    faiths = [_heuristic_faithfulness(s["answer"], s["contexts"]) for s in group]
+    ars = [_heuristic_answer_relevancy(s["question"], s["answer"]) for s in group]
+    cps = [_heuristic_context_precision(s["answer"], s["contexts"]) for s in group]
+    return [
+        EvalMetric(
+            name="faithfulness",
+            value=round(statistics.mean(faiths), 4),
+            threshold=EVAL_FAITHFULNESS_MIN,
+            passed=statistics.mean(faiths) >= EVAL_FAITHFULNESS_MIN,
+        ),
+        EvalMetric(
+            name="answer_relevancy",
+            value=round(statistics.mean(ars), 4),
+            threshold=EVAL_ANSWER_REL_MIN,
+            passed=statistics.mean(ars) >= EVAL_ANSWER_REL_MIN,
+        ),
+        EvalMetric(
+            name="context_precision",
+            value=round(statistics.mean(cps), 4),
+            threshold=EVAL_CONTEXT_PREC_MIN,
+            passed=statistics.mean(cps) >= EVAL_CONTEXT_PREC_MIN,
+        ),
+    ]
 
 
 def _compute_by_segment(
     samples: list[dict[str, Any]],
     backend: str,
 ) -> dict[str, dict[str, list[EvalMetric]]]:
-    """Group samples by inferred topic tag and recompute metrics per group.
+    """Group samples by topic, locale, taxpayer type, and flag variant (G25/G26).
 
-    Returns a dict keyed on segment dimension → segment value → metrics.
-    This is the ``by_segment`` field in :class:`EvalReport`.  Samples
-    without enough data per segment (< 3) are skipped to avoid
-    noisy single-sample scores.
+    Groups smaller than 3 are skipped so a single turn cannot look like a
+    quality regression.
     """
     from collections import defaultdict
 
-    _topic_keywords = {
-        "vat": ["vat", "value added"],
-        "paye": ["paye", "salary"],
-        "cit": ["corporation", "corporate tax"],
-        "customs": ["import", "customs", "cif", "tariff"],
-        "registration": ["register", "tin"],
-        "escalation": ["dispute", "appeal", "human", "officer"],
+    buckets: dict[str, dict[str, list[dict[str, Any]]]] = {
+        "topic": defaultdict(list),
+        "locale": defaultdict(list),
+        "taxpayer_type": defaultdict(list),
+        "variant": defaultdict(list),
     }
+    for sample in samples:
+        buckets["topic"][_topic_of(sample)].append(sample)
+        buckets["locale"][_locale_of(sample)].append(sample)
+        buckets["taxpayer_type"][_taxpayer_type_of(sample)].append(sample)
+        for key in _variant_keys(sample):
+            buckets["variant"][key].append(sample)
 
-    def topic_of(sample: dict[str, Any]) -> str:
-        q = (sample.get("question", "") or "").lower()
-        for tag, keywords in _topic_keywords.items():
-            if any(k in q for k in keywords):
-                return tag
-        return "general"
-
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for s in samples:
-        groups[topic_of(s)].append(s)
-
-    by_segment: dict[str, dict[str, list[EvalMetric]]] = {"topic": {}}
-
-    for topic, group in groups.items():
-        if len(group) < 3:
-            continue  # Skip noisy small groups
-        faiths = [_heuristic_faithfulness(s["answer"], s["contexts"]) for s in group]
-        ars = [_heuristic_answer_relevancy(s["question"], s["answer"]) for s in group]
-        cps = [_heuristic_context_precision(s["answer"], s["contexts"]) for s in group]
-        by_segment["topic"][topic] = [
-            EvalMetric(
-                name="faithfulness",
-                value=round(statistics.mean(faiths), 4),
-                threshold=EVAL_FAITHFULNESS_MIN,
-                passed=statistics.mean(faiths) >= EVAL_FAITHFULNESS_MIN,
-            ),
-            EvalMetric(
-                name="answer_relevancy",
-                value=round(statistics.mean(ars), 4),
-                threshold=EVAL_ANSWER_REL_MIN,
-                passed=statistics.mean(ars) >= EVAL_ANSWER_REL_MIN,
-            ),
-            EvalMetric(
-                name="context_precision",
-                value=round(statistics.mean(cps), 4),
-                threshold=EVAL_CONTEXT_PREC_MIN,
-                passed=statistics.mean(cps) >= EVAL_CONTEXT_PREC_MIN,
-            ),
-        ]
-
+    by_segment: dict[str, dict[str, list[EvalMetric]]] = {}
+    for dim, groups in buckets.items():
+        filled = {name: _metrics_for_group(group) for name, group in groups.items() if len(group) >= 3}
+        if filled:
+            by_segment[dim] = filled
     return by_segment
 
 

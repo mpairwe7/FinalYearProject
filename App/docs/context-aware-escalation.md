@@ -181,7 +181,11 @@ moving the ticket off `open`; leaving it open is not a response.
 
 `GET /v1/admin/tickets/sla?days=30` reports **medians**, not means: one
 ticket left over a holiday weekend would otherwise make the whole queue
-look broken.
+look broken. Medians stay period-scoped. `breaching`,
+`breaching_first_response`, `breaching_next_reply`, and
+`awaiting_next_response` use every `open`/`assigned` row so a 20-row
+queue sample cannot under-count. After the first officer touch the
+next-reply clock is `reply_at` or `first_response_at`.
 
 ## Routing
 
@@ -211,7 +215,11 @@ chart.
 
 `/admin/tickets` (Next.js) renders the queue the backend orders —
 urgent first, then longest-waiting — with the waiting time on every row
-and the SLA strip showing what is still unanswered.
+and the SLA strip showing first-response and next-reply clocks plus
+population breach counts. Canned replies insert text only; they do not
+send. If the case is assigned to someone else, Send is disabled until
+Assign to me. `POST /v1/admin/tickets/{id}/presence` heartbeats the
+officer so the case can show who else has it open.
 
 Selecting a ticket shows **the whole transcript, unedited**. Summarising
 it in the UI would put back exactly the problem the feature removes.
@@ -235,7 +243,10 @@ mid-call.
 `WS /v1/admin/tickets/stream` pushes escalations to staff as they
 arrive. Staff roles only, read-only, and `?team=customs` narrows it to
 one queue. The client sends nothing — a socket that only ever receives
-cannot be used to reach the ticket store.
+cannot be used to reach the ticket store. The staff UI
+(`TicketLiveBanner` on every `/admin` and `/agent` page) opens
+`/api/v1/admin/tickets/stream` and invalidates the queue, SLA, and
+stats queries on `escalation.created`.
 
 The event carries the same triage metadata as the webhook and **no
 transcript**: it fans out to every connected staff socket, which is the

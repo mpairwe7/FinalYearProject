@@ -107,6 +107,15 @@
   opacity: 0.35;
 }
 
+/* Stop occupies the same primary slot as send. Invert fill so it is not
+   mistaken for another send tap while a reply is streaming. */
+.chatv2 .cmpv2-bar .stop-circle-btn,
+.chatv2 .cmpv2-bar .stop-circle-btn:hover:not(:disabled) {
+  background: var(--text-0);
+  color: var(--bg-0);
+  transform: none;
+}
+
 /* Voice mode engaged. A ring rather than a colour change: the button keeps the
    accent fill it had a moment ago, so "on" is legible without the control
    appearing to become a different button. */
@@ -315,6 +324,17 @@
 .chatv2 .chat-dock {
   background: linear-gradient(to top, var(--bg-0) 60%, transparent);
 }
+/* Landing reuses .chat-dock so phones get the same keyboard-aware thumb dock.
+   On desktop it must stay in the hero, not pin to the viewport bottom. */
+@media (min-width: 721px) {
+  .chatv2 .landing-dock.chat-dock {
+    position: static;
+    background: transparent;
+    padding: 0;
+    pointer-events: auto;
+  }
+}
+
 @media (max-width: 720px) {
   .chatv2 .chat-dock .composer.cmpv2 {
     border-radius: 20px;

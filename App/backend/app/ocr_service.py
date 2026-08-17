@@ -32,6 +32,14 @@ MAX_INPUT_BYTES = int(os.getenv("OCR_SERVICE_MAX_BYTES", str(12 * 1024 * 1024)))
 MAX_IMAGE_PIXELS = int(os.getenv("OCR_SERVICE_MAX_PIXELS", str(20_000_000)))
 OCR_MAX_CONCURRENT = max(1, int(os.getenv("OCR_INFERENCE_MAX_CONCURRENT", "1")))
 _ocr_slots = threading.BoundedSemaphore(OCR_MAX_CONCURRENT)
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+
+
+def _looks_like_image(data: bytes) -> bool:
+    """Cheap magic-byte check before Pillow decodes an untrusted body."""
+    if data.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"BM", b"II*\x00", b"MM\x00*")):
+        return True
+    return data.startswith(b"RIFF") and data[8:12] == b"WEBP"
 
 app = FastAPI(title="URA Local OCR", version="1.0.0", docs_url=None, redoc_url=None)
 
@@ -138,6 +146,8 @@ async def ocr_image(request: Request) -> OCRResponse:
     data = await _read_body_bounded(request)
     if not data:
         raise HTTPException(status_code=422, detail="OCR input is empty")
+    if not _looks_like_image(data):
+        raise HTTPException(status_code=422, detail="OCR input is not a valid image")
     if len(data) > MAX_INPUT_BYTES:
         raise HTTPException(
             status_code=413,

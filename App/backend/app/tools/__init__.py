@@ -274,7 +274,6 @@ class ToolRegistry:
             return {
                 "ok": False,
                 "error": f"Unknown tool: {name}",
-                "available_tools": cls.names(),
             }
 
         try:

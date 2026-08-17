@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 # retriever's opinion — these are the safety rails.
 MANDATORY_RAILS = ["search_ura_knowledge_base", "escalate_to_human"]
 
+_injected_dense: Any = None
+
+
+def inject_dense_model(model: Any) -> None:
+    """Share the retriever's already-loaded embedder. Never loads a model."""
+    global _injected_dense
+    _injected_dense = model
+
+
+def injected_dense_model() -> Any:
+    return _injected_dense
+
 
 def _tokenize(text: str) -> set[str]:
     return {t for t in re.findall(r"\w+", text.lower()) if len(t) > 2}
@@ -66,7 +78,7 @@ class ToolRAGSelector:
     """
 
     def __init__(self, dense_model: Any = None) -> None:
-        self._dense_model = dense_model
+        self._dense_model = dense_model if dense_model is not None else _injected_dense
         self._tool_embeds: dict[str, Any] | None = None
 
     def set_dense_model(self, model: Any) -> None:
@@ -162,12 +174,11 @@ class ToolRAGSelector:
                 selected.append(rail)
 
         if not selected:
-            # Nothing scored — fall back to exposing everything eligible
-            # (avoids leaving the LLM with zero tools).
+            rails = [name for name in MANDATORY_RAILS if name in eligible_names]
             return ToolSelection(
-                tool_names=eligible_names,
+                tool_names=rails or eligible_names[:k],
                 scores=scores,
-                fallback_reason="no tools scored above threshold",
+                fallback_reason="no tools scored; rails only",
             )
 
         return ToolSelection(tool_names=selected, scores=scores)

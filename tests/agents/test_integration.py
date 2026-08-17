@@ -22,10 +22,10 @@ class TestFeatureFlags:
         assert "agentic_mode" in all_flags
         assert "ticket_queue" in all_flags
 
-    def test_all_phase_flags_default_off(self, clean_flags):
-        """None of the Phase A-D flags should be on by default."""
+    def test_phase_flag_defaults(self, clean_flags):
+        """tool_use / tickets stay off; agentic_mode is on behind the routing gate."""
         assert clean_flags.is_enabled("tool_use") is False
-        assert clean_flags.is_enabled("agentic_mode") is False
+        assert clean_flags.is_enabled("agentic_mode") is True
         assert clean_flags.is_enabled("ticket_queue") is False
 
     def test_flag_overrides_work(self, clean_flags):

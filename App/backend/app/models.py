@@ -35,6 +35,9 @@ class Citation(BaseModel):
     page: str = Field("", description="Page number (PDFs)")
     section: str = Field("", description="Section or heading title")
     passage: str = Field("", max_length=500, description="Relevant passage excerpt")
+    url: str = Field("", description="Canonical source URL when the index stored one")
+    effective_date: str = Field("", description="Fiscal year, effective-from, or crawl date")
+    title: str = Field("", description="Document title when present")
 
 
 class ChatResponse(BaseModel):
@@ -85,6 +88,10 @@ class ChatResponse(BaseModel):
     # display "ticket 1234abcd" to the user.  Empty string when no
     # ticket was created.
     ticket_id: str = Field("", description="Escalation ticket id, if one was created")
+    current_topic: str = Field(
+        "",
+        description="Persisted conversation task id (G6), empty when none is active",
+    )
 
 
 # ---------------------------------------------------------------------------

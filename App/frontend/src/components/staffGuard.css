@@ -1,5 +1,24 @@
 /* Shared staff nav + access-gate states. Tokens come from globals.css. */
 
+.staff-skip {
+  position: absolute;
+  left: 12px;
+  top: -40px;
+  z-index: 30;
+  padding: 8px 12px;
+  background: var(--surface-ink);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.staff-skip:focus {
+  top: 10px;
+}
+
 .staff-nav {
   display: flex;
   align-items: center;

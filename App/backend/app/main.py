@@ -710,6 +710,21 @@ def authority_status(
     return get_authority_status()
 
 
+@app.get("/v1/index/freshness", tags=["system"])
+def index_freshness() -> dict[str, Any]:
+    """Last corpus-hash check (G27). Does not re-hash on this request.
+
+    Cron writes the status file: ``python -m app.freshness --check --write-status``.
+    Missing file means the check has not run yet — not that the index is fresh.
+    """
+    from .freshness import load_status
+
+    status = load_status()
+    if status is None:
+        return {"ok": None, "snapshot_missing": True, "checked_at": None}
+    return status
+
+
 # ---------------------------------------------------------------------------
 # Chat endpoint (with conversation logging)
 # ---------------------------------------------------------------------------
@@ -771,6 +786,7 @@ def chat(
             response_time_ms=round(elapsed_ms, 2),
             confidence=confidence,
             topic_tag=topic_tag,
+            **_experiment_log_fields(ctx.user_id or "", result.get("locale") or body.locale or ""),
         )
     except Exception:
         logger.warning("Conversation logging failed", exc_info=True)
@@ -875,6 +891,13 @@ async def _sse_not_disconnected(request: Request) -> bool:
     return not (await request.is_disconnected())
 
 
+def _experiment_log_fields(user_id: str = "", locale: str = "") -> dict[str, str]:
+    """Flag variants + locale persisted on each turn (G26)."""
+    from .flags import flags
+
+    return flags.experiment_log_fields(subject=user_id or None, locale=locale)
+
+
 def _log_stream_conversation(
     body: ChatRequest,
     session_id: str,
@@ -897,6 +920,7 @@ def _log_stream_conversation(
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             user_id=user_id,
+            **_experiment_log_fields(user_id, result.get("locale") or body.locale or ""),
         )
     except Exception:
         logger.warning("Stream conversation logging failed", exc_info=True)
@@ -1509,6 +1533,7 @@ async def voice_chat(
             sources=json.dumps(chat_result.get("sources", [])),
             contexts=_CM.contexts_json(chat_result),
             response_time_ms=round(total_latency * 1000, 2),
+            **_experiment_log_fields(ctx.user_id or "", chat_result.get("locale") or ""),
         )
     except Exception:
         logger.warning("Voice conversation logging failed", exc_info=True)
@@ -2062,6 +2087,70 @@ def ticket_sla_endpoint(
     return db.sla_stats(days=days)
 
 
+@app.post("/v1/admin/tickets/{ticket_id}/presence", tags=["admin"])
+def ticket_presence_endpoint(
+    request: Request,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """Heartbeat: this officer has the case open (collision lock)."""
+    ticket = db.get_ticket(ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    viewer = ""
+    if ctx.user:
+        viewer = (ctx.user.email or ctx.user.user_id or "").strip()
+    if not viewer:
+        viewer = "ops"
+    db.heartbeat_ticket_presence(ticket_id, viewer)
+    return {"status": "ok", "viewers": db.list_ticket_viewers(ticket_id)}
+
+
+@app.get("/v1/admin/flags", tags=["admin"])
+def list_flags_endpoint(
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """Replica flag registry — what is on, without SSH."""
+    from .flags import _REGISTRY, flags as flag_reg, is_protected
+
+    items = []
+    for name in sorted(_REGISTRY):
+        meta = flag_reg.describe(name)
+        items.append(
+            {
+                **meta,
+                "enabled": flag_reg.is_enabled(name),
+                "protected": is_protected(name),
+            }
+        )
+    return {"flags": items, "overrides_are_ephemeral": True}
+
+
+@app.patch("/v1/admin/flags/{name}", tags=["admin"])
+def set_flag_endpoint(
+    name: str,
+    enabled: bool,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """In-process override. Cluster-wide still needs FLAG_* on every replica."""
+    from .flags import flags as flag_reg, is_protected
+
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may toggle flags")
+    if is_protected(name):
+        raise HTTPException(status_code=400, detail="this flag cannot be toggled from the UI")
+    try:
+        flag_reg.set(name, enabled)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown flag") from None
+    return {
+        "name": name,
+        "enabled": flag_reg.is_enabled(name),
+        "overridden": True,
+        "ephemeral": True,
+    }
+
+
 @app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
 def get_ticket_endpoint(
     request: Request,
@@ -2076,6 +2165,7 @@ def get_ticket_endpoint(
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
+    ticket["viewers"] = db.list_ticket_viewers(ticket_id)
     return ticket
 
 

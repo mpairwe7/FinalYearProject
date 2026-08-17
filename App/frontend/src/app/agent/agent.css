@@ -439,6 +439,8 @@
 @media (max-width: 960px) {
   .ag-split { grid-template-columns: 1fr; }
   .ag-queue { max-height: 42vh; }
+  .ag-split.is-open .ag-queue-pane { display: none; }
+  .ag-split:not(.is-open) .ag-detail { display: none; }
 }
 
 @media (max-width: 560px) {

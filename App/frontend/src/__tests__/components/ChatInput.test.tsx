@@ -60,9 +60,19 @@ describe("ChatInput", () => {
     expect(screen.getByLabelText("Send message")).toBeDisabled();
   });
 
-  it("disables send button when loading", () => {
+  it("disables send button when loading without onStop", () => {
     render(<ChatInput {...defaults} message="test" isLoading />);
     expect(screen.getByLabelText("Send message")).toBeDisabled();
+  });
+
+  it("shows stop in the primary slot while loading when onStop is set", async () => {
+    const onStop = vi.fn();
+    render(<ChatInput {...defaults} message="" isLoading onStop={onStop} />);
+    expect(screen.queryByLabelText("Send message")).not.toBeInTheDocument();
+    const stop = screen.getByLabelText("Stop generating");
+    expect(stop).toBeEnabled();
+    await userEvent.click(stop);
+    expect(onStop).toHaveBeenCalledTimes(1);
   });
 
   it("disables mic button when speech unavailable", () => {

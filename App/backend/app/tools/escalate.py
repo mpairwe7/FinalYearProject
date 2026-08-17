@@ -73,6 +73,18 @@ class EscalateToHumanTool(Tool):
                     },
                 },
                 "required": ["reason"],
+                "additionalProperties": False,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "ticket_id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "priority": {"type": "string"},
+                    "message": {"type": "string"},
+                    "error": {"type": "string"},
+                },
             },
             risk="medium",
             namespace="core",

@@ -242,7 +242,12 @@ python threat-model/tm.py --describe threat-model/output/threats.md
 python threat-model/validate_threats.py
 ```
 
-### 4.2 Threat Registry (21 Threats — STRIDE × OWASP LLM × MITRE ATLAS)
+### 4.2 Threat Registry (living: 28 threats — STRIDE × OWASP LLM × MITRE ATLAS)
+
+Week 6 closed T01–T21. The living registry in
+`threat-model/validate_threats.py` added T22–T28 on 2026-08-17 for the
+document/PDF surface and LLM06 (tool agency). Re-derive counts with
+`python threat-model/validate_threats.py` rather than this snapshot.
 
 The threat registry (`threat-model/validate_threats.py`) tracks all identified threats with:
 - **STRIDE category** — Spoofing, Tampering, Repudiation, Info Disclosure, DoS, Elevation
@@ -275,11 +280,19 @@ The threat registry (`threat-model/validate_threats.py`) tracks all identified t
 | T19 | Tampering | IaC misconfiguration in Dockerfiles/CI | – | – | Mitigated |
 | T20 | Spoofing | Dependency confusion / typosquatting | LLM03 | AML.T0010 | Mitigated |
 | T21 | Info Disclosure | Mobile model extraction via APK RE | LLM03 | AML.T0044 | Accepted |
+| T22 | Elevation | Malicious PDF active content (JS/Launch/embedded) | LLM04 | – | Mitigated |
+| T23 | Denial of Service | PDF/image resource bomb, zip-slip, macros | LLM10 | AML.T0029 | Mitigated |
+| T24 | Elevation | Indirect prompt injection via uploaded document | LLM01 | AML.T0051 | Mitigated |
+| T25 | Info Disclosure | Document-store IDOR by document id | LLM02 | – | Mitigated |
+| T26 | Tampering | Polyglot upload declared as PDF/Office | LLM04 | AML.T0020 | Mitigated |
+| T27 | Tampering | Index-time PDF poisoning during export | LLM04 | AML.T0020 | Mitigated |
+| T28 | Elevation | Excessive agency via tools / MCP | LLM06 | AML.T0051 | Mitigated |
 
-**Coverage summary:**
+**Coverage summary (living registry, verified 2026-08-17):**
 - STRIDE: **6/6** categories (100%)
-- OWASP LLM Top 10: **9/10** mapped (LLM06 N/A — system has no tool-use/agency)
-- MITRE ATLAS: **12 techniques** mapped across 21 threats
+- OWASP LLM Top 10: **10/10** mapped (LLM06 → T28)
+- MITRE ATLAS: **19 mappings / 10 unique techniques** across 28 threats
+  (27 mitigated, T21 accepted)
 
 ### 4.3 SAST/DAST Tool Selection (2026 State of the Art)
 
@@ -328,7 +341,7 @@ All tools are open-source and run in CI via `.github/workflows/devsecops-sast-da
 | 8 | License compliance (block AGPL/GPL/SSPL/BSL) | Trivy | Every PR | Implemented |
 | 9 | DAST baseline scan against live API | OWASP ZAP | Every push to main/develop | Implemented |
 | 10 | Supply chain security posture scoring | OSSF Scorecard | Weekly + push | Implemented |
-| 11 | Threat model validation (21 threats + evidence) | pytm + validate_threats.py | Every PR | Implemented |
+| 11 | Threat model validation (28 threats + evidence) | pytm + validate_threats.py | Every PR | Implemented |
 | 12 | SBOM generation (CycloneDX) for all images | Trivy | Every build | Implemented |
 | 13 | Secret scanning (4-layer defence-in-depth) | TruffleHog + Gitleaks + ggshield + detect-secrets | Every PR + pre-commit + weekly | Implemented |
 | 14 | Prompt injection testing (50 NIST AI 600-1 prompts) | `scripts/ai_red_team.py` | Pre-release + quarterly | Implemented |

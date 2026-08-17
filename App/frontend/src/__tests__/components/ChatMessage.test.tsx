@@ -71,6 +71,15 @@ describe("ChatMessage", () => {
     ).toBeInTheDocument();
   });
 
+  it("copies a user message to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderMsg(userTurn);
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
+    expect(writeText).toHaveBeenCalledWith("What is VAT?");
+    expect(await screen.findByRole("button", { name: "Message copied" })).toBeInTheDocument();
+  });
+
   it("copies the assistant reply to the clipboard", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });

@@ -10,6 +10,15 @@
 > does, what is genuinely missing, and what the next increment should be. It
 > deliberately does not re-propose capabilities that are already in the
 > repository.
+>
+> **Traceability (2026-08-17):** Treat `docs/GAPS_AND_AGENTIC_ROADMAP.md` as
+> current. Of the “five real gaps” in §1.2: **A** (model tiering) is still
+> open; **B** (G16) graph + RRF fusion *code* is shipped, flags default off;
+> **C** locale routing is shipped, retrieval is still English-indexed (G18);
+> **D** deterministic money evaluator + one `RevisionBudget` revision is
+> shipped (G21 is now bounded ReAct — observe + one reasoning-miss
+> retry, not an open loop); **E** percentage/cohort rollout is
+> shipped and G26 now logs `flag_variants` per turn.
 
 ---
 

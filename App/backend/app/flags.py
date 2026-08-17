@@ -39,6 +39,22 @@ import os
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+# CodeQL py/log-injection: `name` reaches these log calls before any registry
+# check can run in every caller CodeQL considers (is_enabled() validates it
+# against _REGISTRY first, but that guard lives in a different function, so
+# static analysis can't credit it for callers it can't fully trace). Strip
+# CR/LF/control characters at the log call itself so a value can never forge
+# a fake log line, regardless of which caller reached it.
+_LOG_STRIP_TABLE = dict.fromkeys(range(0x20), None)
+_LOG_STRIP_TABLE[0x7F] = None
+
+
+def _log_safe(value: str) -> str:
+    """*value* with control characters (CR/LF included) removed."""
+    return value.translate(_LOG_STRIP_TABLE)
+
+
 _PRODUCTION_ON_FLAGS = {
     "auth_required",
     "multi_tenant",
@@ -116,6 +132,24 @@ _REGISTRY: dict[str, Flag] = {
         Flag("corrective_rag", True, "Re-retrieve on low initial quality"),
         Flag("semantic_cache", True, "Cache semantically similar queries"),
         Flag("query_rewrite", True, "Spelling / abbreviation / coreference"),
+        Flag(
+            "query_decomposition",
+            True,
+            "Split multi-intent questions into parallel retrieval queries",
+        ),
+        Flag(
+            "hyde",
+            False,
+            "Hypothetical Document Embeddings on the dense leg only "
+            "(template by default; HYDE_LLM=true spends one short generation)",
+        ),
+        Flag(
+            "translate_retrieve",
+            True,
+            "For non-English questions, also search an English translation "
+            "against the English corpus (generate still uses the user locale). "
+            "No re-index. Off = original query only.",
+        ),
         Flag("reranker", True, "Cross-encoder reranking"),
         Flag(
             "cloudflare_fallback",
@@ -123,11 +157,17 @@ _REGISTRY: dict[str, Flag] = {
             "Route to Cloudflare Workers AI / Vectorize / R2 + Gemini when primaries are down/over-budget",
         ),
         Flag("eval_auto_run", False, "Run evaluation harness on every Nth request"),
-        # Phase 14 — agentic workflows (feature-flagged off by default)
+        # Phase 14 — agentic workflows (tool_use / tickets stay off)
         Flag(
             "tool_use", False, "Allow the LLM to call registered tools via Qwen2.5 function-calling"
         ),
-        Flag("agentic_mode", False, "Route requests through the supervisor-specialist agent graph"),
+        Flag(
+            "agentic_mode",
+            True,
+            "Route requests through the supervisor-specialist agent graph. "
+            "Default on after EN golden-set accuracy >= 0.95 "
+            "(app.agents.eval_routing.agentic_mode_gate).",
+        ),
         Flag("ticket_queue", False, "Persist escalations to the tickets table for human follow-up"),
         # Phase 14 (2026) — identity & consent
         Flag("auth_required", False, "Reject unauthenticated /v1/* requests"),
@@ -367,7 +407,12 @@ def _env_rollout(name: str, declared: Rollout | None) -> Rollout | None:
         except ValueError:
             # A malformed percentage must not silently mean 100%.  Keep
             # the declared value and make the typo visible.
-            logger.warning("flag %s: bad FLAG_%s_PERCENT=%r, ignoring", name, upper, raw_pct)
+            logger.warning(
+                "flag %s: bad FLAG_%s_PERCENT=%r, ignoring",
+                _log_safe(name),
+                _log_safe(upper),
+                raw_pct,
+            )
 
     def _split(raw: str | None, fallback: frozenset[str]) -> frozenset[str]:
         if raw is None:
@@ -421,7 +466,7 @@ class FeatureFlags:
             return self._overrides[name]
         flag = _REGISTRY.get(name)
         if flag is None:
-            logger.warning("unknown feature flag queried: %s", name)
+            logger.warning("unknown feature flag queried: %s", _log_safe(name))
             return False
         env_val = os.getenv(f"FLAG_{name.upper()}")
         if env_val is not None:
@@ -465,7 +510,7 @@ class FeatureFlags:
                 logger.warning(
                     "flag %s has a percentage rollout but was checked without a "
                     "subject — falling back to the default",
-                    name,
+                    _log_safe(name),
                 )
             return None
         if _bucket_of(name, subject) < rollout.percent * (_BUCKETS / 100):
@@ -486,6 +531,31 @@ class FeatureFlags:
         of averaging the two together.
         """
         return "on" if self.is_enabled(name, subject=subject, cohorts=cohorts) else "off"
+
+    def logged_variants(self, subject: str | None = None) -> dict[str, str]:
+        """Per-turn on/off labels for the flags that change retrieval or answers (G26)."""
+        return {
+            name: self.variant_for(name, subject=subject)
+            for name in (
+                "hyde",
+                "graph_fusion",
+                "translate_retrieve",
+                "corrective_rag",
+                "query_decomposition",
+                "evaluator_optimizer",
+            )
+        }
+
+    def experiment_log_fields(
+        self, subject: str | None = None, locale: str = ""
+    ) -> dict[str, str]:
+        """kwargs for ``log_conversation`` (flag_variants JSON + locale)."""
+        import json
+
+        return {
+            "flag_variants": json.dumps(self.logged_variants(subject=subject)),
+            "locale": locale or "",
+        }
 
     def set(self, name: str, enabled: bool) -> None:
         """Programmatic override (e.g. from an admin API).
@@ -529,6 +599,11 @@ class FeatureFlags:
                 else None
             ),
         }
+
+
+def is_protected(name: str) -> bool:
+    """Safety flags that the admin UI must not flip off from a browser."""
+    return name in _PRODUCTION_ON_FLAGS
 
 
 flags = FeatureFlags()

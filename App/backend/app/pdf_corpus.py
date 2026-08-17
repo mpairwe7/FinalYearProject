@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .faq_corpus import CorpusValidationError
+from .pdf_guards import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -198,6 +199,12 @@ def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str,
             "PDF export needs ml.scripts.data_aug.chunkers (and pymupdf4llm). "
             "Run the exporter from a source checkout with the ml/ package importable."
         ) from exc
+
+    try:
+        inspect_pdf_path(pdf_path, CORPUS_PDF_LIMITS)
+    except PdfRejected as err:
+        logger.warning("skipped %s — PDF guard rejected it: %s", pdf_path.name, err)
+        return
 
     source = pdf_path.name
     fiscal_year = fiscal_year_from_name(pdf_path.stem)

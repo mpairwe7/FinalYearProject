@@ -18,11 +18,16 @@ User Query
   ├─► Stage 0: Conversation History (database.py)
   │     └── Fetch 5-turn sliding window from SQLite/Postgres (keyed by session_id)
   │
-  ├─► Stage 0b: Query Rewriting (query.py)
+  ├─► Stage 0b: Query Rewriting (query.py)  [FLAG_QUERY_REWRITE]
   │     ├── normalize() — whitespace cleanup
   │     ├── correct_spelling() — 20+ domain misspellings
   │     ├── expand_abbreviations() — 15+ URA terms (TIN, VAT, PAYE, EFRIS, etc.)
   │     └── rewrite_with_history() — coreference resolution from 5-turn memory
+  │
+  ├─► Stage 0b2: Retrieval plan (query.py → plan_retrieval)
+  │     ├── extract_retrieval_filters() — hard FY filter only on explicit FY2024-25
+  │     ├── extract_retrieval_preferences() — soft tax-type / current-FY boost
+  │     └── decompose_query() — multi-intent split  [FLAG_QUERY_DECOMPOSITION]
   │
   ├─► Stage 0c: Language Detection (query.py)
   │     └── Auto-detect locale (en, lg, sw, nyn, ach) via regex + word patterns
@@ -36,18 +41,20 @@ User Query
   │     └── Check if query triggers a guided workflow (TIN registration, filing, etc.)
   │         └── If matched: enter slot-filling state machine, skip RAG
   │
-  ├─► Stage 1c: Semantic Cache Lookup (cache.py)
+  ├─► Stage 1c: Semantic Cache Lookup (cache.py)  [FLAG_SEMANTIC_CACHE]
   │     └── Cosine similarity ≥ 0.92 on embeddings → instant return
   │
   ├─► Stage 1d: Supervisor Routing (agents/supervisor.py)  [FLAG_AGENTIC_MODE]
   │     ├── Rule-based fast path (regex+keywords) + optional LLM fallback
   │     └── Routes: RAG | TOOLS | TAX_SPECIALIST | CUSTOMS_SPECIALIST | CLARIFY | ESCALATE
   │
-  ├─► Stage 2: Hybrid Retrieval (retriever.py)
+  ├─► Stage 2: Hybrid Retrieval (retriever.py → search_planned)
   │     ├── Dense: BAAI/bge-m3 (1024-dim multilingual) → Qdrant ANN search
-  │     ├── Sparse: BM25 keyword matching
-  │     ├── Fusion: Reciprocal Rank Fusion (RRF)
-  │     ├── Reranking: mxbai-rerank-base-v2 (500M, BEIR 55.6)
+  │     │     └── Optional HyDE document as the *dense* query only  [FLAG_HYDE]
+  │     ├── Sparse: BM25 on the taxpayer's original words (never HyDE)
+  │     ├── Fusion: Reciprocal Rank Fusion (RRF, k=RRF_K default 60)
+  │     ├── Graph leg: statutory rate claims fused by rank, not prepended  [FLAG_GRAPH_FUSION + FLAG_TAX_GRAPH]
+  │     ├── Reranking: mxbai-rerank-base-v2 (500M, BEIR 55.6) — scores the raw query
   │     └── Circuit breaker: thread-safe, exponential backoff (10s→300s)
   │
   ├─► Stage 3: Keyword Fallback
@@ -238,6 +245,7 @@ App/backend/app/
 ├── main.py              # 50+ FastAPI routes, SSE, CORS, rate limiting, auth, lifecycle
 ├── models.py            # Pydantic v2 schemas (chat, speech, export, auth, feedback)
 ├── service.py           # ChatModel — 12-stage RAG orchestrator + agentic routing
+├── topics.py            # G6 conversation topic catalog + persist/follow-up bind
 ├── llm.py               # Qwen3-8B generation (local + vLLM + tool-calling + LoRA)
 ├── query.py             # Query rewriting (abbreviations, spelling, coreference, lang detect)
 ├── cache.py             # Semantic response cache (memory or Redis backend)
@@ -300,7 +308,11 @@ App/backend/app/
 
 ## Agent Runtime (Phase 14)
 
-When `FLAG_AGENTIC_MODE=true`, the supervisor classifier (`agents/supervisor.py`) routes queries before retrieval:
+When `FLAG_AGENTIC_MODE=true` (the default after the English golden-set
+gate ≥ 0.95), the supervisor classifier (`agents/supervisor.py`) routes
+queries before retrieval. G6 topic persistence (`topics.py`) runs on
+every turn: the catalog label is merged into the prompt and anaphoric
+queries are prefixed for retrieval.
 
 Three deterministic fast paths intercept BEFORE routing
 (`ChatModel._maybe_handle_fast_paths`, REST and streaming parity):
@@ -457,7 +469,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `workflows` | on | Guided multi-step workflows |
 | `handoff_summaries` | on | Human triage packets |
 | `tool_use` | off | LLM tool-calling |
-| `agentic_mode` | off | Supervisor routing |
+| `agentic_mode` | on | Supervisor routing (EN golden-set gate ≥ 0.95) |
 | `auth_required` | off | Enforce JWT |
 | `memory_enabled` | off | Consent-gated personalization |
 | `audit_ledger` | off | Hash-chained audit log |
@@ -500,6 +512,39 @@ FLAG_TAX_GRAPH_ALLOWLIST=tin-1001,tin-1002
 A subject the rollout does not target falls through to the flag's **default**,
 not to off — otherwise adding a 5% rollout would silently disable the flag for
 the other 95%. `variant_for()` labels each resolution for per-variant reporting.
+
+## Retrieval serving path (2026-08-17)
+
+Shared entry: `HybridRetriever.search_planned()` — used by REST `generate()`,
+SSE/stream, `search_ura_knowledge_base`, corrective RAG, LangGraph
+`node_retrieve`, and voice speculative prefetch. Do not add another retrieve
+helper. LangGraph now fuses the graph RRF leg when those flags are on,
+applies the unbound-FAQ filter + exact-FAQ promote, and observes after
+tools: one retrieve hop when tools produce no evidence, then one
+reflect retry on low faithfulness or a reasoning miss. Soft “this fiscal
+year” boost follows `current_fiscal_year()`.
+
+The corpus is English. Non-English questions take a merged English
+translation pass (`FLAG_TRANSLATE_RETRIEVE`, default on); generation stays
+in the user locale. Citations carry `url` / `effective_date` when the
+index stored them (crawl chunks do).
+
+| Control | Default | Effect |
+|---------|---------|--------|
+| `FLAG_QUERY_REWRITE` | on | Spelling / abbreviation / coreference |
+| `FLAG_QUERY_DECOMPOSITION` | on | Parallel search on multi-intent questions |
+| `FLAG_TRANSLATE_RETRIEVE` | on | Extra English hybrid pass for non-`en` locales |
+| `FLAG_HYDE` | **off** | Dense-only hypothetical document (template; `HYDE_LLM=true` is vLLM-only). A/B-ready via `FLAG_HYDE_PERCENT` + `user_id`; leave `FLAG_HYDE` unset for a canary. Do not enable until measured on `rag_eval.jsonl`. |
+| `FLAG_HYDE_PERCENT` | 0 | Stable user-id bucket. Ignored if `FLAG_HYDE` is set. |
+| `FLAG_SEMANTIC_CACHE` | on | Exact + cosine cache |
+| `FLAG_CORRECTIVE_RAG` | on | Re-retrieve on low calibrated relevance |
+| `FLAG_GRAPH_FUSION` + `FLAG_TAX_GRAPH` | **off** | Statutory graph as a third RRF leg |
+| `FLAG_TOOL_RAG` | **off** | Top-k tool schemas + rails. Dense embedder is injected from the retriever when loaded; a miss keeps rails only. A/B via `FLAG_TOOL_RAG_PERCENT`. |
+| `python -m app.freshness --check --write-status --notify` | — | Exit 1 on drift; writes status for `GET /v1/index/freshness`; Slack if `FRESHNESS_SLACK_WEBHOOK` is https |
+
+Eval set: `Data/eval/rag_eval.jsonl` (30 English rows, including `reg-*` regression ids). Keyword self-retrieval gate: `App/backend/tests/test_retrieval_regression_gate.py`. Completeness: `test_eval_set_completeness.py`.
+
+Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17.md](../App/docs/traceability/retrieval-agentic-upgrade-2026-08-17.md).
 
 ## Configuration Reference
 

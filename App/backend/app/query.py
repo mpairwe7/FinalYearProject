@@ -11,9 +11,23 @@ Transforms raw user queries into optimized retrieval queries:
 from __future__ import annotations
 
 import logging
+import os
 import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# CodeQL py/log-injection: a request-supplied locale reaches a log call
+# below. Strip CR/LF/control characters at the log call itself so a value
+# can never forge a fake log line.
+_LOG_STRIP_TABLE = dict.fromkeys(range(0x20), None)
+_LOG_STRIP_TABLE[0x7F] = None
+
+
+def _log_safe(value: str) -> str:
+    """*value* with control characters (CR/LF included) removed."""
+    return value.translate(_LOG_STRIP_TABLE)
+
 
 # ---------------------------------------------------------------------------
 # Language detection — heuristic patterns for Ugandan languages
@@ -314,3 +328,179 @@ def extract_question_span(text: str) -> str:
     sentences = _SENTENCE_BOUNDARY_RE.split((text or "").strip())
     questions = [s.strip() for s in sentences if s.strip().endswith("?")]
     return " ".join(questions)
+
+
+# ---------------------------------------------------------------------------
+# Query-time retrieval plan (G17 + agentic multi-intent)
+# ---------------------------------------------------------------------------
+# Hard filters only fire on *unambiguous* mentions. A bare "2026" is not a
+# fiscal year (Ugandan FY is July–June). Soft preferences boost matching
+# passages without starving recall when the preferred edition is missing.
+
+def current_fiscal_year() -> str:
+    """Soft-preference target for “this fiscal year” / “current”.
+
+    ``CURRENT_FISCAL_YEAR`` in the environment wins. Otherwise use the
+    rate-table year in force today so the boost cannot freeze on last
+    year's edition (see ``App/docs/tax-rate-tables.md``).
+    """
+    env = os.getenv("CURRENT_FISCAL_YEAR", "").strip()
+    if env:
+        return env
+    try:
+        from .tax.tables import resolve_fiscal_year
+
+        return resolve_fiscal_year()
+    except Exception:
+        return "FY2026-27"
+
+
+CURRENT_FISCAL_YEAR = current_fiscal_year()
+
+_FY_EXPLICIT_RE = re.compile(
+    r"\bFY\s*(20\d{2})\s*[-/]\s*(?:20)?(\d{2})\b",
+    re.I,
+)
+_FY_SLASH_RE = re.compile(r"\b(20\d{2})\s*/\s*(20)?(\d{2})\s+(?:fiscal\s+)?year\b", re.I)
+_CURRENT_FY_RE = re.compile(
+    r"\b(this\s+(?:fiscal\s+)?year|current\s+(?:fiscal\s+)?year|latest|this\s+fy)\b",
+    re.I,
+)
+
+_TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(value[-\s]?added\s+tax|vat)\b", re.I), "vat"),
+    (re.compile(r"\b(pay\s+as\s+you\s+earn|paye)\b", re.I), "paye"),
+    (re.compile(r"\b(withholding\s+tax|wht)\b", re.I), "wht"),
+    (re.compile(r"\b(corporate\s+income\s+tax|corporation\s+tax|cit)\b", re.I), "cit"),
+    (re.compile(r"\b(personal\s+income\s+tax|pit)\b", re.I), "pit"),
+    (re.compile(r"\b(excise\s+duty|excise)\b", re.I), "excise"),
+    (re.compile(r"\b(customs?(?:\s+duty)?|import\s+duty)\b", re.I), "customs"),
+    (re.compile(r"\b(capital\s+gains?(?:\s+tax)?|cgt)\b", re.I), "cgt"),
+    (re.compile(r"\b(efris)\b", re.I), "efris"),
+    (re.compile(r"\b(tin|taxpayer\s+identification)\b", re.I), "tin"),
+]
+
+# Split only on multi-intent markers. A bare "and" is too common
+# ("VAT and PAYE rates" is one comparison, not two searches).
+#
+# Possessive quantifiers (Python 3.11+): \s+ adjacent to alternation here
+# is exactly CodeQL's py/polynomial-redos shape — an adversarial run of
+# whitespace lets the backtracking engine try many equivalent ways to
+# split it across the \s+/\s* boundaries before a match ultimately fails.
+# Making them possessive (\s++, \s*+) is the standard fix: the engine
+# commits to the longest run and never backtracks into it. Verified
+# behavior-identical to the backtracking originals across representative
+# inputs, and empirically fast (µs, not seconds) on adversarial whitespace.
+# decompose_query() below also runs normalize() before matching, which
+# already collapses whitespace runs to one space — independently removing
+# the long-run precondition these patterns would otherwise need.
+_DECOMPOSE_SPLIT_RE = re.compile(
+    r"\s++(?:and also|as well as|and then)\s++|"
+    r"\s*+;\s++|"
+    r"\?\s++(?=(?:what|how|when|where|which|who)\b)",
+    re.I,
+)
+_AND_QUESTION_RE = re.compile(
+    r"\s++and\s++(?=(?:what|how|when|where|which|who)\b)",
+    re.I,
+)
+
+
+def _normalize_fy(start: str, end: str) -> str:
+    end = end[-2:] if len(end) >= 2 else end
+    return f"FY{start}-{end}"
+
+
+def extract_retrieval_filters(query: str) -> dict[str, Any]:
+    """Hard Qdrant payload filters for *explicit* metadata in the query.
+
+    ``HybridRetriever.search`` already accepts filters; nothing in the
+    serving path used them (G17). Only unambiguous FY labels become a
+    hard filter — a missing edition must not silently empty the result
+    set, so tax-type and "current year" stay as preferences.
+    """
+    filters: dict[str, Any] = {}
+    text = query or ""
+    match = _FY_EXPLICIT_RE.search(text) or _FY_SLASH_RE.search(text)
+    if match:
+        if match.re is _FY_SLASH_RE:
+            filters["fiscal_year"] = _normalize_fy(match.group(1), match.group(3))
+        else:
+            filters["fiscal_year"] = _normalize_fy(match.group(1), match.group(2))
+    return filters
+
+
+def extract_retrieval_preferences(query: str) -> dict[str, Any]:
+    """Soft ranking hints: mentioned tax type and 'current' fiscal year."""
+    prefer: dict[str, Any] = {}
+    text = query or ""
+    if _CURRENT_FY_RE.search(text) and not extract_retrieval_filters(text):
+        prefer["fiscal_year"] = current_fiscal_year()
+    types = [name for pattern, name in _TAX_TYPE_PATTERNS if pattern.search(text)]
+    if len(types) == 1:
+        prefer["tax_type"] = types[0]
+    return prefer
+
+
+def decompose_query(query: str) -> list[str]:
+    """Split a multi-intent question into at most three retrieval queries.
+
+    Single-intent questions (the common case) return ``[query]`` unchanged.
+    Used as a cheap stand-in for query decomposition / multi-hop planning
+    without a second LLM call on the hot path.
+    """
+    text = normalize(query or "")
+    if not text:
+        return []
+    parts = [p.strip(" .?") for p in _DECOMPOSE_SPLIT_RE.split(text) if p.strip()]
+    if len(parts) == 1:
+        parts = [p.strip(" .?") for p in _AND_QUESTION_RE.split(text) if p.strip()]
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        if len(part.split()) < 2:
+            continue
+        key = part.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(part)
+    if len(cleaned) <= 1:
+        return [text]
+    return cleaned[:3]
+
+
+def plan_retrieval(query: str) -> dict[str, Any]:
+    """Bundle filters, preferences, and sub-queries for one retrieval turn."""
+    return {
+        "filters": extract_retrieval_filters(query),
+        "prefer": extract_retrieval_preferences(query),
+        "subqueries": decompose_query(query),
+    }
+
+
+def english_retrieval_query(query: str, locale: str | None) -> str:
+    """Query text to search the English corpus with (G18).
+
+    Source documents are English. The generator answers in *locale*.
+    Translation is best-effort: English, unknown, or a failed MT call
+    returns the original string so dense/BM25 still run.
+    """
+    text = (query or "").strip()
+    loc = (locale or "en").strip().lower().split("-")[0]
+    if not text or loc in ("", "en"):
+        return text
+    try:
+        from . import sunbird
+
+        english = sunbird.translate_to_english(text, loc)
+    except Exception:
+        logger.debug(
+            "english_retrieval_query: translation failed locale=%s",
+            _log_safe(loc),
+            exc_info=True,
+        )
+        return text
+    if not english or english.strip().casefold() == text.casefold():
+        return text
+    return english.strip()

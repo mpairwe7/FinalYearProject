@@ -69,7 +69,13 @@ from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
 from .guardrails import STORE_RAW_PROMPTS, InputGuard, OutputGuard, redact_pii_text
 from .memory import get_memory_service
-from .query import detect_language, extract_question_span, rewrite as rewrite_query
+from .query import (
+    detect_language,
+    extract_question_span,
+    extract_retrieval_filters,
+    normalize as normalize_query,
+    rewrite as rewrite_query,
+)
 from .resilience import CircuitBreaker
 from .retriever import HybridRetriever
 from .text_signals import (
@@ -90,6 +96,7 @@ from .text_signals import (
     split_sentences,
     tone_hint_for,
 )
+from .topics import resolve_topic, topic_retrieval_query
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
 from .workflows.registry import WorkflowRegistry, WorkflowSession, auto_load_flows
 
@@ -2212,9 +2219,10 @@ def _prepend_unique(
     _priority_faq_hits had correctly sorted "How do I file a return?" first —
     matching that string is its top sort key — and the loop put it second.
 
-    Ordering between groups is unchanged: callers still prepend graph claims
-    before priority FAQs, so priority still lands above graph exactly as
-    before. Only the order within a group is fixed.
+    Ordering between groups is unchanged: callers that prepend more than
+    one group still put later groups first. The statutory graph is no
+    longer prepended here — it is RRF-fused in ``_fuse_graph_leg``.
+    Only the order within a prepended group is fixed.
     """
     fresh: list[dict[str, Any]] = []
     for h in new_hits:
@@ -2225,6 +2233,12 @@ def _prepend_unique(
         fresh.append(h)
     hits[0:0] = fresh
     return len(fresh)
+
+
+def _canonical_faq_url(source: str) -> str:
+    from .retriever import canonical_source_url
+
+    return canonical_source_url(source)
 
 
 def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -2242,6 +2256,7 @@ def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str,
                 "page": "",
                 "section": tag,
                 "doc_type": "csv",
+                "url": _canonical_faq_url(entry.get("source", "")),
                 "score_rrf": float(entry.get("_overlap", 0.0) or 0.0),
                 "faq_match_score": float(entry.get("_faq_match_score", 0.0) or 0.0),
             }
@@ -2525,6 +2540,11 @@ class ChatModel:
         detail_level = str(profile.get("detail_level", "")).strip().lower()
         if detail_level:
             lines.append(f"- Preferred explanation depth: {detail_level}")
+            from .agents.prompts import detail_level_prompt
+
+            extra = detail_level_prompt(detail_level)
+            if extra:
+                lines.append(extra)
 
         registered = profile.get("registered_tax_types") or []
         if isinstance(registered, list) and registered:
@@ -2577,6 +2597,30 @@ class ChatModel:
             "prefill_slots": prefill_slots,
             "prompt_context": prompt_context,
         }
+
+    def _bind_conversation_topic(
+        self,
+        *,
+        conversation_id: str,
+        message: str,
+        retrieval_query: str,
+        binding_query: str,
+        personalization: dict[str, Any] | None,
+        trace_ctx: dict[str, Any] | None = None,
+    ) -> tuple[str, str, dict[str, Any] | None]:
+        """Keep the current task across turns (G6) and expand anaphoric retrieval."""
+        topic = resolve_topic(conversation_id, message)
+        if trace_ctx is not None:
+            trace_ctx["current_topic"] = topic.topic_id if topic else ""
+        retrieval_query = topic_retrieval_query(topic, retrieval_query)
+        binding_query = topic_retrieval_query(topic, binding_query)
+        fragment = topic.prompt_fragment() if topic else ""
+        if not fragment:
+            return retrieval_query, binding_query, personalization
+        merged = dict(personalization or {})
+        existing = str(merged.get("prompt_context") or "").strip()
+        merged["prompt_context"] = f"{existing}\n{fragment}".strip() if existing else fragment
+        return retrieval_query, binding_query, merged
 
     @staticmethod
     def _apply_personalization_to_workflow(
@@ -2886,58 +2930,38 @@ class ChatModel:
 
     @staticmethod
     def _graph_hits(query: str) -> list[dict[str, Any]]:
-        """Statutory graph claims as a retrieval hit, or nothing.
+        """Statutory graph claims as one retrieval hit, or nothing.
 
-        **Not RRF fusion**, despite what the architecture proposal said.
-        The graph is projected from the effective-dated rate tables, not
-        from the passage corpus, so its claims have no passage ids to
-        rank against — there is nothing for reciprocal rank fusion to
-        fuse. Once prose provisions are extracted from the crawl and
-        linked to chunk ids, a genuine third RRF leg becomes possible;
-        pretending this is one would misdescribe where the answer came
-        from.
+        The graph is a third RRF *leg*, not a prepend. It has no passage
+        ids to join against the corpus, so the hit is fused by rank
+        (graph is a one-item list at rank 0) and a calibrated
+        ``score_norm`` so it can compete with reranked passages. Claims
+        for one question stay in one hit: splitting them lets a reranker
+        keep the rate and drop the threshold that gates it.
 
-        What it is instead is the pattern already used next door by
-        ``_priority_faq_hits``: a high-authority source injected ahead
-        of the retrieved passages. The authority claim is stronger here
-        than for the FAQ hits — every figure carries its Act, its
-        section and its fiscal year, and an unreconciled figure carries
-        that mark too — so an answer built on it can be checked rather
-        than trusted.
-
-        Returns at most one hit. The claims for one question belong in
-        one passage: split across several, the reranker can keep the
-        rate and drop the threshold that gates it, which is the exact
-        join the graph exists to preserve.
+        Returns at most one hit.
         """
         if not flags.is_enabled("graph_fusion") or not flags.is_enabled("tax_graph"):
             return []
         try:
-            from .graph.shadow import graph_answer_for
+            from .graph.shadow import graph_hit_for
 
-            rendered = graph_answer_for(query)
+            hit = graph_hit_for(query)
         except Exception:
             # A retrieval leg must never take down the turn.
             logger.warning("graph leg unavailable", exc_info=True)
             return []
-        if not rendered.strip():
-            return []
-        return [
-            {
-                "text": (
-                    "Statutory rate positions (from the effective-dated URA "
-                    "rate tables, with the Act behind each figure):\n" + rendered
-                ),
-                "question": "",
-                "answer": rendered,
-                "source": "URA rate tables (statutory graph)",
-                "chunk_id": "",
-                "page": "",
-                "section": "statutory-graph",
-                "doc_type": "graph",
-                "score_rrf": 0.0,
-            }
-        ]
+        return [hit] if hit else []
+
+    @staticmethod
+    def _fuse_graph_leg(query: str, hits: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+        """RRF-fuse the statutory graph into *hits*. Returns (hits, fused)."""
+        from .retriever import rrf_fuse_ranked_lists
+
+        graph_hits = ChatModel._graph_hits(query)
+        if not graph_hits:
+            return hits, False
+        return rrf_fuse_ranked_lists(hits, graph_hits), True
 
     def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:
         """Inject high-precision FAQ hits for common procedures that reranking can miss."""
@@ -4105,7 +4129,10 @@ class ChatModel:
             # 0b. Query rewriting — spell correction, abbreviation expansion,
             #     coreference resolution from history (Phase 4)
             with trace_stage("query_rewrite", timings=timings):
-                rewritten = rewrite_query(message, history=conversation_history or None)
+                if flags.is_enabled("query_rewrite"):
+                    rewritten = rewrite_query(message, history=conversation_history or None)
+                else:
+                    rewritten = normalize_query(message)
 
             # 0c. Language detection — auto-detect user's language for
             #     adapter routing and locale-aware responses.
@@ -4148,6 +4175,15 @@ class ChatModel:
                 message_question_span = extract_question_span(message)
                 if message_question_span:
                     binding_query = message_question_span
+
+            retrieval_query, binding_query, personalization = self._bind_conversation_topic(
+                conversation_id=thread_id,
+                message=message,
+                retrieval_query=retrieval_query,
+                binding_query=binding_query,
+                personalization=personalization,
+                trace_ctx=trace_ctx,
+            )
 
             # 1. Input guardrails FIRST (OWASP LLM01) — check original message
             with trace_stage("input_guard", timings=timings):
@@ -4308,7 +4344,7 @@ class ChatModel:
                 return closing
 
             # 1b. Semantic cache check AFTER guardrails (Phase 5)
-            if cache_allowed:
+            if cache_allowed and flags.is_enabled("semantic_cache"):
                 with trace_stage("cache_lookup", timings=timings):
                     cached = self._cache.get(rewritten, locale=locale)
                 if cached:
@@ -4508,7 +4544,12 @@ class ChatModel:
             if self._retriever_ready:
                 with trace_stage("hybrid_search", timings=timings):
                     search_t0 = time.perf_counter()
-                    hits = self._retriever.search(retrieval_query, top_k=top_k)
+                    hits = self._retriever.search_planned(
+                        retrieval_query,
+                        top_k=top_k,
+                        locale=locale,
+                        subject=user_id or None,
+                    )
                     search_ms = (time.perf_counter() - search_t0) * 1000
                 if hits:
                     retrieval_mode = "hybrid"
@@ -4536,7 +4577,12 @@ class ChatModel:
             if hits and self._retriever_ready:
                 with trace_stage("corrective_rag", timings=timings):
                     hits, was_corrected = corrective_retrieve(
-                        retrieval_query, self._retriever, hits, top_k=top_k
+                        retrieval_query,
+                        self._retriever,
+                        hits,
+                        top_k=top_k,
+                        filters=extract_retrieval_filters(retrieval_query) or None,
+                        subject=user_id or None,
                     )
                     if was_corrected:
                         retrieval_mode = "hybrid_corrected"
@@ -4572,12 +4618,10 @@ class ChatModel:
                     locale=locale,
                 )
                 priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
-                seen_texts = {h.get("text", "")[:80] for h in hits}
-                # Graph claims go in first: they carry the statutory
-                # basis and the fiscal year, so where they and a passage
-                # disagree the passage is the one that is out of date.
-                if _prepend_unique(hits, self._graph_hits(retrieval_query), seen_texts):
+                hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
+                if graph_fused:
                     retrieval_mode = "graph"
+                seen_texts = {h.get("text", "")[:80] for h in hits}
                 if _prepend_unique(hits, priority_hits, seen_texts):
                     retrieval_mode = "faq_priority"
                 for h in kw_hits:
@@ -4668,7 +4712,7 @@ class ChatModel:
                     locale=locale,
                     agent_role=agent_role,
                 )
-                if cache_allowed:
+                if cache_allowed and flags.is_enabled("semantic_cache"):
                     # Cache the neutral copy — a calm user hitting this entry
                     # later must not receive someone else's empathy opener.
                     self._cache.put(rewritten, dict(result))
@@ -5181,7 +5225,11 @@ class ChatModel:
 
         # Store in semantic cache (Phase 5) — a copy, so the empathy prefix
         # below never reaches a later (possibly calm) user via a cache hit.
-        if cache_allowed and retrieval_mode not in ("blocked", "abstained"):
+        if (
+            cache_allowed
+            and flags.is_enabled("semantic_cache")
+            and retrieval_mode not in ("blocked", "abstained")
+        ):
             self._cache.put(rewritten, dict(result))
 
         # EI parity for the extractive fallback: with every LLM tier down the
@@ -5231,6 +5279,8 @@ class ChatModel:
         Failures are swallowed — a broken audit DB must never
         block a user response.
         """
+        trace_ctx = trace_ctx or {}
+        result["current_topic"] = str(trace_ctx.get("current_topic") or "")
         if not flags.is_enabled("audit_ledger"):
             return
         try:
@@ -5238,7 +5288,6 @@ class ChatModel:
 
             from .audit import get_ledger
 
-            trace_ctx = trace_ctx or {}
             reply = result.get("reply", "") or ""
             payload = {
                 "query_sha256": _hashlib.sha256((message or "").encode("utf-8")).hexdigest(),
@@ -5314,7 +5363,10 @@ class ChatModel:
                     logger.debug("Failed to fetch conversation history", exc_info=True)
 
         # Query rewriting (Phase 4)
-        rewritten = rewrite_query(message, history=conversation_history or None)
+        if flags.is_enabled("query_rewrite"):
+            rewritten = rewrite_query(message, history=conversation_history or None)
+        else:
+            rewritten = normalize_query(message)
 
         # Language detection — auto-detect for adapter routing
         if locale == "en":
@@ -5345,6 +5397,16 @@ class ChatModel:
             message_question_span = extract_question_span(message)
             if message_question_span:
                 binding_query = message_question_span
+
+        stream_topic_ctx: dict[str, Any] = {}
+        retrieval_query, binding_query, personalization = self._bind_conversation_topic(
+            conversation_id=thread_id,
+            message=message,
+            retrieval_query=retrieval_query,
+            binding_query=binding_query,
+            personalization=personalization,
+            trace_ctx=stream_topic_ctx,
+        )
 
         # Input guardrails (OWASP LLM01)
         guard = self._input_guard.check(message)
@@ -5460,7 +5522,7 @@ class ChatModel:
             }
 
         # Semantic cache check (Phase 5)
-        if cache_allowed:
+        if cache_allowed and flags.is_enabled("semantic_cache"):
             cached = self._cache.get(rewritten, locale=locale)
             if cached:
                 return self._finalize_result({
@@ -5562,7 +5624,12 @@ class ChatModel:
             self._retriever_ready = self._retriever.initialize()
 
         if self._retriever_ready:
-            hits = self._retriever.search(retrieval_query, top_k=top_k)
+            hits = self._retriever.search_planned(
+                retrieval_query,
+                top_k=top_k,
+                locale=locale,
+                subject=user_id or None,
+            )
             if hits:
                 retrieval_mode = "hybrid"
             self._retriever_ready = self._retriever._ready
@@ -5582,7 +5649,14 @@ class ChatModel:
 
         # Corrective RAG (Phase 6)
         if hits and self._retriever_ready:
-            hits, was_corrected = corrective_retrieve(retrieval_query, self._retriever, hits, top_k=top_k)
+            hits, was_corrected = corrective_retrieve(
+                retrieval_query,
+                self._retriever,
+                hits,
+                top_k=top_k,
+                filters=extract_retrieval_filters(retrieval_query) or None,
+                subject=user_id or None,
+            )
             if was_corrected:
                 retrieval_mode = "hybrid_corrected"
 
@@ -5613,10 +5687,8 @@ class ChatModel:
             binding_query=binding_query,
             locale=locale,
         )
-        # Graph claims first — same reasoning as the SSE path above.
-        graph_hits = self._graph_hits(retrieval_query)
-        if graph_hits:
-            hits = graph_hits + hits
+        hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
+        if graph_fused:
             retrieval_mode = "graph"
         priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
@@ -5689,7 +5761,7 @@ class ChatModel:
                     locale=locale,
                     agent_role=agent_role,
                 )
-                if cache_allowed:
+                if cache_allowed and flags.is_enabled("semantic_cache"):
                     self._cache.put(rewritten, dict(result))
                 if distress:
                     result["reply"] = f"{empathy_ack(distress)}\n\n{result['reply']}"
@@ -5832,6 +5904,7 @@ class ChatModel:
             "_personalization_context": (personalization or {}).get("prompt_context", ""),
             "_tone_hint": tone_hint,
             "_distress": distress,
+            "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
         }
 
     @staticmethod

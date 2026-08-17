@@ -40,7 +40,14 @@ def _extractive_seams(model):
     from app import service
 
     return (
-        mock.patch.object(service.flags, "is_enabled", return_value=False),
+        # False for everything except semantic_cache: this test's own point is
+        # that the cache keeps the neutral copy (see module docstring), so a
+        # blanket False here — which used to be harmless — now also disables
+        # the cache.put() gate service.py added (`flags.is_enabled("semantic_cache")`),
+        # silently turning off the exact behavior these tests assert on.
+        mock.patch.object(
+            service.flags, "is_enabled", side_effect=lambda name, **kw: name == "semantic_cache"
+        ),
         mock.patch.object(
             service.ChatModel, "_priority_faq_hits", return_value=[dict(_VAT_HIT)]
         ),

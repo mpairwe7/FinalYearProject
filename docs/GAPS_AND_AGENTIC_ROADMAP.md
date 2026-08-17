@@ -3,6 +3,12 @@
 > Companion to `App/README.md` (which documents Phases 1–16) and
 > `docs/AGENT_ARCHITECTURE.md` (which documents the agent runtime).
 >
+> **This is the living gap register.** Dated proposals
+> (`docs/URA_Chatbot_Roadmap_2026_Enhanced.md`,
+> `docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md`) do **not** supersede it.
+> Retrieval / agentic serving-path decisions: `App/docs/traceability/retrieval-agentic-upgrade-2026-08-17.md`.
+> Document / PDF intake guards: `App/docs/traceability/document-pdf-guards-2026-08-17.md`.
+>
 > This document tracks the **remaining gaps** — things that are
 > not yet in the codebase and what it would take to close them.
 > Gaps closed during Phases 14 A-D, 15, and 16 are marked **SHIPPED**.
@@ -26,7 +32,7 @@ tool-calling, agentic routing, workflows, memory, audit, and speech.
 
 The chatbot now ships with:
 
-- **Hybrid retrieval** (Qdrant dense + BM25 RRF + cross-encoder rerank)
+- **Hybrid retrieval** (Qdrant dense + BM25 RRF + cross-encoder rerank; optional HyDE on the dense leg via `FLAG_HYDE`)
 - **Grounded generation** (Qwen3-8B, spotlight markers,
 token-aware trimming, structured-output option)
 - **OWASP LLM Top 10 (2025) coverage** — prompt-injection guards,
@@ -59,16 +65,22 @@ cloud fallback
 memory (`memory/` directory)
 - **Audit ledger** — hash-chained, Merkle tree proofs (`audit/`
 directory)
-- **Feature flags** — 45 flags via `flags.py`, with percentage / cohort / allowlist rollout
+- **Feature flags** — 48 flags via `flags.py`, with percentage / cohort / allowlist rollout
+- **MCP 2026-07-28** — spec `_meta`, `Mcp-Name` check, MRTR `inputRequests`,
+  shared idempotency. Decision log:
+  `App/docs/traceability/mcp-hardening-2026-08-17.md`.
 - **PostgreSQL backend** option alongside SQLite
 
 **What this is good at:** answering factual questions about URA
 policy, performing tax calculations, routing to specialists,
 walking users through guided workflows, and escalating to staff.
 
-**What this is not good at yet:** deep multi-step planning (ReAct),
-live URA account integration, document ingestion at query time,
-proactive notifications, or multi-tenant deployment.
+**What this is not good at yet:** unbounded multi-step planning
+(the shipped loop is bounded ReAct: one observe hop + one reflect
+retry), live URA account integration, proactive notifications, or
+multi-tenant deployment. Query-time document upload exists
+(`POST /v1/documents/analyze`); it is not virus-scanned and has no
+`mcp_document_parser` tool.
 
 ---
 
@@ -93,8 +105,8 @@ surface that would need to change. Effort estimates are rough:
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
 | G5 🟢 | **~~No long-term memory~~ across sessions.** **SHIPPED Phase 16** — `memory/` directory with three tiers: semantic facts, episodic summaries, working memory. Facts extracted with provenance and confidence scores; injected into system prompt at chat time. | — | Done. | `backend/app/memory/` directory | Done |
-| G6 | **No topic persistence.** If a user is working on "importing a car", every reply is standalone — no awareness that they're in the middle of a workflow. | Fragmented UX for multi-step tasks. | Conversation history is fetched, but there's no "current workflow" concept. | Add `conversation_topics` table + a lightweight topic classifier; surface `current_topic` to the LLM. | `service.py`, new `topics.py` module | M |
-| G7 🟢 | **No temporal grounding.** ~~The model doesn't know today's date, the current fiscal year…~~ **SHIPPED Phase 14-A** — `get_current_date` and `get_next_deadlines` tools return today's date, day-of-week, fiscal year (`FY2025-26`), days-into-FY, days-remaining, and the next N deadlines.  The LLM calls them explicitly whenever a query mentions "today"/"now"/"this year"/"deadline", per the supervisor's temporal patterns and the `TOOL_USE_PROMPT_SUFFIX` rules. | — | Done. | `backend/app/tools/calendar.py` | Done (S actual) |
+| G6 🟢 | **~~No topic persistence.~~** **SHIPPED 2026-08-17** — `conversation_topics` table (SQLite + Postgres) + catalog classifier in `topics.py`. Follow-ups inherit the current task; the prompt sees only the catalog label (never raw user text). `FLAG_AGENTIC_MODE` now defaults **on**, gated by `agentic_mode_gate()` (EN golden-set accuracy ≥ 0.95). | — | Done. | `topics.py`, `database.py`, `postgres.py`, `service.py`, `eval_routing.py` | Done |
+| G7 🟢 | **No temporal grounding.** ~~The model doesn't know today's date, the current fiscal year…~~ **SHIPPED Phase 14-A** — `get_current_date` and `get_next_deadlines` tools return today's date, day-of-week, and the fiscal year computed from the date (Ugandan FY is 1 July–30 June; on/after 2026-07-01 that is `FY2026-27`), plus days-into-FY, days-remaining, and the next N deadlines. Soft retrieval preference for “this fiscal year” follows the same year via `current_fiscal_year()` / rate tables unless `CURRENT_FISCAL_YEAR` is set. | — | Done. | `backend/app/tools/calendar.py`, `query.py` | Done (S actual) |
 | G8 🟢 | **~~Conversation store is not an audit log.~~** **SHIPPED Phase 16** — `audit/` directory with hash-chained, append-only audit ledger and Merkle tree proofs for tamper evidence. Separate from conversation TTL. | — | Done. | `backend/app/audit/` directory | Done |
 
 ### 2.3 Capabilities & actions
@@ -102,10 +114,10 @@ surface that would need to change. Effort estimates are rough:
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
 | G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen chat-template tool formatting; `ToolRegistry` dispatches via `.call()`; 11 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
-| G10 🟢 | **No calculators.** ~~PAYE, VAT, CGT, customs, income tax, effective rate.~~ **SHIPPED Phase 14-A** — 5 deterministic calculators (`calculate_vat`, `calculate_paye` with progressive bands, `calculate_corporation_tax`, `calculate_capital_gains`, `calculate_customs_duty`) all backed by FY2025-26 rate tables, unit-tested (29 pytest assertions covering arithmetic + edge cases + error paths). | — | Done. | `backend/app/tools/calculators.py` | Done (S actual) |
+| G10 🟢 | **No calculators.** ~~PAYE, VAT, CGT, customs, income tax, effective rate.~~ **SHIPPED Phase 14-A** — deterministic calculators (`calculate_vat`, `calculate_paye` with progressive bands, `calculate_corporation_tax`, `calculate_capital_gains`, `calculate_customs_duty`) backed by **effective-dated** rate tables (`FY2025-26`, `FY2026-27`, …). A frozen “current year” default is a documented failure mode — see `App/docs/tax-rate-tables.md`. | — | Done. | `backend/app/tools/calculators.py`, `tax/tables.py` | Done (S actual) |
 | G11 🟢 | **~~No structured form flows.~~** **SHIPPED Phase 15** — `workflows/` directory with 5 YAML-declared workflows loaded at startup via `loader.py`. Slot-filling state machine (`slots.py`), workflow registry (`registry.py`), keyed on `conversation_id`. | — | Done. | `backend/app/workflows/` directory | Done |
 | G12 | **No URA account actions.** Can't fetch filing status, balance, registered tax types, next due dates — even for the authenticated user. | Bot only talks *about* URA; doesn't help users actually interact with it. | No integration. | New `mcp_ura_account` server talking to URA's internal API (behind auth); exposes `get_tin_status`, `get_filing_status`, `list_returns_due`, etc. Scoped to the authenticated user. | New `backend/app/tools/ura_account.py`, `auth.py`, secrets mgmt | XL |
-| G13 | **No document ingestion.** User can't upload a receipt, invoice, or tax cert to ask "is this correct?" | High-value use case for businesses is blocked. | Index-time PDF parsing exists (`pdf_corpus.export_pdf_chunks_to_jsonl`) but not query-time. | Add `POST /v1/upload` (size-limited, virus-scanned, PII-redacted), an OCR + table-extract pipeline, and a `mcp_document_parser` tool. Vision support should use a pinned vision-capable model. | New `backend/app/uploads.py`, new `DocumentUpload.tsx`, `llm.py` multimodal branch | L |
+| G13 🟢 | **~~No document ingestion.~~** **SHIPPED** query-time upload (`POST /v1/documents/analyze` + report + chat `attachment_ids`) with OCR/tables and **2026-08-17** structural PDF/Office guards (`pdf_guards.py`: header, encryption, JS/Launch/embedded files, xref/page caps; zip-slip/macro reject; LLM01 scrub + `<untrusted_user_document>` wrap). | User can attach a receipt/invoice and ask about it. | Remaining: no ClamAV (or equivalent) malware scan; no `mcp_document_parser` tool; parsers still share the API worker. | Optional later: isolated parse worker + malware scan + MCP wrapper. | `documents.py`, `pdf_guards.py`, `ocr_service.py`, `ChatInput.tsx` | Done (malware scan / MCP wrapper open) |
 | G14 | **No scheduled notifications.** Nothing reminds the user "your quarterly VAT return is due in 3 days". | Missed opportunity for value-add engagement. | No scheduler. | Add an APScheduler / Temporal worker that reads user deadlines and dispatches via email / SMS / in-app. | New `backend/app/scheduler.py`, notification channels | L |
 | G15 | **No URA live data.** FAQ CSVs were indexed once; new circulars, rate changes, and press releases never reach the bot. | Staleness within weeks of deployment. | Manual re-index via `POST /v1/index`. | Add a nightly ingestion worker: scrape `ura.go.ug/news`, diff against last run, re-embed, upsert to Qdrant. | New `backend/app/workers/news_ingest.py` | M |
 
@@ -113,28 +125,28 @@ surface that would need to change. Effort estimates are rough:
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G16 🟢 | **~~Unstructured retrieval only.~~** **SHIPPED Phase 30** — `app/graph/` projects the effective-dated rate tables into an 87-node / 153-edge statutory graph: rates joined to taxpayer class (`APPLIES_TO`), to their Act and section (`IMPOSED_BY`), across fiscal years (`SUPERSEDES`), with the thresholds that gate them (`GATES`) and the charges they stack on (`COMPUTED_ON`). `tax_graph` MCP namespace exposes 3 tools. Zero dependencies — a JSON-backed adjacency index behind a `GraphStore` seam, not Kùzu; see the proposal's "Where the build departed" for why. | — | Shadow score 12/12 on the authored set, **6/8 held-out**. `FLAG_GRAPH_FUSION` stays closed until the set is expanded with unseen questions. | Expand the golden set from real traffic; extract prose provisions from the crawl behind review. | `backend/app/graph/`, `tools/graph_tools.py`, `service.py` | Done (measurement pending) |
-| G17 | **No metadata-aware retrieval.** Can't filter to "only FY2025-26 sources" or "only VAT passages" at query time, even though the payload has the fields. | Stale-document answers when multiple fiscal years share the collection. | `HybridRetriever.search` supports filters but no caller uses them. | Route queries through a tiny classifier → extract `filters={doc_type, fiscal_year, tax_type}` → pass to `search()`. | `service.py`, `query.py` | S |
-| G18 🟡 | **No multilingual retrieval.** Users writing in Luganda get routed through the same English index; the prompt just says "respond in Luganda". | Poor recall on non-English queries. | **ROUTING SHIPPED Phase 30** — `agents/patterns/` carries locale-keyed supervisor tables. Measured before: **all 12** real Luganda questions in `Data/eval/rag_eval_lg.jsonl` fell to the default RAG route, including two asking for a human. Now 23/23 with `FLAG_MULTILINGUAL_ROUTING` on; English holds 36/36. **Retrieval itself is still English-indexed.** | Swap `DENSE_MODEL` to a multilingual embedder (BGE-M3 or multilingual-e5-large) and re-index — blocked on NVIDIA driver ≥550 on the current host (see `App/README.md` → "Host-level gotchas"). | `retriever.py`, `indexer.py`, ops | S (code) / L (ops) |
-| G19 | **No citation provenance.** Citations show file + section, but not the URA URL the document came from. | Users can't click through to the original notice. | Payload has `source` filename only. | Extend indexer to store a canonical URL + effective date per passage; surface those in the UI. | `indexer.py`, `retriever.py`, `models.py`, `page.tsx` | S |
+| G16 🟢 | **~~Unstructured retrieval only.~~** **SHIPPED Phase 30** — `app/graph/` projects the effective-dated rate tables into an 87-node / 153-edge statutory graph. **2026-08-17:** REST and streaming fuse that graph as a third RRF leg (`rrf_fuse_ranked_lists` + calibrated `score_norm`) instead of prepending it. `FLAG_GRAPH_FUSION` / `FLAG_TAX_GRAPH` remain default **off** until the multi-hop golden set is expanded with unseen questions (shadow gate 75%). Fusion is rank-level, not passage-id / entity-linked. | — | Fusion **code** shipped; **production flag stays off**. | Expand the golden set from real traffic; extract prose provisions from the crawl behind review. | `graph/shadow.py`, `retriever.py`, `service.py` | Done (measurement pending) |
+| G17 🟢 | **~~No metadata-aware retrieval.~~** **SHIPPED 2026-08-17** — `plan_retrieval()` extracts an explicit FY as a hard Qdrant filter and a mentioned tax type / "this fiscal year" as a soft boost (`current_fiscal_year()`). `search_planned()` is the shared caller (REST, stream, RAG tool, corrective RAG, LangGraph `node_retrieve`, voice speculative prefetch). LangGraph fuses the graph RRF leg when those flags are on and applies the same unbound-FAQ filter + exact-FAQ promote as REST. Hard filters do **not** fire on a bare calendar year (Ugandan FY is July–June). | — | Done. | `query.py`, `retriever.py`, `service.py` | Done |
+| G18 🟢 | **~~No multilingual retrieval.~~** **SHIPPED 2026-08-17 (translate-retrieve).** The corpus stays English by design — the model translates the *answer*. `english_retrieval_query()` + `FLAG_TRANSLATE_RETRIEVE` (default on) merge a second hybrid pass on the English translation for non-`en` locales. FAQ keyword path already did this lazily. Routing (Phase 30) is unchanged. A multilingual re-index is **not** required and is not claimed. | — | Done (English index + generate-in-locale). | Optional later: multilingual dense if a Luganda corpus is added. | `query.py`, `retriever.search_planned`, `service.py` | Done |
+| G19 🟢 | **~~No citation provenance.~~** **SHIPPED 2026-08-17** — crawl chunks store `url` / `crawled_at`. Hits and `Citation` surface `url`, `effective_date`, `title`. `canonical_source_url()` backfills `https://ura.go.ug` for `ura_*.csv/.pdf` when no deep link was indexed. UI prefers a stored https URL. | — | Done. | Optional per-notice deep links when crawl mapping exists. | `retriever.py`, `models.py`, `ChatMessage.tsx` | Done |
 
 ### 2.5 Agentic reasoning
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
 | G20 🟢 | **~~No planning loop.~~** **SHIPPED Phase 15** — `agents/supervisor.py` with 7 routes, per-specialist tool whitelists, and a bounded tool-call loop (up to 3 iterations per request). Flagged by `FLAG_AGENTIC_MODE`. Full planner-executor (JSON plan, tree of thought) remains future work for Phase 17+. | — | Done. | `backend/app/agents/supervisor.py` | Done |
-| G21 🟡 | **No ReAct / self-correction.** ~~Self-reflection only fires on low faithfulness, not on reasoning mistakes.~~ **PARTIAL Phase 30** — `agents/evaluator.py` verifies money answers **deterministically**: it re-derives the figure through the MCP client and compares it against what the reply printed, so a wrong number is caught without a model. A confirmed mismatch escalates. `Verdict` keeps *checked-and-passed*, *checked-and-failed* and *could-not-check* apart. | — | `RevisionBudget` exists and is tested but nothing calls it — this rejects and escalates rather than regenerating. | Wire the one-revision regeneration path at the evaluator tier; then the full ReAct loop if it proves necessary. | `service.py`, `agents/evaluator.py` | M |
-| G22 🟡 | **No per-specialty sub-agents.** ~~A tax question should route to a tax-specialist prompt…~~ **PARTIAL Phase 14-C** — the supervisor now routes customs vocabulary to `CUSTOMS_SPECIALIST` with a narrowed tool whitelist (`calculate_customs_duty`, `search_ura_knowledge_base`, `get_current_date`).  `TAX_SPECIALIST` is reserved but uses the base prompt today. | Per-specialist system prompts not yet written. | Partial — next step: add `agents/prompts/` with per-route system prompts. | `backend/app/agents/supervisor.py` | Done (partial) |
-| G23 | **No delegation between agents.** When the planner calls a specialist, the specialist can't call back to the planner for more context. | Limits the depth of reasoning chains. | N/A. | Use LangGraph-style message passing with explicit state (`AgentState` typed dict). | `agent.py` | M |
-| G24 | **No per-user prompt tuning.** The system prompt is one constant, regardless of who asks. | Beginners vs accountants get the same jargon level. | Static prompt. | Parameterize `SYSTEM_PROMPT` on user profile fields (`detail_level: beginner | intermediate | expert`). | `llm.py::_build_messages`, `service.py` | S |
+| G21 🟢 | **~~No ReAct / self-correction.~~** **SHIPPED 2026-08-17 (bounded).** Money answers are verified deterministically + one `RevisionBudget` rewrite. LangGraph is `act → observe → synthesize → reflect`. `node_observe` hands off once to `retrieve` when tools produced no usable evidence (`max_handoffs=1`). `node_reflect` re-retrieves once on low faithfulness **or** a reasoning miss (reply shares too few question terms), even if query expand is a no-op. `max_reflections=1`. Industry 2026 practice is MAX_ITER 2–3 — this is **not** unbounded ReAct. | — | Done (bounded). | Do not add unbounded critique-revise. | `service.py`, `evaluator.py`, `graphs/main_graph.py` | Done |
+| G22 🟢 | **~~No per-specialty sub-agents.~~** **SHIPPED** — `agents/prompts.py` appends short tax / customs / tool specialist fragments to the shared base prompt (safety rules stay first). Supervisor still narrows tool whitelists per route. Remaining (optional): versioned YAML under `agents/prompts/` with hot-reload. | — | Done (in-code fragments). | Optional YAML split. | `backend/app/agents/prompts.py`, `supervisor.py` | Done |
+| G23 🟢 | **~~No delegation between agents.~~** **SHIPPED 2026-08-17 (one hop).** Typed `handoff_*` fields on `AgentGraphState`. When a specialist/tool plan yields no usable observation, the graph hands off once to `retrieve` instead of synthesising an empty answer. Not free-form multi-agent chat — schema-validated, budgeted at one hop (2026 enterprise pattern). | — | Done (bounded). | Extra hops only with a measured quality gate. | `graphs/state.py`, `graphs/main_graph.py` | Done |
+| G24 🟢 | **~~No per-user prompt tuning.~~** **SHIPPED 2026-08-17** — profile `detail_level` (`beginner` / `intermediate` / `expert`) appends a short instruction fragment via `detail_level_prompt()`. Intermediate adds nothing (base prompt already matches). Unknown values are ignored so a profile field cannot inject prompt text. Still consent-gated. | — | Done. | Optional industry/language fragments later. | `agents/prompts.py`, `service.py` | Done |
 
 ### 2.6 Evaluation & quality
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G25 | **No per-segment quality metrics.** The eval harness gives one faithfulness score for everyone. | Can't see that "individual taxpayer" queries are well served but "customs agent" queries aren't. | `evaluation.run_evaluation()` computes global means. | Extend `EvalReport` with `by_segment` dimensions (taxpayer_type, topic, locale). | `evaluation.py`, `main.py::run_eval` | S |
-| G26 🟡 | **~~No A/B testing.~~** **PARTIAL Phase 30** — `flags.py` now carries `Rollout` (percentage / cohort / allowlist) with stable SHA-256 bucketing, env-var ramping (`FLAG_<N>_PERCENT`), and `variant_for()` for per-variant labelling. Remaining: persist the variant on each conversation and report by it in `evaluation.py`. | — | Targeting done; variant not yet logged to the conversation store. | Log `variant_for()` on each turn; add `by_variant` to `EvalReport`. | `analytics.py`, `database.py`, `evaluation.py` | S |
-| G27 | **No drift detection on the index.** When URA updates a policy, Qdrant still returns the old passage — nothing signals staleness. | Silent failure mode. | Manual re-index. | Hash each source file at index time; nightly compare; alert on delta; auto-enqueue re-index. | `indexer.py`, new `freshness.py` worker | M |
+| G25 🟢 | **~~No per-segment quality metrics.~~** **SHIPPED 2026-08-17** — `EvalReport.by_segment` now has `topic`, `locale`, `taxpayer_type`, and `variant`. Groups smaller than 3 are omitted. Prometheus exposition already labels `segment_dim` / `segment`. | — | Done. | — | `evaluation.py` | Done |
+| G26 🟢 | **~~No A/B testing.~~** **SHIPPED 2026-08-17** — rollout targeting was already in `flags.py`. Each chat/stream/voice/WS turn now persists `flag_variants` + `locale` on `conversations`. Eval reports `by_segment.variant` (e.g. `hyde:off`). | — | Done. | — | `flags.py`, `database.py`, `postgres.py`, `main.py`, `evaluation.py` | Done |
+| G27 🟢 | **~~No drift detection on the index.~~** **SHIPPED 2026-08-17.** Hash + compare + status probe + nightly GitHub Action `.github/workflows/index-freshness.yml` (`15 2 * * *`). Exit 1 = drift (fail); exit 2 = no snapshot (skip). `--notify` POSTs to `FRESHNESS_SLACK_WEBHOOK` (https only; no-op if unset). `--enqueue` writes `index_reindex_requested.json`. **No auto-reindex** — ops still run `python -m app.indexer --recreate`. | — | Done (alert + request file; recreate stays manual). | Do not auto-recreate. | `freshness.py`, `index-freshness.yml` | Done |
 | G28 | **No red-team fixtures.** Prompt-injection patterns are hand-written regex; no automated adversarial testing. | Coverage gaps. | `_INJECTION_PATTERNS` in `guardrails.py`. | Integrate PurpleLlama / promptmap test suite into CI. | `tests/security/`, `.github/workflows/` | S |
 | G29 | **No human feedback loop into training.** Thumbs-down feedback accumulates but doesn't fine-tune anything. | Improvement requires manual prompt engineering. | `export_review_feedback` exists, no training pipeline consumes it. | Build a weekly DPO/KTO fine-tuning job from the negative feedback set; promote via the model registry. | `ml/` pipeline, model registry | XL |
 
@@ -143,8 +155,8 @@ surface that would need to change. Effort estimates are rough:
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
 | G30 | **Single tenant.** One knowledge base, one prompt, one model for everyone. | Can't offer this to KCCA, NSSF, or private firms under the same codebase. | Implicit single-tenancy. | Add `tenant_id` everywhere (users, conversations, Qdrant collections, rate limits). | Backend-wide, DB schema changes | L |
-| G31 | **No admin UI.** Ops staff can't curate content, approve uploads, override bot answers, manage flags without SSH'ing to the server. | Non-technical staff can't operate the system. | CLI + curl only. | Small admin Next.js route with RBAC gating `/admin/*`. | New routes, `auth.py`, UI | L |
-| G32 🟢 | **~~No human-in-the-loop queue.~~** **SHIPPED Phase 15** — `tickets` table with CRUD, `escalate_to_human` tool, 4 admin REST endpoints (`GET/PATCH /v1/admin/tickets[/{id}][/stats]`). Supervisor `ESCALATE` route persists tickets when `FLAG_TICKET_QUEUE=true`. `ticket_id` surfaces in `ChatResponse`. | Staff UI (Next.js `/admin/tickets` page) remains future work. | Done (backend). | `backend/app/database.py`, `backend/app/tools/`, `backend/app/main.py` | Done |
+| G31 🟡 | **~~No admin UI.~~** **PARTIAL 2026-08-17** — `/admin/flags` lists the replica registry; `ura_admin` can set an in-process override. Safety flags (auth, audit, consent, multi-tenant) stay protected. Content curation / answer override remain open. | Cluster-wide still needs `FLAG_*` on every replica. | Flags console shipped; CMS still open. | Content curation / answer-override CMS. | `GET/PATCH /v1/admin/flags`, `frontend/src/app/admin/flags/` | M |
+| G32 🟢 | **~~No human-in-the-loop queue.~~** **SHIPPED Phase 15 + staff workbench 2026-08-17** — claim → brief → reply → resolve, live `/v1/admin/tickets/stream`, collision presence, canned replies, first- and next-reply SLA with population breach counts. | — | Done. | — | `ticket_ws.py`, `ticket_presence`, `frontend/src/components/staff/` | Done |
 | G33 | **No SLO-driven autoscaling.** Prometheus alerts exist, but no action is taken — no HPA, no Kubernetes operator. | Manual intervention during load spikes. | Alert rules only. | Kubernetes HPA on `chat_response_time_ms` p95, plus a KEDA scaler on Redis queue depth. | Infra, new `k8s/` manifests | M |
 | G34 | **No chaos / failure drills.** We've hardened against failure modes but never exercised them end-to-end. | Unknown unknowns in prod. | Unit tests only. | Add Litmus/ChaosMesh experiments: kill Redis, spike Qdrant latency, kill LLM worker, measure recovery. | `tests/chaos/`, CI schedule | M |
 
@@ -307,8 +319,10 @@ responses are scanned for PII on the way back.
 result, timestamp, hash of previous row). Enables forensic
 replay for disputes.
 
-Also: keep `FLAG_AGENTIC_MODE=false` as the default. Ship as an
-opt-in beta, gated on a specific user tier, for the first 90 days.
+Also: `FLAG_AGENTIC_MODE` now defaults **on** after
+`agentic_mode_gate()` (English golden-set accuracy ≥ 0.95).
+`FLAG_TOOL_USE` stays off — irreversible URA actions still require
+explicit confirmation.
 
 ---
 
@@ -365,37 +379,41 @@ cloud fallback (`speech_service.py`, `sunbird.py`).
 ### Phase 17 — Document ingestion + topic persistence (G6, G13, G25)
 
 **Goal:** Query-time document uploads and topic-aware conversations.
-**Deliverables:**
-- `POST /v1/upload` with size/virus scanning
-- `mcp_document_parser` tool (pinned vision model, OCR + table extract)
-- `conversation_topics` table + lightweight topic classifier
-- Per-segment quality metrics in `evaluation.py`
-- UI: upload button, step progress indicator
+**Shipped (G13 core + 2026-08-17 guards):** `POST /v1/documents/analyze`,
+session-bound TTL store, OCR/tables, chat `attachment_ids`, PDF report,
+structural PDF/Office guards, LLM01 scrub. See
+`App/docs/traceability/document-pdf-guards-2026-08-17.md`.
+**Still open:**
+- Virus / malware scan (ClamAV or equivalent) in an isolated worker
+- `mcp_document_parser` tool
+**Shipped 2026-08-17:** `conversation_topics` + `topics.py` classifier (G6). G25 segment metrics were already shipped.
 
 **Dependencies:** Phase 14 (auth), Phase 15 (tool framework).
-**Effort:** ~2-3 weeks.
-**Risks:** Document parser quality; topic classifier accuracy.
+**Effort remaining:** malware scan is an ops add-on; LangGraph topic
+chips remain a later UX upgrade.
+**Risks:** Parser DoS if a native library is already executing.
 
 ### Phase 18 — Staff dashboard + ticket UI (G32 follow-up, G31)
 
 **Goal:** Give URA staff a UI for the ticket queue (backend shipped in Phase 15).
-**Deliverables:**
-- Staff dashboard route in `/admin/tickets` (Next.js)
-- Real-time push via WebSocket when tickets arrive
-- Reply-back mechanism surfaces in the user's chat
-- SLA tracking (time to first response, time to resolution)
-- Admin UI for flag management, content curation
+**Shipped 2026-08-17:** `/admin` morning board, `/agent` claim-and-reply queue,
+`/admin/tickets` full console, live ticket stream, collision presence,
+canned replies, next-reply SLA, population breach counts, `/admin/flags`.
+**Still open:**
+- Content curation / answer-override CMS (remainder of G31)
 
 **Dependencies:** Phase 14 (auth, RBAC) — already shipped.
-**Effort:** ~2 weeks.
+**Effort remaining:** content curation / answer-override CMS (remainder of G31).
 
 ### Phase 19 — Deep planning + ReAct (G21, G22, G23)
 
 **Goal:** Extend the shipped supervisor into a full planner-executor.
-**Deliverables:**
-- ReAct loop with max-step bound (`Thought -> Action -> Observation`)
-- Per-specialist system prompts in `agents/prompts/`
-- LangGraph-style state machine with delegation between agents
+**Landed 2026-08-17 (bounded):** G21 observe + reasoning-miss retry,
+G22 specialist fragments, G23 one typed hop. Remaining is a deeper
+planner-executor, not an open ReAct loop.
+**Deliverables (remaining):**
+- Full planner-executor (JSON plan / tree of thought) — optional
+- Per-specialist system prompts in `agents/prompts/` (YAML/hot-reload)
 - LLM-based supervisor classifier (replace rule-based soft-misses)
 - Per-agent eval suites
 
@@ -412,7 +430,7 @@ chain brittleness; cost if hosted.
 - Notification channels (email via Resend/SES, SMS via
 Africa's Talking, in-app)
 - Fresh-data ingestion worker (URA news scraper + nightly reindex)
-- Index-freshness alert
+- Index-freshness alert — **shipped** (`freshness.py` + Slack `--notify`)
 - User-facing notification preferences
 
 **Dependencies:** Phases 14, 17.
@@ -463,8 +481,9 @@ voice chat with VAD + barge-in, sentence-chunked TTS, offline RAG (FAISS),
 accent detection (5 Ugandan profiles), voice consent & audit trail,
 full-screen mobile voice-first UI.
 
-**Next priorities:** Phases 17-20 (document ingestion, staff UI, deep
-planning, proactive engagement) stack on top of the shipped foundation.
+**Next priorities:** Phase 17 leftover (optional malware-scan worker),
+Phases 18-20 (staff UI, deep planning, proactive engagement) stack on
+top of the shipped foundation.
 
 ---
 
@@ -478,8 +497,9 @@ planning, proactive engagement) stack on top of the shipped foundation.
 | Memory | `backend/app/memory.py`, `backend/app/workers/memory_worker.py`, `backend/app/tools/memory.py` | `backend/app/service.py`, `backend/app/database.py` |
 | Tickets | `backend/app/tickets.py`, `frontend/src/app/admin/tickets/page.tsx` | `backend/app/main.py`, `backend/app/service.py` (escalation hook) |
 | Agents | `backend/app/agents/supervisor.py`, `backend/app/agents/tax_specialist.py`, `backend/app/agents/customs_specialist.py`, `backend/app/agents/account_specialist.py` | `backend/app/service.py`, `backend/app/flags.py` |
+| Topic persistence (G6) | `backend/app/topics.py` | `backend/app/database.py`, `backend/app/postgres.py`, `backend/app/service.py`, `backend/app/models.py`, `backend/app/agents/eval_routing.py` |
 | Voice-first (Phase 23) | `backend/app/voice_stream.py`, `backend/app/voice_ws.py`, `backend/app/voice_consent.py`, `backend/app/offline_rag.py`, `backend/app/accent_detector.py`, `frontend/src/components/VoiceChat.tsx`, `frontend/src/services/voiceWebSocket.ts`, `frontend/src/store/useVoiceStore.ts`, `frontend/src/hooks/useVoiceWebSocket.ts`, `frontend/src/components/CameraCapture.tsx`, `frontend/public/audio-worklet-processor.js` | `backend/app/speech_service.py`, `backend/app/flags.py`, `backend/app/models.py`, `backend/app/main.py`, `backend/app/database.py`, `backend/app/tracing.py`, `frontend/src/app/page.tsx`, `frontend/src/services/voiceService.ts`, `frontend/src/components/Icons.tsx`, `frontend/src/app/globals.css` |
-| Scheduler + freshness | `backend/app/scheduler.py`, `backend/app/workers/news_ingest.py`, `backend/app/workers/freshness.py`, `backend/app/tools/notify.py` | `backend/app/main.py`, `docker-compose.yml` |
+| Scheduler + freshness | `backend/app/scheduler.py`, `backend/app/workers/news_ingest.py`, `backend/app/freshness.py` (hash + compare shipped 2026-08-17; cron / Slack / auto-reindex still Phase 20), `backend/app/tools/notify.py` | `backend/app/main.py`, `docker-compose.yml` |
 
 ---
 

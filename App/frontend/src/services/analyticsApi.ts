@@ -83,6 +83,11 @@ export interface TicketQueueItem {
   updated_at: number;
   /** Owning team, routed from the handoff topic at escalation time. */
   team?: string;
+  assignee?: string;
+  first_response_at?: number;
+  reply_at?: number;
+  officer_reply?: string;
+  viewers?: string[];
   handoff?: {
     summary?: string;
     topic?: string;
@@ -144,8 +149,13 @@ export interface TicketSla {
   responded: number;
   resolved: number;
   awaiting_first_response: number;
+  awaiting_next_response?: number;
   median_response_seconds: number | null;
   median_resolution_seconds: number | null;
+  median_next_reply_seconds?: number | null;
+  breaching_first_response?: number;
+  breaching_next_reply?: number;
+  breaching?: number;
 }
 
 export interface TicketPatch {
@@ -182,11 +192,22 @@ export interface FeedbackSummary {
   }[];
 }
 
+export interface FlagRecord {
+  name: string;
+  default: boolean;
+  description: string;
+  enabled: boolean;
+  overridden?: boolean;
+  protected?: boolean;
+  rollout?: { percent: number; cohorts: string[]; allowlist_size: number } | null;
+}
+
 const BASE = "/api";
 
-async function fetchJson<T>(url: string): Promise<T> {
+async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
-    headers: authHeaders(),
+    ...init,
+    headers: authHeaders(init.headers as Record<string, string> | undefined),
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -205,6 +226,17 @@ export const analyticsApi = {
     ),
   ticket: (id: string) => fetchJson<TicketDetail>(`/v1/admin/tickets/${encodeURIComponent(id)}`),
   ticketSla: (days = 30) => fetchJson<TicketSla>(`/v1/admin/tickets/sla?days=${days}`),
+  heartbeatPresence: (id: string) =>
+    fetchJson<{ status: string; viewers: string[] }>(
+      `/v1/admin/tickets/${encodeURIComponent(id)}/presence`,
+      { method: "POST" },
+    ),
+  flags: () => fetchJson<{ flags: FlagRecord[]; overrides_are_ephemeral: boolean }>("/v1/admin/flags"),
+  setFlag: (name: string, enabled: boolean) =>
+    fetchJson<{ name: string; enabled: boolean; ephemeral: boolean }>(
+      `/v1/admin/flags/${encodeURIComponent(name)}?enabled=${enabled}`,
+      { method: "PATCH" },
+    ),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     // The backend takes these as query parameters, not a JSON body.
     const params = new URLSearchParams();

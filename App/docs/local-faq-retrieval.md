@@ -62,4 +62,6 @@ PDFs and `Data/eval/*.jsonl` are rejected by construction.
 `HF_HUB_OFFLINE=1` means the required embedding and reranker assets must be
 available locally before that rebuild. See
 [the retrieval diagnosis](traceability/faq-retrieval-diagnosis-2026-07-21.md)
+and the 2026-08-17 serving-path upgrade
+[retrieval-agentic-upgrade-2026-08-17](traceability/retrieval-agentic-upgrade-2026-08-17.md)
 for the source-policy and data-quality evidence.

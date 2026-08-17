@@ -6,6 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ThemeToggle from './ThemeToggle';
 import LanguageMenu, { LanguageOption } from './LanguageMenu';
 import { useIdentity } from '../hooks/useIdentity';
+import { useTheme } from '../hooks/useTheme';
 import {
   BookIcon,
   KebabIcon,
@@ -71,6 +72,8 @@ export default function ChatHeader({
   // checked the buttons stay, and they come back if it turns out to be stale.
   const { status } = useIdentity();
   const signedIn = status === 'signed-in';
+  const { pref: themePref, cycle: cycleTheme } = useTheme();
+  const themeLabel = themePref === 'light' ? 'Light' : themePref === 'dark' ? 'Dark' : 'Auto';
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -117,22 +120,22 @@ export default function ChatHeader({
         <span className="top-bar-title">URA Tax Assistant</span>
       </div>
       <div className="hdrv2-spacer" />
-      {hasStartedChat && (
-        <button
-          className="top-bar-icon-btn"
-          onClick={onNewChat}
-          aria-label="New conversation"
-          title="New chat"
-        >
-          <PlusIcon />
-        </button>
-      )}
+      <button
+        className="top-bar-icon-btn"
+        onClick={onNewChat}
+        aria-label="New conversation"
+        title="New chat"
+      >
+        <PlusIcon />
+      </button>
       <LanguageMenu
         locale={locale}
         options={localeOptions}
         onLocaleChange={onLocaleChange}
       />
-      <ThemeToggle />
+      <div className="hdrv2-theme">
+        <ThemeToggle />
+      </div>
       {!signedIn && (
         <div className="hdrv2-auth">
           <Link className="hdrv2-signin" href="/signin">
@@ -155,6 +158,16 @@ export default function ChatHeader({
         </button>
         {menuOpen && (
           <div className="hdrv2-menu" role="menu">
+            <button
+              role="menuitem"
+              className="hdrv2-menu-item hdrv2-menu-theme"
+              onClick={() => {
+                cycleTheme();
+              }}
+              aria-label={`Theme: ${themeLabel}. Click to switch.`}
+            >
+              Theme: {themeLabel}
+            </button>
             <button
               role="menuitem"
               className="hdrv2-menu-item"

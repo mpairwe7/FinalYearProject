@@ -202,6 +202,22 @@ def init_db() -> None:
         legal_basis   TEXT DEFAULT 'consent'
     );
 
+    CREATE TABLE IF NOT EXISTS ticket_presence (
+        ticket_id  TEXT NOT NULL,
+        viewer     TEXT NOT NULL,
+        updated_at DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (ticket_id, viewer)
+    );
+
+    CREATE TABLE IF NOT EXISTS conversation_topics (
+        conversation_id TEXT PRIMARY KEY,
+        topic_id        TEXT NOT NULL,
+        label           TEXT NOT NULL,
+        tax_type        TEXT DEFAULT '',
+        confidence      DOUBLE PRECISION DEFAULT 0,
+        updated_at      DOUBLE PRECISION NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS workflow_sessions (
         conversation_id  TEXT PRIMARY KEY,
         workflow_id      TEXT NOT NULL,
@@ -237,6 +253,8 @@ def init_db() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contexts TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS flag_variants TEXT DEFAULT '{}'")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript_json TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             for _col, _ddl in (
@@ -269,6 +287,8 @@ def cleanup_expired_data() -> dict[str, int]:
         ("analytics_events", _ANALYTICS_TTL_DAYS, "created_at"),
         ("feedback", _FEEDBACK_TTL_DAYS, "created_at"),
         ("sessions", _SESSION_TTL_DAYS, "last_active_at"),
+        ("conversation_topics", _CONVERSATION_TTL_DAYS, "updated_at"),
+        ("ticket_presence", 1, "updated_at"),
     ]
     deleted: dict[str, int] = {}
     with pool.connection() as conn:
@@ -483,6 +503,8 @@ def log_conversation(
     confidence: float = 0,
     topic_tag: str = "",
     user_id: str = "",
+    flag_variants: str = "{}",
+    locale: str = "",
 ) -> str:
     """Mirrors :func:`database.log_conversation` exactly.
 
@@ -503,8 +525,8 @@ def log_conversation(
             cur.execute(
                 """INSERT INTO conversations (id, conversation_id, session_id, user_message, bot_reply,
                        sources, contexts, response_time_ms, confidence, topic_tag,
-                       user_id, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       user_id, flag_variants, locale, created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     row_id,
                     thread_id,
@@ -517,6 +539,8 @@ def log_conversation(
                     confidence,
                     topic_tag,
                     user_id,
+                    flag_variants or "{}",
+                    locale or "",
                     time.time(),
                 ),
             )
@@ -548,6 +572,74 @@ def get_recent_turns(
         cur.execute(sql, args)
         rows = cur.fetchall()
     return [{"user_message": r[0], "bot_reply": r[1]} for r in reversed(rows)]
+
+
+def get_conversation_topic(conversation_id: str) -> dict[str, Any] | None:
+    pool = _get_pool()
+    if pool is None:
+        return None
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT conversation_id, topic_id, label, tax_type, confidence, updated_at
+               FROM conversation_topics WHERE conversation_id = %s""",
+            (cid,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return {
+        "conversation_id": row[0],
+        "topic_id": row[1],
+        "label": row[2],
+        "tax_type": row[3] or "",
+        "confidence": float(row[4] or 0),
+        "updated_at": float(row[5] or 0),
+    }
+
+
+def upsert_conversation_topic(
+    conversation_id: str,
+    *,
+    topic_id: str,
+    label: str,
+    tax_type: str = "",
+    confidence: float = 0.0,
+) -> None:
+    pool = _get_pool()
+    if pool is None:
+        return
+    cid = (conversation_id or "").strip()
+    if not cid or not topic_id:
+        return
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO conversation_topics
+               (conversation_id, topic_id, label, tax_type, confidence, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (conversation_id) DO UPDATE SET
+                 topic_id = EXCLUDED.topic_id,
+                 label = EXCLUDED.label,
+                 tax_type = EXCLUDED.tax_type,
+                 confidence = EXCLUDED.confidence,
+                 updated_at = EXCLUDED.updated_at""",
+            (cid, topic_id, label, tax_type or "", float(confidence), time.time()),
+        )
+        conn.commit()
+
+
+def clear_conversation_topic(conversation_id: str) -> None:
+    pool = _get_pool()
+    if pool is None:
+        return
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM conversation_topics WHERE conversation_id = %s", (cid,))
+        conn.commit()
 
 
 def get_conversation_stats(days: int = 30) -> dict[str, Any]:
@@ -965,47 +1057,67 @@ def mark_reply_delivered(ticket_id: str) -> bool:
 
 def sla_stats(days: int = 30) -> dict[str, Any]:
     """Postgres mirror of :func:`database.sla_stats`."""
+    from .database import compose_sla_stats
+
     pool = _get_pool()
-    empty = {
-        "period_days": days,
-        "tickets": 0,
-        "responded": 0,
-        "resolved": 0,
-        "awaiting_first_response": 0,
-        "median_response_seconds": None,
-        "median_resolution_seconds": None,
-    }
+    now = time.time()
     if pool is None:
-        return empty
-    cutoff = time.time() - (days * 86400)
+        return compose_sla_stats(period_rows=[], open_rows=[], days=days, now=now)
+    cutoff = now - (days * 86400)
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT created_at, first_response_at, resolved_at FROM tickets "
-            "WHERE created_at >= %s",
+            "SELECT created_at, first_response_at, resolved_at, reply_at "
+            "FROM tickets WHERE created_at >= %s",
             (cutoff,),
         )
-        rows = cur.fetchall()
+        period = cur.fetchall()
+        cur.execute(
+            "SELECT created_at, first_response_at, reply_at, status "
+            "FROM tickets WHERE status IN ('open', 'assigned')",
+        )
+        opened = cur.fetchall()
+    return compose_sla_stats(period_rows=period, open_rows=opened, days=days, now=now)
 
-    def _median(values: list[float]) -> float | None:
-        if not values:
-            return None
-        ordered = sorted(values)
-        mid = len(ordered) // 2
-        if len(ordered) % 2:
-            return round(ordered[mid], 1)
-        return round((ordered[mid - 1] + ordered[mid]) / 2, 1)
 
-    response = [r[1] - r[0] for r in rows if r[1]]
-    resolution = [r[2] - r[0] for r in rows if r[2]]
-    return {
-        "period_days": days,
-        "tickets": len(rows),
-        "responded": len(response),
-        "resolved": len(resolution),
-        "awaiting_first_response": sum(1 for r in rows if not r[1]),
-        "median_response_seconds": _median(response),
-        "median_resolution_seconds": _median(resolution),
-    }
+def heartbeat_ticket_presence(ticket_id: str, viewer: str) -> None:
+    cid = (ticket_id or "").strip()
+    who = (viewer or "").strip()[:128]
+    if not cid or not who:
+        return
+    pool = _get_pool()
+    if pool is None:
+        return
+    now = time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO ticket_presence (ticket_id, viewer, updated_at)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (ticket_id, viewer) DO UPDATE SET updated_at = EXCLUDED.updated_at""",
+            (cid, who, now),
+        )
+        conn.commit()
+
+
+def list_ticket_viewers(ticket_id: str, max_age: float | None = None) -> list[str]:
+    from .database import PRESENCE_TTL_SECONDS
+
+    if max_age is None:
+        max_age = PRESENCE_TTL_SECONDS
+    cid = (ticket_id or "").strip()
+    if not cid:
+        return []
+    pool = _get_pool()
+    if pool is None:
+        return []
+    cutoff = time.time() - max_age
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT viewer FROM ticket_presence
+               WHERE ticket_id = %s AND updated_at >= %s
+               ORDER BY updated_at DESC""",
+            (cid, cutoff),
+        )
+        return [str(r[0]) for r in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------
