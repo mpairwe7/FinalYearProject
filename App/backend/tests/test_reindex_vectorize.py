@@ -87,11 +87,79 @@ class EmbedBatchTest(unittest.TestCase):
         with mock.patch.object(ri, "EMBED_BATCH", 2), \
              mock.patch.object(ri, "time", types.SimpleNamespace(sleep=lambda s: None)), \
              mock.patch.object(ri.gw, "workers_ai_embed", side_effect=fake_embed):
-            vectors = ri.embed_all(texts)
+            vectors, skipped = ri.embed_all(texts)
 
         self.assertEqual(len(vectors), 5)
+        self.assertEqual(skipped, set())
         self.assertEqual([len(c) for c in calls], [2, 2, 1])
         self.assertEqual(calls[0], ["text 0", "text 1"])
+
+    def test_a_batch_that_exhausts_retries_is_skipped_not_fatal(self):
+        """Observed live: a batch can outlast even 5 retries with backoff —
+        looks like a rate/budget window, not a one-off blip. ~250 batches are
+        needed for the full corpus, so the run must survive one bad batch
+        rather than lose everything embedded before it."""
+        import httpx
+
+        req = httpx.Request("POST", "https://example.invalid")
+        resp = httpx.Response(400, request=req, text="rate limited")
+
+        def flaky_embed(batch):
+            if batch == ["text 2", "text 3"]:
+                raise httpx.HTTPStatusError("400", request=req, response=resp)
+            return [[0.5] * 4 for _ in batch]
+
+        texts = [f"text {i}" for i in range(5)]
+        with mock.patch.object(ri, "EMBED_BATCH", 2), \
+             mock.patch.object(ri, "time", types.SimpleNamespace(sleep=lambda s: None)), \
+             mock.patch.object(ri.gw, "workers_ai_embed", side_effect=flaky_embed):
+            vectors, skipped = ri.embed_all(texts)
+
+        # texts 0-1 (batch 0) and text 4 (batch 2) survive; text 2-3 (batch 1) skipped.
+        self.assertEqual(len(vectors), 3)
+        self.assertEqual(skipped, {2, 3})
+
+
+class EmbedRetryTest(unittest.TestCase):
+    """A batch that 400s once and then succeeds unchanged, observed live while
+    seeding this index (Workers AI / AI Gateway free-tier blip, not a
+    malformed document), must not lose the whole run."""
+
+    def test_retries_a_transient_failure_then_succeeds(self):
+        import httpx
+
+        calls = {"n": 0}
+
+        def flaky(batch):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                req = httpx.Request("POST", "https://example.invalid")
+                resp = httpx.Response(400, request=req, text="bad request")
+                raise httpx.HTTPStatusError("400", request=req, response=resp)
+            return [[0.1] * 4 for _ in batch]
+
+        with mock.patch.object(ri, "time", types.SimpleNamespace(sleep=lambda s: None)), \
+             mock.patch.object(ri.gw, "workers_ai_embed", side_effect=flaky):
+            vectors = ri._embed_batch_with_retry(["a", "b"])
+
+        self.assertEqual(vectors, [[0.1] * 4, [0.1] * 4])
+        self.assertEqual(calls["n"], 2)
+
+    def test_gives_up_after_exhausting_retries(self):
+        import httpx
+
+        req = httpx.Request("POST", "https://example.invalid")
+        resp = httpx.Response(400, request=req, text="still bad")
+        always_fails = mock.Mock(
+            side_effect=httpx.HTTPStatusError("400", request=req, response=resp)
+        )
+
+        with mock.patch.object(ri, "time", types.SimpleNamespace(sleep=lambda s: None)), \
+             mock.patch.object(ri.gw, "workers_ai_embed", always_fails):
+            with self.assertRaises(httpx.HTTPStatusError):
+                ri._embed_batch_with_retry(["a"])
+
+        self.assertEqual(always_fails.call_count, ri._EMBED_RETRIES)
 
 
 class WranglerTest(unittest.TestCase):
@@ -102,6 +170,25 @@ class WranglerTest(unittest.TestCase):
             [ri.WRANGLER, "vectorize", "insert", "ura-kb", "--file", "/tmp/x.ndjson"],
             check=True,
         )
+
+    def test_main_upserts_not_inserts(self):
+        """`insert` errors on any id already present, and deterministic_point_id
+        reuses the same id for an unchanged chunk — so a re-run against an
+        already-seeded index (the normal case) needs `upsert`, which overwrites
+        in place instead of failing on every unchanged document."""
+        settings = types.SimpleNamespace(vectorize_index="ura-kb")
+        with mock.patch.object(ri.cfg, "is_vectorize_configured", return_value=True), \
+             mock.patch.object(ri.cfg, "get_cloud_settings", return_value=settings), \
+             mock.patch.object(ri, "load_documents", return_value=list(_DOCS)), \
+             mock.patch.object(ri.gw, "workers_ai_embed", return_value=[[0.1] * 4] * 2), \
+             mock.patch.object(ri, "time", types.SimpleNamespace(sleep=lambda s: None)), \
+             mock.patch.object(ri.subprocess, "run") as run, \
+             mock.patch.object(sys, "argv", ["reindex_vectorize.py"]):
+            ri.main()
+
+        verbs = [call.args[0][2] for call in run.call_args_list]
+        self.assertIn("upsert", verbs)
+        self.assertNotIn("insert", verbs)
 
 
 class MainGuardTest(unittest.TestCase):

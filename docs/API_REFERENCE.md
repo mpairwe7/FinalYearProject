@@ -40,7 +40,7 @@ GET /health
 
 ### Readiness Probe
 
-Confirms the model is loaded and the service can handle requests. Returns **503** if the model is unavailable. Includes retrieval mode status (`hybrid` when Qdrant is connected, `keyword` fallback).
+Confirms the model is loaded and the service can handle requests. Returns **503** if the model is unavailable. Includes retrieval mode status (`hybrid` when Qdrant is connected with a real dense vector, `vector` for the Cloudflare Vectorize dense fallback, `sparse` for a Qdrant collection with BM25 only, `keyword` for the in-process FAQ fallback).
 
 ```http
 GET /ready
@@ -60,7 +60,7 @@ GET /ready
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | string | `ready` (Qdrant connected) or `degraded` (keyword fallback) |
-| `retrieval_mode` | string | `hybrid` (Qdrant dense+BM25) or `keyword` (CSV overlap fallback) |
+| `retrieval_mode` | string | `hybrid` (Qdrant dense+BM25+rerank), `vector` (Cloudflare Vectorize dense fallback), `sparse` (Qdrant BM25 only, no dense), or `keyword` (CSV overlap fallback) |
 
 ---
 
@@ -1495,7 +1495,7 @@ class HealthResponse(BaseModel):
     version: str
     model_loaded: bool
     tags_loaded: int = 0
-    retrieval_mode: str = "keyword"  # hybrid | keyword
+    retrieval_mode: str = "keyword"  # hybrid | vector | sparse | keyword
 ```
 
 ### SynthesizeRequest

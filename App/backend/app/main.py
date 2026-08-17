@@ -673,8 +673,20 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     # this reported "hybrid" while BM25 did all the work. That is the field
     # operators read to decide whether retrieval is healthy, and on the
     # deployed Space it was saying yes while dense was off.
+    #
+    # "vector" is its own label, checked BEFORE _sparse_only: the CPU-only
+    # deployments serve a sparse-only Qdrant collection whenever Vectorize is
+    # unavailable, so _sparse_only stays True even while Vectorize is actively
+    # serving dense queries (initialize() keeps that Qdrant state as a fallback
+    # rather than discarding it). Reporting "sparse" there would be the same
+    # false-negative this field was fixed to stop making. "vector" is also
+    # deliberately not folded into "hybrid": Vectorize is dense-only with a
+    # client-side lexical re-score, not Qdrant's reranked dense+BM25 fusion,
+    # and operators reading this field should be able to tell them apart.
     if not model._retriever_ready:
         retrieval_mode = "keyword"
+    elif getattr(model._retriever, "_vectorize_mode", False):
+        retrieval_mode = "vector"
     elif getattr(model._retriever, "_sparse_only", False):
         retrieval_mode = "sparse"
     else:

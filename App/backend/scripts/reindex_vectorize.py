@@ -3,9 +3,13 @@
 
 Mirrors the Qdrant indexer (the SAME chunks + deterministic ids) but computes
 dense vectors through the Cloudflare AI Gateway (Workers AI ``@cf/baai/bge-m3``)
-— no local torch — then upserts them with ``wrangler vectorize insert``. This is
-what populates the index the retriever's Vectorize fallback queries, flipping
-Crane Cloud from ``keyword`` to ``hybrid`` retrieval.
+— no local torch — then upserts them with ``wrangler vectorize upsert``
+(idempotent: re-running this over an already-seeded index overwrites unchanged
+content in place rather than erroring on it). This is what populates the index
+``HybridRetriever``'s Vectorize fallback queries, restoring real dense
+retrieval on Crane Cloud and the HF Space whenever their baked-in Qdrant
+collection is sparse-only (the CPU-only images ship no torch to compute dense
+vectors locally) — see ``docs/CLOUDFLARE_FALLBACKS.md``.
 
 Prerequisites (load the gitignored .env into the process env first so both this
 script *and* wrangler see the credentials, without printing them):
@@ -14,9 +18,9 @@ script *and* wrangler see the credentials, without printing them):
     wrangler --version                # v3 (Node 20) on PATH, authed via CLOUDFLARE_API_TOKEN
 
 Usage:
-    python scripts/reindex_vectorize.py --create     # create the index, embed, insert
-    python scripts/reindex_vectorize.py              # embed + insert (index already created)
-    python scripts/reindex_vectorize.py --dry-run    # build the NDJSON only; no insert
+    python scripts/reindex_vectorize.py --create     # create the index, embed, upsert
+    python scripts/reindex_vectorize.py              # embed + upsert (index already created)
+    python scripts/reindex_vectorize.py --dry-run    # build the NDJSON only; no upsert
     python scripts/reindex_vectorize.py --verify "What is the VAT rate?"   # query smoke-test
 """
 
@@ -30,6 +34,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+import httpx
 
 # Make `app` importable when run from App/backend/scripts/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -109,14 +115,80 @@ def load_documents(*, allow_partial: bool = False) -> list[dict]:
     return annotate_fiscal_year(docs)
 
 
-def embed_all(texts: list[str]) -> list[list[float]]:
+_EMBED_RETRIES = 5
+_EMBED_BACKOFF_BASE_S = 1.0
+
+
+def _embed_batch_with_retry(batch: list[str]) -> list[list[float]]:
+    """One batch, retried with backoff on the free tier's occasional blip.
+
+    Observed directly while seeding this index: the same batch, re-sent
+    unchanged, alternates between a clean 200 and a 400 — including one run
+    of 3 straight 400s, which is why this retries 5 times (exponential
+    backoff: 1/2/4/8/16s) rather than the fewer attempts that first looked
+    sufficient. Confirmed to be a genuine intermittent Workers AI / AI Gateway
+    issue and not a malformed document: bisecting a consistently-failing
+    range down to a single chunk stopped reproducing once the range got small
+    enough to test repeatably, and that same chunk later embedded cleanly on
+    its own. With ~250 batches needed for the full corpus, this fires more
+    than once per run, and `embed_all` originally had no retry at all — one
+    blip lost every vector embedded before it, since insertion only happens
+    after the whole corpus is embedded.
+    """
+    last: Exception | None = None
+    for attempt in range(1, _EMBED_RETRIES + 1):
+        try:
+            return gw.workers_ai_embed(batch)
+        except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+            last = exc
+            if attempt == _EMBED_RETRIES:
+                break
+            delay = _EMBED_BACKOFF_BASE_S * (2 ** (attempt - 1))
+            print(f"  batch failed ({exc}); retrying in {delay:.1f}s ({attempt}/{_EMBED_RETRIES})", flush=True)
+            time.sleep(delay)
+    assert last is not None  # noqa: S101 — loop always sets it before falling through
+    raise last
+
+
+def embed_all(texts: list[str]) -> tuple[list[list[float]], set[int]]:
+    """Embed every text; a batch that exhausts retries is skipped, not fatal.
+
+    Observed directly while seeding this index: a batch can outlast even 5
+    retries with exponential backoff (up to ~30s), which looks less like a
+    one-off blip and more like a rate/budget window on the Workers AI / AI
+    Gateway free tier. ~250 batches are needed for the full corpus, so it is
+    not safe to bet the whole run on that window always clearing in time —
+    but insertion only happens after every batch is embedded, so one
+    unlucky batch used to cost every vector embedded before it too.
+
+    Returns the vectors for whatever embedded successfully, plus the set of
+    *text-list indices* that were skipped, so the caller can drop the
+    matching docs and keep both lists aligned. A skip is not silent: it
+    prints a clear marker and the run ends with a count and a instruction to
+    re-run — safe because `deterministic_point_id` + `upsert` make a re-run
+    a no-op for everything that already succeeded and fill in the rest.
+    """
     vectors: list[list[float]] = []
+    skipped: set[int] = set()
     for i in range(0, len(texts), EMBED_BATCH):
         batch = texts[i : i + EMBED_BATCH]
-        vectors.extend(gw.workers_ai_embed(batch))
-        print(f"  embedded {min(i + EMBED_BATCH, len(texts))}/{len(texts)}", flush=True)
+        try:
+            vectors.extend(_embed_batch_with_retry(batch))
+        except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+            skipped.update(range(i, i + len(batch)))
+            print(f"  SKIPPED [{i}:{i + len(batch)}] after exhausting retries: {exc}", flush=True)
+            continue
+        note = f" ({len(skipped)} skipped so far)" if skipped else ""
+        print(f"  embedded {min(i + EMBED_BATCH, len(texts))}/{len(texts)}{note}", flush=True)
         time.sleep(0.2)  # gentle on the free tier
-    return vectors
+    if skipped:
+        print(
+            f"\nWARNING: {len(skipped)}/{len(texts)} chunks skipped after exhausting "
+            "retries. Re-run this script (without --create) to fill the gap — "
+            "upsert is idempotent for everything that already succeeded.",
+            flush=True,
+        )
+    return vectors, skipped
 
 
 def to_ndjson(docs: list[dict], vectors: list[list[float]], path: Path) -> int:
@@ -189,7 +261,9 @@ def main() -> None:
     print(f"Loaded {len(docs)} chunks {by_type}; embedding via Workers AI @cf/baai/bge-m3 ...")
     # Same embedding input as the Qdrant indexer: PDF chunks carry their
     # contextual prefix, every other corpus embeds its text verbatim.
-    vectors = embed_all([_embedding_text(d) for d in docs])
+    vectors, skipped = embed_all([_embedding_text(d) for d in docs])
+    if skipped:
+        docs = [d for i, d in enumerate(docs) if i not in skipped]
     dim = len(vectors[0]) if vectors else 0
     print(f"Embedded {len(vectors)} vectors (dim={dim}).")
 
@@ -207,11 +281,17 @@ def main() -> None:
             print("  (metadata index already exists or not supported — continuing)")
 
     if args.dry_run:
-        print("Dry run — NDJSON ready; skipping insert.")
+        print("Dry run — NDJSON ready; skipping upsert.")
         return
 
-    _wrangler(["vectorize", "insert", index, "--file", str(out)])
-    print(f"\nInserted {n} vectors into Vectorize index '{index}'.")
+    # upsert, not insert: `insert` errors on any id already present, and
+    # deterministic_point_id() intentionally reuses the same id for an
+    # unchanged chunk across runs. A re-run against an already-seeded index
+    # (the normal case — corpus content changes far more often than the index
+    # is rebuilt from scratch) needs every existing id overwritten in place,
+    # which is exactly what `upsert` does and `insert` refuses to.
+    _wrangler(["vectorize", "upsert", index, "--file", str(out)])
+    print(f"\nUpserted {n} vectors into Vectorize index '{index}'.")
     print(f"Verify: python scripts/reindex_vectorize.py --verify 'What is the VAT rate?'")
 
 

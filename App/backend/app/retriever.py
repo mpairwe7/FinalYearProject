@@ -540,20 +540,47 @@ class HybridRetriever:
 
         Priority, highest first:
 
-        1. **Qdrant** — dense + BM25 sparse fused by RRF, then cross-encoder
-           rerank. The only backend with a lexical signal and reranking, so it
-           is always preferred when reachable.
+        1. **Qdrant with a dense vector** — dense + BM25 sparse fused by RRF,
+           then cross-encoder rerank. The richest backend, preferred whenever
+           reachable with a real dense half.
         2. **Cloudflare Vectorize** — dense-only via Workers AI ``bge-m3``, with
-           a client-side lexical re-score. No GPU or torch required.
-        3. **Keyword** — the caller's fallback when this returns ``False``.
+           a client-side lexical re-score. No GPU or torch required. Also
+           preferred over a *sparse-only* Qdrant collection: sparse-only Qdrant
+           has no dense signal at all, so it is strictly poorer than a real
+           (if unreranked) dense retriever — not richer, despite Qdrant being
+           first in this list.
+        3. **Qdrant sparse-only** — BM25 alone, served from Qdrant. The floor
+           for the CPU-only deployments (Crane Cloud, HF Space) when Vectorize
+           is not configured, rather than dropping straight to keyword search.
+        4. **Keyword** — the caller's fallback when this returns ``False``.
 
         Every way Qdrant can be unavailable now falls through to Vectorize:
         previously only ``QDRANT_ENABLED=false`` did, so a missing collection, an
         unreachable host or an encoder mismatch skipped the dense fallback
-        entirely and degraded straight to keyword search.
+        entirely and degraded straight to keyword search. A *sparse-only*
+        collection is not "unavailable" in that sense — ``_init_qdrant`` returns
+        ``True`` for it — so it needs its own check here too. Without it, a
+        CPU-only image that bakes a sparse-only collection at build time (as
+        Crane Cloud/HF Space's does) can never reach the dense fallback even
+        when Vectorize is fully configured and seeded: this was a live
+        regression, not a missing feature. Vectorize-backed hybrid retrieval
+        was confirmed working end-to-end in prod before the sparse-only sidecar
+        shipped, then silently stopped once it did, because a successful
+        ``_init_qdrant`` was (wrongly) treated as always the richest case.
         """
         if QDRANT_ENABLED:
             if self._init_qdrant():
+                if not self._sparse_only:
+                    return True
+                logger.info(
+                    "Qdrant is sparse-only (no dense vector); trying Vectorize "
+                    "before settling for BM25 alone"
+                )
+                if self._init_vectorize_mode():
+                    return True
+                logger.info(
+                    "Vectorize unavailable; serving sparse-only Qdrant (BM25) instead"
+                )
                 return True
             logger.warning(
                 "Qdrant unavailable at %s; trying the Cloudflare Vectorize dense fallback",

@@ -62,29 +62,41 @@ STT_FALLBACK_BACKEND=workers_ai          # (Phase 4)
 
 - **Phase 1 — restore hybrid retrieval: DONE.** `providers/` package + `retriever`
   Vectorize fallback (`_init_vectorize_mode` / `_search_vectorize`). Once Vectorize
-  is populated + the env is set, `/ready` flips `keyword` → `hybrid`.
+  is populated + the env is set, `/ready` flips `keyword`/`sparse` → `vector`.
 
 ### Retrieval backend priority
 
 `HybridRetriever.initialize` tries the tiers in order and reports the winner via
-`HybridRetriever.backend`:
+`HybridRetriever.backend` (and `/ready`'s `retrieval_mode`, see below):
 
 | Tier | Backend | Signals | Corpus |
 | --- | --- | --- | --- |
-| 1 | **Qdrant** (dense + sparse) | dense + BM25 sparse fused by RRF, then cross-encoder rerank | all 7,924 docs |
-| 1b | **Qdrant** (sparse-only sidecar) | BM25 sparse only — no dense, no rerank | all 7,924 docs |
-| 2 | **Cloudflare Vectorize** | dense bge-m3 + client-side lexical re-score (no GPU) | all 7,924 docs |
+| 1 | **Qdrant** (dense + sparse) | dense + BM25 sparse fused by RRF, then cross-encoder rerank | all 7,874 docs |
+| 2 | **Cloudflare Vectorize** | dense bge-m3 + client-side lexical re-score (no GPU) | all 7,874 docs |
+| 1b | **Qdrant** (sparse-only sidecar) | BM25 sparse only — no dense, no rerank | all 7,874 docs |
 | 3 | **Keyword** | in-process FAQ search over the CSVs | 486 FAQ rows only |
 
-Tier 1b is what the single-container deployments run. Crane Cloud and the HF
-Space can reach neither a managed Qdrant nor Cloudflare, so they used to land on
-tier 3 — which reads `ura_*_faqs.csv` and therefore never saw a PDF or crawl
-chunk. They now run Qdrant as a supervisord sidecar against a collection baked
-into the image at build time (`SPARSE_ONLY_INDEX=true`).
+Tier 1b sits *below* Vectorize, not above it, despite being a Qdrant tier: a
+sparse-only collection carries no dense signal at all, so it is strictly poorer
+than Vectorize's real (if unreranked) dense retrieval, not richer. This ordering
+is deliberately different from what "Qdrant first" would suggest, and getting it
+wrong is exactly what happened in prod: Crane Cloud and the HF Space run Qdrant
+as a supervisord sidecar against a collection baked into the image at build time
+(`SPARSE_ONLY_INDEX=true`, since these CPU-only images ship no torch to compute
+dense vectors). `_init_qdrant()` returns `True` for that sparse-only collection —
+it *is* a working Qdrant connection — and `initialize()` used to stop the moment
+any tier-1 Qdrant connection succeeded, sparse-only or not. That silently
+regressed both deployments from Vectorize-backed hybrid retrieval (confirmed
+working end-to-end before the sparse-only sidecar shipped) down to tier 1b, with
+`/ready` still reporting a retrieval_mode that didn't distinguish "real dense
+signal" from "BM25 alone" — see the next section. Fixed: `initialize()` now
+tries Vectorize whenever tier 1 comes back sparse-only, and only settles for 1b
+when Vectorize is also unavailable — so 1b remains the deliberate floor for a
+Vectorize outage, never a silent ceiling.
 
-Sparse-only is a necessity, not a preference: a BM25 query vector is computed
-from `bm25_state.json` in pure Python, whereas a dense query would need bge-m3,
-and these images ship no torch — dense vectors would be unqueryable. The
+Sparse-only Qdrant is otherwise a necessity, not a preference, exactly because
+these images have no torch: a BM25 query vector is computed from
+`bm25_state.json` in pure Python, whereas a dense query needs bge-m3. The
 retriever detects sparse-only from the collection's own vector config, so a
 process that *does* have torch still behaves correctly against the same
 collection (keying it off the import instead produces
@@ -152,7 +164,8 @@ keyword even with valid Cloudflare credentials.
 
 Tier 2 only helps if the index holds the whole corpus, which is why
 `reindex_vectorize.py` refuses to seed a subset — otherwise the same question
-answers from 3,900 chunks normally and from 486 FAQ rows during an outage.
+answers from the full corpus normally and from 486 FAQ rows only once tier 1
+degrades (whether to tier 1b or all the way to tier 3).
 - **Phase 2 — LLM fallback: DONE.** `service._llm_cloud_fallback` /
   `_stream_cloud_fallback` wired into `_call_llm_with_deadline` + `stream_llm_tokens`,
   keyed off `_LLM_CIRCUIT` (Gemini → Workers AI).
@@ -178,11 +191,15 @@ to the cloud tier (`service._cloud_llm_ready` widens the availability gates).
 
 ### Deferred (follow-up, mostly provisioning-time)
 1. **Vectorize re-index CLI — DONE** (`App/backend/scripts/reindex_vectorize.py`).
-   Reuses the indexer's chunk loaders + `deterministic_point_id`, embeds the 729
-   chunks via Workers AI bge-m3 (no torch), and upserts with `wrangler vectorize
-   insert`. Run once authenticated:
+   Reuses the indexer's chunk loaders + `deterministic_point_id`, embeds the full
+   corpus via Workers AI bge-m3 (no torch, retried on the free tier's occasional
+   transient failures), and upserts with `wrangler vectorize upsert` — not
+   `insert`, which errors on any id already present, and `deterministic_point_id`
+   deliberately reuses the same id for an unchanged chunk so a re-run is a
+   no-op for content that hasn't changed. Run once authenticated:
    `set -a; . .env; set +a; python scripts/reindex_vectorize.py --create`
-   then `… --verify "What is the VAT rate?"`.
+   then `… --verify "What is the VAT rate?"`. Re-run (without `--create`)
+   whenever the corpus changes materially — the index does not update itself.
 2. **R2 `bm25_state.json` durability** — only matters for a *Qdrant* deployment that
    loses its volume; the Crane Cloud target uses Vectorize mode (lexical re-score, no
    bm25_state needed), so this is niche.
@@ -195,4 +212,4 @@ to the cloud tier (`service._cloud_llm_ready` widens the availability gates).
 - Live (after keys): Vectorize embed→upsert→query round-trip; a Gemini Luganda
   translation; a Workers AI chat — confirm AI Gateway analytics shows cache hits on repeats.
 - Live Crane Cloud re-test: redeploy with the flag on; assert `/ready` →
-  `retrieval_mode: hybrid` and `/v1/chat` still answers when the primary LLM is forced down.
+  `retrieval_mode: vector` and `/v1/chat` still answers when the primary LLM is forced down.
