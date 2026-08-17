@@ -26,7 +26,12 @@ function ticket(over: Record<string, unknown> = {}) {
     created_at: now - 3600 * 5,
     status: "open",
     priority: "urgent",
-    reason: "dispute",
+    // The staff queue labels a case with `reason`, falling back to the handoff
+    // topic (topicLabel()) — /admin/tickets has always worked that way and
+    // /agent joined it on the shared QueueRow. The backend's escalation_reason
+    // is a sentence rather than a code (see _evaluate_response_judge), so keep
+    // the stub that shape or the label under test is not the one shipped.
+    reason: "Taxpayer disputes a double VAT charge",
     user_query: "I was charged VAT twice on the same import and URA says it is correct.",
     bot_reply: "I cannot resolve a double-charge dispute.",
     officer_reply: "",
@@ -134,6 +139,22 @@ async function signedInAs(page: Page, role: string) {
   );
 }
 
+/**
+ * Open queue row `n` on /agent, from whichever pane is currently on screen.
+ *
+ * Above 960px the queue and the case sit side by side and this is one click.
+ * Below it they are alternating views (`.ag-split.is-open` hides the queue),
+ * so reaching a different row means going Back first. Unlike the off-canvas
+ * rail in helpers.ts, these panes are switched with `display: none`, so
+ * isVisible() reports them honestly and can be branched on.
+ */
+async function openRow(page: Page, n: number) {
+  if (!(await page.locator(".ag-queue-pane").isVisible())) {
+    await page.getByRole("button", { name: "Back to queue" }).click();
+  }
+  await page.locator(".st-row").nth(n).click();
+}
+
 /** Grid tracks resolve to px in getComputedStyle; count them to read the layout. */
 async function columnCount(page: Page, selector: string): Promise<number> {
   return page.locator(selector).evaluate(
@@ -214,23 +235,34 @@ test.describe("Staff UI on Chromium", () => {
     });
 
     test("renders every metric from the API, humanised", async ({ page }) => {
+      // Six since the SLA/assignment board landed: open, awaiting first reply,
+      // past the 24h SLA, unassigned, then the two medians.
       const metrics = page.locator(".ov-metric");
-      await expect(metrics).toHaveCount(4);
-      // 11_820s → 3h 17m and 7_200s → 2h 0m: the humanDuration() contract.
-      await expect(metrics.nth(2)).toContainText("3h 17m");
-      await expect(metrics.nth(3)).toContainText("2h 0m");
+      await expect(metrics).toHaveCount(6);
+      // 11_820s → 3.3h and 7_200s → 2.0h: the formatDuration() contract, which
+      // reports medians in decimal hours (h+m is kept for per-ticket waits,
+      // where the minutes are what an officer is actually watching).
+      await expect(metrics.nth(4)).toContainText("3.3h");
+      await expect(metrics.nth(5)).toContainText("2.0h");
       await expect(metrics.nth(0)).toContainText("4");
       await expect(metrics.nth(1)).toContainText("3");
+      // No `breaching` in the SLA stub → 0, and none of the three stub tickets
+      // carries an assignee → 3.
+      await expect(metrics.nth(2)).toContainText("0");
+      await expect(metrics.nth(3)).toContainText("3");
     });
 
     test("the attention metric gets an inset accent edge, not a colour wash", async ({ page }) => {
-      // awaiting_first_response = 3 → tone="warn" → inset 3px left edge. The
-      // value must stay on the panel colour so it holds AA contrast.
+      // awaiting_first_response = 3 and 3 unassigned → both tone="warn" → inset
+      // 3px left edge. The value must stay on the panel colour so it holds AA
+      // contrast. (`breaching` is 0 here, so no danger tone to check.)
       const warn = page.locator(".ov-metric.ov-warn");
-      await expect(warn).toHaveCount(1);
-      const shadow = await warn.evaluate((el) => getComputedStyle(el).boxShadow);
-      expect(shadow).toMatch(/inset/);
-      expect(shadow).not.toBe("none");
+      await expect(warn).toHaveCount(2);
+      for (const metric of await warn.all()) {
+        const shadow = await metric.evaluate((el) => getComputedStyle(el).boxShadow);
+        expect(shadow).toMatch(/inset/);
+        expect(shadow).not.toBe("none");
+      }
     });
 
     test("queue is ordered urgent-first with real waits", async ({ page }) => {
@@ -284,51 +316,69 @@ test.describe("Staff UI on Chromium", () => {
     });
 
     test("lands on the top ticket instead of an empty pane", async ({ page }) => {
-      await expect(page.locator(".ag-row.selected")).toHaveCount(1);
-      await expect(page.locator(".ag-row").first()).toHaveClass(/selected/);
+      // Nothing clicked yet: the top of the queue is already the live case, so
+      // the placeholder never renders at any width.
+      await expect(page.locator(".st-row.is-selected")).toHaveCount(1);
+      await expect(page.locator(".st-row").first()).toHaveClass(/is-selected/);
+      await expect(page.getByText("Pick a ticket to see the brief.")).toHaveCount(0);
+
+      await openRow(page, 0);
       await expect(
-        page.getByRole("heading", { name: "Double VAT charge on one import" }),
+        page.getByRole("heading", { name: "Taxpayer disputes a double VAT charge" }),
       ).toBeVisible();
     });
 
     test("handoff brief shows the warm-transfer edge and what to have ready", async ({ page }) => {
-      const brief = page.locator(".ag-brief");
+      await openRow(page, 0);
+      // The warm-transfer and sentiment markers moved out of the brief and into
+      // the case header pills when /agent and /admin/tickets were merged onto
+      // the shared TicketCase; the brief itself still carries the guidance.
+      const pills = page.locator(".st-case-pills");
+      await expect(pills.getByText("warm transfer")).toBeVisible();
+      await expect(pills.getByText("frustrated")).toBeVisible();
+
+      const brief = page.locator(".st-brief");
       await expect(brief).toHaveClass(/warm/);
       const shadow = await brief.evaluate((el) => getComputedStyle(el).boxShadow);
       expect(shadow).toMatch(/inset/);
 
-      await expect(brief.getByText("warm transfer")).toBeVisible();
-      await expect(brief.getByText("felt frustrated")).toBeVisible();
       await expect(brief.getByText("Import declaration number")).toBeVisible();
       await expect(brief.getByText(/Acknowledge the double charge/)).toBeVisible();
     });
 
     test("transcript is shown in full, not summarised away", async ({ page }) => {
-      const transcript = page.locator(".ag-transcript");
-      await expect(transcript).toContainText("I paid VAT twice on one import.");
-      await expect(transcript).toContainText("3 turns");
+      await openRow(page, 0);
+      await expect(page.locator(".st-transcript")).toContainText(
+        "I paid VAT twice on one import.",
+      );
+      // Counts the turns actually rendered rather than handoff.turns_before_handoff,
+      // so the label can never claim more conversation than the pane shows.
+      await expect(page.getByText(/1 turn, as it stood/)).toBeVisible();
     });
 
     test("taxpayer reply and internal note stay separate inputs", async ({ page }) => {
       // Merging these would leak an internal note to the taxpayer, so the
       // separation is load-bearing rather than cosmetic.
-      const boxes = page.locator(".ag-field textarea");
+      await openRow(page, 0);
+      const boxes = page.locator(".st-field textarea");
       await expect(boxes).toHaveCount(2);
-      await expect(page.getByText("They see this on their next turn.")).toBeVisible();
+      await expect(page.getByText("They see this on their next turn")).toBeVisible();
       await expect(page.getByText("Never shown to the taxpayer.")).toBeVisible();
     });
 
     test("send is disabled until something is typed", async ({ page }) => {
+      await openRow(page, 0);
       const send = page.getByRole("button", { name: "Send reply" });
       await expect(send).toBeDisabled();
-      await page.locator(".ag-field textarea").first().fill("Send both receipts and we will refund.");
+      await page.locator(".st-field textarea").first().fill("Send both receipts and we will refund.");
       await expect(send).toBeEnabled();
     });
 
     test("switching ticket clears a half-typed reply", async ({ page }) => {
-      const box = page.locator(".ag-field textarea").first();
+      await openRow(page, 0);
+      const box = page.locator(".st-field textarea").first();
       await box.fill("half-written answer for the wrong taxpayer");
-      await page.locator(".ag-row").nth(1).click();
+      await openRow(page, 1);
       await expect(box).toHaveValue("");
     });
 

@@ -40,10 +40,18 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
     return rows;
   }, [queue, view.mine, handle]);
 
-  const activeId =
-    view.ticket && tickets.some((ticket) => ticket.id === view.ticket)
-      ? view.ticket
-      : null;
+  // The case the officer explicitly opened, or arrived on via ?ticket=.
+  // Below 960px the queue and the case are alternating views, so this — and
+  // not the fallback below — decides which of the two is on screen; keeping
+  // them separate is what lets "Back to queue" actually go back.
+  const openedId =
+    view.ticket && tickets.some((ticket) => ticket.id === view.ticket) ? view.ticket : null;
+
+  // Land on the top of the queue rather than an empty pane: above 960px both
+  // panes are on screen together, so an empty one is just wasted space on a
+  // work queue. (/admin/tickets is the browse-everything console and starts
+  // empty on purpose — this page does not.)
+  const activeId = openedId ?? tickets[0]?.id ?? null;
 
   const { data: detail, isLoading: detailLoading, error: detailError } = useTicket(activeId);
   const select = (id: string) => setView({ ticket: id });
@@ -137,7 +145,7 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
         </button>
       </div>
 
-      <div className={`ag-split${activeId ? " is-open" : ""}`} id="ag-panel" role="tabpanel">
+      <div className={`ag-split${openedId ? " is-open" : ""}`} id="ag-panel" role="tabpanel">
         <section className="ag-queue-pane" aria-label="Queue">
           {isLoading && <p className="ag-empty">Loading the queue…</p>}
           {error && <p className="ag-empty ag-error">Could not load the queue.</p>}
