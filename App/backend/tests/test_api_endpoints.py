@@ -285,7 +285,7 @@ class CFRelayEndpoints(_Base):
     def test_403_with_no_or_wrong_bearer(self):
         from app.providers import config as cf_config
 
-        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"  # pragma: allowlist secret
         cf_config.get_cloud_settings.cache_clear()
         c = _client()
         r = c.post("/internal/cf-relay/vectorize-query", json={"vector": [0.1]})
@@ -300,7 +300,7 @@ class CFRelayEndpoints(_Base):
     def test_vectorize_query_relays_through_with_correct_bearer(self):
         from app.providers import config as cf_config
 
-        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"  # pragma: allowlist secret
         cf_config.get_cloud_settings.cache_clear()
         c = _client()
         with mock.patch(
@@ -319,7 +319,7 @@ class CFRelayEndpoints(_Base):
     def test_workers_ai_embed_relays_through_with_correct_bearer(self):
         from app.providers import config as cf_config
 
-        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"  # pragma: allowlist secret
         cf_config.get_cloud_settings.cache_clear()
         c = _client()
         with mock.patch(
@@ -334,13 +334,40 @@ class CFRelayEndpoints(_Base):
         self.assertEqual(r.json(), {"vectors": [[0.1, 0.2]]})
         mocked.assert_called_once_with(["hello"])  # no caller-controlled model — see CFRelayEmbedRequest
 
+    def test_embed_upstream_failure_is_502_not_500(self):
+        """A Workers AI failure is an ordinary, already-anticipated condition
+        (the caller's own circuit breaker + keyword fallback exist for
+        exactly this) -- it must not look like the relay endpoint itself is
+        broken. Observed live: this was an unhandled 500 in production,
+        indistinguishable from a real bug in relay_client.py's error log."""
+        import httpx
+
+        from app.providers import config as cf_config
+
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"  # pragma: allowlist secret
+        cf_config.get_cloud_settings.cache_clear()
+        c = _client()
+        with mock.patch(
+            "app.providers.gateway.workers_ai_embed",
+            side_effect=httpx.HTTPStatusError(
+                "400", request=httpx.Request("POST", "https://example.invalid"),
+                response=httpx.Response(400, request=httpx.Request("POST", "https://example.invalid")),
+            ),
+        ):
+            r = c.post(
+                "/internal/cf-relay/workers-ai-embed",
+                json={"texts": ["hello"]},
+                headers=_bearer("relay-secret-123"),
+            )
+        self.assertEqual(r.status_code, 502)
+
     def test_embed_rejects_caller_supplied_model(self):
         """Regression guard for the partial-SSRF CodeQL finding: a ``model``
         field in the request body must be rejected, not silently accepted
         and threaded into the Cloudflare URL this process builds."""
         from app.providers import config as cf_config
 
-        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"  # pragma: allowlist secret
         cf_config.get_cloud_settings.cache_clear()
         c = _client()
         r = c.post(
@@ -354,7 +381,7 @@ class CFRelayEndpoints(_Base):
         from app.providers import config as cf_config
         from app.providers import routing
 
-        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"  # pragma: allowlist secret
         cf_config.get_cloud_settings.cache_clear()
         c = _client()
         with mock.patch(
@@ -391,7 +418,7 @@ class CFRelayEndpoints(_Base):
         credits, but a Literal + dict-lookup is."""
         from app.providers import config as cf_config
 
-        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-123"  # pragma: allowlist secret
         cf_config.get_cloud_settings.cache_clear()
         c = _client()
         r = c.post(

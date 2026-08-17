@@ -13,6 +13,7 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
@@ -1748,6 +1749,26 @@ def trigger_indexing(
 # (embed the query, search Vectorize, run a chat completion) and nothing else
 # is exposed, so there is no open-ended forwarding surface to worry about.
 # ---------------------------------------------------------------------------
+def _relay_upstream_call(op: str, fn: Callable[[], dict]) -> dict:
+    """Run a relay op, turning an upstream Cloudflare failure into a clean 502.
+
+    Without this, an ordinary and already-anticipated failure — Workers AI
+    intermittently rejecting a call, the same failure mode every direct
+    caller already retries/falls back around — propagated as an unhandled
+    500. That is indistinguishable from "the relay endpoint itself is
+    broken" to the caller (``relay_client.py``), and pollutes error tracking
+    with tracebacks for a condition the system already has a designed
+    fallback for (the caller's own circuit breaker + keyword-search
+    fallback). 502 (Bad Gateway) is the correct status for "the upstream this
+    endpoint relays to failed" — the relay itself worked.
+    """
+    try:
+        return fn()
+    except Exception as exc:
+        logger.warning("cf-relay %s: upstream call failed: %s", op, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Upstream Cloudflare call failed: {exc}") from exc
+
+
 @app.post("/internal/cf-relay/workers-ai-embed", include_in_schema=False)
 def cf_relay_workers_ai_embed(request: Request, body: CFRelayEmbedRequest) -> dict:
     _require_relay_key(request)
@@ -1755,8 +1776,8 @@ def cf_relay_workers_ai_embed(request: Request, body: CFRelayEmbedRequest) -> di
 
     # No caller-supplied model — always the retrieval embedding model
     # (gateway.workers_ai_embed's own default); see CFRelayEmbedRequest.
-    vectors = _gw.workers_ai_embed(body.texts)
-    return {"vectors": vectors}
+    vectors = _relay_upstream_call("workers-ai-embed", lambda: {"vectors": _gw.workers_ai_embed(body.texts)})
+    return vectors
 
 
 @app.post("/internal/cf-relay/vectorize-query", include_in_schema=False)
@@ -1764,8 +1785,12 @@ def cf_relay_vectorize_query(request: Request, body: CFRelayVectorizeQueryReques
     _require_relay_key(request)
     from .providers import vectorize as _vz
 
-    hits = _vz.vectorize_query(body.vector, top_k=body.top_k, vector_filter=body.vector_filter)
-    return {"hits": hits}
+    return _relay_upstream_call(
+        "vectorize-query",
+        lambda: {
+            "hits": _vz.vectorize_query(body.vector, top_k=body.top_k, vector_filter=body.vector_filter)
+        },
+    )
 
 
 @app.post("/internal/cf-relay/workers-ai-chat", include_in_schema=False)
@@ -1780,10 +1805,14 @@ def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict
     # See CFRelayChatRequest for why this indirection exists.
     model = _routing.CHAT_MODEL_SLOTS[body.model_slot]
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
-    text = _gw.workers_ai_chat(
-        messages, model, max_tokens=body.max_tokens, temperature=body.temperature
+    return _relay_upstream_call(
+        "workers-ai-chat",
+        lambda: {
+            "text": _gw.workers_ai_chat(
+                messages, model, max_tokens=body.max_tokens, temperature=body.temperature
+            )
+        },
     )
-    return {"text": text}
 
 
 # ---------------------------------------------------------------------------
