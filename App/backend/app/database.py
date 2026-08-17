@@ -179,12 +179,80 @@ def _ensure_column(
     logger.info("Added missing column %s.%s", table, column)
 
 
+def consent_purposes() -> tuple[str, ...]:
+    """The allowed consent purposes, from the one place that defines them.
+
+    The schema used to repeat this list inside a CHECK constraint, so
+    adding a purpose to the enum left the database rejecting it. Derived
+    here instead: the enum is the source of truth, and the constraint
+    follows it.
+    """
+    from typing import get_args
+
+    from .auth.models import ConsentPurpose
+
+    return tuple(str(p) for p in get_args(ConsentPurpose))
+
+
+def _CONSENT_PURPOSE_SQL(ddl: str) -> str:  # noqa: N802 - reads as a constant substitution
+    quoted = ",".join(f"'{p}'" for p in consent_purposes())
+    return ddl.replace("__CONSENT_PURPOSES__", quoted)
+
+
+def _refresh_consent_purpose_check(conn: sqlite3.Connection) -> None:
+    """Rebuild consent_receipts when its CHECK list has fallen behind.
+
+    SQLite cannot alter a CHECK constraint, so an existing database keeps
+    whichever list it was created with and rejects any purpose added
+    later. Rebuild-and-copy is the standard remedy; it runs only when the
+    stored DDL is actually stale, so the normal path costs one PRAGMA.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='consent_receipts'"
+    ).fetchone()
+    if row is None:
+        return
+    stored = row["sql"] if isinstance(row, sqlite3.Row) else row[0]
+    missing = [p for p in consent_purposes() if f"'{p}'" not in (stored or "")]
+    if not missing:
+        return
+    logger.info("Rebuilding consent_receipts CHECK for new purposes: %s", missing)
+    try:
+        conn.executescript(
+            _CONSENT_PURPOSE_SQL("""
+            PRAGMA foreign_keys=OFF;
+            CREATE TABLE consent_receipts__new (
+                receipt_id    TEXT PRIMARY KEY,
+                user_id       TEXT NOT NULL
+                              REFERENCES users(id) ON DELETE CASCADE,
+                purpose       TEXT NOT NULL
+                              CHECK(purpose IN (__CONSENT_PURPOSES__)),
+                version       TEXT NOT NULL,
+                granted_at    REAL NOT NULL,
+                withdrawn_at  REAL,
+                legal_basis   TEXT NOT NULL DEFAULT 'consent'
+                              CHECK(legal_basis IN ('consent','public_task','legal_obligation'))
+            );
+            INSERT INTO consent_receipts__new
+                SELECT receipt_id, user_id, purpose, version, granted_at,
+                       withdrawn_at, legal_basis FROM consent_receipts;
+            DROP TABLE consent_receipts;
+            ALTER TABLE consent_receipts__new RENAME TO consent_receipts;
+            PRAGMA foreign_keys=ON;
+            """)
+        )
+        conn.commit()
+    except Exception:
+        logger.exception("consent_receipts CHECK rebuild failed")
+        conn.rollback()
+
+
 def init_db() -> None:
     """Create tables if they don't exist."""
     _DB_DIR.mkdir(parents=True, exist_ok=True)
     conn = _get_connection()
 
-    conn.executescript("""
+    conn.executescript(_CONSENT_PURPOSE_SQL("""
         CREATE TABLE IF NOT EXISTS feedback (
             id          TEXT PRIMARY KEY,
             message_id  TEXT NOT NULL,
@@ -287,7 +355,7 @@ def init_db() -> None:
             user_id       TEXT NOT NULL
                           REFERENCES users(id) ON DELETE CASCADE,
             purpose       TEXT NOT NULL
-                          CHECK(purpose IN ('personalization','analytics','ticket_escalation','long_term_storage','ura_account_access','ura_actions','voice_recording','voice_analytics')),
+                          CHECK(purpose IN (__CONSENT_PURPOSES__)),
             version       TEXT NOT NULL,
             granted_at    REAL NOT NULL,
             withdrawn_at  REAL,
@@ -474,9 +542,10 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_users_last_seen   ON users(last_seen_at);
         CREATE INDEX IF NOT EXISTS idx_consent_user      ON consent_receipts(user_id);
         CREATE INDEX IF NOT EXISTS idx_consent_active    ON consent_receipts(user_id, purpose, withdrawn_at);
-    """)
+    """))
 
     # Forward-compatible schema migrations for existing DBs.
+    _refresh_consent_purpose_check(conn)
     _ensure_column(conn, "conversations", "conversation_id", "TEXT")
     conn.execute(
         "UPDATE conversations SET conversation_id = id WHERE conversation_id IS NULL OR conversation_id = ''"

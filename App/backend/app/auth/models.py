@@ -22,6 +22,10 @@ ConsentPurpose = Literal[
     "ura_actions",
     "voice_recording",
     "voice_analytics",
+    # Proactive contact is its own purpose. Agreeing to a tailored
+    # answer is not agreeing to be messaged, so reminders cannot ride
+    # on "personalization".
+    "deadline_reminders",
 ]
 TaxpayerType = Literal[
     "unknown",

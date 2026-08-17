@@ -1080,6 +1080,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `FLAG_WORKFLOWS` | YAML-driven durable multi-step workflow guides | `true` |
 | `FLAG_HANDOFF_SUMMARIES` | Structured human handoff packets + escalation metadata | `true` |
 | `FLAG_MEMORY_ENABLED` | Inject consented personal memory facts into prompts | `false` |
+| `deadline_reminders` consent | Proactive contact is a separate consent purpose from personalization — see [`docs/deadline-reminders.md`](docs/deadline-reminders.md) | opt-in |
 | **Voice-first flags (Phase 23)** | | |
 | `FLAG_VOICE_STREAMING` | Enable WebSocket streaming voice chat (VAD + barge-in) | `false` |
 | `FLAG_VOICE_CONSENT` | Enforce voice-specific consent checks before audio processing | `false` |
