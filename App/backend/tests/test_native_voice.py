@@ -193,10 +193,17 @@ class TestSpeculativePrefetcher(unittest.IsolatedAsyncioTestCase):
         from app.native_voice.speculative_prefetch import SpeculativePrefetcher
 
         retriever = MagicMock()
-        retriever.search.return_value = hits or [
+        hits = hits or [
             {"chunk_id": "c1", "text": "VAT is 18%", "score_rrf": 0.9},
             {"chunk_id": "c2", "text": "Applied to goods", "score_rrf": 0.7},
         ]
+        # speculative_prefetch.py prefers search_planned() when present
+        # (getattr(self._retriever, "search_planned", self._retriever.search)) —
+        # a real HybridRetriever always has it now, and an unspecced MagicMock
+        # auto-vivifies the attribute too, so this is genuinely what gets
+        # called. Configuring both keeps this fixture correct against either.
+        retriever.search.return_value = hits
+        retriever.search_planned.return_value = hits
         return SpeculativePrefetcher(retriever, top_k=4), retriever
 
     async def test_prefetch_ignores_short_prefix(self):
@@ -204,6 +211,7 @@ class TestSpeculativePrefetcher(unittest.IsolatedAsyncioTestCase):
         await pf.maybe_prefetch("how much")  # only 2 tokens < 4 min
         self.assertEqual(pf.stats.attempts, 0)
         retriever.search.assert_not_called()
+        retriever.search_planned.assert_not_called()
 
     async def test_prefetch_fires_on_long_prefix(self):
         pf, retriever = self._make_prefetcher()
@@ -211,7 +219,7 @@ class TestSpeculativePrefetcher(unittest.IsolatedAsyncioTestCase):
         # Wait for background task
         await asyncio.sleep(0.1)
         self.assertEqual(pf.stats.attempts, 1)
-        retriever.search.assert_called_once()
+        retriever.search_planned.assert_called_once()
 
     async def test_resolve_hit_when_prefix_matches(self):
         pf, _ = self._make_prefetcher()

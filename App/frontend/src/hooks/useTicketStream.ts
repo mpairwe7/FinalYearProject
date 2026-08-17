@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { appendAuthToken } from "../lib/authSession";
 
 export interface LiveEscalation {
@@ -22,8 +22,6 @@ export function useTicketStream(enabled: boolean): {
   const client = useQueryClient();
   const [latest, setLatest] = useState<LiveEscalation | null>(null);
   const [connected, setConnected] = useState(false);
-  const latestRef = useRef(latest);
-  latestRef.current = latest;
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;

@@ -39,6 +39,22 @@ import os
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+# CodeQL py/log-injection: `name` reaches these log calls before any registry
+# check can run in every caller CodeQL considers (is_enabled() validates it
+# against _REGISTRY first, but that guard lives in a different function, so
+# static analysis can't credit it for callers it can't fully trace). Strip
+# CR/LF/control characters at the log call itself so a value can never forge
+# a fake log line, regardless of which caller reached it.
+_LOG_STRIP_TABLE = dict.fromkeys(range(0x20), None)
+_LOG_STRIP_TABLE[0x7F] = None
+
+
+def _log_safe(value: str) -> str:
+    """*value* with control characters (CR/LF included) removed."""
+    return value.translate(_LOG_STRIP_TABLE)
+
+
 _PRODUCTION_ON_FLAGS = {
     "auth_required",
     "multi_tenant",
@@ -391,7 +407,12 @@ def _env_rollout(name: str, declared: Rollout | None) -> Rollout | None:
         except ValueError:
             # A malformed percentage must not silently mean 100%.  Keep
             # the declared value and make the typo visible.
-            logger.warning("flag %s: bad FLAG_%s_PERCENT=%r, ignoring", name, upper, raw_pct)
+            logger.warning(
+                "flag %s: bad FLAG_%s_PERCENT=%r, ignoring",
+                _log_safe(name),
+                _log_safe(upper),
+                raw_pct,
+            )
 
     def _split(raw: str | None, fallback: frozenset[str]) -> frozenset[str]:
         if raw is None:
@@ -445,7 +466,7 @@ class FeatureFlags:
             return self._overrides[name]
         flag = _REGISTRY.get(name)
         if flag is None:
-            logger.warning("unknown feature flag queried: %s", name)
+            logger.warning("unknown feature flag queried: %s", _log_safe(name))
             return False
         env_val = os.getenv(f"FLAG_{name.upper()}")
         if env_val is not None:
@@ -489,7 +510,7 @@ class FeatureFlags:
                 logger.warning(
                     "flag %s has a percentage rollout but was checked without a "
                     "subject — falling back to the default",
-                    name,
+                    _log_safe(name),
                 )
             return None
         if _bucket_of(name, subject) < rollout.percent * (_BUCKETS / 100):

@@ -17,6 +17,18 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# CodeQL py/log-injection: a request-supplied locale reaches a log call
+# below. Strip CR/LF/control characters at the log call itself so a value
+# can never forge a fake log line.
+_LOG_STRIP_TABLE = dict.fromkeys(range(0x20), None)
+_LOG_STRIP_TABLE[0x7F] = None
+
+
+def _log_safe(value: str) -> str:
+    """*value* with control characters (CR/LF included) removed."""
+    return value.translate(_LOG_STRIP_TABLE)
+
+
 # ---------------------------------------------------------------------------
 # Language detection — heuristic patterns for Ugandan languages
 # ---------------------------------------------------------------------------
@@ -370,14 +382,26 @@ _TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 # Split only on multi-intent markers. A bare "and" is too common
 # ("VAT and PAYE rates" is one comparison, not two searches).
+#
+# Possessive quantifiers (Python 3.11+): \s+ adjacent to alternation here
+# is exactly CodeQL's py/polynomial-redos shape — an adversarial run of
+# whitespace lets the backtracking engine try many equivalent ways to
+# split it across the \s+/\s* boundaries before a match ultimately fails.
+# Making them possessive (\s++, \s*+) is the standard fix: the engine
+# commits to the longest run and never backtracks into it. Verified
+# behavior-identical to the backtracking originals across representative
+# inputs, and empirically fast (µs, not seconds) on adversarial whitespace.
+# decompose_query() below also runs normalize() before matching, which
+# already collapses whitespace runs to one space — independently removing
+# the long-run precondition these patterns would otherwise need.
 _DECOMPOSE_SPLIT_RE = re.compile(
-    r"\s+(?:and also|as well as|and then)\s+|"
-    r"\s*;\s+|"
-    r"\?\s+(?=(?:what|how|when|where|which|who)\b)",
+    r"\s++(?:and also|as well as|and then)\s++|"
+    r"\s*+;\s++|"
+    r"\?\s++(?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
 _AND_QUESTION_RE = re.compile(
-    r"\s+and\s+(?=(?:what|how|when|where|which|who)\b)",
+    r"\s++and\s++(?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
 
@@ -471,7 +495,11 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
 
         english = sunbird.translate_to_english(text, loc)
     except Exception:
-        logger.debug("english_retrieval_query: translation failed locale=%s", loc, exc_info=True)
+        logger.debug(
+            "english_retrieval_query: translation failed locale=%s",
+            _log_safe(loc),
+            exc_info=True,
+        )
         return text
     if not english or english.strip().casefold() == text.casefold():
         return text

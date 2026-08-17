@@ -82,6 +82,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/health"),
     ("GET", "/ready"),
     ("GET", "/metrics"),
+    ("GET", "/v1/index/freshness"),
     # --- Chat ---
     ("POST", "/v1/chat"),
     ("POST", "/v1/chat/stream"),
@@ -161,6 +162,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/health"): "this:test_health_ready_metrics",
     ("GET", "/ready"): "this:test_health_ready_metrics",
     ("GET", "/metrics"): "this:test_health_ready_metrics",
+    ("GET", "/v1/index/freshness"): "this:test_index_freshness",
     ("POST", "/v1/chat"): "this:test_chat_happy_path + test_api_endpoints.ChatEndpoints",
     ("POST", "/v1/chat/stream"): "test_fallback_integration.TestChatStreamEndpointFallback",
     ("POST", "/classify"): "test_api_endpoints.ClassificationKnowledge",
@@ -346,10 +348,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (53 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (57 HTTP + 4 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 53, f"expected 53 HTTP endpoints, found {len(http)}"
+    assert len(http) == 57, f"expected 57 HTTP endpoints, found {len(http)}"
     assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
 
 
@@ -361,6 +363,17 @@ def test_health_ready_metrics():
     assert c.get("/health").json()["status"] == "alive"
     assert c.get("/ready").status_code == 200
     assert c.get("/metrics", headers=_bearer(STAFF)).status_code == 200
+
+
+def test_index_freshness():
+    """Public, no model/auth needed — load_status() reads a status file the
+    cron writer (app.freshness --write-status) produces; absent in a fresh
+    test environment, which is itself the "not run yet" case being asserted."""
+    c = _client(model=False)
+    r = c.get("/v1/index/freshness")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"ok": None, "snapshot_missing": True, "checked_at": None}
 
 
 # ---------------------------------------------------------------------------
