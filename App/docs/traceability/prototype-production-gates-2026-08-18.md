@@ -24,6 +24,7 @@ stay default **off**.
 | Decision | Choice | Why |
 |----------|--------|-----|
 | Account connector | `off` / `mock` / `live`. Dev defaults to mock (`live=false`). Production rejects mock. `live` needs https base, token, and `URA_ACCOUNT_LIVE_ACK`. | A fake balance in production is worse than no balance. |
+| Action submit in mock | Proposal `ok=true`; `submit=true` still fail-closes (`URA action API is not configured`) | Confirmation must not look like a live filing. |
 | Live lookup transport | https only | http to an "internal" account host is not a URA contract. |
 | Document AV | `MALWARE_SCAN_REQUIRED` fail-closed when on; default fail-open in dev | Local demo must run without ClamAV. |
 | Isolated parse | subprocess when `DOCUMENT_PARSE_ISOLATED`; production requires it | Not a parse pool or gVisor; still better than in-process extractors. |

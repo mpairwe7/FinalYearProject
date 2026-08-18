@@ -84,6 +84,16 @@ class UraActionProposalTool(Tool):
         from ..ura_account_mock import account_mode
 
         if account_mode() == "mock":
+            if submit:
+                return {
+                    "ok": False,
+                    "submitted": False,
+                    "configured": False,
+                    "live": False,
+                    "source": "mock",
+                    "proposal": proposal,
+                    "error": "URA action API is not configured",
+                }
             return {
                 "ok": True,
                 "submitted": False,
