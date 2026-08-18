@@ -711,12 +711,26 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     else:
         retrieval_mode = "hybrid"
     qdrant_healthy = model._retriever.is_ready if model._retriever_ready else False
+    # Optional capabilities report the backend they actually resolved to. Both
+    # of these degrade silently by design — detection drops to a character
+    # heuristic, translation drops to serving English — and both degradations
+    # shipped unnoticed. An operator should not have to ask the assistant a
+    # Luganda question to find out.
+    from . import sunbird
+    from .query import language_detection_backend
+
+    capabilities = {
+        "language_detection": language_detection_backend(),
+        "translation": "sunbird" if sunbird.is_available() else "unavailable",
+        "retrieval": retrieval_mode,
+    }
     return HealthResponse(
         status="ready" if qdrant_healthy else "degraded",
         version=app.version,
         model_loaded=True,
         tags_loaded=len(model._faq_index),
         retrieval_mode=retrieval_mode,
+        capabilities=capabilities,
     )
 
 

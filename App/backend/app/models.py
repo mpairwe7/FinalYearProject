@@ -498,6 +498,16 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     tags_loaded: int = 0
     retrieval_mode: str = "keyword"
+    # Which backend each optional capability actually resolved to, so a silent
+    # fallback is visible to an operator instead of only to a debug log. The
+    # language detector degrading to its character heuristic shipped unnoticed
+    # for the life of the deployment and read every Luganda question as English
+    # (#308); the point of this field is that the next one is legible from
+    # outside the process.
+    capabilities: dict[str, str] = Field(
+        default_factory=dict,
+        description="capability -> resolved backend, e.g. {'language_detection': 'lingua'}",
+    )
 
 
 # ---------------------------------------------------------------------------

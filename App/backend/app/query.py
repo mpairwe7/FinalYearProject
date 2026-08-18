@@ -228,8 +228,25 @@ def _get_language_detector():
             _LANG_DETECTOR = LanguageDetector(min_confidence=0.55)
         except Exception:
             _LANG_DETECTOR_INIT_FAILED = True
-            logger.debug("LanguageDetector unavailable, using heuristic only")
+            # warning, not debug: this is a silent quality degradation — the
+            # heuristic below reads Luganda as English — and it went unnoticed
+            # in production precisely because it was logged where nobody looks.
+            logger.warning(
+                "LanguageDetector unavailable (ml.scripts.lang_id not importable); "
+                "falling back to the character heuristic, which mis-detects "
+                "Ugandan languages. See /ready capabilities.",
+                exc_info=True,
+            )
     return _LANG_DETECTOR
+
+
+def language_detection_backend() -> str:
+    """Which detector is actually answering: ``lingua`` or ``heuristic``.
+
+    Reported on ``/ready`` so an operator can see the degradation from
+    outside the process rather than inferring it from answer quality.
+    """
+    return "lingua" if _get_language_detector() is not None else "heuristic"
 
 
 def detect_language(text: str) -> str:
