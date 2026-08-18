@@ -70,7 +70,9 @@ from .flags import flags
 from .guardrails import STORE_RAW_PROMPTS, InputGuard, OutputGuard, redact_pii_text
 from .memory import get_memory_service
 from .query import (
+    canonicalize_tax_terms,
     detect_language,
+    english_retrieval_query,
     extract_question_span,
     extract_retrieval_filters,
     normalize as normalize_query,
@@ -4185,8 +4187,14 @@ class ChatModel:
             granted_purposes=granted_purposes,
             attachments=attachments,
         )
-        if isinstance(result, dict) and locale not in ("", "en"):
-            result["reply"] = self._localize_reply(str(result.get("reply", "")), locale)
+        # The *effective* locale, not the one passed in: a caller that sends no
+        # locale gets "en" by default and _generate_en detects the real one
+        # (detect_language) partway through, recording it on the result. Keying
+        # off the parameter meant an auto-detected Luganda turn was answered in
+        # English — the exact case a taxpayer who just types Luganda hits.
+        effective = str((result or {}).get("locale") or locale or "en")
+        if isinstance(result, dict) and effective not in ("", "en"):
+            result["reply"] = self._localize_reply(str(result.get("reply", "")), effective)
         return result
 
     def _generate_en(
@@ -4272,6 +4280,24 @@ class ChatModel:
                         locale = detected_locale
                         logger.info("Auto-detected locale: %s", locale)
 
+            # The deterministic routers below — workflows, TIN clarification,
+            # calculators, rate tables — match English patterns. Retrieval
+            # translates the question inside the retriever, but these run
+            # before that, so a Luganda question used to miss every one of
+            # them and fall through to an abstention: the languages most in
+            # need of a guided path were getting the weakest one. Translate
+            # once here and route on the English form.
+            router_message, router_rewritten = message, rewritten
+            if locale not in ("", "en"):
+                with trace_stage("router_translate", timings=timings):
+                    english_form = english_retrieval_query(message, locale)
+                if english_form and english_form.strip() and english_form != message:
+                    # MT expands abbreviations the routers key on ("VAT" comes
+                    # back as "value-added tax"), so canonicalize before routing.
+                    english_form = canonicalize_tax_terms(english_form)
+                    router_message = english_form
+                    router_rewritten = normalize_query(english_form)
+
             personalization = self._load_personalization_state(user_id)
             # Attachment turns are never cache-served or cache-stored: the answer
             # is specific to the attached document, not the query text alone.
@@ -4340,8 +4366,8 @@ class ChatModel:
             if flags.is_enabled("workflows"):
                 with trace_stage("workflow_router", timings=timings):
                     workflow_result = self._maybe_handle_workflow(
-                        message=message,
-                        rewritten=rewritten,
+                        message=router_message,
+                        rewritten=router_rewritten,
                         thread_id=thread_id,
                         locale=locale,
                         personalization=personalization,
@@ -4364,8 +4390,8 @@ class ChatModel:
             #       carries the figures, guided elicitation when it doesn't.
             with trace_stage("calculator_router", timings=timings):
                 calc_result = self._maybe_handle_fast_paths(
-                    message=message,
-                    rewritten=rewritten,
+                    message=router_message,
+                    rewritten=router_rewritten,
                     thread_id=thread_id,
                     locale=locale,
                 )

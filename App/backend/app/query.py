@@ -367,6 +367,37 @@ _CURRENT_FY_RE = re.compile(
     re.I,
 )
 
+# Machine translation returns the expanded form of a tax term where the
+# deterministic routers and the corpus both use the abbreviation: Sunbird
+# renders a Luganda VAT question as "what is the value-added tax in Uganda",
+# and the rate matcher wants the literal "VAT". Without this a translated
+# question misses every fast path and abstains, which is the whole reason
+# local-language questions used to get worse answers than English ones.
+#
+# Only terms whose abbreviation is what the matchers key on are listed. The
+# substitution is deliberately one-way (expanded -> abbreviation) and leaves
+# the rest of the sentence alone.
+_EXPANDED_TAX_TERMS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bvalue[-\s]?added\s+tax\b", re.I), "VAT"),
+    (re.compile(r"\bpay[-\s]?as[-\s]?you[-\s]?earn\b", re.I), "PAYE"),
+    # MT renders this both ways — "Tax Identification Number" and "taxpayer
+    # identification number" — so "payer" is optional here.
+    (re.compile(r"\btax\s*(?:payer)?\s+identification\s+number\b", re.I), "TIN"),
+]
+
+
+def canonicalize_tax_terms(text: str) -> str:
+    """Rewrite expanded tax terms to the abbreviations the matchers use.
+
+    Applied to machine-translated text before it reaches the deterministic
+    routers; a no-op for text that already uses the abbreviation.
+    """
+    out = text or ""
+    for pattern, replacement in _EXPANDED_TAX_TERMS:
+        out = pattern.sub(replacement, out)
+    return out
+
+
 _TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(value[-\s]?added\s+tax|vat)\b", re.I), "vat"),
     (re.compile(r"\b(pay\s+as\s+you\s+earn|paye)\b", re.I), "paye"),
