@@ -96,6 +96,8 @@ Expected on 2026-08-17: **25 tools**, **11 namespaces**.
 - MCP `resources/` and `prompts/` — optional; rate tables as resources would be a later increment.
 - MCP Apps (SEP-1865) — not needed for this product.
 - G12 URA account / actions DMZ servers — scaffolds stay fail-closed.
+  2026-08-18: sandbox mock + production gates in
+  `prototype-production-gates-2026-08-18.md`. Still not a live URA API.
 - In-process tool timeout is still a soft deadline (pure Python cannot preempt).
 - Schema pin / AIBOM for third-party MCP servers — first-party registry only today.
 

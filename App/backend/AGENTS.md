@@ -28,5 +28,6 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 - `ticket_queue` default on; escalate tool returns `ok: false` when it is off.
 - Document analyze: PDF guards, then `malware_scan` (fail-open unless `MALWARE_SCAN_REQUIRED`). `DOCUMENT_PARSE_ISOLATED` runs extractors in a subprocess.
 - `URA_ACCOUNT_API_MODE=mock` is sandbox only (`live=false`). Production rejects it.
+- Production gap gates: `app/production_readiness.py` (malware isolated parse, https publications, RLS ack, no seed, no live notify). See `docs/PRODUCTION_GATES.md`.
 - Publications ingest hashes `URA_PUBLICATIONS_URL` and enqueues reindex. Never auto-`--recreate`.
 - Flag PATCH persists to `flag_overrides` on **this replica**. Cluster-wide still needs `FLAG_*`.

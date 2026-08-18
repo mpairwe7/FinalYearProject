@@ -146,8 +146,9 @@ def _validate_production_env() -> None:
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
 
-    if (os.getenv("URA_ACCOUNT_API_MODE") or "").strip().lower() == "mock":
-        errors.append("URA_ACCOUNT_API_MODE=mock is not allowed in production.")
+    from .production_readiness import gap_gate_errors
+
+    errors.extend(gap_gate_errors())
 
     # Cloudflare/Gemini fallbacks: if the flag is explicitly on, the credentials
     # it needs must be present (otherwise the fallback silently no-ops in prod).
