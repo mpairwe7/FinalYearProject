@@ -4134,6 +4134,25 @@ class ChatModel:
                 else:
                     rewritten = normalize_query(message)
 
+            if flags.is_enabled("answer_overrides"):
+                from . import cms as _cms
+
+                override = _cms.lookup(rewritten)
+                if override:
+                    return self._finalize_result(
+                        self._deterministic_result(
+                            reply=str(override.get("reply") or ""),
+                            curated=True,
+                            hits=[],
+                            sources=[str(override.get("source_url") or "staff-override")],
+                            citations=[],
+                            retrieval_mode="answer_override",
+                            thread_id=thread_id,
+                            locale=locale,
+                            agent_role="staff_override",
+                        )
+                    )
+
             # 0c. Language detection — auto-detect user's language for
             #     adapter routing and locale-aware responses.
             if locale == "en":

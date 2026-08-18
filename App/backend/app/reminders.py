@@ -198,3 +198,42 @@ def due_reminders(
     if not reminders:
         return SelectionResult(skipped_reason="no deadline within the lead window")
     return SelectionResult(reminders=reminders)
+
+
+def refresh_inbox(
+    user_id: str,
+    profile: dict[str, Any] | None = None,
+    *,
+    tenant_id: str = "default",
+    today: _dt.date | None = None,
+) -> dict[str, Any]:
+    """Select due reminders and persist them to the in-app inbox.
+
+    This is the channel. It does not send email or SMS.
+    """
+    from . import database as db
+
+    from .notify import dispatch_selection
+
+    selected = due_reminders(user_id, profile=profile, tenant_id=tenant_id, today=today)
+    written = []
+    for item in selected.reminders:
+        row = db.upsert_reminder_inbox(
+            user_id,
+            item.deadline_name,
+            item.due_date,
+            item.message(),
+        )
+        if row:
+            written.append(row)
+    queued = dispatch_selection(
+        user_id,
+        selected.reminders,
+        ReminderPreferences.from_profile(profile),
+    )
+    return {
+        "skipped_reason": selected.skipped_reason,
+        "written": len(written),
+        "queued_notifications": queued,
+        "reminders": db.list_reminder_inbox(user_id),
+    }

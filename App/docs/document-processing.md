@@ -45,8 +45,12 @@ OCR, and keeps document/report state in local container storage.
 For high-volume or untrusted uploads, keep parsing/OCR in a separately
 resource-limited local worker or sandbox. Application-level limits reduce
 exposure, but they cannot forcibly terminate a native parser already executing
-in the same Python worker. There is no ClamAV (or equivalent) malware scan
-on this path.
+in the same Python worker. `malware_scan.py` can INSTREAM the bytes to
+clamd (`CLAMD_HOST` / `CLAMD_PORT`). `MALWARE_SCAN_REQUIRED=true`
+fail-closes when the daemon is down; the default is fail-open with a
+warning. Set `DOCUMENT_PARSE_ISOLATED=true` to run extractors in a
+spawned subprocess (`document_worker.py`). That is not a dedicated
+parse pool.
 
 ## Report exports
 

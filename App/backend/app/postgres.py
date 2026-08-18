@@ -209,6 +209,43 @@ def init_db() -> None:
         PRIMARY KEY (ticket_id, viewer)
     );
 
+    CREATE TABLE IF NOT EXISTS flag_overrides (
+        name       TEXT PRIMARY KEY,
+        enabled    BOOLEAN NOT NULL,
+        updated_at DOUBLE PRECISION NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reminder_inbox (
+        id            TEXT PRIMARY KEY,
+        user_id       TEXT NOT NULL,
+        deadline_name TEXT NOT NULL,
+        due_date      TEXT NOT NULL,
+        message       TEXT NOT NULL,
+        created_at    DOUBLE PRECISION NOT NULL,
+        read_at       DOUBLE PRECISION DEFAULT 0,
+        UNIQUE(user_id, deadline_name, due_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_outbox (
+        id         TEXT PRIMARY KEY,
+        user_id    TEXT NOT NULL,
+        channel    TEXT NOT NULL,
+        provider   TEXT NOT NULL DEFAULT 'mock',
+        payload    TEXT NOT NULL,
+        status     TEXT NOT NULL DEFAULT 'queued',
+        created_at DOUBLE PRECISION NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS answer_overrides (
+        id           TEXT PRIMARY KEY,
+        match_query  TEXT NOT NULL UNIQUE,
+        reply        TEXT NOT NULL,
+        source_url   TEXT DEFAULT '',
+        created_by   TEXT DEFAULT '',
+        enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at   DOUBLE PRECISION NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS conversation_topics (
         conversation_id TEXT PRIMARY KEY,
         topic_id        TEXT NOT NULL,
@@ -1118,6 +1155,307 @@ def list_ticket_viewers(ticket_id: str, max_age: float | None = None) -> list[st
             (cid, cutoff),
         )
         return [str(r[0]) for r in cur.fetchall()]
+
+
+def load_flag_overrides() -> dict[str, bool]:
+    pool = _get_pool()
+    if pool is None:
+        return {}
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT name, enabled FROM flag_overrides")
+        return {str(r[0]): bool(r[1]) for r in cur.fetchall()}
+
+
+def save_flag_override(name: str, enabled: bool) -> None:
+    key = (name or "").strip()
+    if not key:
+        return
+    pool = _get_pool()
+    if pool is None:
+        return
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO flag_overrides (name, enabled, updated_at)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (name) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = EXCLUDED.updated_at""",
+            (key, enabled, time.time()),
+        )
+        conn.commit()
+
+
+def clear_flag_override(name: str) -> None:
+    key = (name or "").strip()
+    if not key:
+        return
+    pool = _get_pool()
+    if pool is None:
+        return
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM flag_overrides WHERE name = %s", (key,))
+        conn.commit()
+
+
+def upsert_reminder_inbox(
+    user_id: str,
+    deadline_name: str,
+    due_date: str,
+    message: str,
+) -> dict[str, Any]:
+    import uuid as _uuid
+
+    uid = (user_id or "").strip()
+    if not uid or not deadline_name or not due_date:
+        return {}
+    pool = _get_pool()
+    if pool is None:
+        return {}
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id FROM reminder_inbox
+               WHERE user_id = %s AND deadline_name = %s AND due_date = %s""",
+            (uid, deadline_name, due_date),
+        )
+        row = cur.fetchone()
+        if row:
+            rid = str(row[0])
+            cur.execute("UPDATE reminder_inbox SET message = %s WHERE id = %s", (message, rid))
+            conn.commit()
+            return {
+                "id": rid,
+                "user_id": uid,
+                "deadline_name": deadline_name,
+                "due_date": due_date,
+                "message": message,
+            }
+        rid = str(_uuid.uuid4())
+        cur.execute(
+            """INSERT INTO reminder_inbox
+               (id, user_id, deadline_name, due_date, message, created_at, read_at)
+               VALUES (%s, %s, %s, %s, %s, %s, 0)""",
+            (rid, uid, deadline_name, due_date, message, time.time()),
+        )
+        conn.commit()
+        return {
+            "id": rid,
+            "user_id": uid,
+            "deadline_name": deadline_name,
+            "due_date": due_date,
+            "message": message,
+        }
+
+
+def list_reminder_inbox(user_id: str) -> list[dict[str, Any]]:
+    uid = (user_id or "").strip()
+    if not uid:
+        return []
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, user_id, deadline_name, due_date, message, created_at, read_at
+               FROM reminder_inbox WHERE user_id = %s ORDER BY due_date ASC""",
+            (uid,),
+        )
+        return [
+            {
+                "id": r[0],
+                "user_id": r[1],
+                "deadline_name": r[2],
+                "due_date": r[3],
+                "message": r[4],
+                "created_at": r[5],
+                "read_at": r[6],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+def enqueue_notification(
+    user_id: str,
+    channel: str,
+    payload: dict[str, Any],
+    *,
+    provider: str = "mock",
+) -> dict[str, Any]:
+    import json as _json
+    import uuid as _uuid
+
+    uid = (user_id or "").strip()
+    ch = (channel or "").strip().lower()
+    pool = _get_pool()
+    if pool is None or not uid or not ch:
+        return {}
+    nid = str(_uuid.uuid4())
+    now = time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO notification_outbox
+               (id, user_id, channel, provider, payload, status, created_at)
+               VALUES (%s, %s, %s, %s, %s, 'queued', %s)""",
+            (nid, uid, ch, provider, _json.dumps(payload or {}), now),
+        )
+        conn.commit()
+    return {
+        "id": nid,
+        "user_id": uid,
+        "channel": ch,
+        "provider": provider,
+        "status": "queued",
+        "live": False,
+    }
+
+
+def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    import json as _json
+
+    pool = _get_pool()
+    if pool is None:
+        return []
+    cap = max(1, min(limit, 200))
+    with pool.connection() as conn, conn.cursor() as cur:
+        if user_id:
+            cur.execute(
+                """SELECT id, user_id, channel, provider, payload, status, created_at
+                   FROM notification_outbox WHERE user_id = %s
+                   ORDER BY created_at DESC LIMIT %s""",
+                (user_id, cap),
+            )
+        else:
+            cur.execute(
+                """SELECT id, user_id, channel, provider, payload, status, created_at
+                   FROM notification_outbox ORDER BY created_at DESC LIMIT %s""",
+                (cap,),
+            )
+        rows = cur.fetchall()
+    out = []
+    for r in rows:
+        raw = r[4]
+        if isinstance(raw, str):
+            try:
+                raw = _json.loads(raw)
+            except _json.JSONDecodeError:
+                pass
+        out.append(
+            {
+                "id": r[0],
+                "user_id": r[1],
+                "channel": r[2],
+                "provider": r[3],
+                "payload": raw,
+                "status": r[5],
+                "created_at": r[6],
+            }
+        )
+    return out
+
+
+def get_answer_override(match_query: str) -> dict[str, Any] | None:
+    key = (match_query or "").strip()
+    pool = _get_pool()
+    if pool is None or not key:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, match_query, reply, source_url, created_by, enabled, updated_at
+               FROM answer_overrides WHERE match_query = %s AND enabled IS TRUE""",
+            (key,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "match_query": row[1],
+        "reply": row[2],
+        "source_url": row[3],
+        "created_by": row[4],
+        "enabled": bool(row[5]),
+        "updated_at": row[6],
+    }
+
+
+def upsert_answer_override(
+    match_query: str,
+    reply: str,
+    *,
+    source_url: str = "",
+    created_by: str = "",
+    enabled: bool = True,
+) -> dict[str, Any]:
+    import uuid as _uuid
+
+    key = (match_query or "").strip()
+    body = (reply or "").strip()
+    pool = _get_pool()
+    if pool is None or not key:
+        return {}
+    now = time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM answer_overrides WHERE match_query = %s", (key,))
+        existing = cur.fetchone()
+        if existing:
+            oid = str(existing[0])
+            cur.execute(
+                """UPDATE answer_overrides
+                   SET reply = %s, source_url = %s, created_by = %s,
+                       enabled = %s, updated_at = %s
+                   WHERE id = %s""",
+                (body, source_url, created_by, enabled, now, oid),
+            )
+        else:
+            oid = str(_uuid.uuid4())
+            cur.execute(
+                """INSERT INTO answer_overrides
+                   (id, match_query, reply, source_url, created_by, enabled, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (oid, key, body, source_url, created_by, enabled, now),
+            )
+        conn.commit()
+    return {
+        "id": oid,
+        "match_query": key,
+        "reply": body,
+        "source_url": source_url,
+        "created_by": created_by,
+        "enabled": enabled,
+    }
+
+
+def list_answer_overrides(limit: int = 100) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, match_query, reply, source_url, created_by, enabled, updated_at
+               FROM answer_overrides ORDER BY updated_at DESC LIMIT %s""",
+            (max(1, min(limit, 200)),),
+        )
+        return [
+            {
+                "id": r[0],
+                "match_query": r[1],
+                "reply": r[2],
+                "source_url": r[3],
+                "created_by": r[4],
+                "enabled": bool(r[5]),
+                "updated_at": r[6],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+def delete_answer_override(override_id: str) -> bool:
+    oid = (override_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not oid:
+        return False
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM answer_overrides WHERE id = %s", (oid,))
+        touched = cur.rowcount > 0
+        conn.commit()
+    return touched
 
 
 # ---------------------------------------------------------------------------

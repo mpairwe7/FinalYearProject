@@ -146,6 +146,26 @@ export const accountApi = {
   /** Identity + role. Safe to call anonymously: returns `authenticated: false`. */
   me: () => request<Identity>("/v1/me"),
 
+  account: () =>
+    request<{
+      live: boolean;
+      mode?: string;
+      source?: string;
+      profile?: {
+        tin?: string;
+        display_name?: string;
+        taxpayer_type?: string;
+        status?: string;
+        note?: string;
+        returns_due?: { name: string; period?: string; status?: string }[];
+      };
+    }>("/v1/me/account"),
+
+  reminders: () => request<{ reminders: { deadline_name: string; due_date: string; message: string }[] }>("/v1/me/reminders"),
+
+  refreshReminders: () =>
+    request<{ written: number; reminders: unknown[] }>("/v1/me/reminders/refresh", { method: "POST" }),
+
   profile: () => request<UserProfile>("/v1/me/profile"),
 
   updateProfile: (patch: ProfilePatch) =>

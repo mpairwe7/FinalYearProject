@@ -14,6 +14,7 @@ This repository describes a CI/CD pipeline for developing and training a custome
 | [Monitoring & Observability](docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
 | [Data Schema & Evaluation](docs/data-schema-and-eval.md) | Database models and evaluation criteria |
 | [Security Policy](SECURITY.md) | Secret scanning, OWASP LLM Top 10, threat model |
+| [Agent repo map](AGENTS.md) | 2026 agent-monorepo folder map (`agents/`, `evals/`, `infra/`) |
 
 ## Pipeline Overview
 - **Code**: Source, data configs, and frontend live in this repo on GitHub.
@@ -27,6 +28,19 @@ This repository describes a CI/CD pipeline for developing and training a custome
 
 ```
 FinalYearProject/
+├── AGENTS.md              # Agent-monorepo router (imports still live under App/)
+├── CLAUDE.md              # Points coding agents at AGENTS.md
+├── agents/                # graphs / tools / mcp / prompts pointers
+├── apps/api               # FastAPI entry → App/backend
+├── apps/web               # Next.js entry → App/frontend
+├── packages/              # Why this is not a split package monorepo
+├── prompts/               # Pointer to runtime prompts
+├── skills/                # Pointer to Cursor/Claude skills
+├── configs/               # prototype.env
+├── scripts/prototype.sh   # load demo defaults + print seed command
+├── evals/                 # Eval runners + preference export
+├── infra/                 # K8s stubs (not applied)
+├── .agents/               # layout, testing, prototype notes
 ├── .github/workflows/     # CI/CD, security, frontend, mobile, and MLOps workflows
 ├── App/                   # Application code
 │   ├── app.py            # Gradio HF Spaces app

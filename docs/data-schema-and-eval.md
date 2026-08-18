@@ -24,6 +24,8 @@
 
 The backend maintains 16 tables in SQLite (default, WAL mode) or PostgreSQL (opt-in via `ANALYTICS_BACKEND=postgres`). Forward-compatible migrations are applied on startup.
 
+Prototype sample rows live in `Data/eval/prototype_seed.json`. In development the API loads them on start unless `SEED_PROTOTYPE=false`. Production never seeds. CLI: `PYTHONPATH=App/backend python3 -m app.seed_prototype`.
+
 - **feedback**: User thumbs-up/down on chatbot responses.
   - id (PK), message_id, session_id, rating (up|down), comment, user_query, bot_reply, created_at.
   - Indexes: message_id, created_at. Retention: `FEEDBACK_TTL_DAYS` (default: 90).
@@ -65,6 +67,19 @@ The backend maintains 16 tables in SQLite (default, WAL mode) or PostgreSQL (opt
 - **tickets**: Escalation queue (Phase 14-D).
   - id (PK), conversation_id, session_id, status (open|assigned|resolved|wontfix), priority (low|normal|high|urgent), reason, user_query, bot_reply, handoff_json, response_judge_json, assignee, staff_note, created_at, updated_at.
   - Indexes: status, priority, created_at.
+
+- **flag_overrides**: Replica-local admin flag toggles (G31). Survives process restart; not cluster-wide.
+  - name (PK), enabled, updated_at.
+
+- **reminder_inbox**: In-app deadline matches (G14).
+  - id (PK), user_id, deadline_name, due_date, message, created_at, read_at.
+  - Unique: (user_id, deadline_name, due_date).
+
+- **notification_outbox**: Mock email/SMS queue (`provider=mock`, never sent).
+  - id (PK), user_id, channel, provider, payload, status, created_at.
+
+- **answer_overrides**: Staff CMS exact-match replies (G31).
+  - id (PK), match_query (unique), reply, source_url, created_by, enabled, updated_at.
 
 - **audit_events**: Hash-chained immutable audit ledger (Phase 21, UDPA compliance).
   - event_id (PK), tenant_id, user_id, event_type, payload (JSON), query_sha256, reply_sha256, previous_hash, hash, created_at.

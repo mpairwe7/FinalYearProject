@@ -157,7 +157,7 @@ _REGISTRY: dict[str, Flag] = {
             "Route to Cloudflare Workers AI / Vectorize / R2 + Gemini when primaries are down/over-budget",
         ),
         Flag("eval_auto_run", False, "Run evaluation harness on every Nth request"),
-        # Phase 14 — agentic workflows (tool_use / tickets stay off)
+        # Phase 14 — agentic workflows (tool_use stays off; ticket_queue on)
         Flag(
             "tool_use", False, "Allow the LLM to call registered tools via Qwen2.5 function-calling"
         ),
@@ -168,7 +168,13 @@ _REGISTRY: dict[str, Flag] = {
             "Default on after EN golden-set accuracy >= 0.95 "
             "(app.agents.eval_routing.agentic_mode_gate).",
         ),
-        Flag("ticket_queue", False, "Persist escalations to the tickets table for human follow-up"),
+        Flag(
+            "ticket_queue",
+            True,
+            "Persist escalations to the tickets table for human follow-up. "
+            "Default on after the staff workbench shipped (G32). "
+            "escalate_to_human uses the same flag.",
+        ),
         # Phase 14 (2026) — identity & consent
         Flag("auth_required", False, "Reject unauthenticated /v1/* requests"),
         Flag("multi_tenant", False, "Enforce tenant_id isolation via RLS"),
@@ -372,6 +378,11 @@ _REGISTRY: dict[str, Flag] = {
             "Fuse the graph retrieval leg into RRF alongside dense and BM25. "
             "Requires tax_graph. Off means the graph is scored in shadow mode "
             "without reaching any answer.",
+        ),
+        Flag(
+            "answer_overrides",
+            True,
+            "Staff CMS: exact-match answer overrides before retrieval.",
         ),
         Flag(
             "mcp_tasks",

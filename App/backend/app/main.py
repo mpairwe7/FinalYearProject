@@ -142,9 +142,12 @@ def _validate_production_env() -> None:
         if not os.getenv(name):
             errors.append(f"{name} must be set for production OIDC/JWT verification.")
 
-    for flag_name in ("auth_required", "multi_tenant", "audit_ledger"):
+    for flag_name in ("auth_required", "multi_tenant", "audit_ledger", "ticket_queue"):
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
+
+    if (os.getenv("URA_ACCOUNT_API_MODE") or "").strip().lower() == "mock":
+        errors.append("URA_ACCOUNT_API_MODE=mock is not allowed in production.")
 
     # Cloudflare/Gemini fallbacks: if the flag is explicitly on, the credentials
     # it needs must be present (otherwise the fallback silently no-ops in prod).
@@ -441,6 +444,20 @@ async def lifespan(app: FastAPI):
     try:
         db.init_db()
         logger.info("Analytics database ready")
+        from .seed_prototype import seed as _seed_prototype, should_seed as _should_seed
+
+        if _should_seed():
+            try:
+                logger.info("prototype seed: %s", _seed_prototype())
+            except Exception:
+                logger.exception("prototype seed skipped")
+        from .flags import flags as _flags
+
+        for _name, _on in db.load_flag_overrides().items():
+            try:
+                _flags.set(_name, _on)
+            except KeyError:
+                continue
     except Exception:
         logger.exception("Analytics database initialisation failed")
 
@@ -1193,7 +1210,11 @@ async def analyze_uploaded_document(
     except documents.UnsupportedDocumentError as err:
         raise HTTPException(status_code=415, detail=str(err)) from err
     except ValueError as err:
-        raise HTTPException(status_code=422, detail=str(err)) from err
+        detail = str(err)
+        code = 422
+        if "malware" in detail.lower():
+            code = 422
+        raise HTTPException(status_code=code, detail=detail) from err
     finally:
         metrics.observe("document_analysis_duration_ms", (time.perf_counter() - started) * 1000)
 
@@ -2123,7 +2144,7 @@ def list_flags_endpoint(
                 "protected": is_protected(name),
             }
         )
-    return {"flags": items, "overrides_are_ephemeral": True}
+    return {"flags": items, "overrides_are_ephemeral": False, "scope": "this_replica"}
 
 
 @app.patch("/v1/admin/flags/{name}", tags=["admin"])
@@ -2143,12 +2164,65 @@ def set_flag_endpoint(
         flag_reg.set(name, enabled)
     except KeyError:
         raise HTTPException(status_code=404, detail="unknown flag") from None
+    db.save_flag_override(name, enabled)
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),
         "overridden": True,
-        "ephemeral": True,
+        "ephemeral": False,
+        "scope": "this_replica",
     }
+
+
+@app.get("/v1/admin/overrides", tags=["admin"])
+def list_overrides_endpoint(
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return {"overrides": db.list_answer_overrides(), "exact_match": True}
+
+
+@app.put("/v1/admin/overrides", tags=["admin"])
+def put_override_endpoint(
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    from . import cms
+
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may edit overrides")
+    try:
+        row = cms.upsert(
+            str(body.get("query") or ""),
+            str(body.get("reply") or ""),
+            source_url=str(body.get("source_url") or ""),
+            created_by=ctx.user.user_id if ctx.user else "",
+            enabled=bool(body.get("enabled", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return row
+
+
+@app.delete("/v1/admin/overrides/{override_id}", tags=["admin"])
+def delete_override_endpoint(
+    override_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may edit overrides")
+    ok = db.delete_answer_override(override_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="override not found")
+    return {"ok": True, "id": override_id}
+
+
+@app.get("/v1/admin/outbox", tags=["admin"])
+def list_outbox_endpoint(
+    _ctx: AuthContext = Depends(require_admin_access),
+    limit: int = 50,
+) -> dict:
+    """Mock email/SMS queue. provider=mock; nothing is sent."""
+    return {"items": db.list_notification_outbox(limit=limit), "live": False}
 
 
 @app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
@@ -2230,6 +2304,8 @@ def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
     """Return the current auth context (or anonymous)."""
     if not ctx.is_authenticated:
         return {"authenticated": False, "role": "public", "tenant_id": "default"}
+    from .tools.ura_account import account_api_status
+
     # Refresh last_seen + upsert on every whoami call
     row = db.upsert_user(
         external_id=ctx.user.user_id,
@@ -2245,7 +2321,46 @@ def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
         "email": row["email"],
         "role": row["role"],
         "granted_purposes": ctx.user.granted_purposes,
+        "account_api": account_api_status(),
     }
+
+
+@app.get("/v1/me/reminders", tags=["me"])
+def me_list_reminders(ctx: AuthContext = Depends(require_user)) -> dict:
+    """In-app deadline inbox. Does not send email or SMS."""
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    return {"reminders": db.list_reminder_inbox(row["id"])}
+
+
+@app.post("/v1/me/reminders/refresh", tags=["me"])
+def me_refresh_reminders(ctx: AuthContext = Depends(require_user)) -> dict:
+    """Run the selector and persist matches to the inbox."""
+    from .reminders import refresh_inbox
+
+    row = db.upsert_user(
+        external_id=ctx.user.user_id,
+        tenant_id=ctx.tenant_id,
+        email=ctx.user.email,
+        role=ctx.role,
+    )
+    profile = db.get_user_profile(row["id"]) or {}
+    return refresh_inbox(row["id"], profile, tenant_id=ctx.tenant_id)
+
+
+@app.get("/v1/me/account", tags=["me"])
+def me_account(ctx: AuthContext = Depends(require_user)) -> dict:
+    """Sandbox or live account snapshot. Mock is never labeled live."""
+    from .tools.ura_account import UraAccountProfileTool, account_api_status
+
+    status = account_api_status()
+    taxpayer_id = ctx.user.user_id if ctx.user else ""
+    result = UraAccountProfileTool().execute(taxpayer_id=taxpayer_id)
+    return {**status, **result, "user_id": taxpayer_id}
 
 
 @app.get("/v1/me/profile", tags=["me"])

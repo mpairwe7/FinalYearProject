@@ -23,10 +23,12 @@ class TestFeatureFlags:
         assert "ticket_queue" in all_flags
 
     def test_phase_flag_defaults(self, clean_flags):
-        """tool_use / tickets stay off; agentic_mode is on behind the routing gate."""
+        """tool_use stays off; agentic_mode and ticket_queue default on in the registry."""
+        from app.flags import _REGISTRY
+
         assert clean_flags.is_enabled("tool_use") is False
         assert clean_flags.is_enabled("agentic_mode") is True
-        assert clean_flags.is_enabled("ticket_queue") is False
+        assert _REGISTRY["ticket_queue"].default is True
 
     def test_flag_overrides_work(self, clean_flags):
         clean_flags.set("tool_use", True)

@@ -1,0 +1,53 @@
+{
+  "user": {
+    "external_id": "sandbox-taxpayer",
+    "email": "sandbox.taxpayer@example.test",
+    "role": "verified_taxpayer"
+  },
+  "overrides": [
+    {
+      "query": "What is the VAT rate?",
+      "reply": "The standard VAT rate is 18%. This is a staff override for prototype testing.",
+      "source_url": "https://ura.go.ug"
+    },
+    {
+      "query": "How do I register for a TIN?",
+      "reply": "Register for a TIN on the official URA portal. This override is sample data, not a live circular.",
+      "source_url": "https://ura.go.ug"
+    }
+  ],
+  "reminders": [
+    {
+      "deadline_name": "VAT return",
+      "due_date": "2026-08-20",
+      "message": "Sandbox Taxpayer, your VAT return filing is due in 2 days (2026-08-20). Monthly VAT."
+    },
+    {
+      "deadline_name": "PAYE",
+      "due_date": "2026-08-15",
+      "message": "Sandbox Taxpayer, your PAYE filing is due today (2026-08-15). Monthly PAYE."
+    }
+  ],
+  "outbox": [
+    {
+      "channel": "email",
+      "message": "Prototype email: VAT return due 2026-08-20. Not sent."
+    }
+  ],
+  "tickets": [
+    {
+      "reason": "Prototype: multi-country customs question needs an officer",
+      "user_query": "I imported a vehicle from Kenya. What duty applies?",
+      "priority": "high"
+    }
+  ],
+  "feedback": [
+    {
+      "message_id": "proto-fb-001",
+      "rating": "down",
+      "user_query": "What is the VAT rate?",
+      "bot_reply": "I am not sure about the current VAT rate.",
+      "comment": "Should have said 18%"
+    }
+  ]
+}

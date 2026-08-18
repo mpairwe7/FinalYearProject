@@ -24,6 +24,7 @@ from app.reminders import (
     Reminder,
     ReminderPreferences,
     due_reminders,
+    refresh_inbox,
 )
 
 #: Three days before the 15th monthly deadline.
@@ -152,6 +153,14 @@ class TestMessageText:
     def test_the_date_is_always_stated(self):
         # "in 3 days" is ambiguous once a message sits unread.
         assert "2026-01-15" in self._reminder(3).message()
+
+
+class TestInboxChannel:
+    def test_refresh_writes_when_consent_is_granted(self, tmp_db, user):
+        tmp_db.grant_consent(user["id"], REMINDER_PURPOSE, "v1")
+        result = refresh_inbox(user["id"], ENABLED_PROFILE, today=JAN_12)
+        assert result["written"] >= 1
+        assert tmp_db.list_reminder_inbox(user["id"])
 
 
 class TestConsentPurposeIsRegistered:

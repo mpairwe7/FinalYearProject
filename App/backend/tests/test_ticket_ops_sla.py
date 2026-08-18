@@ -52,6 +52,14 @@ def isolated_db(monkeypatch: pytest.MonkeyPatch):
     conn.close()
 
 
+def test_flag_overrides_survive_a_reload(isolated_db) -> None:
+    isolated_db.save_flag_override("hyde", True)
+    loaded = isolated_db.load_flag_overrides()
+    assert loaded["hyde"] is True
+    isolated_db.clear_flag_override("hyde")
+    assert "hyde" not in isolated_db.load_flag_overrides()
+
+
 def test_heartbeat_lists_the_viewer_and_expires(isolated_db) -> None:
     ticket = isolated_db.create_ticket(reason="presence")
     isolated_db.heartbeat_ticket_presence(ticket["id"], "officer@ura.go.ug")

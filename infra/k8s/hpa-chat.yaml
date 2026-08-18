@@ -1,0 +1,20 @@
+# Example only. Not applied. Needs a measured p95 before any replica count.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ura-chat-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ura-chat-api
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: chat_response_time_ms
+        target:
+          type: AverageValue
+          averageValue: "4000"

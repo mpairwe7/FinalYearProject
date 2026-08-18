@@ -4,7 +4,7 @@ This module is the completeness guarantee for the HTTP/WS API surface. It has
 three jobs:
 
 1. **Drift guard** (``test_route_table_matches_manifest``) — enumerates the live
-   ``app.routes`` table and asserts it equals a hand-declared manifest of all 60
+   ``app.routes`` table and asserts it equals a hand-declared manifest of all 62
    application endpoints. Add or remove a route without updating the manifest and
    this test fails, so the surface can never silently grow untested.
 
@@ -118,6 +118,10 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/admin/tickets/{ticket_id}/presence"),
     ("GET", "/v1/admin/flags"),
     ("PATCH", "/v1/admin/flags/{name}"),
+    ("GET", "/v1/admin/overrides"),
+    ("PUT", "/v1/admin/overrides"),
+    ("DELETE", "/v1/admin/overrides/{override_id}"),
+    ("GET", "/v1/admin/outbox"),
     ("GET", "/v1/admin/voice_audit"),
     ("GET", "/v1/admin/offline_stats"),
     # --- Ops-key gated ---
@@ -139,6 +143,9 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Identity / consent (/v1/me) ---
     ("GET", "/v1/me"),
     ("DELETE", "/v1/me"),
+    ("GET", "/v1/me/reminders"),
+    ("POST", "/v1/me/reminders/refresh"),
+    ("GET", "/v1/me/account"),
     ("GET", "/v1/me/profile"),
     ("PUT", "/v1/me/profile"),
     ("GET", "/v1/me/consents"),
@@ -207,6 +214,13 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/documents/{document_id}/report"): "test_documents.DocumentEndpointsTest",
     ("GET", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("DELETE", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
+    ("GET", "/v1/me/reminders"): "tests.agents.test_reminders",
+    ("POST", "/v1/me/reminders/refresh"): "tests.agents.test_reminders",
+    ("GET", "/v1/me/account"): "App.backend.tests.test_remaining_gaps",
+    ("GET", "/v1/admin/overrides"): "App.backend.tests.test_remaining_gaps",
+    ("PUT", "/v1/admin/overrides"): "App.backend.tests.test_remaining_gaps",
+    ("DELETE", "/v1/admin/overrides/{override_id}"): "App.backend.tests.test_remaining_gaps",
+    ("GET", "/v1/admin/outbox"): "App.backend.tests.test_remaining_gaps",
     ("GET", "/v1/me/profile"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("PUT", "/v1/me/profile"): "test_me_endpoints",
     ("GET", "/v1/me/consents"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
@@ -348,10 +362,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (57 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (64 HTTP + 4 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 57, f"expected 57 HTTP endpoints, found {len(http)}"
+    assert len(http) == 64, f"expected 64 HTTP endpoints, found {len(http)}"
     assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
 
 

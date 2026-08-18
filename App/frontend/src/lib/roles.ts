@@ -47,6 +47,8 @@ export const STAFF_DESTINATIONS: readonly {
   { href: "/agent", label: "My queue", roles: ["ura_staff", "ura_admin"] },
   { href: "/admin/tickets", label: "All tickets", roles: STAFF_ROLES },
   { href: "/admin/flags", label: "Flags", roles: ["ura_admin", "ura_auditor"] },
+  { href: "/admin/overrides", label: "Answer overrides", roles: ["ura_admin", "ura_auditor"] },
+  { href: "/admin/outbox", label: "Notification outbox", roles: ["ura_admin", "ura_auditor"] },
   { href: "/analytics", label: "Analytics", roles: ["ura_admin", "ura_auditor"] },
 ];
 

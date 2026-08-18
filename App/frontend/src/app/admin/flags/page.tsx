@@ -4,8 +4,8 @@
  * Feature-flag console (G31 slice).
  *
  * Reads the replica registry so an operator does not need SSH.
- * Toggles are in-process and ephemeral — cluster-wide still needs FLAG_*
- * on every replica. Safety flags (auth, audit, consent) cannot be flipped.
+ * Toggles persist on this replica (flag_overrides table). Cluster-wide
+ * still needs FLAG_* on every replica. Safety flags cannot be flipped.
  */
 import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -33,8 +33,8 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
         <div>
           <h1>Feature flags</h1>
           <p className="ov-sub">
-            What this replica is serving. Toggles last until the process
-            restarts — set FLAG_* on every pod for a lasting change.
+            What this replica is serving. Toggles persist in this replica’s
+            store — set FLAG_* on every pod for a cluster-wide change.
           </p>
         </div>
       </header>

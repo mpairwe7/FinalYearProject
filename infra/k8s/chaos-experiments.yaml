@@ -1,0 +1,26 @@
+# Example Chaos Mesh experiments (G34). Do not apply without a game-day window.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: kill-redis
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    labelSelectors:
+      app: redis
+  duration: "30s"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: qdrant-latency
+spec:
+  action: delay
+  mode: one
+  selector:
+    labelSelectors:
+      app: qdrant
+  delay:
+    latency: "200ms"
+  duration: "2m"
