@@ -22,6 +22,16 @@
 !App/Data/pdf_jsonl/**
 !App/Data/crawl_jsonl/**
 
+# query.detect_language() imports ml.scripts.lang_id for the lingua backend and
+# silently falls back to a character heuristic that reads Luganda as English if
+# the import fails. The Dockerfile copies these three files and nothing else
+# from the training tree; this context is deny-all, so without them listed here
+# that COPY fails the build outright — which is how it failed, rather than
+# shipping a degraded image. Keep this list and the COPY lines in step.
+!ml/__init__.py
+!ml/scripts/__init__.py
+!ml/scripts/lang_id.py
+
 # Within the allow-listed paths, still strip cruft.
 App/frontend/node_modules/
 App/frontend/.next/

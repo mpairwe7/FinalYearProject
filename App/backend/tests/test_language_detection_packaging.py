@@ -36,6 +36,7 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _BACKEND.parents[1]
 DOCKERFILE = _BACKEND.parent / "Dockerfile.cranecloud"
+DOCKERIGNORE = _BACKEND.parent / "Dockerfile.cranecloud.dockerignore"
 
 # CI runs this suite as `working-directory: App/backend` with `PYTHONPATH=.`,
 # which is the same shape as the container: `app` resolves, `ml` does not.
@@ -97,6 +98,30 @@ class ImagePackagingTest(unittest.TestCase):
                 )
                 return
         self.fail("no COPY line for ml/scripts/lang_id.py in Dockerfile.cranecloud")
+
+
+class BuildContextTest(unittest.TestCase):
+    """A COPY is only as good as the build context it copies from.
+
+    The dockerignore is deny-all plus an allowlist. The lang_id COPY was added
+    without the matching allowlist entries, so BuildKit failed with
+    "/ml/scripts/lang_id.py: not found" and the image could not be built at
+    all. That is the good failure mode — loud — but it still broke every
+    deploy until it was noticed, so the two files are pinned together here.
+    """
+
+    def test_every_ml_file_the_dockerfile_copies_is_in_the_build_context(self) -> None:
+        copied = re.findall(r"^\s*COPY\s+(ml/[^\s]+)", DOCKERFILE.read_text(encoding="utf-8"), re.M)
+        self.assertTrue(copied, "no ml/ COPY lines found — did the lang_id fix get reverted?")
+        allowed = DOCKERIGNORE.read_text(encoding="utf-8")
+        for path in copied:
+            with self.subTest(path=path):
+                self.assertIn(
+                    f"!{path}",
+                    allowed,
+                    f"Dockerfile copies {path} but the deny-all build context does "
+                    f"not allow it; the build fails with 'not found'",
+                )
 
 
 class IndexFreshnessPackagingTest(unittest.TestCase):
