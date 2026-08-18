@@ -99,5 +99,35 @@ class ImagePackagingTest(unittest.TestCase):
         self.fail("no COPY line for ml/scripts/lang_id.py in Dockerfile.cranecloud")
 
 
+class IndexFreshnessPackagingTest(unittest.TestCase):
+    """The image must ship a freshness baseline, not just the machinery.
+
+    `/v1/index/freshness` answered `snapshot_missing: true` in production for
+    the life of the deployment: app.freshness can write a snapshot and
+    app.indexer builds the index, but nothing connected the two, so corpus
+    drift — a CSV updated after the image was cut — had no baseline to be
+    measured against and the probe reported nothing useful (#300).
+    """
+
+    def test_the_build_writes_a_freshness_snapshot_after_indexing(self) -> None:
+        body = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertIn(
+            "app.freshness --write",
+            body,
+            "the image no longer baselines corpus hashes, so "
+            "/v1/index/freshness will report snapshot_missing and drift will "
+            "be invisible",
+        )
+
+    def test_the_snapshot_is_written_after_the_index_is_built(self) -> None:
+        """Order matters: a baseline taken before indexing proves nothing."""
+        body = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertLess(
+            body.index("app.indexer --recreate"),
+            body.index("app.freshness --write"),
+            "freshness snapshot must be written after app.indexer --recreate",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

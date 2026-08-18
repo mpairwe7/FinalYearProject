@@ -237,6 +237,14 @@ RUN set -eux; \
     # the vocab/idf come from the same fit — the corpus-hash sentinel would
     # otherwise disable sparse retrieval at startup.
     test -s /app/Model/bm25_state.json; \
+    # Baseline the corpus hashes against the index just built. Without this the
+    # image ships no snapshot, /v1/index/freshness answers snapshot_missing for
+    # the life of the deployment, and corpus drift — a CSV updated after the
+    # image was cut — is invisible rather than reported. app.indexer does not
+    # write it, so it is written here, where the index is known to be current.
+    APP_DATA_ROOT=/app/Data PYTHONPATH=. \
+    /opt/venv/bin/python -m app.freshness --write; \
+    test -s /app/Model/index_freshness.json; \
     # procps is not installed, so stop it by the PID captured above.
     kill "$QDRANT_PID"; \
     wait "$QDRANT_PID" || true; \
