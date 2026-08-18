@@ -274,6 +274,20 @@ jobs:
           " >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # The scan above ends in `|| true` so the summary is always produced.
+      # This is the part that actually gates: it fails on advisory IDs that
+      # are not in .security/dependency-advisories.json. The repo carries a
+      # backlog (#299), and gating on "zero findings" would fail every build
+      # until it is cleared, which in practice gets the gate deleted rather
+      # than the backlog fixed — so the ratchet is "no worse than baseline".
+      # IDs, not counts: a change that fixes one advisory and adds another
+      # leaves the count identical.
+      - name: Gate on new dependency advisories
+        run: |
+          REQ_NAME=$(basename $(dirname ${{ matrix.requirements }}))_$(basename ${{ matrix.requirements }})
+          python3 scripts/check_dependency_advisories.py \
+            --audit "pip-audit-${REQ_NAME}.json"
+
       - name: Upload pip-audit results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

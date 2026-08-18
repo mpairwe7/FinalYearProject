@@ -1,0 +1,149 @@
+{
+  "_comment": "Advisory IDs known to CI. The build fails on IDs absent from this file. Removing an entry is free; adding one should be a reviewed decision with an owner. Regenerate with --update.",
+  "advisories": {
+    "GHSA-rf74-v2fm-23pw": {
+      "package": "nltk",
+      "version": "3.9.3"
+    },
+    "PYSEC-2025-194": {
+      "package": "torch",
+      "version": "2.12.1"
+    },
+    "PYSEC-2025-211": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2025-212": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2025-213": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2025-214": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2025-215": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2025-216": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2025-217": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2025-218": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2025-40": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-113": {
+      "package": "pyarrow",
+      "version": "18.1.0"
+    },
+    "PYSEC-2026-1977": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-1980": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-1981": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-1983": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-1984": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-1985": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-1986": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-1987": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-1988": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-2085": {
+      "package": "nltk",
+      "version": "3.9.3"
+    },
+    "PYSEC-2026-2192": {
+      "package": "langchain",
+      "version": "1.2.15"
+    },
+    "PYSEC-2026-2235": {
+      "package": "nltk",
+      "version": "3.9.3"
+    },
+    "PYSEC-2026-2236": {
+      "package": "nltk",
+      "version": "3.9.3"
+    },
+    "PYSEC-2026-2237": {
+      "package": "nltk",
+      "version": "3.9.3"
+    },
+    "PYSEC-2026-2288": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-2289": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-2290": {
+      "package": "transformers",
+      "version": "4.48.3"
+    },
+    "PYSEC-2026-2447": {
+      "package": "diskcache",
+      "version": "5.6.3"
+    },
+    "PYSEC-2026-3046": {
+      "package": "ragas",
+      "version": "0.3.2"
+    },
+    "PYSEC-2026-3447": {
+      "package": "setuptools",
+      "version": "81.0.0"
+    },
+    "PYSEC-2026-3582": {
+      "package": "nltk",
+      "version": "3.9.3"
+    },
+    "PYSEC-2026-3583": {
+      "package": "nltk",
+      "version": "3.9.3"
+    },
+    "PYSEC-2026-3584": {
+      "package": "nltk",
+      "version": "3.9.3"
+    },
+    "PYSEC-2026-597": {
+      "package": "nltk",
+      "version": "3.9.3"
+    }
+  }
+}
