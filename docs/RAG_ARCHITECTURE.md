@@ -262,7 +262,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (45 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (49 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -468,6 +468,8 @@ All major subsystems are behind feature flags for progressive rollout:
 | `reranker` | on | Cross-encoder reranking |
 | `workflows` | on | Guided multi-step workflows |
 | `handoff_summaries` | on | Human triage packets |
+| `ticket_queue` | on | Persist escalations for the staff workbench |
+| `answer_overrides` | on | Staff CMS exact-match replies before retrieval |
 | `tool_use` | off | LLM tool-calling |
 | `agentic_mode` | on | Supervisor routing (EN golden-set gate ≥ 0.95) |
 | `auth_required` | off | Enforce JWT |
@@ -485,7 +487,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**45** in total, including the per-phase switches for voice, offline and
+**49** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list.
 
 ### Addressable rollout

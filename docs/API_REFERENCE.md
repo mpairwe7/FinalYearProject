@@ -1064,10 +1064,27 @@ GET /v1/admin/flags
 PATCH /v1/admin/flags/{name}?enabled=true
 ```
 
-`GET` lists the replica registry (`enabled`, `protected`, rollout size).
-`PATCH` is `ura_admin` only, in-process, and ephemeral. Safety flags
-(`auth_required`, `multi_tenant`, `audit_ledger`, `voice_consent`)
+`GET` lists the replica registry (`enabled`, `protected`, rollout size)
+and `overrides_are_ephemeral: false` / `scope: this_replica`.
+`PATCH` is `ura_admin` only and writes `flag_overrides` on this replica
+(survives process restart; cluster-wide still needs `FLAG_*`). Safety
+flags (`auth_required`, `multi_tenant`, `audit_ledger`, `voice_consent`)
 return 400.
+
+```http
+GET /v1/admin/overrides
+PUT /v1/admin/overrides
+DELETE /v1/admin/overrides/{override_id}
+```
+
+Exact-match staff answer overrides (`FLAG_ANSWER_OVERRIDES`). `PUT` body:
+`{"query":"…","reply":"…","source_url":"","enabled":true}`.
+
+```http
+GET /v1/admin/outbox
+```
+
+Mock email/SMS queue (`live=false`). Nothing is sent.
 
 ---
 
@@ -1083,16 +1100,55 @@ User identity, profile preferences, and UDPA 2019 data-subject rights. All endpo
 GET /v1/me
 ```
 
-Returns the current authentication context. Works for both anonymous and authenticated users.
+Returns the current authentication context. Works for both anonymous and authenticated users. Authenticated responses include `account_api` (`configured` / `error`) — never a fabricated balance.
 
-**Response**
+**Anonymous**
 ```json
 {
   "authenticated": false,
-  "sub": null,
-  "roles": ["anonymous"]
+  "role": "public",
+  "tenant_id": "default"
 }
 ```
+
+**Authenticated (excerpt)**
+```json
+{
+  "authenticated": true,
+  "user_id": "…",
+  "role": "verified_taxpayer",
+  "account_api": {
+    "configured": false,
+    "error": "URA account API is not configured"
+  }
+}
+```
+
+---
+
+#### Deadline inbox (in-app only)
+
+```http
+GET /v1/me/reminders
+POST /v1/me/reminders/refresh
+```
+
+Requires JWT. Lists the `reminder_inbox` rows for the caller. `POST` runs
+the existing selector, persists matches, and queues mock email/SMS rows
+in `notification_outbox` (`provider=mock`, `live=false`). Nothing is sent.
+
+---
+
+#### Account snapshot (sandbox or live)
+
+```http
+GET /v1/me/account
+```
+
+Requires JWT. In development the connector defaults to mock
+(`live=false`) and Settings shows the sandbox TIN. `live` is only true
+when mode is `live` and real credentials succeed. Production refuses
+`mock`.
 
 ---
 
@@ -1333,7 +1389,10 @@ reference numbers.
 }
 ```
 
-Errors: `413` over size limit, `415` unsupported type, `422` empty/missing file.
+Errors: `413` over size limit, `415` unsupported type, `422` empty/missing
+file, structural reject, or malware reject (`malware_scan.py` via clamd
+INSTREAM). `MALWARE_SCAN_REQUIRED=true` fail-closes when clamd is down;
+default is fail-open with a warning.
 
 To ground a chat turn on the document, pass the id in the chat request:
 `{"message": "…", "attachment_ids": ["<document_id>"]}` (max 3, both

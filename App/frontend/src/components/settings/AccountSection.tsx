@@ -10,10 +10,10 @@
  */
 
 import Link from "next/link";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type { IdentityState } from "../../hooks/useIdentity";
 import { staffDestinationsFor } from "../../lib/roles";
-import { ApiError } from "../../services/accountApi";
+import { accountApi, ApiError } from "../../services/accountApi";
 import { ActionButton, SettingsRow, SettingsSection, StatusNote } from "./controls";
 
 export default function AccountSection({ state }: { state: IdentityState }) {
@@ -115,6 +115,9 @@ export default function AccountSection({ state }: { state: IdentityState }) {
         )}
       </SettingsSection>
 
+      {status === "signed-in" ? <SandboxAccountPanel /> : null}
+      {status === "signed-in" ? <ReminderInboxPanel /> : null}
+
       {isStaff && destinations.length > 0 && (
         <SettingsSection
           title="Operations tools"
@@ -130,5 +133,83 @@ export default function AccountSection({ state }: { state: IdentityState }) {
         </SettingsSection>
       )}
     </>
+  );
+}
+
+function SandboxAccountPanel() {
+  const [note, setNote] = useState<string>("");
+  const [tin, setTin] = useState<string>("");
+  const [live, setLive] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    accountApi
+      .account()
+      .then((row) => {
+        if (cancelled) return;
+        setLive(Boolean(row.live));
+        setTin(row.profile?.tin || "");
+        setNote(row.profile?.note || row.source || "");
+      })
+      .catch(() => {
+        if (!cancelled) setNote("Account connector unavailable.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <SettingsSection
+      title="URA account (prototype)"
+      description="Sandbox snapshot. Never treated as a live URA balance."
+    >
+      {live === false ? (
+        <StatusNote kind="info">
+          {tin ? `Sandbox TIN ${tin}. ` : ""}
+          {note || "Placeholder. Not URA data."}
+        </StatusNote>
+      ) : live ? (
+        <StatusNote kind="info">Live connector reported configured.</StatusNote>
+      ) : (
+        <StatusNote kind="info">Loading account snapshot…</StatusNote>
+      )}
+    </SettingsSection>
+  );
+}
+
+function ReminderInboxPanel() {
+  const [lines, setLines] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    accountApi
+      .reminders()
+      .then((row) => {
+        if (!cancelled) setLines((row.reminders || []).map((r) => r.message || r.deadline_name));
+      })
+      .catch(() => {
+        if (!cancelled) setLines([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <SettingsSection
+      title="Deadline inbox"
+      description="In-app reminders. Email and SMS stay in a mock outbox."
+    >
+      {lines.length === 0 ? (
+        <StatusNote kind="info">No due reminders in the inbox.</StatusNote>
+      ) : (
+        lines.map((line) => (
+          <StatusNote key={line} kind="info">
+            {line}
+          </StatusNote>
+        ))
+      )}
+    </SettingsSection>
   );
 }

@@ -213,6 +213,9 @@ function Overview() {
           )}
           <nav className="ov-links" aria-label="More">
             <a href="/agent">Agent queue</a>
+            <a href="/admin/flags">Feature flags</a>
+            <a href="/admin/overrides">Answer overrides</a>
+            <a href="/admin/outbox">Notification outbox</a>
             <a href="/analytics">Analytics dashboard</a>
             <a href="/analytics/evaluation">Answer evaluation</a>
           </nav>

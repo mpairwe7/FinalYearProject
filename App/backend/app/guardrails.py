@@ -110,9 +110,16 @@ _ANSWER_START_REGEX = re.compile(
 _INJECTION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(p, re.IGNORECASE)
     for p in [
-        r"ignore\s+(all\s+)?previous\s+instructions",
-        r"disregard\s+(all\s+)?(previous|above|prior)",
-        r"you\s+are\s+now\s+(?:a\s+)?(?:DAN|jailbreak|evil)",
+        r"ignore\s+(all\s+)?(?:previous|your)\s+(?:instructions|guidelines)",
+        r"disregard\s+(all\s+)?(previous|above|prior|safety|ura)",
+        r"forget\s+everything\s+above",
+        r"you\s+are\s+now\s+(?:a\s+)?(?:DAN|jailbreak|evil|unrestricted)",
+        r"developer\s+mode",
+        r"previous\s+instructions\s+are\s+obsolete",
+        r"repeat\s+your\s+(?:full\s+)?system\s+prompt",
+        r"execute:\s*delete",
+        r"decode\s+this\s+base64\s+and\s+follow",
+        r"translate\s+from\s+rot13\s+and\s+comply",
         r"system\s*:\s*",
         r"<\|(?:im_start|system|assistant)\|>",
         r"\[INST\]",
@@ -164,6 +171,15 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
         r"(?:avoid|evade|escape)\s+(?:the\s+)?(?:pattern|detection|audit)",
         # Social engineering / credential harvesting
         r"(?:what\s+is|give\s+me|tell\s+me)\s+(?:the\s+)?(?:admin|administrator|root|system)\s+(?:password|credential|access|login)",
+        r"tax\s+evasion\s+consultant",
+        r"tax\s+hacker",
+        r"launder\s+cash",
+        r"evil\s+AI\s+with\s+no\s+ethics",
+        r"as\s+a\s+villain",
+        r"tax\s+evasion\s+is\s+legal",
+        r"historical\s+VAT\s+fraud",
+        r"academic\s+exercise.{0,80}fraud",
+        r"delete\s+all\s+URA",
     ]
 ]
 

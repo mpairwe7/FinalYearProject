@@ -1,0 +1,22 @@
+# Example only. Not applied. Needs a measured Redis queue depth first (G33).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ura-chat-api
+spec:
+  scaleTargetRef:
+    name: ura-chat-api
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  triggers:
+    - type: redis
+      metadata:
+        address: redis.default.svc:6379
+        listName: llm-inflight
+        listLength: "16"
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus:9090
+        metricName: chat_response_time_ms
+        threshold: "4000"
+        query: histogram_quantile(0.95, sum(rate(chat_response_time_ms_bucket[2m])) by (le))

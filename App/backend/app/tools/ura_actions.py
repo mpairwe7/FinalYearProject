@@ -81,6 +81,19 @@ class UraActionProposalTool(Tool):
             "idempotency_key": idempotency_key,
             "requires_confirmation": True,
         }
+        from ..ura_account_mock import account_mode
+
+        if account_mode() == "mock":
+            return {
+                "ok": True,
+                "submitted": False,
+                "configured": False,
+                "live": False,
+                "source": "mock",
+                "proposal": proposal,
+                "message": "Sandbox proposal only. Not submitted to URA.",
+            }
+
         if not submit:
             return {
                 "ok": True,

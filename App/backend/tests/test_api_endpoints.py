@@ -262,7 +262,7 @@ class AdminEndpoints(_Base):
         r = _client().get("/v1/admin/flags", headers=_bearer(staff))
         self.assertEqual(r.status_code, 200, r.text)
         payload = r.json()
-        self.assertTrue(payload["overrides_are_ephemeral"])
+        self.assertFalse(payload["overrides_are_ephemeral"])
         names = {row["name"] for row in payload["flags"]}
         self.assertIn("hyde", names)
         protected = {row["name"] for row in payload["flags"] if row["protected"]}
@@ -291,9 +291,10 @@ class AdminEndpoints(_Base):
             r = c.patch("/v1/admin/flags/hyde?enabled=true", headers=_bearer(admin))
             self.assertEqual(r.status_code, 200, r.text)
             self.assertTrue(r.json()["enabled"])
-            self.assertTrue(r.json()["ephemeral"])
+            self.assertFalse(r.json()["ephemeral"])
         finally:
             flags.clear("hyde")
+            db.clear_flag_override("hyde")
 
 
 # ---------------------------------------------------------------------------

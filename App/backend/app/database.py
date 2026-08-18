@@ -430,6 +430,43 @@ def init_db() -> None:
             PRIMARY KEY (ticket_id, viewer)
         );
 
+        CREATE TABLE IF NOT EXISTS flag_overrides (
+            name       TEXT PRIMARY KEY,
+            enabled    INTEGER NOT NULL,
+            updated_at REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS reminder_inbox (
+            id            TEXT PRIMARY KEY,
+            user_id       TEXT NOT NULL,
+            deadline_name TEXT NOT NULL,
+            due_date      TEXT NOT NULL,
+            message       TEXT NOT NULL,
+            created_at    REAL NOT NULL,
+            read_at       REAL DEFAULT 0,
+            UNIQUE(user_id, deadline_name, due_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS notification_outbox (
+            id         TEXT PRIMARY KEY,
+            user_id    TEXT NOT NULL,
+            channel    TEXT NOT NULL,
+            provider   TEXT NOT NULL DEFAULT 'mock',
+            payload    TEXT NOT NULL,
+            status     TEXT NOT NULL DEFAULT 'queued',
+            created_at REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS answer_overrides (
+            id           TEXT PRIMARY KEY,
+            match_query  TEXT NOT NULL UNIQUE,
+            reply        TEXT NOT NULL,
+            source_url   TEXT DEFAULT '',
+            created_by   TEXT DEFAULT '',
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            updated_at   REAL NOT NULL
+        );
+
         -- Memory + audit tables (memory/semantic.py, memory/episodic.py,
         -- audit/ledger.py). Part of the shared analytics schema: those
         -- stores are process-wide singletons that only create their tables
@@ -1516,6 +1553,271 @@ def list_ticket_viewers(ticket_id: str, max_age: float = PRESENCE_TTL_SECONDS) -
     return [str(r["viewer"] if not isinstance(r, tuple) else r[0]) for r in rows]
 
 
+def load_flag_overrides() -> dict[str, bool]:
+    conn = _get_connection()
+    try:
+        rows = conn.execute("SELECT name, enabled FROM flag_overrides").fetchall()
+    except Exception:
+        return {}
+    out: dict[str, bool] = {}
+    for row in rows:
+        name = str(row["name"] if not isinstance(row, tuple) else row[0])
+        enabled = row["enabled"] if not isinstance(row, tuple) else row[1]
+        out[name] = bool(int(enabled))
+    return out
+
+
+def save_flag_override(name: str, enabled: bool) -> None:
+    key = (name or "").strip()
+    if not key:
+        return
+    conn = _get_connection()
+    conn.execute(
+        """INSERT INTO flag_overrides (name, enabled, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(name) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at""",
+        (key, 1 if enabled else 0, time.time()),
+    )
+    conn.commit()
+
+
+def clear_flag_override(name: str) -> None:
+    key = (name or "").strip()
+    if not key:
+        return
+    conn = _get_connection()
+    conn.execute("DELETE FROM flag_overrides WHERE name = ?", (key,))
+    conn.commit()
+
+
+def upsert_reminder_inbox(
+    user_id: str,
+    deadline_name: str,
+    due_date: str,
+    message: str,
+) -> dict[str, Any]:
+    uid = (user_id or "").strip()
+    if not uid or not deadline_name or not due_date:
+        return {}
+    conn = _get_connection()
+    now = time.time()
+    row = conn.execute(
+        """SELECT id FROM reminder_inbox
+           WHERE user_id = ? AND deadline_name = ? AND due_date = ?""",
+        (uid, deadline_name, due_date),
+    ).fetchone()
+    if row:
+        rid = str(row["id"] if not isinstance(row, tuple) else row[0])
+        conn.execute(
+            "UPDATE reminder_inbox SET message = ? WHERE id = ?",
+            (message, rid),
+        )
+        conn.commit()
+        return {"id": rid, "user_id": uid, "deadline_name": deadline_name, "due_date": due_date, "message": message}
+    rid = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO reminder_inbox
+           (id, user_id, deadline_name, due_date, message, created_at, read_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0)""",
+        (rid, uid, deadline_name, due_date, message, now),
+    )
+    conn.commit()
+    return {"id": rid, "user_id": uid, "deadline_name": deadline_name, "due_date": due_date, "message": message}
+
+
+def list_reminder_inbox(user_id: str) -> list[dict[str, Any]]:
+    uid = (user_id or "").strip()
+    if not uid:
+        return []
+    conn = _get_connection()
+    rows = conn.execute(
+        """SELECT id, user_id, deadline_name, due_date, message, created_at, read_at
+           FROM reminder_inbox WHERE user_id = ? ORDER BY due_date ASC""",
+        (uid,),
+    ).fetchall()
+    out = []
+    for row in rows:
+        if isinstance(row, dict):
+            out.append(dict(row))
+        else:
+            out.append(
+                {
+                    "id": row[0],
+                    "user_id": row[1],
+                    "deadline_name": row[2],
+                    "due_date": row[3],
+                    "message": row[4],
+                    "created_at": row[5],
+                    "read_at": row[6],
+                }
+            )
+    return out
+
+
+def enqueue_notification(
+    user_id: str,
+    channel: str,
+    payload: dict[str, Any],
+    *,
+    provider: str = "mock",
+) -> dict[str, Any]:
+    uid = (user_id or "").strip()
+    ch = (channel or "").strip().lower()
+    if not uid or not ch:
+        return {}
+    conn = _get_connection()
+    nid = str(uuid.uuid4())
+    now = time.time()
+    body = json.dumps(payload or {}, ensure_ascii=True)
+    conn.execute(
+        """INSERT INTO notification_outbox
+           (id, user_id, channel, provider, payload, status, created_at)
+           VALUES (?, ?, ?, ?, ?, 'queued', ?)""",
+        (nid, uid, ch, provider, body, now),
+    )
+    conn.commit()
+    return {
+        "id": nid,
+        "user_id": uid,
+        "channel": ch,
+        "provider": provider,
+        "status": "queued",
+        "live": False,
+    }
+
+
+def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    conn = _get_connection()
+    if user_id:
+        rows = conn.execute(
+            """SELECT id, user_id, channel, provider, payload, status, created_at
+               FROM notification_outbox WHERE user_id = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (user_id, max(1, min(limit, 200))),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT id, user_id, channel, provider, payload, status, created_at
+               FROM notification_outbox ORDER BY created_at DESC LIMIT ?""",
+            (max(1, min(limit, 200)),),
+        ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row) if isinstance(row, dict) else {
+            "id": row[0],
+            "user_id": row[1],
+            "channel": row[2],
+            "provider": row[3],
+            "payload": row[4],
+            "status": row[5],
+            "created_at": row[6],
+        }
+        raw = item.get("payload")
+        if isinstance(raw, str):
+            try:
+                item["payload"] = json.loads(raw)
+            except json.JSONDecodeError:
+                pass
+        out.append(item)
+    return out
+
+
+def get_answer_override(match_query: str) -> dict[str, Any] | None:
+    key = (match_query or "").strip()
+    if not key:
+        return None
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT id, match_query, reply, source_url, created_by, enabled, updated_at
+           FROM answer_overrides WHERE match_query = ? AND enabled = 1""",
+        (key,),
+    ).fetchone()
+    if not row:
+        return None
+    return dict(row) if isinstance(row, dict) else {
+        "id": row[0],
+        "match_query": row[1],
+        "reply": row[2],
+        "source_url": row[3],
+        "created_by": row[4],
+        "enabled": bool(row[5]),
+        "updated_at": row[6],
+    }
+
+
+def upsert_answer_override(
+    match_query: str,
+    reply: str,
+    *,
+    source_url: str = "",
+    created_by: str = "",
+    enabled: bool = True,
+) -> dict[str, Any]:
+    key = (match_query or "").strip()
+    body = (reply or "").strip()
+    conn = _get_connection()
+    now = time.time()
+    existing = conn.execute(
+        "SELECT id FROM answer_overrides WHERE match_query = ?", (key,)
+    ).fetchone()
+    if existing:
+        oid = str(existing["id"] if not isinstance(existing, tuple) else existing[0])
+        conn.execute(
+            """UPDATE answer_overrides
+               SET reply = ?, source_url = ?, created_by = ?, enabled = ?, updated_at = ?
+               WHERE id = ?""",
+            (body, source_url, created_by, 1 if enabled else 0, now, oid),
+        )
+    else:
+        oid = str(uuid.uuid4())
+        conn.execute(
+            """INSERT INTO answer_overrides
+               (id, match_query, reply, source_url, created_by, enabled, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (oid, key, body, source_url, created_by, 1 if enabled else 0, now),
+        )
+    conn.commit()
+    return {
+        "id": oid,
+        "match_query": key,
+        "reply": body,
+        "source_url": source_url,
+        "created_by": created_by,
+        "enabled": enabled,
+    }
+
+
+def list_answer_overrides(limit: int = 100) -> list[dict[str, Any]]:
+    conn = _get_connection()
+    rows = conn.execute(
+        """SELECT id, match_query, reply, source_url, created_by, enabled, updated_at
+           FROM answer_overrides ORDER BY updated_at DESC LIMIT ?""",
+        (max(1, min(limit, 200)),),
+    ).fetchall()
+    out = []
+    for row in rows:
+        out.append(dict(row) if isinstance(row, dict) else {
+            "id": row[0],
+            "match_query": row[1],
+            "reply": row[2],
+            "source_url": row[3],
+            "created_by": row[4],
+            "enabled": bool(row[5]),
+            "updated_at": row[6],
+        })
+    return out
+
+
+def delete_answer_override(override_id: str) -> bool:
+    oid = (override_id or "").strip()
+    if not oid:
+        return False
+    conn = _get_connection()
+    cur = conn.execute("DELETE FROM answer_overrides WHERE id = ?", (oid,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
     """Return the newest unresolved ticket for *conversation_id*, if any.
 
@@ -2264,6 +2566,17 @@ if ANALYTICS_BACKEND == "postgres":
         sla_stats = _pg.sla_stats  # type: ignore
         heartbeat_ticket_presence = _pg.heartbeat_ticket_presence  # type: ignore
         list_ticket_viewers = _pg.list_ticket_viewers  # type: ignore
+        load_flag_overrides = _pg.load_flag_overrides  # type: ignore
+        save_flag_override = _pg.save_flag_override  # type: ignore
+        clear_flag_override = _pg.clear_flag_override  # type: ignore
+        upsert_reminder_inbox = _pg.upsert_reminder_inbox  # type: ignore
+        list_reminder_inbox = _pg.list_reminder_inbox  # type: ignore
+        enqueue_notification = _pg.enqueue_notification  # type: ignore
+        list_notification_outbox = _pg.list_notification_outbox  # type: ignore
+        get_answer_override = _pg.get_answer_override  # type: ignore
+        upsert_answer_override = _pg.upsert_answer_override  # type: ignore
+        list_answer_overrides = _pg.list_answer_overrides  # type: ignore
+        delete_answer_override = _pg.delete_answer_override  # type: ignore
         # Identity, consent and workflow state.  Left on SQLite these
         # are per-replica: a consent withdrawal reaches one pod while
         # every other keeps processing the taxpayer as consenting.

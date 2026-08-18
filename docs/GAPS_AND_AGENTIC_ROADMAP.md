@@ -65,7 +65,7 @@ cloud fallback
 memory (`memory/` directory)
 - **Audit ledger** — hash-chained, Merkle tree proofs (`audit/`
 directory)
-- **Feature flags** — 48 flags via `flags.py`, with percentage / cohort / allowlist rollout
+- **Feature flags** — 49 flags via `flags.py`, with percentage / cohort / allowlist rollout
 - **MCP 2026-07-28** — spec `_meta`, `Mcp-Name` check, MRTR `inputRequests`,
   shared idempotency. Decision log:
   `App/docs/traceability/mcp-hardening-2026-08-17.md`.
@@ -116,10 +116,10 @@ surface that would need to change. Effort estimates are rough:
 | G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen chat-template tool formatting; `ToolRegistry` dispatches via `.call()`; 11 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
 | G10 🟢 | **No calculators.** ~~PAYE, VAT, CGT, customs, income tax, effective rate.~~ **SHIPPED Phase 14-A** — deterministic calculators (`calculate_vat`, `calculate_paye` with progressive bands, `calculate_corporation_tax`, `calculate_capital_gains`, `calculate_customs_duty`) backed by **effective-dated** rate tables (`FY2025-26`, `FY2026-27`, …). A frozen “current year” default is a documented failure mode — see `App/docs/tax-rate-tables.md`. | — | Done. | `backend/app/tools/calculators.py`, `tax/tables.py` | Done (S actual) |
 | G11 🟢 | **~~No structured form flows.~~** **SHIPPED Phase 15** — `workflows/` directory with 5 YAML-declared workflows loaded at startup via `loader.py`. Slot-filling state machine (`slots.py`), workflow registry (`registry.py`), keyed on `conversation_id`. | — | Done. | `backend/app/workflows/` directory | Done |
-| G12 | **No URA account actions.** Can't fetch filing status, balance, registered tax types, next due dates — even for the authenticated user. | Bot only talks *about* URA; doesn't help users actually interact with it. | No integration. | New `mcp_ura_account` server talking to URA's internal API (behind auth); exposes `get_tin_status`, `get_filing_status`, `list_returns_due`, etc. Scoped to the authenticated user. | New `backend/app/tools/ura_account.py`, `auth.py`, secrets mgmt | XL |
-| G13 🟢 | **~~No document ingestion.~~** **SHIPPED** query-time upload (`POST /v1/documents/analyze` + report + chat `attachment_ids`) with OCR/tables and **2026-08-17** structural PDF/Office guards (`pdf_guards.py`: header, encryption, JS/Launch/embedded files, xref/page caps; zip-slip/macro reject; LLM01 scrub + `<untrusted_user_document>` wrap). | User can attach a receipt/invoice and ask about it. | Remaining: no ClamAV (or equivalent) malware scan; no `mcp_document_parser` tool; parsers still share the API worker. | Optional later: isolated parse worker + malware scan + MCP wrapper. | `documents.py`, `pdf_guards.py`, `ocr_service.py`, `ChatInput.tsx` | Done (malware scan / MCP wrapper open) |
-| G14 | **No scheduled notifications.** Nothing reminds the user "your quarterly VAT return is due in 3 days". | Missed opportunity for value-add engagement. | No scheduler. | Add an APScheduler / Temporal worker that reads user deadlines and dispatches via email / SMS / in-app. | New `backend/app/scheduler.py`, notification channels | L |
-| G15 | **No URA live data.** FAQ CSVs were indexed once; new circulars, rate changes, and press releases never reach the bot. | Staleness within weeks of deployment. | Manual re-index via `POST /v1/index`. | Add a nightly ingestion worker: scrape `ura.go.ug/news`, diff against last run, re-embed, upsert to Qdrant. | New `backend/app/workers/news_ingest.py` | M |
+| G12 🟢 | **~~No URA account actions.~~** **PROTOTYPE 2026-08-18** — development defaults to mock (`live=false`). Settings shows the sandbox TIN. Production rejects mock. | Demo account works. | Mock ready. | Wire live `URA_ACCOUNT_API_*`. | `ura_account_mock.py`, Settings | XL |
+| G13 🟢 | **~~No document ingestion.~~** **PROTOTYPE 2026-08-18** — upload + guards + optional isolated worker. Dedicated parse pool is post-prototype. | User can attach a receipt. | Demo ready. | Parse pool / gVisor later. | `documents.py`, `document_worker.py` | M |
+| G14 🟢 | **~~No scheduled notifications.~~** **PROTOTYPE 2026-08-18** — Settings inbox + staff `/admin/outbox`. Email/SMS mock-queued, not sent. | Taxpayer sees inbox. | Demo ready. | SES / Africa's Talking later. | `notify.py`, `/admin/outbox` | M |
+| G15 🟢 | **~~No URA live data.~~** **PROTOTYPE 2026-08-18** — offline fixture ingest when no https URL is set. Nightly workflow. **No auto-recreate.** | Demo ingest works offline. | Fixture ready. | Set a real publications URL. | `Data/eval/publications_fixture.txt` | S |
 
 ### 2.4 Knowledge gaps
 
@@ -147,18 +147,18 @@ surface that would need to change. Effort estimates are rough:
 | G25 🟢 | **~~No per-segment quality metrics.~~** **SHIPPED 2026-08-17** — `EvalReport.by_segment` now has `topic`, `locale`, `taxpayer_type`, and `variant`. Groups smaller than 3 are omitted. Prometheus exposition already labels `segment_dim` / `segment`. | — | Done. | — | `evaluation.py` | Done |
 | G26 🟢 | **~~No A/B testing.~~** **SHIPPED 2026-08-17** — rollout targeting was already in `flags.py`. Each chat/stream/voice/WS turn now persists `flag_variants` + `locale` on `conversations`. Eval reports `by_segment.variant` (e.g. `hyde:off`). | — | Done. | — | `flags.py`, `database.py`, `postgres.py`, `main.py`, `evaluation.py` | Done |
 | G27 🟢 | **~~No drift detection on the index.~~** **SHIPPED 2026-08-17.** Hash + compare + status probe + nightly GitHub Action `.github/workflows/index-freshness.yml` (`15 2 * * *`). Exit 1 = drift (fail); exit 2 = no snapshot (skip). `--notify` POSTs to `FRESHNESS_SLACK_WEBHOOK` (https only; no-op if unset). `--enqueue` writes `index_reindex_requested.json`. **No auto-reindex** — ops still run `python -m app.indexer --recreate`. | — | Done (alert + request file; recreate stays manual). | Do not auto-recreate. | `freshness.py`, `index-freshness.yml` | Done |
-| G28 | **No red-team fixtures.** Prompt-injection patterns are hand-written regex; no automated adversarial testing. | Coverage gaps. | `_INJECTION_PATTERNS` in `guardrails.py`. | Integrate PurpleLlama / promptmap test suite into CI. | `tests/security/`, `.github/workflows/` | S |
-| G29 | **No human feedback loop into training.** Thumbs-down feedback accumulates but doesn't fine-tune anything. | Improvement requires manual prompt engineering. | `export_review_feedback` exists, no training pipeline consumes it. | Build a weekly DPO/KTO fine-tuning job from the negative feedback set; promote via the model registry. | `ml/` pipeline, model registry | XL |
+| G28 🟢 | **~~No red-team fixtures.~~** **SHIPPED 2026-08-18** — `Data/eval/redteam_corpus.jsonl` is a pytest gate (`test_redteam_corpus.py`). PurpleLlama / promptmap remain optional later. | — | CI refuse-all on the corpus. | Optional LLM-vs-LLM weekly. | `guardrails.py`, `test_redteam_corpus.py` | Done |
+| G29 🟢 | **~~No human feedback loop into training.~~** **PROTOTYPE 2026-08-18** — preference export + `dpo_job.py` refuse-to-train. Fine-tune is post-prototype. | Pairs can be exported. | Export ready. | Axolotl/DPO behind the eval gate. | `evals/dpo_job.py` | XL |
 
 ### 2.7 Operations & multi-tenancy
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G30 | **Single tenant.** One knowledge base, one prompt, one model for everyone. | Can't offer this to KCCA, NSSF, or private firms under the same codebase. | Implicit single-tenancy. | Add `tenant_id` everywhere (users, conversations, Qdrant collections, rate limits). | Backend-wide, DB schema changes | L |
-| G31 🟡 | **~~No admin UI.~~** **PARTIAL 2026-08-17** — `/admin/flags` lists the replica registry; `ura_admin` can set an in-process override. Safety flags (auth, audit, consent, multi-tenant) stay protected. Content curation / answer override remain open. | Cluster-wide still needs `FLAG_*` on every replica. | Flags console shipped; CMS still open. | Content curation / answer-override CMS. | `GET/PATCH /v1/admin/flags`, `frontend/src/app/admin/flags/` | M |
+| G30 🟢 | **~~Single tenant.~~** **PROTOTYPE 2026-08-18** — single-tenant demo. Predicate + RLS template exist; not marketed as multi-tenant. | Capstone is one tenant. | Demo ready. | Apply RLS for a platform later. | `tenancy.py` | L |
+| G31 🟢 | **~~No admin UI.~~** **PROTOTYPE 2026-08-18** — flags + exact-match `/admin/overrides` + outbox. Not a full FAQ CMS. | Staff can correct one answer. | Demo ready. | Git-backed prompt editor later. | `cms.py`, `/admin/overrides` | M |
 | G32 🟢 | **~~No human-in-the-loop queue.~~** **SHIPPED Phase 15 + staff workbench 2026-08-17** — claim → brief → reply → resolve, live `/v1/admin/tickets/stream`, collision presence, canned replies, first- and next-reply SLA with population breach counts. | — | Done. | — | `ticket_ws.py`, `ticket_presence`, `frontend/src/components/staff/` | Done |
-| G33 | **No SLO-driven autoscaling.** Prometheus alerts exist, but no action is taken — no HPA, no Kubernetes operator. | Manual intervention during load spikes. | Alert rules only. | Kubernetes HPA on `chat_response_time_ms` p95, plus a KEDA scaler on Redis queue depth. | Infra, new `k8s/` manifests | M |
-| G34 | **No chaos / failure drills.** We've hardened against failure modes but never exercised them end-to-end. | Unknown unknowns in prod. | Unit tests only. | Add Litmus/ChaosMesh experiments: kill Redis, spike Qdrant latency, kill LLM worker, measure recovery. | `tests/chaos/`, CI schedule | M |
+| G33 | **SLO autoscaling (post-prototype).** Example HPA/KEDA YAML only. | Not needed for a laptop demo. | Deferred. | Apply after a measured p95. | `infra/k8s/` | M |
+| G34 | **Cluster chaos (post-prototype).** In-process fail-closed tests shipped. | Not needed for a laptop demo. | Deferred. | Game day later. | `tests/chaos/` | M |
 
 ---
 
@@ -399,11 +399,12 @@ chips remain a later UX upgrade.
 **Shipped 2026-08-17:** `/admin` morning board, `/agent` claim-and-reply queue,
 `/admin/tickets` full console, live ticket stream, collision presence,
 canned replies, next-reply SLA, population breach counts, `/admin/flags`.
-**Still open:**
-- Content curation / answer-override CMS (remainder of G31)
+**Shipped 2026-08-18 (G31 prototype):** exact-match `/admin/overrides` +
+`GET/PUT/DELETE /v1/admin/overrides`. Seeded by `python -m app.seed_prototype`.
+Not a full FAQ CMS.
 
 **Dependencies:** Phase 14 (auth, RBAC) — already shipped.
-**Effort remaining:** content curation / answer-override CMS (remainder of G31).
+**Effort remaining:** git-backed prompt / FAQ editor (post-prototype).
 
 ### Phase 19 — Deep planning + ReAct (G21, G22, G23)
 
@@ -422,19 +423,23 @@ planner-executor, not an open ReAct loop.
 **Risks:** Latency (each agent hop adds 300-800 ms); reasoning
 chain brittleness; cost if hosted.
 
-### Phase 20 — Proactive engagement (G14, G15, G27)
+### Phase 20 — Proactive engagement (G14, G15, G27) 🟢 **PROTOTYPE**
 
 **Goal:** Bot reaches out *before* the user asks.
-**Deliverables:**
-- Scheduler (APScheduler) with cron-like deadlines
-- Notification channels (email via Resend/SES, SMS via
-Africa's Talking, in-app)
-- Fresh-data ingestion worker (URA news scraper + nightly reindex)
-- Index-freshness alert — **shipped** (`freshness.py` + Slack `--notify`)
-- User-facing notification preferences
+
+**Shipped 2026-08-18:**
+- In-app inbox (`GET/POST /v1/me/reminders`) behind the existing selector
+- Publication hash-diff ingest (`publications.py`) — no auto-recreate
+- Index-freshness alert (`freshness.py` + Slack `--notify`)
+- Sample inbox / outbox / ticket rows via `Data/eval/prototype_seed.json`
+
+**Still open:**
+- Email (SES) / SMS (Africa's Talking)
+- Scheduled push without a client calling refresh
+- User-facing notification-preference UI beyond consent
 
 **Dependencies:** Phases 14, 17.
-**Effort:** ~2 weeks.
+**Effort remaining:** ~1 week for a real sender.
 
 ### Phase 23 — Voice-first streaming infrastructure 🟢 **SHIPPED**
 

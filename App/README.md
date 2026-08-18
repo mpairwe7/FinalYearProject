@@ -1078,7 +1078,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | **Agentic flags (Phase 14–18)** | | |
 | `FLAG_TOOL_USE` | Allow registered tools through the bounded agentic loop | `false` |
 | `FLAG_AGENTIC_MODE` | Enable supervisor routing for tools / specialists (EN golden-set gate ≥ 0.95) | `true` |
-| `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `false` |
+| `FLAG_TICKET_QUEUE` | Persist escalations to the `tickets` table | `true` |
 | `ESCALATION_WEBHOOK_URL` | POST target notified when an escalation ticket is created; unset disables delivery | _(unset)_ |
 | `ESCALATION_WEBHOOK_TOKEN` | Bearer token for that webhook, sent as a header | _(unset)_ |
 | `ESCALATION_WEBHOOK_TIMEOUT` | Webhook timeout in seconds | `5` |
@@ -1722,7 +1722,7 @@ an operator flips a flag.
   - `GET /v1/admin/tickets/sla?days=30` — medians plus population
     first-response / next-reply breach counts
   - `GET /v1/admin/flags` / `PATCH /v1/admin/flags/{name}` — replica
-    registry; toggles are in-process and ephemeral
+    registry; toggles persist in `flag_overrides` on this replica
   - `PATCH /v1/admin/tickets/{id}` (status / assignee / note / priority /
     `officer_reply`). `officer_reply` is delivered to the **taxpayer** on
     their next turn; `staff_note` stays internal

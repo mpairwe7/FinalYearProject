@@ -1,0 +1,36 @@
+# Nightly publication hash-diff (G15). Never auto-recreates the index.
+name: Publications ingest
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publications-ingest
+  cancel-in-progress: true
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: App/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Hash-diff URA publications URL
+        env:
+          URA_PUBLICATIONS_URL: ${{ vars.URA_PUBLICATIONS_URL }}
+        run: |
+          if [ -z "$URA_PUBLICATIONS_URL" ]; then
+            echo "URA_PUBLICATIONS_URL unset — skip ingest."
+            exit 0
+          fi
+          python -m app.publications
+          echo "Re-index remains manual: python -m app.indexer --recreate"

@@ -66,12 +66,21 @@ class UraAccountProfileTool(Tool):
         if not taxpayer_id:
             return {"ok": False, "error": "taxpayer_id is required"}
 
+        from ..ura_account_mock import account_mode, lookup_mock
+
+        mode = account_mode()
+        if mode == "mock":
+            return lookup_mock(taxpayer_id)
+
         base_url = os.getenv("URA_ACCOUNT_API_BASE", "").rstrip("/")
         token = os.getenv("URA_ACCOUNT_API_TOKEN", "")
-        if not base_url or not token:
+        if mode != "live" or not base_url or not token:
             return {
                 "ok": False,
                 "configured": False,
+                "live": False,
+                "source": "none",
+                "mode": mode,
                 "error": "URA account API is not configured",
             }
 
@@ -89,7 +98,37 @@ class UraAccountProfileTool(Tool):
                 "error": f"URA account lookup failed: {type(exc).__name__}",
             }
 
-        return {"ok": True, "configured": True, "profile": payload}
+        return {
+            "ok": True,
+            "configured": True,
+            "live": True,
+            "source": "ura_api",
+            "mode": "live",
+            "profile": payload,
+        }
+
+
+def account_api_status() -> dict[str, Any]:
+    """Describe the account connector. Mock is never reported as live."""
+    from ..ura_account_mock import account_mode, live_credentials_configured
+
+    mode = account_mode()
+    live = mode == "live" and live_credentials_configured()
+    if mode == "mock":
+        return {
+            "configured": False,
+            "live": False,
+            "mode": "mock",
+            "source": "mock",
+            "error": None,
+        }
+    return {
+        "configured": live,
+        "live": live,
+        "mode": mode,
+        "source": "ura_api" if live else "none",
+        "error": None if live else "URA account API is not configured",
+    }
 
 
 ToolRegistry.register(UraAccountProfileTool())

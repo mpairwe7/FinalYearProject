@@ -1,0 +1,5 @@
+URA sandbox publications fixture (not a live ura.go.ug crawl).
+
+VAT rate remains 18% for the prototype corpus.
+TIN registration continues through the official URA portal.
+This file exists so hash-diff ingest works offline for capstone demos.

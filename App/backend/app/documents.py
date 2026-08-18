@@ -904,9 +904,22 @@ def analyze_document(
     if len(data) > MAX_FILE_BYTES:
         raise ValueError(f"File exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MB limit.")
 
+    from .malware_scan import scan_bytes
+
+    scan = scan_bytes(data, filename=filename)
     kind = detect_kind(filename, content_type)
     precheck_warnings = _validate_document_content(data, kind)
-    extraction = _EXTRACTORS[kind](data)
+    if scan.skipped:
+        precheck_warnings.append("Malware scan skipped — clamd was not reachable.")
+    elif scan.engine == "clamd":
+        precheck_warnings.append("Malware scan passed (clamd).")
+    from .document_worker import try_isolated
+
+    extraction = try_isolated(kind, data)
+    if extraction is None:
+        extraction = _EXTRACTORS[kind](data)
+    else:
+        precheck_warnings.append("Parsed in an isolated worker process.")
     extraction.warnings.extend(precheck_warnings)
     extraction.meta.setdefault("extraction_method", kind)
     extraction.meta["source_sha256"] = hashlib.sha256(data).hexdigest()

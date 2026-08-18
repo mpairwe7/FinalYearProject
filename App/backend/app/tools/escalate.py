@@ -113,8 +113,15 @@ class EscalateToHumanTool(Tool):
     ) -> dict[str, Any]:
         try:
             from .. import database as db  # noqa: PLC0415
+            from ..flags import flags  # noqa: PLC0415
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": f"database unavailable: {e}"}
+
+        if not flags.is_enabled("ticket_queue"):
+            return {
+                "ok": False,
+                "error": "ticket_queue is off — escalation was not persisted",
+            }
 
         # We don't have access to the request-scoped session_id /
         # conversation_id here — the calling service layer will

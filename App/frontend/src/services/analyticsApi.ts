@@ -202,6 +202,15 @@ export interface FlagRecord {
   rollout?: { percent: number; cohorts: string[]; allowlist_size: number } | null;
 }
 
+export interface AnswerOverride {
+  id: string;
+  match_query: string;
+  reply: string;
+  source_url?: string;
+  created_by?: string;
+  enabled?: boolean;
+}
+
 const BASE = "/api";
 
 async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -236,6 +245,19 @@ export const analyticsApi = {
     fetchJson<{ name: string; enabled: boolean; ephemeral: boolean }>(
       `/v1/admin/flags/${encodeURIComponent(name)}?enabled=${enabled}`,
       { method: "PATCH" },
+    ),
+  overrides: () => fetchJson<{ overrides: AnswerOverride[] }>("/v1/admin/overrides"),
+  putOverride: (body: { query: string; reply: string; source_url?: string; enabled?: boolean }) =>
+    fetchJson<AnswerOverride>("/v1/admin/overrides", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  deleteOverride: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/v1/admin/overrides/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  outbox: () =>
+    fetchJson<{ items: { id: string; channel: string; provider: string; status: string }[]; live: boolean }>(
+      "/v1/admin/outbox",
     ),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     // The backend takes these as query parameters, not a JSON body.

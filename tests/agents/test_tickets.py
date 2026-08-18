@@ -163,7 +163,8 @@ class TestTicketStats:
 # escalate_to_human tool — round-trips through the registry + DB
 # ---------------------------------------------------------------------------
 class TestEscalateTool:
-    def test_tool_creates_ticket_via_registry(self, tmp_db, fresh_registry):
+    def test_tool_creates_ticket_via_registry(self, tmp_db, fresh_registry, clean_flags):
+        clean_flags.set("ticket_queue", True)
         result = fresh_registry.call("escalate_to_human", {
             "reason": "multi-country customs dispute",
             "priority": "high",
@@ -180,13 +181,15 @@ class TestEscalateTool:
         assert rows[0]["priority"] == "high"
         assert "multi-country" in rows[0]["reason"]
 
-    def test_default_priority_normal(self, tmp_db, fresh_registry):
+    def test_default_priority_normal(self, tmp_db, fresh_registry, clean_flags):
+        clean_flags.set("ticket_queue", True)
         result = fresh_registry.call("escalate_to_human",
                                      {"reason": "general help"})
         assert result["ok"] is True
         assert result["priority"] == "normal"
 
-    def test_returns_user_facing_message(self, tmp_db, fresh_registry):
+    def test_returns_user_facing_message(self, tmp_db, fresh_registry, clean_flags):
+        clean_flags.set("ticket_queue", True)
         result = fresh_registry.call("escalate_to_human", {"reason": "test"})
         assert result["ok"] is True
         msg = result["message"]
@@ -198,3 +201,9 @@ class TestEscalateTool:
         tool = fresh_registry.get("escalate_to_human")
         assert tool.schema.risk == "medium"
         assert "reason" in tool.schema.parameters["required"]
+
+    def test_respects_ticket_queue_flag(self, tmp_db, fresh_registry, clean_flags):
+        clean_flags.set("ticket_queue", False)
+        result = fresh_registry.call("escalate_to_human", {"reason": "should not persist"})
+        assert result["ok"] is False
+        assert tmp_db.list_tickets(status="open") == []
