@@ -11,6 +11,7 @@ from app.cms import lookup, normalize_query, upsert
 from app.notify import dispatch
 from app.reminders import Reminder
 from app.tools.ura_account import UraAccountProfileTool, account_api_status
+from app.tools.ura_actions import UraActionProposalTool
 from app.ura_account_mock import MOCK_PROFILES, account_mode, lookup_mock
 from app.document_worker import isolated_enabled, try_isolated
 
@@ -56,6 +57,29 @@ def test_production_rejects_mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     assert account_mode() == "off"
     assert account_api_status()["live"] is False
     assert lookup_mock("1999999999")["live"] is False
+
+
+def test_mock_action_submit_is_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("URA_ACCOUNT_API_MODE", "mock")
+    monkeypatch.setenv("APP_ENV", "development")
+    draft = UraActionProposalTool().execute(
+        action_type="tin_update",
+        payload={"field": "email"},
+        idempotency_key="idem-1",
+        submit=False,
+    )
+    assert draft["ok"] is True
+    assert draft["submitted"] is False
+    assert draft["live"] is False
+    submitted = UraActionProposalTool().execute(
+        action_type="tin_update",
+        payload={"field": "email"},
+        idempotency_key="idem-1",
+        submit=True,
+    )
+    assert submitted["ok"] is False
+    assert submitted["submitted"] is False
+    assert submitted["error"] == "URA action API is not configured"
 
 
 def test_isolated_parse_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
