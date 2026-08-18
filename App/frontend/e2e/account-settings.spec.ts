@@ -11,12 +11,29 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { clearChatStore, expectAuthCta, mockBackend, seedConsent } from "./helpers";
+import { clearChatStore, expectAuthCta, mockBackend, openSettings, seedConsent } from "./helpers";
 
 async function anonymous(page: Page) {
   await seedConsent(page);
   await clearChatStore(page);
   await mockBackend(page);
+}
+
+/**
+ * Open the sidebar's account rail as an overlay on narrow viewports.
+ *
+ * Below 1024px the rail (`aside.conversation-rail`) is parked off-screen via
+ * `transform: translateX(-100%)`, not `display:none` — see openSettings()'s
+ * docstring in helpers.ts for the isVisible()-lies trap this avoids. At/above
+ * 1024px the hamburger is `display:none` (rail is a persistent column), so
+ * this is a genuine no-op there, matching responsive.spec.ts's own pattern.
+ */
+async function ensureRailOpen(page: Page) {
+  const hamburger = page.getByLabel("Open conversation history");
+  if (await hamburger.isVisible().catch(() => false)) {
+    await hamburger.click();
+    await expect(page.locator("aside.conversation-rail.conversation-rail-open")).toBeVisible();
+  }
 }
 
 /** A token plus a `/v1/me` that accepts it — both are needed to read as signed in. */
@@ -78,7 +95,9 @@ test.describe("Auth entry points", () => {
     await expect(page.locator("a.hdrv2-signup")).toHaveCount(0);
     await expect(page.locator("a.rail-acct-primary")).toHaveCount(0);
 
-    // Signing out from the account menu brings the entry points back.
+    // Signing out from the account menu brings the entry points back. The
+    // rail is off-canvas below 1024px — open it first (no-op on desktop).
+    await ensureRailOpen(page);
     await page.locator(".rail-acct-user").click();
     await page.getByRole("menuitem", { name: /Sign out/ }).click();
     await expect(page.locator("a.rail-acct-primary")).toBeVisible();
@@ -99,8 +118,9 @@ test.describe("Settings", () => {
   test.beforeEach(async ({ page }) => {
     await anonymous(page);
     await page.goto("/");
-    await page.getByRole("button", { name: "Open settings" }).click();
-    await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+    // The header's overflow menu, not the rail's own "Open settings" — that
+    // one is off-canvas below 1024px (see openSettings()'s docstring).
+    await openSettings(page);
   });
 
   test("a theme change is applied to the whole app, not just the dialog", async ({ page }) => {
@@ -140,8 +160,7 @@ test.describe("Settings", () => {
     await page.getByLabel("Send message").click();
     await expect(page.locator(".message-row-user")).toBeVisible();
 
-    await page.getByRole("button", { name: "More options" }).click();
-    await page.getByRole("menuitem", { name: "Settings" }).click();
+    await openSettings(page);
     await page.getByRole("tab", { name: "Privacy & data" }).click();
     await page.getByRole("button", { name: "Delete all" }).click();
 
@@ -153,10 +172,31 @@ test.describe("Settings", () => {
     await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   });
 
+  /**
+   * Opened from the rail rather than the beforeEach's overflow menu, because
+   * only a trigger that survives the open can be focused again.
+   *
+   * SettingsDialog samples `document.activeElement` inside the effect that
+   * runs when it opens (settings/SettingsDialog.tsx) and refocuses it on
+   * close. The rail's button is still mounted then, so the round trip works.
+   * The overflow menu's item is not: clicking it closes the menu and opens
+   * the dialog in one render, so the effect samples <body> and Escape returns
+   * focus there — a real, narrow gap that predates this spec and is not
+   * reachable to fix from a test. Asserting the rail path keeps the guarantee
+   * that actually holds under test rather than skipping the check entirely.
+   */
   test("Escape closes the dialog and returns focus to the trigger", async ({ page }) => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open settings" })).toBeFocused();
+
+    await ensureRailOpen(page);
+    const trigger = page.getByRole("button", { name: "Open settings" });
+    await trigger.click();
+    await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
+    await expect(trigger).toBeFocused();
   });
 
   test("signed out, the account tab offers both routes", async ({ page }) => {
