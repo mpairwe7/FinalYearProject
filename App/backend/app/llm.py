@@ -317,7 +317,13 @@ def _build_messages(
         parts.append(f'<passage id="{marker}">{trimmed}</passage>')
         parts.append("")
 
-    if locale != "en":
+    # Only ask for a non-English answer when a locale adapter is actually
+    # loaded. Without one the base model has no real Luganda/Runyankole/Acholi
+    # capability and this instruction made it try anyway — the observed output
+    # was a degenerate loop ("kozesa kozesa kozesa…") rather than an answer.
+    # Generating English and translating with Sunbird's Ugandan-language MT
+    # (service._localize_reply) is both correct and far better quality.
+    if locale != "en" and can_generate_in_locale(locale):
         parts.append(f"(Respond in locale: {locale})")
 
     parts.append(f"## User question\n{query}")
@@ -474,6 +480,18 @@ def _load_model() -> bool:
         except Exception:
             logger.exception("Failed to load %s", LLM_MODEL)
             return False
+
+
+def can_generate_in_locale(locale: str) -> bool:
+    """True when the loaded model can actually answer in *locale*.
+
+    Only a locale-specific LoRA adapter counts. The CPU deployments and the
+    vLLM backend load no adapters at all (``_active_adapter is None``), so
+    this is False there and the caller should generate English and translate.
+    """
+    if locale == "en":
+        return True
+    return _active_adapter is not None and _active_adapter == locale
 
 
 def _select_adapter(locale: str) -> None:

@@ -1228,7 +1228,10 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             "escalated",
         ) or result.get("_short_circuit"):
             yield ("metadata", _metadata_payload(result, include_short_circuit=True))
-            full_reply = result.get("reply", "")
+            # These branches emit the whole reply as one frame, so it can be
+            # localized before it is sent rather than corrected afterwards.
+            full_reply = localize_reply(result.get("reply", ""), locale)
+            result["reply"] = full_reply
             yield ("token", full_reply)
             yield ("done", "")
             yield (
@@ -1452,6 +1455,17 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             if guard["revised"]:
                 yield ("revision", full_reply)
 
+            # Tokens streamed in English (the model has no adapter for these
+            # languages — see llm.can_generate_in_locale), so the localized
+            # text arrives as a revision, which the client already applies for
+            # grounded revisions above. Emitted only when translation actually
+            # changed something, so an English session sees no extra frame.
+            if locale not in ("", "en"):
+                localized = localize_reply(full_reply, locale)
+                if localized != full_reply:
+                    full_reply = localized
+                    yield ("revision", full_reply)
+
             result["handoff"] = handoff
             result["response_judge"] = response_judge
             result["ticket_id"] = ticket_id
@@ -1498,6 +1512,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             full_reply = result.get("reply", "")
             if distress and full_reply:
                 full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
+            # One frame, so localize before sending rather than revising after.
+            full_reply = localize_reply(full_reply, locale)
             yield ("token", full_reply)
 
         yield ("done", "")
@@ -1954,6 +1970,50 @@ def _faq_bm25_score(query_tokens: list[str], entry: dict, encoder: Any) -> float
             continue
         score += idf * f_t * (k1 + 1) / (f_t + k1 * norm)
     return score
+
+
+def localize_reply(reply: str, locale: str) -> str:
+    """Render *reply* in *locale*, or return the English unchanged.
+
+    Answers are generated in English (see ``llm.can_generate_in_locale``) and
+    translated here by Sunbird's Ugandan-language MT, which is built for
+    lg/nyn/ach. The generation model is not, and asking it directly produced
+    repetition loops ("kozesa kozesa kozesa…") rather than sentences.
+
+    Every failure path deliberately yields the English text rather than an
+    error or an empty string: a taxpayer who reads English as a second
+    language is served by an English answer, and served by nothing at all if
+    translation is down and this raised or blanked the reply. The same applies
+    to a translation that returns empty or absurdly short — that is a degraded
+    model response, not a usable answer.
+
+    Module-level rather than a ChatModel method because ``run_chat_turn``
+    accepts any duck-typed model, and localization is a pure function of the
+    text: making it model state would put it out of reach of the streaming
+    path's stand-ins.
+    """
+    text = str(reply or "").strip()
+    if not text or locale in ("", "en"):
+        return reply
+    try:
+        from . import sunbird  # local import: matches english_retrieval_query
+
+        translated = sunbird.translate_from_english(text, locale)
+    except Exception:
+        logger.info("reply localization to %s failed; serving English", locale)
+        return reply
+    if not translated or not translated.strip():
+        return reply
+    # Guard against a collapsed MT response replacing a real answer.
+    if len(translated.strip()) < max(12, len(text) // 10):
+        logger.info(
+            "reply localization to %s returned %d chars for %d; serving English",
+            locale,
+            len(translated.strip()),
+            len(text),
+        )
+        return reply
+    return translated.strip()
 
 
 def _simple_search(
@@ -2887,6 +2947,11 @@ class ChatModel:
         out = dict(result)
         out["reply"] = self._finalize_reply(str(out.get("reply", "")))
         return out
+
+    @staticmethod
+    def _localize_reply(reply: str, locale: str) -> str:
+        """Instance-side alias for :func:`localize_reply`."""
+        return localize_reply(reply, locale)
 
     @staticmethod
     def _recompute_for_verification(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -4098,7 +4163,52 @@ class ChatModel:
         granted_purposes: list[str] | None = None,
         attachments: list[documents_module.DocumentRecord] | None = None,
     ) -> dict[str, Any]:
+        """Answer *message*, rendered in *locale*.
+
+        A thin wrapper over :meth:`_generate_en` so that localization happens
+        in exactly one place. The implementation has a dozen or so exits —
+        blocked, workflow, calculator, greeting, closing, clarification,
+        deterministic, abstained, escalated, the generated path — and
+        translating at each of them is how one of those branches quietly ends
+        up answering a Luganda question in English.
+        """
+        result = self._generate_en(
+            message=message,
+            conversation_id=conversation_id,
+            top_k=top_k,
+            locale=locale,
+            session_id=session_id,
+            request_id=request_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            user_role=user_role,
+            granted_purposes=granted_purposes,
+            attachments=attachments,
+        )
+        if isinstance(result, dict) and locale not in ("", "en"):
+            result["reply"] = self._localize_reply(str(result.get("reply", "")), locale)
+        return result
+
+    def _generate_en(
+        self,
+        message: str,
+        conversation_id: str | None = None,
+        top_k: int = 6,
+        locale: str = "en",
+        session_id: str | None = None,
+        request_id: str | None = None,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        user_role: str = "public",
+        granted_purposes: list[str] | None = None,
+        attachments: list[documents_module.DocumentRecord] | None = None,
+    ) -> dict[str, Any]:
         """Return a grounded, cited answer via hybrid retrieval + guardrails.
+
+        Produces English; :meth:`generate` renders it into the caller's locale.
+        ``locale`` is still threaded through here because retrieval translates
+        the *question* into English (``english_retrieval_query``) and the voice
+        stack keys TTS off it.
 
         ``attachments`` are pre-analysed documents (``documents.DocumentRecord``)
         resolved by the endpoint from ``ChatRequest.attachment_ids``; their
