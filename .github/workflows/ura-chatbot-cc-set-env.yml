@@ -1,0 +1,133 @@
+name: URA Chatbot — set a Crane Cloud env var
+
+# Crane Cloud's PATCH /apps/<id> replaces `env_vars` wholesale — the CLI's
+# `-e KEY=value` sends only the pairs you typed as the entire object, so using
+# it to add one variable silently deletes every other one. This workflow reads
+# the current environment, merges one key into it, and writes the whole set
+# back, refusing to proceed if the read looks wrong.
+#
+# Manual dispatch on purpose. Environment changes restart the app, and they are
+# rare and deliberate rather than something that should ride along with a
+# deploy. The deploy workflow PATCHes only `image` and never touches env_vars.
+#
+# The value never appears in an input: it is read from a repository secret of
+# the same name inside the runner, so it stays out of the run log, the URL and
+# anyone's shell history.
+
+on:
+  workflow_dispatch:
+    inputs:
+      var_name:
+        description: "Variable to set. Its value is read from the repo secret of the same name."
+        required: true
+        type: choice
+        options:
+          - SUNBIRD_API_TOKEN
+      dry_run:
+        description: "Report the change without applying it"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  set-env:
+    name: "Merge env var into Crane Cloud app"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set the variable
+        env:
+          CRANE_EMAIL: ${{ secrets.CRANE_CLOUD_EMAIL }}
+          CRANE_PASSWORD: ${{ secrets.CRANE_CLOUD_PASSWORD }}
+          CRANE_APP_ID: ${{ secrets.CRANE_CLOUD_URA_APP_ID }}
+          VAR_NAME: ${{ inputs.var_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          # Only the chosen variable is exposed, and only as a secret.
+          SUNBIRD_API_TOKEN: ${{ secrets.SUNBIRD_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${CRANE_EMAIL:?CRANE_CLOUD_EMAIL secret is missing}"
+          : "${CRANE_PASSWORD:?CRANE_CLOUD_PASSWORD secret is missing}"
+          : "${CRANE_APP_ID:?CRANE_CLOUD_URA_APP_ID secret is missing}"
+          API="https://api.cranecloud.io"
+
+          VALUE="${!VAR_NAME:-}"
+          if [ -z "$VALUE" ]; then
+            echo "::error::repository secret $VAR_NAME is empty or unset"
+            exit 1
+          fi
+          echo "::add-mask::$VALUE"
+
+          TOKEN=$(curl -sS -X POST "$API/users/login" \
+            -H 'Content-Type: application/json' \
+            -d "$(python3 -c "import json,os;print(json.dumps({'email':os.environ['CRANE_EMAIL'],'password':os.environ['CRANE_PASSWORD']}))")" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('data',{}).get('access_token',''))")
+          [ -n "$TOKEN" ] || { echo "::error::Crane Cloud login returned no access_token"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          echo "✓ logged in"
+
+          # Read the current environment. Everything below depends on this
+          # being complete: a partial read merged and written back is how the
+          # app loses its configuration.
+          GET=$(curl -sS "$API/apps/$CRANE_APP_ID" -H "Authorization: Bearer $TOKEN")
+          printf '%s' "$GET" > /tmp/app.json
+
+          python3 - "$VAR_NAME" <<'PY' > /tmp/merged.json
+          import json, os, sys
+
+          name = sys.argv[1]
+          app = json.load(open("/tmp/app.json"))
+          data = app.get("data", {}).get("apps", app.get("data", {})) or {}
+          current = data.get("env_vars")
+
+          if not isinstance(current, dict):
+              print(f"::error::could not read env_vars (got {type(current).__name__}); refusing to write",
+                    file=sys.stderr)
+              raise SystemExit(1)
+          # A live app has real configuration. If the read comes back nearly
+          # empty the response shape has changed, and writing it back would
+          # erase the environment rather than extend it.
+          if name not in current and len(current) < 3:
+              print(f"::error::env_vars has only {len(current)} entries — refusing to write "
+                    "what looks like a truncated read", file=sys.stderr)
+              raise SystemExit(1)
+
+          before = sorted(current)
+          merged = dict(current)
+          merged[name] = os.environ[name]
+          json.dump({"env_vars": merged}, open("/tmp/merged.json", "w"))
+          print(f"read {len(before)} variables: {', '.join(before)}", file=sys.stderr)
+          print(f"{'updating' if name in current else 'adding'} {name}", file=sys.stderr)
+          PY
+
+          COUNT=$(python3 -c "import json;print(len(json.load(open('/tmp/merged.json'))['env_vars']))")
+          echo "will write $COUNT variables"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "dry run — nothing applied. Re-run with dry_run=false to write."
+            exit 0
+          fi
+
+          RESPONSE=$(curl -sS -w $'\n%{http_code}' -X PATCH "$API/apps/$CRANE_APP_ID" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/merged.json || printf '\n000')
+          CODE=$(printf '%s' "$RESPONSE" | tail -n1)
+          BODY=$(printf '%s' "$RESPONSE" | sed '$d')
+          STATUS=$(printf '%s' "$BODY" | python3 -c "import sys,json;print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo parse_err)
+          echo "HTTP $CODE, status=$STATUS"
+          [ "$STATUS" = "success" ] || { echo "::error::PATCH rejected"; exit 1; }
+
+          # Confirm by reading back — the count must not have shrunk.
+          AFTER=$(curl -sS "$API/apps/$CRANE_APP_ID" -H "Authorization: Bearer $TOKEN" \
+            | python3 -c "
+          import sys, json
+          app = json.load(sys.stdin)
+          d = app.get('data', {}).get('apps', app.get('data', {})) or {}
+          print(len(d.get('env_vars') or {}))")
+          echo "app now reports $AFTER variables (expected $COUNT)"
+          [ "$AFTER" -ge "$COUNT" ] || { echo "::error::variable count shrank after write"; exit 1; }
+          echo "✓ $VAR_NAME set; the app restarts with the new environment"
