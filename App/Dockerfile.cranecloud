@@ -158,6 +158,21 @@ WORKDIR /app
 COPY App/backend/app /app/backend/app
 COPY App/backend/pyproject.toml* /app/backend/
 
+# query.detect_language() imports ml.scripts.lang_id for the lingua backend and
+# silently drops to a character heuristic when the import fails. Without these
+# three files the container did exactly that, and the heuristic reads Luganda
+# as English — so a Luganda question was answered in English or abstained on,
+# with nothing in the response to show detection had degraded. lingua itself
+# already ships (requirements-cranecloud.txt); only the module was missing.
+# Copied file-by-file on purpose: ml/ is the training tree, and none of the
+# rest of it belongs in the runtime image. It lands beside app/ rather than at
+# /app because uvicorn runs with directory=/app/backend and sets no PYTHONPATH
+# (see deploy/cranecloud/supervisord.conf) — /app/backend is what is on
+# sys.path, which is exactly why `app.main:app` resolves.
+COPY ml/__init__.py            /app/backend/ml/__init__.py
+COPY ml/scripts/__init__.py    /app/backend/ml/scripts/__init__.py
+COPY ml/scripts/lang_id.py     /app/backend/ml/scripts/lang_id.py
+
 # Bake in the BM25 keyword index + every corpus.  Crane Cloud and the HF Space
 # have no persistent storage and cannot reach Qdrant, so whatever retrieval can
 # see at runtime is exactly what ships here.
