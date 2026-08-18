@@ -173,19 +173,30 @@ test.describe("Settings", () => {
   });
 
   /**
-   * Opened from the rail rather than the beforeEach's overflow menu, because
-   * only a trigger that survives the open can be focused again.
+   * Escape must never leave focus on <body>: that drops a keyboard or
+   * screen-reader user at the top of the page with no idea the dialog is
+   * gone (WAI-ARIA APG modal-dialog pattern — focus returns to the invoking
+   * element).
    *
-   * SettingsDialog samples `document.activeElement` inside the effect that
-   * runs when it opens (settings/SettingsDialog.tsx) and refocuses it on
-   * close. The rail's button is still mounted then, so the round trip works.
-   * The overflow menu's item is not: clicking it closes the menu and opens
-   * the dialog in one render, so the effect samples <body> and Escape returns
-   * focus there — a real, narrow gap that predates this spec and is not
-   * reachable to fix from a test. Asserting the rail path keeps the guarantee
-   * that actually holds under test rather than skipping the check entirely.
+   * Both openers are checked because they fail differently. The rail's
+   * button is still mounted when the dialog reads what to restore, so it was
+   * always fine. The overflow menu's item is not — activating it closes the
+   * menu and opens the dialog in one render — so the restore target has to be
+   * the button that owns the menu, which ChatHeader focuses on the way out
+   * (closeMenuThen). That path used to land on <body>.
    */
-  test("Escape closes the dialog and returns focus to the trigger", async ({ page }) => {
+  test("Escape closes the dialog and returns focus to the overflow menu button", async ({
+    page,
+  }) => {
+    // The beforeEach opened this dialog through the overflow menu.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "More options" })).toBeFocused();
+  });
+
+  test("Escape returns focus to the rail's settings button when opened there", async ({
+    page,
+  }) => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
 

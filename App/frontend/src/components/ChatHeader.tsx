@@ -68,6 +68,26 @@ export default function ChatHeader({
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * Close the menu, hand focus back to the button that owns it, then act.
+   *
+   * The focus hand-back is the WAI-ARIA menu-button pattern (APG: activating
+   * a menuitem closes the menu and returns focus to the button), and here it
+   * also decides where focus lands after a dialog opened from this menu is
+   * closed again. SettingsDialog remembers whatever is focused as it opens
+   * and restores it on close; the menuitem is unmounted by then, so without
+   * this the dialog remembered <body> and Escape stranded keyboard and
+   * screen-reader users at the top of the page. Focusing here — synchronously
+   * in the handler, while the menu is still mounted — leaves it a live element
+   * to remember. `action` runs last so it sees the settled focus.
+   */
+  const closeMenuThen = (action?: () => void) => {
+    setMenuOpen(false);
+    menuButtonRef.current?.focus();
+    action?.();
+  };
   // Only a confirmed sign-in hides the call to action: while the token is being
   // checked the buttons stay, and they come back if it turns out to be stale.
   const { status } = useIdentity();
@@ -148,6 +168,7 @@ export default function ChatHeader({
       )}
       <div className="hdrv2-kebab" ref={menuRef}>
         <button
+          ref={menuButtonRef}
           className="top-bar-icon-btn"
           aria-label="More options"
           aria-haspopup="menu"
@@ -171,10 +192,7 @@ export default function ChatHeader({
             <button
               role="menuitem"
               className="hdrv2-menu-item"
-              onClick={() => {
-                setMenuOpen(false);
-                onOpenSettings();
-              }}
+              onClick={() => closeMenuThen(onOpenSettings)}
               aria-label="Settings"
             >
               <SettingsIcon /> Settings
@@ -182,10 +200,7 @@ export default function ChatHeader({
             <button
               role="menuitem"
               className="hdrv2-menu-item"
-              onClick={() => {
-                setMenuOpen(false);
-                onRequestClear();
-              }}
+              onClick={() => closeMenuThen(onRequestClear)}
               disabled={!hasStartedChat}
               aria-label="Clear conversation"
             >
@@ -198,7 +213,7 @@ export default function ChatHeader({
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Project blog"
-              onClick={() => setMenuOpen(false)}
+              onClick={() => closeMenuThen()}
             >
               <BookIcon /> Project blog ↗
             </a>
