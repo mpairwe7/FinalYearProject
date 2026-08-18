@@ -75,18 +75,34 @@ jobs:
           GET=$(curl -sS "$API/apps/$CRANE_APP_ID" -H "Authorization: Bearer $TOKEN")
           printf '%s' "$GET" > /tmp/app.json
 
-          python3 - "$VAR_NAME" <<'PY' > /tmp/merged.json
+          python3 - "$VAR_NAME" <<'PY'
           import json, os, sys
 
           name = sys.argv[1]
           app = json.load(open("/tmp/app.json"))
           data = app.get("data", {}).get("apps", app.get("data", {})) or {}
-          current = data.get("env_vars")
 
-          if not isinstance(current, dict):
-              print(f"::error::could not read env_vars (got {type(current).__name__}); refusing to write",
-                    file=sys.stderr)
+          # Structure only — field names, never values. Crane Cloud has been
+          # inconsistent about this shape before (data.apps is a singular dict
+          # under a plural key), so show what actually came back rather than
+          # guessing again.
+          print(f"app fields: {', '.join(sorted(data))}", file=sys.stderr)
+
+          # env vars have appeared under several spellings; take the first that
+          # is actually a dict of strings.
+          CANDIDATES = ("env_vars", "envVars", "environment_variables", "env", "environment")
+          current = None
+          for key in CANDIDATES:
+              value = data.get(key)
+              if isinstance(value, dict):
+                  current, found_key = value, key
+                  break
+
+          if current is None:
+              print(f"::error::no env-var object on the app (tried {', '.join(CANDIDATES)}); "
+                    "refusing to write", file=sys.stderr)
               raise SystemExit(1)
+          print(f"env vars live under '{found_key}'", file=sys.stderr)
           # A live app has real configuration. If the read comes back nearly
           # empty the response shape has changed, and writing it back would
           # erase the environment rather than extend it.
@@ -98,12 +114,13 @@ jobs:
           before = sorted(current)
           merged = dict(current)
           merged[name] = os.environ[name]
-          json.dump({"env_vars": merged}, open("/tmp/merged.json", "w"))
+          # Write back under the same key it was read from.
+          json.dump({found_key: merged}, open("/tmp/merged.json", "w"))
           print(f"read {len(before)} variables: {', '.join(before)}", file=sys.stderr)
           print(f"{'updating' if name in current else 'adding'} {name}", file=sys.stderr)
           PY
 
-          COUNT=$(python3 -c "import json;print(len(json.load(open('/tmp/merged.json'))['env_vars']))")
+          COUNT=$(python3 -c "import json;d=json.load(open('/tmp/merged.json'));print(len(next(iter(d.values()))))")
           echo "will write $COUNT variables"
 
           if [ "$DRY_RUN" = "true" ]; then
@@ -127,7 +144,11 @@ jobs:
           import sys, json
           app = json.load(sys.stdin)
           d = app.get('data', {}).get('apps', app.get('data', {})) or {}
-          print(len(d.get('env_vars') or {}))")
+          for k in ('env_vars','envVars','environment_variables','env','environment'):
+              if isinstance(d.get(k), dict):
+                  print(len(d[k])); break
+          else:
+              print(0)")
           echo "app now reports $AFTER variables (expected $COUNT)"
           [ "$AFTER" -ge "$COUNT" ] || { echo "::error::variable count shrank after write"; exit 1; }
           echo "✓ $VAR_NAME set; the app restarts with the new environment"
