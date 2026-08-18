@@ -245,6 +245,16 @@ RUN set -eux; \
     APP_DATA_ROOT=/app/Data PYTHONPATH=. \
     /opt/venv/bin/python -m app.freshness --write; \
     test -s /app/Model/index_freshness.json; \
+    # --write and --check are mutually exclusive in one invocation (the CLI
+    # returns immediately after --write) and they write different files:
+    # --write makes the baseline snapshot above, --check --write-status makes
+    # index_freshness_status.json, which is what /v1/index/freshness's own
+    # docstring says it reads. Checking now, against the snapshot just
+    # written, trivially reports zero drift and gives the endpoint a real
+    # "checked at build time" answer instead of "never checked".
+    APP_DATA_ROOT=/app/Data PYTHONPATH=. \
+    /opt/venv/bin/python -m app.freshness --check --write-status; \
+    test -s /app/Model/index_freshness_status.json; \
     # procps is not installed, so stop it by the PID captured above.
     kill "$QDRANT_PID"; \
     wait "$QDRANT_PID" || true; \

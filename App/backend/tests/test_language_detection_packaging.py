@@ -125,13 +125,24 @@ class BuildContextTest(unittest.TestCase):
 
 
 class IndexFreshnessPackagingTest(unittest.TestCase):
-    """The image must ship a freshness baseline, not just the machinery.
+    """The image must ship a freshness baseline AND a status the endpoint reads.
 
-    `/v1/index/freshness` answered `snapshot_missing: true` in production for
-    the life of the deployment: app.freshness can write a snapshot and
-    app.indexer builds the index, but nothing connected the two, so corpus
-    drift — a CSV updated after the image was cut — had no baseline to be
-    measured against and the probe reported nothing useful (#300).
+    `/v1/index/freshness` answered `snapshot_missing: true` in every prod
+    deployment so far — twice, for two different reasons.
+
+    First, nothing ever ran app.freshness at all: app.indexer builds the
+    index and does not call write_snapshot, so there was no baseline (#300).
+
+    Fixed that, then verified live and found the endpoint still answering
+    snapshot_missing. The handler's own docstring says what it reads: "Cron
+    writes the status file: python -m app.freshness --check --write-status".
+    --write makes index_freshness.json — the baseline for a *future* drift
+    check — but load_status() reads index_freshness_status.json, a different
+    file that only --write-status produces. --write and --check are mutually
+    exclusive in one CLI invocation (the code returns immediately after
+    --write), so this needs both, in sequence: write the baseline, then check
+    it — trivially clean, since nothing has changed since the write moments
+    earlier — and persist that as the status the endpoint actually serves.
     """
 
     def test_the_build_writes_a_freshness_snapshot_after_indexing(self) -> None:
@@ -144,6 +155,18 @@ class IndexFreshnessPackagingTest(unittest.TestCase):
             "be invisible",
         )
 
+    def test_the_build_also_writes_the_status_file_the_endpoint_reads(self) -> None:
+        body = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertIn(
+            "app.freshness --check --write-status",
+            body,
+            "the image writes a snapshot but never a status: "
+            "/v1/index/freshness reads index_freshness_status.json "
+            "(load_status -> STATUS_PATH), which only --write-status "
+            "produces — --write alone leaves the endpoint reporting "
+            "snapshot_missing regardless of the baseline existing",
+        )
+
     def test_the_snapshot_is_written_after_the_index_is_built(self) -> None:
         """Order matters: a baseline taken before indexing proves nothing."""
         body = DOCKERFILE.read_text(encoding="utf-8")
@@ -151,6 +174,15 @@ class IndexFreshnessPackagingTest(unittest.TestCase):
             body.index("app.indexer --recreate"),
             body.index("app.freshness --write"),
             "freshness snapshot must be written after app.indexer --recreate",
+        )
+
+    def test_the_status_check_runs_after_the_snapshot_it_checks_against(self) -> None:
+        """Checking before the baseline exists reports snapshot_missing again."""
+        body = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertLess(
+            body.index("app.freshness --write"),
+            body.index("app.freshness --check --write-status"),
+            "the status check must run after the snapshot it compares against",
         )
 
 
