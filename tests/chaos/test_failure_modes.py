@@ -25,9 +25,12 @@ def test_malware_required_is_fail_closed(monkeypatch):
 
 
 def test_tenant_filter_and_rls_sql(monkeypatch):
+    from app import tenancy
     from app.flags import flags
 
+    monkeypatch.setenv("FLAG_MULTI_TENANT", "true")
     flags.set("multi_tenant", True)
+    monkeypatch.setattr(tenancy, "tenant_enabled", lambda: True)
     try:
         filt = qdrant_payload_filter("tenant-a")
         assert filt is not None
