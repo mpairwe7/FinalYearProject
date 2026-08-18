@@ -63,11 +63,13 @@ def load_fixture_body() -> bytes:
 
 
 def _use_fixture(source: str) -> bool:
+    if (os.getenv("APP_ENV") or "development").lower() == "production":
+        return False
     if source.startswith("fixture:"):
         return True
     if source:
         return False
-    return (os.getenv("APP_ENV") or "development").lower() != "production"
+    return True
 
 
 def _digest(body: bytes) -> str:

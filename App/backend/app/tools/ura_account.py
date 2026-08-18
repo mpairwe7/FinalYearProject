@@ -74,7 +74,8 @@ class UraAccountProfileTool(Tool):
 
         base_url = os.getenv("URA_ACCOUNT_API_BASE", "").rstrip("/")
         token = os.getenv("URA_ACCOUNT_API_TOKEN", "")
-        if mode != "live" or not base_url or not token:
+        parsed = urllib.parse.urlparse(base_url)
+        if mode != "live" or parsed.scheme != "https" or not parsed.netloc or not token:
             return {
                 "ok": False,
                 "configured": False,

@@ -67,3 +67,5 @@ The dated implementation and verification records are:
 - [traceability/document-pdf-guards-2026-08-17.md](traceability/document-pdf-guards-2026-08-17.md)
   — structural PDF guards, Office macro/zip-slip, indirect-injection wrap,
   and threat-registry T21–T28.
+- [traceability/prototype-production-gates-2026-08-18.md](traceability/prototype-production-gates-2026-08-18.md)
+  — production requires `MALWARE_SCAN_REQUIRED` and `DOCUMENT_PARSE_ISOLATED`.

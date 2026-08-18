@@ -59,6 +59,7 @@ _PRODUCTION_ON_FLAGS = {
     "auth_required",
     "multi_tenant",
     "audit_ledger",
+    "ticket_queue",
     "voice_consent",
 }
 

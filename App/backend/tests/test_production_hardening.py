@@ -44,6 +44,14 @@ SECURE_PROD_ENV = {
     "FLAG_VOICE_CONSENT": "true",
     "WS_CONFIRM_HMAC_SECRET": "prod-confirm-hmac-secret-with-entropy",
     "REQUIRE_FRESH_AUTHORITY": "true",
+    "FLAG_TICKET_QUEUE": "true",
+    "MALWARE_SCAN_REQUIRED": "true",
+    "DOCUMENT_PARSE_ISOLATED": "true",
+    "URA_PUBLICATIONS_URL": "https://ura.go.ug/en/news",
+    "SEED_PROTOTYPE": "false",
+    "URA_ACCOUNT_API_MODE": "off",
+    "MULTI_TENANT_RLS_APPLIED": "true",
+    "NOTIFICATION_LIVE": "false",
 }
 
 

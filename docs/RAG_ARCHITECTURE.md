@@ -488,7 +488,11 @@ All major subsystems are behind feature flags for progressive rollout:
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
 **49** in total, including the per-phase switches for voice, offline and
-quantization. `flags.all()` is the authoritative list.
+quantization. `flags.all()` is the authoritative list. Production also
+forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
+and `voice_consent` unless explicitly disabled (startup then refuses).
+Remaining prototype gaps have env gates in `docs/PRODUCTION_GATES.md`.
+Traceability: [prototype-production-gates-2026-08-18.md](../App/docs/traceability/prototype-production-gates-2026-08-18.md).
 
 ### Addressable rollout
 

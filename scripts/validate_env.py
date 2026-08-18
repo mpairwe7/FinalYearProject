@@ -61,6 +61,7 @@ def validate(env: str = "development") -> tuple[list[str], list[str]]:
 
     # Production-only checks
     if is_prod:
+        os.environ.setdefault("APP_ENV", "production")
         for var, desc in PRODUCTION_REQUIRED.items():
             if not os.getenv(var):
                 errors.append(f"PRODUCTION MISSING: {var} — {desc}")
@@ -80,6 +81,16 @@ def validate(env: str = "development") -> tuple[list[str], list[str]]:
         cors = os.getenv("CORS_ORIGINS", "")
         if "localhost" in cors or "127.0.0.1" in cors:
             errors.append("CORS_ORIGINS contains localhost — not safe for production")
+
+        backend = Path(__file__).resolve().parent.parent / "App" / "backend"
+        if str(backend) not in sys.path:
+            sys.path.insert(0, str(backend))
+        try:
+            from app.production_readiness import gap_gate_errors
+
+            errors.extend(gap_gate_errors())
+        except ImportError as exc:
+            warnings.append(f"production_readiness unavailable: {exc}")
     else:
         # Dev-mode warnings
         if not os.getenv("HF_TOKEN"):

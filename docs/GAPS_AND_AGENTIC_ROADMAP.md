@@ -8,6 +8,7 @@
 > `docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md`) do **not** supersede it.
 > Retrieval / agentic serving-path decisions: `App/docs/traceability/retrieval-agentic-upgrade-2026-08-17.md`.
 > Document / PDF intake guards: `App/docs/traceability/document-pdf-guards-2026-08-17.md`.
+> Prototype gaps + production gates: `App/docs/traceability/prototype-production-gates-2026-08-18.md`.
 >
 > This document tracks the **remaining gaps** — things that are
 > not yet in the codebase and what it would take to close them.
@@ -77,10 +78,10 @@ walking users through guided workflows, and escalating to staff.
 
 **What this is not good at yet:** unbounded multi-step planning
 (the shipped loop is bounded ReAct: one observe hop + one reflect
-retry), live URA account integration, proactive notifications, or
-multi-tenant deployment. Query-time document upload exists
-(`POST /v1/documents/analyze`); it is not virus-scanned and has no
-`mcp_document_parser` tool.
+retry), a **live** URA account API, a real email/SMS sender, or
+applied Postgres RLS. Query-time document upload exists
+(`POST /v1/documents/analyze`) with optional ClamAV + isolated parse;
+production startup requires both (`docs/PRODUCTION_GATES.md`).
 
 ---
 
@@ -159,6 +160,20 @@ surface that would need to change. Effort estimates are rough:
 | G32 🟢 | **~~No human-in-the-loop queue.~~** **SHIPPED Phase 15 + staff workbench 2026-08-17** — claim → brief → reply → resolve, live `/v1/admin/tickets/stream`, collision presence, canned replies, first- and next-reply SLA with population breach counts. | — | Done. | — | `ticket_ws.py`, `ticket_presence`, `frontend/src/components/staff/` | Done |
 | G33 | **SLO autoscaling (post-prototype).** Example HPA/KEDA YAML only. | Not needed for a laptop demo. | Deferred. | Apply after a measured p95. | `infra/k8s/` | M |
 | G34 | **Cluster chaos (post-prototype).** In-process fail-closed tests shipped. | Not needed for a laptop demo. | Deferred. | Game day later. | `tests/chaos/` | M |
+
+### 2.8 Production activation (2026-08-18)
+
+Prototype rows above stay **demo-ready**. They become **start blockers**
+when `APP_ENV=production`. The gate list and operator checklist live in
+`docs/PRODUCTION_GATES.md`. Probe:
+
+```bash
+PYTHONPATH=App/backend python3 -m app.production_readiness --as-production
+```
+
+`FLAG_HYDE`, `FLAG_GRAPH_FUSION`, `FLAG_TOOL_RAG`, and `FLAG_TOOL_USE`
+stay default **off**. Do not treat a green production start as a live
+URA account or a delivered SMS channel.
 
 ---
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 # Obviously fake TINs. Do not treat these as real taxpayers.
 MOCK_PROFILES: dict[str, dict[str, Any]] = {
@@ -62,10 +63,10 @@ def account_mode() -> str:
 
 
 def live_credentials_configured() -> bool:
-    return bool(
-        (os.getenv("URA_ACCOUNT_API_BASE") or "").strip()
-        and (os.getenv("URA_ACCOUNT_API_TOKEN") or "").strip()
-    )
+    base = (os.getenv("URA_ACCOUNT_API_BASE") or "").strip()
+    token = (os.getenv("URA_ACCOUNT_API_TOKEN") or "").strip()
+    parsed = urlparse(base)
+    return parsed.scheme == "https" and bool(parsed.netloc) and bool(token)
 
 
 def lookup_mock(taxpayer_id: str) -> dict[str, Any]:
