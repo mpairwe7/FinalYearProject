@@ -122,7 +122,7 @@ class FAQSafetyRegressionTests(unittest.TestCase):
 
     def test_cache_hit_with_crlf_query_cannot_forge_log_lines(self) -> None:
         """Regression guard for CodeQL py/log-injection: a query containing
-        CR/LF must not let a user forge fake log lines on a cache hit."""
+        CR/LF must not let a user forge fake log lines or enter the log."""
 
         class _FixedVectorModel:
             def encode(self, text: str, normalize_embeddings: bool = True) -> np.ndarray:
@@ -137,7 +137,9 @@ class FAQSafetyRegressionTests(unittest.TestCase):
         self.assertIsNotNone(result)  # confirms the log line under test actually ran
         logged = "\n".join(cm.output)
         self.assertNotIn("\r\n", logged)
-        self.assertIn("\\r\\n", logged)  # visible escape, not a real line break
+        self.assertNotIn(malicious, logged)
+        self.assertNotIn("fake admin override", logged)
+        self.assertIn("query_length=", logged)
 
 
 if __name__ == "__main__":
