@@ -17,17 +17,23 @@ References:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 import math
 import os
 import re
+import time
 import uuid
+import zlib
 from collections import Counter, OrderedDict
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from ._root import APP_DATA_ROOT as _APP_DATA_ROOT
+from .analytics import metrics
 from .resilience import CircuitBreaker, CircuitState  # re-export for backcompat
 from .text_signals import content_tokens, is_courtesy_sentence, split_sentences
 
@@ -63,7 +69,6 @@ DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
 RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
 RETRIEVER_DENSE_DEVICE = os.getenv("RETRIEVER_DENSE_DEVICE", "cpu")
 RERANKER_DEVICE = os.getenv("RERANKER_DEVICE", RETRIEVER_DENSE_DEVICE)
-from ._root import APP_DATA_ROOT as _APP_DATA_ROOT
 BM25_STATE_PATH = Path(
     os.getenv("BM25_STATE_PATH", str(_APP_DATA_ROOT.parent / "Model" / "bm25_state.json"))
 )
@@ -150,7 +155,7 @@ _FY_RANK_RE = re.compile(r"FY(\d{4})-\d{2}")
 def canonical_source_url(source: str, existing: str = "") -> str:
     """HTTPS URL for a citation: stored URL, else the URA portal for URA files (G19)."""
     raw = (existing or "").strip()
-    if raw.startswith("https://") or raw.startswith("http://"):
+    if raw.startswith(("https://", "http://")):
         return raw
     name = (source or "").strip().lower()
     if name.startswith("ura") and name.endswith((".csv", ".pdf", ".jsonl", ".json")):
@@ -391,10 +396,8 @@ def apply_preference_boost(
         if not boost:
             continue
         if hit.get("score_norm") is not None:
-            try:
+            with suppress(TypeError, ValueError):
                 hit["score_norm"] = min(1.0, float(hit["score_norm"]) + boost)
-            except (TypeError, ValueError):
-                pass
         try:
             hit["score_rrf"] = float(hit.get("score_rrf") or 0.0) + boost
         except (TypeError, ValueError):
@@ -808,16 +811,21 @@ class HybridRetriever:
 
             self._client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=10)
             collections = [c.name for c in self._client.get_collections().collections]
-            if QDRANT_COLLECTION not in collections:
+            aliases = {a.alias_name for a in self._client.get_aliases().aliases}
+            if QDRANT_COLLECTION not in collections and QDRANT_COLLECTION not in aliases:
                 logger.warning("Qdrant collection '%s' not found", QDRANT_COLLECTION)
                 return False
 
-            # Load BM25 state persisted by the indexer
-            if BM25_STATE_PATH.exists():
+            # Alias-backed staged builds embed their matching BM25 encoder in
+            # the sentinel. This avoids pairing a newly-promoted sparse index
+            # with a stale local state file. Older collections retain the file
+            # fallback for backwards compatibility.
+            binding = self._binding_payload()
+            if not self._load_sparse_state_from_binding(binding) and BM25_STATE_PATH.exists():
                 with open(BM25_STATE_PATH) as f:
                     self._sparse_encoder = BM25SparseEncoder.from_dict(json.load(f))
                 logger.info("Loaded BM25 state from %s", BM25_STATE_PATH)
-            self._verify_bm25_binding()
+            self._verify_bm25_binding(binding)
             if not self._verify_embedder_binding():
                 # Both halves of hybrid search are untrustworthy against this
                 # collection. Give up on Qdrant so ``initialize`` can try the
@@ -952,9 +960,8 @@ class HybridRetriever:
     ) -> list[dict[str, Any]]:
         """Dense retrieval via Workers AI bge-m3 -> Vectorize, fused client-side
         with a lexical (BM25-lite) re-score via RRF.  CPU-only hybrid."""
-        from .providers import breakers, budget
+        from .providers import breakers, budget, routing
         from .providers import gateway as _gw
-        from .providers import routing
         from .providers import vectorize as _vz
 
         if not breakers.VECTORIZE_BREAKER.allow_request():
@@ -1043,7 +1050,37 @@ class HybridRetriever:
         for candidate in candidates:
             candidate["score_lexical"] = lexical_relevance(query, candidate, self._sparse_encoder)
 
-    def _verify_bm25_binding(self) -> None:
+    def _binding_payload(self) -> dict[str, Any]:
+        """Return the Qdrant binding sentinel payload for this collection."""
+        try:
+            points = self._client.retrieve(
+                collection_name=QDRANT_COLLECTION,
+                ids=[bm25_binding_sentinel_id(QDRANT_COLLECTION)],
+                with_payload=True,
+                with_vectors=False,
+            )
+            return dict(points[0].payload or {}) if points else {}
+        except Exception:
+            logger.warning("Could not read Qdrant binding sentinel", exc_info=True)
+            return {}
+
+    def _load_sparse_state_from_binding(self, payload: dict[str, Any]) -> bool:
+        """Load the compressed encoder state shipped with an alias-backed index."""
+        packed = payload.get("bm25_state_zlib")
+        if not isinstance(packed, str) or not packed:
+            return False
+        try:
+            raw = zlib.decompress(base64.b64decode(packed.encode("ascii")))
+            state = json.loads(raw)
+            self._sparse_encoder = BM25SparseEncoder.from_dict(state)
+            logger.info("Loaded BM25 state from Qdrant binding sentinel")
+            return True
+        except Exception:
+            logger.error("Qdrant binding contains an invalid BM25 state", exc_info=True)
+            self._sparse_ok = False
+            return False
+
+    def _verify_bm25_binding(self, payload: dict[str, Any] | None = None) -> None:
         """Disable sparse retrieval if the loaded bm25_state's corpus hash does
         not match the one stamped into Qdrant at index time (P1-6).
 
@@ -1055,30 +1092,22 @@ class HybridRetriever:
         local = self._sparse_encoder.corpus_hash
         if not local:
             return  # old state file without a hash — nothing to compare
-        try:
-            points = self._client.retrieve(
-                collection_name=QDRANT_COLLECTION,
-                ids=[bm25_binding_sentinel_id(QDRANT_COLLECTION)],
-                with_payload=True,
-                with_vectors=False,
+        payload = payload if payload is not None else self._binding_payload()
+        remote = str(payload.get("corpus_hash", ""))
+        if not remote:
+            logger.warning(
+                "BM25 binding sentinel missing in Qdrant; cannot verify "
+                "sparse/state consistency — reindex to write it."
             )
-            remote = str((points[0].payload or {}).get("corpus_hash", "")) if points else ""
-            if not remote:
-                logger.warning(
-                    "BM25 binding sentinel missing in Qdrant; cannot verify "
-                    "sparse/state consistency — reindex to write it."
-                )
-                return
-            if remote != local:
-                self._sparse_ok = False
-                logger.error(
-                    "BM25 state/Qdrant corpus hash MISMATCH (state=%s qdrant=%s) — "
-                    "disabling sparse retrieval to avoid desynced results; reindex.",
-                    local[:12],
-                    remote[:12],
-                )
-        except Exception:
-            logger.warning("BM25 binding verification failed; leaving sparse enabled", exc_info=True)
+            return
+        if remote != local:
+            self._sparse_ok = False
+            logger.error(
+                "BM25 state/Qdrant corpus hash MISMATCH (state=%s qdrant=%s) — "
+                "disabling sparse retrieval to avoid desynced results; reindex.",
+                local[:12],
+                remote[:12],
+            )
 
     def _verify_embedder_binding(self) -> bool:
         """Return ``False`` when the collection was built by a different encoder.
@@ -1268,12 +1297,18 @@ class HybridRetriever:
                     )
                 )
 
+            query_started = time.perf_counter()
             results = self._client.query_points(
                 collection_name=QDRANT_COLLECTION,
                 prefetch=prefetch,
                 query=models.FusionQuery(fusion=models.Fusion.RRF),
                 query_filter=query_filter,
                 limit=prefetch_limit,
+            )
+            metrics.observe(
+                "qdrant_query_duration_seconds",
+                time.perf_counter() - query_started,
+                labels={"mode": "sparse" if self._sparse_only else "hybrid"},
             )
 
             if not results.points:
@@ -1325,6 +1360,7 @@ class HybridRetriever:
             return prune_context(candidates[:top_k])
 
         except Exception:
+            metrics.inc("qdrant_query_errors_total")
             self._circuit.record_failure()
             logger.exception("Hybrid search failed; circuit breaker tracking failure")
             # Do NOT permanently disable _ready — the circuit breaker

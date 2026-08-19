@@ -113,7 +113,9 @@ RATE_LIMIT=30/minute
 # --- Qdrant ---
 QDRANT_URL=http://qdrant:6333          # Inside Docker network (default)
 # QDRANT_URL=http://localhost:16333    # From host, if ports are remapped
-QDRANT_COLLECTION=ura_knowledge_base
+# Use a stable alias for staged rebuilds; never rebuild a serving physical
+# collection in place. See docs/runbooks/qdrant-staged-rebuild.md.
+QDRANT_COLLECTION=ura_knowledge_base_active
 DENSE_MODEL=BAAI/bge-m3
 DENSE_DIM=1024                         # Must match the indexed collection
 
@@ -337,12 +339,12 @@ For high-availability retrieval, run a multi-node Qdrant cluster:
 # qdrant-cluster.yml (example)
 services:
   qdrant-0:
-    image: qdrant/qdrant:v1.17.1
+    image: qdrant/qdrant:v1.19.0
     environment:
       - QDRANT__CLUSTER__ENABLED=true
     command: ./qdrant --uri http://qdrant-0:6335
   qdrant-1:
-    image: qdrant/qdrant:v1.17.1
+    image: qdrant/qdrant:v1.19.0
     environment:
       - QDRANT__CLUSTER__ENABLED=true
     command: ./qdrant --uri http://qdrant-1:6335 --bootstrap http://qdrant-0:6335
@@ -365,6 +367,16 @@ The Next.js standalone frontend is also stateless. Scale with `--scale frontend=
 ## 7. Backup & Recovery
 
 ### Qdrant snapshots
+
+The local retrieval overlay runs a daily checksum-verified snapshot worker with
+seven retained copies and a monthly disposable restore drill. Use the staged
+rebuild runbook for its status files, manual drill, retention, and Qdrant
+one-minor-version-at-a-time storage upgrade procedure.
+
+```bash
+docker compose -f App/docker-compose.yml -f App/docker-compose.local-retrieval.yml \
+  exec qdrant-backup python -m app.qdrant_backup --restore-drill
+```
 
 ```bash
 # Create snapshot
@@ -555,7 +567,9 @@ docker compose restart api
 Restore from a prior snapshot (see Section 7) if a bad re-index corrupts results:
 
 ```bash
-# Stop API to prevent writes
+# Stop API to prevent writes. Prefer repointing the alias to the retained
+# versioned collection; restore a snapshot only when both active generations
+# are unusable. See docs/runbooks/qdrant-staged-rebuild.md.
 docker compose stop api
 
 # Restore snapshot

@@ -1503,9 +1503,10 @@ diagnosis phase.
 5. **`next start` warns when `output: "standalone"`** — the warning
    is cosmetic for dev, but in production use
    `node .next/standalone/server.js` (already the Dockerfile path).
-6. **Qdrant client-server version drift warning** —
-   `qdrant-client 1.17.1` vs `qdrant/qdrant:1.13.3` prints a
-   harmless compat warning on boot; pin both or bump together.
+6. **Qdrant client-server release compatibility** — use the pinned
+   `qdrant-client>=1.18,<1.19` with the v1.19 server image, and upgrade an
+   existing persistent Qdrant volume one minor server release at a time.
+   See `docs/runbooks/qdrant-staged-rebuild.md` before upgrading storage.
 7. **slowapi `[redis]` extra pins redis<4** — install
    `slowapi>=0.1.9` bare and `limits[redis]>=3.13` (slowapi's
    internal storage layer) for modern `redis>=5` compatibility.

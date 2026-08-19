@@ -51,7 +51,7 @@ sse-starlette>=2.0.0
 
 # Qdrant client kept so QDRANT_ENABLED=true is a future-flag toggle.
 # Without QDRANT_URL set, HybridRetriever falls back to keyword search.
-qdrant-client>=1.13,<2
+qdrant-client>=1.18,<1.19
 
 # Misc utilities used outside the LLM path
 cryptography>=44.0.0

@@ -5,14 +5,15 @@
 # Crane Cloud has two constraints that shape this Dockerfile:
 #   1. One service per app, one public port.  We bundle nginx + FastAPI
 #      + Next.js together and front them with supervisord.
-#   2. No persistent volumes.  The BM25 keyword index and the FAQ CSV
-#      corpus are baked into the image at build time.
+#   2. No persistent volumes. The sparse Qdrant collection, its BM25 state,
+#      and the knowledge corpus are baked into the immutable image at build
+#      time, making the prior signed image the rollback unit.
 #
 # CPU profile: torch / transformers / sentence-transformers are
 # excluded (no GPU on Crane Cloud).  The app's LLM dispatches through
 # an external endpoint (LLM_BACKEND=vllm pointing at VLLM_BASE_URL).
-# Retrieval falls back to keyword search; QDRANT_ENABLED=false is the
-# default operating mode on Crane Cloud.
+# Retrieval uses an embedded sparse-only Qdrant sidecar. Its BM25 query vector
+# is computed in pure Python, so it needs neither torch nor an embedding model.
 #
 # Build:
 #   docker build -t landwind/ura-chatbot:cranecloud -f App/Dockerfile.cranecloud .
@@ -200,11 +201,16 @@ COPY --from=frontend-builder /build/frontend/public          /app/frontend/publi
 # behind the retriever.
 #
 # The collection is SPARSE-ONLY and is built here, at image build time, so the
-# image is self-contained and no runtime indexing step is needed. Sparse-only is
-# not a compromise for this image: a BM25 query vector is computed from
+# image is self-contained and no runtime indexing step is needed. The build uses
+# a versioned collection plus a Qdrant alias, so a failed candidate build never
+# replaces the index in the previously deployed image. Sparse-only is not a
+# compromise for this image: a BM25 query vector is computed from
 # bm25_state.json in pure Python, whereas a dense query would need bge-m3 and
 # this image deliberately ships no torch, so dense vectors would be unqueryable.
-COPY --from=qdrant/qdrant:v1.15.1 /qdrant/qdrant /usr/local/bin/qdrant
+# Keep this binary in lockstep with the local Qdrant server release line.
+# The embedded store is recreated at image build time, so it has no persistent
+# storage upgrade path; an immutable image is its durable rollback artifact.
+COPY --from=qdrant/qdrant:v1.19.0 /qdrant/qdrant /usr/local/bin/qdrant
 
 RUN set -eux; \
     mkdir -p /app/qdrant/storage; \
@@ -226,34 +232,22 @@ RUN set -eux; \
     cd /app/backend; \
     SPARSE_ONLY_INDEX=true \
     QDRANT_URL=http://127.0.0.1:6333 \
+    QDRANT_COLLECTION=ura_knowledge_base_active \
     APP_DATA_ROOT=/app/Data \
     # The image ships the derived JSONL but not the 500 MB of source PDFs or the
     # crawl pages, so ingest cannot re-hash them. Everything internal to the
     # export is still verified; only the source-hash comparison is skipped.
     CORPUS_TRUST_MANIFEST=true \
     PYTHONPATH=. \
-    /opt/venv/bin/python -m app.indexer --recreate; \
+    /opt/venv/bin/python -m app.index_lifecycle --bootstrap; \
     # bm25_state.json is rewritten by the index build so the sparse vectors and
     # the vocab/idf come from the same fit — the corpus-hash sentinel would
     # otherwise disable sparse retrieval at startup.
     test -s /app/Model/bm25_state.json; \
-    # Baseline the corpus hashes against the index just built. Without this the
-    # image ships no snapshot, /v1/index/freshness answers snapshot_missing for
-    # the life of the deployment, and corpus drift — a CSV updated after the
-    # image was cut — is invisible rather than reported. app.indexer does not
-    # write it, so it is written here, where the index is known to be current.
-    APP_DATA_ROOT=/app/Data PYTHONPATH=. \
-    /opt/venv/bin/python -m app.freshness --write; \
+    # index_lifecycle writes both the snapshot and the endpoint status only
+    # after it has promoted the validated alias. Do not overwrite that status
+    # with a source-only freshness command: it would discard index_corpus_hash.
     test -s /app/Model/index_freshness.json; \
-    # --write and --check are mutually exclusive in one invocation (the CLI
-    # returns immediately after --write) and they write different files:
-    # --write makes the baseline snapshot above, --check --write-status makes
-    # index_freshness_status.json, which is what /v1/index/freshness's own
-    # docstring says it reads. Checking now, against the snapshot just
-    # written, trivially reports zero drift and gives the endpoint a real
-    # "checked at build time" answer instead of "never checked".
-    APP_DATA_ROOT=/app/Data PYTHONPATH=. \
-    /opt/venv/bin/python -m app.freshness --check --write-status; \
     test -s /app/Model/index_freshness_status.json; \
     # procps is not installed, so stop it by the PID captured above.
     kill "$QDRANT_PID"; \
@@ -283,7 +277,7 @@ ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
     # so no extra flag is needed here.
     QDRANT_ENABLED=true \
     QDRANT_URL=http://127.0.0.1:6333 \
-    QDRANT_COLLECTION=ura_knowledge_base \
+    QDRANT_COLLECTION=ura_knowledge_base_active \
     # Tells the production env check that this loopback URL is the intentional
     # in-image sidecar, not a misconfiguration. Without it the backend refuses to
     # start in production.
