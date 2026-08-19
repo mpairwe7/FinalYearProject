@@ -27,6 +27,7 @@ import GeneralSection from "./GeneralSection";
 import PrivacySection from "./PrivacySection";
 import ProfileSection from "./ProfileSection";
 import VoiceSection from "./VoiceSection";
+import { restoreFocus } from "../../lib/focus";
 
 export type SettingsTab = "general" | "voice" | "profile" | "privacy" | "account";
 
@@ -94,14 +95,10 @@ export default function SettingsDialog({
 
     return () => {
       document.body.style.overflow = prevOverflow;
-      // Only hand focus back to an element that is still in the document.
-      // Calling focus() on a detached node is a silent no-op that leaves the
-      // browser's default — <body> — focused, which drops a keyboard or
-      // screen-reader user at the top of the page with the dialog gone. An
-      // opener that unmounts as it opens this (a menu closing behind its own
-      // menuitem) is expected to leave a live element focused; ChatHeader's
-      // closeMenuThen() does exactly that.
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+      // Return to the opener when it still exists. If it was a menu item that
+      // unmounted as the dialog opened, restoreFocus() puts focus on the main
+      // landmark rather than silently leaving it on <body>.
+      restoreFocus(previouslyFocused);
     };
   }, [open]);
 

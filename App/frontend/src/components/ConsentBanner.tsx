@@ -52,10 +52,15 @@ function ConsentBannerInner() {
   if (consent === undefined || consent !== null) return null;
 
   return (
-    <div className="consent-banner" role="alertdialog" aria-label="Analytics consent">
+    <section
+      className="consent-banner"
+      role="region"
+      aria-labelledby="analytics-consent-title"
+      aria-describedby="analytics-consent-description"
+    >
       <div className="consent-text">
-        <strong>Privacy notice</strong>
-        <p>
+        <h2 id="analytics-consent-title">Privacy notice</h2>
+        <p id="analytics-consent-description">
           We use anonymous analytics to improve the URA Tax Assistant.
           No personal data is stored. You can change this anytime.
         </p>
@@ -68,7 +73,7 @@ function ConsentBannerInner() {
           Accept
         </button>
       </div>
-    </div>
+    </section>
   );
 }
 

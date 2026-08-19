@@ -1,96 +1,190 @@
 /**
- * Accessibility audit — axe-core (WCAG 2.1 AA).
+ * WCAG 2.2 AA accessibility evidence.
  *
- * Aligned with: ISO/IEC 25010:2023 §4 (Interaction Capability),
- * week08 NFR-05 (WCAG 2.1 AA), week09 QO-04 (Lighthouse >= 90).
- *
- * Runs axe-core against every major view to catch:
- * - Missing alt text / aria-labels
- * - Colour contrast failures
- * - Missing landmark roles
- * - Keyboard navigation traps
+ * axe is necessary but not sufficient: it catches machine-testable issues on
+ * every public and staff surface, while the keyboard tests below cover the
+ * dynamic controls axe cannot operate. The manual checklist in
+ * docs/ACCESSIBILITY_CONFORMANCE.md covers the remaining human checks.
  */
-import { test, expect } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-test.describe("WCAG 2.1 AA Accessibility", () => {
-  test("homepage passes axe-core audit", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector(".composer", { timeout: 10_000 });
+import { clearChatStore, mockBackend, openSettings, seedConsent } from "./helpers";
 
-    const results = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-      .exclude(".hero-badge") // decorative gradient — known contrast exception
-      .analyze();
+const WCAG_22_AA_TAGS = [
+  "wcag2a",
+  "wcag2aa",
+  "wcag21a",
+  "wcag21aa",
+  "wcag22a",
+  "wcag22aa",
+];
 
-    const violations = results.violations.filter(
-      (v) => v.impact === "critical" || v.impact === "serious",
-    );
+type Theme = "light" | "dark";
 
-    if (violations.length > 0) {
-      const summary = violations
-        .map(
-          (v) =>
-            `[${v.impact}] ${v.id}: ${v.description} (${v.nodes.length} instances)`,
-        )
-        .join("\n");
-      console.error("Accessibility violations:\n" + summary);
+function violationSummary(violations: Awaited<ReturnType<AxeBuilder["analyze"]>>["violations"]) {
+  return violations
+    .map(
+      (violation) =>
+        `[${violation.impact}] ${violation.id}: ${violation.description} (${violation.nodes.length} instances)`,
+    )
+    .join("\n");
+}
+
+async function expectNoSeriousOrCritical(page: Page, surface: string) {
+  const results = await new AxeBuilder({ page }).withTags(WCAG_22_AA_TAGS).analyze();
+  const violations = results.violations.filter(
+    (violation) => violation.impact === "critical" || violation.impact === "serious",
+  );
+  expect(violations, `${surface}\n${violationSummary(violations)}`).toHaveLength(0);
+}
+
+/** Set the explicit theme, then reload so every route receives the same tokens. */
+async function visitInTheme(page: Page, path: string, theme: Theme) {
+  await page.goto(path);
+  await page.evaluate((nextTheme) => {
+    window.localStorage.setItem("ura-theme", nextTheme);
+  }, theme);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+}
+
+/** A minimal but valid operations API for the routes below. */
+async function prepareStaffSession(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("ura_auth_token", "e2e-a11y-admin-token");
+    window.localStorage.setItem("ura_analytics_consent", "false");
+  });
+  // StaffGuard opens the live-arrivals WebSocket on every staff route. Keep
+  // this test hermetic: a mocked route represents an idle, healthy stream
+  // without repeatedly attempting to reach a developer's local API process.
+  await page.routeWebSocket("**/api/v1/admin/tickets/stream**", () => {});
+
+  // Register the catch-all first: Playwright gives later routes precedence.
+  await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
+  await page.route("**/api/v1/me", (route) =>
+    route.fulfill({
+      json: {
+        authenticated: true,
+        role: "ura_admin",
+        email: "accessibility.audit@ura.go.ug",
+        external_id: "e2e-a11y-admin",
+        tenant_id: "default",
+      },
+    }),
+  );
+  await page.route("**/api/v1/authority/status", (route) =>
+    route.fulfill({
+      json: {
+        fresh: true,
+        version: "2026-08",
+        age_days: 1,
+        max_age_days: 120,
+        sources: ["rates.pdf"],
+      },
+    }),
+  );
+  await page.route("**/api/v1/admin/tickets/sla**", (route) =>
+    route.fulfill({
+      json: {
+        tickets: 0,
+        responded: 0,
+        resolved: 0,
+        awaiting_first_response: 0,
+        median_response_seconds: 0,
+        median_resolution_seconds: 0,
+        awaiting_next_response: 0,
+        breaching: 0,
+      },
+    }),
+  );
+  await page.route("**/api/v1/admin/tickets/stats**", (route) =>
+    route.fulfill({ json: { total: 0, open: 0, assigned: 0, resolved: 0, by_priority: {}, by_team: {} } }),
+  );
+  await page.route("**/api/v1/admin/tickets?**", (route) =>
+    route.fulfill({ json: { tickets: [], teams: [], total: 0 } }),
+  );
+  await page.route("**/api/v1/admin/flags", (route) => route.fulfill({ json: { flags: [] } }));
+}
+
+test.describe("WCAG 2.2 AA automated route audit", () => {
+  test("has no serious or critical axe violations on every required surface in both themes", async ({ page }) => {
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page);
+
+    for (const theme of ["light", "dark"] as const) {
+      await visitInTheme(page, "/", theme);
+      await expect(page.getByLabel("Type your message")).toBeVisible();
+      await expectNoSeriousOrCritical(page, `taxpayer chat (${theme})`);
+
+      await openSettings(page);
+      // The sheet fades in. axe resolves rendered colours, so wait for the
+      // finished state rather than measuring the intentionally translucent
+      // entry animation as if it were the steady UI.
+      await expect(page.locator(".setv2")).toHaveCSS("opacity", "1");
+      await expectNoSeriousOrCritical(page, `settings dialog (${theme})`);
+      await page.keyboard.press("Escape");
+
+      await visitInTheme(page, "/signin", theme);
+      await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+      await expectNoSeriousOrCritical(page, `sign-in (${theme})`);
     }
-
-    expect(violations).toHaveLength(0);
   });
 
-  test("chat area has correct ARIA landmarks", async ({ page }) => {
-    await page.goto("/");
+  test("has no serious or critical axe violations on every required staff surface in both themes", async ({ page }) => {
+    await prepareStaffSession(page);
 
-    // Composer input has aria-label
-    const input = page.getByLabel("Type your message");
-    await expect(input).toBeVisible();
+    const routes = [
+      ["/admin", "Operations overview"],
+      ["/agent", "My queue"],
+      ["/admin/tickets", "Escalation queue"],
+      ["/admin/flags", "Feature flags"],
+    ] as const;
 
-    // Mic button — matched by accessible name (aria-label "Start speaking").
-    // Present in both composer states; only the primary slot beside it swaps.
-    const micBtn = page.getByRole("button", { name: /speak/i });
-    await expect(micBtn.first()).toBeVisible();
-
-    // The primary slot carries an accessible name in BOTH states, which is the
-    // part that matters here: an empty composer offers voice mode, and typing
-    // replaces it with send. Asserting both directions stops the morph from
-    // regressing into a permanently-disabled send button.
-    await expect(page.getByLabel("Enter voice mode")).toBeVisible();
-    await expect(page.getByLabel("Send message")).toHaveCount(0);
-
-    await input.fill("What is EFRIS?");
-    await expect(page.getByLabel("Send message")).toBeVisible();
-    await expect(page.getByLabel("Enter voice mode")).toHaveCount(0);
-
-    await input.fill("");
-    await expect(page.getByLabel("Enter voice mode")).toBeVisible();
-  });
-
-  test("interactive elements are keyboard-accessible", async ({ page }) => {
-    await page.goto("/");
-
-    // Tab to input
-    await page.keyboard.press("Tab");
-    const focused = page.locator(":focus");
-    await expect(focused).toBeVisible();
-
-    // Tab through interactive elements — should not trap
-    for (let i = 0; i < 10; i++) {
-      await page.keyboard.press("Tab");
+    for (const theme of ["light", "dark"] as const) {
+      for (const [path, heading] of routes) {
+        await visitInTheme(page, path, theme);
+        await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+        await expectNoSeriousOrCritical(page, `${path} (${theme})`);
+      }
     }
-    // Still focused on something (no trap)
-    await expect(page.locator(":focus")).toBeVisible();
+  });
+});
+
+test.describe("keyboard and focus regression checks", () => {
+  test("header menu follows the menu-button keyboard pattern and restores focus", async ({ page }) => {
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page);
+    await page.goto("/");
+
+    const trigger = page.getByRole("button", { name: "More options" });
+    await trigger.click();
+    await expect(page.getByRole("menuitem", { name: /^Theme:/ })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("menuitem", { name: "Settings" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(trigger).toBeFocused();
   });
 
-  test("escalation banner uses role=alert for screen readers", async ({
-    page,
-  }) => {
+  test("composer controls and staff tabs are reachable without a pointer", async ({ page }) => {
+    await prepareStaffSession(page);
     await page.goto("/");
-    // If escalation banners exist, they must have role="alert"
-    const alerts = page.locator('[role="alert"]');
-    const count = await alerts.count();
-    // Just verify the selector works — banners are conditional
-    expect(count).toBeGreaterThanOrEqual(0);
+    await expect(page.getByLabel("Type your message")).toBeVisible();
+    await expect(page.getByLabel("Start speaking")).toBeVisible();
+    await expect(page.getByLabel("Enter voice mode")).toBeVisible();
+
+    await page.goto("/agent");
+    const nextUp = page.getByRole("tab", { name: "Next up" });
+    await nextUp.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("tab", { name: "Mine" })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "Mine" })).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("End");
+    await expect(page.getByRole("tab", { name: "Resolved" })).toBeFocused();
+    await expect(page.locator("body")).not.toBeFocused();
   });
 });

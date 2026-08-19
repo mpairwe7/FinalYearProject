@@ -30,7 +30,8 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Mobile Architecture](MOBILE_ARCHITECTURE.md) | Layered architecture, Riverpod 2.6 Notifier, go_router, design tokens, 7 ADRs |
 | **Testing & Quality** |
 | [Frontend Tests](../App/frontend/vitest.config.ts) | Vitest unit/component tests + coverage thresholds |
-| [E2E Tests](../App/frontend/e2e/) | Playwright smoke + axe-core WCAG 2.1 AA accessibility audit |
+| [E2E Tests](../App/frontend/e2e/) | Playwright smoke + axe-core WCAG 2.2 AA accessibility audit |
+| [Accessibility statement](ACCESSIBILITY_CONFORMANCE.md) | WCAG 2.2 AA target, automated evidence, and required independent audit |
 | [Load Tests](../tests/load/k6-chat-slo.js) | k6 SLO validation (p95 latency, error rate) |
 | **Security** |
 | [Security Policy](../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |

@@ -137,10 +137,20 @@
   --text-0:      #0B1220;
   --text-1:      #28303B;
   --text-2:      #55606E;
-  --text-3:      #6B7480;
+  /* Muted small labels must still clear 4.5:1 on the #F5F7FA canvas. */
+  --text-3:      #66717D;
 
   /* Deep blue accent for data UIs reads better than the bright on white. */
   --accent-data: var(--ura-blue);
+  /* Semantic colours double as text in the staff workbench. The dark-theme
+     tints below are excellent fills on a dark canvas but fail 4.5:1 when
+     rendered as small text on a pale chip, so light mode uses their darker
+     AA-safe counterparts. */
+  --ura-blue-bright: #0B57D0;
+  --ura-teal-light:  #0F766E;
+  --success:         #087443;
+  --warning:         #9A5A00;
+  --danger:          #B42318;
 
   /* User bubble: a touch more gold so it reads on white. */
   --grad-user:   linear-gradient(135deg, rgba(249, 199, 79, 0.34), rgba(249, 199, 79, 0.16));
@@ -1649,11 +1659,11 @@ main.legacy-layout {
 .consent-text {
   flex: 1;
 }
-.consent-text strong {
+.consent-text h2 {
   display: block;
+  margin: 0 0 0.25rem;
   font-size: 0.88rem;
   color: var(--text-0);
-  margin-bottom: 0.25rem;
 }
 .consent-text p {
   margin: 0;
@@ -2512,6 +2522,10 @@ a:focus-visible {
 .rail-search:focus-visible {
   outline: 2px solid var(--ura-gold);
   outline-offset: 2px;
+}
+main[tabindex="-1"]:focus-visible {
+  outline: 2px solid var(--ura-gold);
+  outline-offset: 4px;
 }
 
 /* Eliminate 300ms tap delay on all interactive elements (2026 best practice) */
