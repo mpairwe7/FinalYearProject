@@ -156,6 +156,28 @@ def _account_tokens() -> list[str]:
     return [t for t in (SUNBIRD_API_TOKEN, SUNBIRD_FALLBACK_API_TOKEN) if t]
 
 
+def account_summary() -> str:
+    """Which Sunbird accounts are configured — never the tokens themselves.
+
+    Reported on ``/ready`` for the same reason ``language_detection_backend``
+    is: the failover in :func:`_post` only works with two accounts, and with
+    one it degrades silently. ``is_available()`` is True either way, so a
+    deployment running on a single account looked identical to a healthy one
+    from outside — right up until that account's daily quota returned 429 and
+    Luganda narration fell back to an English voice with nothing to fail over
+    to. Names the accounts by role, so "fallback-only" is visible as the
+    misconfiguration it is rather than reading as "the fallback is working".
+    """
+    names = [
+        name
+        for name, token in (("primary", SUNBIRD_API_TOKEN), ("fallback", SUNBIRD_FALLBACK_API_TOKEN))
+        if token
+    ]
+    if not names:
+        return "unavailable"
+    return "+".join(names)
+
+
 def _client_for(token: str) -> httpx.Client:
     client = _clients.get(token)
     if client is None:

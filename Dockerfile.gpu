@@ -1,0 +1,201 @@
+# syntax=docker/dockerfile:1.7
+
+# =============================================================================
+# URA Chatbot API — GPU variant (Spark-TTS-SALT baked in)
+#
+# Everything in the base Dockerfile, plus a pinned-commit checkout of
+# github.com/SparkAudio/Spark-TTS (Apache-2.0) so app.spark_tts_salt's local
+# tier — SPARK_TTS_ENABLED=true by default since 2026-08-19 — actually
+# activates out of the box instead of needing a manual operator step. See
+# docs/runbooks/salt-speech-backends.md for why this lives in a separate
+# Dockerfile rather than the base one: that repo ships no
+# setup.py/pyproject.toml (not pip-installable) and pulls in its own
+# dependency stack (torchaudio, einx, einops, omegaconf, soundfile, soxr) —
+# real image weight and a real supply-chain surface that a CPU-only /
+# CraneCloud-style deployment (the base Dockerfile's actual target) has no
+# use for and should not carry.
+#
+# Build:
+#   docker build -f Dockerfile.gpu -t ura-chatbot-api:gpu .
+#
+# Run (needs nvidia-container-toolkit on the host):
+#   docker run --gpus all -p 8000:8000 --env-file .env ura-chatbot-api:gpu
+#
+# What this does NOT change: App/backend/requirements.txt hard-pins
+# torch==2.12.1 (no CUDA-tag suffix), and no CUDA-generation-specific wheel
+# index (cu121, cu124, cu128, ...) has yet published a build for that exact
+# version — only default PyPI does, and its linux wheel for 2.12.1 bundles
+# CUDA 13.0-generation runtime libs. This means the --extra-index-url below
+# does NOT actually select a CUDA generation for `torch` itself the way it
+# looks like it should: pip/uv can only resolve the pinned version from
+# wherever a matching build exists, so it always lands on PyPI's default
+# regardless of which extra index is offered. (An earlier version of this
+# file had a TORCH_CUDA_TAG build-arg meant to let operators target an
+# older-driver host this way — built and tested, and it changed nothing:
+# torch resolved to 2.12.1 from CUDA-13-bundled PyPI either way, because the
+# arg can't override requirements.txt's own hard pin. Removed rather than
+# shipped as a knob that silently does nothing.)
+#
+# So: this is a *driver compatibility* question the Dockerfile cannot solve
+# by itself. The HOST'S NVIDIA driver has to support CUDA 13.0-generation
+# wheels. Verified on THIS project's dev sandbox (driver reporting CUDA
+# 12.2, i.e. too old): torch.cuda.is_available() is False with that
+# mismatch, silently — no error, just CPU. Confirm on a new host with:
+#   docker run --rm --gpus all --entrypoint python ura-chatbot-api:gpu \
+#     -c "import torch; print(torch.cuda.is_available())"
+# before assuming this image is actually using the GPU there. If it's
+# False, the fix is a newer driver on the host (or waiting for requirements
+# .txt's torch pin to move to a version the host's driver already supports)
+# — not a Dockerfile build-arg; see docs/runbooks/salt-speech-backends.md's
+# "faster inference in production" section for the full story, including
+# why downgrading torch just for this file was rejected (broader untested
+# blast radius across every other torch-dependent code path in the app).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Builder — Install dependencies + bake in Spark-TTS-SALT's BiCodec
+# -----------------------------------------------------------------------------
+ARG PYTHON_IMAGE=python:3.11.11-slim-bookworm
+FROM ${PYTHON_IMAGE} AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+WORKDIR /build
+
+# git: needed only to clone Spark-TTS below — not present in the base image's
+# builder stage, which has no third-party checkout to make.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN uv venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" \
+    VIRTUAL_ENV="/opt/venv"
+
+# Same base install as the CPU/production image — same torch/transformers
+# pin, so Whisper-SALT (already on by default, no bake-in needed — it only
+# ever needed `transformers`) behaves identically here.
+COPY App/backend/requirements.txt ./requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
+
+# Spark-TTS-SALT's own dependencies. Deliberately NOT `pip install -r
+# spark-tts/requirements.txt` — that file pins numpy==2.2.3, torch==2.5.1,
+# torchaudio==2.5.1, transformers==4.46.2 against an older PyTorch generation
+# and would downgrade the versions the line above just installed. Real
+# consequence, not theoretical: this project's own verification pass hit a
+# torch/torchaudio ABI mismatch this exact way (system torch 2.6.0 against a
+# stale torchaudio) — `undefined symbol` on import, not a clean failure. So:
+# torchaudio comes from the SAME index as torch above, unpinned, so the
+# resolver matches it to whatever torch version that line installed; the
+# rest are pure-Python/libsndfile packages with no ABI stake in the match.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match \
+        torchaudio \
+        einops==0.8.1 \
+        einx==0.3.0 \
+        omegaconf==2.3.0 \
+        soundfile==0.12.1 \
+        soxr==0.5.0.post1
+
+# "Unpinned, resolver-matched" (above) still isn't a real binary match: pip's
+# resolver only checks torch/torchaudio *metadata* compatibility, not which
+# CUDA runtime each wheel was actually compiled against. Verified on this
+# build: torch resolves to 2.12.1, bundling CUDA 13.0 (nvidia_cuda_runtime-
+# 13.0.96); torchaudio resolves to 2.11.0+cu128, compiled against CUDA 12.8.
+# torchaudio's compiled extension (_torchaudio*.so) hard-dlopens libcudart —
+# first failure is `OSError: libcudart.so.12: cannot open shared object
+# file` (that library isn't even on the image); installing it just uncovers
+# torchaudio's own explicit guard one layer down: "RuntimeError: Detected
+# that PyTorch and TorchAudio were compiled with different CUDA versions."
+# No torchaudio release on the cu128 index yet targets CUDA 13.0 — this is a
+# real, currently-unresolvable-by-pinning mismatch, not a version typo.
+#
+# The fix is to not ship the broken .so rather than to fight the mismatch.
+# torchaudio/_extension/utils.py's _load_lib() documents this exact escape
+# hatch: if the compiled extension file is *absent*, it returns False (the
+# supported "extension unavailable" degraded mode, written for pex-style
+# deployments); it only raises when the file is *present but fails to load*
+# — which is our case until we remove it. Verified this doesn't regress
+# anything sparktts needs for our code path: grepping sparktts/ for
+# "torchaudio" turns up exactly two use sites — utils/audio.py's
+# highpass_biquad() (only reachable from the voice-cloning/reference-audio
+# tokenize() path, which app.spark_tts_salt.py's synthesize() never calls),
+# and bicodec.py's init_mel_transformer() building a
+# torchaudio.transforms.MelSpectrogram, called unconditionally from
+# BiCodec.__init__ (so it IS in our load path) but never referenced by
+# BiCodec.detokenize() itself (confirmed by reading bicodec.py — detokenize
+# only touches quantizer/speaker_encoder/prenet/decoder). Confirmed by direct
+# test in this exact image with the .so removed: torchaudio imports, its
+# MelSpectrogram constructs and runs forward() correctly (pure tensor STFT +
+# matmul, not compiled-extension-backed), and sparktts's BiCodecTokenizer/
+# BiCodec import cleanly. See docs/runbooks/salt-speech-backends.md for the
+# full verification transcript, including which parts still need a
+# driver/wheel-compatible host and a HF token for Sunbird/spark-tts-salt
+# (gated) to check end to end. Re-run that verification if this
+# torch/torchaudio pin ever moves — the fix is sound for THIS pairing, not
+# guaranteed for the next.
+RUN rm -f /opt/venv/lib/python3.11/site-packages/torchaudio/lib/_torchaudio*.so
+
+# Pinned commit, not a branch — this repo has no tags/releases to pin to
+# instead, and a moving branch would make a build non-reproducible and
+# unreviewable. Re-pin deliberately (new commit, re-read the diff, re-run
+# the verification in docs/runbooks/salt-speech-backends.md) rather than
+# dropping the pin for convenience.
+ARG SPARK_TTS_COMMIT=2f1ea9082400547242641f5271b6f941c9f439d1
+RUN git clone https://github.com/SparkAudio/Spark-TTS /opt/spark-tts && \
+    git -C /opt/spark-tts checkout "${SPARK_TTS_COMMIT}" && \
+    rm -rf /opt/spark-tts/.git
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime — Production image
+# -----------------------------------------------------------------------------
+FROM ${PYTHON_IMAGE} AS runtime
+
+LABEL org.opencontainers.image.title="URA Chatbot API (GPU)" \
+      org.opencontainers.image.description="Uganda Revenue Authority Chatbot API — GPU variant with Spark-TTS-SALT baked in" \
+      org.opencontainers.image.vendor="mpairweLandwind" \
+      org.opencontainers.image.source="https://github.com/mpairweLandwind/FinalYearProject"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    APP_ENV=production \
+    PORT=8000 \
+    WORKERS=4 \
+    SPARK_TTS_ENABLED=true \
+    SPARK_TTS_REPO_DIR=/opt/spark-tts \
+    SPARK_TTS_DEVICE=cuda \
+    WHISPER_SALT_DEVICE=cuda
+
+WORKDIR /app
+
+RUN groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser
+
+COPY --from=builder /opt/venv /opt/venv
+# World-readable: appuser only needs read+execute here, and there is no
+# reason to chown a third-party checkout to the app's own user.
+COPY --from=builder --chmod=755 /opt/spark-tts /opt/spark-tts
+
+COPY --chown=appuser:appuser App/backend/app ./app/
+COPY --chown=appuser:appuser App/backend/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+RUN mkdir -p /app/models /app/logs /app/cache /app/offline /app/quantized /app/hf_cache && \
+    chown -R appuser:appuser /app && \
+    chmod +x /usr/local/bin/entrypoint.sh
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["python", "-c", "import os,sys,urllib.request;url=f'http://127.0.0.1:{os.getenv(\"PORT\",\"8000\")}/health';sys.exit(0 if urllib.request.urlopen(url, timeout=5).status == 200 else 1)"]
+
+EXPOSE 8000
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

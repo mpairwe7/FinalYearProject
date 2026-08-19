@@ -1,0 +1,96 @@
+# Local GPU dev overlay — Sunbird/Sunflower-14B-FP8 via vLLM.
+#
+# Mirrors docker-compose.local-qwen.yml's shape (own vllm service + api
+# env override), but serves the LOCAL on-disk checkpoint at
+# App/Model/Sunflower-14B-FP8 rather than pulling from HuggingFace — this
+# is the same mount + --served-model-name pattern already proven in
+# docs/runbooks/capacity-slo.md (measured 2026-08-19, one RTX A6000,
+# vllm/vllm-openai:v0.8.5; see App/docs/traceability/capacity-envelope-2026-08-19.md).
+#
+#   cd App && docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml up -d
+#
+# Sunflower ships pre-quantized (FP8_DYNAMIC, compressed-tensors) — do not
+# combine this with LLM_LOAD_IN_4BIT or any local (non-vLLM) loading path;
+# it is not validated there. See the LLM Configuration block in
+# .env.example for why.
+#
+# --enable-auto-tool-choice --tool-call-parser hermes: NOT part of the
+# proven capacity-runbook invocation this file otherwise mirrors, but tested
+# separately here since this project's agentic mode (FLAG_TOOL_USE,
+# FLAG_AGENTIC_MODE, both default-on) depends on tool-calling working.
+# Verified 2026-08-19 against a live Sunflower vLLM server (same Qwen3
+# architecture family as Qwen3-8B, which already uses this parser):
+#   - Without these flags, tool_choice="auto" fails outright — vLLM 400s
+#     with '"auto" tool choice requires --enable-auto-tool-choice and
+#     --tool-call-parser to be set'. Not optional to omit.
+#   - With them, tool_choice="required" produces a correctly-formed
+#     tool_calls entry (right function name, right JSON-typed arguments)
+#     for a real multiply(a, b) tool — the parser itself works.
+#   - Under tool_choice="auto" specifically, one direct math-tool prompt
+#     ("calculate VAT on 500000 UGX using the calculator tool") got answered
+#     in prose instead of a tool call — the model computed and stated 90,000
+#     UGX correctly, it just chose not to invoke the tool that was right
+#     there. That is a model-judgment question (how eagerly Sunflower elects
+#     to call tools under "auto", vs. Qwen3-8B-Instruct's tuning for this),
+#     not a parser incompatibility, but it means agentic-mode tool-call rates
+#     against this model are worth watching in practice — see
+#     evals/AGENTS.md's routing-golden-set gate for where that would show up.
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.8.5
+    container_name: ura-app-vllm-sunflower
+    command:
+      - --model
+      - /model
+      - --served-model-name
+      - Sunbird/Sunflower-14B-FP8
+      - --port
+      - "8001"
+      - --max-model-len
+      - "${SUNFLOWER_MAX_MODEL_LEN:-4096}"
+      - --gpu-memory-utilization
+      - "${SUNFLOWER_GPU_MEM_UTIL:-0.70}"
+      - --max-num-seqs
+      - "64"
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+    ports:
+      - "8011:8001"
+    volumes:
+      # Read-only mount of the already-downloaded 16GB checkpoint — no
+      # network pull needed, matching the proven recipe exactly.
+      - ${SUNFLOWER_LOCAL_MODEL_DIR:-./Model/Sunflower-14B-FP8}:/model:ro
+    ipc: host
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${SUNFLOWER_GPU_ID:-4}
+      - HF_HUB_OFFLINE=1
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/v1/models', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 6m
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${SUNFLOWER_GPU_ID:-4}"]
+              capabilities: [gpu]
+    networks:
+      - app-network
+
+  api:
+    environment:
+      - LLM_BACKEND=vllm
+      - LLM_MODEL=Sunbird/Sunflower-14B-FP8
+      - VLLM_BASE_URL=http://vllm:8001/v1
+      - VLLM_API_KEY=not-needed
+      - VLLM_HTTP_TIMEOUT=120
+      - LLM_MAX_TOKENS=512
+      - ANALYTICS_DB_DIR=/tmp/ura-analytics
+    depends_on:
+      vllm:
+        condition: service_healthy

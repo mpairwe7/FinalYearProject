@@ -1860,8 +1860,9 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `DENSE_MODEL` | Embedding model | `BAAI/bge-m3` |
 | `RERANKER_MODEL` | Cross-encoder reranker | `mixedbread-ai/mxbai-rerank-base-v2` |
 | `RERANK_ENABLED` | Enable cross-encoder reranking | `true` |
-| **LLM Generation (Qwen3-8B)** | | |
-| `LLM_MODEL` | HuggingFace model ID | `Qwen/Qwen3-8B` |
+| **LLM Generation (Sunbird/Sunflower-14B-FP8 via vLLM)** | | |
+| `LLM_MODEL` | HuggingFace model ID | `Sunbird/Sunflower-14B-FP8` (simple local fallback: `Qwen/Qwen3-8B`) |
+| `LLM_BACKEND` | `local` (Transformers+BnB) or `vllm` (required for the default above) | `vllm` |
 | `LLM_ENABLED` | Enable LLM generation (`false` = FAQ lookup fallback) | `true` |
 | `LLM_DEVICE` | Device for inference (`auto`, `cpu`, `cuda`) | `auto` |
 | `LLM_TORCH_DTYPE` | Tensor dtype (`float16`, `bfloat16`, `float32`, `auto`) | `auto` |

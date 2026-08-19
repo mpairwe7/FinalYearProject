@@ -31,14 +31,18 @@ Complete documentation for the URA Chatbot MLOps project.
 | **Testing & Quality** |
 | [Frontend Tests](../App/frontend/vitest.config.ts) | Vitest unit/component tests + coverage thresholds |
 | [E2E Tests](../App/frontend/e2e/) | Playwright smoke + axe-core WCAG 2.1 AA accessibility audit |
-| [Load Tests](../tests/load/k6-chat-slo.js) | k6 SLO validation (p95 latency, error rate) |
+| [Load Tests](../tests/load/k6-chat-slo.js) | k6 SLO validation (p95 latency, error rate) — **not in CI**; see measured envelope |
+| [Capacity envelope (2026-08-19)](../App/docs/traceability/capacity-envelope-2026-08-19.md) | Measured p50/p95/p99, Qdrant FAQ JSONL seed, GPU + API limits |
+| [Capacity / SLO runbook](runbooks/capacity-slo.md) | Operator headroom, seed commands, SLO split |
+| [Corpus coverage runbook](runbooks/corpus-coverage.md) | Curated taxpayer question bank, per-domain coverage floors, corpus/api/voice modes, URA sign-off |
+| [SALT speech backends runbook](runbooks/salt-speech-backends.md) | Sunbird SALT ASR (on by default) + TTS (opt-in) — verified language tokens, speaker ids, checkout recipe |
 | **Security** |
 | [Security Policy](../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
 | [AI Red Team](../scripts/ai_red_team.py) | 50 adversarial prompts across 10 NIST AI 600-1 categories |
 | [Incident Response Sim](../scripts/incident_response_sim.py) | Automated playbook validation (3 AI-specific scenarios) |
 | **Governance & Compliance** |
 | [AI Risk Manifest](../governance/ai_risk_manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM, EU AI Act risk register |
-| [Compliance Gate](../governance/compliance_check.py) | CI gate script (10 files + 29 keywords) |
+| [Compliance Gate](../governance/compliance_check.py) | CI gate script (20 files + 36 keywords) |
 | [Model Card](MODEL_CARD.md) | EU AI Act Article 53 model card (components, eval, ethics, limitations) |
 | [Privacy Impact Assessment](capstone/PIA.md) | NDPA 2019 §28 PIA (7 risks, compliance matrix, audit trail) |
 | [Bias & Fairness Audit](../scripts/bias_fairness_audit.py) | Language parity + taxpayer type parity evaluation |
@@ -113,7 +117,7 @@ FinalYearProject/
 │   ├── validate_env.py   # Pre-deployment env validation
 │   └── dr_test.sh        # Disaster recovery test (Qdrant + SQLite + health)
 ├── tests/
-│   └── load/k6-chat-slo.js # k6 load test (p95 < 3s, error rate < 1%)
+│   └── load/k6-chat-slo.js # k6 load test (p95 < 3s, error rate < 1%; not in CI)
 └── docs/                  # Documentation
 ```
 

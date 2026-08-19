@@ -1,0 +1,200 @@
+# Corpus-coverage domain registry (issue #303).
+#
+# The unit of reporting is a *taxpayer-facing domain*, not a CSV file: a
+# taxpayer asking "how do I register for a TIN" does not know the answer is
+# split across ura_instant_tin_application_faqs.csv,
+# ura_taxpayer_starter_pack_faqs.csv and the handbook. Coverage is therefore
+# measured per domain and each domain names the corpus files that are allowed
+# to answer for it.
+#
+# Every ura_*_faqs.csv in Data/dataset MUST appear under exactly one or more
+# domains here. A new corpus file with no domain — and no question in
+# Data/eval/coverage_bank.jsonl — fails the gate (acceptance criterion 6).
+#
+# `floor` is the fraction of that domain's bank questions that must be
+# answered on-target. Floors are set *below* the measured rate with headroom,
+# the same convention as SELF_RETRIEVAL_FLOOR in
+# App/backend/tests/test_retrieval_regression_gate.py: a gate that trips on a
+# single new near-duplicate FAQ gets disabled rather than fixed.
+#
+# `review` is the domain-owner sign-off (acceptance criterion 5). `by` and
+# `role` record who reviewed the question bank for this domain; `date` is when.
+# `role: ura_domain_owner` is the only value that counts as URA sign-off —
+# see docs/runbooks/corpus-coverage.md for the sign-off procedure.
+
+version: 1
+
+# Whole-bank floor, gated alongside the per-domain ones. With 105 questions it
+# has the resolution the per-domain figures lack (a four-question domain moves
+# in 25-point steps), so this is what catches slow aggregate drift while the
+# per-domain floors catch a single domain falling over.
+# Measured 85.7% English on 2026-08-20; 0.80 leaves ~6 questions of headroom.
+overall_floor: 0.80
+
+# Bank-wide defaults; a domain may override any of them. Every domain sets its
+# own `floor`, one question below its measured rate — the resolution the bank
+# actually has. This default only applies to a domain added without one.
+defaults:
+  floor: 0.60
+  review:
+    by: engineering
+    role: engineering
+    date: "2026-08-20"
+    note: "Drafted from URA contact-centre themes; awaiting URA domain-owner sign-off."
+
+domains:
+  tin:
+    label: "TIN registration"
+    floor: 0.60
+    sources:
+      - ura_instant_tin_application_faqs.csv
+      - ura_taxpayer_starter_pack_faqs.csv
+      - ura_taxation_handbook_fy2025_26_faqs.csv
+
+  vat:
+    label: "Value Added Tax"
+    floor: 0.60
+    sources:
+      - ura_vat_faqs.csv
+      - ura_exempt_income_faqs.csv
+
+  paye:
+    label: "PAYE / employment income"
+    floor: 0.40
+    sources:
+      - ura_employment_income_faqs.csv
+
+  wht:
+    label: "Withholding tax"
+    floor: 0.60
+    sources:
+      - ura_withholding_tax_faqs.csv
+
+  cit:
+    label: "Corporation tax"
+    floor: 0.75
+    sources:
+      - ura_corporation_tax_faqs.csv
+
+  rental:
+    label: "Rental income tax"
+    floor: 0.60
+    sources:
+      - ura_rental_income_tax_faqs.csv
+
+  cgt:
+    label: "Capital gains tax"
+    floor: 0.75
+    sources:
+      - ura_capital_gains_faqs.csv
+
+  efris:
+    label: "EFRIS e-invoicing"
+    floor: 0.80
+    sources:
+      - ura_efris_faqs.csv
+      - ura_edition_02_teeny_faqs.csv
+
+  dts:
+    label: "Digital tax stamps"
+    floor: 0.50
+    sources:
+      - ura_dts_faqs.csv
+      - ura_dts_digital_tax_stamps_faqs.csv
+
+  customs:
+    label: "Customs — import, valuation, offences"
+    floor: 0.66
+    sources:
+      - ura_customs_valuation_faqs.csv
+      - ura_customs_offences_faqs.csv
+      - ura_documents_point_of_entry_faqs.csv
+      - ura_passenger_baggage_faqs.csv
+      - ura_groupage_cargo_faqs.csv
+      - ura_smuggling_effects_faqs.csv
+      - ura_authorised_economic_operator_faqs.csv
+
+  export:
+    label: "Export procedures"
+    floor: 0.75
+    sources:
+      - ura_export_procedures_faqs.csv
+      - ura_export_process_faqs.csv
+
+  objections:
+    label: "Objections and appeals"
+    floor: 0.60
+    sources:
+      - ura_objections_and_appeals_faqs.csv
+
+  payments:
+    label: "Making a payment (PRN)"
+    floor: 0.80
+    sources:
+      - ura_make_a_payment_faqs.csv
+
+  eservices:
+    label: "URA portal and e-services"
+    floor: 0.60
+    sources:
+      - ura_processes_systems_faqs.csv
+
+  small_business:
+    label: "Small business and presumptive tax"
+    floor: 0.80
+    sources:
+      - ura_taxes_on_small_businesses_faqs.csv
+      - ura_financial_management_skills_faqs.csv
+      - ura_business_records_faqs.csv
+
+  ngo_religious:
+    label: "NGOs and religious institutions"
+    floor: 0.60
+    sources:
+      - ura_tax_obligations_ngos_faqs.csv
+      - ura_religious_institution_fy2024_25_faqs.csv
+
+  stamp_duty:
+    label: "Stamp duty"
+    floor: 0.50
+    sources:
+      - ura_stamp_duty_faqs.csv
+
+  gaming:
+    label: "Gaming and pool betting"
+    floor: 0.75
+    sources:
+      - ura_gaming_pool_betting_faqs.csv
+
+  advance_tax:
+    label: "Advance tax — transport sector"
+    floor: 0.75
+    sources:
+      - ura_advance_tax_transport_faqs.csv
+
+  exemptions:
+    label: "Tax exemptions"
+    floor: 0.75
+    sources:
+      - ura_tax_exemption_faqs.csv
+
+  policy:
+    label: "Budget amendments, laws and acts"
+    floor: 0.50
+    sources:
+      - ura_post_budget_policy_amendments_2025_26_faqs.csv
+      - ura_laws_and_acts_faqs.csv
+
+  eoi:
+    label: "Exchange of information"
+    floor: 0.50
+    sources:
+      - ura_exchange_of_information_faqs.csv
+
+  about_ura:
+    label: "About URA and whistleblowing"
+    floor: 0.50
+    sources:
+      - ura_about_ura_faqs.csv
+      - ura_whistleblowing_faqs.csv
+      - ura_edition_02_toto_faqs.csv

@@ -1,0 +1,93 @@
+# Local-only overlay for the issue-303 corpus-coverage + voice run.
+# See docs/runbooks/corpus-coverage.md. Not referenced by CI or any deployment.
+#
+#   cd App
+#   QWEN_GPU_ID=3 API_GPU_ID=4 docker compose \
+#     -f docker-compose.yml -f docker-compose.local-qwen.yml \
+#     -f docker-compose.coverage-gpu.yml up -d qdrant redis vllm api
+#
+# It does two things the base overlays do not:
+#
+#  1. Pins each GPU consumer to a named device. `docker-compose.local-qwen.yml`
+#     defaults vLLM to GPU 4 and the base file hardcodes the API to GPU 2;
+#     on a shared box those are whatever happens to be busy. Pick idle ones
+#     with `bash scripts/select_free_gpu.sh` and pass them in.
+#
+#  2. Gives the speech pipeline something real to run. The image ships no ASR
+#     or TTS model and mounts the HF cache read-only from NAS, so `POST /v1/asr`
+#     answered "All ASR backends failed" for every locale. This points the
+#     Whisper tier at the fine-tuned Luganda adapter this repo already carries
+#     and gives it a writable cache so openai/whisper-small is fetched once.
+#
+# Only Luganda has an adapter (`fine-tuning/adapters/` is empty and
+# WHISPER_ADAPTER_SW/NYN/ACH have nothing to point at), so English and
+# Kiswahili fall through speech_service's legacy `_whisper_peft` compat path
+# and are transcribed by the Luganda-merged model. That is a real gap in what
+# the deployment ships, not a quirk of this overlay — read any non-Luganda
+# transcript accordingly.
+services:
+  vllm:
+    command:
+      - --model
+      - ${QWEN_MODEL:-Qwen/Qwen3-8B}
+      - --port
+      - "8001"
+      - --max-model-len
+      - "8192"
+      # Lower than local-qwen.yml's 0.70: this leaves room on a card that
+      # already has other tenants' work on it.
+      - --gpu-memory-utilization
+      - "${VLLM_GPU_MEM_UTIL:-0.55}"
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${QWEN_GPU_ID:-3}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${QWEN_GPU_ID:-3}"]
+              capabilities: [gpu]
+
+  api:
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${API_GPU_ID:-4}
+      - SPEECH_ENABLED=true
+      - SPEECH_ASR_BACKEND=auto
+      - SPEECH_TTS_BACKEND=auto
+      # The repo's own fine-tuned Luganda Whisper LoRA, merged onto
+      # openai/whisper-small at startup.
+      - WHISPER_ADAPTER_LG=/app/artifacts/speech/asr/whisper_lg/final
+      # cpu deliberately: this host's driver is CUDA 12.2 and the image's torch
+      # is cu128, so torch.cuda.is_available() is False inside the container no
+      # matter what is reserved above. Reserving the GPU anyway keeps the
+      # compose file correct for a host whose driver does match.
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
+      # Writable, unlike the NAS mount the base file uses, so the Whisper base
+      # checkpoint can be fetched on first run.
+      - HF_HOME=/app/hf_writable
+      - HF_HUB_OFFLINE=0
+      # Sunbird's native Luganda (salt_lug_0001) and Kiswahili
+      # (waxal_swa_0006) voices are the ones this product should be heard in,
+      # and its /tasks/audio/speech and /tasks/audio/transcriptions endpoints
+      # do serve them — measured 5.8s to a signed URL plus 2.3s to fetch a
+      # 172 KB RIFF WAV once warm. The FIRST call is a cold start that
+      # overruns the 30s default, and sunbird._post deliberately does not
+      # retry the same account, so with a single token configured the native
+      # voice is lost on exactly the call that matters and Luganda falls
+      # through to an English edge-tts stand-in. 90s absorbs the cold start.
+      # The real fix is a second account token (see issue #298), not a longer
+      # timeout — this is the local test stack, not a production default.
+      - SUNBIRD_TIMEOUT=${SUNBIRD_TIMEOUT:-90}
+    volumes:
+      - ${HF_WRITABLE_DIR:-${HOME}/.cache/huggingface}:/app/hf_writable
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${API_GPU_ID:-4}"]
+              capabilities: [gpu]

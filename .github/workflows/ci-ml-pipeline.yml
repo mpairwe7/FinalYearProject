@@ -175,6 +175,77 @@ jobs:
           QDRANT_ENABLED: 'false'
         run: python -m ml.scripts.eval_retrieval --min-hit1 0.85
 
+      - name: Corpus coverage gate
+        # Issue #303. Every gate above scores rows the corpus was BUILT from —
+        # ask an indexed FAQ its own question and it retrieves itself, so a
+        # subject the corpus simply does not cover is invisible. That is how
+        # "How do I object to a tax assessment I disagree with?" reached
+        # production abstaining.
+        #
+        # This asks the questions taxpayers ask instead (Data/eval/coverage_bank.jsonl,
+        # drawn from URA contact-centre themes) and gates the answered rate per
+        # tax domain against the floors in Data/eval/coverage_domains.yaml, plus
+        # a whole-bank floor. Every abstention and every on-topic-but-wrong
+        # answer is printed by question, so a failure is a work list.
+        #
+        # English only: the indexed corpus is English, and Luganda/Kiswahili
+        # coverage is a property of translate-then-retrieve rather than of the
+        # corpus. Those are measured with `--mode api` against a running
+        # deployment (docs/runbooks/corpus-coverage.md), which this job has not
+        # got. Runs offline in seconds — no Qdrant, no LLM, no network.
+        working-directory: App/backend
+        env:
+          PYTHONPATH: .:${{ github.workspace }}
+          LLM_ENABLED: 'false'
+          QDRANT_ENABLED: 'false'
+          SPEECH_ENABLED: 'false'
+        run: |
+          python -m ml.pipelines.corpus_coverage \
+            --languages en \
+            --fail-under-floor \
+            --output "${RUNNER_TEMP}/corpus_coverage.json"
+
+      - name: Publish corpus coverage figures
+        if: always()
+        # The per-domain figure is the deliverable, not just the pass/fail —
+        # it belongs where a reviewer sees it without opening an artifact.
+        working-directory: App/backend
+        run: |
+          test -f "${RUNNER_TEMP}/corpus_coverage.json" || exit 0
+          python - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json, os
+
+          report = json.load(open(f"{os.environ['RUNNER_TEMP']}/corpus_coverage.json"))
+          totals = report["totals"]
+          print("## Corpus coverage (issue #303)\n")
+          print(
+              f"**{totals['coverage']:.1%}** of {totals['scored']} curated taxpayer "
+              f"questions answered on target "
+              f"(floor {totals.get('floor', 0):.0%}) — "
+              f"{totals['abstained']} abstained, {totals['weak']} answered off target.\n"
+          )
+          print("| Domain | Coverage | Floor | Abstained | Weak |")
+          print("| --- | ---: | ---: | ---: | ---: |")
+          for name, row in report["by_domain"].items():
+              mark = "" if row["passed"] else " :x:"
+              print(
+                  f"| {row['label']}{mark} | {row['coverage']:.0%} | {row['floor']:.0%} "
+                  f"| {row['abstained']} | {row['weak']} |"
+              )
+          gaps = report["gaps"]
+          if gaps:
+              print(f"\n<details><summary>{len(gaps)} gaps by question</summary>\n")
+              for gap in gaps:
+                  print(f"- `{gap['status']}` **{gap['domain']}** — {gap['question']}")
+              print("\n</details>")
+          pending = report["meta"].get("pending_ura_signoff") or []
+          if pending:
+              print(
+                  f"\n{len(pending)} domain(s) still awaiting URA domain-owner "
+                  f"sign-off on the question bank: {', '.join(pending)}."
+              )
+          PY
+
       - name: Live-retrieval evaluation smoke
         # evaluate_rag_offline is the only pipeline that drives real retrieval
         # (the CI grounding gate scores frozen contexts), and it had never run

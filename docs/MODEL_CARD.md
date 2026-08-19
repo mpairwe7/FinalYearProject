@@ -21,13 +21,13 @@
 
 | Component | Model | Parameters | Purpose |
 |-----------|-------|------------|---------|
-| **LLM (server)** | Qwen/Qwen3-8B | 8B | Answer generation + tool-calling (Apache-2.0, 128K context) |
+| **LLM (server)** | Sunbird/Sunflower-14B-FP8 (via vLLM) | 14B (FP8) | Answer generation + tool-calling (Apache-2.0, natively multilingual for Ugandan languages); Qwen/Qwen3-8B is the simple local-Transformers fallback (see docs/MODEL_SWAP_GUIDE.md) |
 | **LLM (mobile)** | google/gemma-2-2b-it GGUF Q4_K_M | 2B (quantised) | Offline mobile inference |
 | **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings (MTEB 63.0) |
 | **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |
 | **Reranker** | mixedbread-ai/mxbai-rerank-base-v2 | 500M | Passage reranking (BEIR 55.6, Apache-2.0) |
-| **ASR (server)** | Whisper Small + LoRA adapters | 244M | Speech-to-text (5 languages) |
-| **TTS (server)** | Piper native voices | ~40M per locale | Text-to-speech (5 languages) |
+| **ASR (server)** | Sunbird/asr-whisper-large-v3-salt | 1.5B | Speech-to-text (5 languages, one checkpoint; on by default — see docs/runbooks/salt-speech-backends.md); Whisper Small + LoRA adapters is the fallback tier |
+| **TTS (server)** | Sunbird/spark-tts-salt + BiCodec (opt-in, verified) / Piper native voices (fallback) | 0.5B + 0.6B | Text-to-speech (4-5 languages; local-first, Sunbird cloud and edge-tts as fallbacks) |
 | **MT (server)** | Qwen3-8B prompted / ONNX | varies | Machine translation (en ↔ lg/sw/nyn/ach) |
 | **Speech cloud** | Sunbird AI API | N/A (cloud) | Fallback ASR/TTS/MT for Ugandan languages |
 | **ASR (mobile)** | Whisper Small INT8 | 244M (quantised) | On-device speech recognition |

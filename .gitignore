@@ -55,6 +55,12 @@ Model/*.onnx
 Model/*.tflite
 Model/faiss_index/
 
+# Downloaded LLM checkpoints (16GB+ safetensors shards + HF cache locks —
+# App/Model/Sunflower-14B-FP8/ is a local snapshot_download of
+# Sunbird/Sunflower-14B-FP8, not a repo artifact; re-download via
+# LLM_MODEL/.env.example rather than committing it)
+App/Model/
+
 # On-device LLM weights (too large for Git, distribute via release/HF Hub)
 *.gguf
 
@@ -64,6 +70,9 @@ Results/plots/*.png
 Results/plots/*.pdf
 Results/reports/*.json
 Results/reports/*.csv
+# Corpus-coverage run reports (#303) — measurements, not artefacts to review;
+# the gate reads floors from Data/eval/coverage_domains.yaml, not from these.
+Results/eval/*.json
 
 # Node.js
 node_modules/

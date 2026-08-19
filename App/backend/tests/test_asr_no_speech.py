@@ -48,6 +48,7 @@ class _Bare:
     _asr = None
     _lang_det = None
     _whisper_peft = None
+    _whisper_salt = None
     _accent_detector = None
     _whisper_adapters: dict = {}
     _breakers: dict = {}

@@ -5,7 +5,7 @@
 The URA Chatbot implements a production-grade Retrieval-Augmented Generation pipeline with local LLM inference, agentic supervisor routing, guided workflows, and a full speech pipeline. The system runs entirely on-premises (no external API calls for core RAG), making it suitable for air-gapped or privacy-sensitive government deployments.
 
 **API Version**: 1.3.0
-**LLM**: Qwen/Qwen3-8B (local HF transformers or vLLM HTTP, Apache-2.0, 128K context)
+**LLM**: Sunbird/Sunflower-14B-FP8 (Qwen3-14B base, FP8-quantized, via vLLM — Apache-2.0, natively multilingual for Ugandan languages; Qwen/Qwen3-8B is the simple local-Transformers fallback, see docs/MODEL_SWAP_GUIDE.md)
 **Retrieval**: Qdrant dense (BAAI/bge-m3, 1024-dim) + BM25 sparse + RRF fusion + mxbai-rerank-base-v2
 **Speech**: Whisper (ASR) + Piper (TTS) + Sunbird AI cloud fallback (5 Ugandan languages)
 **Auth**: JWT (HS256 dev / RS256 OIDC prod), RBAC, consent-gated personalization
@@ -128,7 +128,7 @@ User Query
 
 | Setting | Default | Env Var |
 |---------|---------|---------|
-| Model | `Qwen/Qwen3-8B` | `LLM_MODEL` |
+| Model | `Sunbird/Sunflower-14B-FP8` (vLLM) | `LLM_MODEL` / `LLM_BACKEND` |
 | Backend | `local` (HF transformers) | `LLM_BACKEND` (`local` or `vllm`) |
 | Context window | 8192 tokens | `LLM_CONTEXT_WINDOW` |
 | Device | `auto` (GPU if available) | `LLM_DEVICE` |

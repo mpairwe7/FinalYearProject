@@ -25,6 +25,11 @@ REQUIRED_FILES = [
     "ml/pipelines/quality_gates.py",
     "Data/eval/rag_eval.jsonl",
     "Data/eval/rag_eval_lg.jsonl",
+    # Corpus-coverage gate (#303) — the evidence that abstentions on common
+    # taxpayer questions are measured before release, not found in production.
+    "Data/eval/coverage_bank.jsonl",
+    "Data/eval/coverage_domains.yaml",
+    "ml/pipelines/corpus_coverage.py",
     "ml/pipelines/export_feedback.py",
     # DevSecOps threat modelling artifacts
     "threat-model/tm.py",

@@ -30,6 +30,13 @@ openpyxl==3.1.5
 # Hybrid retrieval (BM25 sparse + cross-encoder reranking)
 rank-bm25==0.2.2
 
+# Config for the CI gates — ml/pipelines/quality_gates.py and
+# ml/pipelines/corpus_coverage.py both read YAML. It has only ever arrived
+# transitively (via transformers/datasets); declared here because a gate that
+# stops running when an unrelated dependency drops it is a gate that silently
+# stops gating.
+PyYAML>=6.0,<7
+
 # PDF ingestion + generation
 pymupdf4llm==1.27.2.3
 pymupdf==1.27.2.3
