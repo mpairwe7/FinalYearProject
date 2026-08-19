@@ -35,7 +35,7 @@ cd App/backend
 python -m app.indexer --export-faq-jsonl     # CSV  -> faq_jsonl/
 python -m app.indexer --export-pdf-jsonl     # PDFs -> pdf_jsonl/   (minutes)
 python -m app.indexer --export-crawl-jsonl   # crawl -> crawl_jsonl/ (seconds)
-python -m app.indexer --recreate             # build Qdrant from every export
+python -m app.index_lifecycle --rebuild       # safely stage + promote Qdrant
 python scripts/reindex_vectorize.py --create # build Vectorize from the same JSONL
 ```
 

@@ -28,9 +28,11 @@ Usage:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -125,9 +127,38 @@ def _vector_payload(doc: dict[str, Any]) -> dict[str, Any]:
     keeping it would store every chunk body twice per point.
     """
     return {k: v for k, v in doc.items() if k != "embed_text"}
+
+
+def _write_bm25_state(path: Path, state: dict[str, Any]) -> None:
+    """Atomically persist a BM25 state file for legacy/offline consumers."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w") as fh:
+        json.dump(state, fh, sort_keys=True)
+        fh.write("\n")
+    tmp.replace(path)
+
+
+def _packed_bm25_state(state: dict[str, Any]) -> str:
+    """Compact BM25 state embedded in the Qdrant binding sentinel.
+
+    A staged collection can be promoted by changing one Qdrant alias. Keeping
+    the sparse encoder state beside that collection means a running retriever
+    can load the matching state after the alias swap; it never has to pair a
+    new sparse index with an old local ``bm25_state.json``.
+    """
+    raw = json.dumps(state, separators=(",", ":"), sort_keys=True).encode()
+    return base64.b64encode(zlib.compress(raw, level=9)).decode("ascii")
+
+
 def build_index(
     documents: list[dict[str, Any]],
     recreate: bool = False,
+    *,
+    collection_name: str | None = None,
+    binding_collection_name: str | None = None,
+    bm25_state_path: Path | None = None,
+    source_corpus_hash: str = "",
 ) -> dict[str, Any]:
     """Embed *documents* and upsert into Qdrant with dense + sparse vectors.
 
@@ -154,17 +185,20 @@ def build_index(
 
         dense_model = SentenceTransformer(DENSE_MODEL_NAME)
 
+    collection = collection_name or QDRANT_COLLECTION
+    binding_collection = binding_collection_name or collection
+    state_path = bm25_state_path or BM25_STATE_PATH
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
 
     # -- Collection management -----------------------------------------------
     existing = [c.name for c in client.get_collections().collections]
-    if recreate and QDRANT_COLLECTION in existing:
-        client.delete_collection(QDRANT_COLLECTION)
-        logger.info("Deleted existing collection '%s'", QDRANT_COLLECTION)
+    if recreate and collection in existing:
+        client.delete_collection(collection)
+        logger.info("Deleted existing collection '%s'", collection)
 
-    if QDRANT_COLLECTION not in existing or recreate:
+    if collection not in existing or recreate:
         client.create_collection(
-            collection_name=QDRANT_COLLECTION,
+            collection_name=collection,
             vectors_config=(
                 {}
                 if SPARSE_ONLY_INDEX
@@ -183,7 +217,7 @@ def build_index(
         )
         logger.info(
             "Created Qdrant collection '%s' (%s)",
-            QDRANT_COLLECTION,
+            collection,
             "sparse only" if SPARSE_ONLY_INDEX else f"dense {DENSE_DIM}d + sparse",
         )
 
@@ -193,10 +227,9 @@ def build_index(
     texts = [_embedding_text(d) for d in documents]
     sparse_encoder = BM25SparseEncoder().fit(texts)
 
-    BM25_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(BM25_STATE_PATH, "w") as f:
-        json.dump(sparse_encoder.to_dict(), f)
-    logger.info("Saved BM25 state to %s", BM25_STATE_PATH)
+    bm25_state = sparse_encoder.to_dict()
+    _write_bm25_state(state_path, bm25_state)
+    logger.info("Saved BM25 state to %s", state_path)
 
     # -- Batch embed + upsert ------------------------------------------------
     total_upserted = 0
@@ -226,7 +259,7 @@ def build_index(
                 )
             )
 
-        client.upsert(collection_name=QDRANT_COLLECTION, points=points)
+        client.upsert(collection_name=collection, points=points)
         total_upserted += len(points)
         logger.info(
             "Upserted batch %d–%d (%d/%d)",
@@ -239,14 +272,16 @@ def build_index(
     # Stamp the corpus hash into Qdrant so the retriever can detect a
     # bm25_state.json that is out of sync with these vectors (P1-6).
     client.upsert(
-        collection_name=QDRANT_COLLECTION,
+        collection_name=collection,
         points=[
             models.PointStruct(
-                id=bm25_binding_sentinel_id(QDRANT_COLLECTION),
+                id=bm25_binding_sentinel_id(binding_collection),
                 vector={} if SPARSE_ONLY_INDEX else {"dense": [0.0] * DENSE_DIM},
                 payload={
                     "_meta": "bm25_binding",
                     "corpus_hash": sparse_encoder.corpus_hash,
+                    "source_corpus_hash": source_corpus_hash,
+                    "bm25_state_zlib": _packed_bm25_state(bm25_state),
                     # Dense-side binding: querying a bge-m3 collection with a
                     # different encoder returns confident nonsense rather than
                     # an error, so the retriever verifies this at init. Omitted
@@ -263,7 +298,9 @@ def build_index(
     )
 
     stats = {
-        "collection": QDRANT_COLLECTION,
+        "collection": collection,
+        "binding_collection": binding_collection,
+        "source_corpus_hash": source_corpus_hash,
         "total_documents": len(documents),
         "total_upserted": total_upserted,
         "faq_jsonl_documents": sum(1 for d in documents if d["doc_type"] == "faq_jsonl"),
@@ -275,6 +312,45 @@ def build_index(
     }
     logger.info("Indexing complete: %s", stats)
     return stats
+
+
+def load_documents(
+    *,
+    only: str | None = None,
+    csv_dir: Path = DATA_DIR,
+    faq_jsonl_dir: Path = FAQ_JSONL_DIR,
+    teacher_qa_dir: Path = TEACHER_QA_DIR,
+    pdf_dir: Path = PDF_DIR,
+    pdf_jsonl_dir: Path = PDF_JSONL_DIR,
+    crawl_pages_dir: Path = CRAWL_PAGES_DIR,
+    crawl_jsonl_dir: Path = CRAWL_JSONL_DIR,
+) -> list[dict[str, Any]]:
+    """Load the validated corpus set used by both direct and staged builds."""
+    corpora: list[tuple[str, Path | None, Any]] = [
+        ("faq", None, lambda: ingest_faq_jsonls(csv_dir, faq_jsonl_dir)),
+        ("teacher_qa", None, lambda: ingest_teacher_qa_jsonls(teacher_qa_dir)),
+        ("pdf", pdf_jsonl_dir / PDF_MANIFEST_NAME, lambda: ingest_pdf_jsonls(pdf_dir, pdf_jsonl_dir)),
+        (
+            "crawl",
+            crawl_jsonl_dir / CRAWL_MANIFEST_NAME,
+            lambda: ingest_crawl_jsonls(crawl_pages_dir, crawl_jsonl_dir),
+        ),
+    ]
+    documents: list[dict[str, Any]] = []
+    for name, manifest_path, ingest in corpora:
+        if only is not None and only != name:
+            continue
+        if only is None and manifest_path is not None and not manifest_path.is_file():
+            logger.info("%s corpus skipped (no export at %s)", name, manifest_path.parent)
+            continue
+        rows = ingest()
+        logger.info("%s corpus: %d documents", name, len(rows))
+        documents.extend(rows)
+    if not documents:
+        raise CorpusValidationError(
+            "No FAQ, teacher-QA, PDF-chunk or crawl-chunk JSONL documents to index"
+        )
+    return annotate_fiscal_year(documents)
 
 
 # ---------------------------------------------------------------------------
@@ -363,39 +439,29 @@ def main() -> None:
         ),
         None,
     )
-    corpora: list[tuple[str, Path | None, Any]] = [
-        ("faq", None, lambda: ingest_faq_jsonls(csv_dir, faq_jsonl_dir)),
-        ("teacher_qa", None, lambda: ingest_teacher_qa_jsonls(teacher_qa_dir)),
-        ("pdf", pdf_jsonl_dir / PDF_MANIFEST_NAME, lambda: ingest_pdf_jsonls(pdf_dir, pdf_jsonl_dir)),
-        (
-            "crawl",
-            crawl_jsonl_dir / CRAWL_MANIFEST_NAME,
-            lambda: ingest_crawl_jsonls(crawl_pages_dir, crawl_jsonl_dir),
-        ),
-    ]
-
     try:
-        documents: list[dict[str, Any]] = []
-        for name, manifest_path, ingest in corpora:
-            if only is not None and only != name:
-                continue
-            if only is None and manifest_path is not None and not manifest_path.is_file():
-                logger.info("%s corpus skipped (no export at %s)", name, manifest_path.parent)
-                continue
-            rows = ingest()
-            logger.info("%s corpus: %d documents", name, len(rows))
-            documents.extend(rows)
+        documents = load_documents(
+            only=only,
+            csv_dir=csv_dir,
+            faq_jsonl_dir=faq_jsonl_dir,
+            teacher_qa_dir=teacher_qa_dir,
+            pdf_dir=pdf_dir,
+            pdf_jsonl_dir=pdf_jsonl_dir,
+            crawl_pages_dir=crawl_pages_dir,
+            crawl_jsonl_dir=crawl_jsonl_dir,
+        )
     except CorpusValidationError as exc:
         logger.error("Corpus validation failed: %s", exc)
         raise SystemExit(2) from exc
 
-    if not documents:
-        logger.error("No FAQ, teacher-QA, PDF-chunk or crawl-chunk JSONL documents to index")
-        raise SystemExit(2)
+    source_corpus_hash = ""
+    try:
+        from .freshness import snapshot_sources
 
-    annotate_fiscal_year(documents)
-
-    build_index(documents, recreate=args.recreate)
+        source_corpus_hash = str(snapshot_sources().get("corpus_hash") or "")
+    except Exception:
+        logger.warning("Could not calculate source corpus hash", exc_info=True)
+    build_index(documents, recreate=args.recreate, source_corpus_hash=source_corpus_hash)
     try:
         from .freshness import write_snapshot
 

@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from collections import defaultdict, deque
+from datetime import datetime
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -133,6 +135,7 @@ class MetricsStore:
                 lines.append(f"{name}_count{labels} {n}")
                 lines.append(f"{name}_sum{labels} {total:.4f}")
 
+        lines.extend(_index_lifecycle_prometheus_metrics())
         return "\n".join(lines) + "\n"
 
     @staticmethod
@@ -148,6 +151,77 @@ class MetricsStore:
             idx = key.index("{")
             return key[:idx], key[idx:]
         return key, ""
+
+
+def _status_timestamp(status: dict[str, Any] | None, field: str) -> float:
+    """Return an epoch timestamp from an operational status file, or zero."""
+    if not status:
+        return 0.0
+    raw = str(status.get(field) or "")
+    if not raw:
+        return 0.0
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _index_lifecycle_prometheus_metrics() -> list[str]:
+    """Render index lifecycle gauges from the atomically-written status files.
+
+    The indexer and backup scheduler run in separate short-lived containers, so
+    process-local counters would disappear before Prometheus scrapes the API.
+    Reading their small status records gives the API durable, scrapeable gauges
+    without adding a separate exporter or exposing the Qdrant management API.
+    """
+    try:
+        from .freshness import load_backup_status, load_lifecycle_status, load_status
+
+        freshness = load_status()
+        lifecycle = load_lifecycle_status()
+        backup = load_backup_status()
+    except Exception:
+        logger.warning("Could not read Qdrant lifecycle status for /metrics", exc_info=True)
+        freshness = lifecycle = backup = None
+
+    source_drift = bool(
+        freshness
+        and (
+            freshness.get("index_drift")
+            or freshness.get("snapshot_missing")
+            or freshness.get("index_snapshot_missing")
+            or freshness.get("drift_count")
+        )
+    )
+    backup_required = os.getenv("QDRANT_BACKUP_REQUIRED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    gauges = {
+        "ura_qdrant_index_fresh": int(bool(freshness and freshness.get("ok"))),
+        "ura_qdrant_index_drift": int(source_drift),
+        "ura_qdrant_index_status_timestamp_seconds": _status_timestamp(freshness, "checked_at"),
+        "ura_qdrant_rebuild_failed": int(bool(lifecycle and not lifecycle.get("ok"))),
+        "ura_qdrant_rebuild_timestamp_seconds": _status_timestamp(lifecycle, "last_attempt_at"),
+        "ura_qdrant_backup_required": int(backup_required),
+        "ura_qdrant_backup_failed": int(bool(backup_required and backup and not backup.get("ok"))),
+        "ura_qdrant_backup_timestamp_seconds": _status_timestamp(backup, "last_attempt_at"),
+        "ura_qdrant_restore_drill_failed": int(
+            bool(backup_required and backup and backup.get("restore_drill_ok") is False)
+        ),
+        "ura_qdrant_restore_drill_timestamp_seconds": _status_timestamp(
+            backup,
+            "last_restore_drill_at",
+        ),
+    }
+    lines: list[str] = []
+    for name, value in gauges.items():
+        lines.append(f"# TYPE {name} gauge")
+        lines.append(f"{name} {value}")
+    return lines
 
 
 # Global singleton

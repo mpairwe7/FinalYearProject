@@ -125,66 +125,28 @@ class BuildContextTest(unittest.TestCase):
 
 
 class IndexFreshnessPackagingTest(unittest.TestCase):
-    """The image must ship a freshness baseline AND a status the endpoint reads.
+    """The image lifecycle must emit the status `/v1/index/freshness` reads."""
 
-    `/v1/index/freshness` answered `snapshot_missing: true` in every prod
-    deployment so far — twice, for two different reasons.
-
-    First, nothing ever ran app.freshness at all: app.indexer builds the
-    index and does not call write_snapshot, so there was no baseline (#300).
-
-    Fixed that, then verified live and found the endpoint still answering
-    snapshot_missing. The handler's own docstring says what it reads: "Cron
-    writes the status file: python -m app.freshness --check --write-status".
-    --write makes index_freshness.json — the baseline for a *future* drift
-    check — but load_status() reads index_freshness_status.json, a different
-    file that only --write-status produces. --write and --check are mutually
-    exclusive in one CLI invocation (the code returns immediately after
-    --write), so this needs both, in sequence: write the baseline, then check
-    it — trivially clean, since nothing has changed since the write moments
-    earlier — and persist that as the status the endpoint actually serves.
-    """
-
-    def test_the_build_writes_a_freshness_snapshot_after_indexing(self) -> None:
+    def test_the_image_bootstraps_with_the_staged_lifecycle(self) -> None:
         body = DOCKERFILE.read_text(encoding="utf-8")
-        self.assertIn(
-            "app.freshness --write",
-            body,
-            "the image no longer baselines corpus hashes, so "
-            "/v1/index/freshness will report snapshot_missing and drift will "
-            "be invisible",
-        )
+        self.assertIn("app.index_lifecycle --bootstrap", body)
+        self.assertIn("test -s /app/Model/index_freshness.json", body)
+        self.assertIn("test -s /app/Model/index_freshness_status.json", body)
 
-    def test_the_build_also_writes_the_status_file_the_endpoint_reads(self) -> None:
-        body = DOCKERFILE.read_text(encoding="utf-8")
-        self.assertIn(
-            "app.freshness --check --write-status",
-            body,
-            "the image writes a snapshot but never a status: "
-            "/v1/index/freshness reads index_freshness_status.json "
-            "(load_status -> STATUS_PATH), which only --write-status "
-            "produces — --write alone leaves the endpoint reporting "
-            "snapshot_missing regardless of the baseline existing",
-        )
-
-    def test_the_snapshot_is_written_after_the_index_is_built(self) -> None:
-        """Order matters: a baseline taken before indexing proves nothing."""
-        body = DOCKERFILE.read_text(encoding="utf-8")
+    def test_the_lifecycle_writes_status_only_after_alias_promotion(self) -> None:
+        lifecycle = (_BACKEND / "app/index_lifecycle.py").read_text(encoding="utf-8")
         self.assertLess(
-            body.index("app.indexer --recreate"),
-            body.index("app.freshness --write"),
-            "freshness snapshot must be written after app.indexer --recreate",
+            lifecycle.index("promote_alias(client, alias="),
+            lifecycle.index("_write_fresh_status(after_build)"),
         )
+        self.assertIn("write_snapshot(snapshot)", lifecycle)
+        self.assertIn("write_status(report)", lifecycle)
 
-    def test_the_status_check_runs_after_the_snapshot_it_checks_against(self) -> None:
-        """Checking before the baseline exists reports snapshot_missing again."""
+    def test_the_embedded_index_uses_an_alias_backed_lifecycle(self) -> None:
         body = DOCKERFILE.read_text(encoding="utf-8")
-        self.assertLess(
-            body.index("app.freshness --write"),
-            body.index("app.freshness --check --write-status"),
-            "the status check must run after the snapshot it compares against",
-        )
-
+        self.assertIn("QDRANT_COLLECTION=", body)
+        self.assertIn("knowledge_base_active", body)
+        self.assertIn("app.index_lifecycle --bootstrap", body)
 
 if __name__ == "__main__":
     unittest.main()

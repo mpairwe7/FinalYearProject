@@ -16,8 +16,8 @@ Crane Cloud has two operational constraints that shape the deployment shape:
 
 The compose stack in `App/docker-compose.yml` (api + frontend + qdrant + redis)
 is therefore **not** what Crane Cloud runs. Crane Cloud uses a dedicated
-`Dockerfile.cranecloud` that bundles `nginx + uvicorn + Next.js standalone`
-under `supervisord` and falls back to BM25 keyword retrieval (no Qdrant).
+`Dockerfile.cranecloud` that bundles `nginx + uvicorn + Next.js standalone + a
+loopback sparse Qdrant sidecar` under `supervisord`.
 
 ---
 
@@ -37,7 +37,7 @@ under `supervisord` and falls back to BM25 keyword retrieval (no Qdrant).
 | Cluster | RENU (`9e81a70e-8460-4e5d-b0a8-17abcac30f68`) |
 | Source | `App/` subtree of `github.com/mpairwe7/FinalYearProject` |
 | LLM backend | `vllm` (external) or `groq` fallback (free tier) |
-| Retrieval | BM25 keyword (Qdrant unavailable on Crane Cloud) |
+| Retrieval | Embedded sparse Qdrant (BM25 vectors, versioned alias) |
 
 > **Why not run Qwen3-8B locally on Crane Cloud?** Crane Cloud pods do not
 > attach GPUs and the default RAM budget (~4–8 GB) cannot host an 8 B
@@ -63,10 +63,11 @@ CRANE CLOUD (single container, port 8080)
 │ supervisord                                                │
 │  ├─ nginx :8080 ──┬── proxy_pass /api/* → uvicorn :8081    │
 │  │                └── proxy_pass /     → node :3000        │
-│  ├─ uvicorn :8081 (FastAPI, BM25 retrieval, LLM dispatch)  │
+│  ├─ qdrant :6333 (loopback, sparse-only BM25 collection)  │
+│  ├─ uvicorn :8081 (FastAPI, sparse retrieval, LLM dispatch)│
 │  └─ node :3000    (Next.js standalone build)               │
 │                                                            │
-│ Baked-in: BM25 state, knowledge base, no Qdrant            │
+│ Baked-in: Qdrant storage, BM25 state, knowledge base       │
 │ External: vLLM endpoint OR Groq API for LLM generation     │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -242,14 +243,13 @@ When OIDC is wired up later, flip to `RS256` and add `OIDC_ISSUER`,
 
 ---
 
-## 6. Retrieval on Crane Cloud (no Qdrant)
+## 6. Retrieval on Crane Cloud (embedded Qdrant)
 
-The App's `HybridRetriever` always tries Qdrant first; if Qdrant is
-unavailable, `ChatModel._simple_search` (keyword overlap) is used. With
-`QDRANT_ENABLED=false`, the Qdrant client is never instantiated and
-`/ready` returns `status: "degraded"` (still 200) — search uses BM25
-keyword matching over the in-memory FAQ index plus the BM25 sparse
-posting list loaded from `BM25_STATE_PATH`.
+The image starts a loopback Qdrant sidecar with `QDRANT_ENABLED=true` and a
+sparse-only collection. The retriever computes the BM25 query vector from the
+state embedded in the collection, avoiding the dense model and its GPU-sized
+dependencies. If the sidecar becomes unavailable after start-up, the existing
+keyword fallback remains available and `/ready` reports `degraded`.
 
 Knowledge base files baked into the image:
 
@@ -259,15 +259,15 @@ Knowledge base files baked into the image:
 /app/Model/bm25_state.json       # Pre-built BM25 posting list + IDF
 ```
 
-Rebuild the BM25 state before each release by rebuilding the index, which writes
-it as a side effect:
+The Dockerfile performs the safe build during image creation: it creates a
+versioned candidate, validates source-hash and retrieval canaries, then promotes
+the image's alias. Prepare the generated JSONL inputs before each release:
 
 ```bash
 cd App/backend
 PYTHONPATH=. python -m app.indexer --export-faq-jsonl
 PYTHONPATH=. python -m app.indexer --export-pdf-jsonl     # optional, minutes
 PYTHONPATH=. python -m app.indexer --export-crawl-jsonl   # optional, seconds
-PYTHONPATH=. python -m app.indexer --recreate             # writes Model/bm25_state.json
 ```
 
 **Do not fit the sparse state on its own.** BM25 token ids are assigned in
@@ -277,8 +277,8 @@ into the collection and `HybridRetriever._verify_bm25_binding` disables sparse
 retrieval when the two disagree — so a standalone refit degrades search silently
 rather than failing loudly at build time.
 
-Commit the resulting `Model/bm25_state.json` so the Crane Cloud build
-picks it up automatically.
+Do not commit generated `Model/bm25_state.json`: the Docker build derives it
+from the release corpus and embeds a matching copy in Qdrant.
 
 ---
 
@@ -491,7 +491,7 @@ token — they will 401 anonymously.
 via `supervisord`. View with `kubectl logs -f <pod>` or the Crane Cloud
 log pane.
 
-**Scaling**: the image is stateless (no Qdrant writes, no local DB
+**Scaling**: the image is immutable at runtime (no Qdrant writes, no local DB
 mutations). Scale horizontally by raising the replica count in the
 dashboard. The slowapi rate limiter falls back to in-process buckets on
 Crane Cloud (no Redis), so per-IP limits are enforced per replica only
@@ -524,10 +524,10 @@ docker images landwind/ura-chatbot --format "{{.Tag}}\t{{.CreatedAt}}"
 # (Dashboard → Image → set tag → Redeploy)
 ```
 
-Because the image is fully self-contained (no out-of-band DB migrations,
-no Qdrant index versioning), rollback is single-step: change the image
-tag in the dashboard. The BM25 state lives inside each image so older
-images keep their original knowledge base snapshot.
+Because the image is fully self-contained (no out-of-band DB migrations),
+rollback is single-step: change the image tag in the dashboard. Each image
+contains its own versioned Qdrant collection and alias, so older images retain
+their original knowledge-base snapshot.
 
 ---
 

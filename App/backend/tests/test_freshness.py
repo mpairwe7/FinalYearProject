@@ -127,7 +127,7 @@ class FreshnessNotifyEnqueueTests(unittest.TestCase):
             self.assertEqual(written, path)
             payload = json.loads(path.read_text())
             self.assertFalse(payload["auto_reindex"])
-            self.assertIn("python -m app.indexer --recreate", payload["reindex_hint"])
+            self.assertIn("python -m app.index_lifecycle --rebuild", payload["reindex_hint"])
             self.assertEqual(payload["added"], ["c.csv"])
 
     def test_enqueue_skips_when_sources_match(self) -> None:
