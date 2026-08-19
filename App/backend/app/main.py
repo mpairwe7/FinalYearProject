@@ -5,6 +5,7 @@ ISO/IEC 42001:2023 security controls.  Includes analytics, feedback,
 and Prometheus-compatible metrics (2026 observability standards).
 """
 
+import asyncio
 import contextlib
 import datetime
 import json
@@ -101,6 +102,9 @@ _INSECURE_DEV_SECRET = "dev-insecure-change-me"  # noqa: S105  # pragma: allowli
 # reply-TTS leg is skipped (tts_skipped=True) so the text reply still beats
 # the deployment's gateway timeout; the client narrates via /v1/tts instead.
 VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
+_RETENTION_CLEANUP_INTERVAL_SECONDS = max(
+    60, int(os.getenv("RETENTION_CLEANUP_INTERVAL_SECONDS", "3600"))
+)
 
 
 def _truthy_env(name: str, default: str = "false") -> bool:
@@ -520,15 +524,42 @@ async def lifespan(app: FastAPI):
     else:
         app.state.offline_rag = None
 
-    yield
-    app.state.model = None
+    # Startup alone is insufficient: an otherwise idle pod would retain
+    # expired documents and in-memory data indefinitely. The job itself is
+    # idempotent, including when several replicas run it at once.
+    from .retention import run_retention_cleanup
+
+    run_retention_cleanup()
+    retention_stop = asyncio.Event()
+
+    async def _retention_loop() -> None:
+        while True:
+            try:
+                await asyncio.wait_for(
+                    retention_stop.wait(), timeout=_RETENTION_CLEANUP_INTERVAL_SECONDS
+                )
+                return
+            except TimeoutError:
+                run_retention_cleanup()
+            except asyncio.CancelledError:
+                return
+
+    retention_task = asyncio.create_task(_retention_loop(), name="retention-cleanup")
     try:
-        if getattr(app.state, "speech", None) is not None:
-            app.state.speech.close()
-    except Exception:
-        logger.warning("SpeechModel close raised", exc_info=True)
-    app.state.speech = None
-    logger.info("ChatModel shut down.")
+        yield
+    finally:
+        retention_stop.set()
+        retention_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await retention_task
+        app.state.model = None
+        try:
+            if getattr(app.state, "speech", None) is not None:
+                app.state.speech.close()
+        except Exception:
+            logger.warning("SpeechModel close raised", exc_info=True)
+        app.state.speech = None
+        logger.info("ChatModel shut down.")
 
 
 # ---------------------------------------------------------------------------
@@ -826,19 +857,21 @@ def chat(
     # Track escalation events
     if result.get("escalation_required"):
         metrics.inc("escalation_total")
-        try:
-            db.track_event(
-                "escalation_required",
-                json.dumps(
-                    {
-                        "reason": result.get("escalation_reason", ""),
-                        "topic_tag": topic_tag,
-                    }
-                ),
-                session_id=session_id or None,
-            )
-        except Exception:
-            logger.debug("Escalation event tracking failed", exc_info=True)
+        if ctx.authenticated and db.has_active_consent(ctx.user_id, "analytics"):
+            try:
+                db.track_event(
+                    "escalation_required",
+                    json.dumps(
+                        {
+                            "reason": result.get("escalation_reason", ""),
+                            "topic_tag": topic_tag,
+                        }
+                    ),
+                    session_id=session_id or None,
+                    user_id=ctx.user_id,
+                )
+            except Exception:
+                logger.debug("Escalation event tracking failed", exc_info=True)
 
     return ChatResponse(**result)
 
@@ -1882,17 +1915,20 @@ def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict
 @app.post("/v1/feedback", response_model=FeedbackResponse, tags=["feedback"])
 def submit_feedback(
     body: FeedbackRequest,
-    _ctx: AuthContext = Depends(current_user),
+    ctx: AuthContext = Depends(current_user),
 ) -> FeedbackResponse:
     """Submit thumbs-up/down feedback on a chatbot response."""
     from .service import ChatModel as _CM
 
+    if not ctx.authenticated or not db.has_active_consent(ctx.user_id, "analytics"):
+        raise HTTPException(status_code=403, detail="analytics consent is required for feedback")
     metrics.inc("feedback_total", labels={"rating": body.rating})
     result = db.save_feedback(
         message_id=body.message_id,
         rating=body.rating,
         comment=body.comment,
         session_id=body.session_id,
+        user_id=ctx.user_id,
         user_query=_CM.redact_for_storage(body.user_query),
         bot_reply=_CM.redact_for_storage(body.bot_reply),
     )
@@ -1903,12 +1939,16 @@ def submit_feedback(
 def update_feedback_comment(
     message_id: str,
     body: FeedbackCommentRequest,
-    _ctx: AuthContext = Depends(current_user),
+    ctx: AuthContext = Depends(current_user),
 ) -> dict:
     """Add a follow-up comment to existing feedback (avoids duplicate entries)."""
     from .service import ChatModel as _CM
 
-    updated = db.update_feedback_comment(message_id, _CM.redact_for_storage(body.comment))
+    if not ctx.authenticated or not db.has_active_consent(ctx.user_id, "analytics"):
+        raise HTTPException(status_code=403, detail="analytics consent is required for feedback")
+    updated = db.update_feedback_comment(
+        message_id, _CM.redact_for_storage(body.comment), user_id=ctx.user_id
+    )
     if not updated:
         raise HTTPException(
             status_code=404, detail="Feedback entry not found or already has comment"
@@ -1933,13 +1973,18 @@ def feedback_summary(
 @app.post("/v1/analytics/event", tags=["analytics"])
 def track_analytics_event(
     body: AnalyticsEvent,
-    _ctx: AuthContext = Depends(current_user),
+    ctx: AuthContext = Depends(current_user),
 ) -> dict:
     """Track a client-side analytics event."""
+    if not ctx.authenticated or not db.has_active_consent(ctx.user_id, "analytics"):
+        return {"status": "ignored", "reason": "analytics_consent_required"}
+    from .guardrails import redact_pii_text
+
     db.track_event(
         event_type=body.event_type,
-        event_data=json.dumps(body.event_data),
+        event_data=redact_pii_text(json.dumps(body.event_data)),
         session_id=body.session_id,
+        user_id=ctx.user_id,
     )
     return {"status": "ok"}
 
@@ -2452,6 +2497,8 @@ def me_withdraw_consent(
         from .memory.service import get_memory_service
 
         get_memory_service().forget_user(ctx.user.user_id)
+    if "analytics" in body.purposes:
+        withdrawn["analytics_data"] = db.delete_user_analytics(ctx.user.user_id)
     return {"user_id": row["id"], "withdrawn": withdrawn}
 
 
@@ -2469,6 +2516,7 @@ def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
     )
     data = db.export_user_data(row["id"], external_id=ctx.user.user_id)
     data["facts"] = get_memory_service().export_user(ctx.user.user_id)["facts"]
+    data["documents"] = documents.export_user_documents(ctx.user.user_id)
     return data
 
 
@@ -2490,6 +2538,7 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
 
     counts = db.delete_user_cascade(row["id"], external_id=ctx.user.user_id)
     counts["memory"] = sum(get_memory_service().forget_user(ctx.user.user_id).values())
+    counts["documents"] = sum(documents.forget_user_documents(ctx.user.user_id).values())
     return {"deleted": counts, "external_id": ctx.user.user_id}
 
 

@@ -67,6 +67,11 @@ FULL_DELIVERY: dict[str, str] = {
     ),
     "G33": "Apply infra/k8s/hpa-chat.yaml and keda-chat.yaml after a measured p95.",
     "G34": "Run a cluster game day. In-process fail-closed tests are not that drill.",
+    "G35": (
+        "The DPO/legal owner must sign the DPIA, record the PDPO registration "
+        "decision, and approve each external processor/cross-border transfer. "
+        "Environment values are deployment attestations, not legal evidence."
+    ),
 }
 
 
@@ -143,6 +148,63 @@ def _seed_errors() -> list[str]:
     return []
 
 
+def _privacy_governance_errors() -> list[str]:
+    """Require deployer attestations for controls that code cannot perform."""
+    errors: list[str] = []
+    if not _truthy("DPIA_APPROVED"):
+        errors.append("G35: DPIA_APPROVED=true is required in production after DPO/legal sign-off.")
+    if not (os.getenv("DPIA_APPROVAL_REFERENCE") or "").strip():
+        errors.append("G35: DPIA_APPROVAL_REFERENCE is required in production (signed DPIA evidence id).")
+    registration = (os.getenv("PDPO_REGISTRATION_STATUS") or "").strip().lower()
+    if registration not in {"confirmed", "not_required"}:
+        errors.append(
+            "G35: PDPO_REGISTRATION_STATUS must be confirmed or not_required after a documented DPO decision."
+        )
+    if not (os.getenv("PDPO_REGISTRATION_REFERENCE") or "").strip():
+        errors.append(
+            "G35: PDPO_REGISTRATION_REFERENCE is required in production (registration or DPO decision evidence id)."
+        )
+    return errors
+
+
+def _external_processor_names() -> list[str]:
+    """Configured outbound processors that can receive user content."""
+    providers: list[str] = []
+    if os.getenv("SUNBIRD_API_TOKEN") or os.getenv("SUNBIRD_FALLBACK_API_TOKEN"):
+        providers.append("Sunbird")
+    cloudflare_enabled = _truthy("FLAG_CLOUDFLARE_FALLBACK")
+    # An unset dense selector is intentionally "auto" when the master switch
+    # is on, so the master switch itself is the material processing decision.
+    if cloudflare_enabled:
+        providers.append("Cloudflare/Gemini or Workers AI")
+    vllm_url = urlparse((os.getenv("VLLM_BASE_URL") or "").strip())
+    if (
+        (os.getenv("LLM_BACKEND") or "").strip().lower() == "vllm"
+        and vllm_url.hostname not in {None, "localhost", "127.0.0.1", "::1"}
+    ):
+        providers.append("remote vLLM")
+    return providers
+
+
+def _cross_border_errors() -> list[str]:
+    providers = _external_processor_names()
+    if not providers:
+        return []
+    errors: list[str] = []
+    if not _truthy("CROSS_BORDER_PROCESSING_APPROVED"):
+        errors.append(
+            f"G35: external processing ({', '.join(providers)}) requires "
+            "CROSS_BORDER_PROCESSING_APPROVED=true after the transfer assessment "
+            "and processor disclosure are approved."
+        )
+    if not (os.getenv("CROSS_BORDER_TRANSFER_ASSESSMENT_ID") or "").strip():
+        errors.append(
+            "G35: external processing requires CROSS_BORDER_TRANSFER_ASSESSMENT_ID "
+            "(approved transfer-assessment evidence id)."
+        )
+    return errors
+
+
 def gap_gate_errors() -> list[str]:
     """Production-only errors for remaining prototype features. Empty in development."""
     if not is_production():
@@ -155,6 +217,8 @@ def gap_gate_errors() -> list[str]:
     errors.extend(_dpo_errors())
     errors.extend(_tenancy_errors())
     errors.extend(_seed_errors())
+    errors.extend(_privacy_governance_errors())
+    errors.extend(_cross_border_errors())
     return errors
 
 
@@ -168,6 +232,7 @@ def evaluate_gate(gap: str) -> dict[str, Any]:
         "G29": _dpo_errors,
         "G30": _tenancy_errors,
         "G31": _seed_errors,
+        "G35": lambda: _privacy_governance_errors() + _cross_border_errors(),
     }
     deferred = {"G33", "G34"}
     if gap in deferred:
@@ -196,7 +261,7 @@ def readiness_report(*, as_production: bool = False) -> dict[str, Any]:
     if as_production:
         os.environ["APP_ENV"] = "production"
     try:
-        gaps = ["G12", "G13", "G14", "G15", "G29", "G30", "G31", "G33", "G34"]
+        gaps = ["G12", "G13", "G14", "G15", "G29", "G30", "G31", "G33", "G34", "G35"]
         items = [evaluate_gate(gap) for gap in gaps]
         errors = gap_gate_errors()
         return {

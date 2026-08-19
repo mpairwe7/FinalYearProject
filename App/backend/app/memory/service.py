@@ -238,6 +238,18 @@ class MemoryService:
             "semantic": facts_deleted,
         }
 
+    def cleanup_expired(self) -> dict[str, int]:
+        """Run retention across every memory tier.
+
+        Working memory evicts lazily; ``size`` performs that eviction without
+        exposing any personal data. Persistent tiers are deleted explicitly.
+        """
+        return {
+            "working": self.working.purge_expired(),
+            "episodic": self.episodic.cleanup_expired(),
+            "semantic": self.semantic.cleanup_expired(),
+        }
+
 
 # ---------------------------------------------------------------------------
 # Topic-tag heuristic (keeps the dependency count low)

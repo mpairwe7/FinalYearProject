@@ -141,7 +141,9 @@ class Supervisor:
         #    precedence over any other intent.
         for pat, reason in pats.escalate:
             if pat.search(q):
-                logger.info("supervisor: ESCALATE pattern=%r reason=%s", pat.pattern[:40], reason)
+                logger.info(
+                    "supervisor: ESCALATE pattern=%r reason_length=%d", pat.pattern[:40], len(reason or "")
+                )
                 return RouteDecision(
                     route=AgentRoute.ESCALATE,
                     reason=reason,

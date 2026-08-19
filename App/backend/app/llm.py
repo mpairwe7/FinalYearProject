@@ -803,7 +803,7 @@ def translate_text(
 
     verdict = InputGuard().check(text)
     if not verdict.allowed:
-        logger.warning("Prompted MT refused input: %s", verdict.reason)
+        logger.warning("Prompted MT refused input (reason_length=%d)", len(verdict.reason or ""))
         return ""
 
     if not _load_model() or _tokenizer is None or _model is None:
@@ -1089,7 +1089,7 @@ def _parse_tool_calls(text: str) -> list[dict[str, Any]]:
         try:
             data = _json.loads(raw)
         except Exception:
-            logger.debug("tool_call block failed to parse: %s", raw[:120])
+            logger.debug("tool_call block failed to parse (payload_length=%d)", len(raw))
             continue
         if not isinstance(data, dict) or "name" not in data:
             continue

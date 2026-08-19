@@ -2247,7 +2247,7 @@ def _judge_rescue(
     # For a tax authority a confidently wrong answer costs more than "I could
     # not find this", so the flag it already returns is honoured.
     if not confident:
-        logger.info("FAQ judge declined (unconfident) for %r", query[:60])
+        logger.info("FAQ judge declined (unconfident, query_length=%d)", len(query))
         return []
 
     chosen = candidates[pick - 1]
@@ -4503,7 +4503,7 @@ class ChatModel:
                 with trace_stage("cache_lookup", timings=timings):
                     cached = self._cache.get(rewritten, locale=locale)
                 if cached:
-                    logger.info("generate: cache HIT for query=%s", message[:50])
+                    logger.info("generate: cache HIT (query_length=%d)", len(message))
                     return self._finalize_result({
                         **cached,
                         "conversation_id": thread_id,

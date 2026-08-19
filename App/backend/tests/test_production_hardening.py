@@ -18,7 +18,7 @@ from app.main import _validate_production_env
 SECURE_PROD_ENV = {
     "APP_ENV": "production",
     "AUTH_ALG": "RS256",
-    "AUTH_DEV_SECRET": "prod-secret-with-enough-entropy",
+    "AUTH_DEV_SECRET": "prod-secret-with-enough-entropy",  # pragma: allowlist secret
     "OIDC_ISSUER": "https://idp.example.gov/realms/ura",
     "OIDC_AUDIENCE": "ura-chatbot",
     "OIDC_JWKS_URL": "https://idp.example.gov/realms/ura/protocol/openid-connect/certs",
@@ -32,17 +32,17 @@ SECURE_PROD_ENV = {
     "LLM_SERIALIZE_LOCAL_GENERATION": "true",
     "STORE_RAW_PROMPTS": "false",
     "ANALYTICS_BACKEND": "postgres",
-    "POSTGRES_DSN": "postgresql://ura:secret@postgres:5432/ura",
-    "INDEX_API_KEY": "prod-index-key",
+    "POSTGRES_DSN": "postgresql://ura:secret@postgres:5432/ura",  # pragma: allowlist secret
+    "INDEX_API_KEY": "prod-index-key",  # pragma: allowlist secret
     "QDRANT_URL": "http://qdrant:6333",
-    "QDRANT_API_KEY": "qdrant-secret",
+    "QDRANT_API_KEY": "qdrant-secret",  # pragma: allowlist secret
     "ANALYTICS_DB_DIR": "/data/ura",
     "SPEECH_ENABLED": "true",
     "FLAG_AUTH_REQUIRED": "true",
     "FLAG_MULTI_TENANT": "true",
     "FLAG_AUDIT_LEDGER": "true",
     "FLAG_VOICE_CONSENT": "true",
-    "WS_CONFIRM_HMAC_SECRET": "prod-confirm-hmac-secret-with-entropy",
+    "WS_CONFIRM_HMAC_SECRET": "prod-confirm-hmac-secret-with-entropy",  # pragma: allowlist secret
     "REQUIRE_FRESH_AUTHORITY": "true",
     "FLAG_TICKET_QUEUE": "true",
     "MALWARE_SCAN_REQUIRED": "true",
@@ -52,6 +52,10 @@ SECURE_PROD_ENV = {
     "URA_ACCOUNT_API_MODE": "off",
     "MULTI_TENANT_RLS_APPLIED": "true",
     "NOTIFICATION_LIVE": "false",
+    "DPIA_APPROVED": "true",
+    "DPIA_APPROVAL_REFERENCE": "DPIA-TEST-001",
+    "PDPO_REGISTRATION_STATUS": "not_required",
+    "PDPO_REGISTRATION_REFERENCE": "DPO-TEST-001",
 }
 
 
@@ -89,7 +93,7 @@ class ProductionHardeningTests(unittest.TestCase):
             **self.secure_env,
             "CORS_ORIGINS": "http://localhost:3032,https://demo.ngrok-free.dev",
             "AUTH_ALG": "HS256",
-            "INDEX_API_KEY": "dev-index-key",
+            "INDEX_API_KEY": "dev-index-key",  # pragma: allowlist secret
             "ANALYTICS_BACKEND": "sqlite",
         }
         with patch.dict(os.environ, env, clear=True):
@@ -180,6 +184,8 @@ class ProductionHardeningTests(unittest.TestCase):
         "CLOUDFLARE_API_TOKEN": "cf-prod-token",
         "CF_AIG_GATEWAY": "ura-gw",
         "CF_AIG_TOKEN": "aig-prod-token",
+        "CROSS_BORDER_PROCESSING_APPROVED": "true",
+        "CROSS_BORDER_TRANSFER_ASSESSMENT_ID": "TIA-TEST-001",
     }
 
     def _validate_with(self, env: dict[str, str]) -> None:
@@ -193,7 +199,16 @@ class ProductionHardeningTests(unittest.TestCase):
             _validate_production_env()
 
     def test_cloudflare_flag_requires_credentials_in_prod(self) -> None:
-        env = {**self.secure_env, "FLAG_CLOUDFLARE_FALLBACK": "true"}
+        env = {
+            **self.secure_env,
+            "FLAG_CLOUDFLARE_FALLBACK": "true",
+            "CLOUDFLARE_ACCOUNT_ID": "",
+            "CLOUDFLARE_API_TOKEN": "",
+            "CF_AIG_GATEWAY": "",
+            "CF_AIG_TOKEN": "",
+            "CROSS_BORDER_PROCESSING_APPROVED": "true",
+            "CROSS_BORDER_TRANSFER_ASSESSMENT_ID": "TIA-TEST-001",
+        }
         with self.assertRaises(SystemExit) as raised:
             self._validate_with(env)
         self.assertIn("Cloudflare is not fully configured", str(raised.exception))
@@ -213,7 +228,12 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertIn("requires VECTORIZE_INDEX", str(raised.exception))
 
     def test_gemini_fallback_requires_gemini_key(self) -> None:
-        env = {**self.secure_env, **self._CF_ENV, "LLM_FALLBACK_BACKEND": "gemini"}
+        env = {
+            **self.secure_env,
+            **self._CF_ENV,
+            "LLM_FALLBACK_BACKEND": "gemini",
+            "GEMINI_API_KEY": "",
+        }
         with self.assertRaises(SystemExit) as raised:
             self._validate_with(env)
         self.assertIn("GEMINI_API_KEY", str(raised.exception))

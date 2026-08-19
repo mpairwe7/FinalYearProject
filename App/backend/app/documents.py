@@ -1080,6 +1080,100 @@ def _spool_purge() -> None:
             continue
 
 
+def purge_expired_documents() -> dict[str, int]:
+    """Run the document-retention deletion job.
+
+    Uploads are intentionally transient, but a process that receives no more
+    uploads would otherwise keep expired in-memory and spool entries until it
+    is restarted.  The application scheduler invokes this function regularly;
+    it is idempotent and safe for each replica to run.
+    """
+    with _registry_lock:
+        before = len(_registry)
+        _purge_expired_locked()
+        memory_deleted = before - len(_registry)
+
+    try:
+        before_spool = len(list(_STORE_DIR.glob("*.json")))
+    except OSError:
+        before_spool = 0
+    _spool_purge()
+    try:
+        after_spool = len(list(_STORE_DIR.glob("*.json")))
+    except OSError:
+        after_spool = before_spool
+    return {
+        "memory_records": memory_deleted,
+        "spool_records": max(0, before_spool - after_spool),
+    }
+
+
+def forget_user_documents(user_id: str) -> dict[str, int]:
+    """Delete transient upload records owned by a data subject.
+
+    Document content is never copied into analytics storage, but it can exist
+    briefly in the multi-worker spool.  Subject erasure must not wait for its
+    normal TTL.
+    """
+    if not user_id:
+        return {"memory_records": 0, "spool_records": 0}
+
+    with _registry_lock:
+        matching = [doc_id for doc_id, record in _registry.items() if record.user_id == user_id]
+        for doc_id in matching:
+            _registry.pop(doc_id, None)
+
+    spool_deleted = 0
+    try:
+        entries = list(_STORE_DIR.glob("*.json"))
+    except OSError:
+        entries = []
+    for path in entries:
+        try:
+            payload = json.loads(path.read_text())
+            if payload.get("user_id") == user_id:
+                path.unlink(missing_ok=True)
+                spool_deleted += 1
+        except (OSError, ValueError, TypeError):
+            continue
+    return {"memory_records": len(matching), "spool_records": spool_deleted}
+
+
+def export_user_documents(user_id: str) -> list[dict[str, Any]]:
+    """Return active transient uploads for a subject-access response.
+
+    Source bytes are deliberately never retained, but extracted text, fields,
+    and analysis metadata remain available during the short document TTL.  The
+    export uses the same authenticated subject binding as retrieval and does
+    not disclose another user's session-bound attachment.
+    """
+    if not user_id:
+        return []
+    now = time.time()
+    records: dict[str, DocumentRecord] = {}
+    with _registry_lock:
+        _purge_expired_locked()
+        records = {doc_id: record for doc_id, record in _registry.items() if record.user_id == user_id}
+
+    try:
+        entries = list(_STORE_DIR.glob("*.json"))
+    except OSError:
+        entries = []
+    for path in entries:
+        try:
+            if now - path.stat().st_mtime > DOCUMENT_TTL_SECONDS:
+                continue
+            payload = json.loads(path.read_text())
+            if payload.get("user_id") != user_id:
+                continue
+            payload["tables"] = [TableSummary(**table) for table in payload.get("tables", [])]
+            record = DocumentRecord(**payload)
+            records.setdefault(record.doc_id, record)
+        except (OSError, TypeError, ValueError, KeyError):
+            continue
+    return [record.to_report_payload() for record in sorted(records.values(), key=lambda item: item.created_at)]
+
+
 def _store(record: DocumentRecord) -> None:
     with _registry_lock:
         _purge_expired_locked()

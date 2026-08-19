@@ -11,7 +11,7 @@ same indexes) so you can migrate data with a one-shot export.
 
 Environment variables:
     ANALYTICS_BACKEND       – "sqlite" (default) or "postgres"
-    POSTGRES_DSN            – psycopg DSN, e.g. "postgresql://user:pw@host/db"
+    POSTGRES_DSN            – psycopg PostgreSQL connection string
     POSTGRES_POOL_MIN       – min pool size (default: 1)
     POSTGRES_POOL_MAX       – max pool size (default: 10)
 
@@ -41,6 +41,7 @@ _CONVERSATION_TTL_DAYS = int(os.getenv("CONVERSATION_TTL_DAYS", "7"))
 _ANALYTICS_TTL_DAYS = int(os.getenv("ANALYTICS_TTL_DAYS", "365"))
 _FEEDBACK_TTL_DAYS = int(os.getenv("FEEDBACK_TTL_DAYS", "90"))
 _SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
+_TICKET_TTL_DAYS = int(os.getenv("TICKET_TTL_DAYS", "90"))
 
 _pool: Any = None
 
@@ -84,6 +85,7 @@ def init_db() -> None:
         id          TEXT PRIMARY KEY,
         message_id  TEXT NOT NULL,
         session_id  TEXT,
+        user_id     TEXT DEFAULT '',
         rating      TEXT NOT NULL CHECK (rating IN ('up','down')),
         comment     TEXT DEFAULT '',
         user_query  TEXT DEFAULT '',
@@ -94,6 +96,7 @@ def init_db() -> None:
     CREATE TABLE IF NOT EXISTS analytics_events (
         id          TEXT PRIMARY KEY,
         session_id  TEXT,
+        user_id     TEXT DEFAULT '',
         event_type  TEXT NOT NULL,
         event_data  TEXT DEFAULT '{}',
         created_at  DOUBLE PRECISION NOT NULL
@@ -101,6 +104,7 @@ def init_db() -> None:
 
     CREATE TABLE IF NOT EXISTS sessions (
         id              TEXT PRIMARY KEY,
+        user_id         TEXT DEFAULT '',
         started_at      DOUBLE PRECISION NOT NULL,
         last_active_at  DOUBLE PRECISION NOT NULL,
         message_count   INTEGER DEFAULT 0,
@@ -292,6 +296,9 @@ def init_db() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS flag_variants TEXT DEFAULT '{}'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript_json TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             for _col, _ddl in (
@@ -309,6 +316,9 @@ def init_db() -> None:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(conversation_id)"
             )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON analytics_events(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.commit()
     logger.info("Postgres analytics schema ready")
     cleanup_expired_data()
@@ -343,6 +353,20 @@ def cleanup_expired_data() -> dict[str, int]:
                 conn.rollback()
                 logger.exception("TTL cleanup failed for %s", table)
                 deleted[table] = 0
+        ticket_cutoff = now - (_TICKET_TTL_DAYS * 86400)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM tickets WHERE status IN ('resolved', 'wontfix') "
+                    "AND resolved_at > 0 AND resolved_at < %s",
+                    (ticket_cutoff,),
+                )
+                deleted["tickets"] = cur.rowcount
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.exception("TTL cleanup failed for tickets")
+            deleted["tickets"] = 0
     return deleted
 
 
@@ -356,38 +380,46 @@ def save_feedback(
     session_id: str | None = None,
     user_query: str = "",
     bot_reply: str = "",
+    user_id: str = "",
 ) -> dict[str, Any]:
     pool = _get_pool()
     if pool is None:
         raise RuntimeError("postgres unavailable")
+    from .guardrails import redact_pii_text
+
+    comment = redact_pii_text(comment)
+    user_query = redact_pii_text(user_query)
+    bot_reply = redact_pii_text(bot_reply)
     fb_id = str(uuid.uuid4())
     now = time.time()
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO feedback (id, message_id, session_id, rating,
+                """INSERT INTO feedback (id, message_id, session_id, user_id, rating,
                     comment, user_query, bot_reply, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (fb_id, message_id, session_id, rating, comment, user_query, bot_reply, now),
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now),
             )
         conn.commit()
     return {"id": fb_id, "message_id": message_id, "rating": rating, "created_at": now}
 
 
-def update_feedback_comment(message_id: str, comment: str) -> bool:
+def update_feedback_comment(message_id: str, comment: str, user_id: str = "") -> bool:
     pool = _get_pool()
     if pool is None:
         return False
+    from .guardrails import redact_pii_text
+
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """UPDATE feedback SET comment = %s
                    WHERE id = (
                      SELECT id FROM feedback
-                     WHERE message_id = %s AND comment = ''
+                     WHERE message_id = %s AND user_id = %s AND comment = ''
                      ORDER BY created_at DESC LIMIT 1
                    )""",
-                (comment, message_id),
+                (redact_pii_text(comment), message_id, user_id or ""),
             )
             rowcount = cur.rowcount
         conn.commit()
@@ -449,16 +481,30 @@ def get_feedback_summary(days: int = 30) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Analytics events
 # ---------------------------------------------------------------------------
-def track_event(event_type: str, event_data: str = "{}", session_id: str | None = None) -> None:
+def track_event(
+    event_type: str,
+    event_data: str = "{}",
+    session_id: str | None = None,
+    user_id: str = "",
+) -> None:
     pool = _get_pool()
     if pool is None:
         return
+    from .guardrails import redact_pii_text
+
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO analytics_events (id, session_id, event_type, event_data, created_at)
-                   VALUES (%s,%s,%s,%s,%s)""",
-                (str(uuid.uuid4()), session_id, event_type, event_data, time.time()),
+                """INSERT INTO analytics_events (id, session_id, user_id, event_type, event_data, created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (
+                    str(uuid.uuid4()),
+                    session_id,
+                    user_id or "",
+                    event_type,
+                    redact_pii_text(event_data),
+                    time.time(),
+                ),
             )
         conn.commit()
 
@@ -481,7 +527,12 @@ def get_event_counts(days: int = 30) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 # Session tracking
 # ---------------------------------------------------------------------------
-def upsert_session(session_id: str, user_agent: str = "", platform: str = "") -> None:
+def upsert_session(
+    session_id: str,
+    user_agent: str = "",
+    platform: str = "",
+    user_id: str = "",
+) -> None:
     pool = _get_pool()
     if pool is None:
         return
@@ -489,13 +540,14 @@ def upsert_session(session_id: str, user_agent: str = "", platform: str = "") ->
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO sessions (id, started_at, last_active_at,
+                """INSERT INTO sessions (id, user_id, started_at, last_active_at,
                        message_count, user_agent, platform)
-                   VALUES (%s,%s,%s,1,%s,%s)
+                   VALUES (%s,%s,%s,%s,1,%s,%s)
                    ON CONFLICT (id) DO UPDATE SET
+                     user_id = CASE WHEN EXCLUDED.user_id <> '' THEN EXCLUDED.user_id ELSE sessions.user_id END,
                      last_active_at = EXCLUDED.last_active_at,
                      message_count  = sessions.message_count + 1""",
-                (session_id, now, now, user_agent, platform),
+                (session_id, user_id or "", now, now, user_agent, platform),
             )
         conn.commit()
 
@@ -555,6 +607,10 @@ def log_conversation(
     pool = _get_pool()
     if pool is None:
         raise RuntimeError("postgres unavailable")
+    from .guardrails import redact_pii_text
+
+    user_message = redact_pii_text(user_message)
+    bot_reply = redact_pii_text(bot_reply)
     row_id = str(uuid.uuid4())
     thread_id = conversation_id or row_id
     with pool.connection() as conn:
@@ -787,9 +843,16 @@ _TICKET_COLUMNS_FULL = _TICKET_COLUMNS + ", transcript_json"
 def _row_to_ticket(row: tuple[Any, ...], columns: str = _TICKET_COLUMNS) -> dict[str, Any]:
     """Map a row onto the same dict shape :mod:`database` returns."""
     ticket = dict(zip(columns.replace(" ", "").split(","), row, strict=True))
-    ticket["handoff"] = _loads(ticket.pop("handoff_json", "{}"), {})
-    ticket["response_judge"] = _loads(ticket.pop("response_judge_json", "{}"), {})
-    ticket["transcript"] = _loads(ticket.pop("transcript_json", "[]"), [])
+    from .database import _redact_ticket_value
+
+    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply"):
+        if field in ticket:
+            ticket[field] = _redact_ticket_value(ticket[field])
+    ticket["handoff"] = _redact_ticket_value(_loads(ticket.pop("handoff_json", "{}"), {}))
+    ticket["response_judge"] = _redact_ticket_value(
+        _loads(ticket.pop("response_judge_json", "{}"), {})
+    )
+    ticket["transcript"] = _redact_ticket_value(_loads(ticket.pop("transcript_json", "[]"), []))
     return ticket
 
 
@@ -818,6 +881,14 @@ def create_ticket(
     if priority not in ("low", "normal", "high", "urgent"):
         logger.warning("create_ticket: invalid priority %r -> 'normal'", priority)
         priority = "normal"
+    from .database import _redact_ticket_value
+
+    reason = _redact_ticket_value(reason)
+    user_query = _redact_ticket_value(user_query)
+    bot_reply = _redact_ticket_value(bot_reply)
+    handoff = _redact_ticket_value(handoff or {})
+    response_judge = _redact_ticket_value(response_judge or {})
+    transcript = _redact_ticket_value(transcript or [])
     pool = _get_pool()
     if pool is None:
         raise RuntimeError("postgres unavailable")
@@ -840,9 +911,9 @@ def create_ticket(
                     reason,
                     user_query,
                     bot_reply,
-                    json.dumps(handoff or {}),
-                    json.dumps(response_judge or {}),
-                    json.dumps(transcript or []),
+                    json.dumps(handoff),
+                    json.dumps(response_judge),
+                    json.dumps(transcript),
                     user_id,
                     team,
                     now,
@@ -856,9 +927,9 @@ def create_ticket(
         "status": "open",
         "priority": priority,
         "reason": reason,
-        "handoff": handoff or {},
-        "response_judge": response_judge or {},
-        "transcript": transcript or [],
+        "handoff": handoff,
+        "response_judge": response_judge,
+        "transcript": transcript,
         "team": team,
         "created_at": now,
     }
@@ -952,8 +1023,10 @@ def update_ticket(
         sets.append("resolved_at = %s")
         params.append(now)
     if officer_reply is not None:
+        from .database import _redact_ticket_value
+
         sets.append("officer_reply = %s")
-        params.append(officer_reply[:4000])
+        params.append(_redact_ticket_value(officer_reply)[:4000])
         sets.append("reply_at = %s")
         params.append(now)
     if status is not None:
@@ -964,7 +1037,9 @@ def update_ticket(
         params.append(assignee)
     if staff_note is not None:
         sets.append("staff_note = %s")
-        params.append(staff_note)
+        from .database import _redact_ticket_value
+
+        params.append(_redact_ticket_value(staff_note))
     if priority is not None:
         sets.append("priority = %s")
         params.append(priority)

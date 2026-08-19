@@ -851,7 +851,7 @@ class SpeechModel:
 
         latency = time.perf_counter() - t0
         duration = len(samples) / max(sample_rate, 1)
-        logger.info("Whisper+LoRA STT: '%s' (%.1fs)", text[:60], latency)
+        logger.info("Whisper+LoRA STT completed (chars=%d, %.1fs)", len(text), latency)
         return TranscribeResult(
             text=text,
             language=language or "lg",
@@ -908,7 +908,10 @@ class SpeechModel:
             text = " ".join(seg.text.strip() for seg in segments)
             latency = time.perf_counter() - t0
             duration = len(samples) / max(sample_rate, 1)
-            logger.info("faster-whisper STT: '%s' (%.1fs, lang=%s)", text[:60], latency, info.language)
+            logger.info(
+                "faster-whisper STT completed (chars=%d, %.1fs, lang=%s)",
+                len(text), latency, info.language,
+            )
             return TranscribeResult(
                 text=text,
                 language=info.language or language or "en",

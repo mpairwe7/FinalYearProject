@@ -198,14 +198,14 @@ def rewrite_with_history(
                 replacement = f"{article} {subject_phrase}"
 
             rewritten = pronoun_pattern.sub(replacement, query)
-            logger.debug("Query rewritten with user-turn subject: %s → %s", query, rewritten)
+            logger.debug("Query rewritten with user-turn subject (input_length=%d)", len(query))
             return rewritten
 
         # Fallback: use the first assistant sentence as a broad context hint.
         first_sentence = re.split(r"(?<=[^A-Z])[.!?]\s", last_bot)[0].strip()
         if first_sentence and len(first_sentence) > 10:
             rewritten = f"Regarding '{first_sentence[:100]}': {query}"
-            logger.debug("Query rewritten with assistant context: %s → %s", query, rewritten)
+            logger.debug("Query rewritten with assistant context (input_length=%d)", len(query))
             return rewritten
 
     return query
