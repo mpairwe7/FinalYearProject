@@ -28,6 +28,24 @@ _MAX_HISTOGRAM_SIZE = 5000
 _QUANTILES = [("0.5", 0.5), ("0.95", 0.95), ("0.99", 0.99)]
 
 
+def _analytics_subject(request: Request) -> str:
+    """Return an opted-in subject id, otherwise fail closed.
+
+    Request metrics stay aggregated in process, but durable session and event
+    records are personal data.  Only a verified subject with an active
+    ``analytics`` consent receipt may create those records.
+    """
+    ctx = getattr(request.state, "auth", None)
+    user_id = getattr(ctx, "user_id", "") if getattr(ctx, "authenticated", False) else ""
+    if not user_id:
+        return ""
+    try:
+        return user_id if db.has_active_consent(user_id, "analytics") else ""
+    except Exception:
+        logger.warning("Analytics consent lookup failed; durable tracking skipped", exc_info=True)
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # In-process metrics store (thread-safe)
 # ---------------------------------------------------------------------------
@@ -169,10 +187,11 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
             )
 
         # Track session activity
-        if session_id and path.startswith("/v1/"):
+        analytics_user_id = _analytics_subject(request)
+        if session_id and analytics_user_id and path.startswith("/v1/"):
             try:
                 user_agent = request.headers.get("User-Agent", "")[:200]
-                db.upsert_session(session_id, user_agent=user_agent)
+                db.upsert_session(session_id, user_agent=user_agent, user_id=analytics_user_id)
             except Exception:
                 logger.debug("Session tracking failed", exc_info=True)
 
@@ -180,14 +199,16 @@ class AnalyticsMiddleware(BaseHTTPMiddleware):
         if path == "/v1/chat" and method == "POST":
             metrics.inc("chat_requests_total")
             metrics.observe("chat_response_time_ms", elapsed_ms)
-            try:
-                db.track_event(
-                    "chat_request",
-                    json.dumps({"response_time_ms": round(elapsed_ms, 2), "status": status}),
-                    session_id=session_id or None,
-                )
-            except Exception:
-                logger.debug("Event tracking failed", exc_info=True)
+            if analytics_user_id:
+                try:
+                    db.track_event(
+                        "chat_request",
+                        json.dumps({"response_time_ms": round(elapsed_ms, 2), "status": status}),
+                        session_id=session_id or None,
+                        user_id=analytics_user_id,
+                    )
+                except Exception:
+                    logger.debug("Event tracking failed", exc_info=True)
 
         # Track retrieval mode distribution for degradation visibility
         if path == "/v1/chat" and method == "POST":

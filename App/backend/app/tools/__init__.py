@@ -285,7 +285,12 @@ class ToolRegistry:
         except TypeError as e:
             # Schema mismatch — the LLM passed wrong args.  Don't
             # log a stacktrace, just return a clean message.
-            logger.info("Tool %s rejected args %s: %s", name, arguments, e)
+            logger.info(
+                "Tool %s rejected arguments (argument_keys=%s, error_type=%s)",
+                name,
+                sorted((arguments or {}).keys()),
+                type(e).__name__,
+            )
             return {
                 "ok": False,
                 "error": f"Invalid arguments for {name}: {e}",

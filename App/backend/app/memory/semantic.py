@@ -21,6 +21,7 @@ the same; callers don't know the backend changed.
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ from typing import Any
 from .decay import compute_decayed_confidence
 
 logger = logging.getLogger(__name__)
+
+SEMANTIC_TTL_DAYS = int(os.getenv("SEMANTIC_TTL_DAYS", "365"))
 
 
 @dataclass
@@ -219,3 +222,14 @@ class SemanticMemory:
         except Exception:
             logger.exception("semantic forget_fact failed")
             return False
+
+    def cleanup_expired(self) -> int:
+        """Delete facts that have reached the declared retention limit."""
+        from .. import database as db
+
+        cutoff = time.time() - (SEMANTIC_TTL_DAYS * 86400)
+        try:
+            return db.execute("DELETE FROM user_facts WHERE extracted_at < ?", (cutoff,))
+        except Exception:
+            logger.exception("semantic cleanup failed")
+            return 0

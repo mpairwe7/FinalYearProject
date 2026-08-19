@@ -222,9 +222,9 @@ class InputGuard:
         for pattern in _INJECTION_PATTERNS:
             if pattern.search(text):
                 logger.warning(
-                    "Prompt injection blocked: pattern=%s input=%s",
+                    "Prompt injection blocked: pattern=%s input_length=%d",
                     pattern.pattern[:60],
-                    text[:80].replace("\r", "\\r").replace("\n", "\\n"),
+                    len(text),
                 )
                 return GuardResult(
                     allowed=False,
@@ -239,9 +239,9 @@ class InputGuard:
         for pattern in _HARMFUL_INTENT_PATTERNS:
             if pattern.search(text):
                 logger.warning(
-                    "Harmful intent blocked: pattern=%s input=%s",
+                    "Harmful intent blocked: pattern=%s input_length=%d",
                     pattern.pattern[:60],
-                    text[:80].replace("\r", "\\r").replace("\n", "\\n"),
+                    len(text),
                 )
                 return GuardResult(
                     allowed=False,

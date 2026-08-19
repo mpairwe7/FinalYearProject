@@ -170,9 +170,9 @@ class ClassificationKnowledge(_Base):
 # Feedback (current_user; summary is admin)
 # ---------------------------------------------------------------------------
 class FeedbackEndpoints(_Base):
-    def test_feedback_anonymous_ok_when_flag_off(self):
+    def test_feedback_requires_authenticated_analytics_consent(self):
         r = _client().post("/v1/feedback", json={"message_id": "m1", "rating": "up"})
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 403)
 
     def test_feedback_invalid_rating_422(self):
         r = _client().post("/v1/feedback", json={"message_id": "m1", "rating": "maybe"})
@@ -183,11 +183,11 @@ class FeedbackEndpoints(_Base):
         r = _client().post("/v1/feedback", json={"message_id": "m1", "rating": "up"})
         self.assertEqual(r.status_code, 401)
 
-    def test_feedback_comment_404_for_unknown_message(self):
+    def test_feedback_comment_requires_analytics_consent(self):
         r = _client().patch(
             "/v1/feedback/does-not-exist/comment", json={"comment": "hello"}
         )
-        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.status_code, 403)
 
     def test_feedback_summary_requires_admin(self):
         c = _client()
@@ -200,12 +200,50 @@ class FeedbackEndpoints(_Base):
 # Analytics
 # ---------------------------------------------------------------------------
 class AnalyticsEndpoints(_Base):
-    def test_event_accepts_post(self):
+    def test_event_without_consent_is_ignored(self):
         r = _client().post("/v1/analytics/event", json={"event_type": "page_view"})
         self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["status"], "ignored")
 
     def test_event_missing_type_422(self):
         self.assertEqual(_client().post("/v1/analytics/event", json={}).status_code, 422)
+
+    def test_consent_gates_event_and_withdrawal_erases_it(self):
+        sub = "analytics-consent-subject"
+        token = make_dev_token(sub, role="verified_taxpayer")
+        headers = _bearer(token)
+        client = _client()
+        self.assertEqual(
+            client.post(
+                "/v1/me/consents/grant",
+                headers=headers,
+                json={"purposes": ["analytics"], "version": "2026-08"},
+            ).status_code,
+            200,
+        )
+        stored = client.post(
+            "/v1/analytics/event",
+            headers=headers,
+            json={"event_type": "page_view", "event_data": {"email": "person@example.com"}},
+        )
+        self.assertEqual(stored.status_code, 200)
+        self.assertEqual(stored.json()["status"], "ok")
+        exported = client.get("/v1/me/export", headers=headers).json()
+        self.assertTrue(exported["analytics_events"])
+        self.assertNotIn("person@example.com", str(exported["analytics_events"]))
+
+        withdrawn = client.post(
+            "/v1/me/consents/withdraw",
+            headers=headers,
+            json={"purposes": ["analytics"]},
+        )
+        self.assertEqual(withdrawn.status_code, 200)
+        self.assertGreaterEqual(withdrawn.json()["withdrawn"]["analytics_data"]["analytics_events"], 1)
+        self.assertEqual(client.get("/v1/me/export", headers=headers).json()["analytics_events"], [])
+        ignored = client.post(
+            "/v1/analytics/event", headers=headers, json={"event_type": "page_view"}
+        )
+        self.assertEqual(ignored.json()["status"], "ignored")
 
     def test_dashboard_and_comparison_require_admin(self):
         c = _client()

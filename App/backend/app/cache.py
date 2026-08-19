@@ -189,7 +189,7 @@ class SemanticCache:
             if exact is not None and (time.time() - exact.created_at) < CACHE_TTL_SECONDS:
                 exact.hits += 1
                 self._stats["hits"] += 1
-                logger.debug("Cache HIT (exact): %s", query[:50].replace("\n", "\\n"))
+                logger.debug("Cache HIT (exact, query_length=%d)", len(query))
                 return exact.response
 
         if not self._dense_model:
@@ -223,10 +223,10 @@ class SemanticCache:
                 best_entry.hits += 1
                 self._stats["hits"] += 1
                 logger.debug(
-                    "Cache HIT: sim=%.4f query=%s → cached=%s",
+                    "Cache HIT: sim=%.4f query_length=%d cached_query_length=%d",
                     best_sim,
-                    query[:50].replace("\r", "\\r").replace("\n", "\\n"),
-                    best_entry.query[:50].replace("\r", "\\r").replace("\n", "\\n"),
+                    len(query),
+                    len(best_entry.query),
                 )
                 return best_entry.response
 
@@ -341,7 +341,7 @@ class RedisSemanticCache:
             raw = self._client.get(self._exact_redis_key(query, locale))
             if raw:
                 self._stats["hits"] += 1
-                logger.debug("Redis cache HIT (exact): %s", query[:50].replace("\n", "\\n"))
+                logger.debug("Redis cache HIT (exact, query_length=%d)", len(query))
                 return _json.loads(raw.decode("utf-8"))
         except Exception:
             logger.debug("Redis exact cache get failed", exc_info=True)

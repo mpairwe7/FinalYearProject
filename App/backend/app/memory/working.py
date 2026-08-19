@@ -69,11 +69,16 @@ class WorkingMemory:
         with self._lock:
             self._store.clear()
 
-    def size(self) -> int:
+    def purge_expired(self) -> int:
+        """Delete expired entries and return the number removed."""
         with self._lock:
             now = time.time()
-            # Lazy eviction
-            expired = [k for k, v in self._store.items() if v.expires_at < now]
-            for k in expired:
-                self._store.pop(k, None)
+            expired = [key for key, value in self._store.items() if value.expires_at < now]
+            for key in expired:
+                self._store.pop(key, None)
+            return len(expired)
+
+    def size(self) -> int:
+        self.purge_expired()
+        with self._lock:
             return len(self._store)

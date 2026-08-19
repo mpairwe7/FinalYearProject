@@ -352,7 +352,7 @@ def speech_to_text(
             result.get("output", {}).get("audio_transcription")
             or result.get("audio_transcription", "")
         )
-        logger.info("Sunbird STT (%s): '%s'", language, transcription[:80])
+        logger.info("Sunbird STT completed (language=%s, chars=%d)", language, len(transcription))
         return {"text": transcription, "language": result.get("language", language)}
     except httpx.HTTPStatusError as e:
         body = ""
