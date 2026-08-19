@@ -546,9 +546,25 @@ def test_patch_ticket_noop_400():
 def test_feedback_comment_roundtrip():
     c = _client()
     mid = f"m-e2e-{uuid.uuid4().hex[:8]}"
-    posted = c.post("/v1/feedback", json={"message_id": mid, "rating": "up"})
+    # Feedback is analytics processing, so a user must give purpose-specific
+    # consent before the success path is available.
+    consent = c.post(
+        "/v1/me/consents/grant",
+        headers=_bearer(USER),
+        json={"purposes": ["analytics"], "version": "2026-08"},
+    )
+    assert consent.status_code == 200
+    posted = c.post(
+        "/v1/feedback",
+        headers=_bearer(USER),
+        json={"message_id": mid, "rating": "up"},
+    )
     assert posted.status_code == 200
-    commented = c.patch(f"/v1/feedback/{mid}/comment", json={"comment": "very helpful, thanks"})
+    commented = c.patch(
+        f"/v1/feedback/{mid}/comment",
+        headers=_bearer(USER),
+        json={"comment": "very helpful, thanks"},
+    )
     assert commented.status_code == 200
 
 
