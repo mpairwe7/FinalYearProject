@@ -188,7 +188,7 @@ services:
     image: vllm/vllm-openai:v0.6.6
     container_name: ura-vllm
     command: >
-      --model ${LLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      --model ${LLM_MODEL:-Sunbird/Sunflower-14B-FP8}
       --port 8001
       --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
       --gpu-memory-utilization ${VLLM_GPU_MEM_UTIL:-0.85}

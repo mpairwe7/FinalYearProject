@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "App" / "backend"))
 
 os.environ.setdefault("LLM_BACKEND", "vllm")
 os.environ.setdefault("VLLM_BASE_URL", "http://localhost:18001/v1")
-os.environ.setdefault("LLM_MODEL", "Qwen/Qwen3-8B")
+os.environ.setdefault("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 os.environ.setdefault("LLM_ENABLED", "true")
 
 from app import llm  # noqa: E402

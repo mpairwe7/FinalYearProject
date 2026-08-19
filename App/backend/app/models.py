@@ -52,7 +52,7 @@ class ChatResponse(BaseModel):
             "clarification | workflow | escalated"
         ),
     )
-    model: str = "Qwen/Qwen3-8B"
+    model: str = "Sunbird/Sunflower-14B-FP8"
     conversation_id: str | None = None
     locale: str = Field("en", description="Locale used for this response")
     escalation_required: bool = Field(False, description="Whether human review is needed")
