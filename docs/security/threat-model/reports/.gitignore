@@ -1,0 +1,7 @@
+# Threagile generated reports — produced by CI or locally, not committed
+*.pdf
+*.xlsx
+*.json
+*.png
+!.gitkeep
+!README.md

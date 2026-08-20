@@ -1,0 +1,30 @@
+# OWASP Threat Dragon -- Visual Threat Modeling for Quarterly Workshops
+#
+# Usage:
+#   cd docs/security/threat-model/workshop
+#   docker compose up -d
+#   Open http://localhost:8080
+#   Import ura-threat-dragon-model.json from this directory
+#
+# After workshop:
+#   Export updated model → overwrite ura-threat-dragon-model.json
+#   Commit changes to repo
+#   docker compose down
+
+services:
+  threat-dragon:
+    image: threatdragon/owasp-threat-dragon:v2.4.1
+    ports:
+      - "8080:3000"
+    environment:
+      - NODE_ENV=production
+      - SERVER_API_PROTOCOL=http
+      - ENCRYPTION_KEYS=workshop-local-only-key-not-for-production
+      - ENCRYPTION_JWT_SIGNING_KEY=workshop-local-jwt-not-for-production
+      - ENCRYPTION_JWT_REFRESH_SIGNING_KEY=workshop-local-refresh-not-for-production
+    volumes:
+      - dragon-data:/app/threat-dragon/data
+    restart: unless-stopped
+
+volumes:
+  dragon-data:
