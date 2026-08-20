@@ -90,7 +90,7 @@ seaborn>=0.13.0
 # OpenTelemetry GenAI observability (opt-in via OTEL_ENABLED=true)
 opentelemetry-api>=1.27.0
 opentelemetry-sdk>=1.44.0
-opentelemetry-exporter-otlp-proto-grpc>=1.27.0
+opentelemetry-exporter-otlp-proto-grpc>=1.44.0
 
 # RAG evaluation (CI/CD pipeline)
 ragas>=0.2.0
