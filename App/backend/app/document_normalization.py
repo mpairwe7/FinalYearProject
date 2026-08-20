@@ -14,11 +14,14 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_pdf_normalization_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -200,93 +203,106 @@ def normalize_document(
     try:
         import pypdfium2 as pdfium  # type: ignore[import-untyped]
 
-        pdf = pdfium.PdfDocument(data)
-        page_count = len(pdf)
-        pages: list[NormalizedPage] = []
-        warnings: list[str] = []
+        with _pdf_normalization_lock:
+            pdf = pdfium.PdfDocument(data)
+            try:
+                page_count = len(pdf)
+                pages: list[NormalizedPage] = []
+                warnings: list[str] = []
 
-        target_indices = spec.page_indices if spec.page_indices is not None else list(range(page_count))
+                target_indices = spec.page_indices if spec.page_indices is not None else list(range(page_count))
 
-        for idx in target_indices:
-            if idx < 0 or idx >= page_count:
-                continue
-            page = pdf[idx]
-            width_pt, height_pt = page.get_size()
-            width_px = int(round(width_pt * spec.dpi_x / 72.0))
-            height_px = int(round(height_pt * spec.dpi_y / 72.0))
-
-            page_warnings: list[str] = []
-            page_text = ""
-            page_glyphs: list[dict[str, Any]] = []
-            if extract_text_layer:
-                try:
-                    from app.vision.glyph_fusion import extract_page_vector_glyphs
-
-                    glyphs_list = extract_page_vector_glyphs(data, idx, dpi=spec.dpi_x)
-                    page_glyphs = [
-                        {"text": g.text, "bbox": g.bbox, "confidence": g.confidence, "source": g.source}
-                        for g in glyphs_list
-                    ]
-                    if glyphs_list:
-                        page_text = " ".join(g.text for g in glyphs_list)
-                    else:
-                        textpage = page.get_textpage()
-                        page_text = textpage.get_text_range() or ""
-                except Exception:
+                for idx in target_indices:
+                    if idx < 0 or idx >= page_count:
+                        continue
+                    page = pdf[idx]
                     try:
-                        textpage = page.get_textpage()
-                        page_text = textpage.get_text_range() or ""
-                    except Exception:
-                        page_warnings.append(f"Could not extract text layer from page {idx + 1}")
+                        width_pt, height_pt = page.get_size()
+                        width_px = int(round(width_pt * spec.dpi_x / 72.0))
+                        height_px = int(round(height_pt * spec.dpi_y / 72.0))
 
-            img_bytes: bytes | None = None
-            if render_images:
-                try:
-                    scale = spec.dpi_x / 72.0
-                    if width_px * height_px > spec.max_pixels:
-                        scale = (spec.max_pixels / max(1.0, width_pt * height_pt * (spec.dpi_x / 72.0) ** 2)) ** 0.5 * (spec.dpi_x / 72.0)
-                        page_warnings.append(f"Page {idx + 1} was downscaled to meet pixel limits")
-                    bitmap = page.render(scale=scale)
-                    pil_image = bitmap.to_pil()
-                    buf = io.BytesIO()
-                    pil_image.save(buf, format="PNG")
-                    img_bytes = buf.getvalue()
-                except Exception:
-                    page_warnings.append(f"Failed to render image for page {idx + 1}")
+                        page_warnings: list[str] = []
+                        page_text = ""
+                        page_glyphs: list[dict[str, Any]] = []
+                        if extract_text_layer:
+                            try:
+                                from app.vision.glyph_fusion import extract_page_vector_glyphs
 
-            page_tables: list[list[list[str | None]]] = []
-            if extract_tables:
-                try:
-                    from app.vision.table_structuring import structure_document_tables
+                                glyphs_list = extract_page_vector_glyphs(data, idx, dpi=spec.dpi_x)
+                                page_glyphs = [
+                                    {"text": g.text, "bbox": g.bbox, "confidence": g.confidence, "source": g.source}
+                                    for g in glyphs_list
+                                ]
+                                if glyphs_list:
+                                    page_text = " ".join(g.text for g in glyphs_list)
+                                else:
+                                    textpage = page.get_textpage()
+                                    try:
+                                        page_text = textpage.get_text_range() or ""
+                                    finally:
+                                        textpage.close()
+                            except Exception:
+                                try:
+                                    textpage = page.get_textpage()
+                                    try:
+                                        page_text = textpage.get_text_range() or ""
+                                    finally:
+                                        textpage.close()
+                                except Exception:
+                                    page_warnings.append(f"Could not extract text layer from page {idx + 1}")
 
-                    structured = structure_document_tables(data, page_text, page_number=idx + 1)
-                    page_tables = [t.matrix for t in structured]
-                except Exception:
-                    pass
+                        img_bytes: bytes | None = None
+                        if render_images:
+                            try:
+                                scale = spec.dpi_x / 72.0
+                                if width_px * height_px > spec.max_pixels:
+                                    scale = (spec.max_pixels / max(1.0, width_pt * height_pt * (spec.dpi_x / 72.0) ** 2)) ** 0.5 * (spec.dpi_x / 72.0)
+                                    page_warnings.append(f"Page {idx + 1} was downscaled to meet pixel limits")
+                                bitmap = page.render(scale=scale)
+                                pil_image = bitmap.to_pil()
+                                buf = io.BytesIO()
+                                pil_image.save(buf, format="PNG")
+                                img_bytes = buf.getvalue()
+                            except Exception:
+                                page_warnings.append(f"Failed to render image for page {idx + 1}")
 
-            pages.append(
-                NormalizedPage(
-                    page_index=idx,
-                    source_page_number=idx + 1,
-                    original_size=(width_px, height_px),
-                    text=page_text,
-                    image_bytes=img_bytes,
-                    source_kind="pdf_page",
-                    pdf_source_id=f"{doc_id}_page_{idx}",
-                    tables=page_tables,
-                    glyphs=page_glyphs,
-                    warnings=page_warnings,
+                        page_tables: list[list[list[str | None]]] = []
+                        if extract_tables:
+                            try:
+                                from app.vision.table_structuring import structure_document_tables
+
+                                structured = structure_document_tables(data, page_text, page_number=idx + 1)
+                                page_tables = [t.matrix for t in structured]
+                            except Exception:
+                                pass
+
+                        pages.append(
+                            NormalizedPage(
+                                page_index=idx,
+                                source_page_number=idx + 1,
+                                original_size=(width_px, height_px),
+                                text=page_text,
+                                image_bytes=img_bytes,
+                                source_kind="pdf_page",
+                                pdf_source_id=f"{doc_id}_page_{idx}",
+                                tables=page_tables,
+                                glyphs=page_glyphs,
+                                warnings=page_warnings,
+                            )
+                        )
+                    finally:
+                        page.close()
+
+                return NormalizationBundle(
+                    source_fingerprint=sha256_hash,
+                    page_count=page_count,
+                    pages=pages,
+                    adapter="pypdfium2",
+                    source_kind="pdf",
+                    warnings=warnings,
                 )
-            )
-
-        return NormalizationBundle(
-            source_fingerprint=sha256_hash,
-            page_count=page_count,
-            pages=pages,
-            adapter="pypdfium2",
-            source_kind="pdf",
-            warnings=warnings,
-        )
+            finally:
+                pdf.close()
     except (ImportError, Exception) as pdfium_err:
         logger.debug("pypdfium2 normalization unavailable or failed: %s", pdfium_err)
 
