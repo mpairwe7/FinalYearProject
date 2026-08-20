@@ -41,7 +41,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
       {isLoading ? <p className="ov-empty">Loading flags…</p> : null}
       {error ? <p className="ov-empty">Could not load flags.</p> : null}
       {data ? (
-        <div className="table-responsive">
+        <div className="table-responsive" tabIndex={0} role="region" aria-label="Feature Flags Table">
           <table className="flag-table">
             <thead>
               <tr>
