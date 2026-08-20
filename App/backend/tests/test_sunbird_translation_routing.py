@@ -15,8 +15,12 @@ Two configuration defects sent four of those languages to a general model:
     which answers, so Sunbird was never reached. Measured in production:
     lg 3.2s on sunbird_cloud, nyn/ach/teo 17-18s on gemini_flash.
 
-Swahili is the deliberate exception: it has a Sunbird TTS voice but their
-translate endpoint does not serve it, so it must keep leading with Gemini.
+Swahili was believed to be a deliberate exception — a comment claimed
+Sunbird's translate endpoint did not serve it, so it led with Gemini
+instead. Verified false against the live API 2026-08-19 (both directions,
+HTTP 200, fluent output) and against the live OpenAPI spec
+(https://api.sunbird.ai/openapi.json), which lists Swahili (swa) among 31
+supported /tasks/translate languages. Swahili now leads with Sunbird too.
 """
 
 from __future__ import annotations
@@ -107,10 +111,11 @@ class TestSunbirdLeadsForEveryLanguageItServes(unittest.TestCase):
     def test_the_reverse_direction_also_leads_with_sunbird(self):
         self.assertEqual(self._first_backend_called("nyn", "en"), "sunbird")
 
-    def test_swahili_still_leads_with_gemini(self):
-        """Sunbird's translate endpoint does not serve Swahili; leading with it
-        would spend a guaranteed-failed call first."""
-        self.assertEqual(self._first_backend_called("en", "sw"), "gemini")
+    def test_swahili_now_leads_with_sunbird(self):
+        """Sunbird's translate endpoint does serve Swahili (verified live,
+        2026-08-19) — the earlier "leads with Gemini" behavior was based on a
+        stale claim, not a real API limitation."""
+        self.assertEqual(self._first_backend_called("en", "sw"), "sunbird")
 
     def test_an_unrelated_language_leads_with_gemini(self):
         self.assertEqual(self._first_backend_called("en", "fr"), "gemini")

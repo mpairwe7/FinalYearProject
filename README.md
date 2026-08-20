@@ -249,7 +249,7 @@ The PR Python coverage gate is currently set to a ratcheting baseline of 35% whi
 |-------|-------------|
 | Lint | ESLint + TypeScript checking |
 | Unit & Component Tests | Vitest + React Testing Library; coverage artifact is uploaded while the blocking gate focuses on correctness |
-| Accessibility Audit | axe-core WCAG 2.1 AA + Lighthouse CI (accessibility >= 90) |
+| Accessibility Audit | axe-core WCAG 2.2 AA across taxpayer and staff routes + Lighthouse CI (accessibility >= 90) |
 | Build | Next.js production build |
 | Build Docker | Build & push frontend Docker image + Trivy scan |
 | Deploy Production | Production Docker deployment |
@@ -349,7 +349,7 @@ The project implements **defense-in-depth** security across 7 CI/CD workflows an
 | **Supply Chain** | SHA-pinned Actions, OSSF Scorecard, Dependabot, cosign | SLSA Level 2+ compliance |
 | **Container** | Trivy image scan (3 images), non-root, cap_drop, read_only, cosign signed | Container hardening |
 | **AI Red Teaming** | 50 adversarial prompts (NIST AI 600-1 taxonomy) | Prompt injection, jailbreak, PII extraction |
-| **Accessibility** | axe-core WCAG 2.1 AA, Lighthouse CI (>= 90) | Frontend a11y audit in CI |
+| **Accessibility** | axe-core WCAG 2.2 AA, Lighthouse CI (>= 90) | Frontend a11y audit in CI |
 | **Load Testing** | k6 (p95 < 3s, error rate < 1%) | SLO validation |
 
 All GitHub Actions are **SHA-pinned** to commit hashes (not mutable tags). Container images are signed with Sigstore cosign (keyless OIDC) and attested with SLSA v1.2 provenance. See [SECURITY.md](SECURITY.md) for full details.

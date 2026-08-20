@@ -1579,10 +1579,11 @@ class SpeechModel:
                     # equal their Sunbird code. Use the canonical table so that
                     # is intentional rather than luck.
                     #
-                    # Swahili still won't translate here — Sunbird's translate
-                    # endpoint covers English + five Ugandan languages only (see
-                    # TRANSLATION_LANGUAGES) — but it now declines with the right
-                    # code and falls through to Gemini/Workers AI/prompted.
+                    # Swahili now translates here too — verified 2026-08-19
+                    # against the live API (see TRANSLATION_LANGUAGES in
+                    # sunbird.py). It used to decline and fall through to
+                    # Gemini/Workers AI/prompted on a stale claim that the
+                    # translate endpoint didn't serve swa; it does.
                     src_code = sunbird.LOCALE_TO_SUNBIRD.get(source_lang, source_lang)
                     tgt_code = sunbird.LOCALE_TO_SUNBIRD.get(target_lang, target_lang)
                     result = sunbird.translate(text, src_code, tgt_code)
@@ -1621,10 +1622,9 @@ class SpeechModel:
         # sunbird_cloud while nyn/ach/teo took 17-18s on gemini_flash, for
         # languages a general model approximates rather than speaks.
         #
-        # Swahili deliberately still leads with Gemini: it has a Sunbird TTS
-        # voice but their translate endpoint does not serve it (see
-        # TRANSLATION_LANGUAGES), so leading with Sunbird there would just
-        # spend a failed call before falling through.
+        # Swahili now leads with Sunbird too (see TRANSLATION_LANGUAGES in
+        # sunbird.py) — the earlier "their translate endpoint does not serve
+        # it" claim was verified false against the live API 2026-08-19.
         def _sunbird_translates(src: str, tgt: str) -> bool:
             try:
                 from . import sunbird

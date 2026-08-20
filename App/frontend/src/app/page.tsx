@@ -149,6 +149,11 @@ export default function Page() {
   const [dictationNotice, setDictationNotice] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // The transcript itself is intentionally not a live region. Updating an
+  // assistant turn for every SSE token would otherwise make a screen reader
+  // repeatedly announce the whole conversation. This compact status is the
+  // one, stable announcement for the start and end of a response.
+  const [chatLiveStatus, setChatLiveStatus] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const chatDockRef = useRef<HTMLDivElement>(null);
@@ -592,6 +597,7 @@ export default function Page() {
     setMessage('');
     setPendingAttachments([]);
     setIsLoading(true);
+    setChatLiveStatus('Getting a response from URA.');
     lastUserQueryRef.current = text;
     trackChatSent(text.length);
     const t0 = Date.now();
@@ -648,6 +654,7 @@ export default function Page() {
       });
       if (!res.ok) {
         await applySyncReply();
+        setChatLiveStatus('URA response ready.');
         return;
       }
       addTurns([createTurn('assistant', '', {})]);
@@ -744,9 +751,11 @@ export default function Page() {
       } finally { reader.releaseLock(); }
       if (!useChatStore.getState().chat.at(-1)?.content.trim()) {
         await applySyncReply();
+        setChatLiveStatus('URA response ready.');
         return;
       }
       trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
+      setChatLiveStatus('URA response ready.');
     } catch {
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
@@ -759,7 +768,12 @@ export default function Page() {
       } else if (!userStoppedRef.current) {
         addTurns([createTurn('assistant', 'Sorry, I could not reach the URA knowledge base. Please try again shortly.')]);
       }
-      if (!userStoppedRef.current) trackErrorOccurred('chat_fetch_failed');
+      if (userStoppedRef.current) {
+        setChatLiveStatus('Response stopped.');
+      } else {
+        trackErrorOccurred('chat_fetch_failed');
+        setChatLiveStatus('URA response unavailable. Please try again.');
+      }
     } finally {
       clearTimeout(timeout);
       streamAbortRef.current = null;
@@ -1064,7 +1078,7 @@ export default function Page() {
         onLocaleChange={setLocale}
       />
 
-      <main className="app-content">
+      <main id="main-content" className="app-content" tabIndex={-1}>
         {!hasStartedChat ? (
           /* ── Landing state — input-first hierarchy (chatv2) ── */
           <div className="landing">
@@ -1121,7 +1135,6 @@ export default function Page() {
             <div
               ref={messageListRef}
               className={`message-list${isLoading ? ' is-streaming' : ''}`}
-              aria-live="polite"
             >
               {chat.map((turn) => (
                 <ChatMessage
@@ -1152,6 +1165,10 @@ export default function Page() {
               })()}
               <div ref={messagesEndRef} className="messages-end-spacer" />
             </div>
+
+            <p className="sr-only" role="status" aria-atomic="true">
+              {chatLiveStatus}
+            </p>
 
             {showScrollToLatest && (
               <button

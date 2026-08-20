@@ -1559,7 +1559,24 @@ Open http://localhost:13000 in a browser.  Feedback, citations, and
 SSE streaming are all proxied through the `/api` rewrite so no ports
 need to be exposed beyond 13000.
 
-**Option B — one-command Docker stack with local Qwen3-8B:**
+**Option B — one-command Docker stack with local Sunflower-14B-FP8 (current
+default LLM, see [docs/MODEL_SWAP_GUIDE.md](../docs/MODEL_SWAP_GUIDE.md)):**
+
+```bash
+# From App/
+docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml up -d --build
+```
+
+This starts Redis, Qdrant, vLLM (`Sunbird/Sunflower-14B-FP8` — gated on HF,
+needs an approved `HF_TOKEN`; measured ~42 tok/s on an RTX A6000 via vLLM's
+Marlin FP8 kernel), the FastAPI backend, and the Next.js frontend together.
+Override the GPU with `SUNFLOWER_GPU_ID`, the model with `SUNFLOWER_MODEL`,
+and a local model directory with `SUNFLOWER_LOCAL_MODEL_DIR` — same pattern
+as `docker-compose.local-qwen.yml` below, with `SUNFLOWER_*` in place of
+`QWEN_*`.
+
+**Option B (rollback) — one-command Docker stack with local Qwen3-8B**
+(ungated, English-centric; use if HF access to Sunflower isn't granted):
 
 ```bash
 # From App/
@@ -1948,7 +1965,7 @@ curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/ti
 |---------|------|-----|-------------|
 | Backend (FastAPI) | 8083 container / 8887 local dev | API retrieval GPU mapping + CPU reranker | RAG retrieval, workflows, auth, speech orchestration |
 | Frontend (Next.js 16) | 3032 Compose / 13000 standalone | — | PWA + `/api` proxy + consent + analytics queue |
-| vLLM | 8011 | `QWEN_GPU_ID` via `docker-compose.local-qwen.yml` (default GPU 4) | Qwen/Qwen3-8B + tool-calling via OpenAI-compatible API |
+| vLLM | 8011 | `SUNFLOWER_GPU_ID` via `docker-compose.local-sunflower.yml` (default GPU 4; `QWEN_GPU_ID` via `docker-compose.local-qwen.yml` for the rollback) | Sunbird/Sunflower-14B-FP8 (or Qwen/Qwen3-8B rollback) + tool-calling via OpenAI-compatible API |
 | Qdrant | 6333 | CPU | dense + sparse retrieval index |
 | Redis | internal 6379 | CPU | semantic cache and distributed rate-limit storage |
 | ngrok | public HTTPS -> 3032 | — | silent background tunnel to the frontend; no GPU is used by ngrok |

@@ -1,9 +1,19 @@
-"""LLM generation layer — Qwen3-8B answer synthesis (2026).
+"""LLM generation layer — Sunflower-14B-FP8 answer synthesis (2026).
 
 True RAG: top-k retrieved passages are fed to an instruction-tuned LLM
-that synthesizes a grounded, cited answer.  Default model is Qwen3-8B
-(Apache-2.0, +13 MMLU pts over Qwen3-3B, 128K context, hybrid
-thinking/non-thinking modes).
+that synthesizes a grounded, cited answer.  Default model is
+Sunbird/Sunflower-14B-FP8 (Apache-2.0, Qwen3-14B architecture, FP8
+compressed-tensors quantized, natively multilingual across 31 Ugandan
+languages + English, hybrid thinking/non-thinking modes inherited from
+Qwen3's chat template). GATED on HuggingFace — HF_TOKEN must belong to an
+account granted access, or LLM_MODEL may point at a local download.
+
+On GPUs without native FP8 tensor cores (e.g. Ampere/A6000),
+LLM_BACKEND=vllm is materially faster than LLM_BACKEND=local: vLLM
+auto-selects the Marlin weight-only-FP8 kernel (~42 tok/s measured)
+vs. this module's naive per-layer FP8->bf16 dequant via
+transformers/compressed-tensors (~4.5-5 tok/s). See
+docs/MODEL_SWAP_GUIDE.md for the full comparison.
 
 Supports both synchronous and streaming (SSE) generation via HuggingFace
 transformers with TextIteratorStreamer, or high-throughput vLLM serving.
@@ -21,7 +31,7 @@ air-gapped or privacy-sensitive deployments.
 Model swap guide: see docs/MODEL_SWAP_GUIDE.md for tested alternatives.
 
 Environment variables:
-    LLM_MODEL               – HF model ID (default: Qwen/Qwen3-8B)
+    LLM_MODEL               – HF model ID (default: Sunbird/Sunflower-14B-FP8)
     LLM_MODEL_REVISION      – HF revision/commit SHA to pin (default: None)
     LLM_TRUST_REMOTE_CODE   – "true" to allow model-defined Python (default: false)
     LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 8192)
@@ -56,7 +66,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LLM_BACKEND = os.getenv("LLM_BACKEND", "local").lower()  # "local" | "vllm"
-LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen3-8B")
+LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 LLM_MODEL_REVISION = os.getenv("LLM_MODEL_REVISION", "") or None
 LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "true"
 LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
@@ -462,7 +472,7 @@ def _load_model() -> bool:
             _model.eval()
 
             logger.info(
-                "Qwen LLM ready (model=%s revision=%s device=%s params=%.1fB adapters=%s)",
+                "LLM ready (model=%s revision=%s device=%s params=%.1fB adapters=%s)",
                 LLM_MODEL,
                 LLM_MODEL_REVISION or "HEAD",
                 next(_model.parameters()).device,
@@ -785,7 +795,7 @@ def translate_text(
 ) -> str:
     """Lightweight LLM-prompted translation with repetition control.
 
-    Uses the already-loaded Qwen3-8B with a minimal prompt (no RAG context)
+    Uses the already-loaded local LLM with a minimal prompt (no RAG context)
     and capped output length to avoid runaway generation.
     """
     # Guard here, not upstream. I first suppressed this call site on the claim

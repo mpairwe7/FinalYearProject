@@ -63,6 +63,8 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                       type="button"
                       className={flag.enabled ? "is-active" : undefined}
                       disabled={toggle.isPending}
+                      aria-pressed={flag.enabled}
+                      aria-label={`${flag.name}: ${flag.enabled ? "on" : "off"}`}
                       onClick={() => toggle.mutate({ name: flag.name, enabled: !flag.enabled })}
                     >
                       {flag.enabled ? "on" : "off"}

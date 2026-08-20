@@ -115,12 +115,13 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
         ) : null}
       </header>
 
-      <div className="tickets-filters">
+      <div className="tickets-filters" role="group" aria-label="Filter escalation queue">
         {STATUSES.map((value) => (
           <button
             key={value}
             type="button"
             className={`filter${view.status === value ? " is-active" : ""}`}
+            aria-pressed={view.status === value}
             onClick={() => setView({ status: value, ticket: "" })}
           >
             {STATUS_LABEL[value]}
@@ -130,6 +131,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
         <button
           type="button"
           className={`filter${view.priority === "" ? " is-active" : ""}`}
+          aria-pressed={view.priority === ""}
           onClick={() => setView({ priority: "" })}
         >
           all priorities
@@ -139,6 +141,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
             key={value}
             type="button"
             className={`filter${view.priority === value ? " is-active" : ""}`}
+            aria-pressed={view.priority === value}
             onClick={() => setView({ priority: value })}
           >
             {value}
@@ -150,6 +153,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
             <button
               type="button"
               className={`filter${view.team === "" ? " is-active" : ""}`}
+              aria-pressed={view.team === ""}
               onClick={() => setView({ team: "" })}
             >
               all teams
@@ -159,6 +163,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
                 key={value}
                 type="button"
                 className={`filter${view.team === value ? " is-active" : ""}`}
+                aria-pressed={view.team === value}
                 onClick={() => setView({ team: value })}
               >
                 {value.replace(/_/g, " ")}

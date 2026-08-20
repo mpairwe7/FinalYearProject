@@ -6,7 +6,7 @@
  * `/admin/tickets` is the full console. This page answers: what should I
  * pick up next, and what do I need before I reply.
  */
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import StaffGuard, { type StaffIdentity } from "../../components/StaffGuard";
 import { QueueRow } from "../../components/staff/QueueRow";
 import { TicketCase } from "../../components/staff/TicketCase";
@@ -25,6 +25,9 @@ import {
   waitTone,
 } from "../../lib/ticketUi";
 import "./agent.css";
+
+const QUEUE_TABS = ["next", "mine", "resolved"] as const;
+type QueueTab = (typeof QUEUE_TABS)[number];
 
 function AgentQueue({ who }: { who: StaffIdentity }) {
   const handle = officerHandle(who);
@@ -77,6 +80,25 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
   const awaiting = sla?.awaiting_first_response ?? 0;
 
   const tab = view.status === "resolved" ? "resolved" : view.mine ? "mine" : "next";
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const selectTab = (next: QueueTab) => {
+    if (next === "next") setView({ status: "open", mine: false, ticket: "" });
+    if (next === "mine") setView({ status: "assigned", mine: true, ticket: "" });
+    if (next === "resolved") setView({ status: "resolved", mine: false, ticket: "" });
+  };
+
+  const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let next: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % QUEUE_TABS.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + QUEUE_TABS.length) % QUEUE_TABS.length;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = QUEUE_TABS.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    selectTab(QUEUE_TABS[next]);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
     <main className="ag-page" id="staff-main">
@@ -110,42 +132,33 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
       </header>
 
       <div className="ag-status-tabs" role="tablist" aria-label="Queue view">
-        <button
-          type="button"
-          role="tab"
-          id="ag-tab-next"
-          aria-controls="ag-panel"
-          aria-selected={tab === "next"}
-          className={tab === "next" ? "active" : ""}
-          onClick={() => setView({ status: "open", mine: false, ticket: "" })}
-        >
-          Next up
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="ag-tab-mine"
-          aria-controls="ag-panel"
-          aria-selected={tab === "mine"}
-          className={tab === "mine" ? "active" : ""}
-          onClick={() => setView({ status: "assigned", mine: true, ticket: "" })}
-        >
-          Mine
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="ag-tab-resolved"
-          aria-controls="ag-panel"
-          aria-selected={tab === "resolved"}
-          className={tab === "resolved" ? "active" : ""}
-          onClick={() => setView({ status: "resolved", mine: false, ticket: "" })}
-        >
-          Resolved
-        </button>
+        {QUEUE_TABS.map((queueTab, index) => (
+          <button
+            key={queueTab}
+            ref={(element) => {
+              tabRefs.current[index] = element;
+            }}
+            type="button"
+            role="tab"
+            id={`ag-tab-${queueTab}`}
+            aria-controls="ag-panel"
+            aria-selected={tab === queueTab}
+            tabIndex={tab === queueTab ? 0 : -1}
+            className={tab === queueTab ? "active" : ""}
+            onClick={() => selectTab(queueTab)}
+            onKeyDown={(event) => onTabKeyDown(event, index)}
+          >
+            {queueTab === "next" ? "Next up" : queueTab === "mine" ? "Mine" : "Resolved"}
+          </button>
+        ))}
       </div>
 
-      <div className={`ag-split${openedId ? " is-open" : ""}`} id="ag-panel" role="tabpanel">
+      <div
+        className={`ag-split${openedId ? " is-open" : ""}`}
+        id="ag-panel"
+        role="tabpanel"
+        aria-labelledby={`ag-tab-${tab}`}
+      >
         <section className="ag-queue-pane" aria-label="Queue">
           {isLoading && <p className="ag-empty">Loading the queue…</p>}
           {error && <p className="ag-empty ag-error">Could not load the queue.</p>}
