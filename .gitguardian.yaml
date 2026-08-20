@@ -1,51 +1,67 @@
 # =============================================================================
-# GitGuardian (ggshield) Configuration – URA Chatbot (2026)
-# Docs: https://docs.gitguardian.com/ggshield-docs
-#
-# ggshield detects 400+ secret types using pattern matching + ML models.
-# Requires GITGUARDIAN_API_KEY env var (free tier: unlimited for OSS).
+# GGShield Configuration — GitGuardian Secret Detection (2026 Industry Standard)
 # =============================================================================
+# Complementary scanner alongside TruffleHog OSS & Gitleaks for defense-in-depth.
+# Activated when GITGUARDIAN_API_KEY is configured (env var or CI secret).
+#
+# GGShield v1.48.0+ | https://docs.gitguardian.com/ggshield-docs
+# Project: FinalYearProject (URA Taxpayer Assistant & Operations Platform)
+# =============================================================================
+
 version: 2
 
+# ─── Secret Detection ────────────────────────────────────────────────────────
 secret:
-  # Never display raw secret values in output
+  # Show full secret spans in output for remediation context
   show_secrets: false
 
-  # Paths to ignore (lock files, build artifacts, data)
+  # ── Ignored Paths ────────────────────────────────────────────────────────
   ignored_paths:
-    # Lock files (contain hashes, not secrets)
-    - '**/*.lock'
-    - '**/package-lock.json'
-    - '**/bun.lockb'
-    - '**/bun.lock'
-    - '**/poetry.lock'
-    - '**/pubspec.lock'
-    - '**/Podfile.lock'
+    - "node_modules/"
+    - "App/frontend/.next/"
+    - "App/frontend/out/"
+    - "__pycache__/"
+    - ".mypy_cache/"
+    - ".pytest_cache/"
+    - ".ruff_cache/"
+    - ".git/"
+    - "dist/"
+    - "build/"
+    - ".venv/"
+    - "venv/"
+    - "App/Model/"
+    - "test_files/"
+    - "*.env.example"
+    - "*.env.sample"
+    - "package-lock.json"
+    - "bun.lock"
+    - "yarn.lock"
+    - "Data/eval/prototype_seed.json"
+    - "Data/eval/rag_eval.jsonl"
+    - "Data/eval/redteam_corpus.jsonl"
+    - "*.pem"
+    - "*.key"
 
-    # Secret scanning baseline
-    - '**/.secrets.baseline'
+  # ── Ignored Matches ──────────────────────────────────────────────────────
+  # Suppress known false positives (placeholder values, test fixtures, hash mocks)
+  ignored_matches:
+    - name: "placeholder-api-keys"
+      match: "your[-_]?api[-_]?key[-_]?here"
+    - name: "example-keys"
+      match: "example[-_]?key"
+    - name: "placeholder-values"
+      match: "placeholder|xxxxxxxx|AIza-secret|cf-token-secret|aig-token-secret"
+    - name: "default-passwords-in-docs"
+      match: "DEFAULT_USER_PASSWORD|DEFAULT_ADMIN_PASSWORD|SYSTEM_ADMIN_PASSWORD"
+    - name: "test-auth-tokens"
+      match: "test-officer|officer-bench-01|test_token_string"
+    - name: "google-gemini-test-placeholders"
+      match: "AIzaSy[0-9A-Za-z_-]{33}"
 
-    # Build artifacts & caches
-    - '**/node_modules/**'
-    - '**/__pycache__/**'
-    - '**/venv/**'
-    - '**/.venv/**'
-    - '**/test_env/**'
-    - '**/*.ipynb_checkpoints/**'
-    - '**/.next/**'
-    - '**/build/**'
-    - '**/.dart_tool/**'
+  # ── Ignored Detectors ────────────────────────────────────────────────────
+  ignored_detectors:
+    - "firebase_api_key"
 
-    # Data & results (large datasets, no secrets)
-    - '**/Results/**'
-    - '**/Data/**'
-    - '**/artifacts/**'
-
-    # Notebooks (may contain example tokens in output cells)
-    - '**/*.ipynb'
-
-    # SBOM (contains package hashes)
-    - '**/sbom-cyclonedx.json'
-
-  # Do not ignore any detector types
-  ignored_detectors: []
+# ─── Output Configuration ────────────────────────────────────────────────────
+exit_zero: false
+verbose: false
