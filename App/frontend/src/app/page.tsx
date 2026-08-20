@@ -557,7 +557,7 @@ export default function Page() {
         name: file.name,
         sizeBytes: file.size,
         status: oversize ? 'error' : 'uploading',
-        error: oversize ? 'Over the 10 MB limit' : undefined,
+        error: oversize ? 'Over the 40 MB limit' : undefined,
       });
       if (!oversize) void uploadAttachment(file, clientId);
     }

@@ -800,7 +800,7 @@ SPEECH_ENABLED=false uvicorn app.main:app --reload --port 8887
 | `OCR_SERVICE_MAX_BYTES` | `12582912` | Sidecar request-body cap |
 | `OCR_SERVICE_MAX_PIXELS` | `20000000` | Sidecar Pillow decode cap |
 | `OCR_INFERENCE_MAX_CONCURRENT` | `1` | Sidecar in-process OCR concurrency |
-| `DOCUMENT_MAX_BYTES` | `10485760` | Maximum uploaded source file size (10 MiB) |
+| `DOCUMENT_MAX_BYTES` | `41943040` | Maximum uploaded source file size (40 MiB) |
 | `DOCUMENT_MAX_PDF_XREFS` | `20000` | Query-time PDF object-count cap |
 | `DOCUMENT_MAX_PDF_PAGE_EDGE_PT` | `14400` | Max page width/height in points (200 in) |
 | `DOCUMENT_MAX_IMAGE_PIXELS` | `20000000` | Pillow decode cap for uploaded images |
