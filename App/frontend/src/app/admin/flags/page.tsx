@@ -41,50 +41,52 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
       {isLoading ? <p className="ov-empty">Loading flags…</p> : null}
       {error ? <p className="ov-empty">Could not load flags.</p> : null}
       {data ? (
-        <table className="flag-table">
-          <thead>
-            <tr>
-              <th>Flag</th>
-              <th>State</th>
-              <th>Default</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.flags.map((flag) => (
-              <tr key={flag.name}>
-                <td>
-                  <strong>{flag.name}</strong>
-                  <div className="ov-q-query">{flag.description}</div>
-                </td>
-                <td>
-                  {canToggle && !flag.protected ? (
-                    <button
-                      type="button"
-                      className={flag.enabled ? "is-active" : undefined}
-                      disabled={toggle.isPending}
-                      aria-pressed={flag.enabled}
-                      aria-label={`${flag.name}: ${flag.enabled ? "on" : "off"}`}
-                      onClick={() => toggle.mutate({ name: flag.name, enabled: !flag.enabled })}
-                    >
-                      {flag.enabled ? "on" : "off"}
-                    </button>
-                  ) : (
-                    <span className={flag.enabled ? "ov-chip good" : "ov-chip warn"}>
-                      {flag.enabled ? "on" : "off"}
-                    </span>
-                  )}
-                </td>
-                <td>{flag.default ? "on" : "off"}</td>
-                <td>
-                  {flag.protected ? "protected" : null}
-                  {flag.overridden ? " · this process" : null}
-                  {flag.rollout ? ` · ${flag.rollout.percent}% rollout` : null}
-                </td>
+        <div className="table-responsive">
+          <table className="flag-table">
+            <thead>
+              <tr>
+                <th>Flag</th>
+                <th>State</th>
+                <th>Default</th>
+                <th>Notes</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.flags.map((flag) => (
+                <tr key={flag.name}>
+                  <td>
+                    <strong>{flag.name}</strong>
+                    <div className="ov-q-query">{flag.description}</div>
+                  </td>
+                  <td>
+                    {canToggle && !flag.protected ? (
+                      <button
+                        type="button"
+                        className={flag.enabled ? "is-active" : undefined}
+                        disabled={toggle.isPending}
+                        aria-pressed={flag.enabled}
+                        aria-label={`${flag.name}: ${flag.enabled ? "on" : "off"}`}
+                        onClick={() => toggle.mutate({ name: flag.name, enabled: !flag.enabled })}
+                      >
+                        {flag.enabled ? "on" : "off"}
+                      </button>
+                    ) : (
+                      <span className={flag.enabled ? "ov-chip good" : "ov-chip warn"}>
+                        {flag.enabled ? "on" : "off"}
+                      </span>
+                    )}
+                  </td>
+                  <td>{flag.default ? "on" : "off"}</td>
+                  <td>
+                    {flag.protected ? "protected" : null}
+                    {flag.overridden ? " · this process" : null}
+                    {flag.rollout ? ` · ${flag.rollout.percent}% rollout` : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
     </main>
   );
