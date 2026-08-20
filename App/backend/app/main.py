@@ -2857,11 +2857,11 @@ async def voice_vision_chat(
     if len(audio_bytes) > 16 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio exceeds 16 MiB limit")
 
-    # Extract image (hard cap: 10 MiB)
+    # Extract image (hard cap: 40 MiB)
     image_file = body.get("image")
     image_bytes = await image_file.read() if image_file else b""
-    if len(image_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image exceeds 10 MiB limit")
+    if len(image_bytes) > 40 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image exceeds 40 MiB limit")
 
     transcript = ""
     ocr_text = ""

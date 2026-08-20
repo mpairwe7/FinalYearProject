@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 # Limits & configuration
 # ---------------------------------------------------------------------------
 
-MAX_FILE_BYTES = int(os.getenv("DOCUMENT_MAX_BYTES", str(10 * 1024 * 1024)))
+MAX_FILE_BYTES = int(os.getenv("DOCUMENT_MAX_BYTES", str(40 * 1024 * 1024)))
 DOCUMENT_TTL_SECONDS = int(os.getenv("DOCUMENT_TTL_SECONDS", "7200"))
 DOCUMENT_REGISTRY_MAX = int(os.getenv("DOCUMENT_REGISTRY_MAX", "200"))
 MAX_ATTACHMENTS_PER_TURN = 3
@@ -79,7 +79,7 @@ _MAX_OCR_PDF_PAGES = int(os.getenv("DOCUMENT_OCR_MAX_PDF_PAGES", "20"))
 _ENABLE_SPATIAL_OCR = os.getenv("DOCUMENT_ENABLE_SPATIAL_OCR", "false").lower() in ("1", "true", "yes")
 _MAX_ARCHIVE_ENTRIES = int(os.getenv("DOCUMENT_MAX_ARCHIVE_ENTRIES", "1000"))
 _MAX_ARCHIVE_UNCOMPRESSED_BYTES = int(
-    os.getenv("DOCUMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES", str(50 * 1024 * 1024))
+    os.getenv("DOCUMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES", str(160 * 1024 * 1024))
 )
 _MAX_ARCHIVE_COMPRESSION_RATIO = float(os.getenv("DOCUMENT_MAX_ARCHIVE_COMPRESSION_RATIO", "100"))
 _MAX_IMAGE_PIXELS = int(os.getenv("DOCUMENT_MAX_IMAGE_PIXELS", "20_000_000"))

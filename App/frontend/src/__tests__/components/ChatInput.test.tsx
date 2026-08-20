@@ -139,12 +139,12 @@ describe("ChatInput attachments", () => {
         message="What is this?"
         onAttachFiles={vi.fn()}
         attachments={[
-          { ...readyAttachment, clientId: "c2", status: "error", error: "Over the 10 MB limit" },
+          { ...readyAttachment, clientId: "c2", status: "error", error: "Over the 40 MB limit" },
           { ...readyAttachment, clientId: "c3", status: "uploading" },
         ]}
       />,
     );
-    expect(screen.getByText("Over the 10 MB limit")).toBeInTheDocument();
+    expect(screen.getByText("Over the 40 MB limit")).toBeInTheDocument();
     expect(screen.getByLabelText("Analysing attachment...")).toBeDisabled();
   });
 
