@@ -18,6 +18,7 @@ rather than re-testing Qdrant or Cloudflare connectivity.
 
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -56,6 +57,16 @@ def _fake_init_vectorize(retriever: HybridRetriever, *, succeeds: bool):
 
 
 class InitializePriorityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._orig_env = os.environ.get("QDRANT_ENABLED")
+        os.environ["QDRANT_ENABLED"] = "true"
+
+    def tearDown(self) -> None:
+        if self._orig_env is None:
+            os.environ.pop("QDRANT_ENABLED", None)
+        else:
+            os.environ["QDRANT_ENABLED"] = self._orig_env
+
     def test_dense_qdrant_wins_immediately_without_trying_vectorize(self) -> None:
         """The normal (GPU/dev) case is unaffected: real dense Qdrant is the
         richest backend and initialize() must not even look at Vectorize."""

@@ -1,0 +1,65 @@
+# ZAP Automation Framework - Full Active Scan Configuration (URA Chatbot)
+# Standards: OWASP WSTG v4.2, NIST SP 800-115
+
+env:
+  contexts:
+    - name: "ura-chatbot-full"
+      urls:
+        - "TARGET_URL_PLACEHOLDER"
+      includePaths:
+        - "TARGET_URL_PLACEHOLDER/api/.*"
+      excludePaths:
+        - ".*/_next/.*"
+        - ".*/static/.*"
+        - ".*/metrics"
+        - ".*/healthz?"
+      sessionManagement:
+        method: "headers"
+        parameters:
+          Authorization: "Bearer AUTH_TOKEN_PLACEHOLDER"
+
+  parameters:
+    failOnError: false
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: openapi
+    parameters:
+      apiUrl: "TARGET_URL_PLACEHOLDER/openapi.json"
+      targetUrl: "TARGET_URL_PLACEHOLDER"
+      context: "ura-chatbot-full"
+
+  - type: spider
+    parameters:
+      context: "ura-chatbot-full"
+      maxDuration: 10
+      maxDepth: 5
+
+  - type: activeScan
+    parameters:
+      context: "ura-chatbot-full"
+      policy: "Default Policy"
+      maxRuleDurationInMins: 5
+      maxScanDurationInMins: 20
+
+  - type: report
+    parameters:
+      template: "traditional-json"
+      reportDir: "/zap/wrk"
+      reportFile: "zap-results.json"
+      displayReport: false
+
+  - type: report
+    parameters:
+      template: "traditional-html"
+      reportDir: "/zap/wrk"
+      reportFile: "zap-results.html"
+      displayReport: false
+
+  - type: report
+    parameters:
+      template: "sarif-json"
+      reportDir: "/zap/wrk"
+      reportFile: "zap-results.sarif"
+      displayReport: false
