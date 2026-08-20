@@ -1,15 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useSyncExternalStore } from "react";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
 
-export default function OfflineBanner() {
-  const [mounted, setMounted] = useState(false);
-  const { isOffline } = useNetworkStatus();
+const emptySubscribe = () => () => {};
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+export default function OfflineBanner() {
+  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
+  const { isOffline } = useNetworkStatus();
 
   if (!mounted || !isOffline) {
     return null;

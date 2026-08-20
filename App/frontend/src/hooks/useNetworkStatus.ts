@@ -16,8 +16,6 @@ export function useNetworkStatus() {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    setIsOnline(navigator.onLine);
-
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);

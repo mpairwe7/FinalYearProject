@@ -55,10 +55,6 @@ export function DocumentInspectionViewer({
     return fields.filter((f) => f.page === currentPage);
   }, [fields, currentPage]);
 
-  const activeHoveredField = useMemo(() => {
-    return fields.find((f) => f.id === hoveredFieldId) || null;
-  }, [fields, hoveredFieldId]);
-
   return (
     <div className="doc-inspect-container">
       <header className="doc-inspect-header">
