@@ -60,7 +60,7 @@ class PdfUnavailableTests(unittest.TestCase):
         from app.pdf_guards import PdfUnavailable
         from unittest import mock
 
-        with mock.patch("app.pdf_guards._open_fitz", side_effect=PdfUnavailable("no fitz")):
+        with mock.patch("app.pdf_guards._open_document", side_effect=PdfUnavailable("no engine")):
             inspection = inspect_pdf_bytes(b"%PDF-1.7 hello")
         self.assertEqual(inspection.findings, [])
         self.assertTrue(any("PyMuPDF" in item for item in inspection.warnings))
@@ -129,7 +129,7 @@ class PdfInspectOpenTests(unittest.TestCase):
         self.assertTrue(any("dimension" in item for item in inspection.findings))
 
 
-@unittest.skipUnless(_has("fitz"), "PyMuPDF not installed")
+@unittest.skipUnless(_has("pypdfium2") or _has("fitz"), "PDF library not installed")
 class PdfBytesGuardTests(unittest.TestCase):
     def test_clean_text_pdf_is_accepted(self) -> None:
         import fitz

@@ -30,9 +30,9 @@ sentence-transformers>=5.4.1,<6
 qdrant-client>=1.18,<1.19
 numpy>=2.4.4,<3
 
-# PDF ingestion
-pymupdf4llm>=0.0.17
-pymupdf>=1.25.3
+# PDF ingestion & document processing (permissive Apache-2.0 / MIT)
+pypdfium2>=4.0.0
+pdfplumber>=0.11.0
 
 # Document attachment analysis (POST /v1/documents/analyze) — DOCX/XLSX
 # extraction plus multipart form parsing for the upload endpoint. All

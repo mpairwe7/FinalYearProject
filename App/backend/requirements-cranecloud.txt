@@ -37,8 +37,9 @@ python-multipart>=0.0.18
 httpx>=0.28.1,<0.29
 # MCP tool argument/result validation (app/mcp/validation.py); falls back
 # to a structural check if absent.
-jsonschema>=4.23
-pymupdf>=1.25.3
+# PDF document processing (permissive Apache-2.0 / MIT)
+pypdfium2>=4.0.0
+pdfplumber>=0.11.0
 # PDF report generation (pdf_export.py: /v1/export/* and
 # /v1/documents/{id}/report). fpdf2 was never declared, so every PDF-export
 # endpoint 500'd on this image — live-verified on the HF Space 2026-07-18.

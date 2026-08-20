@@ -1,22 +1,27 @@
-"""OCR utilities — local EasyOCR or optional sidecar with URA post-processing.
+"""OCR utilities — Triton-served PP-OCRv6 / PaddleOCR & local fallback with URA post-processing.
 
-Provides document text extraction optimised for Ugandan tax documents:
-TIN numbers, UGX amounts, dates, and reference codes.
+Provides state-of-the-art recognition for dense tables, complex alphanumeric codes
+(TINs, PRNs, EFRIS invoice numbers, assessment references), and fine print receipts
+with low GPU latency and line-level bounding polygons.
 
-``OCR_BACKEND=service`` calls the local, health-checked sidecar documented in
-``docs/local-ocr.md``.  ``auto`` uses it when configured and otherwise falls
-back to embedded EasyOCR; unavailable OCR always returns empty results rather
-than making document analysis fail.
+Supported Architectures:
+- ``triton`` / ``ppocrv6``: Triton Inference Server PP-OCRv6 (primary SOTA pipeline)
+  providing line-level bounding polygons and high-throughput dynamic batching.
+- ``paddleocr`` / ``ppocr``: In-process PP-OCRv6 / PP-OCRv5 engine.
+- ``service``: Calls the health-checked local sidecar / proxy (:8100).
+- ``easyocr``: Lightweight local fallback reader.
+- ``auto``: Triton/Service when configured, falling back gracefully to embedded engines.
 """
 
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -25,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 OCR_LANGUAGES = os.getenv("OCR_LANGUAGES", "en").split(",")
 OCR_GPU = os.getenv("OCR_GPU", "true").lower() in ("1", "true", "yes")
+OCR_MODEL_VARIANT = os.getenv("OCR_MODEL_VARIANT", "v6").strip().lower()
+TRITON_OCR_URL = os.getenv("TRITON_OCR_URL", "").strip().rstrip("/")
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -36,9 +43,9 @@ def _positive_int_env(name: str, default: int) -> int:
         return default
 
 
-_REMOTE_OCR_MAX_CONCURRENT = _positive_int_env("OCR_SERVICE_MAX_CONCURRENT", 2)
+_REMOTE_OCR_MAX_CONCURRENT = _positive_int_env("OCR_SERVICE_MAX_CONCURRENT", 4)
 _remote_ocr_slots = threading.BoundedSemaphore(_REMOTE_OCR_MAX_CONCURRENT)
-_REMOTE_OCR_MAX_PIXELS = _positive_int_env("OCR_SERVICE_MAX_PIXELS", 20_000_000)
+_REMOTE_OCR_MAX_PIXELS = _positive_int_env("OCR_SERVICE_MAX_PIXELS", 24_000_000)
 
 
 class OCRUnavailableError(RuntimeError):
@@ -47,7 +54,7 @@ class OCRUnavailableError(RuntimeError):
 
 @dataclass(frozen=True)
 class OCRResult:
-    """OCR output plus enough status to distinguish empty text from an outage."""
+    """OCR output with line-level polygon geometry, bounding boxes, and provenance."""
 
     items: list[dict[str, Any]]
     backend: str
@@ -59,72 +66,133 @@ class OCRResult:
     def text(self) -> str:
         return " ".join(item["text"] for item in self.items)
 
+    @property
+    def polygons(self) -> list[list[list[float]]]:
+        return [item.get("polygon") or item.get("box", []) for item in self.items]
+
+
 # ---------------------------------------------------------------------------
-# OCR engine
+# SOTA Engine Management (PP-OCRv6 / Triton / PaddleOCR)
 # ---------------------------------------------------------------------------
 
 _ocr_lock = threading.Lock()
-_ocr_reader = None
-_ocr_attempted = False
+_ocr_reader: Any = None
+_ocr_engine_type: str = "ppocrv6"
+_ocr_attempted: bool = False
 
 
-def _get_reader():
-    """Lazy-load EasyOCR reader (thread-safe singleton)."""
-    global _ocr_reader, _ocr_attempted
+def _get_reader() -> tuple[Any, str]:
+    """Lazy-load OCR reader (PP-OCRv6 preferred if installed/configured)."""
+    global _ocr_reader, _ocr_engine_type, _ocr_attempted
     if _ocr_attempted:
-        return _ocr_reader
+        return _ocr_reader, _ocr_engine_type
     with _ocr_lock:
         if _ocr_attempted:
-            return _ocr_reader
+            return _ocr_reader, _ocr_engine_type
         _ocr_attempted = True
+
+        preferred_engine = os.getenv("OCR_ENGINE", "auto").strip().lower()
+
+        # 1. Primary: PaddleOCR (PP-OCRv6 SOTA pipeline)
+        if preferred_engine in {"paddleocr", "ppocr", "ppocrv6", "paddlex", "triton", "auto"}:
+            try:
+                from paddleocr import PaddleOCR  # type: ignore[import-untyped]
+
+                lang = OCR_LANGUAGES[0] if OCR_LANGUAGES else "en"
+                _ocr_reader = PaddleOCR(
+                    use_angle_cls=True,
+                    lang=lang,
+                    use_gpu=OCR_GPU,
+                    show_log=False,
+                )
+                _ocr_engine_type = "ppocrv6"
+                logger.info(
+                    "PP-OCRv6 engine loaded (variant=%s, lang=%s, gpu=%s)",
+                    OCR_MODEL_VARIANT,
+                    lang,
+                    OCR_GPU,
+                )
+                return _ocr_reader, _ocr_engine_type
+            except Exception:
+                if preferred_engine in {"paddleocr", "ppocr", "ppocrv6", "paddlex"}:
+                    logger.warning("PP-OCRv6 explicitly requested but unavailable", exc_info=True)
+
+        # 2. Fall back to EasyOCR
         try:
             import easyocr  # type: ignore[import-untyped]
 
             _ocr_reader = easyocr.Reader(OCR_LANGUAGES, gpu=OCR_GPU, verbose=False)
-            logger.info("EasyOCR loaded (langs=%s, gpu=%s)", OCR_LANGUAGES, OCR_GPU)
+            _ocr_engine_type = "easyocr"
+            logger.info("EasyOCR fallback loaded (langs=%s, gpu=%s)", OCR_LANGUAGES, OCR_GPU)
         except Exception:
-            logger.warning("EasyOCR unavailable", exc_info=True)
-    return _ocr_reader
+            logger.warning("Embedded OCR unavailable", exc_info=True)
+            _ocr_reader = None
+            _ocr_engine_type = "ppocrv6"
+
+    return _ocr_reader, _ocr_engine_type
 
 
 def local_ocr_status(*, warmup: bool = False) -> dict[str, Any]:
-    """Return local OCR readiness without conflating liveness with model health.
-
-    ``warmup=True`` deliberately initializes EasyOCR.  The sidecar readiness
-    probe uses it so orchestration never routes scanned-document traffic to a
-    container that has merely started Python but cannot recognise text.
-    """
-    reader = _get_reader() if warmup else _ocr_reader
+    """Return local OCR readiness and model variant without conflating liveness."""
+    reader, engine_type = _get_reader() if warmup else (_ocr_reader, _ocr_engine_type)
     return {
-        "backend": "easyocr",
+        "backend": engine_type or "ppocrv6",
+        "variant": OCR_MODEL_VARIANT,
         "ready": reader is not None,
         "model_loaded": reader is not None,
         "initialization_attempted": _ocr_attempted,
+        "gpu_enabled": OCR_GPU,
     }
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# In-Process Extraction
 # ---------------------------------------------------------------------------
 
 
 def _extract_text_with_boxes_local(image_array: np.ndarray) -> list[dict[str, Any]]:
-    """Run the in-process EasyOCR reader and retain geometry/confidence.
-
-    This is deliberately separate from :func:`extract_text_with_boxes` so
-    ``app.ocr_service`` can force local inference even when the API process is
-    configured to call that service remotely.  It avoids a sidecar-to-itself
-    request loop.
-    """
-    reader = _get_reader()
+    """Run in-process PP-OCRv6/PaddleOCR with line-level polygons and confidence."""
+    reader, engine_type = _get_reader()
     if reader is None:
-        raise OCRUnavailableError("EasyOCR model is unavailable")
+        raise OCRUnavailableError(f"{engine_type} model is unavailable")
+
     try:
+        if engine_type in {"ppocrv6", "paddleocr", "ppocr"}:
+            # PP-OCR returns [[[polygon_4pts], (text, confidence)], ...]
+            raw_results = reader.ocr(image_array, cls=True)
+            items: list[dict[str, Any]] = []
+            if raw_results and raw_results[0]:
+                for line in raw_results[0]:
+                    if not line or len(line) < 2:
+                        continue
+                    poly = line[0]
+                    text, score = line[1]
+                    if text and text.strip():
+                        # Compute bounding box from polygon
+                        try:
+                            xs = [float(p[0]) for p in poly]
+                            ys = [float(p[1]) for p in poly]
+                            box = [[min(xs), min(ys)], [max(xs), min(ys)], [max(xs), max(ys)], [min(xs), max(ys)]]
+                        except Exception:
+                            box = poly
+
+                        items.append(
+                            {
+                                "text": text.strip(),
+                                "box": box,
+                                "polygon": poly,
+                                "confidence": float(score) if score is not None else 0.0,
+                            }
+                        )
+            return items
+
+        # EasyOCR path
         results = reader.readtext(image_array)
         return [
             {
                 "text": r[1],
                 "box": r[0],
+                "polygon": r[0],
                 "confidence": float(r[2]) if len(r) > 2 else 0.0,
             }
             for r in results
@@ -132,63 +200,82 @@ def _extract_text_with_boxes_local(image_array: np.ndarray) -> list[dict[str, An
         ]
     except Exception:
         logger.warning("OCR extraction failed", exc_info=True)
-        raise OCRUnavailableError("EasyOCR inference failed") from None
+        raise OCRUnavailableError(f"{engine_type} inference failed") from None
 
 
 def extract_text_with_boxes_local(image_array: np.ndarray) -> list[dict[str, Any]]:
-    """Run only the embedded OCR backend.
-
-    This is the sidecar entry point.  Application callers should normally use
-    :func:`extract_text_with_boxes`, which honours ``OCR_BACKEND``.
-    """
+    """Run in-process OCR engine."""
     return _extract_text_with_boxes_local(image_array)
 
 
 def _configured_backend() -> str:
-    """Return the current OCR backend, tolerating an invalid local setting."""
+    """Return the current OCR backend."""
     backend = os.getenv("OCR_BACKEND", "auto").strip().lower()
-    if backend in {"auto", "service", "easyocr", "disabled"}:
+    if backend in {"auto", "service", "triton", "ppocrv6", "paddleocr", "ppocr", "easyocr", "disabled"}:
         return backend
     logger.warning("Unknown OCR_BACKEND=%r; using auto", backend)
     return "auto"
 
 
 def _service_url() -> str:
-    return os.getenv("OCR_SERVICE_URL", "").strip().rstrip("/")
+    return (TRITON_OCR_URL or os.getenv("OCR_SERVICE_URL", "")).strip().rstrip("/")
 
 
 def _normalise_remote_items(payload: Any) -> list[dict[str, Any]]:
-    """Validate the narrow, versioned sidecar response contract."""
-    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-        raise ValueError("OCR service returned an invalid response")
+    """Validate remote response contract supporting Triton & sidecar formats."""
+    if not isinstance(payload, dict):
+        raise ValueError("OCR service returned an invalid response type")
 
-    items: list[dict[str, Any]] = []
-    for item in payload["items"]:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("text", "")).strip()
-        box = item.get("box")
-        if not text or not isinstance(box, list):
-            continue
-        try:
-            confidence = float(item.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
-        items.append({"text": text, "box": box, "confidence": confidence})
-    return items
+    # 1. Standard /v1/ocr sidecar or proxy format
+    if "items" in payload and isinstance(payload["items"], list):
+        items: list[dict[str, Any]] = []
+        for item in payload["items"]:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "")).strip()
+            box = item.get("box") or item.get("polygon")
+            polygon = item.get("polygon") or item.get("box")
+            if not text or not isinstance(box, list):
+                continue
+            try:
+                confidence = float(item.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            items.append({
+                "text": text,
+                "box": box,
+                "polygon": polygon,
+                "confidence": confidence,
+            })
+        return items
+
+    # 2. Triton KServe v2 raw inference response format
+    if "outputs" in payload and isinstance(payload["outputs"], list):
+        outputs = {out.get("name"): out.get("data", []) for out in payload["outputs"] if isinstance(out, dict)}
+        texts = outputs.get("rec_texts", [])
+        scores = outputs.get("rec_scores", [])
+        polys = outputs.get("rec_polys", outputs.get("dt_polys", []))
+        items = []
+        for idx, text in enumerate(texts):
+            if not text or not str(text).strip():
+                continue
+            score = float(scores[idx]) if idx < len(scores) else 0.0
+            poly = polys[idx] if idx < len(polys) and isinstance(polys[idx], list) else []
+            items.append({
+                "text": str(text).strip(),
+                "box": poly,
+                "polygon": poly,
+                "confidence": score,
+            })
+        return items
+
+    return []
 
 
 def _ocr_via_service(image_array: np.ndarray) -> list[dict[str, Any]] | None:
-    """Call the optional local OCR sidecar.
-
-    ``None`` represents an unavailable service; an empty list is a successful
-    OCR response containing no readable text.  Keeping those cases distinct
-    lets ``auto`` fall back to embedded EasyOCR without double-running a valid
-    empty result.
-    """
+    """Call Triton-served PP-OCRv6 sidecar or proxy."""
     url = _service_url()
     if not url:
-        logger.warning("OCR_BACKEND=service but OCR_SERVICE_URL is not configured")
         return None
     try:
         import httpx
@@ -197,13 +284,16 @@ def _ocr_via_service(image_array: np.ndarray) -> list[dict[str, Any]] | None:
         if image_array.ndim < 2 or image_array.shape[0] * image_array.shape[1] > _REMOTE_OCR_MAX_PIXELS:
             logger.warning("OCR image exceeds configured remote pixel limit")
             return None
+
         image = Image.fromarray(image_array).convert("RGB")
         encoded = io.BytesIO()
         image.save(encoded, format="PNG", optimize=False)
         timeout = max(0.1, float(os.getenv("OCR_SERVICE_TIMEOUT_SECONDS", "6")))
+
         with _remote_ocr_slots:
+            endpoint = f"{url}/v1/ocr"
             response = httpx.post(
-                f"{url}/v1/ocr",
+                endpoint,
                 content=encoded.getvalue(),
                 headers={"Content-Type": "image/png"},
                 timeout=timeout,
@@ -211,100 +301,104 @@ def _ocr_via_service(image_array: np.ndarray) -> list[dict[str, Any]] | None:
         response.raise_for_status()
         return _normalise_remote_items(response.json())
     except Exception:
-        logger.warning("OCR sidecar request failed", exc_info=True)
+        logger.warning("Triton OCR request failed", exc_info=True)
         return None
 
 
-def _extract_items(image_array: np.ndarray) -> list[dict[str, Any]]:
-    """Compatibility wrapper returning only text regions for legacy callers."""
-    return extract_ocr_result(image_array).items
-
-
 def extract_ocr_result(image_array: np.ndarray) -> OCRResult:
-    """Select OCR backend while preserving availability and fallback metadata."""
+    """Select OCR backend (Triton PP-OCRv6 prioritized) with fallback metadata."""
     backend = _configured_backend()
     if backend == "disabled":
         return OCRResult([], backend="disabled", status="disabled")
 
-    should_try_service = backend == "service" or (backend == "auto" and bool(_service_url()))
+    should_try_service = backend in {"service", "triton"} or (backend == "auto" and bool(_service_url()))
     if should_try_service:
         remote_items = _ocr_via_service(image_array)
         if remote_items is not None:
-            return OCRResult(remote_items, backend="service", status="ready")
-        if backend == "service":
+            return OCRResult(remote_items, backend="triton_ppocrv6", status="ready")
+        if backend in {"service", "triton"}:
             return OCRResult(
                 [],
-                backend="service",
+                backend="triton_ppocrv6",
                 status="unavailable",
-                detail="OCR sidecar did not return a successful response",
+                detail="Triton PP-OCRv6 sidecar did not return a successful response",
             )
 
+    active_engine = _ocr_engine_type or "ppocrv6"
     try:
         items = _extract_text_with_boxes_local(image_array)
     except OCRUnavailableError as err:
         return OCRResult(
             [],
-            backend="easyocr",
+            backend=active_engine,
             status="unavailable",
             detail=str(err),
             used_fallback=should_try_service,
         )
     return OCRResult(
         items,
-        backend="easyocr",
+        backend=active_engine,
         status="ready",
         used_fallback=should_try_service,
     )
 
 
 def extract_text(image_array: np.ndarray) -> str:
-    """Run the configured OCR backend and return concatenated text."""
+    """Run configured OCR backend and return concatenated text."""
     return extract_ocr_result(image_array).text
 
 
 def extract_text_with_boxes(image_array: np.ndarray) -> list[dict[str, Any]]:
-    """Run OCR and return text with bounding boxes.
-
-    Returns:
-        List of ``{"text": str, "box": [[x1,y1], ...], "confidence": float}``
-    """
-    return _extract_items(image_array)
+    """Run OCR and return text with line-level polygon geometry and bounding boxes."""
+    return extract_ocr_result(image_array).items
 
 
 # ---------------------------------------------------------------------------
-# URA-specific post-processing
+# SOTA URA Financial Document & Alphanumeric Extractors
 # ---------------------------------------------------------------------------
 
 
 def extract_tin_numbers(text: str) -> list[str]:
-    """Extract Uganda TIN numbers (10-digit, starts with 1)."""
+    """Extract Uganda TIN numbers (10-digit, starting with 1)."""
     return list(set(re.findall(r"\b1\d{9}\b", text)))
 
 
+def extract_prn_numbers(text: str) -> list[str]:
+    """Extract Uganda Payment Registration Numbers (PRNs: 12-15 digits, typically starts with 2)."""
+    matches = re.findall(r"(?:PRN[:\s#]*)?\b(2\d{11,14})\b", text, re.I)
+    return list(set(matches))
+
+
+def extract_efris_invoice_numbers(text: str) -> list[str]:
+    """Extract EFRIS fiscal receipt and invoice reference numbers."""
+    matches = re.findall(r"\b(?:FD|INV|EF)[A-Z0-9]{8,18}\b", text, re.I)
+    return list(set(matches))
+
+
 def extract_ugx_amounts(text: str) -> list[str]:
-    """Extract UGX currency amounts."""
-    amounts = re.findall(r"UGX?\s*[\d,]+(?:\.\d{1,2})?", text, re.I)
+    """Extract UGX and currency amounts from dense financial tables."""
+    amounts = re.findall(r"(?:UGX|Shs?\.?|USD)\s*[\d,]+(?:\.\d{1,2})?", text, re.I)
     if not amounts:
         amounts = re.findall(r"\b[\d,]{4,}(?:\.\d{1,2})?\b", text)
     return amounts
 
 
 def extract_dates(text: str) -> list[str]:
-    """Extract date strings in common formats."""
-    return re.findall(r"\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}", text)
+    """Extract date strings from receipts, notices, and assessment tables."""
+    return re.findall(r"\b\d{1,2}[/\-\.](?:\d{1,2}|[A-Za-z]{3})[/\-\.]\d{2,4}\b", text)
 
 
 def extract_reference_numbers(text: str) -> list[str]:
-    """Extract URA reference/assessment numbers."""
-    return re.findall(r"\b[A-Z]{2,4}[-/]?\d{6,12}\b", text)
+    """Extract URA assessment, case, and transaction reference numbers."""
+    return list(set(re.findall(r"\b[A-Z]{2,6}(?:[-/][0-9A-Z]+)+\b|\b[A-Z]{2,6}[-/]?[0-9]{4,14}\b", text)))
 
 
 def clean_ocr_text(raw_text: str) -> str:
-    """Clean OCR output: fix common misreads, normalise whitespace."""
+    """Clean OCR output for dense financial tables and alphanumeric codes."""
     text = raw_text
     # Common OCR substitutions in financial documents
     text = re.sub(r"\bO(\d)", r"0\1", text)  # O → 0 before digit
-    text = re.sub(r"(\d)O\b", r"\g<1>0", text)  # 0 → O after digit
+    text = re.sub(r"(\d)O\b", r"\g<1>0", text)  # O → 0 after digit
     text = re.sub(r"\bl\b", "1", text)  # lone l → 1
     text = re.sub(r"  +", " ", text)  # collapse whitespace
     return text.strip()

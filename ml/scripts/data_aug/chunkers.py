@@ -201,31 +201,68 @@ def _recursive_chunk(
 
 
 def extract_markdown(pdf_path: Path) -> str | None:
-    """Extract PDF as markdown with table preservation.
+    """Extract PDF as markdown with table preservation using permissive MIT/Apache-2.0 engines.
 
     Returns None if extraction fails. Never raises — callers must be able
     to process thousands of PDFs without a single bad file killing the run.
     """
+    # 1. Primary: pdfplumber (MIT) with table markdown formatting
     try:
-        import pymupdf4llm  # lazy
-    except ImportError:
-        return None
+        import pdfplumber
 
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            pages_md: list[str] = []
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                tables = page.extract_tables() or []
+                table_md_parts: list[str] = []
+                for table in tables:
+                    if not table or len(table) < 1:
+                        continue
+                    header = [str(c or "").replace("\n", " ") for c in table[0]]
+                    table_md_parts.append("| " + " | ".join(header) + " |")
+                    table_md_parts.append("| " + " | ".join(["---"] * len(header)) + " |")
+                    for row in table[1:]:
+                        cols = [str(c or "").replace("\n", " ") for c in row]
+                        table_md_parts.append("| " + " | ".join(cols) + " |")
+                
+                content_parts = [text.strip()] if text.strip() else []
+                if table_md_parts:
+                    content_parts.append("\n".join(table_md_parts))
+                if content_parts:
+                    pages_md.append("\n\n".join(content_parts))
+
+            if pages_md:
+                return "\n\n---\n\n".join(pages_md)
+    except Exception:
+        pass
+
+    # 2. Secondary: pypdfium2 (Apache-2.0)
     try:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        pages_md = []
+        for i in range(len(pdf)):
+            page_text = pdf[i].get_textpage().get_text_range() or ""
+            if page_text.strip():
+                pages_md.append(page_text.strip())
+        if pages_md:
+            return "\n\n---\n\n".join(pages_md)
+    except Exception:
+        pass
+
+    # 3. Fallback: pymupdf4llm if installed
+    try:
+        import pymupdf4llm  # type: ignore[import-untyped]
+
         md = pymupdf4llm.to_markdown(
             str(pdf_path),
             pages=None,
             show_progress=False,
-            # lines_strict keeps table structure; fallback to simple if unsupported.
             table_strategy="lines_strict",
         )
         return str(md) if md else None
-    except TypeError:
-        # Older pymupdf4llm may not accept table_strategy
-        try:
-            return str(pymupdf4llm.to_markdown(str(pdf_path), pages=None, show_progress=False))
-        except Exception:
-            return None
     except Exception:
         return None
 
