@@ -61,7 +61,7 @@ lingua-language-detector>=2.0.0
 # OpenTelemetry (opt-in)
 opentelemetry-api>=1.29.0
 opentelemetry-sdk>=1.29.0
-opentelemetry-exporter-otlp-proto-grpc>=1.29.0
+opentelemetry-exporter-otlp-proto-grpc>=1.44.0
 
 # Phase 29 — WebSocket text-chat tests need this on the server side too
 # for the test runtime (the runtime endpoint itself uses Starlette's
