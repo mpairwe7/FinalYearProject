@@ -105,6 +105,12 @@
   --blur-md:     20px;
   --blur-lg:     28px;
 
+  /* Safe area insets for notched devices (iPhone X+, etc.) */
+  --safe-area-inset-top: max(12px, env(safe-area-inset-top));
+  --safe-area-inset-left: max(12px, env(safe-area-inset-left));
+  --safe-area-inset-right: max(12px, env(safe-area-inset-right));
+  --safe-area-inset-bottom: max(12px, env(safe-area-inset-bottom));
+
   /* Runtime layout vars updated by the chat screen on mobile. */
   --app-viewport-height: 100dvh;
   --chat-dock-height: 92px;
@@ -1731,9 +1737,10 @@ main.legacy-layout {
 
 .conversation-rail {
   position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
+  top: var(--safe-area-inset-top);
+  left: var(--safe-area-inset-left);
+  bottom: var(--safe-area-inset-bottom);
+  right: auto;
   z-index: 200;
   width: min(85vw, 320px);
   background: var(--bg-1);
