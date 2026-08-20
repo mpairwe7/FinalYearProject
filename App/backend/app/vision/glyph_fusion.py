@@ -113,26 +113,29 @@ def extract_page_vector_glyphs(
         import pypdfium2 as pdfium
 
         pdf = pdfium.PdfDocument(pdf_data)
-        if 0 <= page_index < len(pdf):
-            page = pdf[page_index]
-            textpage = page.get_textpage()
-            raw_text = textpage.get_text_range() or ""
-            width_pt, height_pt = page.get_size()
-            width_px = width_pt * scale
-            height_px = height_pt * scale
+        try:
+            if 0 <= page_index < len(pdf):
+                page = pdf[page_index]
+                textpage = page.get_textpage()
+                raw_text = textpage.get_text_range() or ""
+                width_pt, height_pt = page.get_size()
+                width_px = width_pt * scale
+                height_px = height_pt * scale
 
-            for line in raw_text.splitlines():
-                line = line.strip()
-                if line:
-                    glyphs.append(
-                        VectorGlyph(
-                            text=line,
-                            bbox=[0.0, 0.0, width_px, height_px],
-                            page=page_index + 1,
-                            confidence=1.0,
-                            source="vector_glyph",
+                for line in raw_text.splitlines():
+                    line = line.strip()
+                    if line:
+                        glyphs.append(
+                            VectorGlyph(
+                                text=line,
+                                bbox=[0.0, 0.0, width_px, height_px],
+                                page=page_index + 1,
+                                confidence=1.0,
+                                source="vector_glyph",
+                            )
                         )
-                    )
+        finally:
+            pdf.close()
     except Exception as pdfium_err:
         logger.debug("pypdfium2 vector extraction failed on page %d: %s", page_index, pdfium_err)
 

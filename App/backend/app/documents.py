@@ -449,6 +449,8 @@ def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, st
 # Per-type extractors (all lazy-import + failure-guarded)
 # ---------------------------------------------------------------------------
 
+_pdf_extraction_lock = threading.Lock()
+
 
 def _extract_pdf(data: bytes) -> _Extraction:
     out = _Extraction()
@@ -460,20 +462,31 @@ def _extract_pdf(data: bytes) -> _Extraction:
     try:
         import pypdfium2 as pdfium  # type: ignore[import-untyped]
 
-        pdf = pdfium.PdfDocument(data)
-        page_count = len(pdf)
-        out.meta["page_count"] = page_count
-        if page_count > _MAX_PDF_PAGES:
-            out.warnings.append(
-                f"Only the first {_MAX_PDF_PAGES} of {page_count} pages were processed."
-            )
-        for i in range(min(page_count, _MAX_PDF_PAGES)):
+        with _pdf_extraction_lock:
+            pdf = pdfium.PdfDocument(data)
             try:
-                textpage = pdf[i].get_textpage()
-                parts.append(textpage.get_text_range() or "")
-            except Exception:
-                parts.append("")
-        doc_parsed = True
+                page_count = len(pdf)
+                out.meta["page_count"] = page_count
+                if page_count > _MAX_PDF_PAGES:
+                    out.warnings.append(
+                        f"Only the first {_MAX_PDF_PAGES} of {page_count} pages were processed."
+                    )
+                for i in range(min(page_count, _MAX_PDF_PAGES)):
+                    try:
+                        page = pdf[i]
+                        try:
+                            textpage = page.get_textpage()
+                            try:
+                                parts.append(textpage.get_text_range() or "")
+                            finally:
+                                textpage.close()
+                        finally:
+                            page.close()
+                    except Exception:
+                        parts.append("")
+                doc_parsed = True
+            finally:
+                pdf.close()
     except Exception as pdfium_err:
         logger.debug("pypdfium2 parse failed, trying pdfplumber: %s", pdfium_err)
 
