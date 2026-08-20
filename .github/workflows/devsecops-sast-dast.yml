@@ -357,24 +357,42 @@ jobs:
           WORKERS: "1"
         run: |
           touch .env
-          docker compose up -d qdrant api || {
-            docker compose ps
-            docker compose logs --no-color --tail=200 qdrant api
+          # Use the CI override so /app/data_store is a writable tmpfs instead
+          # of the named analytics_data volume (which Docker creates as root-owned
+          # on a fresh runner, preventing appuser from opening the SQLite DB).
+          docker compose \
+            -f docker-compose.yml \
+            -f infra/docker-compose.ci.yml \
+            up -d qdrant api || {
+            docker compose \
+              -f docker-compose.yml \
+              -f infra/docker-compose.ci.yml \
+              ps
+            docker compose \
+              -f docker-compose.yml \
+              -f infra/docker-compose.ci.yml \
+              logs --no-color --tail=200 qdrant api
             exit 1
           }
 
-          echo "Waiting for API to be healthy..."
+          echo "Waiting for API to be healthy on port ${API_PORT}..."
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8087/health > /dev/null 2>&1; then
+            if curl -sf "http://localhost:${API_PORT}/health" > /dev/null 2>&1; then
               echo "API is healthy"
               exit 0
             fi
             sleep 5
           done
 
-          echo "::error::API did not become healthy on port 8087"
-          docker compose ps
-          docker compose logs --no-color --tail=200 qdrant api
+          echo "::error::API did not become healthy on port ${API_PORT}"
+          docker compose \
+            -f docker-compose.yml \
+            -f infra/docker-compose.ci.yml \
+            ps
+          docker compose \
+            -f docker-compose.yml \
+            -f infra/docker-compose.ci.yml \
+            logs --no-color --tail=200 qdrant api
           exit 1
 
       - name: OWASP ZAP Baseline Scan
@@ -413,7 +431,11 @@ jobs:
         if: always()
         env:
           API_PORT: "8087"
-        run: docker compose down -v || true
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f infra/docker-compose.ci.yml \
+            down -v || true
 
   # ============================================
   # 6. OSSF Scorecard – Supply Chain Security
