@@ -59,9 +59,9 @@ export function initWebVitalsTracking(endpoint?: string): void {
 function trackLCP(): void {
   const observer = new PerformanceObserver((list) => {
     const entries = list.getEntries();
-    const lastEntry = entries[entries.length - 1];
+    const lastEntry = entries[entries.length - 1] as LargestContentfulPaint;
 
-    const value = lastEntry.renderTime || lastEntry.loadTime;
+    const value = lastEntry.renderTime || lastEntry.startTime || 0;
     const rating = getRating('LCP', value);
 
     if (process.env.NODE_ENV === 'development') {
@@ -101,7 +101,7 @@ function trackINP(): void {
     }
   });
 
-  observer.observe({ entryTypes: ['event'], durable: true });
+  observer.observe({ entryTypes: ['event'], buffered: true });
 }
 
 /**
@@ -212,4 +212,10 @@ export async function getWebVitalsSnapshot(): Promise<Record<string, any>> {
 interface LayoutShift extends PerformanceEntry {
   value: number;
   hadRecentInput: boolean;
+}
+
+// Type definitions for LCP
+interface LargestContentfulPaint extends PerformanceEntry {
+  renderTime: number;
+  startTime: number;
 }

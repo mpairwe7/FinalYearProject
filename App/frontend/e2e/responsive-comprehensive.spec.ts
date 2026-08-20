@@ -545,7 +545,6 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       }
     });
   });
-});
 
   test.describe("Core Web Vitals — Performance Across Breakpoints", () => {
     test("measures LCP (Largest Contentful Paint) on mobile", async ({ page }) => {
