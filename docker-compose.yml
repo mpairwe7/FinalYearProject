@@ -133,6 +133,7 @@ services:
     tmpfs:
       - /tmp
       - /app/cache
+      - /app/data_store
     volumes:
       - ./artifacts/models:/app/models:ro
       - ./artifacts/offline:/app/offline:ro
