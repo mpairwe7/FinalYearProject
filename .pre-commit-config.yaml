@@ -27,15 +27,13 @@ repos:
           - --only-verified
 
   # ── GitGuardian ggshield – real-time secret detection ─────────────────────
-  # Requires GITGUARDIAN_API_KEY env var (free for open-source).
   # Config: .gitguardian.yaml
-  # Uncomment when GITGUARDIAN_API_KEY is configured (ggshield auth login)
-  # - repo: https://github.com/gitguardian/ggshield
-  #   rev: v1.35.0
-  #   hooks:
-  #     - id: ggshield
-  #       name: ggshield – GitGuardian secret scan
-  #       stages: [pre-commit]
+  - repo: https://github.com/gitguardian/ggshield
+    rev: v1.38.0
+    hooks:
+      - id: ggshield
+        name: GitGuardian – ggshield secret scan
+        stages: [pre-commit, pre-push]
 
   # ── Gitleaks – fast regex-based secret scanner ────────────────────────────
   # Config: .gitleaks.toml (includes Uganda-specific PII + ML API key rules)
