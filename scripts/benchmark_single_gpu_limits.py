@@ -424,11 +424,17 @@ def run_single_gpu_validation() -> dict[str, Any]:
               f"User p50={results['user_staff_isolation']['user_p50_ms']}ms | Staff p50={results['user_staff_isolation']['staff_p50_ms']}ms | Errors: 0")
 
     # -----------------------------------------------------------------------
-    # 7. Hardware Telemetry & Resource Cleanup Verification
+    # 7. Hardware Telemetry & Resource Cleanup Verification (Scoped to ~/Mpairwe7)
     # -----------------------------------------------------------------------
-    print(f"\n[Phase 7] GPU {SELECTED_GPU_ID} Telemetry & Cleanup Verification...")
+    print(f"\n[Phase 7] GPU {SELECTED_GPU_ID} Telemetry & Scoped Cleanup Verification (~/Mpairwe7 only)...")
     gpu_peak = get_gpu_telemetry(SELECTED_GPU_ID)
     results["peak_gpu_telemetry"] = gpu_peak
+
+    try:
+        from scripts.cleanup_gpu_processes import cleanup_mpairwe7_gpu_processes
+        cleanup_mpairwe7_gpu_processes(dry_run=False)
+    except Exception as ex:
+        print(f"Warning: Scoped GPU cleanup encountered: {ex}")
 
     gc.collect()
     time.sleep(1)
