@@ -1,0 +1,91 @@
+# ZAP Automation Framework - Baseline Scan Configuration (URA Chatbot)
+# Purpose: Fast, passive DAST scan for CI/CD gates
+# Standards: OWASP WSTG v4.2, OWASP Top 10
+
+env:
+  contexts:
+    - name: "ura-chatbot-baseline"
+      urls:
+        - "TARGET_URL_PLACEHOLDER"
+      includePaths:
+        - "TARGET_URL_PLACEHOLDER/api/.*"
+        - "TARGET_URL_PLACEHOLDER/docs.*"
+        - "TARGET_URL_PLACEHOLDER/openapi.json"
+      excludePaths:
+        - ".*/_next/.*"
+        - ".*/static/.*"
+        - ".*/favicon.ico"
+        - ".*/healthz?"
+        - ".*/readyz?"
+        - ".*/metrics"
+      sessionManagement:
+        method: "headers"
+        parameters:
+          Authorization: "Bearer AUTH_TOKEN_PLACEHOLDER"
+
+  parameters:
+    failOnError: false
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: openapi
+    parameters:
+      apiUrl: "TARGET_URL_PLACEHOLDER/openapi.json"
+      targetUrl: "TARGET_URL_PLACEHOLDER"
+      context: "ura-chatbot-baseline"
+
+  - type: passiveScan-config
+    parameters:
+      maxAlertsPerRule: 10
+      scanOnlyInScope: true
+
+  - type: alertFilter
+    parameters:
+      deleteGlobalAlerts: false
+    alertFilters:
+      - ruleId: 10020  # Anti-clickjacking Header Missing for API
+        url: ".*/api/.*"
+        urlRegex: true
+        newRisk: "False Positive"
+      - ruleId: 10021  # X-Content-Type-Options Header Missing
+        url: ".*/api/.*"
+        urlRegex: true
+        newRisk: "False Positive"
+      - ruleId: 10038  # Content Security Policy Header Not Set on raw API JSON
+        url: ".*/api/.*"
+        urlRegex: true
+        newRisk: "False Positive"
+
+  - type: spider
+    parameters:
+      context: "ura-chatbot-baseline"
+      maxDuration: 5
+      maxDepth: 5
+      maxChildren: 10
+      acceptCookies: true
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 10
+
+  - type: report
+    parameters:
+      template: "traditional-json"
+      reportDir: "/zap/wrk"
+      reportFile: "zap-results.json"
+      displayReport: false
+
+  - type: report
+    parameters:
+      template: "traditional-html"
+      reportDir: "/zap/wrk"
+      reportFile: "zap-results.html"
+      displayReport: false
+
+  - type: report
+    parameters:
+      template: "sarif-json"
+      reportDir: "/zap/wrk"
+      reportFile: "zap-results.sarif"
+      displayReport: false

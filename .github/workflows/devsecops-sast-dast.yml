@@ -409,6 +409,15 @@ jobs:
             echo "- ZAP scan did not produce results (API may not have started)" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Create GitHub issues for high/critical findings
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          pip install PyGithub || true
+          python .github/scripts/create-zap-issues.py || true
+
       - name: Tear down services
         if: always()
         env:
@@ -488,11 +497,30 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install pytm
-        run: pip install pytm
+      - name: Install dependencies
+        run: pip install pytm pyyaml
 
       - name: Validate threat registry
         run: python threat-model/validate_threats.py
+
+      - name: Validate threat model risk register
+        run: python scripts/validate-risk-register.py --register docs/security/threat-model/risk-register.yaml
+
+      - name: Check accepted risks review date expiry
+        run: |
+          python3 -c "
+          import yaml, sys
+          from datetime import date
+          try:
+              with open('docs/security/threat-model/accepted-risks.yaml') as f:
+                  risks = yaml.safe_load(f) or []
+              today = date.today()
+              expired = [r for r in risks if 'review_date' in r and date.fromisoformat(str(r['review_date'])) < today]
+              for r in expired:
+                  print(f'::warning::Accepted risk {r.get(\"risk_id\")} has expired review date: {r.get(\"review_date\")}')
+          except Exception as e:
+              print(f'::warning::Accepted risks check error: {e}')
+          "
 
       - name: Generate threat model report
         if: always()
@@ -514,7 +542,7 @@ jobs:
           owasp = len({t['owasp_llm'] for t in THREAT_REGISTRY if t.get('owasp_llm')})
           stride = len({t['category'] for t in THREAT_REGISTRY})
           atlas = len([t for t in THREAT_REGISTRY if t.get('mitre_atlas')])
-          print(f'- **{total}** threats registered ({mitigated} mitigated, {accepted} accepted)')
+          print(f'- **{total}** threats registered in code ({mitigated} mitigated, {accepted} accepted)')
           print(f'- **{stride}/6** STRIDE categories covered')
           print(f'- **{owasp}/10** OWASP LLM Top 10 mapped')
           print(f'- **{atlas}** MITRE ATLAS techniques mapped')
@@ -525,7 +553,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: threat-model-report
-          path: threat-model/output/
+          path: |
+            threat-model/output/
+            docs/security/threat-model/
           retention-days: 90
 
   # ============================================

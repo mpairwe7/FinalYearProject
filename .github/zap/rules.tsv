@@ -1,0 +1,18 @@
+# ZAP Alert Filter Rules — URA AI Chatbot
+# Format: [Rule ID]\t[Alert Name]\t[URL Regex]\t[Parameter]\t[Evidence]\t[CWE ID]\t[WASC ID]\t[Action]
+
+# Suppress known API false positives
+10020	Anti-clickjacking Header Missing	.*/api/.*	*	*	1021	15	IGNORE
+10021	X-Content-Type-Options Header Missing	.*/api/.*	*	*	693	15	IGNORE
+10038	Content Security Policy Header Not Set	.*/api/.*	*	*	693	15	IGNORE
+10049	Storable and Cacheable Content	.*/docs.*	*	*	524	13	IGNORE
+10049	Storable and Cacheable Content	.*/openapi.json	*	*	524	13	IGNORE
+
+# Health check endpoints
+10020	Anti-clickjacking Header Missing	.*/health.*	*	*	1021	15	IGNORE
+10021	X-Content-Type-Options Header Missing	.*/health.*	*	*	693	15	IGNORE
+
+# High priority vulnerabilities
+40018	SQL Injection	.*	*	*	89	19	HIGH
+90020	Remote OS Command Injection	.*	*	*	78	31	HIGH
+40046	Server Side Request Forgery	.*	*	*	918	20	HIGH

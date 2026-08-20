@@ -1,0 +1,162 @@
+threagile_version: 1.0.0
+
+title: URA AI Taxpayer Chatbot - Threat Model
+date: 2026-08-21
+author:
+  name: URA AI Security Team
+  homepage: https://github.com/mpairwe7/FinalYearProject
+
+management_overview_comment: ""
+
+business_criticality: critical
+
+shared_runtimes: {}
+
+business_overview:
+  description: >
+    Official AI-powered Taxpayer Assistant for Uganda Revenue Authority (URA).
+    Enables Ugandan taxpayers to query tax laws, rates, filing procedures,
+    exemption status, and calculate tax obligations with zero hallucination
+    via hybrid RAG (dense + BM25 + DeBERTa cross-encoder reranker).
+  images: []
+
+technical_overview:
+  description: >
+    Next.js 16 frontend + FastAPI backend service containerized on Crane Cloud,
+    Qdrant vector database for hybrid semantic search, vLLM / HuggingFace
+    inference engine (Sunbird Sunflower-14B / Qwen3-8B-AWQ), SQLite/PostgreSQL
+    for analytics & audit logging, Redis for caching & rate limiting,
+    and Cloudflare CDN/Tunnel edge proxy.
+  images: []
+
+questions:
+  Where is taxpayer data processed?: >
+    Backend processing in Crane Cloud (Uganda / East Africa region) with
+    strict data sovereignty. PII is redacted at edge and output filters.
+  How is prompt injection and hallucination prevented?: >
+    Multi-layered InputGuard / OutputGuard delimiters, semantic similarity
+    checks, DeBERTa NLI cross-encoder grounding, and human ticket escalation.
+
+abuse_cases:
+  tax-evasion-prompt-injection: >
+    An adversary submits crafted adversarial prompts attempting to force the
+    chatbot to give erroneous tax evasion guidance or disclose internal rules.
+  pii-exfiltration: >
+    An adversary attempts to extract other taxpayers' TINs, NIDs, or phone
+    numbers via training data inversion or context leakage.
+  rag-corpus-tampering: >
+    An adversary attempts to inject malicious tax advice into ingested PDF
+    laws or publications to manipulate retrieval results.
+
+tags_available:
+  - next.js
+  - react
+  - fastapi
+  - python
+  - qdrant
+  - vector-db
+  - vllm
+  - huggingface
+  - redis
+  - postgresql
+  - sqlite
+  - crane-cloud
+  - cloudflare
+
+security_requirements:
+  Input Validation: Strict InputGuard validation on all taxpayer queries
+  Authentication: JWT / API key authentication for staff and admin endpoints
+  Authorization: RBAC for staff triage, admin overrides, and MCP tool execution
+  Data Protection: Automatic PII redaction and cryptographic Merkle audit logging
+  Grounding: Cross-encoder DeBERTa NLI grounding verification (>0.65 threshold)
+
+trust_boundaries:
+  internet-to-edge:
+    id: internet-to-edge
+    type: network-cloud-provider
+    description: Public Internet to Cloudflare Edge / CDN.
+    technical_assets_inside:
+      - nextjs-frontend
+      - cloudflare-proxy
+
+  edge-to-backend:
+    id: edge-to-backend
+    type: network-dedicated
+    description: Edge to Crane Cloud internal VPC network.
+    technical_assets_inside:
+      - fastapi-api
+      - qdrant-vectordb
+      - redis-cache
+      - database-store
+
+technical_assets:
+  nextjs-frontend:
+    id: nextjs-frontend
+    description: Next.js 16 React Web UI for taxpayers and URA staff.
+    type: process
+    usage: business
+    used_as_client_by_human: true
+    in_scope: true
+    technology: web-client
+    tags: [next.js, react]
+    internet: true
+
+  fastapi-api:
+    id: fastapi-api
+    description: FastAPI core API service with RAG orchestrator and guardrails.
+    type: process
+    usage: business
+    in_scope: true
+    technology: application
+    tags: [fastapi, python]
+    confidentiality: high
+    integrity: critical
+    availability: high
+
+  qdrant-vectordb:
+    id: qdrant-vectordb
+    description: Qdrant vector database hosting dense embeddings for URA documents.
+    type: datastore
+    usage: business
+    in_scope: true
+    technology: database
+    tags: [qdrant, vector-db]
+    confidentiality: high
+    integrity: critical
+    availability: high
+
+  vllm-inference:
+    id: vllm-inference
+    description: vLLM / HuggingFace inference runtime serving quantized LLMs.
+    type: process
+    usage: business
+    in_scope: true
+    technology: application
+    tags: [vllm, huggingface]
+    confidentiality: high
+    integrity: critical
+    availability: high
+
+  database-store:
+    id: database-store
+    description: SQLite / PostgreSQL persistent store for analytics and audit ledger.
+    type: datastore
+    usage: business
+    in_scope: true
+    technology: database
+    tags: [postgresql, sqlite]
+    confidentiality: critical
+    integrity: critical
+    availability: high
+
+  redis-cache:
+    id: redis-cache
+    description: Redis in-memory cache for rate-limiting and semantic response caching.
+    type: datastore
+    usage: business
+    in_scope: true
+    technology: database
+    tags: [redis]
+    confidentiality: medium
+    integrity: high
+    availability: high
