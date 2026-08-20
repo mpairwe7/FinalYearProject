@@ -19,15 +19,7 @@ langchain-qdrant==1.1.0
 qdrant-client>=1.17.1,<2.0.0
 datasets==3.3.2
 evaluate==0.4.6
-# NOTE: 4.48.3 predates Qwen3ForCausalLM support (added 4.51+), so it could
-# not load either the previous default (Qwen/Qwen3-8B) or the current one
-# (Sunbird/Sunflower-14B-FP8, same Qwen3 architecture family) via a fresh
-# `pip install -r requirements.txt` env. Bumped 2026-08-19; verified against
-# transformers==5.15.0 loading Sunflower-14B-FP8 locally.
-transformers>=5.15.0
-# Required for AutoModelForCausalLM to load FP8 compressed-tensors
-# checkpoints (e.g. Sunbird/Sunflower-14B-FP8) via LLM_BACKEND=local.
-compressed-tensors>=0.18.0
+transformers==4.48.3
 accelerate==1.13.0
 torch>=2.6.0
 huggingface-hub==0.27.1
