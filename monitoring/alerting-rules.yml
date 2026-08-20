@@ -75,3 +75,128 @@ groups:
         annotations:
           summary: "Average faithfulness score dropped below 0.5"
           description: "Current avg: {{ $value }}. Check Qdrant index freshness."
+
+  # Index lifecycle / disaster-recovery signals are emitted by the API from
+  # atomically-written status records. This lets Prometheus observe short-lived
+  # reindex and backup containers without an additional exporter.
+  - name: ura-qdrant-index-lifecycle
+    interval: 30s
+    rules:
+      - alert: QdrantIndexDrift
+        expr: ura_qdrant_index_drift > 0
+        for: 5m
+        labels:
+          severity: critical
+          team: ml
+        annotations:
+          summary: "Serving Qdrant index no longer matches the shipped corpus"
+          description: "Freshness reported source/index drift or a missing index binding."
+          runbook: "docs/runbooks/qdrant-staged-rebuild.md"
+
+      - alert: QdrantRebuildFailed
+        expr: ura_qdrant_rebuild_failed > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Staged Qdrant rebuild failed before promotion"
+          description: "The serving alias is unchanged; inspect the candidate build and rerun safely."
+          runbook: "docs/runbooks/qdrant-staged-rebuild.md"
+
+      - alert: QdrantSparseQueryErrors
+        expr: rate(qdrant_query_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Qdrant query errors are occurring"
+          description: "The retriever is recording Qdrant query failures. Check server health and collection state."
+
+      - alert: QdrantQueryLatencyHigh
+        expr: qdrant_query_duration_seconds{quantile="0.95"} > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Qdrant p95 query latency exceeds 500ms"
+          description: "The API-side Qdrant query p95 has remained above the retrieval SLO."
+
+      - alert: QdrantServerQueryLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(rest_responses_duration_seconds_bucket{
+                endpoint="/collections/{collection_name}/points/query"
+              }[5m])
+            )
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Qdrant server p95 query latency exceeds 500ms"
+          description: "Qdrant's own /points/query latency histogram is above the retrieval SLO."
+
+      - alert: QdrantCollectionUnexpectedlySmall
+        expr: (sum(collection_points) or vector(0)) <= 1
+        for: 10m
+        labels:
+          severity: critical
+          team: ml
+        annotations:
+          summary: "Qdrant collection contains only the lifecycle sentinel or no data"
+          description: "The vector collection may have been lost or built from an empty corpus."
+
+      - alert: QdrantHostDiskLow
+        expr: |
+          min(
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}
+          ) < 0.15
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Host disk headroom below 15%; Qdrant persistence is at risk"
+          description: "Free space is below 15% on a persistent host filesystem. Free capacity before Qdrant compaction, backups, or rebuilds fail."
+
+      - alert: QdrantBackupMissingOrFailed
+        expr: |
+          ura_qdrant_backup_required == 1
+          and (
+            ura_qdrant_backup_failed == 1
+            or ura_qdrant_backup_timestamp_seconds == 0
+            or time() - ura_qdrant_backup_timestamp_seconds > 93600
+          )
+        for: 15m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Qdrant retained snapshot backup is missing, failed, or stale"
+          description: "A daily snapshot has not completed successfully within 26 hours."
+          runbook: "docs/runbooks/qdrant-staged-rebuild.md#backup-and-restore-drill"
+
+      - alert: QdrantRestoreDrillFailedOrStale
+        expr: |
+          ura_qdrant_backup_required == 1
+          and (
+            ura_qdrant_restore_drill_failed == 1
+            or ura_qdrant_restore_drill_timestamp_seconds == 0
+            or time() - ura_qdrant_restore_drill_timestamp_seconds > 3024000
+          )
+        for: 30m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Qdrant restore drill failed or has not completed in 35 days"
+          description: "Run the restore drill before relying on the retained snapshots for recovery."
+          runbook: "docs/runbooks/qdrant-staged-rebuild.md#backup-and-restore-drill"

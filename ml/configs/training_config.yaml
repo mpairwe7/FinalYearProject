@@ -50,7 +50,8 @@ models:
       
   # Generation models — 2026 defaults (see docs/MODEL_SWAP_GUIDE.md)
   generation:
-    web_inference: "Qwen/Qwen3-8B"               # API backend (llm.py) — Apache-2.0, MMLU 74.7
+    web_inference: "Sunbird/Sunflower-14B-FP8"     # API backend (llm.py) — Apache-2.0, Qwen3-14B arch, 31 Ugandan langs + English, FP8, gated on HF
+    web_inference_rollback: "Qwen/Qwen3-8B"        # Ungated rollback if HF access to Sunflower isn't granted
     web_budget: "Qwen/Qwen3-4B"                   # Budget GPU (8 GB VRAM)
     web_moe: "Qwen/Qwen3-30B-A3B"                 # MoE — 30B quality at 3B active cost (vLLM)
     web_alt: "microsoft/Phi-4-mini-instruct"       # MIT license, strong math/logic

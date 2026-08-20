@@ -126,17 +126,21 @@ def resolve_tts_voice(locale: str, voice: str | None = None) -> str | None:
 # Lugbara (lgg) is in the model's training mix but exposes NO voice id, so it
 # would have no narration even if it were offered.
 
-# Languages supported for TRANSLATION (Sunbird NLLB-based): English plus the
-# five Ugandan languages their production translate endpoint is trained on —
-# Acholi, Ateso, Luganda, Lugbara, Runyankole.
+# Languages supported for TRANSLATION via Sunbird's Sunflower-backed
+# /tasks/translate endpoint. This used to be a hand-picked 6-language subset
+# with a comment claiming Swahili was "deliberately absent" because "the
+# translate endpoint does not serve Swahili" — that claim is now false.
 #
-# "swa" is deliberately absent. Swahili appears in Sunbird's SALT *dataset* and
-# has a TTS voice (see TTS_VOICES), which makes it look like an oversight —
-# it is not. The translate endpoint does not serve Swahili, so adding it here
-# would turn today's graceful "unsupported, fall through to the next backend"
-# into a live API error. Swahili translation is handled by the Gemini / Workers
-# AI / prompted tiers in speech_service.translate instead.
-TRANSLATION_LANGUAGES = {"eng", "lug", "nyn", "ach", "teo", "lgg"}
+# Verified 2026-08-19 against the live API (both directions, HTTP 200,
+# fluent output): eng->swa returned "Ninawezaje kujisajili kwa nambari ya
+# utambulisho wa kodi (TIN)?" and swa->eng returned "How can I register for
+# a Tax Identification Number (TIN)?". The live OpenAPI spec
+# (https://api.sunbird.ai/openapi.json, /tasks/translate) documents 31
+# supported languages total; this set is intentionally still scoped to the
+# languages this app actually routes (see LOCALE_TO_SUNBIRD) rather than all
+# 31 — widening it further needs matching LOCALE_TO_SUNBIRD /
+# _SUNBIRD_TO_LOCALE / detect_language entries, which is a separate change.
+TRANSLATION_LANGUAGES = {"eng", "lug", "nyn", "ach", "teo", "lgg", "swa"}
 
 # Sunbird code → URA locale (reverse mapping)
 _SUNBIRD_TO_LOCALE: dict[str, str] = {
@@ -352,7 +356,7 @@ def speech_to_text(
             result.get("output", {}).get("audio_transcription")
             or result.get("audio_transcription", "")
         )
-        logger.info("Sunbird STT (%s): '%s'", language, transcription[:80])
+        logger.info("Sunbird STT completed (language=%s, chars=%d)", language, len(transcription))
         return {"text": transcription, "language": result.get("language", language)}
     except httpx.HTTPStatusError as e:
         body = ""

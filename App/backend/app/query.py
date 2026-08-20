@@ -30,6 +30,32 @@ def _log_safe(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Language rollout scope
+# ---------------------------------------------------------------------------
+# Which locales the app actually routes through translation + localization,
+# as opposed to which locales the underlying models/detector are CAPABLE of.
+# detect_language() below can still tell Acholi/Runyankole/Ateso/Lugbara
+# apart, and Sunbird's translate endpoint still serves all of them (see
+# sunbird.TRANSLATION_LANGUAGES) — this is a separate, narrower gate on top,
+# so the app can ship en/lg/sw first and widen this one env var later
+# without touching the detection or translation code underneath it.
+#
+# Gated 2026-08-19: an explicit or auto-detected locale outside this set is
+# treated as English (see ChatModel._generate_en / generate_retrieval_only
+# in service.py, both of which import this constant).
+SUPPORTED_LOCALES = frozenset(
+    loc.strip()
+    for loc in os.getenv("SUPPORTED_LOCALES", "en,lg,sw").split(",")
+    if loc.strip()
+)
+
+
+def gate_locale(locale: str) -> str:
+    """*locale* unchanged if it's in SUPPORTED_LOCALES, else "en"."""
+    return locale if locale in SUPPORTED_LOCALES else "en"
+
+
+# ---------------------------------------------------------------------------
 # Language detection — heuristic patterns for Ugandan languages
 # ---------------------------------------------------------------------------
 # Runyankole (nyn) — Bantu noun-class prefixes (word-start) + common verb forms
@@ -198,14 +224,14 @@ def rewrite_with_history(
                 replacement = f"{article} {subject_phrase}"
 
             rewritten = pronoun_pattern.sub(replacement, query)
-            logger.debug("Query rewritten with user-turn subject: %s → %s", query, rewritten)
+            logger.debug("Query rewritten with user-turn subject (input_length=%d)", len(query))
             return rewritten
 
         # Fallback: use the first assistant sentence as a broad context hint.
         first_sentence = re.split(r"(?<=[^A-Z])[.!?]\s", last_bot)[0].strip()
         if first_sentence and len(first_sentence) > 10:
             rewritten = f"Regarding '{first_sentence[:100]}': {query}"
-            logger.debug("Query rewritten with assistant context: %s → %s", query, rewritten)
+            logger.debug("Query rewritten with assistant context (input_length=%d)", len(query))
             return rewritten
 
     return query

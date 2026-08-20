@@ -1,14 +1,15 @@
-"""Index freshness — detect source drift against the last successful index.
+"""Index freshness — detect source drift against the serving Qdrant index.
 
 G27: when URA updates a FAQ CSV or a PDF export, Qdrant still returns the
 old passage until someone re-indexes. This module hashes every corpus
 source the indexer reads, compares against a snapshot written at the end
 of a successful ``build_index``, and exits non-zero when they diverge.
 
-No Qdrant. No auto-reindex. CI and a nightly cron can both run
-``python -m app.freshness --check``. Optional ``--notify`` posts to
+CI and a nightly cron can run ``python -m app.freshness --check``. Add
+``--verify-qdrant`` to compare the shipped corpus hash with the hash stamped
+into the serving Qdrant collection. Optional ``--notify`` posts to
 ``FRESHNESS_SLACK_WEBHOOK`` (https only). Optional ``--enqueue`` writes
-a request file; it never starts ``indexer --recreate``.
+a request file; rebuild orchestration lives in :mod:`app.index_lifecycle`.
 """
 
 from __future__ import annotations
@@ -17,14 +18,18 @@ import hashlib
 import json
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from ._root import APP_DATA_ROOT, PROJECT_ROOT
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,18 @@ STATUS_PATH = Path(
     os.getenv(
         "INDEX_FRESHNESS_STATUS_PATH",
         str(SNAPSHOT_PATH.with_name("index_freshness_status.json")),
+    )
+)
+LIFECYCLE_STATUS_PATH = Path(
+    os.getenv(
+        "INDEX_LIFECYCLE_STATUS_PATH",
+        str(SNAPSHOT_PATH.with_name("index_lifecycle_status.json")),
+    )
+)
+BACKUP_STATUS_PATH = Path(
+    os.getenv(
+        "QDRANT_BACKUP_STATUS_PATH",
+        str(SNAPSHOT_PATH.with_name("qdrant_backup_status.json")),
     )
 )
 REINDEX_REQUEST_PATH = Path(
@@ -100,7 +117,7 @@ def snapshot_sources(roots: Iterable[Path] | None = None) -> dict[str, Any]:
         digest.update(sha.encode())
         digest.update(b"\x01")
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "corpus_hash": digest.hexdigest(),
         "file_count": len(files),
         "files": files,
@@ -118,6 +135,9 @@ class FreshnessReport:
     removed: list[str] = field(default_factory=list)
     changed: list[str] = field(default_factory=list)
     snapshot_missing: bool = False
+    index_corpus_hash: str = ""
+    index_snapshot_missing: bool = False
+    index_drift: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +148,9 @@ class FreshnessReport:
             "removed": self.removed,
             "changed": self.changed,
             "snapshot_missing": self.snapshot_missing,
+            "index_corpus_hash": self.index_corpus_hash,
+            "index_snapshot_missing": self.index_snapshot_missing,
+            "index_drift": self.index_drift,
             "drift_count": len(self.added) + len(self.removed) + len(self.changed),
         }
 
@@ -203,13 +226,56 @@ def check(
     return compare(snapshot_sources(roots), load_snapshot(snapshot_path))
 
 
+def qdrant_index_hash(
+    *,
+    url: str | None = None,
+    collection: str | None = None,
+    api_key: str | None = None,
+) -> str:
+    """Read the source hash committed with the serving Qdrant collection.
+
+    The binding sentinel lives in the same collection (or Qdrant alias) used
+    by the retriever. An unavailable server or missing sentinel is represented
+    by an empty hash so callers can report that condition explicitly.
+    """
+    from qdrant_client import QdrantClient
+
+    from .retriever import bm25_binding_sentinel_id
+
+    index_url = url or os.getenv("QDRANT_URL", "http://localhost:6333")
+    index_collection = collection or os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
+    client = QdrantClient(
+        url=index_url,
+        api_key=api_key if api_key is not None else (os.getenv("QDRANT_API_KEY") or None),
+        timeout=5,
+    )
+    points = client.retrieve(
+        collection_name=index_collection,
+        ids=[bm25_binding_sentinel_id(index_collection)],
+        with_payload=True,
+        with_vectors=False,
+    )
+    if not points:
+        return ""
+    return str((points[0].payload or {}).get("source_corpus_hash") or "")
+
+
+def compare_index_hash(report: FreshnessReport, index_corpus_hash: str) -> FreshnessReport:
+    """Add Qdrant binding state to a source-snapshot freshness report."""
+    report.index_corpus_hash = index_corpus_hash
+    report.index_snapshot_missing = not bool(index_corpus_hash)
+    report.index_drift = bool(index_corpus_hash) and index_corpus_hash != report.corpus_hash
+    report.ok = report.ok and not report.index_snapshot_missing and not report.index_drift
+    return report
+
+
 def write_status(report: FreshnessReport, path: Path | None = None) -> Path:
     """Persist the last check so /ready does not re-hash the corpus."""
     target = path or STATUS_PATH
     payload = {
         **report.to_dict(),
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-        "reindex_hint": "python -m app.indexer --recreate",
+        "checked_at": datetime.now(UTC).isoformat(),
+        "reindex_hint": "python -m app.index_lifecycle --rebuild",
     }
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")
@@ -227,6 +293,94 @@ def load_status(path: Path | None = None) -> dict[str, Any] | None:
     with target.open() as fh:
         data = json.load(fh)
     return data if isinstance(data, dict) else None
+
+
+def _write_operational_status(target: Path, payload: dict[str, Any]) -> Path:
+    """Atomically persist a small operational status record for `/metrics`."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    with tmp.open("w") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    tmp.replace(target)
+    return target
+
+
+def _load_operational_status(target: Path) -> dict[str, Any] | None:
+    if not target.is_file():
+        return None
+    with target.open() as fh:
+        data = json.load(fh)
+    return data if isinstance(data, dict) else None
+
+
+def write_lifecycle_status(
+    *,
+    ok: bool,
+    reindexed: bool = False,
+    collection: str = "",
+    source_corpus_hash: str = "",
+    error: str = "",
+    path: Path | None = None,
+) -> Path:
+    """Record the last staged rebuild result for Prometheus and operations."""
+    return _write_operational_status(
+        path or LIFECYCLE_STATUS_PATH,
+        {
+            "ok": ok,
+            "reindexed": reindexed,
+            "collection": collection,
+            "source_corpus_hash": source_corpus_hash,
+            "error": error,
+            "last_attempt_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def load_lifecycle_status(path: Path | None = None) -> dict[str, Any] | None:
+    """Return the last staged-rebuild result, if the indexer has run."""
+    return _load_operational_status(path or LIFECYCLE_STATUS_PATH)
+
+
+def write_backup_status(
+    *,
+    ok: bool,
+    collection: str = "",
+    snapshot: str = "",
+    error: str = "",
+    restore_drill_ok: bool | None = None,
+    restore_drill_error: str = "",
+    path: Path | None = None,
+) -> Path:
+    """Record the last retained-Qdrant-backup result for Prometheus."""
+    target = path or BACKUP_STATUS_PATH
+    payload = _load_operational_status(target) or {}
+    payload.update(
+        {
+            "ok": ok,
+            "collection": collection,
+            "snapshot": snapshot,
+            "error": error,
+            "last_attempt_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    if restore_drill_ok is not None:
+        payload.update(
+            {
+                "restore_drill_ok": restore_drill_ok,
+                "restore_drill_error": restore_drill_error,
+                "last_restore_drill_at": datetime.now(UTC).isoformat(),
+            }
+        )
+    return _write_operational_status(
+        target,
+        payload,
+    )
+
+
+def load_backup_status(path: Path | None = None) -> dict[str, Any] | None:
+    """Return the last backup result, if scheduled backup is enabled."""
+    return _load_operational_status(path or BACKUP_STATUS_PATH)
 
 
 def slack_webhook_url(raw: str | None = None) -> str:
@@ -250,11 +404,11 @@ def notify_drift(report: FreshnessReport, *, webhook: str | None = None) -> bool
         return False
     text = (
         f"URA index drift: +{len(report.added)} -{len(report.removed)} "
-        f"~{len(report.changed)}. Re-index in an ops window: "
-        "python -m app.indexer --recreate"
+        f"~{len(report.changed)}; qdrant_index_drift={report.index_drift}. "
+        "Run the safe rebuild: python -m app.index_lifecycle --rebuild"
     )
     body = json.dumps({"text": text}).encode()
-    req = Request(
+    req = Request(  # noqa: S310 -- the URL is restricted to HTTPS below.
         url,
         data=body,
         headers={"Content-Type": "application/json"},
@@ -275,17 +429,16 @@ def enqueue_reindex_request(
 ) -> Path | None:
     """Write a reindex *request* file. Does not run the indexer.
 
-    Auto-recreate is out of scope: an ops window still has to run
-    ``python -m app.indexer --recreate``.
+    An ops window still has to run the staged, alias-based rebuild.
     """
     if report.ok or report.snapshot_missing:
         return None
     target = path or REINDEX_REQUEST_PATH
     payload = {
         **report.to_dict(),
-        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "requested_at": datetime.now(UTC).isoformat(),
         "auto_reindex": False,
-        "reindex_hint": "python -m app.indexer --recreate",
+        "reindex_hint": "python -m app.index_lifecycle --rebuild",
     }
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".tmp")
@@ -320,6 +473,11 @@ def main() -> int:  # pragma: no cover - CLI
         action="store_true",
         help="On drift, write a reindex request file (does not run the indexer)",
     )
+    parser.add_argument(
+        "--verify-qdrant",
+        action="store_true",
+        help="Compare the source hash with the one stamped in the serving Qdrant collection",
+    )
     args = parser.parse_args()
     path = Path(args.snapshot)
 
@@ -330,13 +488,19 @@ def main() -> int:  # pragma: no cover - CLI
         parser.error("specify --check or --write")
 
     report = check(snapshot_path=path)
+    if args.verify_qdrant:
+        try:
+            compare_index_hash(report, qdrant_index_hash())
+        except Exception:
+            logger.warning("Could not read the Qdrant index hash", exc_info=True)
+            compare_index_hash(report, "")
     if args.write_status:
         write_status(report)
     if args.notify:
         notify_drift(report)
     if args.enqueue:
         enqueue_reindex_request(report)
-    print(json.dumps(report.to_dict(), indent=2))
+    sys.stdout.write(json.dumps(report.to_dict(), indent=2) + "\n")
     if report.snapshot_missing:
         logger.error("No freshness snapshot at %s — run indexer or --write", path)
         return 2

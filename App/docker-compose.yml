@@ -26,10 +26,17 @@ services:
   # Qdrant Vector Store
   # ---------------------------------------------------------------------------
   qdrant:
-    image: qdrant/qdrant:v1.17.1
+    # Keep the server on the actively maintained v1.19 release line. Upgrades
+    # of an existing qdrant_data volume must follow Qdrant's documented
+    # one-minor-version-at-a-time path; see docs/runbooks/qdrant-staged-rebuild.md.
+    image: qdrant/qdrant:v1.19.0
     container_name: ura-app-qdrant
     volumes:
       - qdrant_data:/qdrant/storage
+      # Downloaded, checksummed snapshots are stored on a separate named
+      # volume beneath Qdrant's approved snapshots directory. It is read-only
+      # to Qdrant and is used only for restore drills.
+      - qdrant_backups:/qdrant/snapshots/restore:ro
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
     healthcheck:

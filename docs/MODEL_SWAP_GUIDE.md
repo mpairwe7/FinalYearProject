@@ -10,11 +10,22 @@ without restrictions.
 
 ```bash
 # Current defaults (set in .env or docker-compose.yml)
-LLM_MODEL=Qwen/Qwen3-8B           # llm.py    — answer generation
+LLM_MODEL=Sunbird/Sunflower-14B-FP8  # llm.py — answer generation (gated on HF)
 DENSE_MODEL=BAAI/bge-m3            # retriever.py / indexer.py — dense embeddings
 DENSE_DIM=1024                     # must match DENSE_MODEL output dimension
 RERANKER_MODEL=mixedbread-ai/mxbai-rerank-base-v2  # retriever.py — cross-encoder reranking
 ```
+
+**LLM_BACKEND matters as much as LLM_MODEL for this checkpoint.** Measured
+2026-08-19 on an RTX A6000 (Ampere — no native FP8 tensor cores):
+
+| Backend | Path | Throughput | Notes |
+|---------|------|------------|-------|
+| `local` (default) | transformers + compressed-tensors, naive per-layer FP8→bf16 dequant | ~4.5-5 tok/s | Works with zero extra infra; VRAM ~29.5 GB (bf16 dequant footprint) |
+| `vllm` | vLLM auto-selects the **Marlin weight-only-FP8** kernel | **~42 tok/s** | ~8-9x faster; needs a vLLM server (`docker compose --profile vllm up`); VRAM ~15.3 GB weights + configurable KV cache |
+
+Recommendation: use `LLM_BACKEND=vllm` whenever a GPU is available. `local`
+remains the zero-setup fallback for CPU-only or infra-constrained dev boxes.
 
 ### Swap Checklist
 
@@ -29,9 +40,10 @@ RERANKER_MODEL=mixedbread-ai/mxbai-rerank-base-v2  # retriever.py — cross-enco
 
 ## 1. LLM (Answer Generation)
 
-| Model | Params | MMLU | License | VRAM (fp16) | Context | Notes |
-|-------|--------|------|---------|-------------|---------|-------|
-| **Qwen/Qwen3-8B** (default) | 8B | 74.7 | Apache-2.0 | 16 GB | 128K | Best quality per GPU dollar; hybrid thinking mode |
+| Model | Params | MMLU | License | VRAM | Context | Notes |
+|-------|--------|------|---------|------|---------|-------|
+| **Sunbird/Sunflower-14B-FP8** (default) | 14.8B (FP8) | n/a (multilingual-focused, not MMLU-optimized) | Apache-2.0 | ~15.3 GB (vLLM weight-only-FP8) / ~29.5 GB (transformers bf16 dequant) | 40960 (configured 8192) | Qwen3-14B arch; natively multilingual across 31 Ugandan languages + English; **gated on HF**, needs an approved HF_TOKEN or a local download; best served via `LLM_BACKEND=vllm` (Marlin FP8 kernel, ~42 tok/s on Ampere) — plain `local` backend is ~4.5-5 tok/s |
+| Qwen/Qwen3-8B (previous default; rollback) | 8B | 74.7 | Apache-2.0 | 16 GB | 128K | Best quality per GPU dollar for English-centric use; ungated; hybrid thinking mode |
 | Qwen/Qwen3-30B-A3B | 30B (3B active) | 81.4 | Apache-2.0 | 18 GB | 128K | MoE — 30B quality at 3B cost; needs vLLM/SGLang |
 | Qwen/Qwen3-4B | 4B | ~68 | Apache-2.0 | 8 GB | 128K | Matches Qwen2.5-7B; fits small GPUs |
 | microsoft/Phi-4-mini-instruct | 3.8B | 68 | MIT | 8 GB | 128K | Strong math/logic; MIT license |
@@ -41,7 +53,10 @@ RERANKER_MODEL=mixedbread-ai/mxbai-rerank-base-v2  # retriever.py — cross-enco
 ### Swap command
 
 ```bash
-# Upgrade to Qwen3-8B (recommended — fits on RTX A6000 easily)
+# Current default — multilingual, gated (requires approved HF_TOKEN)
+LLM_MODEL=Sunbird/Sunflower-14B-FP8 LLM_CONTEXT_WINDOW=8192 LLM_BACKEND=vllm
+
+# Ungated rollback — fits on RTX A6000 easily, English-centric
 LLM_MODEL=Qwen/Qwen3-8B LLM_CONTEXT_WINDOW=8192
 
 # Budget option: MoE (30B quality, 3B active params)
@@ -54,7 +69,9 @@ LLM_MODEL=Qwen/Qwen3-4B LLM_CONTEXT_WINDOW=8192
 LLM_MODEL=Qwen/Qwen2.5-3B-Instruct LLM_CONTEXT_WINDOW=6144
 ```
 
-No code changes needed — the `LLM_MODEL` env var controls everything.
+No code changes needed — the `LLM_MODEL` env var controls everything. For
+Sunflower-14B-FP8 specifically, `LLM_BACKEND` also matters — see the
+backend comparison table above.
 
 ---
 
@@ -159,15 +176,19 @@ No code changes or re-indexing needed — reranker operates on already-retrieved
 
 ## 6. Recommended Stack by GPU Budget
 
-### RTX A6000 / A100 (48+ GB VRAM) — Maximum Quality
+### RTX A6000 / A100 (48+ GB VRAM) — Maximum Quality, Multilingual
 ```bash
-LLM_MODEL=Qwen/Qwen3-8B
+LLM_MODEL=Sunbird/Sunflower-14B-FP8
+LLM_BACKEND=vllm                      # Marlin FP8 kernel on Ampere — ~42 tok/s measured
 DENSE_MODEL=Qwen/Qwen3-Embedding-8B
 RERANKER_MODEL=mixedbread-ai/mxbai-rerank-large-v2
-# Total VRAM: ~30 GB (all three models fit on one GPU)
+# Total VRAM: ~15.3 GB (Sunflower, vLLM weight-only-FP8) + KV cache + embed/rerank
+# On a shared multi-GPU host, pin an idle GPU: NVIDIA_VISIBLE_DEVICES=<idx>
+# (docker) or CUDA_VISIBLE_DEVICES=<idx> (bare process) — check `nvidia-smi`
+# for 0% utilization before picking one.
 ```
 
-### RTX 4090 / A6000 (24 GB VRAM) — Balanced
+### RTX 4090 / A6000 (24 GB VRAM) — Balanced, English-centric
 ```bash
 LLM_MODEL=Qwen/Qwen3-8B
 DENSE_MODEL=BAAI/bge-m3

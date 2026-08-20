@@ -50,7 +50,7 @@ per-request in tests via `flags.set("tool_use", True)`.
       └──────┬─────────────────────────────────────────┘
              ▼
       ┌─────────────────────────────────────────────────┐
-      │            Hybrid retrieval (Qdrant v1.17.1)      │
+      │            Hybrid retrieval (Qdrant v1.19.0)      │
       │   dense + BM25 RRF + cross-encoder rerank       │
       └──────┬──────────────────────────────────────────┘
              ▼
@@ -617,7 +617,7 @@ and `backend/app/scheduler/` so follow-up PRs have clear landing spots.
 | `ec224c4` | 17-20 | Directory scaffolds + READMEs for DMZ MCP, workflows, scheduler |
 | `79c7239` | 21 wire | Audit ledger wired into `service.generate` on every return path |
 | `95236ae` | tests + docs | +151 pytest tests (154 → 304), TestClient integration for /v1/me/*, AGENT_ARCHITECTURE v2 |
-| `<current>` | infra | Qdrant v1.13.3 → v1.17.1 upgrade (client-server match), healthcheck fix, port mapping docs |
+| `<current>` | infra | Qdrant v1.19.0, staged aliases, retained snapshots, restore drills, and lifecycle metrics |
 
 See `git log --oneline feat/agentic-workflows ^main` for the
 authoritative list.
@@ -631,7 +631,7 @@ authoritative list.
 
 ---
 
-*Document version 2.1 — updated after Qdrant v1.17.1 upgrade and
+*Document version 2.1 — updated after the Qdrant v1.19 lifecycle hardening and
 infrastructure connectivity fixes on `feat/agentic-workflows`.
 Keep this file in sync with any subsequent Phase 14+ changes;
 if you add a new tool, route, or flag, update Sections 3, 4, and 6.*

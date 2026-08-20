@@ -851,7 +851,7 @@ class SpeechModel:
 
         latency = time.perf_counter() - t0
         duration = len(samples) / max(sample_rate, 1)
-        logger.info("Whisper+LoRA STT: '%s' (%.1fs)", text[:60], latency)
+        logger.info("Whisper+LoRA STT completed (chars=%d, %.1fs)", len(text), latency)
         return TranscribeResult(
             text=text,
             language=language or "lg",
@@ -908,7 +908,10 @@ class SpeechModel:
             text = " ".join(seg.text.strip() for seg in segments)
             latency = time.perf_counter() - t0
             duration = len(samples) / max(sample_rate, 1)
-            logger.info("faster-whisper STT: '%s' (%.1fs, lang=%s)", text[:60], latency, info.language)
+            logger.info(
+                "faster-whisper STT completed (chars=%d, %.1fs, lang=%s)",
+                len(text), latency, info.language,
+            )
             return TranscribeResult(
                 text=text,
                 language=info.language or language or "en",
@@ -1576,10 +1579,11 @@ class SpeechModel:
                     # equal their Sunbird code. Use the canonical table so that
                     # is intentional rather than luck.
                     #
-                    # Swahili still won't translate here — Sunbird's translate
-                    # endpoint covers English + five Ugandan languages only (see
-                    # TRANSLATION_LANGUAGES) — but it now declines with the right
-                    # code and falls through to Gemini/Workers AI/prompted.
+                    # Swahili now translates here too — verified 2026-08-19
+                    # against the live API (see TRANSLATION_LANGUAGES in
+                    # sunbird.py). It used to decline and fall through to
+                    # Gemini/Workers AI/prompted on a stale claim that the
+                    # translate endpoint didn't serve swa; it does.
                     src_code = sunbird.LOCALE_TO_SUNBIRD.get(source_lang, source_lang)
                     tgt_code = sunbird.LOCALE_TO_SUNBIRD.get(target_lang, target_lang)
                     result = sunbird.translate(text, src_code, tgt_code)
@@ -1618,10 +1622,9 @@ class SpeechModel:
         # sunbird_cloud while nyn/ach/teo took 17-18s on gemini_flash, for
         # languages a general model approximates rather than speaks.
         #
-        # Swahili deliberately still leads with Gemini: it has a Sunbird TTS
-        # voice but their translate endpoint does not serve it (see
-        # TRANSLATION_LANGUAGES), so leading with Sunbird there would just
-        # spend a failed call before falling through.
+        # Swahili now leads with Sunbird too (see TRANSLATION_LANGUAGES in
+        # sunbird.py) — the earlier "their translate endpoint does not serve
+        # it" claim was verified false against the live API 2026-08-19.
         def _sunbird_translates(src: str, tgt: str) -> bool:
             try:
                 from . import sunbird

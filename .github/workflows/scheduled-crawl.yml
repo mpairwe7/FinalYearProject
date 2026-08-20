@@ -110,11 +110,6 @@ jobs:
           echo "- Crawl state: Data/crawl/crawl_state.json" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ steps.check.outputs.new_files }}" != "0" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "New source documents landed, so the retrieval corpus is now stale." >> "$GITHUB_STEP_SUMMARY"
-            echo "Refresh it from a checkout with \`Data/pdfs\` synced into \`App/Data/pdfs\`:" >> "$GITHUB_STEP_SUMMARY"
-            echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-            echo "python -m app.indexer --export-pdf-jsonl   # re-chunk; rejects a stale export by PDF hash" >> "$GITHUB_STEP_SUMMARY"
-            echo "python -m app.indexer --recreate           # rebuild Qdrant" >> "$GITHUB_STEP_SUMMARY"
-            echo "python scripts/reindex_vectorize.py        # rebuild Vectorize from the same JSONL" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "New source documents were committed. The Crane image-build workflow is triggered by Data/pdfs and Data/crawl changes; it regenerates the validated JSONL corpus and bakes a new alias-backed embedded Qdrant index." >> "$GITHUB_STEP_SUMMARY"
+            echo "The external Vectorize deployment remains a separate managed-index release step." >> "$GITHUB_STEP_SUMMARY"
           fi

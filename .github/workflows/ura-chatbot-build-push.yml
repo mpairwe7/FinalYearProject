@@ -36,6 +36,9 @@ on:
       - "App/backend/requirements-cranecloud.txt"
       - "Model/bm25_state.json"
       - "Data/dataset/**"
+      - "Data/teacher_qa/**"
+      - "Data/pdfs/**"
+      - "Data/crawl/**"
       - ".github/workflows/ura-chatbot-build-push.yml"
   workflow_dispatch:
     inputs:
@@ -168,7 +171,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
+          # Attach SLSA provenance and an SBOM to every pushed image. These are
+          # OCI attestations, so deploy tooling can verify what was built and
+          # policy engines can assess dependency exposure before rollout.
+          provenance: mode=max
+          sbom: true
           # Staff sign-in config baked into the frontend bundle. Repo VARIABLES,
           # not secrets: the issuer and client id are public in the shipped
           # bundle by design (OAuth 2.1 public client). Unset → empty → the OIDC

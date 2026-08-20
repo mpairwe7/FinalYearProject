@@ -40,6 +40,7 @@ _CONVERSATION_TTL_DAYS = int(os.getenv("CONVERSATION_TTL_DAYS", "7"))
 _ANALYTICS_TTL_DAYS = int(os.getenv("ANALYTICS_TTL_DAYS", "365"))
 _FEEDBACK_TTL_DAYS = int(os.getenv("FEEDBACK_TTL_DAYS", "90"))
 _SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
+_TICKET_TTL_DAYS = int(os.getenv("TICKET_TTL_DAYS", "90"))
 
 # Thread-local storage for connections with a lock for init safety
 _local = threading.local()
@@ -257,6 +258,7 @@ def init_db() -> None:
             id          TEXT PRIMARY KEY,
             message_id  TEXT NOT NULL,
             session_id  TEXT,
+            user_id     TEXT DEFAULT '',
             rating      TEXT NOT NULL CHECK(rating IN ('up', 'down')),
             comment     TEXT DEFAULT '',
             user_query  TEXT DEFAULT '',
@@ -267,6 +269,7 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS analytics_events (
             id          TEXT PRIMARY KEY,
             session_id  TEXT,
+            user_id     TEXT DEFAULT '',
             event_type  TEXT NOT NULL,
             event_data  TEXT DEFAULT '{}',
             created_at  REAL NOT NULL
@@ -274,6 +277,7 @@ def init_db() -> None:
 
         CREATE TABLE IF NOT EXISTS sessions (
             id              TEXT PRIMARY KEY,
+            user_id         TEXT DEFAULT '',
             started_at      REAL NOT NULL,
             last_active_at  REAL NOT NULL,
             message_count   INTEGER DEFAULT 0,
@@ -623,6 +627,12 @@ def init_db() -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)")
     _ensure_column(conn, "conversations", "flag_variants", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "conversations", "locale", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "user_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "analytics_events", "user_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "sessions", "user_id", "TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON analytics_events(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
 
     # Seed the default tenant if missing
     conn.execute(
@@ -653,6 +663,7 @@ def cleanup_expired_data() -> dict[str, int]:
         ("workflow_sessions", _CONVERSATION_TTL_DAYS),
         ("conversation_topics", _CONVERSATION_TTL_DAYS),
         ("ticket_presence", 1),
+        ("tickets", _TICKET_TTL_DAYS),
     ]
     ts_col = {
         "conversations": "created_at",
@@ -662,16 +673,24 @@ def cleanup_expired_data() -> dict[str, int]:
         "workflow_sessions": "updated_at",
         "conversation_topics": "updated_at",
         "ticket_presence": "updated_at",
+        "tickets": "resolved_at",
     }
 
     for table, ttl_days in ttls:
         cutoff = now - (ttl_days * 86400)
         col = ts_col[table]
         try:
-            cursor = conn.execute(
-                f"DELETE FROM {table} WHERE {col} < ?",  # noqa: S608 — table/col are hardcoded above
-                (cutoff,),
-            )
+            if table == "tickets":
+                cursor = conn.execute(
+                    "DELETE FROM tickets WHERE status IN ('resolved', 'wontfix') "
+                    "AND resolved_at > 0 AND resolved_at < ?",
+                    (cutoff,),
+                )
+            else:
+                cursor = conn.execute(
+                    f"DELETE FROM {table} WHERE {col} < ?",  # noqa: S608 — table/col are hardcoded above
+                    (cutoff,),
+                )
             conn.commit()
             deleted[table] = cursor.rowcount
             if cursor.rowcount > 0:
@@ -696,17 +715,23 @@ def save_feedback(
     session_id: str | None = None,
     user_query: str = "",
     bot_reply: str = "",
+    user_id: str = "",
 ) -> dict[str, Any]:
     """Persist a feedback entry and return it."""
+    from .guardrails import redact_pii_text
+
+    comment = redact_pii_text(comment)
+    user_query = redact_pii_text(user_query)
+    bot_reply = redact_pii_text(bot_reply)
     conn = _get_connection()
     fb_id = str(uuid.uuid4())
     now = time.time()
     try:
         conn.execute(
-            """INSERT INTO feedback (id, message_id, session_id, rating, comment,
+            """INSERT INTO feedback (id, message_id, session_id, user_id, rating, comment,
                user_query, bot_reply, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (fb_id, message_id, session_id, rating, comment, user_query, bot_reply, now),
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now),
         )
         conn.commit()
     except Exception:
@@ -716,18 +741,20 @@ def save_feedback(
     return {"id": fb_id, "message_id": message_id, "rating": rating, "created_at": now}
 
 
-def update_feedback_comment(message_id: str, comment: str) -> bool:
+def update_feedback_comment(message_id: str, comment: str, user_id: str = "") -> bool:
     """Update the comment on an existing feedback entry (for follow-up comments)."""
     conn = _get_connection()
+    from .guardrails import redact_pii_text
+
     try:
         cursor = conn.execute(
             """UPDATE feedback SET comment = ?
                WHERE id = (
                  SELECT id FROM feedback
-                 WHERE message_id = ? AND comment = ''
+                 WHERE message_id = ? AND user_id = ? AND comment = ''
                  ORDER BY created_at DESC LIMIT 1
                )""",
-            (comment, message_id),
+            (redact_pii_text(comment), message_id, user_id or ""),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -778,14 +805,24 @@ def track_event(
     event_type: str,
     event_data: str = "{}",
     session_id: str | None = None,
+    user_id: str = "",
 ) -> None:
     """Record an analytics event."""
     conn = _get_connection()
+    from .guardrails import redact_pii_text
+
     try:
         conn.execute(
-            """INSERT INTO analytics_events (id, session_id, event_type, event_data, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (str(uuid.uuid4()), session_id, event_type, event_data, time.time()),
+            """INSERT INTO analytics_events (id, session_id, user_id, event_type, event_data, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                str(uuid.uuid4()),
+                session_id,
+                user_id or "",
+                event_type,
+                redact_pii_text(event_data),
+                time.time(),
+            ),
         )
         conn.commit()
     except Exception:
@@ -813,18 +850,20 @@ def upsert_session(
     session_id: str,
     user_agent: str = "",
     platform: str = "",
+    user_id: str = "",
 ) -> None:
     """Create or update a session record."""
     conn = _get_connection()
     now = time.time()
     try:
         conn.execute(
-            """INSERT INTO sessions (id, started_at, last_active_at, message_count, user_agent, platform)
-               VALUES (?, ?, ?, 1, ?, ?)
+            """INSERT INTO sessions (id, user_id, started_at, last_active_at, message_count, user_agent, platform)
+               VALUES (?, ?, ?, ?, 1, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
+                 user_id = CASE WHEN excluded.user_id <> '' THEN excluded.user_id ELSE sessions.user_id END,
                  last_active_at = excluded.last_active_at,
                  message_count = sessions.message_count + 1""",
-            (session_id, now, now, user_agent, platform),
+            (session_id, user_id or "", now, now, user_agent, platform),
         )
         conn.commit()
     except Exception:
@@ -852,6 +891,28 @@ def get_session_stats(days: int = 30) -> dict[str, Any]:
     }
 
 
+def delete_user_analytics(user_id: str) -> dict[str, int]:
+    """Delete analytics-derived records for an authenticated subject.
+
+    The app stores the verified OIDC subject only after explicit analytics
+    consent.  Keeping it on each analytics table means withdrawal and erasure
+    are complete even after a session row would otherwise have expired.
+    """
+    if not user_id:
+        return {"analytics_events": 0, "sessions": 0, "feedback": 0}
+    counts: dict[str, int] = {}
+    for table in ("analytics_events", "sessions", "feedback"):
+        try:
+            counts[table] = execute(
+                f"DELETE FROM {table} WHERE user_id = ?",  # noqa: S608 — fixed table names
+                (user_id,),
+            )
+        except Exception:
+            logger.exception("delete_user_analytics: %s", table)
+            counts[table] = -1
+    return counts
+
+
 # ---------------------------------------------------------------------------
 # Conversation logging
 # ---------------------------------------------------------------------------
@@ -875,6 +936,10 @@ def log_conversation(
     it links the turn to the user for /v1/me export + erasure.
     """
     conn = _get_connection()
+    from .guardrails import redact_pii_text
+
+    user_message = redact_pii_text(user_message)
+    bot_reply = redact_pii_text(bot_reply)
     row_id = str(uuid.uuid4())
     thread_id = conversation_id or row_id
     try:
@@ -1244,11 +1309,34 @@ def _json_loads(value: Any, default: Any) -> Any:
         return default
 
 
+def _redact_ticket_value(value: Any) -> Any:
+    """Redact PII recursively before a staff-facing ticket is stored or read.
+
+    Service-layer redaction is the normal path.  Keeping this guard at the
+    repository boundary covers admin tools, migrations, and future callers
+    that create or update a ticket without going through ``ChatModel``.
+    """
+    if isinstance(value, str):
+        from .guardrails import redact_pii_text
+
+        return redact_pii_text(value)
+    if isinstance(value, list):
+        return [_redact_ticket_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact_ticket_value(item) for key, item in value.items()}
+    return value
+
+
 def _hydrate_ticket(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     ticket = dict(row)
-    ticket["handoff"] = _json_loads(ticket.pop("handoff_json", "{}"), {})
-    ticket["response_judge"] = _json_loads(ticket.pop("response_judge_json", "{}"), {})
-    ticket["transcript"] = _json_loads(ticket.pop("transcript_json", "[]"), [])
+    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply"):
+        if field in ticket:
+            ticket[field] = _redact_ticket_value(ticket[field])
+    ticket["handoff"] = _redact_ticket_value(_json_loads(ticket.pop("handoff_json", "{}"), {}))
+    ticket["response_judge"] = _redact_ticket_value(
+        _json_loads(ticket.pop("response_judge_json", "{}"), {})
+    )
+    ticket["transcript"] = _redact_ticket_value(_json_loads(ticket.pop("transcript_json", "[]"), []))
     return ticket
 
 
@@ -1275,6 +1363,12 @@ def create_ticket(
     if priority not in ("low", "normal", "high", "urgent"):
         logger.warning("create_ticket: invalid priority %r → 'normal'", priority)
         priority = "normal"
+    reason = _redact_ticket_value(reason)
+    user_query = _redact_ticket_value(user_query)
+    bot_reply = _redact_ticket_value(bot_reply)
+    handoff = _redact_ticket_value(handoff or {})
+    response_judge = _redact_ticket_value(response_judge or {})
+    transcript = _redact_ticket_value(transcript or [])
     conn = _get_connection()
     ticket_id = str(uuid.uuid4())
     now = time.time()
@@ -1304,7 +1398,7 @@ def create_ticket(
             ),
         )
         conn.commit()
-        logger.info("ticket %s created (priority=%s reason=%s)", ticket_id, priority, reason[:60])
+        logger.info("ticket %s created (priority=%s reason_length=%d)", ticket_id, priority, len(reason))
     except Exception:
         logger.exception("Failed to create ticket")
         conn.rollback()
@@ -1314,9 +1408,9 @@ def create_ticket(
         "status": "open",
         "priority": priority,
         "reason": reason,
-        "handoff": handoff or {},
-        "response_judge": response_judge or {},
-        "transcript": transcript or [],
+        "handoff": handoff,
+        "response_judge": response_judge,
+        "transcript": transcript,
         "team": team,
         "created_at": now,
     }
@@ -2066,7 +2160,7 @@ def update_ticket(
         params.append(now)
     if officer_reply is not None:
         sets.append("officer_reply = ?")
-        params.append(officer_reply[:4000])
+        params.append(_redact_ticket_value(officer_reply)[:4000])
         sets.append("reply_at = ?")
         params.append(now)
     if status is not None:
@@ -2079,7 +2173,7 @@ def update_ticket(
         params.append(assignee[:128])
     if staff_note is not None:
         sets.append("staff_note = ?")
-        params.append(staff_note[:2000])
+        params.append(_redact_ticket_value(staff_note)[:2000])
     if priority is not None:
         if priority not in ("low", "normal", "high", "urgent"):
             return False
@@ -2401,6 +2495,9 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
     """
     conversations: list[dict[str, Any]] = []
     tickets: list[dict[str, Any]] = []
+    analytics_events: list[dict[str, Any]] = []
+    sessions: list[dict[str, Any]] = []
+    feedback: list[dict[str, Any]] = []
     if external_id:
         conversations = query_all(
             "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
@@ -2413,12 +2510,27 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
                 f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
                 tuple(conv_ids),
             )
+        analytics_events = query_all(
+            "SELECT * FROM analytics_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
+            (external_id,),
+        )
+        sessions = query_all(
+            "SELECT * FROM sessions WHERE user_id = ? ORDER BY last_active_at DESC LIMIT 1000",
+            (external_id,),
+        )
+        feedback = query_all(
+            "SELECT * FROM feedback WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
+            (external_id,),
+        )
     return {
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
         "consents": get_active_consents(user_id),
         "conversations": conversations,
         "tickets": tickets,
+        "analytics_events": analytics_events,
+        "sessions": sessions,
+        "feedback": feedback,
         "facts": [],  # filled by the caller from the memory service (export_user)
     }
 
@@ -2439,6 +2551,8 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
 
     # External-id-keyed: chat history + the escalation tickets linked to it.
     if external_id:
+        for store, count in delete_user_analytics(external_id).items():
+            counts[store] = count
         conv_ids = [
             r["conversation_id"]
             for r in query_all(

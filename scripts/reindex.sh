@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# reindex.sh — Drop-and-rebuild the Qdrant vector index
+# reindex.sh — Stage and atomically promote a Qdrant vector index
 #
 # Usage:
-#   ./scripts/reindex.sh                   # full re-index (PDFs + CSVs)
-#   ./scripts/reindex.sh --csvs-only       # FAQ CSVs only
-#   ./scripts/reindex.sh --pdfs-only       # PDFs only
+#   ./scripts/reindex.sh           # rebuild only when the corpus hash drifted
+#   ./scripts/reindex.sh --force   # force a full staged rebuild
 #
 # When to run:
 #   - After changing DENSE_MODEL or DENSE_DIM (embedding dimension change)
@@ -50,7 +49,8 @@ info "Qdrant is healthy"
 # Show current config
 DENSE_MODEL="${DENSE_MODEL:-BAAI/bge-m3}"
 DENSE_DIM="${DENSE_DIM:-1024}"
-COLLECTION="${QDRANT_COLLECTION:-ura_knowledge_base}"
+COLLECTION="${QDRANT_COLLECTION:-ura_knowledge_base_active}"
+export QDRANT_COLLECTION="$COLLECTION"
 
 info "Config:"
 info "  DENSE_MODEL  = ${DENSE_MODEL}"
@@ -58,11 +58,13 @@ info "  DENSE_DIM    = ${DENSE_DIM}"
 info "  COLLECTION   = ${COLLECTION}"
 
 # ---------------------------------------------------------------------------
-# Run the indexer
+# Stage a candidate and atomically swap the serving alias only after it is
+# complete. Unlike `app.indexer --recreate`, a failure leaves the old index
+# serving and the old versioned collection available for rollback.
 # ---------------------------------------------------------------------------
-info "Starting re-index (--recreate) ..."
+info "Starting staged re-index ..."
 cd "$PROJECT_ROOT"
-python -m App.backend.app.indexer --recreate "$@"
+PYTHONPATH=App/backend python -m app.index_lifecycle --rebuild "$@"
 
 # ---------------------------------------------------------------------------
 # Post-index verification

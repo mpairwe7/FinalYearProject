@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from "react";
 import { CloseIcon } from "./Icons";
+import { restoreFocus } from "../lib/focus";
 
 /**
  * Confirmation dialog for destructive actions (delete conversation, clear
@@ -70,7 +71,7 @@ export default function ConfirmDialog({ confirm, onClose }: ConfirmDialogProps) 
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
-      previouslyFocused?.focus();
+      restoreFocus(previouslyFocused);
     };
   }, [confirm, onClose]);
 

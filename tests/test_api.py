@@ -167,7 +167,7 @@ class TestChatResponse:
 
         assert response.reply == "Test response"
         assert response.sources == []
-        assert response.model == "Qwen/Qwen3-8B"
+        assert response.model == "Sunbird/Sunflower-14B-FP8"
 
 
 class TestChatModel:
@@ -179,13 +179,14 @@ class TestChatModel:
 
         model = ChatModel()
 
-        assert model.name == "Qwen/Qwen3-8B"
+        assert model.name == "Sunbird/Sunflower-14B-FP8"
     
     def test_generate_returns_dict(self, isolated_analytics_db):
         """Test generate returns proper dict."""
         from App.backend.app.service import ChatModel
         
         model = ChatModel()
+        # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
         result = model.generate("How do I pay VAT?")
         
         assert isinstance(result, dict)
@@ -198,6 +199,7 @@ class TestChatModel:
         from App.backend.app.service import ChatModel
         
         model = ChatModel()
+        # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
         result = model.generate("Test question", top_k=5)
         
         assert isinstance(result, dict)
@@ -208,13 +210,14 @@ class TestChatModel:
         from App.backend.app.service import ChatModel
 
         model = ChatModel()
+        # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
         result = model.generate("What is VAT?")
 
         # Response must be a non-empty string with expected fields
         assert isinstance(result["reply"], str)
         assert len(result["reply"]) > 0
         assert isinstance(result["sources"], list)
-        assert result["model"] == "Qwen/Qwen3-8B"
+        assert result["model"] == "Sunbird/Sunflower-14B-FP8"
         assert result["retrieval_mode"] in ("hybrid", "keyword", "abstained", "blocked")
         assert isinstance(result["escalation_required"], bool)
 
@@ -232,6 +235,7 @@ class TestChatEndpoint:
         
         # Process with model
         model = ChatModel()
+        # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
         result = model.generate(request.message, top_k=request.top_k)
         
         # Create response

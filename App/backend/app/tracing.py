@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "false").lower() == "true"
 OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "ura-chatbot-api")
 OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-GEN_AI_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen3-8B")
+GEN_AI_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 
 _tracer: Any = None
 _meter: Any = None

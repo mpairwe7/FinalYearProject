@@ -68,7 +68,9 @@ services:
   # Qdrant Vector Store (first-class RAG dependency)
   # ---------------------------------------------------------------------------
   qdrant:
-    image: qdrant/qdrant:v1.17.1
+    # Existing v1.17 storage must be upgraded one minor version at a time;
+    # see docs/runbooks/qdrant-staged-rebuild.md before starting this v1.19 image.
+    image: qdrant/qdrant:v1.19.0
     container_name: ura-qdrant
     ports:
       - "${QDRANT_PORT:-6333}:6333"
@@ -188,7 +190,7 @@ services:
     image: vllm/vllm-openai:v0.6.6
     container_name: ura-vllm
     command: >
-      --model ${LLM_MODEL:-Qwen/Qwen2.5-3B-Instruct}
+      --model ${LLM_MODEL:-Sunbird/Sunflower-14B-FP8}
       --port 8001
       --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
       --gpu-memory-utilization ${VLLM_GPU_MEM_UTIL:-0.85}
@@ -377,6 +379,26 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - ura-network
+
+  # Host filesystem metrics let the Qdrant volume's capacity be alerted on.
+  # This is intentionally opt-in with the existing monitoring profile.
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    container_name: ura-node-exporter
+    profiles: [monitoring]
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - /:/host:ro,rslave
+    read_only: true
+    pid: host
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

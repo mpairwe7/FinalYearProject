@@ -1,9 +1,9 @@
-# Local FAQ retrieval and Qdrant profile.
+# Local Qdrant retrieval profile with an automatic staged rebuild.
 #
 # Uses only files under App/Data and App/Model, and publishes Qdrant on the
 # loopback interface for local inspection. Combine with the base stack:
 #   docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
-#     up -d --build redis qdrant api
+#     up -d --build redis qdrant qdrant-indexer qdrant-backup api
 services:
   qdrant:
     ports:
@@ -14,12 +14,17 @@ services:
       DATA_DIR: /app/Data/dataset
       FAQ_JSONL_DIR: /app/Data/faq_jsonl
       TEACHER_QA_DIR: /app/Data/teacher_qa
-      BM25_STATE_PATH: /app/Model/bm25_state.json
+      PDF_JSONL_DIR: /app/Data/pdf_jsonl
+      CRAWL_JSONL_DIR: /app/Data/crawl_jsonl
+      BM25_STATE_PATH: /app/index_state/bm25_state.json
+      INDEX_FRESHNESS_PATH: /app/index_state/index_freshness.json
+      INDEX_FRESHNESS_STATUS_PATH: /app/index_state/index_freshness_status.json
       QDRANT_URL: http://qdrant:6333
-      # Keep the legacy collection intact while this validated JSONL corpus is
-      # promoted locally. The application profile queries this collection only.
-      QDRANT_COLLECTION: ura_knowledge_base_jsonl
+      # An alias, never a mutable collection: qdrant-indexer builds a candidate
+      # and swaps this name only after all documents and metadata validate.
+      QDRANT_COLLECTION: ura_knowledge_base_jsonl_active
       QDRANT_ENABLED: "true"
+      QDRANT_BACKUP_REQUIRED: "true"
       LLM_ENABLED: "false"
       SPEECH_ENABLED: "false"
       HF_HUB_OFFLINE: "1"
@@ -36,4 +41,93 @@ services:
       - ./Data/dataset:/app/Data/dataset:ro
       - ./Data/faq_jsonl:/app/Data/faq_jsonl:ro
       - ./Data/teacher_qa:/app/Data/teacher_qa:ro
+      - ./Data/pdf_jsonl:/app/Data/pdf_jsonl:ro
+      - ./Data/crawl_jsonl:/app/Data/crawl_jsonl:ro
       - ./Model:/app/Model
+      - qdrant_index_state:/app/index_state:ro
+    depends_on:
+      qdrant-indexer:
+        condition: service_completed_successfully
+
+  # Runs every `compose up` for this profile. A matching source hash exits
+  # without work; a changed corpus is built into a versioned collection and
+  # promoted through the alias above only after validation. A failed candidate
+  # never changes the active collection.
+  qdrant-indexer:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: runtime
+    entrypoint: ["python", "-m", "app.index_lifecycle"]
+    command: ["--rebuild"]
+    user: "0:0"
+    environment:
+      APP_ENV: development
+      APP_DATA_ROOT: /app/Data
+      DATA_DIR: /app/Data/dataset
+      FAQ_JSONL_DIR: /app/Data/faq_jsonl
+      TEACHER_QA_DIR: /app/Data/teacher_qa
+      PDF_DIR: /app/Data/pdfs
+      PDF_JSONL_DIR: /app/Data/pdf_jsonl
+      CRAWL_PAGES_DIR: /app/Data/crawl/pages
+      CRAWL_JSONL_DIR: /app/Data/crawl_jsonl
+      BM25_STATE_PATH: /app/index_state/bm25_state.json
+      INDEX_FRESHNESS_PATH: /app/index_state/index_freshness.json
+      INDEX_FRESHNESS_STATUS_PATH: /app/index_state/index_freshness_status.json
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ura_knowledge_base_jsonl_active
+      QDRANT_ENABLED: "true"
+      LLM_ENABLED: "false"
+      SPEECH_ENABLED: "false"
+      OTEL_ENABLED: "false"
+    volumes:
+      - ./Data/dataset:/app/Data/dataset:ro
+      - ./Data/faq_jsonl:/app/Data/faq_jsonl:ro
+      - ./Data/teacher_qa:/app/Data/teacher_qa:ro
+      - ./Data/pdf_jsonl:/app/Data/pdf_jsonl:ro
+      - ./Data/crawl_jsonl:/app/Data/crawl_jsonl:ro
+      - ../Data/pdfs:/app/Data/pdfs:ro
+      - ../Data/crawl/pages:/app/Data/crawl/pages:ro
+      - qdrant_index_state:/app/index_state
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: "no"
+
+  # Daily durable snapshot plus a monthly restore drill. The worker downloads
+  # each snapshot into qdrant_backups, records a checksum, retains seven copies
+  # and verifies restoration into a disposable collection before deleting it.
+  # It never mutates the serving alias.
+  qdrant-backup:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: runtime
+    entrypoint: ["python", "-m", "app.qdrant_backup"]
+    command: ["--loop", "--interval-seconds", "86400", "--retry-seconds", "300", "--keep", "7"]
+    user: "0:0"
+    environment:
+      APP_ENV: development
+      APP_DATA_ROOT: /app/Data
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ura_knowledge_base_jsonl_active
+      QDRANT_SNAPSHOT_DIR: /backups
+      QDRANT_RESTORE_SNAPSHOT_DIR: /qdrant/snapshots/restore
+      QDRANT_SNAPSHOT_KEEP: "7"
+      QDRANT_SNAPSHOT_INTERVAL_SECONDS: "86400"
+      QDRANT_SNAPSHOT_RETRY_SECONDS: "300"
+      QDRANT_RESTORE_DRILL_INTERVAL_SECONDS: "2592000"
+      INDEX_FRESHNESS_PATH: /app/index_state/index_freshness.json
+      INDEX_LIFECYCLE_STATUS_PATH: /app/index_state/index_lifecycle_status.json
+      QDRANT_BACKUP_STATUS_PATH: /app/index_state/qdrant_backup_status.json
+    volumes:
+      - qdrant_backups:/backups
+      - qdrant_index_state:/app/index_state
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  qdrant_index_state:
+  qdrant_backups:

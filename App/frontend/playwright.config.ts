@@ -3,10 +3,10 @@
  *
  * Projects:
  *   - chromium: functional E2E smoke test (chat flow, SSE streaming)
- *   - a11y: axe-core accessibility audit (WCAG 2.1 AA) via @axe-core/playwright
+ *   - a11y: axe-core accessibility audit (WCAG 2.2 AA) via @axe-core/playwright
  *
- * Aligned with: ISO/IEC 25010:2023 §4 (Interaction Capability), WCAG 2.1 AA,
- * and week08 NFR-05 (WCAG 2.1 AA, Lighthouse >= 90).
+ * Aligned with: ISO/IEC 25010:2023 §4 (Interaction Capability), WCAG 2.2 AA,
+ * and the accessibility conformance statement (Lighthouse >= 90).
  */
 import { defineConfig, devices } from "@playwright/test";
 

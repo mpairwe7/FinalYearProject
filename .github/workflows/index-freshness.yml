@@ -32,7 +32,7 @@ jobs:
           python -m app.freshness --check --write-status --notify
           code=$?
           if [ "$code" -eq 1 ]; then
-            echo "Index sources drifted — re-index in an ops window (python -m app.indexer --recreate)"
+            echo "Index sources drifted — run the staged rebuild (python -m app.index_lifecycle --rebuild)"
             exit 1
           fi
           if [ "$code" -eq 2 ]; then

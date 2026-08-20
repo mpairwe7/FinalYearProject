@@ -13,7 +13,7 @@
 | **Date** | 2026-04-29 |
 | **Type** | Retrieval-Augmented Generation (RAG) with agentic tool-calling |
 | **Task** | Tax domain question answering (Uganda Revenue Authority) |
-| **Languages** | English (primary), Luganda, Swahili, Runyankole, Acholi |
+| **Languages** | English (primary), Luganda, Swahili, Runyankole, Acholi, Ateso (LLM natively supports 31 Ugandan languages; MT/localization coverage above is narrower — see Sunbird MT support notes) |
 | **Developer** | Mpairwe Landwind (Makerere University) |
 | **License** | Apache-2.0 (code), Gemma TOU (mobile model) |
 
@@ -21,14 +21,14 @@
 
 | Component | Model | Parameters | Purpose |
 |-----------|-------|------------|---------|
-| **LLM (server)** | Qwen/Qwen3-8B | 8B | Answer generation + tool-calling (Apache-2.0, 128K context) |
+| **LLM (server)** | Sunbird/Sunflower-14B-FP8 | 14.8B (FP8 quantized) | Answer generation + tool-calling (Apache-2.0, Qwen3-14B arch, 8K context configured, natively multilingual across 31 Ugandan languages + English, gated on HF) |
 | **LLM (mobile)** | google/gemma-2-2b-it GGUF Q4_K_M | 2B (quantised) | Offline mobile inference |
 | **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings (MTEB 63.0) |
 | **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |
 | **Reranker** | mixedbread-ai/mxbai-rerank-base-v2 | 500M | Passage reranking (BEIR 55.6, Apache-2.0) |
 | **ASR (server)** | Whisper Small + LoRA adapters | 244M | Speech-to-text (5 languages) |
 | **TTS (server)** | Piper native voices | ~40M per locale | Text-to-speech (5 languages) |
-| **MT (server)** | Qwen3-8B prompted / ONNX | varies | Machine translation (en ↔ lg/sw/nyn/ach) |
+| **MT (server)** | Sunflower-14B-FP8 prompted / ONNX | varies | Machine translation (en ↔ lg/sw/nyn/ach); non-Sunbird languages (e.g. sw) route through this LLM-prompted tier |
 | **Speech cloud** | Sunbird AI API | N/A (cloud) | Fallback ASR/TTS/MT for Ugandan languages |
 | **ASR (mobile)** | Whisper Small INT8 | 244M (quantised) | On-device speech recognition |
 | **TTS (mobile)** | MMS-TTS VITS | ~40M per locale | On-device speech synthesis |

@@ -183,6 +183,7 @@ export function TicketComposer({
               type="button"
               className={`st-btn${ticket.status === status ? " is-current" : ""}`}
               disabled={ticket.status === status || pending}
+              aria-pressed={ticket.status === status}
               onClick={() => onPatch({ status })}
             >
               {STATUS_LABEL[status]}

@@ -70,11 +70,13 @@ from .flags import flags
 from .guardrails import STORE_RAW_PROMPTS, InputGuard, OutputGuard, redact_pii_text
 from .memory import get_memory_service
 from .query import (
+    SUPPORTED_LOCALES,
     canonicalize_tax_terms,
     detect_language,
     english_retrieval_query,
     extract_question_span,
     extract_retrieval_filters,
+    gate_locale,
     normalize as normalize_query,
     rewrite as rewrite_query,
 )
@@ -2247,7 +2249,7 @@ def _judge_rescue(
     # For a tax authority a confidently wrong answer costs more than "I could
     # not find this", so the flag it already returns is honoured.
     if not confident:
-        logger.info("FAQ judge declined (unconfident) for %r", query[:60])
+        logger.info("FAQ judge declined (unconfident, query_length=%d)", len(query))
         return []
 
     chosen = candidates[pick - 1]
@@ -4226,6 +4228,10 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
 
+        # An explicitly-requested locale outside SUPPORTED_LOCALES is gated
+        # to English here — see query.SUPPORTED_LOCALES for why.
+        locale = gate_locale(locale)
+
         with trace_rag_pipeline(message, request_id=request_id) as trace_ctx:
             timings = trace_ctx["timings"]
             trace_ctx["user_id"] = user_id or ""
@@ -4272,11 +4278,15 @@ class ChatModel:
                     )
 
             # 0c. Language detection — auto-detect user's language for
-            #     adapter routing and locale-aware responses.
+            #     adapter routing and locale-aware responses. Only promotes
+            #     to a locale in SUPPORTED_LOCALES — detect_language() can
+            #     still tell other Ugandan languages apart, but until they're
+            #     ungated a positive detection there stays "en" rather than
+            #     running an incomplete translation/localization round trip.
             if locale == "en":
                 with trace_stage("lang_detect", timings=timings):
                     detected_locale = detect_language(message)
-                    if detected_locale != "en":
+                    if detected_locale != "en" and detected_locale in SUPPORTED_LOCALES:
                         locale = detected_locale
                         logger.info("Auto-detected locale: %s", locale)
 
@@ -4503,7 +4513,7 @@ class ChatModel:
                 with trace_stage("cache_lookup", timings=timings):
                     cached = self._cache.get(rewritten, locale=locale)
                 if cached:
-                    logger.info("generate: cache HIT for query=%s", message[:50])
+                    logger.info("generate: cache HIT (query_length=%d)", len(message))
                     return self._finalize_result({
                         **cached,
                         "conversation_id": thread_id,
@@ -5501,6 +5511,10 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
 
+        # An explicitly-requested locale outside SUPPORTED_LOCALES is gated
+        # to English here — see query.SUPPORTED_LOCALES for why.
+        locale = gate_locale(locale)
+
         # Multi-turn memory (Phase 4 -> overridable in Phase 29)
         conversation_history: list[dict[str, str]] = []
         if conversation_history_override is not None:
@@ -5523,10 +5537,12 @@ class ChatModel:
         else:
             rewritten = normalize_query(message)
 
-        # Language detection — auto-detect for adapter routing
+        # Language detection — auto-detect for adapter routing. Only
+        # promotes to a locale in SUPPORTED_LOCALES; see _generate_en's
+        # matching gate above for the full reasoning.
         if locale == "en":
             detected_locale = detect_language(message)
-            if detected_locale != "en":
+            if detected_locale != "en" and detected_locale in SUPPORTED_LOCALES:
                 locale = detected_locale
                 logger.info("Auto-detected locale: %s (streaming)", locale)
 

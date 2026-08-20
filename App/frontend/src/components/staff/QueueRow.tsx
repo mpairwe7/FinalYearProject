@@ -21,7 +21,7 @@ export function QueueRow({
       type="button"
       className={`st-row${selected ? " is-selected" : ""}`}
       onClick={() => onSelect(ticket.id)}
-      aria-current={selected ? "true" : undefined}
+      aria-pressed={selected}
     >
       <span className={`st-pri st-pri-${ticket.priority}`}>{ticket.priority}</span>
       <span className="st-row-body">

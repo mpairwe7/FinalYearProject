@@ -141,9 +141,17 @@
       "package": "nltk",
       "version": "3.9.3"
     },
+    "PYSEC-2026-3716": {
+      "package": "datasets",
+      "version": "3.3.2"
+    },
     "PYSEC-2026-597": {
       "package": "nltk",
       "version": "3.9.3"
+    },
+    "PYSEC-2026-76": {
+      "package": "langchain-openai",
+      "version": "1.1.9"
     }
   }
 }

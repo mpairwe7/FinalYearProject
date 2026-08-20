@@ -21,6 +21,10 @@ SECURE = {
     "SEED_PROTOTYPE": "false",
     "URA_ACCOUNT_API_MODE": "off",
     "NOTIFICATION_LIVE": "false",
+    "DPIA_APPROVED": "true",
+    "DPIA_APPROVAL_REFERENCE": "DPIA-TEST-001",
+    "PDPO_REGISTRATION_STATUS": "not_required",
+    "PDPO_REGISTRATION_REFERENCE": "DPO-TEST-001",
 }
 
 
@@ -100,3 +104,16 @@ def test_as_production_report_is_json(monkeypatch: pytest.MonkeyPatch) -> None:
     assert report["app_env"] == "production"
     assert report["ok"] is False
     json.dumps(report)
+
+
+def test_external_processor_requires_transfer_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in SECURE.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("SUNBIRD_API_TOKEN", "configured-token")
+    errors = "\n".join(gap_gate_errors())
+    assert "CROSS_BORDER_PROCESSING_APPROVED" in errors
+    assert "CROSS_BORDER_TRANSFER_ASSESSMENT_ID" in errors
+
+    monkeypatch.setenv("CROSS_BORDER_PROCESSING_APPROVED", "true")
+    monkeypatch.setenv("CROSS_BORDER_TRANSFER_ASSESSMENT_ID", "TIA-TEST-001")
+    assert gap_gate_errors() == []

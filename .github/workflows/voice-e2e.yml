@@ -166,7 +166,7 @@ jobs:
       - name: Run account-settings.spec.ts (auth entry points + settings — chromium)
         run: bunx playwright test e2e/account-settings.spec.ts --project=chromium
 
-      - name: Run a11y.spec.ts (WCAG 2.1 AA audit — desktop + mobile)
+      - name: Run a11y.spec.ts (WCAG 2.2 AA audit — desktop + mobile)
         run: bunx playwright test e2e/a11y.spec.ts --project=a11y --project=mobile-chrome
 
       - name: Upload Playwright report

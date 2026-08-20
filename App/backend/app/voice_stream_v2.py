@@ -252,7 +252,7 @@ class VoiceSessionV2:
                 logger.error("ASR failed in parallel: %s", asr_result)
                 asr_result = None
             if isinstance(image_context, BaseException):
-                logger.warning("Vision failed in parallel: %s", image_context)
+                logger.warning("Vision failed in parallel (context_length=%d)", len(image_context or ""))
                 image_context = None
         else:
             asr_result = await asr_coro
