@@ -546,3 +546,100 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
     });
   });
 });
+
+  test.describe("Core Web Vitals — Performance Across Breakpoints", () => {
+    test("measures LCP (Largest Contentful Paint) on mobile", async ({ page }) => {
+      page.setViewportSize({ width: 420, height: 915 });
+      const startTime = Date.now();
+      await page.goto("/");
+      const loadTime = Date.now() - startTime;
+
+      // LCP should be < 2500ms on good connections (Slow 4G: < 4000ms)
+      expect(loadTime).toBeLessThan(4000);
+
+      // Get actual LCP metric
+      const lcp = await page.evaluate(() => {
+        const entries = performance.getEntriesByType("largest-contentful-paint");
+        return entries.length > 0 ? entries[entries.length - 1].startTime : null;
+      });
+
+      if (lcp) {
+        expect(lcp).toBeLessThan(4000); // Poor threshold
+      }
+    });
+
+    test("measures CLS (Cumulative Layout Shift) is minimal", async ({ page }) => {
+      await page.goto("/");
+
+      // Get CLS metric (layout shift entries)
+      const cls = await page.evaluate(() => {
+        let clsValue = 0;
+        const entries = performance.getEntriesByType("layout-shift");
+
+        for (const entry of entries) {
+          const layoutShift = entry as any;
+          if (!layoutShift.hadRecentInput) {
+            clsValue += layoutShift.value;
+          }
+        }
+
+        return clsValue;
+      });
+
+      // CLS should be < 0.1 (good), < 0.25 (needs improvement), >= 0.25 (poor)
+      expect(cls).toBeLessThan(0.25); // At least not in "poor" category
+    });
+
+    test("measures FCP (First Contentful Paint) speed", async ({ page }) => {
+      const startTime = Date.now();
+      await page.goto("/");
+      const loadTime = Date.now() - startTime;
+
+      // FCP should be quick on most devices
+      expect(loadTime).toBeLessThan(3000);
+
+      // Check FCP metric
+      const fcp = await page.evaluate(() => {
+        const fcpEntry = performance.getEntriesByName("first-contentful-paint")[0];
+        return fcpEntry ? fcpEntry.startTime : null;
+      });
+
+      if (fcp) {
+        expect(fcp).toBeLessThan(2500); // Good threshold
+      }
+    });
+
+    test("no excessive layout shift during scroll", async ({ page }) => {
+      await page.goto("/");
+
+      const clsBeforeScroll = await getAccumulatedCLS(page);
+
+      // Scroll through the page
+      await page.evaluate(() => window.scrollBy(0, 500));
+      await page.waitForTimeout(500);
+      await page.evaluate(() => window.scrollBy(0, 500));
+
+      const clsAfterScroll = await getAccumulatedCLS(page);
+
+      // Layout shift during scroll should be minimal
+      const shiftDuringScroll = clsAfterScroll - clsBeforeScroll;
+      expect(shiftDuringScroll).toBeLessThan(0.05); // Very small
+    });
+  });
+});
+
+async function getAccumulatedCLS(page: Page): Promise<number> {
+  return await page.evaluate(() => {
+    let clsValue = 0;
+    const entries = performance.getEntriesByType("layout-shift");
+
+    for (const entry of entries) {
+      const layoutShift = entry as any;
+      if (!layoutShift.hadRecentInput) {
+        clsValue += layoutShift.value;
+      }
+    }
+
+    return clsValue;
+  });
+}

@@ -13,9 +13,31 @@
  * Typography: offline-safe local font stacks (no remote font fetch at build).
  * ============================================================================ */
 
-/* -----------------------------------------------------------------------------
+/* ────────────────────────────────────────────────────────────────────────
+   Progressive Web App (PWA) & Responsive Display Modes
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Support edge-to-edge display on PWA-installed apps (iOS 15+, Android 12+) */
+@supports (viewport-fit: cover) {
+  @media (display-mode: standalone) {
+    body {
+      /* Allow content to extend to safe area edges when app is installed */
+      padding-top: 0;
+      padding-left: 0;
+      padding-right: 0;
+      padding-bottom: 0;
+    }
+  }
+}
+
+/* Support display mode queries for responsive PWA behavior */
+@media (display-mode: fullscreen) {
+  .status-bar-spacer { display: none; }
+}
+
+/* ────────────────────────────────────────────────────────────────────────
    Design tokens
-   -------------------------------------------------------------------------- */
+   ──────────────────────────────────────────────────────────────────────── */
 :root {
   color-scheme: dark;
 
@@ -210,6 +232,11 @@ body {
   position: relative;
   min-height: 100vh;
   overscroll-behavior-y: none;
+  /* Respect user's system font size setting */
+  font-size: clamp(14px, 1rem, 18px);
+  /* Support OS-level font size scaling while maintaining minimum/maximum */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /* -----------------------------------------------------------------------------
