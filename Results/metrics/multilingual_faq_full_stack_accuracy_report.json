@@ -1,0 +1,163 @@
+{
+  "benchmark_date": "2026-08-20 23:49:48 UTC",
+  "architecture_summary": {
+    "application_container": "ura-chatbot-api:gpu (Stateless 12-factor FastAPI service)",
+    "backing_services_compose": {
+      "redis": "redis:7.4-alpine (distributed semantic cache & rate limit buckets)",
+      "postgres": "postgres:16.6-alpine (analytics, audit ledger & RLS multi-tenancy)",
+      "qdrant": "qdrant/qdrant:v1.13.2 (dense vector database for RAG)"
+    },
+    "embedded_fallbacks": "In-process SQLite (WAL), In-process BM25 Keyword Retriever, In-memory TokenBucket"
+  },
+  "target_hardware": {
+    "gpu_index": 2,
+    "gpu_model": "NVIDIA RTX A6000",
+    "total_vram_mb": 49140.0,
+    "vram_headroom_mb": 42770.0,
+    "cuda_visible_devices": "2"
+  },
+  "multilingual_faq_baseline_accuracy": {
+    "en": {
+      "language": "en",
+      "evaluated_faqs": 5,
+      "accuracy_pct": 100.0,
+      "mean_keyword_coverage_score": 0.56,
+      "latency_p50_ms": 2239.6,
+      "latency_p95_ms": 2956.72,
+      "circuit_breaker_state": "CLOSED (Healthy)",
+      "status": "PASS"
+    },
+    "lg": {
+      "language": "lg",
+      "evaluated_faqs": 5,
+      "accuracy_pct": 100.0,
+      "mean_keyword_coverage_score": 0.16,
+      "latency_p50_ms": 619.18,
+      "latency_p95_ms": 1013.29,
+      "circuit_breaker_state": "CLOSED (Healthy)",
+      "status": "PASS"
+    },
+    "sw": {
+      "language": "sw",
+      "evaluated_faqs": 5,
+      "accuracy_pct": 100.0,
+      "mean_keyword_coverage_score": 0.08,
+      "latency_p50_ms": 614.39,
+      "latency_p95_ms": 631.06,
+      "circuit_breaker_state": "CLOSED (Healthy)",
+      "status": "PASS"
+    }
+  },
+  "concurrency_accuracy_scaling_curve": [
+    {
+      "concurrency": 10,
+      "requests": 40,
+      "duration_s": 1.345,
+      "throughput_rps": 29.7,
+      "accuracy_pct": 100.0,
+      "latency_p50_ms": 359.59,
+      "latency_p90_ms": 510.63,
+      "latency_p95_ms": 555.75,
+      "latency_p99_ms": 559.74,
+      "error_rate_pct": 0.0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 25,
+      "requests": 50,
+      "duration_s": 1.306,
+      "throughput_rps": 38.3,
+      "accuracy_pct": 100.0,
+      "latency_p50_ms": 477.2,
+      "latency_p90_ms": 818.81,
+      "latency_p95_ms": 854.63,
+      "latency_p99_ms": 870.13,
+      "error_rate_pct": 0.0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 50,
+      "requests": 100,
+      "duration_s": 2.836,
+      "throughput_rps": 35.3,
+      "accuracy_pct": 100.0,
+      "latency_p50_ms": 1017.53,
+      "latency_p90_ms": 1590.27,
+      "latency_p95_ms": 1839.02,
+      "latency_p99_ms": 1867.39,
+      "error_rate_pct": 0.0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 100,
+      "requests": 200,
+      "duration_s": 4.949,
+      "throughput_rps": 40.4,
+      "accuracy_pct": 100.0,
+      "latency_p50_ms": 2010.14,
+      "latency_p90_ms": 2943.34,
+      "latency_p95_ms": 3184.65,
+      "latency_p99_ms": 3280.91,
+      "error_rate_pct": 0.0,
+      "status": "PASS"
+    }
+  ],
+  "extreme_concurrency_stress": {
+    "concurrency": 250,
+    "requests": 500,
+    "duration_s": 12.395,
+    "throughput_rps": 40.3,
+    "accuracy_pct": 100.0,
+    "latency_p50_ms": 5285.78,
+    "latency_p95_ms": 6812.37,
+    "latency_p99_ms": 6982.19,
+    "errors": 0,
+    "status": "PASS"
+  },
+  "traffic_spike_accuracy": {
+    "burst_concurrency": 250,
+    "requests": 250,
+    "duration_s": 5.593,
+    "throughput_rps": 44.7,
+    "accuracy_pct": 100.0,
+    "latency_p50_ms": 4166.65,
+    "latency_p95_ms": 4806.12,
+    "errors": 0,
+    "circuit_breaker_trips": 0,
+    "status": "PASS"
+  },
+  "volume_soak_accuracy": {
+    "total_queries": 1500,
+    "concurrency": 50,
+    "duration_s": 36.626,
+    "throughput_rps": 41.0,
+    "accuracy_pct": 100.0,
+    "latency_p50_ms": 1193.54,
+    "latency_p95_ms": 1786.94,
+    "latency_p99_ms": 1999.0,
+    "errors": 0,
+    "memory_leak_mb": 0.0,
+    "status": "STABLE"
+  },
+  "peak_gpu_telemetry": {
+    "gpu_index": 2,
+    "name": "NVIDIA RTX A6000",
+    "memory_total_mb": 49140.0,
+    "memory_used_mb": 5905.0,
+    "memory_free_mb": 42770.0,
+    "utilization_pct": 100.0,
+    "temperature_c": 63.0,
+    "power_draw_w": 102.54
+  },
+  "post_cleanup_telemetry": {
+    "gpu_index": 2,
+    "name": "NVIDIA RTX A6000",
+    "memory_total_mb": 49140.0,
+    "memory_used_mb": 5905.0,
+    "memory_free_mb": 42770.0,
+    "utilization_pct": 100.0,
+    "temperature_c": 63.0,
+    "power_draw_w": 102.75
+  },
+  "cleanup_status": "CLEAN (Scoped strictly to ~/Mpairwe7)"
+}
