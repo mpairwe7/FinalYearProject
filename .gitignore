@@ -54,6 +54,7 @@ Model/*.pt
 Model/*.onnx
 Model/*.tflite
 Model/faiss_index/
+App/Model/
 
 # On-device LLM weights (too large for Git, distribute via release/HF Hub)
 *.gguf
@@ -64,6 +65,7 @@ Results/plots/*.png
 Results/plots/*.pdf
 Results/reports/*.json
 Results/reports/*.csv
+Results/eval/
 
 # Node.js
 node_modules/
