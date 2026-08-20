@@ -44,7 +44,7 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
     });
 
     test("no horizontal scrollbar on any breakpoint", async ({ page }) => {
-      for (const [key, bp] of Object.entries(BREAKPOINTS)) {
+      for (const [, bp] of Object.entries(BREAKPOINTS)) {
         await page.setViewportSize({ width: bp.width, height: bp.height });
         await page.goto("/");
         const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
@@ -287,7 +287,7 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       // Portrait: 412x915
       await page.setViewportSize({ width: 412, height: 915 });
       await expect(page.getByLabel("Type your message")).toBeVisible();
-      let hamburger = page.getByLabel("Open conversation history");
+      const hamburger = page.getByLabel("Open conversation history");
       await expect(hamburger).toBeVisible();
 
       // Landscape: 915x412
@@ -357,9 +357,11 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
     test("swipe gestures work on touch devices", async ({ page }) => {
       await page.setViewportSize({ width: 420, height: 915 });
       await page.goto("/");
-      const composer = page.getByLabel("Type your message");
       // Verify touch is enabled
-      const touch = await page.evaluate(() => ("ontouchstart" in window) || (navigator as any).maxTouchPoints > 0);
+      const touch = await page.evaluate(() => {
+        const nav = navigator as { maxTouchPoints?: number };
+        return ("ontouchstart" in window) || (nav.maxTouchPoints ?? 0) > 0;
+      });
       expect(touch).toBe(true);
     });
   });
@@ -408,7 +410,8 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       await page.goto("/");
       // Measure cumulative layout shift
       const cls = await page.evaluate(() => {
-        return (window as any).PerformanceObserver ? "supported" : "not supported";
+        const win = window as { PerformanceObserver?: unknown };
+        return win.PerformanceObserver ? "supported" : "not supported";
       });
       // This would be enhanced with real CLS measurement in production
       expect(cls).toBeTruthy();
@@ -476,7 +479,7 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       await page.setViewportSize({ width: 420, height: 915 });
       await page.goto("/");
       // Mobile: hamburger menu
-      let nav = page.getByLabel("Open conversation history");
+      const nav = page.getByLabel("Open conversation history");
       await expect(nav).toBeVisible();
 
       await page.setViewportSize(1024, 768);
@@ -576,9 +579,9 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
         const entries = performance.getEntriesByType("layout-shift");
 
         for (const entry of entries) {
-          const layoutShift = entry as any;
+          const layoutShift = entry as { hadRecentInput?: boolean; value?: number };
           if (!layoutShift.hadRecentInput) {
-            clsValue += layoutShift.value;
+            clsValue += layoutShift.value ?? 0;
           }
         }
 
@@ -633,9 +636,9 @@ async function getAccumulatedCLS(page: Page): Promise<number> {
     const entries = performance.getEntriesByType("layout-shift");
 
     for (const entry of entries) {
-      const layoutShift = entry as any;
+      const layoutShift = entry as { hadRecentInput?: boolean; value?: number };
       if (!layoutShift.hadRecentInput) {
-        clsValue += layoutShift.value;
+        clsValue += layoutShift.value ?? 0;
       }
     }
 
