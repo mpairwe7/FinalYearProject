@@ -62,8 +62,10 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       const composer = page.getByLabel("Type your message");
       await expect(composer).toBeVisible();
       // Ensure no horizontal scroll
-      const bodyOverflow = await page.evaluate(() => document.body.style.overflowX);
-      expect(bodyOverflow).not.toBe("scroll");
+      const hasHorizontalScroll = await page.evaluate(() => {
+        return document.documentElement.scrollWidth > window.innerWidth;
+      });
+      expect(hasHorizontalScroll).toBe(false);
     });
 
     test("touch targets are at least 44x44px (WCAG AAA)", async ({ page }) => {
@@ -280,23 +282,51 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
   });
 
   test.describe("Orientation Changes", () => {
-    test("survives portrait to landscape rotation", async ({ page }) => {
+    test("survives portrait to landscape rotation (mobile)", async ({ page }) => {
       await page.goto("/");
-      // Portrait
+      // Portrait: 412x915
       await page.setViewportSize({ width: 412, height: 915 });
       await expect(page.getByLabel("Type your message")).toBeVisible();
-      // Landscape
+      let hamburger = page.getByLabel("Open conversation history");
+      await expect(hamburger).toBeVisible();
+
+      // Landscape: 915x412
       await page.setViewportSize({ width: 915, height: 412 });
       await expect(page.getByLabel("Type your message")).toBeVisible();
+      // Hamburger should still be visible (still < 1024px)
+      await expect(hamburger).toBeVisible();
     });
 
-    test("survives landscape to portrait rotation", async ({ page }) => {
-      // Landscape
-      await page.setViewportSize({ width: 1024, height: 600 });
+    test("survives landscape to portrait rotation (desktop)", async ({ page }) => {
+      // Landscape: 1280x720
+      await page.setViewportSize({ width: 1280, height: 720 });
       await page.goto("/");
-      // Portrait
-      await page.setViewportSize({ width: 600, height: 1024 });
       await expect(page.getByLabel("Type your message")).toBeVisible();
+      const rail = page.locator("aside.conversation-rail");
+      await expect(rail).toBeVisible(); // Persistent sidebar at 1280px
+
+      // Portrait: 720x1280
+      await page.setViewportSize({ width: 720, height: 1280 });
+      await expect(page.getByLabel("Type your message")).toBeVisible();
+      const hamburger = page.getByLabel("Open conversation history");
+      await expect(hamburger).toBeVisible(); // Back to hamburger at 720px
+    });
+
+    test("survives multiple rapid rotations without layout corruption", async ({ page }) => {
+      await page.goto("/");
+      const rotations = [
+        { width: 412, height: 915 },   // Portrait
+        { width: 915, height: 412 },   // Landscape
+        { width: 412, height: 915 },   // Portrait
+        { width: 1280, height: 720 },  // Large landscape
+        { width: 720, height: 1280 },  // Back to portrait
+      ];
+
+      for (const size of rotations) {
+        await page.setViewportSize(size);
+        const composer = page.getByLabel("Type your message");
+        await expect(composer).toBeVisible();
+      }
     });
   });
 

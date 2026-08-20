@@ -460,12 +460,18 @@ main.legacy-layout {
   min-height: min(580px, 70vh);
 }
 
+/* ── Container Queries: Enable responsive component layouts ── */
+main {
+  container-type: inline-size;
+}
+
 .message-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scroll-padding-bottom: calc(var(--chat-dock-height, 92px) + 1rem);
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: clamp(1rem, 2.5vw, 1.6rem);
@@ -521,6 +527,27 @@ main.legacy-layout {
 .message-row-assistant .bubble {
   max-width: min(100%, 720px);
 }
+/* ── Container Query: Message row adapts to container width ── */
+@supports (container-type: inline-size) {
+  @container (max-width: 500px) {
+    .message-row-user .bubble {
+      max-width: min(85%, 400px);
+    }
+    .message-row-assistant .bubble {
+      max-width: min(95%, 450px);
+    }
+  }
+
+  @container (min-width: 500px) {
+    .message-row-user .bubble {
+      max-width: min(78%, 640px);
+    }
+    .message-row-assistant .bubble {
+      max-width: min(100%, 720px);
+    }
+  }
+}
+
 @keyframes msg-enter {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -3598,4 +3625,46 @@ summary {
 
 @media (prefers-reduced-motion: reduce) {
   .vv-stop-btn { animation: none; }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Responsive Image Optimization — Phase 2
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Global image styles for responsive behavior */
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  /* Aspect ratio prevents Cumulative Layout Shift (CLS) */
+  aspect-ratio: auto;
+}
+
+/* Picture elements for art direction across breakpoints */
+picture {
+  display: block;
+  width: 100%;
+}
+
+picture img {
+  width: 100%;
+  height: auto;
+}
+
+/* Figures: ensure proper spacing and sizing */
+figure {
+  margin: 0;
+  padding: 0;
+}
+
+figure img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+figcaption {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-2);
 }
