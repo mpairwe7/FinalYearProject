@@ -391,9 +391,15 @@ def run_voice_isolation_benchmark() -> dict[str, Any]:
         print(f"    * Staff Admin Latency: p50={results['user_staff_isolation']['staff_admin_p50_ms']}ms, p95={results['user_staff_isolation']['staff_admin_p95_ms']}ms")
 
     # -----------------------------------------------------------------------
-    # 6. GPU Cleanup & Post-Test Telemetry
+    # 6. GPU Cleanup & Post-Test Telemetry (Scoped to ~/Mpairwe7)
     # -----------------------------------------------------------------------
-    print("\n[Phase 6] GPU Resource Cleanup & Hardware Verification...")
+    print("\n[Phase 6] GPU Resource Cleanup & Hardware Verification (~/Mpairwe7 only)...")
+    try:
+        from scripts.cleanup_gpu_processes import cleanup_mpairwe7_gpu_processes
+        cleanup_mpairwe7_gpu_processes(dry_run=False)
+    except Exception as ex:
+        print(f"Warning: Scoped GPU cleanup encountered: {ex}")
+
     gc.collect()
     time.sleep(1)
 
