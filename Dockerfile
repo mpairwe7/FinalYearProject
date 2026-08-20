@@ -68,7 +68,7 @@ COPY --chown=appuser:appuser App/backend/app ./app/
 COPY --chown=appuser:appuser App/backend/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Create necessary directories (including models + offline bundle dirs)
-RUN mkdir -p /app/models /app/logs /app/cache /app/offline /app/quantized /app/hf_cache && \
+RUN mkdir -p /app/models /app/logs /app/cache /app/offline /app/quantized /app/hf_cache /app/data_store && \
     chown -R appuser:appuser /app && \
     chmod +x /usr/local/bin/entrypoint.sh
 
