@@ -40,7 +40,7 @@ export const VITALS_THRESHOLDS: Record<string, VitalsThresholds> = {
  * Initialize Core Web Vitals tracking
  * Reports metrics to console (in dev) and optional endpoint
  */
-export function initWebVitalsTracking(endpoint?: string): void {
+export function initWebVitalsTracking(_endpoint?: string): void {
   if (typeof window === 'undefined') return;
 
   // Detect if we can use the Web Vitals API
@@ -176,28 +176,34 @@ interface VitalReport {
   entryType: string;
 }
 
-function reportWebVital(vital: VitalReport): void {
+function reportWebVital(_vital: VitalReport): void {
   // In production, send to analytics service
   if (process.env.NODE_ENV === 'production' && typeof navigator !== 'undefined') {
-    const payload = {
-      metric: vital.name,
-      value: vital.value,
-      rating: vital.rating,
-      url: window.location.href,
-      userAgent: navigator.userAgent,
-      timestamp: new Date().toISOString(),
-    };
-
     // Send to analytics (example, replace with actual endpoint)
+    // const payload = {
+    //   metric: vital.name,
+    //   value: vital.value,
+    //   rating: vital.rating,
+    //   url: window.location.href,
+    //   userAgent: navigator.userAgent,
+    //   timestamp: new Date().toISOString(),
+    // };
     // fetch('/api/analytics/vitals', { method: 'POST', body: JSON.stringify(payload) });
   }
+}
+
+interface WebVitalsSnapshot {
+  lcp: PerformanceEntry | undefined;
+  inp: PerformanceEntry[];
+  cls: PerformanceEntry[];
+  fcp: PerformanceEntry | undefined;
 }
 
 /**
  * Get current Web Vitals snapshot for testing
  */
-export async function getWebVitalsSnapshot(): Promise<Record<string, any>> {
-  if (typeof window === 'undefined') return {};
+export async function getWebVitalsSnapshot(): Promise<WebVitalsSnapshot> {
+  if (typeof window === 'undefined') return { lcp: undefined, inp: [], cls: [], fcp: undefined };
 
   const entries = performance.getEntries();
   return {
