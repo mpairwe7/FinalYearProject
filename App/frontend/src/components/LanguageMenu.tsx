@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { restoreFocus } from "../lib/focus";
 import { CheckIcon, ChevronDownIcon, GlobeIcon, CloseIcon } from "./Icons";
 
 /**
@@ -27,39 +26,19 @@ interface LanguageMenuProps {
   locale: string;
   options: readonly LanguageOption[];
   onLocaleChange: (code: string) => void;
-  /**
-   * Render the overlay only, with no trigger of its own.
-   *
-   * The header no longer has room for a language button — the picker is reached
-   * from a "Response language" item in the 3-dot menu, and that item unmounts
-   * the moment it is activated. So the caller owns the open state and says where
-   * focus should land on close; the overlay, its radios and its focus trap are
-   * unchanged either way, which is the point of driving it rather than forking it.
-   */
-  hideTrigger?: boolean;
-  controlledOpen?: boolean;
-  onRequestClose?: () => void;
-  returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 export default function LanguageMenu({
   locale,
   options,
   onLocaleChange,
-  hideTrigger = false,
-  controlledOpen,
-  onRequestClose,
-  returnFocusRef,
 }: LanguageMenuProps) {
-  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const [open, setOpen] = useState(false);
   /** null = follow the selected locale; a number = the user has arrowed away. */
   const [focusIdx, setFocusIdx] = useState<number | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
-  const isControlled = controlledOpen !== undefined;
-  const open = isControlled ? controlledOpen : uncontrolledOpen;
 
   const current = options.find((o) => o.value === locale) ?? options[0];
   const activeIdx = Math.max(0, options.findIndex((o) => o.value === locale));
@@ -69,22 +48,14 @@ export default function LanguageMenu({
 
   const openMenu = useCallback(() => {
     setFocusIdx(null);
-    setUncontrolledOpen(true);
+    setOpen(true);
   }, []);
 
   const close = useCallback(() => {
     setFocusIdx(null);
-    if (isControlled) {
-      onRequestClose?.();
-      // The control that opened this may already be gone (a menu item that
-      // closed its menu on activation), so fall back to the main landmark
-      // rather than stranding focus on <body>.
-      restoreFocus(returnFocusRef?.current ?? null);
-      return;
-    }
-    setUncontrolledOpen(false);
+    setOpen(false);
     btnRef.current?.focus();
-  }, [isControlled, onRequestClose, returnFocusRef]);
+  }, []);
 
   const select = useCallback(
     (code: string) => {
@@ -161,7 +132,6 @@ export default function LanguageMenu({
 
   return (
     <div className="langsel">
-      {!hideTrigger && (
       <button
         ref={btnRef}
         type="button"
@@ -182,7 +152,6 @@ export default function LanguageMenu({
         <span>{current.value.toUpperCase()}</span>
         <ChevronDownIcon />
       </button>
-      )}
 
       {open && (
         <div

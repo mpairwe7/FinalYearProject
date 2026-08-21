@@ -2,9 +2,9 @@
  * Voice E2E — every configured language, end to end through the UI.
  *
  * The other voice specs are English-only, and the live probe checks the API
- * directly. Neither covers the join between them: that choosing Runyankole in
- * the header actually makes the *browser* ask for Runyankole speech, narrate in
- * a Runyankole voice, and label its controls in Runyankole terms. That join is
+ * directly. Neither covers the join between them: that choosing Luganda in
+ * the header actually makes the *browser* ask for Luganda speech, narrate in
+ * a Luganda voice, and label its controls in Luganda terms. That join is
  * where a language quietly falls back to English — the request still succeeds,
  * audio still plays, and nothing looks broken.
  *
@@ -16,7 +16,7 @@
  *   - the UI names the language, so the control says what it will do
  *
  * A scripted SpeechRecognition stands in for the engine: no browser recognises
- * lg/nyn/ach, so a real one would be untestable for four of the five languages
+ * lg/sw, so a real one would be untestable for two of the three languages
  * and the failure mode we care about — sending the wrong `lang` — would be
  * invisible.
  *
@@ -35,8 +35,6 @@ const LOCALES = [
   { value: "en", label: "English", native: "English", speechLang: "en-US" },
   { value: "lg", label: "Luganda", native: "Oluganda", speechLang: "lg-UG" },
   { value: "sw", label: "Swahili", native: "Kiswahili", speechLang: "sw-KE" },
-  { value: "nyn", label: "Runyankole", native: "Runyankore", speechLang: "nyn" },
-  { value: "ach", label: "Acholi", native: "Leb Acoli", speechLang: "ach" },
 ] as const;
 
 /** The catalogue shape /v1/speech/voices returns, trimmed to two per locale. */
@@ -54,14 +52,6 @@ const VOICE_CATALOGUE = {
       { id: "waxal_swa_0006", provider: "sunbird", native: true, default: true, available: true },
       { id: "waxal_swa_0007", provider: "sunbird", native: true, default: false, available: true },
     ],
-    nyn: [
-      { id: "salt_nyn_0001", provider: "sunbird", native: true, default: true, available: true },
-      { id: "waxal_nyn_0003", provider: "sunbird", native: true, default: false, available: true },
-    ],
-    ach: [
-      { id: "salt_ach_0001", provider: "sunbird", native: true, default: true, available: true },
-      { id: "waxal_ach_0001", provider: "sunbird", native: true, default: false, available: true },
-    ],
   },
   sunbird_configured: true,
 };
@@ -69,7 +59,7 @@ const VOICE_CATALOGUE = {
 /**
  * A recognizer that records the `lang` it was configured with.
  *
- * No engine recognises Luganda, Runyankole or Acholi, so the real API would
+ * No engine recognises Luganda or Swahili, so the real API would
  * make four of five languages untestable — and the bug worth catching is that
  * we send the wrong tag, which is observable before any audio exists.
  */
@@ -111,10 +101,9 @@ async function mockVoiceCatalogue(page: Page) {
   await page.route("**/api/v1/speech/voices", (route) => route.fulfill({ json: VOICE_CATALOGUE }));
 }
 
-/** Pick a language the way a person does: 3-dot menu, then the picker. */
+/** Pick a language from the header picker, the way a person does. */
 async function chooseLanguage(page: Page, label: string) {
-  await page.getByRole("button", { name: "More options" }).click();
-  await page.getByRole("menuitem", { name: /Response language/ }).click();
+  await page.locator(".langsel-btn").click();
   await page.getByRole("radio", { name: new RegExp(label) }).click();
   await expect(page.getByRole("dialog", { name: "Response language" })).toHaveCount(0);
 }
@@ -202,13 +191,13 @@ test.describe("Every configured language, through the UI", () => {
     await page.getByRole("tab", { name: "Voice" }).click();
 
     // Pick the non-default Luganda speaker. Voices are per language, so this
-    // must not become the voice for Runyankole.
+    // must not become the voice for Swahili.
     const lgGroup = page.getByRole("radiogroup", { name: "Narration voice for Luganda" });
     await lgGroup.getByRole("radio").nth(1).click();
     await expect(lgGroup.getByRole("radio").nth(1)).toHaveAttribute("aria-checked", "true");
 
-    const nynGroup = page.getByRole("radiogroup", { name: "Narration voice for Runyankole" });
-    await expect(nynGroup.getByRole("radio").first()).toHaveAttribute("aria-checked", "true");
+    const swGroup = page.getByRole("radiogroup", { name: "Narration voice for Swahili" });
+    await expect(swGroup.getByRole("radio").first()).toHaveAttribute("aria-checked", "true");
 
     await page.getByRole("button", { name: "Close settings" }).click();
 
@@ -220,13 +209,13 @@ test.describe("Every configured language, through the UI", () => {
     expect(ttsBodies[0].voice).toBe("waxal_lug_0002");
     expect(ttsBodies[0].language).toBe("lg");
 
-    // ...and switching to Runyankole does not carry it over.
-    await chooseLanguage(page, "Runyankole");
-    await page.getByRole("button", { name: "Listen in Runyankole" }).last().click();
+    // ...and switching to Swahili does not carry it over.
+    await chooseLanguage(page, "Swahili");
+    await page.getByRole("button", { name: "Listen in Swahili" }).last().click();
     await expect.poll(() => ttsBodies.length, { timeout: 10_000 }).toBeGreaterThan(1);
-    const nyn = ttsBodies[ttsBodies.length - 1];
-    expect(nyn.language).toBe("nyn");
-    expect(nyn.voice ?? null).toBeNull();
+    const sw = ttsBodies[ttsBodies.length - 1];
+    expect(sw.language).toBe("sw");
+    expect(sw.voice ?? null).toBeNull();
   });
 
   test("the settings picker offers every language its own voices", async ({ page }) => {

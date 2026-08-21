@@ -92,25 +92,14 @@ test.describe("Agentic chat flow", () => {
   test("language switch toggles to Luganda", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");
-    // The picker overlay is unchanged; only its trigger moved. With the navbar
-    // gone, language is reached from the 3-dot menu rather than a header button.
-    const openPicker = async () => {
-      await page.getByRole("button", { name: "More options" }).click();
-      await page.getByRole("menuitem", { name: /Response language/ }).click();
-    };
-
-    await openPicker();
+    await page.getByRole("button", { name: /Response language/ }).click();
     await page.getByRole("radio", { name: /Luganda/i }).click();
-    // Selecting closes the picker and the menu item reflects the new locale.
-    await expect(page.getByRole("dialog", { name: "Response language" })).toHaveCount(0);
-    await page.getByRole("button", { name: "More options" }).click();
+    // Selecting closes the picker and the trigger reflects the new locale.
     await expect(
-      page.getByRole("menuitem", { name: "Response language: Luganda" }),
+      page.getByRole("button", { name: "Response language: Luganda" }),
     ).toBeVisible();
-    await page.keyboard.press("Escape");
-
     // Re-open to confirm the radio state persisted.
-    await openPicker();
+    await page.getByRole("button", { name: /Response language/ }).click();
     await expect(page.getByRole("radio", { name: /Luganda/i })).toHaveAttribute(
       "aria-checked",
       "true",

@@ -130,15 +130,10 @@ test.describe("Settings", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   });
 
-  test("the response language chosen here is the one the 3-dot menu shows", async ({ page }) => {
+  test("the response language chosen here is the one the header shows", async ({ page }) => {
     await page.getByLabel("Response language", { exact: true }).selectOption("lg");
     await page.getByRole("button", { name: "Close settings" }).click();
-    // The header button that used to report the locale went with the navbar;
-    // the same state is now named by the menu item that opens the picker.
-    await page.getByRole("button", { name: "More options" }).click();
-    await expect(
-      page.getByRole("menuitem", { name: "Response language: Luganda" }),
-    ).toBeVisible();
+    await expect(page.locator(".langsel-btn")).toContainText("LG");
   });
 
   test("every section renders", async ({ page }) => {
