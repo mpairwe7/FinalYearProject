@@ -12,6 +12,8 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
+import pytest
+
 from app.corrective_rag import _improved, _ranking_key
 from app.retriever import (
     BM25SparseEncoder,
@@ -511,3 +513,73 @@ class LexicalStampWiringTests(unittest.TestCase):
         self.assertFalse(OutputGuard.should_abstain(on_hits))
         if off_hits:  # an out-of-vocabulary query may return nothing at all
             self.assertTrue(OutputGuard.should_abstain(off_hits))
+
+
+class VectorizeQueryTimeFallbackTests(unittest.TestCase):
+    """A selected Vectorize backend that serves nothing must not mean keyword.
+
+    ``initialize`` prefers Vectorize over a sparse-only Qdrant collection and
+    deliberately keeps the Qdrant client alive as the fallback. ``search`` did
+    not honour that: ``_vectorize_mode`` was an unconditional early return, so
+    an open circuit, an exhausted neuron budget, a failed request or an empty
+    index all returned ``[]`` straight to the caller, which then degraded to
+    keyword search over the FAQ CSVs alone.
+
+    Both CPU deployments were observed doing exactly this — ``/ready``
+    reporting ``vector`` because the backend was *selected*, while every real
+    query answered from 499 FAQ rows with a 7,600-document collection sitting
+    healthy in the same container.
+    """
+
+    def _vectorize_retriever(self, *, with_qdrant: bool) -> HybridRetriever:
+        r = HybridRetriever()
+        r._vectorize_mode = True
+        r._ready = True
+        r._sparse_only = True
+        r._dense_model = None
+        if with_qdrant:
+            r._client = mock.MagicMock()
+            r._client.query_points.return_value = mock.MagicMock(points=[])
+            r._sparse_encoder = mock.MagicMock()
+            r._sparse_encoder.encode.return_value = ([1, 2, 3], [0.5, 0.4, 0.3])
+        else:
+            r._client = None
+        return r
+
+    def test_vectorize_hits_are_returned_without_touching_qdrant(self) -> None:
+        r = self._vectorize_retriever(with_qdrant=True)
+        hits = [{"id": "c1", "text": "VAT is 18 percent", "score_rrf": 0.9}]
+        with mock.patch.object(r, "_search_vectorize", return_value=hits):
+            self.assertEqual(r.search("vat rate", top_k=3), hits)
+        r._client.query_points.assert_not_called()
+
+    def test_empty_vectorize_result_falls_through_to_qdrant(self) -> None:
+        """Asserted on the circuit gate, which is the first thing on the Qdrant
+        path and needs no qdrant_client import — so this pins the fall-through
+        decision itself rather than Qdrant's internals."""
+        r = self._vectorize_retriever(with_qdrant=True)
+        with mock.patch.object(r, "_search_vectorize", return_value=[]), \
+             mock.patch.object(r._circuit, "allow_request", return_value=True) as gate:
+            r.search("what are the penalties for late filing", top_k=3)
+        gate.assert_called_once()
+
+    def test_fall_through_queries_the_configured_collection(self) -> None:
+        qdrant_client = pytest.importorskip("qdrant_client")
+        del qdrant_client
+        from app import retriever as R
+
+        r = self._vectorize_retriever(with_qdrant=True)
+        with mock.patch.object(r, "_search_vectorize", return_value=[]):
+            r.search("what are the penalties for late filing", top_k=3)
+        r._client.query_points.assert_called_once()
+        self.assertEqual(
+            r._client.query_points.call_args.kwargs["collection_name"],
+            R.QDRANT_COLLECTION,
+        )
+
+    def test_no_qdrant_client_still_returns_empty(self) -> None:
+        """Nothing to fall back to when Qdrant was never initialised."""
+        r = self._vectorize_retriever(with_qdrant=False)
+        with mock.patch.object(r, "_search_vectorize", return_value=[]) as sv:
+            self.assertEqual(r.search("vat rate", top_k=3), [])
+        sv.assert_called_once()

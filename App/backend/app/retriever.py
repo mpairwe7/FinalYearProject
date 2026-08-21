@@ -1236,7 +1236,25 @@ class HybridRetriever:
         at the registry default (off).
         """
         if self._vectorize_mode:
-            return self._search_vectorize(query, top_k, prefetch_limit, filters, subject=subject)
+            hits = self._search_vectorize(query, top_k, prefetch_limit, filters, subject=subject)
+            if hits or self._client is None:
+                return hits
+            # Vectorize produced nothing: an open circuit, an exhausted neuron
+            # budget, a failed request, or an index that answers no query. Every
+            # one of those used to return [] straight to the caller, which then
+            # degraded to keyword search over the FAQ CSVs — while the
+            # sparse-only Qdrant collection ``initialize`` deliberately keeps
+            # alive for this case (see its docstring) sat healthy in the same
+            # container holding the whole corpus. Both CPU deployments were
+            # observed answering from 499 FAQ rows instead of 7,600+ documents
+            # for exactly this reason: /ready reported "vector" because the
+            # backend was *selected*, and nothing reported that it never served
+            # a single query. Fall through to the Qdrant path below instead.
+            logger.info(
+                "Vectorize returned no results; serving from the local Qdrant "
+                "collection %s instead of degrading to keyword search",
+                QDRANT_COLLECTION,
+            )
 
         if not self._ready or self._client is None:
             return []
