@@ -10,8 +10,17 @@ def _resolve() -> Path:
     env = os.getenv("PROJECT_ROOT")
     if env:
         return Path(env).resolve()
-    # Local dev: file is at <project>/App/backend/app/_root.py → parents[3]
-    return _parents[3] if len(_parents) > 3 else _parents[-1]
+    # Local dev: file is at <project>/App/backend/app/_root.py → parents[3].
+    if len(_parents) > 3:
+        return _parents[3]
+    # Container: the image places the package at /app/app, so parents are
+    # [/app/app, /app, /] and the old `_parents[-1]` fallback resolved the
+    # project root to "/". Every PROJECT_ROOT-derived path then pointed at the
+    # read-only rootfs — `/data_store/analytics.db` rather than
+    # `/app/data_store/analytics.db` — and service.py's `is_relative_to`
+    # containment check became vacuous, because every path is under "/".
+    # The application root is the parent of the package directory.
+    return _parents[1] if len(_parents) > 1 else _parents[-1]
 
 
 PROJECT_ROOT = _resolve()

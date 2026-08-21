@@ -538,7 +538,27 @@ async def lifespan(app: FastAPI):
     # idempotent, including when several replicas run it at once.
     from .retention import run_retention_cleanup
 
-    run_retention_cleanup()
+    def _run_retention_cleanup_guarded() -> None:
+        """Housekeeping must never decide whether the service starts or stays up.
+
+        Retention cleanup reaches the analytics database, the memory store and
+        the document registry. Any of those can be unavailable — a read-only
+        volume, a misresolved path, a locked SQLite file — and an unguarded call
+        here took the whole pod down: the exception propagated out of lifespan,
+        uvicorn reported "Application startup failed", and the container
+        crash-looped without ever serving. That is strictly worse than retaining
+        expired rows for one interval, and it is inconsistent with how every
+        other optional subsystem in this lifespan degrades.
+
+        The failure is logged at error level with a traceback, so a store that
+        cannot be cleaned is loud in the logs rather than silent.
+        """
+        try:
+            run_retention_cleanup()
+        except Exception:
+            logger.error("Retention cleanup failed; continuing without it", exc_info=True)
+
+    _run_retention_cleanup_guarded()
     retention_stop = asyncio.Event()
 
     async def _retention_loop() -> None:
@@ -549,7 +569,7 @@ async def lifespan(app: FastAPI):
                 )
                 return
             except TimeoutError:
-                run_retention_cleanup()
+                _run_retention_cleanup_guarded()
             except asyncio.CancelledError:
                 return
 
