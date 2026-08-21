@@ -194,6 +194,31 @@
   color: var(--text-0);
 }
 
+/* Sitting next to the 3-dot, the pill needs room on both sides or the globe,
+   the code and the dots read as one crowded cluster. The gap on .hdrv2 is 8px
+   for icon buttons, which is tight for a control that carries text. */
+.chatv2 .hdrv2 .langsel {
+  margin-right: 4px;
+}
+.chatv2 .hdrv2 .langsel-btn {
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+/* The chevron is the least useful glyph in the row; it earns less space than
+   the code it sits beside. */
+.chatv2 .hdrv2 .langsel-btn svg:last-child {
+  margin-left: -2px;
+  opacity: 0.7;
+}
+
+/* The strip is 16px in from the edge; leave the same on the right so the 3-dot
+   is not tighter to the screen edge than the pill is to it. */
+.chatv2 .hdrv2 .hdrv2-kebab {
+  margin-left: 2px;
+}
+
 /* Kebab (overflow) menu */
 .chatv2 .hdrv2-kebab {
   position: relative;

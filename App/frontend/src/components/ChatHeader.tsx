@@ -8,7 +8,6 @@ import {
   AutoThemeIcon,
   BookIcon,
   ChevronDownIcon,
-  GlobeIcon,
   KebabIcon,
   MoonIcon,
   PanelLeftIcon,
@@ -86,7 +85,6 @@ export default function ChatHeader({
   onDeleteConversation,
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [langOpen, setLangOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
@@ -120,7 +118,6 @@ export default function ChatHeader({
   // Every other item in this menu leads with an icon; without one here the
   // label starts in the icon column and the whole list looks misaligned.
   const ThemeIcon = themePref === 'light' ? SunIcon : themePref === 'dark' ? MoonIcon : AutoThemeIcon;
-  const currentLocale = localeOptions.find((o) => o.value === locale) ?? localeOptions[0];
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -252,6 +249,11 @@ export default function ChatHeader({
 
       <div className="hdrv2-spacer" />
 
+      {/* Language sits beside the 3-dot rather than inside it: it is the one
+          setting people change often enough to want the current value visible
+          — the trigger reads the locale back as EN / LG / SW. */}
+      <LanguageMenu locale={locale} options={localeOptions} onLocaleChange={onLocaleChange} />
+
       <div className="hdrv2-kebab" ref={menuRef}>
         <button
           ref={menuButtonRef}
@@ -277,18 +279,6 @@ export default function ChatHeader({
                 menuItemRefs.current[0] = element;
               }}
               role="menuitem"
-              className="hdrv2-menu-item"
-              onClick={() => closeMenuThen(() => setLangOpen(true))}
-              aria-label={`Response language: ${currentLocale.label}`}
-              onKeyDown={onMenuKeyDown}
-            >
-              <GlobeIcon /> Response language: {currentLocale.label}
-            </button>
-            <button
-              ref={(element) => {
-                menuItemRefs.current[1] = element;
-              }}
-              role="menuitem"
               className="hdrv2-menu-item hdrv2-menu-theme"
               onClick={() => {
                 cycleTheme();
@@ -300,7 +290,7 @@ export default function ChatHeader({
             </button>
             <button
               ref={(element) => {
-                menuItemRefs.current[2] = element;
+                menuItemRefs.current[1] = element;
               }}
               role="menuitem"
               className="hdrv2-menu-item"
@@ -312,7 +302,7 @@ export default function ChatHeader({
             </button>
             <button
               ref={(element) => {
-                menuItemRefs.current[3] = element;
+                menuItemRefs.current[2] = element;
               }}
               role="menuitem"
               className="hdrv2-menu-item"
@@ -325,7 +315,7 @@ export default function ChatHeader({
             </button>
             <a
               ref={(element) => {
-                menuItemRefs.current[4] = element;
+                menuItemRefs.current[3] = element;
               }}
               role="menuitem"
               className="hdrv2-menu-item"
@@ -342,17 +332,6 @@ export default function ChatHeader({
         )}
       </div>
 
-      {/* The picker itself is unchanged — only its trigger moved into the menu
-          above, so the overlay is driven from here instead of a header button. */}
-      <LanguageMenu
-        locale={locale}
-        options={localeOptions}
-        onLocaleChange={onLocaleChange}
-        hideTrigger
-        controlledOpen={langOpen}
-        onRequestClose={() => setLangOpen(false)}
-        returnFocusRef={menuButtonRef}
-      />
     </header>
   );
 }

@@ -1799,7 +1799,12 @@ main {
   width: min(85vw, 320px);
   background: var(--bg-1);
   border-right: 1px solid var(--border-1);
-  transform: translateX(-100%);
+  /* Clear the safe-area inset as well as the panel's own width. `left` holds
+     this 12px off the edge, so a plain -100% parks its right edge at exactly
+     12px — leaving a sliver of the drawer on screen at all times. That went
+     unnoticed while the rail was transparent and became a visible stripe down
+     the left of every phone screen the moment it got a background. */
+  transform: translateX(calc(-100% - var(--safe-area-inset-left)));
   transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
   display: flex;
   flex-direction: column;
