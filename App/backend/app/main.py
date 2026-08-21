@@ -696,7 +696,7 @@ if _HAS_PROXY_MIDDLEWARE:
         if h.strip()
     ]
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=_trusted_hosts)
-    logger.info("ProxyHeadersMiddleware enabled: trusted_hosts=%s", _trusted_hosts)
+    logger.info("ProxyHeadersMiddleware enabled")
 
 
 # ---------------------------------------------------------------------------
