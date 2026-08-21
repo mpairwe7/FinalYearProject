@@ -111,7 +111,7 @@ export default function LoadingState({
   }, [label]);
 
   return (
-    <div className="lds" role="status" aria-label={`${label}, ${formatElapsed(elapsed)} elapsed`}>
+    <div className="lds" role="status" aria-label={label}>
       <span aria-hidden="true" className="lds-grid">
         {delays.map((d, i) => (
           <span
