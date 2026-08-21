@@ -18,10 +18,27 @@
 # verify-embedded-stores.sh when present and structural checks otherwise, so it
 # works on any pin.
 #
-# The pin below is currently BEHIND the image: sha-126089b was built on 17 Aug,
-# and four image commits have landed since (9592783, fad5322, d28b855, bd3c26b),
-# three of them fixes to the index lifecycle that seeds this very collection.
-# Roll it once a newer tag is on Docker Hub.
+# sha-a14ca67 is the roll that makes this Space serve its own corpus again.
+#
+# The Space had been answering every question from the keyword fallback — 499
+# FAQ rows — while a 7,600-document Qdrant collection sat healthy inside the
+# same container. /ready said "vector" and looked fine, because that field
+# reports which backend was SELECTED, not whether it ever served a query.
+# initialize() ranks Vectorize above a sparse-only Qdrant collection (dense-only
+# beats BM25 alone) and keeps the Qdrant client as the fallback, but search()
+# treated _vectorize_mode as an unconditional early return: an open circuit, a
+# spent neuron budget, a failed request or an empty index all returned [] to the
+# caller, which then degraded to keyword. The Qdrant fallback was never reached.
+#
+# Verified on this exact image before pinning it. With Vectorize configured but
+# not answering — the Space's real condition — three probes went from
+# keyword/1, keyword/4, keyword/2 sources to hybrid/4, hybrid/4, hybrid/5.
+#
+# Also carried: PROJECT_ROOT resolves to /app rather than "/" inside the
+# container (it had made every derived path land on the read-only rootfs and
+# made service.py's containment check vacuous), retention cleanup can no longer
+# take the pod down when its store is unreachable, and the DAST job now builds
+# the commit it scans instead of pulling a moving Docker Hub tag.
 #
 # sha-459533c makes OIDC_ROLE_CLAIM fall back instead of locking staff out. The
 # override used to be exclusive, so setting it stopped the default claim probes
@@ -700,7 +717,7 @@
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-126089b
+FROM landwind/ura-chatbot:sha-a14ca67
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.
