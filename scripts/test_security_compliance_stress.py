@@ -188,7 +188,7 @@ def run_security_compliance_benchmark() -> dict[str, Any]:
         "owasp_guardrail_defenses": {},
         "governance_compliance_gates": {},
         "threat_model_stride_validation": {},
-        "secret_scanning_audit": {},
+        "gitleaks_scan_audit": {},
         "concurrency_scaling_curve": [],
         "extreme_stress_performance": {},
         "traffic_spike_surge": {},
@@ -298,14 +298,14 @@ def run_security_compliance_benchmark() -> dict[str, Any]:
         text=True,
     )
     git_time = (time.perf_counter() - t0_git) * 1000
-    results["secret_scanning_audit"] = {
+    results["gitleaks_scan_audit"] = {
         "scanner": "Gitleaks",
         "exit_code": res_gitleaks.returncode,
         "latency_ms": round(git_time, 2),
         "leaks_found": 0 if res_gitleaks.returncode == 0 else 1,
         "status": "PASS" if res_gitleaks.returncode == 0 else "WARNING",
     }
-    print(f"  - Secret Scan (Gitleaks): {results['secret_scanning_audit']['status']} ({git_time:.1f}ms, 0 leaks)")
+    print(f"  - Secret Scan (Gitleaks): {results['gitleaks_scan_audit']['status']} ({git_time:.1f}ms, 0 leaks)")
 
     # -----------------------------------------------------------------------
     # Suite 4: Security Concurrency Scaling Matrix (c = 10, 25, 50, 100)
