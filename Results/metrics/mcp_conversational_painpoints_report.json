@@ -1,0 +1,529 @@
+{
+  "benchmark_date": "2026-08-21 00:06:28 UTC",
+  "target_hardware": {
+    "gpu_index": 2,
+    "gpu_model": "NVIDIA RTX A6000",
+    "total_vram_mb": 49140.0,
+    "vram_headroom_mb": 42770.0,
+    "cuda_visible_devices": "2"
+  },
+  "response_structure_conformance": {},
+  "mcp_tool_direct_accuracy": {
+    "check_vat_registration": {
+      "tool_name": "check_vat_registration",
+      "input_parameters": {
+        "annual_turnover": 350000000
+      },
+      "output_result": {
+        "annual_turnover": 350000000.0,
+        "threshold": 300000000.0,
+        "registration_required": true,
+        "headroom": 0.0,
+        "explanation": "Turnover of UGX 350,000,000.00 is at or above the FY2026-27 VAT registration threshold of UGX 300,000,000.00, so registration is compulsory.",
+        "ok": true,
+        "fiscal_year": "FY2026-27",
+        "rate_basis": {
+          "fiscal_year": "FY2026-27",
+          "status": "confirmed",
+          "effective_from": "2026-07-01",
+          "effective_to": "2027-06-30",
+          "sources": [
+            {
+              "id": "ita-amendment-act-2026",
+              "title": "Income Tax (Amendment) Act 2026 (Bill No. 6) - s.20 substituting Schedule 4 Part I, plus Parts X, XI, XIII and XVI",
+              "publisher": "Parliament of Uganda",
+              "url": "https://www.parliament.go.ug/page/tax-bills-2026"
+            },
+            {
+              "id": "ey-ug-2026-acts",
+              "title": "Uganda issues Tax Amendment Acts for 2026 - assented 18 May 2026, effective 1 July 2026",
+              "publisher": "EY Global Tax News",
+              "url": "https://globaltaxnews.ey.com/news/2026-1253-uganda-issues-tax-amendment-acts-for-2026"
+            },
+            {
+              "id": "kpmg-ug-2026-27",
+              "title": "Uganda: Tax amendments based on 2026/2027 budget passed by Parliament",
+              "publisher": "KPMG TaxNewsFlash",
+              "url": "https://kpmg.com/us/en/taxnewsflash/news/2026/06/uganda-tax-amendments-2026-2027-budget.html"
+            }
+          ],
+          "legal_basis": {
+            "vat_registration_threshold_annual": "VAT (Amendment) Act 2026 - threshold raised to UGX 300,000,000"
+          },
+          "notes": {
+            "vat_registration_threshold_annual": "Businesses below UGX 300,000,000 annual turnover are no longer required to register; voluntary registration remains available."
+          },
+          "unverified": [
+            "vat_registration_threshold_annual"
+          ],
+          "unverified_note": "These figures are not yet reconciled against the primary legislative text; confirm them with URA before relying on them."
+        },
+        "verification_warning": "FY2026-27 is confirmed, but vat_registration_threshold_annual is not yet reconciled against the primary legislative text \u2014 confirm it with URA."
+      },
+      "latency_ms": 0.155,
+      "schema_compliant": true,
+      "arithmetic_precision_valid": true,
+      "status": "PASS"
+    },
+    "calculate_paye": {
+      "tool_name": "calculate_paye",
+      "input_parameters": {
+        "monthly_gross": 4500000,
+        "residency": "resident"
+      },
+      "output_result": {
+        "monthly_gross": 4500000.0,
+        "residency": "resident",
+        "paye": 1238250.0,
+        "nssf_included": false,
+        "nssf_employee": 0.0,
+        "net_take_home": 3261750.0,
+        "annual_paye": 14859000.0,
+        "effective_rate": 0.2752,
+        "band": {
+          "lower": 485000.0,
+          "upper": 10000000.0,
+          "marginal_rate": 0.3
+        },
+        "bands_applied": [
+          {
+            "lower": 0.0,
+            "upper": 335000.0,
+            "rate": 0.0,
+            "taxable_in_band": 335000.0,
+            "tax_in_band": 0.0
+          },
+          {
+            "lower": 335000.0,
+            "upper": 410000.0,
+            "rate": 0.2,
+            "taxable_in_band": 75000.0,
+            "tax_in_band": 15000.0
+          },
+          {
+            "lower": 410000.0,
+            "upper": 485000.0,
+            "rate": 0.25,
+            "taxable_in_band": 75000.0,
+            "tax_in_band": 18750.0
+          },
+          {
+            "lower": 485000.0,
+            "upper": 10000000.0,
+            "rate": 0.3,
+            "taxable_in_band": 4015000.0,
+            "tax_in_band": 1204500.0
+          }
+        ],
+        "deductions_note": "This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure.",
+        "explanation": "On a gross of UGX 4,500,000.00, the applicable band is 30% above UGX 485,000.00. After PAYE UGX 1,238,250.00, net pay = UGX 3,261,750.00. This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure.",
+        "ok": true,
+        "fiscal_year": "FY2026-27",
+        "rate_basis": {
+          "fiscal_year": "FY2026-27",
+          "status": "confirmed",
+          "effective_from": "2026-07-01",
+          "effective_to": "2027-06-30",
+          "sources": [
+            {
+              "id": "ita-amendment-act-2026",
+              "title": "Income Tax (Amendment) Act 2026 (Bill No. 6) - s.20 substituting Schedule 4 Part I, plus Parts X, XI, XIII and XVI",
+              "publisher": "Parliament of Uganda",
+              "url": "https://www.parliament.go.ug/page/tax-bills-2026"
+            },
+            {
+              "id": "ey-ug-2026-acts",
+              "title": "Uganda issues Tax Amendment Acts for 2026 - assented 18 May 2026, effective 1 July 2026",
+              "publisher": "EY Global Tax News",
+              "url": "https://globaltaxnews.ey.com/news/2026-1253-uganda-issues-tax-amendment-acts-for-2026"
+            },
+            {
+              "id": "kpmg-ug-2026-27",
+              "title": "Uganda: Tax amendments based on 2026/2027 budget passed by Parliament",
+              "publisher": "KPMG TaxNewsFlash",
+              "url": "https://kpmg.com/us/en/taxnewsflash/news/2026/06/uganda-tax-amendments-2026-2027-budget.html"
+            }
+          ],
+          "legal_basis": {
+            "paye_bands_resident": "Income Tax (Amendment) Act 2026, s.20(a) substituting Schedule 4 Part I"
+          },
+          "notes": {
+            "paye_bands_resident": "Schedule 4 Part I states ANNUAL chargeable income; these are the monthly equivalents (annual divided by 12). The Act's table is: nil up to UGX 4,020,000; 20% of the excess over 4,020,000 up to 4,920,000; UGX 180,000 plus 25% of the excess over 4,920,000 up to 5,820,000; UGX 405,000 plus 30% of the excess over 5,820,000 up to 120,000,000; above 120,000,000 the same plus an additional 10% of the excess over 120,000,000. The top band is expressed here as a single 40% marginal rate."
+          }
+        }
+      },
+      "latency_ms": 0.149,
+      "schema_compliant": true,
+      "arithmetic_precision_valid": true,
+      "status": "PASS"
+    },
+    "calculate_customs_duty": {
+      "tool_name": "calculate_customs_duty",
+      "input_parameters": {
+        "cif_value": 50000000,
+        "duty_rate": 0.25
+      },
+      "output_result": {
+        "cif_value": 50000000.0,
+        "duty_rate": 0.25,
+        "duty": 12500000.0,
+        "goods_category": "general",
+        "environmental_levy_rate": 0.0,
+        "environmental_levy": 0.0,
+        "vat_included": true,
+        "vat": 11250000.0,
+        "landed_cost": 73750000.0,
+        "explanation": "CIF UGX 50,000,000.00 + duty 25% (UGX 12,500,000.00) + 18% VAT (UGX 11,250,000.00) = UGX 73,750,000.00 landed cost. Note: the binding duty rate is the EAC CET tariff line for the goods' HS code \u2014 use URA EACCustoms for exact classification.",
+        "ok": true,
+        "fiscal_year": "FY2026-27",
+        "rate_basis": {
+          "fiscal_year": "FY2026-27",
+          "status": "confirmed",
+          "effective_from": "2026-07-01",
+          "effective_to": "2027-06-30",
+          "sources": [
+            {
+              "id": "ita-amendment-act-2026",
+              "title": "Income Tax (Amendment) Act 2026 (Bill No. 6) - s.20 substituting Schedule 4 Part I, plus Parts X, XI, XIII and XVI",
+              "publisher": "Parliament of Uganda",
+              "url": "https://www.parliament.go.ug/page/tax-bills-2026"
+            },
+            {
+              "id": "ey-ug-2026-acts",
+              "title": "Uganda issues Tax Amendment Acts for 2026 - assented 18 May 2026, effective 1 July 2026",
+              "publisher": "EY Global Tax News",
+              "url": "https://globaltaxnews.ey.com/news/2026-1253-uganda-issues-tax-amendment-acts-for-2026"
+            },
+            {
+              "id": "kpmg-ug-2026-27",
+              "title": "Uganda: Tax amendments based on 2026/2027 budget passed by Parliament",
+              "publisher": "KPMG TaxNewsFlash",
+              "url": "https://kpmg.com/us/en/taxnewsflash/news/2026/06/uganda-tax-amendments-2026-2027-budget.html"
+            }
+          ],
+          "legal_basis": {
+            "customs_duty_common": "EAC Common External Tariff - finished goods band",
+            "vat_standard": "VAT Act (Cap 349), s.78 and Schedule 3"
+          },
+          "notes": {
+            "customs_duty_common": "Indicative EAC CET band for finished consumer goods. The binding rate is the tariff line for the specific HS code."
+          }
+        }
+      },
+      "latency_ms": 0.087,
+      "schema_compliant": true,
+      "arithmetic_precision_valid": true,
+      "status": "PASS"
+    },
+    "calculate_rental_tax": {
+      "tool_name": "calculate_rental_tax",
+      "input_parameters": {
+        "annual_gross_rent": 36000000,
+        "landlord_type": "individual"
+      },
+      "output_result": {
+        "landlord_type": "individual",
+        "annual_gross_rent": 36000000.0,
+        "threshold": 2820000.0,
+        "taxable_amount": 33180000.0,
+        "rate": 0.12,
+        "tax": 3981600.0,
+        "explanation": "Individual rental tax is 12% of gross rent above the UGX 2,820,000.00 annual threshold: 12% x UGX 33,180,000.00 = UGX 3,981,600.00.",
+        "ok": true,
+        "fiscal_year": "FY2026-27",
+        "rate_basis": {
+          "fiscal_year": "FY2026-27",
+          "status": "confirmed",
+          "effective_from": "2026-07-01",
+          "effective_to": "2027-06-30",
+          "sources": [
+            {
+              "id": "ita-amendment-act-2026",
+              "title": "Income Tax (Amendment) Act 2026 (Bill No. 6) - s.20 substituting Schedule 4 Part I, plus Parts X, XI, XIII and XVI",
+              "publisher": "Parliament of Uganda",
+              "url": "https://www.parliament.go.ug/page/tax-bills-2026"
+            },
+            {
+              "id": "ey-ug-2026-acts",
+              "title": "Uganda issues Tax Amendment Acts for 2026 - assented 18 May 2026, effective 1 July 2026",
+              "publisher": "EY Global Tax News",
+              "url": "https://globaltaxnews.ey.com/news/2026-1253-uganda-issues-tax-amendment-acts-for-2026"
+            },
+            {
+              "id": "kpmg-ug-2026-27",
+              "title": "Uganda: Tax amendments based on 2026/2027 budget passed by Parliament",
+              "publisher": "KPMG TaxNewsFlash",
+              "url": "https://kpmg.com/us/en/taxnewsflash/news/2026/06/uganda-tax-amendments-2026-2027-budget.html"
+            }
+          ],
+          "legal_basis": {
+            "rental_tax_individual": "Income Tax Act (Cap 338), s.5",
+            "rental_tax_individual_threshold": "Income Tax Act (Cap 338), s.5 annual threshold"
+          },
+          "notes": {
+            "rental_tax_individual": "The 2026 Act (s.12, inserting s.124(1a)) lets an individual liable to rental tax file a provisional return monthly. The rate and annual threshold are unchanged."
+          }
+        }
+      },
+      "latency_ms": 0.055,
+      "schema_compliant": true,
+      "arithmetic_precision_valid": true,
+      "status": "PASS"
+    },
+    "calculate_withholding": {
+      "tool_name": "calculate_withholding",
+      "input_parameters": {
+        "payment_type": "services",
+        "amount": 20000000
+      },
+      "output_result": {
+        "payment_type": "services",
+        "amount": 20000000.0,
+        "rate": 0.06,
+        "withholding_tax": 1200000.0,
+        "net_payable": 18800000.0,
+        "explanation": "Withholding tax on services at 6% of UGX 20,000,000.00 is UGX 1,200,000.00; the payee receives UGX 18,800,000.00 net.",
+        "ok": true,
+        "fiscal_year": "FY2026-27",
+        "rate_basis": {
+          "fiscal_year": "FY2026-27",
+          "status": "confirmed",
+          "effective_from": "2026-07-01",
+          "effective_to": "2027-06-30",
+          "sources": [
+            {
+              "id": "ita-amendment-act-2026",
+              "title": "Income Tax (Amendment) Act 2026 (Bill No. 6) - s.20 substituting Schedule 4 Part I, plus Parts X, XI, XIII and XVI",
+              "publisher": "Parliament of Uganda",
+              "url": "https://www.parliament.go.ug/page/tax-bills-2026"
+            },
+            {
+              "id": "ey-ug-2026-acts",
+              "title": "Uganda issues Tax Amendment Acts for 2026 - assented 18 May 2026, effective 1 July 2026",
+              "publisher": "EY Global Tax News",
+              "url": "https://globaltaxnews.ey.com/news/2026-1253-uganda-issues-tax-amendment-acts-for-2026"
+            },
+            {
+              "id": "kpmg-ug-2026-27",
+              "title": "Uganda: Tax amendments based on 2026/2027 budget passed by Parliament",
+              "publisher": "KPMG TaxNewsFlash",
+              "url": "https://kpmg.com/us/en/taxnewsflash/news/2026/06/uganda-tax-amendments-2026-2027-budget.html"
+            }
+          ],
+          "legal_basis": {
+            "withholding_services": "Income Tax Act (Cap 338), s.119"
+          }
+        }
+      },
+      "latency_ms": 0.048,
+      "schema_compliant": true,
+      "arithmetic_precision_valid": true,
+      "status": "PASS"
+    },
+    "escalate_to_human": {
+      "tool_name": "escalate_to_human",
+      "input_parameters": {
+        "reason": "Disputed third-party bank agency notice and frozen account",
+        "priority": "urgent",
+        "summary": "Bank accounts frozen under agency notice"
+      },
+      "output_result": {
+        "ok": true,
+        "ticket_id": "e4d3f31b-c9ce-4976-b5d8-7e22ba54b0d2",
+        "status": "open",
+        "priority": "urgent",
+        "message": "Ticket e4d3f31b created at priority urgent. A URA officer will review this. You may also contact URA directly at https://ura.go.ug."
+      },
+      "latency_ms": 16.996,
+      "schema_compliant": true,
+      "arithmetic_precision_valid": true,
+      "status": "PASS"
+    }
+  },
+  "real_world_painpoint_resolution": [
+    {
+      "painpoint_id": "PP-01",
+      "title": "EFRIS E-Invoicing & Mandatory VAT Registration Threshold",
+      "domain": "VAT & EFRIS",
+      "query": "My retail business made UGX 350,000,000 this year. Do I need to register for VAT and EFRIS?",
+      "http_status": 200,
+      "latency_ms": 98.91,
+      "structure_valid": false,
+      "response_preview": "**VAT registration check (FY2026-27)**\n\n- Annual turnover: UGX 350,000,000\n- Registration threshold: UGX 300,000,000 per...",
+      "painpoint_resolution_verified": false,
+      "status": "FAIL"
+    },
+    {
+      "painpoint_id": "PP-02",
+      "title": "Employer Monthly PAYE Progressive Bracket Computation",
+      "domain": "PAYE & Employment Income",
+      "query": "How much PAYE tax should I deduct for an employee earning UGX 4,500,000 per month?",
+      "http_status": 200,
+      "latency_ms": 19.47,
+      "structure_valid": false,
+      "response_preview": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 4,500,000\n- PAYE due: **UGX 1,238,250** per month\n- Net ta...",
+      "painpoint_resolution_verified": false,
+      "status": "FAIL"
+    },
+    {
+      "painpoint_id": "PP-03",
+      "title": "Customs Import Duty & Consignment Valuation at Border Entry",
+      "domain": "Customs & Port Clearance",
+      "query": "What are the total import taxes on commercial cargo with CIF value UGX 50,000,000 at 25% duty?",
+      "http_status": 200,
+      "latency_ms": 1198.79,
+      "structure_valid": false,
+      "response_preview": "All goods entering into the country are regarded as imports and liable to pay taxes, unless the value is below USD 50 or...",
+      "painpoint_resolution_verified": false,
+      "status": "FAIL"
+    },
+    {
+      "painpoint_id": "PP-04",
+      "title": "Residential & Commercial Rental Income Tax Assessment",
+      "domain": "Rental Tax",
+      "query": "I collect UGX 36,000,000 annually from my rental apartments in Kampala. How much rental tax do I owe?",
+      "http_status": 200,
+      "latency_ms": 11.17,
+      "structure_valid": false,
+      "response_preview": "**Rental income tax \u2014 individual (FY2026-27)**\n\n- Gross annual rent: UGX 36,000,000\n- Tax-free threshold: UGX 2,820,000 ...",
+      "painpoint_resolution_verified": false,
+      "status": "FAIL"
+    },
+    {
+      "painpoint_id": "PP-05",
+      "title": "Withholding Tax (WHT) Deduction on Professional Consultancy Services",
+      "domain": "Withholding Tax",
+      "query": "We received a legal and auditing consultancy invoice of UGX 20,000,000. How much WHT must we withhold?",
+      "http_status": 200,
+      "latency_ms": 11.18,
+      "structure_valid": false,
+      "response_preview": "I know deadlines can be stressful, so here's the quickest way forward.\n\n**Withholding tax \u2014 services (FY2026-27)**\n\n- Gr...",
+      "painpoint_resolution_verified": false,
+      "status": "FAIL"
+    },
+    {
+      "painpoint_id": "PP-06",
+      "title": "Distressed Taxpayer Multi-Turn Escalation to Human Officer",
+      "domain": "Human Staff Escalation & SLA",
+      "query": "My bank accounts have been frozen under an agency notice. I need to speak immediately with a human officer!",
+      "http_status": 200,
+      "latency_ms": 688.65,
+      "structure_valid": false,
+      "response_preview": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the rig...",
+      "painpoint_resolution_verified": false,
+      "status": "FAIL"
+    }
+  ],
+  "conversational_concurrency_scaling": [
+    {
+      "concurrency": 10,
+      "requests": 40,
+      "duration_s": 0.853,
+      "throughput_rps": 46.9,
+      "structure_accuracy_pct": 100.0,
+      "latency_p50_ms": 88.87,
+      "latency_p90_ms": 557.28,
+      "latency_p95_ms": 645.86,
+      "latency_p99_ms": 661.93,
+      "errors": 0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 25,
+      "requests": 50,
+      "duration_s": 1.147,
+      "throughput_rps": 43.6,
+      "structure_accuracy_pct": 100.0,
+      "latency_p50_ms": 354.23,
+      "latency_p90_ms": 719.82,
+      "latency_p95_ms": 727.69,
+      "latency_p99_ms": 971.29,
+      "errors": 0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 50,
+      "requests": 100,
+      "duration_s": 2.167,
+      "throughput_rps": 46.2,
+      "structure_accuracy_pct": 100.0,
+      "latency_p50_ms": 651.5,
+      "latency_p90_ms": 1201.76,
+      "latency_p95_ms": 1462.96,
+      "latency_p99_ms": 2077.77,
+      "errors": 0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 100,
+      "requests": 200,
+      "duration_s": 3.987,
+      "throughput_rps": 50.2,
+      "structure_accuracy_pct": 100.0,
+      "latency_p50_ms": 1503.75,
+      "latency_p90_ms": 2214.01,
+      "latency_p95_ms": 2563.84,
+      "latency_p99_ms": 3510.09,
+      "errors": 0,
+      "status": "PASS"
+    }
+  ],
+  "extreme_stress_accuracy": {
+    "concurrency": 250,
+    "requests": 500,
+    "duration_s": 9.918,
+    "throughput_rps": 50.4,
+    "structure_accuracy_pct": 100.0,
+    "latency_p50_ms": 4105.08,
+    "latency_p95_ms": 5603.29,
+    "latency_p99_ms": 6555.52,
+    "errors": 0,
+    "status": "PASS"
+  },
+  "traffic_spike_conformance": {
+    "burst_concurrency": 250,
+    "requests": 250,
+    "duration_s": 5.46,
+    "throughput_rps": 45.8,
+    "structure_accuracy_pct": 100.0,
+    "latency_p50_ms": 3522.63,
+    "latency_p95_ms": 4387.04,
+    "errors": 0,
+    "circuit_breaker_trips": 0,
+    "status": "PASS"
+  },
+  "volume_soak_conformance": {
+    "total_queries": 1500,
+    "concurrency": 50,
+    "duration_s": 30.752,
+    "throughput_rps": 48.8,
+    "structure_accuracy_pct": 100.0,
+    "latency_p50_ms": 906.39,
+    "latency_p95_ms": 1725.33,
+    "latency_p99_ms": 2729.85,
+    "errors": 0,
+    "memory_leak_mb": 0.0,
+    "status": "STABLE"
+  },
+  "peak_gpu_telemetry": {
+    "gpu_index": 2,
+    "name": "NVIDIA RTX A6000",
+    "memory_total_mb": 49140.0,
+    "memory_used_mb": 5905.0,
+    "memory_free_mb": 42770.0,
+    "utilization_pct": 100.0,
+    "temperature_c": 62.0,
+    "power_draw_w": 102.39
+  },
+  "post_cleanup_telemetry": {
+    "gpu_index": 2,
+    "name": "NVIDIA RTX A6000",
+    "memory_total_mb": 49140.0,
+    "memory_used_mb": 5905.0,
+    "memory_free_mb": 42770.0,
+    "utilization_pct": 100.0,
+    "temperature_c": 62.0,
+    "power_draw_w": 102.09
+  },
+  "cleanup_status": "CLEAN (Scoped strictly to ~/Mpairwe7)"
+}
