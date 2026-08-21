@@ -28,6 +28,15 @@ from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
 from starlette.websockets import WebSocket
 
+# Proxy header validation — prevents IP rate-limit bypass via forged
+# X-Forwarded-For headers (CVE-mitigation: rate-limit header spoofing)
+try:
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    _HAS_PROXY_MIDDLEWARE = True
+except ImportError:  # pragma: no cover – uvicorn always present at runtime
+    _HAS_PROXY_MIDDLEWARE = False
+
 from . import database as db
 from . import documents
 from .analytics import AnalyticsMiddleware, metrics
@@ -671,6 +680,23 @@ app.add_middleware(
 
 # Analytics middleware (must be added after CORS)
 app.add_middleware(AnalyticsMiddleware)
+
+# ---------------------------------------------------------------------------
+# Proxy header validation — rate-limit IP spoofing mitigation
+# ---------------------------------------------------------------------------
+# When behind a trusted reverse proxy (nginx, Cloudflare, K8s ingress),
+# only accept X-Forwarded-For from known gateway IPs. Without this,
+# attackers can forge headers to rotate their apparent IP and bypass
+# per-IP rate limits. TRUSTED_PROXY_HOSTS env is a comma-separated list
+# of IPs or CIDR ranges.  Defaults to loopback only (single-container).
+if _HAS_PROXY_MIDDLEWARE:
+    _trusted_hosts: list[str] = [
+        h.strip()
+        for h in os.getenv("TRUSTED_PROXY_HOSTS", "127.0.0.1,::1").split(",")
+        if h.strip()
+    ]
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=_trusted_hosts)
+    logger.info("ProxyHeadersMiddleware enabled: trusted_hosts=%s", _trusted_hosts)
 
 
 # ---------------------------------------------------------------------------
