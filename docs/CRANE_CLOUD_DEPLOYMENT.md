@@ -330,6 +330,48 @@ first two mean dense retrieval is live:
 Images built before ~13 Aug 2026 report only `hybrid`/`keyword` and will say
 `hybrid` while actually serving sparse-only; the four-way field is newer.
 
+### 6.2 Build gate: `verify-embedded-stores.sh`
+
+Neither embedded store is fail-closed at runtime, and that is deliberate — a
+degraded pod beats a dead one. `wait-for-qdrant.sh` starts the backend anyway on
+timeout, and `cache.py` falls back to in-process memory when Redis is
+unreachable. The cost is that a broken store produces **no startup failure to
+notice**: the Space served keyword-only answers over 499 FAQ rows for a full
+minute after a roll before anyone spotted it, and the response cache silently
+returned `None` for weeks.
+
+`App/deploy/cranecloud/verify-embedded-stores.sh` moves both failures to build
+time. It runs as the last `RUN` in the Dockerfile, after the operational `ENV`
+block so it checks the values the image will really use, and fails the build on:
+
+| Fault | Message |
+| :--- | :--- |
+| Collection promoted with no FAQ rows | `the collection holds ZERO faq_jsonl points` |
+| FAQ corpus only partly loaded | `only N faq_jsonl points indexed, below the floor of M` |
+| Dangling alias, or no collection | `neither an alias nor a collection named '…' exists` |
+| FAQ JSONL missing from the image | `no FAQ JSONL corpus at /app/Data/faq_jsonl` |
+| `redis-server` not installed | `redis-server is not installed in this image` |
+| Redis rejects supervisord's flags | `redis-server did not start with the flags supervisord uses` |
+| Cache and rate-limit sharing one db | `… share a keyspace; they must be separate databases` |
+| `maxmemory` unset or wrong policy | `maxmemory is unset` / `expected 'allkeys-lru'` |
+
+The FAQ floor defaults to **90% of the rows on disk** (`FAQ_INDEX_MIN_ROWS`
+overrides it). It is a floor rather than an equality check because ingest drops
+exact-duplicate questions — currently 508 rows on disk against 499 indexed.
+
+It is also runnable against a live pod, which is the quickest post-roll check
+that retrieval is not silently degraded:
+
+```bash
+kubectl exec <pod> -- /usr/local/bin/verify-embedded-stores.sh
+```
+
+When Qdrant is already serving it verifies that instance in place. When it has
+to start one — the build case — it serves from a throwaway copy of the storage,
+because starting Qdrant materialises its sparse segment files (~1 MB on disk
+growing to ~36 MB) and every touched file would otherwise land in the image
+layer.
+
 ---
 
 ## 7. Speech on Crane Cloud

@@ -8,6 +8,21 @@
 # config (Sunbird/Gemini/Cloudflare secrets, SPEECH_ENABLED, …) is supplied as
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
+# This Space's build now GATES on the two embedded stores rather than trusting
+# the pin: a Qdrant collection seeded from the FAQ JSONL corpus, and an embedded
+# Redis. Neither is fail-closed at runtime — wait-for-qdrant.sh starts the
+# backend anyway on timeout and cache.py falls back to in-process memory — so a
+# base missing either one boots, answers, and looks healthy while serving 499
+# FAQ rows instead of 7,943 documents and recomputing every response. That is
+# how it went unnoticed before. The gate runs the base image's own
+# verify-embedded-stores.sh when present and structural checks otherwise, so it
+# works on any pin.
+#
+# The pin below is currently BEHIND the image: sha-126089b was built on 17 Aug,
+# and four image commits have landed since (9592783, fad5322, d28b855, bd3c26b),
+# three of them fixes to the index lifecycle that seeds this very collection.
+# Roll it once a newer tag is on Docker Hub.
+#
 # sha-459533c makes OIDC_ROLE_CLAIM fall back instead of locking staff out. The
 # override used to be exclusive, so setting it stopped the default claim probes
 # entirely — a typo, or setting it before the provider mapping exists, resolved
@@ -686,6 +701,50 @@
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
 FROM landwind/ura-chatbot:sha-126089b
+
+# Gate the pin on the two embedded stores this Space depends on: a Qdrant
+# collection seeded from the FAQ JSONL corpus, and an embedded Redis.
+#
+# The Space's failure mode is not a crash. Retrieval falls back to keyword-only
+# search and Redis falls back to in-process memory, so a base image missing
+# either one still boots, still answers, and reports nothing unusual — it just
+# answers from 499 FAQ rows instead of 7,943 documents and recomputes every
+# response. That went unnoticed for a long time precisely because the Space
+# looked healthy. Checking here makes a bad pin a failed Space build.
+#
+# Written to work on ANY pin, including bases older than the verifier: the base
+# image's own script is used when present, and older bases fall back to the
+# structural checks below rather than failing for the wrong reason. A base that
+# fails the fallback is one that predates the sidecars entirely (before
+# sha-41b7296) and must not be deployed.
+RUN set -eux; \
+    if [ -x /usr/local/bin/verify-embedded-stores.sh ]; then \
+        /usr/local/bin/verify-embedded-stores.sh; \
+    else \
+        echo "NOTE: this base predates verify-embedded-stores.sh — running structural checks only."; \
+        echo "NOTE: roll the pin to an image built from a commit that ships it for the full gate."; \
+        test -x /usr/local/bin/qdrant || { echo "FAIL: no Qdrant binary — base predates the sidecar" >&2; exit 1; }; \
+        test -d /app/qdrant/storage || { echo "FAIL: no baked Qdrant collection" >&2; exit 1; }; \
+        test -d /app/Data/faq_jsonl || { echo "FAIL: no FAQ JSONL corpus in the image" >&2; exit 1; }; \
+        command -v redis-server >/dev/null || { echo "FAIL: redis-server not installed" >&2; exit 1; }; \
+        grep -q '^\[program:qdrant\]' /etc/supervisor/conf.d/supervisord.conf \
+            || { echo "FAIL: supervisord does not start Qdrant" >&2; exit 1; }; \
+        grep -q '^\[program:redis\]' /etc/supervisor/conf.d/supervisord.conf \
+            || { echo "FAIL: supervisord does not start Redis" >&2; exit 1; }; \
+        echo "structural checks passed: qdrant binary, baked storage, FAQ corpus, redis-server, both supervised"; \
+    fi
+
+# The base sets these already; repeated here so the Space's configuration is
+# readable without pulling the base image apart, and so a pin whose defaults
+# drift cannot quietly point retrieval or the cache somewhere else.
+ENV QDRANT_ENABLED=true \
+    QDRANT_URL=http://127.0.0.1:6333 \
+    QDRANT_COLLECTION=ura_knowledge_base_active \
+    QDRANT_SIDECAR=true \
+    CACHE_BACKEND=redis \
+    REDIS_URL=redis://127.0.0.1:6379/0 \
+    SLOWAPI_STORAGE_URI=redis://127.0.0.1:6379/1 \
+    REDIS_MAXMEMORY=192mb
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
