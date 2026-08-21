@@ -159,7 +159,7 @@ await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 check(await page.locator("a.rail-acct-primary").isVisible(), "sidebar offers Sign in");
 check(
   (await page.locator("a.rail-acct-ghost").getAttribute("href")) === "/signup",
-  "header offers Sign up",
+  "sidebar offers Sign up",
 );
 const me = await page.evaluate(async (b) => {
   // Tolerate a non-JSON body. Pointed at a frontend with no backend behind
