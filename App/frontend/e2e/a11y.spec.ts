@@ -159,8 +159,13 @@ test.describe("keyboard and focus regression checks", () => {
     await mockBackend(page);
     await page.goto("/");
 
+    // Language moved into this menu when the navbar was removed, so it is the
+    // first item now. What is under test is the pattern, not the ordering:
+    // opening focuses the first item, Arrow keys move, Enter activates.
     const trigger = page.getByRole("button", { name: "More options" });
     await trigger.click();
+    await expect(page.getByRole("menuitem", { name: /^Response language:/ })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("menuitem", { name: /^Theme:/ })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("menuitem", { name: "Settings" })).toBeFocused();

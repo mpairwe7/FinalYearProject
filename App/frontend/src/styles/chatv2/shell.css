@@ -11,6 +11,7 @@
 }
 
 .chatv2 .app-main-col {
+  position: relative;
   height: 100dvh;
   min-height: 100dvh;
   overflow: hidden;
@@ -22,14 +23,107 @@
  * .top-bar-title / .pill-sm so legacy sizing + the ≤720px brand-title hide
  * keep working; tokens above re-tint them.
  * ------------------------------------------------------------------------- */
+/* The strip floats over the conversation instead of sitting on top of it in
+   flow. That is what lets the transcript scroll underneath and fade out, with
+   no rule between the two — see the mask on .message-list below. Only the
+   controls take pointer events; the empty space between them belongs to the
+   conversation. */
 .chatv2 .hdrv2 {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: var(--cv2-top-h);
   padding: 8px 16px;
   padding-top: max(8px, env(safe-area-inset-top, 0px));
+  background: transparent;
+  pointer-events: none;
+}
+.chatv2 .hdrv2 > * {
+  pointer-events: auto;
+}
+.chatv2 .hdrv2-spacer {
+  pointer-events: none;
+}
+
+/* Conversation title, level with the 3-dot menu. A quiet pill on hover, the
+   way the rows in the rail behave — it is a menu trigger, not a heading. */
+.chatv2 .hdrv2-convtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(48vw, 420px);
+  min-height: 34px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.chatv2 .hdrv2-convtitle:hover,
+.chatv2 .hdrv2-convtitle[aria-expanded="true"] {
+  background: var(--surface-2);
+}
+.chatv2 .hdrv2-convtitle-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chatv2 .hdrv2-convtitle svg {
+  color: var(--text-2);
   flex-shrink: 0;
+}
+
+.chatv2 .hdrv2-convrename {
+  max-width: min(48vw, 420px);
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--cv2-focus, var(--border-1));
+  border-radius: 8px;
   background: var(--bg-0);
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * The transcript runs full height behind the strip, padded down so nothing
+ * starts underneath it, and masked so anything scrolled up into that band
+ * dissolves rather than being cut off at a line. The bottom stop is the
+ * pre-existing 16px fade into the composer dock.
+ * ------------------------------------------------------------------------- */
+.chatv2 .message-list {
+  padding-top: var(--cv2-top-h);
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0,
+    #000 var(--cv2-top-h),
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0,
+    #000 var(--cv2-top-h),
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+}
+
+/* The landing screen has no transcript to fade, but its brand block still has
+   to clear the strip on a short viewport. */
+.chatv2 .landing {
+  padding-top: max(2rem, calc(var(--cv2-top-h) + 0.5rem));
 }
 
 .chatv2 .hdrv2 .top-bar-title {
@@ -42,14 +136,25 @@
   min-width: 0;
 }
 
-/* Desktop-only sidebar collapse toggle; hamburger stays mobile-only via the
-   legacy .sidebar-toggle-btn rule (display:none at ≥1024px). */
+/* Desktop-only sidebar collapse toggle; the mobile drawer opener stays
+   mobile-only via the legacy .sidebar-toggle-btn rule (display:none at
+   ≥1024px). Rendered only while the rail is collapsed — docked, the rail
+   carries its own toggle in its brand row. */
 .chatv2 .hdrv2-collapse {
   display: none;
 }
 @media (min-width: 1024px) {
   .chatv2 .hdrv2-collapse {
     display: flex;
+  }
+  /* globals.css already says `display: none` for this at >=1024px, but that
+     rule sits at line 1762 and `.top-bar-icon-btn { display: flex }` sits at
+     2253 — same specificity, later wins, so the drawer opener has been
+     painting on desktop. It went unnoticed while it was a hamburger next to
+     other header icons; now it is a second copy of the panel toggle beside a
+     rail that is already docked. Out-specify rather than reorder globals. */
+  .chatv2 .hdrv2 .sidebar-toggle-btn {
+    display: none;
   }
 }
 
@@ -190,36 +295,7 @@
   transform: none;
 }
 
-/* The search field was --bg-0 on a --bg-1 rail, so the rail itself supplied the
-   contrast that made it look like an input. Now that they share a background it
-   has to carry its own, or it reads as a bordered rectangle of nothing. */
-.chatv2 .rail-search {
-  background: var(--surface-1);
-  border: 1px solid var(--border-0);
-  border-radius: 8px;
-}
-.chatv2 .rail-search:focus {
-  border-color: var(--cv2-focus);
-}
-
-.chatv2 .rail-item {
-  border-radius: 8px;
-}
-.chatv2 .rail-item:hover {
-  background: var(--surface-2);
-}
-.chatv2 .rail-item-active {
-  background: var(--surface-3);
-  border-left: 2px solid var(--cv2-accent);
-}
-:root[data-theme="dark"] .chatv2 .rail-item-active {
-  border-left-color: var(--brand-goldish, #f9c74f);
-}
-.chatv2 .rail-item-delete:hover {
-  color: var(--danger);
-  background: var(--cv2-danger-soft);
-  border-radius: 8px;
-}
+/* Row treatment now lives in sidebar.css. */
 
 /* ---------------------------------------------------------------------------
  * Desktop collapse: the grid column is driven by --cv2-rail (an `auto` track
@@ -232,21 +308,129 @@
     display: grid;
     grid-template-columns: var(--cv2-rail) minmax(0, 1fr);
   }
+  /* Explicit placement matters: the peek below takes .rail-wrap out of flow,
+     and with auto-placement the main column would fall into the rail's track. */
+  .chatv2 .rail-wrap {
+    grid-column: 1;
+    width: 100%;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .chatv2 .app-main-col {
+    grid-column: 2;
+  }
   .app-shell.chatv2[data-sidebar="collapsed"] {
     --cv2-rail: 0px;
   }
   .chatv2 .conversation-rail {
     width: 100%;
     overflow: hidden;
+    /* globals.css anchors the rail with `top/left/bottom:
+       var(--safe-area-inset-*)`, which has a 12px floor for notched phones.
+       That is right for a fixed drawer and wrong here: at this width the rail
+       is `position: relative`, so those stop being edges and become offsets,
+       sliding it 12px out of its own grid track and 12px past the bottom of
+       the viewport. Reset them rather than weaken the token — phones still
+       need it. */
+    top: auto;
+    left: auto;
+    bottom: auto;
   }
   .app-shell.chatv2[data-sidebar="collapsed"] .conversation-rail {
     border-right-width: 0;
   }
   /* Pin children to the open width so collapsing clips instead of rewrapping */
-  .chatv2 .rail-top,
+  .chatv2 .rail-brand,
   .chatv2 .rail-new,
-  .chatv2 .rail-search-wrap,
-  .chatv2 .rail-list {
+  .chatv2 .rail-scroll {
     min-width: 276px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Hover peek.
+ *
+ * The behaviour the reference recording shows, and the reason collapse is not
+ * a simple two-state toggle: with the rail collapsed, approaching the toggle
+ * floats the rail in *over* the conversation, and the transcript does not move
+ * — its text sits at an identical x before and during the peek. Only a click
+ * docks it, and only then does the grid track open and the transcript reflow.
+ *
+ * So the grid column stays at 0 throughout and the wrapper leaves the flow.
+ * `position: fixed` escapes the collapsed wrapper's `overflow: hidden` because
+ * no ancestor here establishes a containing block for it.
+ *
+ * Hover-capable pointers only. On a touch screen there is no hover to peek
+ * with, and the rail is a drawer rather than a column anyway.
+ * ------------------------------------------------------------------------- */
+@media (min-width: 1024px) and (hover: hover) {
+  .chatv2 .rail-hotzone {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    z-index: 209;
+  }
+
+  .app-shell.chatv2[data-rail-peek="true"] .rail-wrap {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 300px;
+    z-index: 210;
+    overflow: visible;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+    animation: rail-peek-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Floating over the conversation, the rail keeps the same recessed ground it
+     has when docked — only the shadow says it is above rather than beside. */
+  .app-shell.chatv2[data-rail-peek="true"] .conversation-rail {
+    border-right: 1px solid var(--border-0);
+  }
+
+  /* The peeked rail covers the strip's toggle, so the corner the pointer is
+     resting in has to keep working. The rail brings its own toggle up to meet
+     it: the wordmark steps aside and the rail's actions move to the left edge,
+     landing the toggle where the strip's one just was. Clicking there docks,
+     which is the gesture the reference recording shows.
+     
+     Two things were tried first and are worth not repeating. Hiding the strip's
+     toggle oscillates: the pointer is on that button, so dropping it out of
+     hit-testing fires a mouseleave, which retracts the peek, which puts the
+     button back under the pointer, which peeks again — the slide never settles.
+     Raising .hdrv2 above the rail instead lifts the whole strip, because its
+     z-index opens a stacking context no child can escape — so the conversation
+     title came up with it and painted across the rail's own controls. */
+  .app-shell.chatv2[data-rail-peek="true"] .rail-brand .top-bar-logo-img,
+  .app-shell.chatv2[data-rail-peek="true"] .rail-brand .top-bar-title {
+    display: none;
+  }
+  .app-shell.chatv2[data-rail-peek="true"] .rail-brand-actions {
+    margin-left: 0;
+  }
+}
+
+@keyframes rail-peek-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell.chatv2[data-rail-peek="true"] .rail-wrap {
+    animation: none;
+  }
+}
+
+/* No hover means no peek, and no invisible strip along the left edge either. */
+.chatv2 .rail-hotzone {
+  display: none;
+}
+@media (min-width: 1024px) and (hover: hover) {
+  .chatv2 .rail-hotzone {
+    display: block;
   }
 }

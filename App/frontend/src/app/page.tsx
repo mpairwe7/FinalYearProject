@@ -1,6 +1,5 @@
 "use client";
 
-import Image from 'next/image';
 import Link from 'next/link';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useChatStore, ChatTurn, createTurn, cleanResponse } from '../store/useChatStore';
@@ -26,6 +25,7 @@ import {
   voiceChat,
 } from '../services/voiceService';
 import { authHeaders } from '../lib/authSession';
+import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
@@ -35,9 +35,10 @@ import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
 import ConfirmDialog, { ConfirmRequest } from '../components/ConfirmDialog';
 import ConversationRail from '../components/ConversationRail';
+import ConversationSearch from '../components/ConversationSearch';
+import LoadingState from '../components/LoadingState';
 import SettingsDialog, { SettingsTab } from '../components/settings/SettingsDialog';
 import ChatHeader from '../components/ChatHeader';
-import { BotIcon } from '../components/Icons';
 import { useIdentity } from '../hooks/useIdentity';
 
 // ---------------------------------------------------------------------------
@@ -72,6 +73,32 @@ function joinDictated(base: string, spoken: string): string {
 // All API calls go through the Next.js rewrite proxy at /api/*
 // so the browser stays same-origin (no CORS, CSP-safe).
 const API_URL = '/api';
+
+/** Honour the OS setting for the typed reveal as well as the animations. */
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** Desktop rail collapse preference. Read after mount, never during SSR. */
+const RAIL_COLLAPSED_KEY = 'ura-rail-collapsed';
+
+/**
+ * What the assistant is doing, as the server reports it.
+ *
+ * `thinking` is the window before retrieval opens, `searching` runs between
+ * the two `phase` frames the stream now emits, and `churning` starts at
+ * `metadata` — the frame the server sends once retrieval is done and
+ * generation is about to begin. Turns that never retrieve (voice, the
+ * non-stream fallback) simply go thinking → churning.
+ */
+type TurnPhase = 'thinking' | 'searching' | 'churning';
+
+const PHASE_UI: Record<TurnPhase, { label: string; variant: string }> = {
+  thinking: { label: 'Thinking', variant: 'Dots' },
+  searching: { label: 'Searching the URA knowledge base', variant: 'Orbit' },
+  churning: { label: 'Churning', variant: 'Drive' },
+};
 
 // Project blog (separate Vercel deployment). Set NEXT_PUBLIC_BLOG_URL in the
 // frontend's Vercel project to the blog's real production URL; the value below
@@ -130,6 +157,8 @@ export default function Page() {
   const createNewSession = useChatStore((s) => s.createNewSession);
   const switchSession = useChatStore((s) => s.switchSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
+  const renameSession = useChatStore((s) => s.renameSession);
+  const togglePinSession = useChatStore((s) => s.togglePinSession);
   const ensureActiveConversationId = useChatStore((s) => s.ensureActiveConversationId);
   const saveCurrentSession = useChatStore((s) => s.saveCurrentSession);
 
@@ -149,6 +178,12 @@ export default function Page() {
   const [dictationNotice, setDictationNotice] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [turnPhase, setTurnPhase] = useState<TurnPhase | null>(null);
+  /** Stamped once per turn and held across every phase change, so the timer
+   *  runs continuously and the closing "Thought for …" is the real duration. */
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
+  /** The in-flight reveal, so Stop can cut it short from outside the stream. */
+  const revealQueueRef = useRef<RevealQueue | null>(null);
   // The transcript itself is intentionally not a live region. Updating an
   // assistant turn for every SSE token would otherwise make a screen reader
   // repeatedly announce the whole conversation. This compact status is the
@@ -166,7 +201,24 @@ export default function Page() {
 
   // chatv2 presentation state: destructive-action confirm + desktop rail collapse
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  /**
+   * Desktop rail collapse, and the transient hover "peek" over it.
+   *
+   * Collapsed always starts false and is restored from storage after mount:
+   * the server cannot know the stored value, and rendering a collapsed rail on
+   * the server then expanding it in the browser is a hydration mismatch.
+   *
+   * Peek is the mechanism the reference recording shows. With the rail
+   * collapsed, hovering the toggle floats it in *over* the conversation and the
+   * transcript does not move; clicking docks it, and only then does the
+   * transcript reflow. So peek is deliberately not "collapsed = false" — it is
+   * a third state, and the grid column stays at zero throughout.
+   */
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const [railPeek, setRailPeek] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const peekTimerRef = useRef<number | null>(null);
+  const railSearchReturnRef = useRef<HTMLElement | null>(null);
 
   // Settings dialog. `settingsTab` lets a caller open straight onto a section —
   // the landing page's "Account & settings" link opens Account; every other
@@ -291,6 +343,68 @@ export default function Page() {
       window.visualViewport?.removeEventListener('scroll', updateMobileViewportVars);
     };
   }, [hasStartedChat, isLoading, isRecording]);
+
+  // Restore the stored collapse preference after mount — see the state comment.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(RAIL_COLLAPSED_KEY) === 'true') setRailCollapsed(true);
+    } catch {
+      // Storage can be unavailable in private mode; the default stands.
+    }
+  }, []);
+
+  const toggleRailCollapse = useCallback(() => {
+    setRailCollapsed((v) => {
+      const next = !v;
+      try {
+        window.localStorage.setItem(RAIL_COLLAPSED_KEY, String(next));
+      } catch {
+        // Preference is a convenience, not state the UI depends on.
+      }
+      // Docking or hiding the rail both end the transient hover state.
+      setRailPeek(false);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Peek open on hover, with a short delay in, and a grace period out.
+   *
+   * Without the delay, a pointer travelling diagonally past the toggle on its
+   * way somewhere else drags the whole rail in behind it. Without the grace
+   * period, the gap between the toggle and the rail that just appeared under
+   * it counts as a leave, and the rail flickers shut mid-approach.
+   */
+  const clearPeekTimer = useCallback(() => {
+    if (peekTimerRef.current) {
+      window.clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = null;
+    }
+  }, []);
+
+  const handlePeekEnter = useCallback(() => {
+    clearPeekTimer();
+    peekTimerRef.current = window.setTimeout(() => setRailPeek(true), 120);
+  }, [clearPeekTimer]);
+
+  const handlePeekLeave = useCallback(() => {
+    clearPeekTimer();
+    peekTimerRef.current = window.setTimeout(() => setRailPeek(false), 220);
+  }, [clearPeekTimer]);
+
+  useEffect(() => clearPeekTimer, [clearPeekTimer]);
+
+  // Ctrl/Cmd+B — the shortcut the reference tooltip advertises.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'b' && event.key !== 'B') return;
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      toggleRailCollapse();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [toggleRailCollapse]);
 
   useEffect(() => {
     if (!sidebarOpen) return;
@@ -593,14 +707,21 @@ export default function Page() {
     setShowScrollToLatest(false);
     addTurns([
       createTurn('user', text, sentAttachments.length ? { attachments: sentAttachments } : undefined),
+      // The empty assistant turn used to be added only once the stream
+      // responded. It is created up front now because the working indicator
+      // renders inside this bubble: without it there is nothing on screen to
+      // hold "Thinking" while retrieval runs.
+      createTurn('assistant', '', {}),
     ]);
     setMessage('');
     setPendingAttachments([]);
     setIsLoading(true);
+    const t0 = Date.now();
+    setTurnPhase('thinking');
+    setTurnStartedAt(t0);
     setChatLiveStatus('Getting a response from URA.');
     lastUserQueryRef.current = text;
     trackChatSent(text.length);
-    const t0 = Date.now();
     const ac = new AbortController();
     streamAbortRef.current = ac;
     userStoppedRef.current = false;
@@ -657,22 +778,19 @@ export default function Page() {
         setChatLiveStatus('URA response ready.');
         return;
       }
-      addTurns([createTurn('assistant', '', {})]);
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No body');
       const dec = new TextDecoder();
-      let buf = '', streamed = '', pending = '', meta: Record<string, unknown> = {}, evt = 'token';
-      let raf: number | null = null;
-      const flushPending = () => {
-        if (!pending) {
-          raf = null;
-          return;
-        }
-        streamed += pending;
-        pending = '';
-        updateLastTurn((t) => ({ ...t, content: streamed }));
-        raf = null;
-      };
+      let buf = '', meta: Record<string, unknown> = {}, evt = 'token';
+      /* Tokens go through the reveal queue rather than straight into the store,
+         so the answer types itself out at a steady rate no matter how bursty
+         the stream is. `reveal.getTarget()` is everything that has arrived —
+         the old `streamed` accumulator. */
+      const reveal = createRevealQueue({
+        onCommit: (textSoFar) => updateLastTurn((t) => ({ ...t, content: textSoFar })),
+        instant: prefersReducedMotion(),
+      });
+      revealQueueRef.current = reveal;
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -693,32 +811,36 @@ export default function Page() {
                   meta = { ...meta, ...p };
                   if (p.conversation_id) sessionIdRef.current = p.conversation_id;
                   if (typeof p.reply === 'string' && p.reply.trim()) {
-                    streamed = cleanResponse(p.reply);
-                    pending = '';
-                    updateLastTurn((t) => ({ ...t, content: streamed }));
+                    reveal.set(cleanResponse(p.reply));
                   }
                   updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason }));
                 } catch {
-                  pending += data;
-                  if (raf === null) {
-                    raf = requestAnimationFrame(flushPending);
-                  }
+                  reveal.push(data);
                 }
               }
               evt = 'token';
               continue;
             }
             if (evt === 'revision') {
-              const revised = cleanResponse(data);
-              streamed = revised;
-              pending = '';
-              updateLastTurn((t) => ({ ...t, content: revised }));
+              reveal.set(cleanResponse(data));
               evt = 'token';
               continue;
             }
             if (evt === 'metadata' || evt === 'grounding') {
+              // Retrieval is finished by the time metadata lands and the model
+              // is about to start writing, so this is the churning boundary.
+              if (evt === 'metadata') setTurnPhase('churning');
               try { const p = JSON.parse(data); meta = { ...meta, ...p }; if (p.conversation_id) sessionIdRef.current = p.conversation_id; updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason })); } catch {}
               evt = 'token'; continue;
+            }
+            if (evt === 'phase') {
+              // Live retrieval boundaries (main.py). This needs its own branch
+              // for the same reason agent_trace does — see the note below: an
+              // unhandled event falls through to the token branch and its raw
+              // data is appended straight into the visible reply.
+              if (data.trim() === 'retrieval.started') setTurnPhase('searching');
+              evt = 'token';
+              continue;
             }
             if (evt === 'agent_trace') {
               // Buffered retrieval/iteration/tool-call trace, emitted just before
@@ -729,25 +851,23 @@ export default function Page() {
               evt = 'token'; continue;
             }
             if (data || evt === 'token') {
-              pending += data || '\n';
-              if (raf === null) {
-                raf = requestAnimationFrame(flushPending);
-              }
+              // A token arriving before any metadata frame — the short-circuit
+              // branches do exactly that — still means the answer has started.
+              setTurnPhase('churning');
+              reveal.push(data || '\n');
             }
             evt = 'token';
           }
         }
         dec.decode();
-        if (raf !== null) {
-          cancelAnimationFrame(raf);
-          flushPending();
-        } else if (pending) {
-          flushPending();
-        }
-        const cleaned = cleanResponse(streamed);
-        if (cleaned !== streamed) {
-          updateLastTurn((t) => ({ ...t, content: cleaned }));
-        }
+        const arrived = reveal.getTarget();
+        const cleaned = cleanResponse(arrived);
+        if (cleaned !== arrived) reveal.set(cleaned);
+        // Let the reveal run out before anything downstream reads the turn.
+        // The emptiness check below, the analytics call and saveCurrentSession
+        // in `finally` all inspect the stored content, and a half-typed reply
+        // would look like a short one — or get persisted as one.
+        await reveal.finish();
       } finally { reader.releaseLock(); }
       if (!useChatStore.getState().chat.at(-1)?.content.trim()) {
         await applySyncReply();
@@ -776,15 +896,30 @@ export default function Page() {
       }
     } finally {
       clearTimeout(timeout);
+      // Whatever path got us here — done, abort, error — the reveal must not
+      // outlive the turn, or it keeps committing into a turn nobody is waiting
+      // on and `saveCurrentSession` below persists a partial reply.
+      revealQueueRef.current?.stop();
+      revealQueueRef.current = null;
       streamAbortRef.current = null;
       userStoppedRef.current = false;
       setIsLoading(false);
+      setTurnPhase(null);
+      // The real duration, from the question leaving to the answer settling.
+      const elapsedMs = Date.now() - t0;
+      const finished = useChatStore.getState().chat.at(-1);
+      if (finished?.role === 'assistant' && finished.content.trim()) {
+        updateLastTurn((turn) => ({ ...turn, thoughtForMs: elapsedMs }));
+      }
       saveCurrentSession();
     }
   }, [message, isLoading, locale, activeConversationId, pendingAttachments, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
+    // Commit what has arrived rather than abandoning it mid-word: the reader
+    // asked it to stop, not to throw away the part it had already written.
+    revealQueueRef.current?.stop();
     streamAbortRef.current?.abort();
   }, []);
 
@@ -806,6 +941,8 @@ export default function Page() {
           if (pcm16.byteLength === 0) return;
           setIsLoading(true);
           const t0 = Date.now();
+          setTurnPhase('thinking');
+          setTurnStartedAt(t0);
           const conversationId = activeConversationId ?? ensureActiveConversationId();
           trackChatSent(0);
           try {
@@ -819,7 +956,7 @@ export default function Page() {
             if (r.error && !r.transcript) { addTurns([createTurn('assistant', `Voice error: ${r.error}`)]); trackErrorOccurred('voice_chat_failed'); return; }
             if (r.transcript) { addTurns([createTurn('user', r.transcript)]); lastUserQueryRef.current = r.transcript; }
             if (r.reply) {
-              addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword' })]);
+              addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword', thoughtForMs: Date.now() - t0 })]);
               trackChatReceived(Date.now() - t0, (r.sources?.length ?? 0) > 0);
               const tid = useChatStore.getState().chat[useChatStore.getState().chat.length - 1]?.id;
               if (r.reply_audio_base64) {
@@ -830,7 +967,7 @@ export default function Page() {
                 void handleListenToReply(tid, r.reply);
               }
             }
-          } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); saveCurrentSession(); }
+          } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); setTurnPhase(null); saveCurrentSession(); }
         } else {
           // Start recording
           try {
@@ -981,6 +1118,42 @@ export default function Page() {
 
   // ---- Derived state ----
 
+  const activeConversation = useMemo(
+    () => conversations.find((c) => c.id === activeConversationId) ?? null,
+    [conversations, activeConversationId],
+  );
+
+  /**
+   * The title shown in the top strip.
+   *
+   * A thread only enters `conversations` when `saveCurrentSession` runs, which
+   * is after the reply lands — so between sending the first message and getting
+   * an answer there is a real conversation with no stored record of it. Derive
+   * the title from the transcript in that window rather than leaving the strip
+   * blank for the length of a request.
+   */
+  const conversationTitle = useMemo(() => {
+    if (activeConversation) return activeConversation.title;
+    const first = chat.find((t) => t.role === 'user');
+    if (!first) return undefined;
+    return first.content.slice(0, 60) + (first.content.length > 60 ? '...' : '');
+  }, [activeConversation, chat]);
+
+  /** Delete is confirm-wrapped wherever it is reached from. */
+  const requestDeleteConversation = useCallback(
+    (id: string) => {
+      const conv = conversations.find((c) => c.id === id);
+      setConfirmReq({
+        title: 'Delete conversation?',
+        message: `"${conv?.title ?? 'This conversation'}" and its ${conv?.turns.length ?? 0} messages will be permanently deleted.`,
+        confirmLabel: 'Delete',
+        danger: true,
+        action: () => deleteSession(id),
+      });
+    },
+    [conversations, deleteSession],
+  );
+
   const serverReady = speechHealth?.status === 'ready';
   // Memoize user query lookup per turn for ChatMessage
   const userQueries = useMemo(() => {
@@ -1030,38 +1203,66 @@ export default function Page() {
 
   return (
     <>
-    <div className="app-shell chatv2" data-sidebar={railCollapsed ? 'collapsed' : 'open'}>
+    <div
+      className="app-shell chatv2"
+      data-sidebar={railCollapsed ? 'collapsed' : 'open'}
+      data-rail-peek={railCollapsed && railPeek ? 'true' : undefined}
+    >
+      {/* Left-edge hot zone: with the rail collapsed there is no visible target
+          below the toggle, so the whole edge peeks it back — the reference
+          recording opens on approach, not only on a precise hit. Desktop only;
+          CSS hides it under a pointer that cannot hover. */}
+      {railCollapsed && (
+        <div
+          className="rail-hotzone"
+          aria-hidden="true"
+          onMouseEnter={handlePeekEnter}
+          onMouseLeave={handlePeekLeave}
+        />
+      )}
+
       {/* ── Conversation sidebar ── */}
-      <ConversationRail
-        open={sidebarOpen}
-        conversations={conversations}
-        activeConversationId={activeConversationId}
-        onClose={() => setSidebarOpen(false)}
-        onNewConversation={() => { createNewSession(); setSidebarOpen(false); }}
-        onSelectConversation={(id) => { switchSession(id); setSidebarOpen(false); }}
-        onDeleteConversation={(id) => {
-          const conv = conversations.find((c) => c.id === id);
-          setConfirmReq({
-            title: 'Delete conversation?',
-            message: `"${conv?.title ?? 'This conversation'}" and its ${conv?.turns.length ?? 0} messages will be permanently deleted.`,
-            confirmLabel: 'Delete',
-            danger: true,
-            action: () => deleteSession(id),
-          });
-        }}
-        onOpenSettings={() => {
-          setSidebarOpen(false);
-          openSettings('general');
-        }}
-      />
+      <div
+        className="rail-wrap"
+        onMouseEnter={railCollapsed ? handlePeekEnter : undefined}
+        onMouseLeave={railCollapsed ? handlePeekLeave : undefined}
+      >
+        <ConversationRail
+          open={sidebarOpen}
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onClose={() => setSidebarOpen(false)}
+          onNewConversation={() => { createNewSession(); setSidebarOpen(false); }}
+          onSelectConversation={(id) => { switchSession(id); setSidebarOpen(false); }}
+          onDeleteConversation={requestDeleteConversation}
+          onRenameConversation={renameSession}
+          onPinConversation={togglePinSession}
+          onOpenSearch={() => {
+            railSearchReturnRef.current = document.activeElement as HTMLElement | null;
+            setSearchOpen(true);
+          }}
+          onToggleRailCollapse={toggleRailCollapse}
+          onOpenSettings={() => {
+            setSidebarOpen(false);
+            openSettings('general');
+          }}
+        />
+      </div>
 
       {/* ── Main column (top bar + content) ── */}
       <div className="app-main-col">
       <ChatHeader
         hasStartedChat={hasStartedChat}
         onOpenSidebarMobile={() => setSidebarOpen(true)}
-        onToggleRailCollapse={() => setRailCollapsed((v) => !v)}
-        onNewChat={() => createNewSession()}
+        onToggleRailCollapse={toggleRailCollapse}
+        railCollapsed={railCollapsed}
+        onPeekEnter={handlePeekEnter}
+        onPeekLeave={handlePeekLeave}
+        conversationTitle={conversationTitle}
+        conversationPinned={Boolean(activeConversation?.pinned)}
+        onPinConversation={() => activeConversation && togglePinSession(activeConversation.id)}
+        onRenameConversation={(title) => activeConversation && renameSession(activeConversation.id, title)}
+        onDeleteConversation={() => activeConversation && requestDeleteConversation(activeConversation.id)}
         onRequestClear={() =>
           setConfirmReq({
             title: 'Clear conversation?',
@@ -1083,18 +1284,12 @@ export default function Page() {
           /* ── Landing state — input-first hierarchy (chatv2) ── */
           <div className="landing">
             <div className="landing-brand">
-              <h1 className="ldv2-brand">
-                <Image
-                  src="/ura-assistant-logo.svg"
-                  alt=""
-                  aria-hidden="true"
-                  width={34}
-                  height={34}
-                  priority
-                />
-                URA Tax Assistant
-              </h1>
-              <h2 className="ldv2-headline">How can I help with your taxes?</h2>
+              {/* The wordmark that used to sit above this is gone — the sidebar
+                  carries the brand, and repeating it here pushed the question
+                  the screen is actually asking down the page. This is now the
+                  document's h1: it is the page's real heading, and without it
+                  the landing would start at h2 with nothing above it. */}
+              <h1 className="ldv2-headline">How can I help with your taxes?</h1>
               <p className="landing-sub">
                 Official AI-powered assistant for Uganda Revenue Authority
               </p>
@@ -1136,33 +1331,43 @@ export default function Page() {
               ref={messageListRef}
               className={`message-list${isLoading ? ' is-streaming' : ''}`}
             >
-              {chat.map((turn) => (
-                <ChatMessage
-                  key={turn.id}
-                  turn={turn}
-                  userQuery={userQueries[turn.id] || ''}
-                  locale={locale}
-                  playingTurnId={playingTurnId}
-                  ttsLoading={ttsLoading}
-                  isTransitioning={isTransitioning}
-                  onListen={handleListenToReply}
-                />
-              ))}
-              {isLoading && (() => {
-                const last = chat[chat.length - 1];
-                if (last?.role === 'assistant' && last.content !== '') return null;
+              {chat.map((turn, i) => {
+                /* The working indicator belongs to the turn being written, so
+                   it sits above the text as it types and is replaced in place
+                   by "Thought for …" when the turn ends. */
+                const isPending =
+                  isLoading && turnPhase !== null && i === chat.length - 1 && turn.role === 'assistant';
                 return (
-                  <article className="message-row message-row-assistant">
-                    <div className="avatar assistant" aria-hidden="true"><BotIcon /></div>
-                    <div className="bubble assistant">
-                      <div className="stagev2" role="status">
-                        <span className="stagev2-label">Searching the URA knowledge base…</span>
-                        <div className="stagev2-skl" aria-hidden="true"><span /><span /></div>
-                      </div>
-                    </div>
-                  </article>
+                  <ChatMessage
+                    key={turn.id}
+                    turn={turn}
+                    userQuery={userQueries[turn.id] || ''}
+                    locale={locale}
+                    playingTurnId={playingTurnId}
+                    ttsLoading={ttsLoading}
+                    isTransitioning={isTransitioning}
+                    onListen={handleListenToReply}
+                    phaseLabel={isPending ? PHASE_UI[turnPhase].label : undefined}
+                    phaseVariant={isPending ? PHASE_UI[turnPhase].variant : undefined}
+                    phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
+                  />
                 );
-              })()}
+              })}
+              {/* A turn with no assistant bubble to sit in — the voice path
+                  transcribes and answers in one request, so the reply's turn
+                  does not exist until it arrives. */}
+              {isLoading && turnPhase !== null && turnStartedAt !== null
+                && chat[chat.length - 1]?.role !== 'assistant' && (
+                <article className="message-row message-row-assistant">
+                  <div className="bubble assistant">
+                    <LoadingState
+                      label={PHASE_UI[turnPhase].label}
+                      variant={PHASE_UI[turnPhase].variant}
+                      startedAt={turnStartedAt}
+                    />
+                  </div>
+                </article>
+              )}
               <div ref={messagesEndRef} className="messages-end-spacer" />
             </div>
 
@@ -1190,6 +1395,19 @@ export default function Page() {
           </div>
         )}
       </main>
+
+      {/* Conversation search — opened from the rail's magnifier. */}
+      {searchOpen && (
+      <ConversationSearch
+        conversations={conversations}
+        onClose={() => setSearchOpen(false)}
+        onSelect={(id) => {
+          switchSession(id);
+          setSidebarOpen(false);
+        }}
+        returnFocusRef={railSearchReturnRef}
+      />
+      )}
 
       {/* Destructive-action confirmation (chatv2) */}
       <ConfirmDialog

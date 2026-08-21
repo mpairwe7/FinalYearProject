@@ -56,13 +56,13 @@ async function signedIn(page: Page, role = "verified_taxpayer") {
 }
 
 test.describe("Auth entry points", () => {
-  test("the landing page offers sign-in and sign-up in three places", async ({ page }) => {
+  test("the landing page offers sign-in and sign-up in two places", async ({ page }) => {
     await anonymous(page);
     await page.goto("/");
 
-    // Header pair.
-    await expect(page.locator("a.hdrv2-signup")).toHaveAttribute("href", "/signup");
-    // Sidebar account block.
+    // Two places, not three: the header pair went with the navbar. The sidebar
+    // account block was always their primary home, and the hero note is the
+    // other. Both are on this screen at desktop width.
     await expect(page.locator("a.rail-acct-primary")).toHaveAttribute("href", "/signin");
     await expect(page.locator("a.rail-acct-ghost")).toHaveAttribute("href", "/signup");
     // The hero note, which says what an account is for rather than gating.
@@ -92,8 +92,8 @@ test.describe("Auth entry points", () => {
     await page.goto("/");
 
     await expect(page.locator(".rail-acct-name")).toHaveText("verified_taxpayer@example.ug");
-    await expect(page.locator("a.hdrv2-signup")).toHaveCount(0);
     await expect(page.locator("a.rail-acct-primary")).toHaveCount(0);
+    await expect(page.locator("a.rail-acct-ghost")).toHaveCount(0);
 
     // Signing out from the account menu brings the entry points back. The
     // rail is off-canvas below 1024px — open it first (no-op on desktop).
@@ -130,10 +130,15 @@ test.describe("Settings", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   });
 
-  test("the response language chosen here is the one the header shows", async ({ page }) => {
+  test("the response language chosen here is the one the 3-dot menu shows", async ({ page }) => {
     await page.getByLabel("Response language", { exact: true }).selectOption("lg");
     await page.getByRole("button", { name: "Close settings" }).click();
-    await expect(page.locator(".langsel-btn")).toContainText("LG");
+    // The header button that used to report the locale went with the navbar;
+    // the same state is now named by the menu item that opens the picker.
+    await page.getByRole("button", { name: "More options" }).click();
+    await expect(
+      page.getByRole("menuitem", { name: "Response language: Luganda" }),
+    ).toBeVisible();
   });
 
   test("every section renders", async ({ page }) => {

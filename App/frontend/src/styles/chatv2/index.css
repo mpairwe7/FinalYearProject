@@ -3,8 +3,14 @@
  * at equal specificity. globals.css itself is untouched by the redesign. */
 @import "./tokens.css";
 @import "./shell.css";
+/* Sidebar, conversation rows, the shared row menu, search overlay and /chats.
+   After shell.css because it restyles the same rail selectors. */
+@import "./sidebar.css";
 @import "./composer.css";
 @import "./messages.css";
+/* The working indicator + "Thought for …". After messages.css because it sits
+   inside the transcript it styles. */
+@import "./loading.css";
 @import "./overlays.css";
 /* Settings dialog + the account/auth entry points in the rail and header.
    After overlays.css because it reuses .dlgv2-x and the shared keyframes. */

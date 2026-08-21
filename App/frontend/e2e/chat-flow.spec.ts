@@ -17,7 +17,9 @@ test.describe("Agentic chat flow", () => {
     await mockBackend(page);
     await page.goto("/");
     await expect(page).toHaveTitle(/URA Chatbot/);
-    await expect(page.getByRole("heading", { name: /URA Tax Assistant/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: /How can I help with your taxes/i }),
+    ).toBeVisible();
     await expect(page.getByLabel("Type your message")).toBeVisible();
   });
 
@@ -90,16 +92,25 @@ test.describe("Agentic chat flow", () => {
   test("language switch toggles to Luganda", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");
-    // chatv2: the language radios live inside the composer's picker overlay.
-    await page.getByRole("button", { name: /Response language/ }).click();
-    const lg = page.getByRole("radio", { name: /Luganda/i });
-    await lg.click();
-    // Selecting closes the picker and the trigger reflects the new locale.
+    // The picker overlay is unchanged; only its trigger moved. With the navbar
+    // gone, language is reached from the 3-dot menu rather than a header button.
+    const openPicker = async () => {
+      await page.getByRole("button", { name: "More options" }).click();
+      await page.getByRole("menuitem", { name: /Response language/ }).click();
+    };
+
+    await openPicker();
+    await page.getByRole("radio", { name: /Luganda/i }).click();
+    // Selecting closes the picker and the menu item reflects the new locale.
+    await expect(page.getByRole("dialog", { name: "Response language" })).toHaveCount(0);
+    await page.getByRole("button", { name: "More options" }).click();
     await expect(
-      page.getByRole("button", { name: "Response language: Luganda" }),
+      page.getByRole("menuitem", { name: "Response language: Luganda" }),
     ).toBeVisible();
+    await page.keyboard.press("Escape");
+
     // Re-open to confirm the radio state persisted.
-    await page.getByRole("button", { name: /Response language/ }).click();
+    await openPicker();
     await expect(page.getByRole("radio", { name: /Luganda/i })).toHaveAttribute(
       "aria-checked",
       "true",

@@ -111,9 +111,10 @@ async function mockVoiceCatalogue(page: Page) {
   await page.route("**/api/v1/speech/voices", (route) => route.fulfill({ json: VOICE_CATALOGUE }));
 }
 
-/** Pick a language from the header menu, the way a person does. */
+/** Pick a language the way a person does: 3-dot menu, then the picker. */
 async function chooseLanguage(page: Page, label: string) {
-  await page.locator(".langsel-btn").click();
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("menuitem", { name: /Response language/ }).click();
   await page.getByRole("radio", { name: new RegExp(label) }).click();
   await expect(page.getByRole("dialog", { name: "Response language" })).toHaveCount(0);
 }

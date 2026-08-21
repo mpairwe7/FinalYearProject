@@ -19,8 +19,10 @@ test.describe("URA Chatbot Smoke", () => {
   test("homepage loads with the assistant landing shell", async ({ page }) => {
     await page.goto("/");
     await expect(page).toHaveTitle(/URA Chatbot/);
+    // The hero wordmark is gone — the sidebar carries the brand. The question
+    // the screen asks is the page's h1 now.
     await expect(
-      page.getByRole("heading", { name: /URA Tax Assistant/i }),
+      page.getByRole("heading", { level: 1, name: /How can I help with your taxes/i }),
     ).toBeVisible();
     await expect(
       page.getByText(/Official AI-powered assistant for Uganda Revenue Authority/),

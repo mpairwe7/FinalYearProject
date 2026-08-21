@@ -50,7 +50,8 @@ test.describe("Responsive layout", () => {
 
       await hamburger.click();
       await expect(page.locator("aside.conversation-rail.conversation-rail-open")).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Chats" })).toBeVisible();
+      // The rail is headed by the brand row now, not a "Chats" heading.
+      await expect(page.locator("aside.conversation-rail .rail-brand")).toBeVisible();
 
       // Closing via the close button collapses the overlay.
       await page.getByLabel("Close sidebar").click();

@@ -930,6 +930,14 @@ async def chat_stream(
                 _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
                 continue
             if event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
+                # Retrieval boundaries go out live, as a name and nothing else.
+                # The client needs them to say what it is doing right now, and
+                # the buffered agent_trace below cannot serve that: it is held
+                # back until just before `grounding`, which is after generation
+                # has already streamed. The payloads still go into that summary
+                # unchanged — this only adds a frame, it does not divert one.
+                if event_type in ("retrieval.started", "retrieval.completed"):
+                    yield {"event": "phase", "data": event_type}
                 # Buffer for the agent_trace summary; do not forward live.
                 event_dict = payload if isinstance(payload, dict) else {"value": payload}
                 agent_trace.append({"type": event_type, **{k: v for k, v in event_dict.items() if k != "type"}})

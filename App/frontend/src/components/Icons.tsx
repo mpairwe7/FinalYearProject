@@ -225,3 +225,25 @@ export const ShieldIcon = () => (
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
   </svg>
 );
+export const SearchIcon = () => (
+  <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+    <circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" />
+  </svg>
+);
+export const PinIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15.5 2.5 21.5 8.5" /><path d="M12.5 5.5 5 11l-1.5 5.5L9 15l5.5-7.5" />
+    <path d="M3.5 20.5 9 15" /><path d="M14.5 7.5 16.5 9.5" />
+  </svg>
+);
+export const PinOffIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15.5 2.5 21.5 8.5" /><path d="M12.5 5.5 5 11l-1.5 5.5L9 15l5.5-7.5" />
+    <path d="M3.5 20.5 9 15" /><path d="M2 2l20 20" />
+  </svg>
+);
+export const PencilIcon = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 20h4L19.5 8.5a2.12 2.12 0 0 0-3-3L5 17v3Z" /><path d="M14.5 6.5 17.5 9.5" />
+  </svg>
+);
