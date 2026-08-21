@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { restoreFocus } from "../lib/focus";
 import { CheckIcon, ChevronDownIcon, GlobeIcon, CloseIcon } from "./Icons";
 
 /**
@@ -26,26 +27,64 @@ interface LanguageMenuProps {
   locale: string;
   options: readonly LanguageOption[];
   onLocaleChange: (code: string) => void;
+  /**
+   * Render the overlay only, with no trigger of its own.
+   *
+   * The header no longer has room for a language button — the picker is reached
+   * from a "Response language" item in the 3-dot menu, and that item unmounts
+   * the moment it is activated. So the caller owns the open state and says where
+   * focus should land on close; the overlay, its radios and its focus trap are
+   * unchanged either way, which is the point of driving it rather than forking it.
+   */
+  hideTrigger?: boolean;
+  controlledOpen?: boolean;
+  onRequestClose?: () => void;
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
-export default function LanguageMenu({ locale, options, onLocaleChange }: LanguageMenuProps) {
-  const [open, setOpen] = useState(false);
-  const [focusIdx, setFocusIdx] = useState(0);
+export default function LanguageMenu({
+  locale,
+  options,
+  onLocaleChange,
+  hideTrigger = false,
+  controlledOpen,
+  onRequestClose,
+  returnFocusRef,
+}: LanguageMenuProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  /** null = follow the selected locale; a number = the user has arrowed away. */
+  const [focusIdx, setFocusIdx] = useState<number | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+
   const current = options.find((o) => o.value === locale) ?? options[0];
+  const activeIdx = Math.max(0, options.findIndex((o) => o.value === locale));
+  /* Roving tabindex. Derived rather than stored, so a controlled open — which
+     never runs openMenu() — still lands on the selected language. */
+  const rovingIdx = focusIdx ?? activeIdx;
 
   const openMenu = useCallback(() => {
-    setFocusIdx(Math.max(0, options.findIndex((o) => o.value === locale)));
-    setOpen(true);
-  }, [locale, options]);
+    setFocusIdx(null);
+    setUncontrolledOpen(true);
+  }, []);
 
   const close = useCallback(() => {
-    setOpen(false);
+    setFocusIdx(null);
+    if (isControlled) {
+      onRequestClose?.();
+      // The control that opened this may already be gone (a menu item that
+      // closed its menu on activation), so fall back to the main landmark
+      // rather than stranding focus on <body>.
+      restoreFocus(returnFocusRef?.current ?? null);
+      return;
+    }
+    setUncontrolledOpen(false);
     btnRef.current?.focus();
-  }, []);
+  }, [isControlled, onRequestClose, returnFocusRef]);
 
   const select = useCallback(
     (code: string) => {
@@ -58,7 +97,7 @@ export default function LanguageMenu({ locale, options, onLocaleChange }: Langua
   // Focus the active option on open; lock background scroll; trap Tab.
   useEffect(() => {
     if (!open) return;
-    optionRefs.current[focusIdx]?.focus();
+    optionRefs.current[rovingIdx]?.focus();
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
@@ -122,6 +161,7 @@ export default function LanguageMenu({ locale, options, onLocaleChange }: Langua
 
   return (
     <div className="langsel">
+      {!hideTrigger && (
       <button
         ref={btnRef}
         type="button"
@@ -142,6 +182,7 @@ export default function LanguageMenu({ locale, options, onLocaleChange }: Langua
         <span>{current.value.toUpperCase()}</span>
         <ChevronDownIcon />
       </button>
+      )}
 
       {open && (
         <div
@@ -177,7 +218,7 @@ export default function LanguageMenu({ locale, options, onLocaleChange }: Langua
                   role="radio"
                   aria-checked={o.value === locale}
                   className="lmv2-opt"
-                  tabIndex={i === focusIdx ? 0 : -1}
+                  tabIndex={i === rovingIdx ? 0 : -1}
                   onKeyDown={(e) => onOptionKey(e, i)}
                   onClick={() => select(o.value)}
                 >

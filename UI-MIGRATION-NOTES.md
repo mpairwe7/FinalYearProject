@@ -152,3 +152,34 @@ these knowing exceptions:
 Each commit is independent-ish, but the practical rollback is
 `git revert <range>` of the `ui:` commits — no store, service, or config file
 was touched, so reverting cleanly restores the old UI.
+
+---
+
+## Superseded: the header (2026-08-20)
+
+The `H1`–`H11` rows above record the chatv2 header as it was verified on
+2026-07-29. That header no longer exists. A later change removed the navbar
+outright, so the rows that describe it are history, not current behaviour:
+
+| Was | Now |
+|---|---|
+| `H2` brand + `.top-bar-title` in the header | Moved into the sidebar's brand row, above the conversation list. Still `.top-bar-title`; hidden below 1024px, where the rail is a drawer |
+| `H3` New chat button in the header | Removed. "New chat" is the sidebar's, which is one click away at every width |
+| `H5` locale switch in the header | A `Response language: <label>` item in the 3-dot menu. The picker overlay itself is unchanged |
+| `H10` theme cycle | Unchanged — still the kebab's `Theme: …` item |
+| Header Sign in / Sign up pair | Removed. The sidebar account block was always their primary home |
+| `H1` hamburger | Same control and same accessible name ("Open conversation history"), now drawn as the panel icon |
+| `S1`–`S2` rail "Close sidebar" | Still there, in the sidebar's brand row rather than a separate top bar |
+
+What replaced it: a strip that floats over the conversation with no background
+and no bottom border — the sidebar toggle at top left when the rail is away,
+the conversation title beside it, and the 3-dot menu at top right. The
+transcript scrolls underneath and dissolves into a mask on `.message-list`
+whose top stop is `--cv2-top-h`, so nothing draws a line between the two.
+
+The sidebar gained the toggle and a search button under the URA mark, one-line
+conversation rows with a Pin / Rename / Delete menu on hover, a collapsible
+"Chats" category, and a "View all conversations" link to `/chats` once ten
+threads have accumulated. Collapsing the rail on a desktop leaves it peekable:
+hovering the toggle floats it in over the conversation without moving the
+transcript, and only a click docks it.

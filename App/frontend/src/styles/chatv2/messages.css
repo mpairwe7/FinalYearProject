@@ -4,13 +4,15 @@
  * chips); this file restyles them and adds the loading-stage skeleton.
  * ========================================================================== */
 
-/* No ghost watermark, no scroll mask — clean flat canvas. */
+/* The flat-canvas pass switched off both the ghost watermark and the scroll
+   mask here. Both have since been reinstated by the designs that followed:
+   canvas.css restores the watermark, and shell.css restores the mask — now
+   widened at the top so the transcript dissolves under the floating strip
+   instead of ending at a line. This file no longer has an opinion on either;
+   the watermark rule stays only because canvas.css is written as a revert of
+   it. */
 .chatv2 .chat-area::before {
   display: none;
-}
-.chatv2 .message-list {
-  -webkit-mask-image: none;
-  mask-image: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -204,46 +206,9 @@
 /* ---------------------------------------------------------------------------
  * Loading stage (pre-first-token) + streaming caret
  * ------------------------------------------------------------------------- */
-.chatv2 .stagev2 {
-  padding: 2px 0 4px;
-}
-.chatv2 .stagev2-label {
-  display: inline-block;
-  font-size: 13.5px;
-  color: var(--text-2);
-  animation: cv2-stage-pulse 1.6s ease-in-out infinite;
-}
-@keyframes cv2-stage-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-.chatv2 .stagev2-skl {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-  max-width: 420px;
-}
-.chatv2 .stagev2-skl span {
-  height: 12px;
-  border-radius: 6px;
-  background: linear-gradient(
-    90deg,
-    var(--surface-2) 25%,
-    var(--surface-3) 50%,
-    var(--surface-2) 75%
-  );
-  background-size: 200% 100%;
-  animation: cv2-shimmer 1.4s linear infinite;
-}
-.chatv2 .stagev2-skl span:last-child {
-  width: 62%;
-}
+/* The loading skeleton that used to live here is gone — the working
+   indicator in loading.css replaces it. */
+
 @keyframes cv2-shimmer {
   from {
     background-position: 200% 0;
@@ -296,27 +261,18 @@
   align-items: center;
   gap: 0;
   overflow-y: auto;
-  padding-top: max(40px, 14vh);
+  /* Every landing padding-top below is floored at the strip height. These
+     values were set when the header was a bar in the flow, so 12-24px was
+     enough; the strip floats over the content now, and without the floor the
+     headline slides under the sidebar toggle and the 3-dot menu — which is
+     exactly what happened at 320px wide and on a phone in landscape. */
+  padding-top: max(40px, 14vh, var(--cv2-top-h));
 }
 .chatv2 .landing-brand,
 .chatv2 .landing-composer,
 .chatv2 .landing-prompts,
 .chatv2 .landing-auth {
   width: min(720px, 100%);
-}
-.chatv2 .ldv2-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 6px;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text-2);
-}
-.chatv2 .ldv2-brand img {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
 }
 .chatv2 .ldv2-headline {
   margin: 0 0 8px;
@@ -327,7 +283,15 @@
   color: var(--text-0);
 }
 .chatv2 .landing .landing-sub {
-  margin: 0 0 22px;
+  /* `auto` on the sides is load-bearing: this is a capped-width block in a
+     720px column, so without it the block sits flush left and only its text is
+     centred — which reads as a subtitle drifting left of its own headline. */
+  margin: 0 auto 22px;
+  /* globals caps this at 44ch, which is a measure for running text. This is one
+     56-character line, so the cap only ever broke "Authority" onto a line of
+     its own while space sat unused either side. Wide enough to stay on one line
+     where there is room; narrow screens still wrap on the container. */
+  max-width: 60ch;
   font-size: 13px;
   color: var(--text-2);
   text-align: center;
@@ -377,7 +341,7 @@
 @media (max-width: 720px) {
   /* Brand + chips + auth scroll; composer is the fixed .chat-dock. */
   .chatv2 .landing {
-    padding-top: max(24px, 8vh);
+    padding-top: max(24px, 8vh, var(--cv2-top-h));
     padding-bottom: calc(var(--chat-dock-height, 92px) + var(--keyboard-inset, 0px) + 1.25rem);
   }
   .chatv2 .landing-brand { order: 1; }
@@ -387,7 +351,7 @@
 }
 @media (max-height: 600px) {
   .chatv2 .landing {
-    padding-top: 20px;
+    padding-top: max(20px, var(--cv2-top-h));
   }
 }
 /* A phone turned sideways leaves ~390px of height for the header, the hero and
@@ -395,14 +359,7 @@
    44px thumb target, and it is what the whole screen is for. */
 @media (max-height: 430px) {
   .chatv2 .landing {
-    padding-top: 12px;
-  }
-  .chatv2 .ldv2-brand {
-    margin-bottom: 2px;
-  }
-  .chatv2 .ldv2-brand img {
-    width: 28px;
-    height: 28px;
+    padding-top: max(12px, var(--cv2-top-h));
   }
   .chatv2 .landing .landing-sub {
     margin-bottom: 12px;

@@ -2,6 +2,11 @@
  * Consent banner, conversation-rail interactions, and route navigation
  * (analytics dashboard + evaluation). The evaluation page ships static
  * fallback data, so it renders without a backend.
+ *
+ * The banner is a `region` labelled "Privacy notice", not an `alertdialog`:
+ * a86f3b0b ("fix(a11y): close WCAG 2.2 audit gaps") reclassified it, because
+ * it interrupts nothing and traps no focus. These assertions were still
+ * looking for the old role.
  */
 import { expect, test } from "@playwright/test";
 
@@ -16,7 +21,7 @@ test.describe("Analytics consent banner", () => {
 
   test("accept dismisses the banner and persists the decision", async ({ page }) => {
     await page.goto("/");
-    const banner = page.getByRole("alertdialog", { name: /Analytics consent/i });
+    const banner = page.getByRole("region", { name: /Privacy notice/i });
     await expect(banner).toBeVisible();
     await banner.getByRole("button", { name: "Accept" }).click();
     await expect(banner).toBeHidden();
@@ -27,7 +32,7 @@ test.describe("Analytics consent banner", () => {
 
   test("decline also dismisses the banner", async ({ page }) => {
     await page.goto("/");
-    const banner = page.getByRole("alertdialog", { name: /Analytics consent/i });
+    const banner = page.getByRole("region", { name: /Privacy notice/i });
     await banner.getByRole("button", { name: "Decline" }).click();
     await expect(banner).toBeHidden();
   });
@@ -46,9 +51,26 @@ test.describe("Conversation rail", () => {
     await page.goto("/");
     await page.getByLabel("Open conversation history").click();
     const rail = page.locator("aside.conversation-rail");
-    await expect(rail.getByRole("heading", { name: "Chats" })).toBeVisible();
-    await expect(rail.getByLabel("Search conversations")).toBeVisible();
+    // The "Chats" heading and the always-on search field are gone: the rail is
+    // headed by the brand, and search is a button that opens an overlay.
+    await expect(rail.locator(".rail-brand")).toBeVisible();
     await expect(rail.getByText(/New chat/i)).toBeVisible();
+    await expect(rail.getByRole("button", { name: "Chats" })).toBeVisible();
+  });
+
+  test("the search icon opens an overlay that works with no history", async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel("Open conversation history").click();
+    await page.getByLabel("Search conversations").click();
+
+    const dialog = page.getByRole("dialog", { name: "Search conversations" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Search your conversations")).toBeFocused();
+    // Nothing saved yet, and the overlay still opens and says so.
+    await expect(dialog.getByText(/No conversations yet/i)).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
   });
 });
 

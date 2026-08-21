@@ -1,0 +1,736 @@
+/* =============================================================================
+ * chatv2 — sidebar, conversation rows, the shared row menu, the search overlay
+ * and the all-conversations page.
+ *
+ * Loaded after shell.css. Rows are one line and the actions on them appear on
+ * hover, which is the whole reason this file exists: the legacy `.rail-item`
+ * rules in globals.css assume a two-line row with a permanent delete icon.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * Brand row — the URA mark with the panel toggle and search beside it, where
+ * the navbar's brand and toggle used to be.
+ * ------------------------------------------------------------------------- */
+.chatv2 .rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 6px 14px;
+  min-height: var(--cv2-top-h);
+  flex-shrink: 0;
+}
+
+.chatv2 .rail-brand .top-bar-logo-img {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.chatv2 .rail-brand .top-bar-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Below 1024px the rail is a drawer, so the wordmark is redundant with the
+   screen the drawer slid out of — and the icons need the width more. */
+@media (max-width: 1023px) {
+  .chatv2 .rail-brand .top-bar-title {
+    display: none;
+  }
+}
+
+.chatv2 .rail-brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.chatv2 .rail-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.chatv2 .rail-icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+/* One toggle, two meanings: it collapses the persistent column on a desktop
+   and closes the drawer on a phone. Two buttons rather than one whose label
+   changes, because the label would have to be decided during SSR. */
+.chatv2 .rail-toggle-desktop {
+  display: none;
+}
+.chatv2 .rail-toggle-mobile {
+  display: inline-flex;
+}
+@media (min-width: 1024px) {
+  .chatv2 .rail-toggle-desktop {
+    display: inline-flex;
+  }
+  .chatv2 .rail-toggle-mobile {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Scroll body. The rail is a flex column: brand and "New chat" are fixed, this
+ * scrolls, and the account block is pinned to the foot.
+ * ------------------------------------------------------------------------- */
+.chatv2 .rail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 8px 12px;
+}
+
+.chatv2 .rail-group {
+  margin-bottom: 4px;
+}
+
+.chatv2 .rail-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  padding: 0;
+}
+
+/* Category header. The chevron is revealed on hover or keyboard focus — at
+   rest this reads as a label, and the control turns up where the pointer
+   already is, which is what the reference does. */
+.chatv2 .rail-cat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 8px 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chatv2 .rail-cat-chevron {
+  display: inline-flex;
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity 120ms ease, transform 160ms ease;
+}
+.chatv2 .rail-cat:hover .rail-cat-chevron,
+.chatv2 .rail-cat:focus-visible .rail-cat-chevron {
+  opacity: 1;
+}
+/* Down while the list is open, up while it is packed away. */
+.chatv2 .rail-cat-chevron-up {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+
+.chatv2 .rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: none;
+  overflow: visible;
+  padding: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Rows.
+ * ------------------------------------------------------------------------- */
+.chatv2 .rail-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  border-left: none;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.chatv2 .rail-item:hover,
+.chatv2 .rail-item:focus-within {
+  background: var(--surface-2);
+}
+.chatv2 .rail-item-active,
+.chatv2 .rail-item-active:hover {
+  background: var(--surface-3);
+  border-left: none;
+}
+
+.chatv2 .rail-item-main {
+  display: flex;
+  /* globals.css lays this out as a column — it was built for a two-line row of
+     title-over-preview. Without resetting it the dot stacks above the title and
+     `align-items: center` then centres both, which is what made every row read
+     as ragged centred text. */
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 4px 7px 10px;
+  border: none;
+  background: none;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.chatv2 .rail-item-active .rail-item-main {
+  color: var(--text-0);
+  font-weight: 500;
+}
+
+.chatv2 .rail-item-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  border: 1px solid var(--text-3);
+  flex-shrink: 0;
+}
+.chatv2 .rail-item-active .rail-item-dot {
+  background: var(--cv2-accent);
+  border-color: var(--cv2-accent);
+}
+
+.chatv2 .rail-item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The kebab replaces the old always-on delete icon. Hidden until the row is
+   hovered or something inside it has focus, so a keyboard reaches it too. */
+.chatv2 .rail-item-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 5px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+.chatv2 .rail-item-menu svg {
+  width: 15px;
+  height: 15px;
+}
+.chatv2 .rail-item:hover .rail-item-menu,
+.chatv2 .rail-item:focus-within .rail-item-menu,
+.chatv2 .rail-item-menu[aria-expanded="true"] {
+  opacity: 1;
+}
+.chatv2 .rail-item-menu:hover {
+  background: var(--surface-3);
+  color: var(--text-0);
+}
+/* A control that only exists on hover still has to be reachable by Tab. */
+.chatv2 .rail-item-menu:focus-visible {
+  opacity: 1;
+}
+
+.chatv2 .rail-item-renaming {
+  padding: 2px 5px 2px 6px;
+}
+.chatv2 .rail-item-rename {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--cv2-focus, var(--border-1));
+  border-radius: 6px;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.chatv2 .rail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 12px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: center;
+}
+.chatv2 .rail-empty svg {
+  color: var(--text-3);
+}
+
+/* Sits at the end of the scroll, after the last thread — the way out of a rail
+   that has stopped showing everything. */
+.chatv2 a.rail-view-all {
+  display: block;
+  margin: 8px 2px 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-0);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text-1);
+  font-size: 13px;
+  text-align: center;
+  text-decoration: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.chatv2 a.rail-view-all:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+/* ---------------------------------------------------------------------------
+ * Row / title menu. Portalled to <body>, so it carries `.chatv2` itself and
+ * cannot inherit the shell's tokens through the tree.
+ * ------------------------------------------------------------------------- */
+.convmenu {
+  position: fixed;
+  z-index: 420;
+  display: flex;
+  flex-direction: column;
+  padding: 5px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  animation: dlgv2-fade 120ms ease;
+}
+
+.convmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.convmenu-item:hover {
+  background: var(--surface-2);
+}
+.convmenu-item svg {
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+.convmenu-item-danger {
+  color: var(--danger);
+}
+.convmenu-item-danger svg {
+  color: var(--danger);
+}
+.convmenu-item-danger:hover {
+  background: var(--cv2-danger-soft);
+}
+
+/* ---------------------------------------------------------------------------
+ * Search overlay. Same centred geometry as the language picker next door —
+ * anything anchored inside a 300px rail that clips its children would be cut
+ * off, or would have to escape twice.
+ * ------------------------------------------------------------------------- */
+.chatv2 .csrch-overlay,
+.csrch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 360;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(16px, 12vh, 140px) 16px 16px;
+  background: rgba(0, 0, 0, 0.5);
+  animation: dlgv2-fade 140ms ease;
+}
+
+.csrch {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 100%);
+  max-height: min(70vh, 560px);
+  background: var(--bg-0);
+  border: 1px solid var(--border-0);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: dlgv2-pop 140ms ease;
+}
+
+.csrch-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 18px;
+  border-bottom: 1px solid var(--border-0);
+  flex-shrink: 0;
+}
+.csrch-head > svg {
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.csrch-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  border: none;
+  background: transparent;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 15px;
+  outline: none;
+}
+.csrch-input::placeholder {
+  color: var(--text-3);
+}
+
+.csrch-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.csrch-x:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+.csrch-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.csrch-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.csrch-opt svg {
+  width: 17px;
+  height: 17px;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+.csrch-opt-active {
+  background: var(--surface-2);
+}
+
+.csrch-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csrch-time {
+  color: var(--text-2);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.csrch-empty {
+  margin: 0;
+  padding: 28px 16px;
+  color: var(--text-2);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+ * /chats — the same threads with room to read them.
+ * ------------------------------------------------------------------------- */
+.chatspg-shell {
+  min-height: 100dvh;
+  background: var(--bg-0);
+}
+
+.chatspg {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vh, 56px) clamp(16px, 4vw, 32px) 64px;
+}
+
+.chatspg-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.chatspg-h1 {
+  margin: 0;
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 700;
+  color: var(--text-0);
+}
+
+.chatspg-back {
+  color: var(--text-2);
+  font-size: 13.5px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.chatspg-back:hover {
+  color: var(--text-0);
+  text-decoration: underline;
+}
+
+.chatspg-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+  padding: 0 14px;
+  border: 1px solid var(--border-0);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+.chatspg-search svg {
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+.chatspg-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.chatspg-search:focus-within {
+  border-color: var(--cv2-focus, var(--border-1));
+}
+
+.chatspg-group {
+  margin-bottom: 28px;
+}
+
+.chatspg-h2 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.chatspg-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chatspg-row {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border-0);
+}
+.chatspg-row:hover {
+  background: var(--surface-1);
+}
+
+.chatspg-open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 8px;
+  border: none;
+  background: none;
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 14.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.chatspg-open svg {
+  width: 17px;
+  height: 17px;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.chatspg-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatspg-time {
+  color: var(--text-2);
+  font-size: 12.5px;
+  flex-shrink: 0;
+}
+
+.chatspg-rename {
+  flex: 1;
+  min-height: 40px;
+  margin: 6px 8px;
+  padding: 0 10px;
+  border: 1px solid var(--cv2-focus, var(--border-1));
+  border-radius: 8px;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: 14.5px;
+  outline: none;
+}
+
+.chatspg-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.chatspg-menu:hover {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+
+.chatspg-empty {
+  padding: 40px 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+.chatspg-empty a {
+  color: var(--text-0);
+}
+
+/* ---------------------------------------------------------------------------
+ * Touch targets.
+ *
+ * The compact 26–34px icons above are sized for a mouse on a docked desktop
+ * column. Below 1024px the rail is a drawer — a thumb's context — so the icons
+ * take the 44px minimum the rest of this app already uses (.top-bar-icon-btn,
+ * and the .rail-close button these replaced).
+ *
+ * Visibility is a separate question from size, and keys off hover rather than
+ * width: a row kebab that only appears on hover is unreachable on a screen
+ * that has no hover, so there it is simply always shown.
+ * ------------------------------------------------------------------------- */
+@media (max-width: 1023px) {
+  .chatv2 .rail-icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .chatv2 .rail-item-menu {
+    width: 44px;
+    height: 44px;
+    margin-right: 2px;
+  }
+  .chatv2 .rail-item-menu svg {
+    width: 17px;
+    height: 17px;
+  }
+  .chatv2 .rail-item-main {
+    padding-top: 11px;
+    padding-bottom: 11px;
+  }
+  .chatv2 .rail-cat {
+    min-height: 44px;
+  }
+  .chatspg-menu {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (hover: none) {
+  .chatv2 .rail-item-menu {
+    opacity: 1;
+  }
+  .chatv2 .rail-cat-chevron {
+    opacity: 1;
+  }
+}
+
+/* The account block used to be the only opaque part of a transparent rail,
+   which made it read as a separate panel bolted to the bottom. The rail has a
+   ground of its own now, so this just sits on it. */
+.chatv2 .rail-account {
+  background: transparent;
+  border-top: 1px solid var(--border-0);
+}
+
+/* The picker's own focus treatment. Left alone, the field takes the global
+   input focus ring, which is a bright blue that belongs to neither theme. */
+.chatv2 .csrch-input:focus,
+.chatv2 .csrch-input:focus-visible,
+.chatspg-search input:focus,
+.chatspg-search input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.chatv2 .csrch-head:focus-within {
+  border-bottom-color: var(--cv2-focus, var(--border-1));
+}
