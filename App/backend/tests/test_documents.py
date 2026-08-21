@@ -198,7 +198,7 @@ class DocxAnalysisTest(_RegistryIsolation):
         self.assertGreaterEqual(record.meta.get("paragraph_count", 0), 2)
 
 
-@unittest.skipUnless(_has("fitz"), "PyMuPDF not installed")
+@unittest.skipUnless(_has("pypdfium2") or _has("fitz"), "PDF library not installed")
 class PdfAnalysisTest(_RegistryIsolation):
     def test_pdf_text_layer_extraction(self):
         import fitz
@@ -246,6 +246,171 @@ class PdfAnalysisTest(_RegistryIsolation):
         self.assertEqual(evidence["source"], "ocr")
         self.assertEqual(evidence["page"], 1)
         self.assertEqual(evidence["box"], [[1.0, 2.0], [30.0, 2.0], [30.0, 12.0], [1.0, 12.0]])
+
+    def test_spatial_fusion_mode_extracts_both_layers(self):
+        import fitz
+        from app.vision.ocr import OCRResult
+
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Digital Assessment Header — Official Notice")
+        page.insert_text((72, 96), "This is a full digital text paragraph with sufficient chars.")
+        data = doc.tobytes()
+        doc.close()
+
+        result = OCRResult(
+            items=[
+                {
+                    "text": "STAMPED: 1005556667",
+                    "box": [[10, 10], [50, 10], [50, 20], [10, 20]],
+                    "confidence": 0.95,
+                }
+            ],
+            backend="service",
+            status="ready",
+        )
+
+        with mock.patch.object(documents, "_ENABLE_SPATIAL_OCR", True), \
+             mock.patch.object(documents, "extract_ocr_result", return_value=result):
+            record = documents.analyze_document(data, "hybrid.pdf", "application/pdf")
+
+        self.assertEqual(record.meta["extraction_method"], "pdf_spatial_fusion")
+        self.assertTrue(record.meta.get("ocr_used"))
+        self.assertIn("1005556667", record.fields["tins"])
+        self.assertIn("STAMPED: 1005556667", record.text)
+        self.assertIn("Digital Assessment Header", record.text)
+
+    def test_glyph_fusion_engine_combines_vector_and_insets(self):
+        from app.vision.glyph_fusion import VectorGlyph, fuse_page_glyphs_and_ocr
+
+        # Vector glyphs (crisp, zero OCR error)
+        glyphs = [
+            VectorGlyph(text="Uganda Revenue Authority", bbox=[10.0, 10.0, 200.0, 30.0], page=1),
+            VectorGlyph(text="Notice of Assessment 2026", bbox=[10.0, 35.0, 200.0, 55.0], page=1),
+        ]
+        # Embedded visual inset (diagram/stamp/receipt)
+        ocr_items = [
+            {
+                "text": "EFRIS FISCAL SEAL #991823",
+                "box": [[300.0, 400.0], [500.0, 400.0], [500.0, 480.0], [300.0, 480.0]],
+                "polygon": [[300.0, 400.0], [500.0, 400.0], [500.0, 480.0], [300.0, 480.0]],
+                "confidence": 0.98,
+            }
+        ]
+
+        fused = fuse_page_glyphs_and_ocr(glyphs, ocr_items, page_number=1)
+        sources = [t.source for t in fused]
+        texts = [t.text for t in fused]
+
+        assert "vector_glyph" in sources
+        assert "ocr_inset" in sources
+        assert "Uganda Revenue Authority" in texts
+        assert "EFRIS FISCAL SEAL #991823" in texts
+
+    def test_configurable_ocr_pdf_pages_budget(self):
+        import fitz
+        from app.vision.ocr import OCRResult
+
+        doc = fitz.open()
+        for _ in range(5):
+            doc.new_page()
+        data = doc.tobytes()
+        doc.close()
+
+        result = OCRResult(
+            items=[{"text": "scanned page", "box": [], "confidence": 0.8}],
+            backend="service",
+            status="ready",
+        )
+
+        with mock.patch.object(documents, "_OCR_PDF_PAGES", 4), \
+             mock.patch.object(documents, "extract_ocr_result", return_value=result) as mock_ocr:
+            record = documents.analyze_document(data, "multipage.pdf", "application/pdf")
+
+        self.assertEqual(mock_ocr.call_count, 4)
+        self.assertEqual(len(record.meta["ocr_page_numbers"]), 4)
+
+    def test_pypdfium2_and_pdfplumber_extraction_pure_permissive(self):
+        from app.pdf_export import generate_tax_summary_pdf
+
+        # Generate a standard PDF with fpdf2 (pure Apache-2.0 / LGPL)
+        calc_data = {
+            "items": [
+                {"label": "Gross Income", "amount": 5000000.0},
+                {"label": "PAYE Tax Due", "amount": 1350000.0},
+            ],
+            "total": 1350000.0,
+        }
+        pdf_bytes = generate_tax_summary_pdf(calc_data, taxpayer_ref="TIN-1001234567")
+        
+        # Test extraction via documents.analyze_document (pypdfium2 / pdfplumber)
+        record = documents.analyze_document(pdf_bytes, "summary.pdf", "application/pdf")
+        self.assertEqual(record.kind, "pdf")
+        self.assertIn("Tax Calculation Summary", record.text)
+        self.assertIn("1001234567", record.fields["tins"])
+        self.assertEqual(record.meta["extraction_method"], "pdf_text")
+
+    def test_table_structuring_vector_grid_detector_priority(self):
+        from app.vision.table_structuring import (
+            StructuredTable,
+            TableCell,
+            select_table_structuring_result,
+        )
+
+        vector_table = StructuredTable(
+            table_id="table_1",
+            page_number=1,
+            rows=2,
+            cols=2,
+            cells=[TableCell(row_idx=0, col_idx=0, text="Header", bbox_source="pdf_vector")],
+            matrix=[["Tax Band", "Rate"], ["0 - 235,000", "0%"]],
+            source="pdf_vector",
+            status="ok",
+            downstream_action="auto_use",
+            grid_confidence=0.95,
+        )
+        fallback_table = StructuredTable(
+            table_id="table_1",
+            page_number=1,
+            rows=2,
+            cols=2,
+            matrix=[["Tax Band", "Rate"], ["0 - 235,000", "0%"]],
+            source="vlm",
+            status="ok",
+            downstream_action="auto_use",
+            grid_confidence=0.70,
+        )
+
+        selected = select_table_structuring_result(
+            pdf_vector_candidates=[vector_table],
+            raster_line_candidates=[],
+            fallback_candidates=[fallback_table],
+            pdf_min_confidence=0.90,
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0].source, "pdf_vector")
+        self.assertEqual(selected[0].downstream_action, "auto_use")
+
+    def test_table_structuring_borderless_vlm_fallback_with_warnings(self):
+        from app.vision.table_structuring import (
+            detect_borderless_or_vlm_table,
+            select_table_structuring_result,
+        )
+
+        raw_unbordered = "Category\tRate\nStandard\t18%\nZero-Rated\t0%"
+        fallback = detect_borderless_or_vlm_table(raw_unbordered, page_number=1, enable_vlm_fallback=True)
+        self.assertIsNotNone(fallback)
+        self.assertEqual(fallback.source, "vlm")
+
+        selected = select_table_structuring_result(
+            pdf_vector_candidates=[],
+            raster_line_candidates=[],
+            fallback_candidates=[fallback],
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0].downstream_action, "use_with_warning")
+        self.assertIn("missing_line_candidate", selected[0].warnings)
+        self.assertIn("vlm_fallback", selected[0].warnings)
 
 
 # ---------------------------------------------------------------------------

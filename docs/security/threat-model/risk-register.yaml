@@ -1,0 +1,354 @@
+# URA AI Taxpayer Chatbot — Threat Model Risk Register
+# Source of truth for all identified threats. Parsed and gated by CI/CD pipeline.
+#
+# Severity: Critical | High | Medium | Low
+# Status: Open | Accepted | Mitigated | Closed
+# Framework: STRIDE | MAESTRO | LINDDUN
+
+risks:
+  # ===========================================================================
+  # 1. Frontend (Next.js 16 + React)
+  # ===========================================================================
+  - id: T-FE-01
+    element: Frontend
+    framework: STRIDE
+    stride_category: S
+    threat: Session hijacking or token theft via XSS in chat markdown renderer
+    severity: High
+    cvss: "8.2"
+    existing_controls: DOMPurify/rehype-sanitize in Markdown renderer, strict CSP headers, Next.js script isolation
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: frontend-team
+    cwe: "CWE-79"
+    likelihood_annual: "15%"
+    financial_impact: "$250K"
+    risk_score_annual: "$37.5K"
+    attacker_persona: script_kiddie
+    owasp_api: "API8:2023 Security Misconfiguration"
+
+  - id: T-FE-02
+    element: Frontend
+    framework: STRIDE
+    stride_category: T
+    threat: Client-side tampering of user tier or staff privilege indicators
+    severity: Medium
+    cvss: "5.3"
+    existing_controls: Server-side JWT role validation on all staff and admin API endpoints
+    status: Accepted
+    accepted_by: Engineering Lead
+    accepted_date: "2026-03-24"
+    review_date: "2026-09-24"
+    justification: FastAPI backend enforces role-based access control (RBAC) independently of UI state
+    owner: frontend-team
+    cwe: "CWE-602"
+
+  - id: T-FE-03
+    element: Frontend
+    framework: STRIDE
+    stride_category: I
+    threat: Sensitive taxpayer queries or PII cached in browser history/storage
+    severity: Medium
+    cvss: "6.1"
+    existing_controls: Cache-Control no-store headers, client-side session clear on disconnect, PII masking before storage
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: frontend-team
+    cwe: "CWE-922"
+
+  # ===========================================================================
+  # 2. BFF / API Gateway (FastAPI)
+  # ===========================================================================
+  - id: T-API-01
+    element: BFF API
+    framework: STRIDE
+    stride_category: S
+    threat: API key or JWT forgery via weak signing secret or misconfigured validation
+    severity: Critical
+    cvss: "9.1"
+    existing_controls: HS256/RS256 with cryptographically random 256-bit secrets, mandatory token expiry, signature verification in auth middleware
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-347"
+    owasp_api: "API2:2023 Broken Authentication"
+
+  - id: T-API-02
+    element: BFF API
+    framework: STRIDE
+    stride_category: T
+    threat: Cross-tenant data tampering or unauthorized document upload
+    severity: High
+    cvss: "8.5"
+    existing_controls: Multi-tenant tenant_id isolation in database queries, PDF malware scanning, magic byte MIME validation
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-863"
+    owasp_api: "API1:2023 Broken Object Level Authorization"
+
+  - id: T-API-03
+    element: BFF API
+    framework: STRIDE
+    stride_category: D
+    threat: DoS / Resource exhaustion via unauthenticated burst query floods or slowloris attacks
+    severity: High
+    cvss: "7.5"
+    existing_controls: SlowAPI / Redis sliding window rate limiting per IP and per tenant, request payload size limits (10MB)
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-770"
+    owasp_api: "API4:2023 Unrestricted Resource Consumption"
+
+  - id: T-API-04
+    element: BFF API
+    framework: STRIDE
+    stride_category: E
+    threat: Privilege escalation from taxpayer role to staff/admin role
+    severity: High
+    cvss: "8.8"
+    existing_controls: FastAPI Depends(require_role) dependency injection enforcing strict role hierarchies
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-269"
+
+  - id: T-API-05
+    element: BFF API
+    framework: STRIDE
+    stride_category: R
+    threat: Repudiation of critical staff actions (ticket resolution, prompt overrides)
+    severity: Medium
+    cvss: "6.5"
+    existing_controls: Cryptographic Merkle-tree audit ledger logging all staff actions with timestamp, actor, and hash
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-778"
+
+  # ===========================================================================
+  # 3. RAG Retrieval Engine & Vector Database (Qdrant)
+  # ===========================================================================
+  - id: T-RAG-01
+    element: RAG Engine
+    framework: STRIDE
+    stride_category: T
+    threat: Adversarial document injection / RAG index poisoning with malicious tax advice
+    severity: Critical
+    cvss: "9.3"
+    existing_controls: SHA256 integrity verification on official URA corpus, signed ingest pipeline, document provenance tracking
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: mlops-team
+    cwe: "CWE-353"
+    owasp_llm: "LLM04"
+    mitre_atlas: "AML.T0020"
+
+  - id: T-RAG-02
+    element: RAG Engine
+    framework: STRIDE
+    stride_category: I
+    threat: Indirect prompt injection via ingested PDF documents or web crawl data
+    severity: High
+    cvss: "8.6"
+    existing_controls: InputGuard prompt isolation delimiters, PDF safety filters, strict grounding verification against retrieved text
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: mlops-team
+    cwe: "CWE-74"
+    owasp_llm: "LLM01"
+    mitre_atlas: "AML.T0051"
+
+  - id: T-RAG-03
+    element: Vector DB
+    framework: STRIDE
+    stride_category: I
+    threat: Unauthorized vector collection dump or embedding extraction
+    severity: High
+    cvss: "7.7"
+    existing_controls: Qdrant API key authentication, internal VPC isolation, non-root container user
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: infra-team
+    cwe: "CWE-200"
+
+  # ===========================================================================
+  # 4. LLM & Inference Engine (vLLM / HuggingFace)
+  # ===========================================================================
+  - id: T-LLM-01
+    element: LLM Inference
+    framework: STRIDE
+    stride_category: T
+    threat: Direct jailbreak / prompt injection overriding system prompt and safety policies
+    severity: High
+    cvss: "8.6"
+    existing_controls: InputGuard regex & semantic injection filter, system prompt boundary isolation, OutputGuard verification
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: ai-team
+    cwe: "CWE-74"
+    owasp_llm: "LLM01"
+    mitre_atlas: "AML.T0054"
+
+  - id: T-LLM-02
+    element: LLM Inference
+    framework: STRIDE
+    stride_category: I
+    threat: PII leakage (Uganda TIN, National ID, Phone, Email, Bank info) in generated output
+    severity: Critical
+    cvss: "9.0"
+    existing_controls: OutputGuard PII regex & entity redaction with automatic masking ([TIN-REDACTED], [PHONE-REDACTED])
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: ai-team
+    cwe: "CWE-359"
+    owasp_llm: "LLM02"
+    mitre_atlas: "AML.T0024.001"
+
+  - id: T-LLM-03
+    element: LLM Inference
+    framework: STRIDE
+    stride_category: T
+    threat: Hallucination of tax rates, penalties, or legal deadlines
+    severity: High
+    cvss: "8.1"
+    existing_controls: DeBERTa cross-encoder entailment grounding check; automatic abstention/escalation when confidence < 0.65
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: ai-team
+    cwe: "CWE-392"
+    owasp_llm: "LLM09"
+
+  - id: T-LLM-04
+    element: LLM Inference
+    framework: STRIDE
+    stride_category: D
+    threat: GPU resource exhaustion via quadratic attention token exhaustion (denial of service)
+    severity: Medium
+    cvss: "6.8"
+    existing_controls: Max token length limits (max_model_len=8192, max_output_tokens=1024), request queue caps
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: infra-team
+    cwe: "CWE-400"
+    owasp_llm: "LLM10"
+
+  # ===========================================================================
+  # 5. MCP Tools & Agentic Execution (MAESTRO Framework)
+  # ===========================================================================
+  - id: M-AGT-01
+    element: MCP Agent
+    framework: MAESTRO
+    stride_category: E
+    threat: Excessive agency / unauthorized tool invocation (e.g. executing arbitrary tax adjustments)
+    severity: Critical
+    cvss: "9.4"
+    existing_controls: Strict tool policy gating (mcp/policy.py), human-in-the-loop for ticket escalation, read-only tools by default
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-863"
+    owasp_llm: "LLM06"
+    mitre_atlas: "AML.T0040"
+
+  - id: M-AGT-02
+    element: MCP Agent
+    framework: MAESTRO
+    stride_category: T
+    threat: Tool parameter tampering / SSRF via malicious URL parameters in external scrapers
+    severity: High
+    cvss: "8.7"
+    existing_controls: Strict URL scheme allowlist (HTTPS only, official URA domains), private IP range blocking (10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16)
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-918"
+    owasp_llm: "LLM07"
+
+  - id: M-AGT-03
+    element: MCP Agent
+    framework: MAESTRO
+    stride_category: I
+    threat: Sensitive memory / system context leakage to untrusted third-party subagents
+    severity: Medium
+    cvss: "6.5"
+    existing_controls: Memory isolation between conversation sessions, ephemeral subagent contexts
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-200"
+    owasp_llm: "LLM08"
+
+  # ===========================================================================
+  # 6. Privacy & Data Protection (LINDDUN Framework)
+  # ===========================================================================
+  - id: L-PRV-01
+    element: Audit Ledger
+    framework: LINDDUN
+    stride_category: I
+    threat: Taxpayer profiling via long-term query history retention
+    severity: Medium
+    cvss: "5.8"
+    existing_controls: Configurable TTL auto-pruning (CONVERSATION_TTL_DAYS=30), opt-out flags for raw prompt retention (STORE_RAW_PROMPTS=false)
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-359"
+
+  - id: L-PRV-02
+    element: Feedback Pipeline
+    framework: LINDDUN
+    stride_category: I
+    threat: Re-identification of taxpayers through feedback comments and rating logs
+    severity: Medium
+    cvss: "5.5"
+    existing_controls: Export anonymizer hashing user IDs and stripping metadata before evaluation export
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: mlops-team
+    cwe: "CWE-359"
+
+  # ===========================================================================
+  # 7. CI/CD & Supply Chain
+  # ===========================================================================
+  - id: T-SUP-01
+    element: CI/CD Pipeline
+    framework: STRIDE
+    stride_category: T
+    threat: Vulnerable or compromised Python/Node.js dependencies injected into build artifacts
+    severity: High
+    cvss: "8.8"
+    existing_controls: Pip-audit and Trivy SCA scanning in CI, Dependabot weekly updates, .security/dependency-advisories.json baseline gate
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: devsecops-team
+    cwe: "CWE-1395"
+    owasp_llm: "LLM03"
+    mitre_atlas: "AML.T0010"
+
+  - id: T-SUP-02
+    element: CI/CD Pipeline
+    framework: STRIDE
+    stride_category: S
+    threat: Accidental commit of secrets, HuggingFace tokens, or API credentials
+    severity: Critical
+    cvss: "9.2"
+    existing_controls: Multi-layered secret scanning (TruffleHog, GitGuardian, Gitleaks, detect-secrets) in pre-commit hooks and GitHub Actions
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: devsecops-team
+    cwe: "CWE-798"
+
+  - id: T-SUP-03
+    element: Container
+    framework: STRIDE
+    stride_category: E
+    threat: Container breakout / root privilege escalation from containerized runtime
+    severity: High
+    cvss: "8.4"
+    existing_controls: Non-root user (appuser:10001), cap_drop ALL, read_only filesystem with tmpfs mounts, no-new-privileges:true
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: infra-team
+    cwe: "CWE-250"

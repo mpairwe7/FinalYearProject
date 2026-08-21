@@ -1,72 +1,92 @@
 "use client";
 
-import Image from 'next/image';
-import Link from 'next/link';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import ThemeToggle from './ThemeToggle';
 import LanguageMenu, { LanguageOption } from './LanguageMenu';
-import { useIdentity } from '../hooks/useIdentity';
+import ConversationMenu from './ConversationMenu';
 import { useTheme } from '../hooks/useTheme';
 import {
+  AutoThemeIcon,
   BookIcon,
+  ChevronDownIcon,
   KebabIcon,
-  MenuIcon,
+  MoonIcon,
   PanelLeftIcon,
-  PlusIcon,
   SettingsIcon,
+  SunIcon,
   TrashIcon,
 } from './Icons';
 
 /**
- * chatv2 header: sidebar toggles, brand, then a compact action cluster.
- * Conversation-level controls (language, voice, attach) live in the composer;
- * the header keeps navigation, theme, and an overflow menu with Settings, Clear
- * and the blog link. All aria-labels match the legacy header so tests and AT
- * behavior carry over.
+ * chatv2 top strip — what is left of the header after the navbar was removed.
  *
- * Two speech controls used to sit here and no longer do. The "Voice ready"
- * status pill reported a backend detail continuously in the corner of every
- * screen — it earned its space only in the seconds after a failure, and the
- * composer's mic already goes quiet and explains itself when speech is
- * unreachable, which is where someone is looking when it matters. The
- * voice-overlay mic was a second, differently-shaped entry into speech sitting
- * a few centimetres from the composer's own: two mics in one viewport, neither
- * saying which was which. Speech now has one home, in the composer.
+ * The bar is gone as a bar: no brand, no border, no background. What remains is
+ * three things floating over the canvas — the sidebar toggle at top left when
+ * the rail is away, the current conversation's title beside it, and a single
+ * 3-dot menu at top right. The transcript scrolls up underneath and fades out
+ * (the mask lives on `.message-list`), so no line divides this strip from the
+ * conversation.
  *
- * Signed out, the header also carries the Sign in / Sign up pair. The sidebar's
- * account block is the primary home for those, but it is behind the hamburger
- * on a phone — and the first screen someone lands on is this one.
+ * Everything that used to sit here has moved to where it belongs:
+ *  - "New chat" and the brand are the sidebar's, which is always one click away.
+ *  - Sign in / Sign up are the sidebar's account block, their primary home.
+ *  - Theme and language are settings, so they are menu items in the 3-dot menu
+ *    rather than two more permanent icons.
+ *
+ * The menu is a WAI-ARIA menu, not a tab-order popup: focus moves into the
+ * first item as it opens, Arrow keys and Home/End move within it, and Escape
+ * closes it and hands focus back to the button that owns it.
  */
 interface ChatHeaderProps {
   hasStartedChat: boolean;
+  /** Mobile drawer opener — desktop uses `onToggleRailCollapse` instead. */
   onOpenSidebarMobile: () => void;
   onToggleRailCollapse: () => void;
-  onNewChat: () => void;
+  /** True while the desktop rail is collapsed, which is when the toggle shows here. */
+  railCollapsed: boolean;
+  /** Hover on the collapsed toggle peeks the rail open — see page.tsx. */
+  onPeekEnter: () => void;
+  onPeekLeave: () => void;
   /** Already confirm-wrapped by the page. */
   onRequestClear: () => void;
   onOpenSettings: () => void;
   blogUrl: string;
   /* Language is a session-level setting — it governs the reply language, the
      TTS voice and STT recognition for the whole conversation — so it sits with
-     the other settings here rather than in the composer toolbar. */
+     the other settings in this menu rather than in the composer toolbar. */
   locale: string;
   localeOptions: readonly LanguageOption[];
   onLocaleChange: (code: string) => void;
+  /** Current conversation, shown at top left. Absent on the landing screen. */
+  conversationTitle?: string;
+  conversationPinned?: boolean;
+  onPinConversation?: () => void;
+  /** Commits a new title. The inline editor is owned here, beside the title. */
+  onRenameConversation?: (title: string) => void;
+  onDeleteConversation?: () => void;
 }
 
 export default function ChatHeader({
   hasStartedChat,
   onOpenSidebarMobile,
   onToggleRailCollapse,
-  onNewChat,
+  railCollapsed,
+  onPeekEnter,
+  onPeekLeave,
   onRequestClear,
   onOpenSettings,
   blogUrl,
   locale,
   localeOptions,
   onLocaleChange,
+  conversationTitle,
+  conversationPinned = false,
+  onPinConversation,
+  onRenameConversation,
+  onDeleteConversation,
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuItemRefs = useRef<(HTMLElement | null)[]>([]);
@@ -93,12 +113,11 @@ export default function ChatHeader({
     closeMenu(true);
     action?.();
   };
-  // Only a confirmed sign-in hides the call to action: while the token is being
-  // checked the buttons stay, and they come back if it turns out to be stale.
-  const { status } = useIdentity();
-  const signedIn = status === 'signed-in';
   const { pref: themePref, cycle: cycleTheme } = useTheme();
   const themeLabel = themePref === 'light' ? 'Light' : themePref === 'dark' ? 'Dark' : 'Auto';
+  // Every other item in this menu leads with an icon; without one here the
+  // label starts in the icon column and the whole list looks misaligned.
+  const ThemeIcon = themePref === 'light' ? SunIcon : themePref === 'dark' ? MoonIcon : AutoThemeIcon;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -152,61 +171,89 @@ export default function ChatHeader({
     }
   };
 
+  const showTitle = hasStartedChat && Boolean(conversationTitle);
+
+  const commitRename = () => {
+    setRenaming(false);
+    onRenameConversation?.(draft);
+  };
+
   return (
     <header className="hdrv2">
-      <button
-        className="top-bar-icon-btn hdrv2-collapse"
-        onClick={onToggleRailCollapse}
-        aria-label="Toggle conversation history"
-        title="Toggle sidebar"
-      >
-        <PanelLeftIcon />
-      </button>
+      {/* Desktop: only shown while the rail is away — otherwise the rail owns
+          its own toggle, in its brand row. Hovering peeks; clicking docks. */}
+      {railCollapsed && (
+        <button
+          className="top-bar-icon-btn hdrv2-collapse"
+          onClick={onToggleRailCollapse}
+          onMouseEnter={onPeekEnter}
+          onMouseLeave={onPeekLeave}
+          onFocus={onPeekEnter}
+          onBlur={onPeekLeave}
+          aria-label="Toggle conversation history"
+          title="Open sidebar  Ctrl+B"
+        >
+          <PanelLeftIcon />
+        </button>
+      )}
+      {/* Mobile drawer opener. Same control as before and the same accessible
+          name; only the glyph changed from a hamburger to the panel icon. */}
       <button
         className="top-bar-icon-btn sidebar-toggle-btn"
         onClick={onOpenSidebarMobile}
         aria-label="Open conversation history"
       >
-        <MenuIcon />
+        <PanelLeftIcon />
       </button>
-      <div className="top-bar-brand">
-        <Image
-          src="/ura-assistant-logo.svg"
-          alt="URA Assistant"
-          className="top-bar-logo-img"
-          width={28}
-          height={28}
-          priority
+
+      {showTitle && renaming && (
+        <input
+          className="hdrv2-convrename"
+          value={draft}
+          aria-label={`Rename ${conversationTitle}`}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitRename();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setRenaming(false);
+            }
+          }}
+          onBlur={commitRename}
         />
-        <span className="top-bar-title">URA Tax Assistant</span>
-      </div>
-      <div className="hdrv2-spacer" />
-      <button
-        className="top-bar-icon-btn"
-        onClick={onNewChat}
-        aria-label="New conversation"
-        title="New chat"
-      >
-        <PlusIcon />
-      </button>
-      <LanguageMenu
-        locale={locale}
-        options={localeOptions}
-        onLocaleChange={onLocaleChange}
-      />
-      <div className="hdrv2-theme">
-        <ThemeToggle />
-      </div>
-      {!signedIn && (
-        <div className="hdrv2-auth">
-          <Link className="hdrv2-signin" href="/signin">
-            Sign in
-          </Link>
-          <Link className="hdrv2-signup" href="/signup">
-            Sign up
-          </Link>
-        </div>
       )}
+
+      {showTitle && !renaming && (
+        <ConversationMenu
+          pinned={conversationPinned}
+          onPin={() => onPinConversation?.()}
+          onRename={() => {
+            setDraft(conversationTitle ?? '');
+            setRenaming(true);
+          }}
+          onDelete={() => onDeleteConversation?.()}
+          triggerLabel={`Conversation options: ${conversationTitle}`}
+          triggerClassName="hdrv2-convtitle"
+          align="start"
+          triggerChildren={
+            <>
+              <span className="hdrv2-convtitle-text">{conversationTitle}</span>
+              <ChevronDownIcon />
+            </>
+          }
+        />
+      )}
+
+      <div className="hdrv2-spacer" />
+
+      {/* Language sits beside the 3-dot rather than inside it: it is the one
+          setting people change often enough to want the current value visible
+          — the trigger reads the locale back as EN / LG / SW. */}
+      <LanguageMenu locale={locale} options={localeOptions} onLocaleChange={onLocaleChange} />
+
       <div className="hdrv2-kebab" ref={menuRef}>
         <button
           ref={menuButtonRef}
@@ -239,7 +286,7 @@ export default function ChatHeader({
               aria-label={`Theme: ${themeLabel}. Click to switch.`}
               onKeyDown={onMenuKeyDown}
             >
-              Theme: {themeLabel}
+              <ThemeIcon /> Theme: {themeLabel}
             </button>
             <button
               ref={(element) => {
@@ -284,6 +331,7 @@ export default function ChatHeader({
           </div>
         )}
       </div>
+
     </header>
   );
 }

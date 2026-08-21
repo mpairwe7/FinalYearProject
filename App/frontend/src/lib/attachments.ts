@@ -21,8 +21,8 @@ export interface PendingAttachment {
 
 /** Mirrors backend `documents.MAX_ATTACHMENTS_PER_TURN`. */
 export const MAX_ATTACHMENTS = 3;
-/** Mirrors backend `documents.MAX_FILE_BYTES` (10 MiB). */
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** Mirrors backend `documents.MAX_FILE_BYTES` (40 MiB). */
+export const MAX_ATTACHMENT_BYTES = 40 * 1024 * 1024;
 /** Mirrors backend `documents.SUPPORTED_EXTENSIONS`. */
 export const ATTACHMENT_ACCEPT = '.pdf,.docx,.xlsx,.csv,.txt,image/*';
 

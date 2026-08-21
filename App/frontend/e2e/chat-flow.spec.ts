@@ -17,7 +17,9 @@ test.describe("Agentic chat flow", () => {
     await mockBackend(page);
     await page.goto("/");
     await expect(page).toHaveTitle(/URA Chatbot/);
-    await expect(page.getByRole("heading", { name: /URA Tax Assistant/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: /How can I help with your taxes/i }),
+    ).toBeVisible();
     await expect(page.getByLabel("Type your message")).toBeVisible();
   });
 
@@ -90,10 +92,8 @@ test.describe("Agentic chat flow", () => {
   test("language switch toggles to Luganda", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");
-    // chatv2: the language radios live inside the composer's picker overlay.
     await page.getByRole("button", { name: /Response language/ }).click();
-    const lg = page.getByRole("radio", { name: /Luganda/i });
-    await lg.click();
+    await page.getByRole("radio", { name: /Luganda/i }).click();
     // Selecting closes the picker and the trigger reflects the new locale.
     await expect(
       page.getByRole("button", { name: "Response language: Luganda" }),

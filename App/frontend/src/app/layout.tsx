@@ -8,6 +8,8 @@ import Providers from '../components/Providers';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
 import { THEME_INIT_SCRIPT } from '../lib/theme';
 
+import OfflineBanner from '../components/OfflineBanner';
+
 export const metadata: Metadata = {
   title: 'URA Chatbot — AI Tax Assistant',
   description:
@@ -50,6 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <ServiceWorkerRegistrar />
         <Providers>
+          <OfflineBanner />
           <ConsentBanner />
           {children}
         </Providers>

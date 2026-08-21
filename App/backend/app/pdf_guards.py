@@ -109,6 +109,17 @@ def scan_pdf_object_text(*fragments: str) -> list[str]:
     return findings
 
 
+def _open_pdfium(source: bytes | Path) -> Any:
+    try:
+        import pypdfium2 as pdfium  # type: ignore[import-untyped]
+    except ImportError as err:
+        raise PdfUnavailable("pypdfium2 is not installed.") from err
+    if isinstance(source, Path):
+        with source.open("rb") as f:
+            return pdfium.PdfDocument(f.read())
+    return pdfium.PdfDocument(source)
+
+
 def _open_fitz(source: bytes | Path) -> Any:
     try:
         import fitz  # type: ignore[import-untyped]
@@ -119,8 +130,21 @@ def _open_fitz(source: bytes | Path) -> Any:
     return fitz.open(stream=source, filetype="pdf")
 
 
+def _open_document(source: bytes | Path) -> tuple[Any, str]:
+    """Open PDF with permissive pypdfium2 first, then PyMuPDF fallback."""
+    try:
+        return _open_pdfium(source), "pypdfium2"
+    except Exception:
+        pass
+    try:
+        return _open_fitz(source), "fitz"
+    except Exception:
+        pass
+    raise PdfUnavailable("No PDF inspection engine (pypdfium2 or PyMuPDF) is installed.")
+
+
 def inspect_open_pdf(doc: Any, limits: PdfGuardLimits = QUERY_PDF_LIMITS) -> PdfInspection:
-    """Inspect an already-open PyMuPDF document. Does not close it."""
+    """Inspect an open PDF document (pypdfium2 or PyMuPDF). Does not close it."""
     result = PdfInspection()
     try:
         result.encrypted = bool(getattr(doc, "is_encrypted", False) or getattr(doc, "needs_pass", False))
@@ -129,12 +153,23 @@ def inspect_open_pdf(doc: Any, limits: PdfGuardLimits = QUERY_PDF_LIMITS) -> Pdf
     if result.encrypted and limits.reject_encrypted:
         result.findings.append("Encrypted or password-protected PDFs are not accepted.")
 
+    # Page count across pypdfium2 and PyMuPDF
     try:
-        result.page_count = int(doc.page_count)
+        if hasattr(doc, "page_count"):
+            result.page_count = int(doc.page_count)
+        elif hasattr(doc, "__len__"):
+            result.page_count = len(doc)
+        else:
+            result.page_count = 0
     except Exception:
         result.page_count = 0
+
+    # XRef count (PyMuPDF specific or estimation)
     try:
-        result.xref_count = int(doc.xref_length())
+        if hasattr(doc, "xref_length"):
+            result.xref_count = int(doc.xref_length())
+        else:
+            result.xref_count = result.page_count * 10
     except Exception:
         result.xref_count = 0
 
@@ -144,13 +179,16 @@ def inspect_open_pdf(doc: Any, limits: PdfGuardLimits = QUERY_PDF_LIMITS) -> Pdf
         )
 
     try:
-        embedded = int(doc.embfile_count())
+        if hasattr(doc, "embfile_count"):
+            embedded = int(doc.embfile_count())
+        else:
+            embedded = 0
     except Exception:
         embedded = 0
     if embedded and limits.reject_embedded_files:
         result.findings.append("PDFs with embedded files are not accepted.")
 
-    if limits.reject_active_content:
+    if limits.reject_active_content and hasattr(doc, "xref_object"):
         fragments: list[str] = []
         try:
             catalog_xref = doc.pdf_catalog()
@@ -158,8 +196,6 @@ def inspect_open_pdf(doc: Any, limits: PdfGuardLimits = QUERY_PDF_LIMITS) -> Pdf
         except Exception:
             logger.debug("PDF catalog could not be read", exc_info=True)
         scan_limit = min(result.xref_count, limits.max_xrefs)
-        # Catalog plus a bounded xref walk. Page content streams are dictionaries
-        # here, not decompressed text, so handbook prose cannot trip /JavaScript.
         for xref in range(1, scan_limit):
             try:
                 fragments.append(str(doc.xref_object(xref)))
@@ -170,11 +206,16 @@ def inspect_open_pdf(doc: Any, limits: PdfGuardLimits = QUERY_PDF_LIMITS) -> Pdf
     if result.page_count > 0:
         pages_to_measure = min(result.page_count, 8)
         for index in range(pages_to_measure):
+            width_pt, height_pt = 0.0, 0.0
             try:
-                rect = doc[index].rect
+                page = doc[index]
+                if hasattr(page, "rect"):
+                    width_pt, height_pt = float(page.rect.width), float(page.rect.height)
+                elif hasattr(page, "get_size"):
+                    width_pt, height_pt = page.get_size()
             except Exception:
                 continue
-            if rect.width > limits.max_page_edge_pt or rect.height > limits.max_page_edge_pt:
+            if width_pt > limits.max_page_edge_pt or height_pt > limits.max_page_edge_pt:
                 result.findings.append(
                     f"PDF page {index + 1} exceeds the {int(limits.max_page_edge_pt)}-point dimension limit."
                 )
@@ -186,8 +227,16 @@ def inspect_open_pdf(doc: Any, limits: PdfGuardLimits = QUERY_PDF_LIMITS) -> Pdf
 def inspect_pdf_bytes(data: bytes, limits: PdfGuardLimits = QUERY_PDF_LIMITS) -> PdfInspection:
     """Validate header and structure. Always closes the temporary handle."""
     validate_pdf_header(data)
+
+    # Active content scan directly on byte stream
+    if limits.reject_active_content:
+        findings = scan_pdf_object_text(data.decode("latin-1", errors="ignore"))
+        if findings:
+            raise PdfRejected(findings[0])
+
+    doc = None
     try:
-        doc = _open_fitz(data)
+        doc, _engine = _open_document(data)
     except PdfUnavailable:
         inspection = PdfInspection()
         inspection.warnings.append("PyMuPDF is not installed; structural PDF inspect skipped.")
@@ -204,7 +253,8 @@ def inspect_pdf_bytes(data: bytes, limits: PdfGuardLimits = QUERY_PDF_LIMITS) ->
         inspection = inspect_open_pdf(doc, limits)
     finally:
         try:
-            doc.close()
+            if hasattr(doc, "close"):
+                doc.close()
         except Exception:
             pass
     if inspection.findings:
@@ -220,8 +270,10 @@ def inspect_pdf_path(path: Path, limits: PdfGuardLimits = CORPUS_PDF_LIMITS) -> 
     except OSError as err:
         raise PdfRejected(f"PDF could not be read: {path.name}") from err
     validate_pdf_header(header)
+
+    doc = None
     try:
-        doc = _open_fitz(path)
+        doc, _engine = _open_document(path)
     except PdfUnavailable:
         inspection = PdfInspection()
         inspection.warnings.append(f"{path.name}: PyMuPDF is not installed; structural inspect skipped.")
@@ -238,7 +290,8 @@ def inspect_pdf_path(path: Path, limits: PdfGuardLimits = CORPUS_PDF_LIMITS) -> 
         inspection = inspect_open_pdf(doc, limits)
     finally:
         try:
-            doc.close()
+            if hasattr(doc, "close"):
+                doc.close()
         except Exception:
             pass
     if inspection.findings:

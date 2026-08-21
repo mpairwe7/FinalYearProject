@@ -34,6 +34,13 @@ export interface ChatTurn {
   offlineMode?: boolean;
   /** Documents attached to this (user) turn */
   attachments?: ChatAttachment[];
+  /**
+   * Wall-clock time the assistant spent on this turn, from the moment the
+   * question was sent to the moment the reply finished. Persisted so the
+   * "Thought for 13.9s" note survives a reload rather than vanishing with the
+   * in-flight state that produced it.
+   */
+  thoughtForMs?: number;
 }
 
 export interface Conversation {
@@ -43,6 +50,13 @@ export interface Conversation {
   turns: ChatTurn[];
   createdAt: number;
   updatedAt: number;
+  /** Pinned threads sort above everything else in the rail and the chats page. */
+  pinned?: boolean;
+  /**
+   * The title was typed by the user, so `deriveTitle` must stop overwriting it.
+   * Without this flag a rename survives only until the next turn is saved.
+   */
+  titleCustom?: boolean;
 }
 
 /** `processing` = recording stopped, transcription in flight. Only the
@@ -71,6 +85,8 @@ interface ChatStore {
   createNewSession: () => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
+  renameSession: (id: string, title: string) => void;
+  togglePinSession: (id: string) => void;
   clearAllSessions: () => void;
   hydratePersisted: () => void;
 }
@@ -99,6 +115,7 @@ export function createTurn(
     escalationRequired?: boolean;
     escalationReason?: string;
     attachments?: ChatAttachment[];
+    thoughtForMs?: number;
   },
 ): ChatTurn {
   return { id: generateId(), role, content, timestamp: Date.now(), ...meta };
@@ -153,6 +170,9 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   if (typeof value.escalationRequired === 'boolean') turn.escalationRequired = value.escalationRequired;
   if (typeof value.escalationReason === 'string') turn.escalationReason = value.escalationReason;
   if (typeof value.offlineMode === 'boolean') turn.offlineMode = value.offlineMode;
+  if (typeof value.thoughtForMs === 'number' && Number.isFinite(value.thoughtForMs)) {
+    turn.thoughtForMs = value.thoughtForMs;
+  }
   if (Array.isArray(value.attachments)) {
     const attachments = value.attachments
       .filter(isRecord)
@@ -180,7 +200,7 @@ function sanitizeConversation(value: unknown): Conversation | null {
 
   const turns = sanitizeTurns(value.turns);
   const lastTurn = turns[turns.length - 1];
-  return {
+  const conversation: Conversation = {
     id,
     title: typeof value.title === 'string' && value.title ? value.title : deriveTitle(turns),
     preview:
@@ -191,6 +211,9 @@ function sanitizeConversation(value: unknown): Conversation | null {
     createdAt: typeof value.createdAt === 'number' ? value.createdAt : 0,
     updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : 0,
   };
+  if (value.pinned === true) conversation.pinned = true;
+  if (value.titleCustom === true) conversation.titleCustom = true;
+  return conversation;
 }
 
 function readPersistedChatState(): PersistedChatState | null {
@@ -425,11 +448,13 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     const existing = conversations.find((c) => c.id === id);
 
     if (existing) {
+      // A title the user typed is theirs. `deriveTitle` re-runs on every save,
+      // so without this guard a rename lasts exactly until the next turn.
       set({
         activeConversationId: id,
         conversations: conversations.map((c) =>
           c.id === id
-            ? { ...c, title, preview, turns: chat, updatedAt: now }
+            ? { ...c, title: c.titleCustom ? c.title : title, preview, turns: chat, updatedAt: now }
             : c,
         ),
       });
@@ -469,6 +494,35 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     } else {
       set({ conversations: filtered });
     }
+    writePersistedChatState(get());
+  },
+
+  /**
+   * Rename a conversation. Marks the title as user-owned so `saveCurrentSession`
+   * stops deriving it from the first message.
+   *
+   * An empty or whitespace-only title is a no-op rather than an erasure — the
+   * inline editor commits on blur, so an accidental click-away must not leave a
+   * nameless row.
+   */
+  renameSession: (id, title) => {
+    const next = title.trim().slice(0, 80);
+    if (!next) return;
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id ? { ...c, title: next, titleCustom: true } : c,
+      ),
+    }));
+    writePersistedChatState(get());
+  },
+
+  /** Pin / unpin. Ordering is applied at read time by `sortConversations`. */
+  togglePinSession: (id) => {
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === id ? { ...c, pinned: !c.pinned } : c,
+      ),
+    }));
     writePersistedChatState(get());
   },
 

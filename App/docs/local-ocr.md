@@ -1,23 +1,24 @@
-# Local OCR for document processing
+# Triton-served PP-OCRv6 SOTA OCR & Document Recognition
 
-The document pipeline always extracts a PDF text layer first.  Use this
-optional sidecar only for scanned PDFs and image attachments.  It follows the
-BP workflow-engine local pattern: OCR owns its model/runtime, exposes a small
-HTTP contract and health check, and the API calls it through a bounded client.
+The document pipeline extracts a clean PDF text layer and normalizes document inputs
+first via the `app.document_normalization` adapter. For scanned PDFs, fine-print receipts,
+complex financial tables, and hybrid embedded visual evidence, the system dispatches
+to **Triton-served PP-OCRv6**.
 
-## Docker Compose (recommended)
+It aligns directly with the **enterprise BP workflow-engine architecture**:
+- **SOTA PP-OCRv6 Engine**: State-of-the-art recognition for dense tables, complex alphanumeric codes (TINs, PRNs, EFRIS invoice numbers, assessment refs), and fine-print thermal receipts.
+- **Line-Level Bounding Polygons**: Returns precise 4-point quadrilaterals / multi-point polygon contours (`polygon`) alongside axis-aligned bounding boxes (`box`).
+- **Low GPU Latency & Dynamic Batching**: Optimized Triton Inference Server KServe v2 protocol execution with concurrency limits and watchdog auto-reclamation.
+- **Switchable Variants**: `OCR_MODEL_VARIANT=v6` (default SOTA) and `v5` (server fallback).
 
-For the local document/PDF evaluation boundary, use the dedicated override:
+## Docker Compose
+
+Run the Triton-served PP-OCRv6 profile:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.local-documents.yml \
   -f docker-compose.ocr.yml --profile ocr up -d --build redis qdrant api ocr
 ```
-
-This keeps OCR on the private Docker network and disables hosted inference and
-fallbacks for the document workflow. See
-[local-document-evaluation.md](local-document-evaluation.md) for its full
-configuration boundary and evaluation procedure.
 
 Verify liveness and model readiness on the host:
 
@@ -26,68 +27,42 @@ curl http://127.0.0.1:8100/health
 curl http://127.0.0.1:8100/ready
 ```
 
-`/health` only confirms the process is alive. `/ready` warms EasyOCR and
-returns `503` until the model can load; Compose waits for that probe before it
-starts the API override. The named `ocr_models` volume retains model downloads
-across restarts. The default is CPU mode; set `OCR_GPU=true` only after adding
-an appropriate GPU compose override for the host.
+`/health` reports active engine, GPU readiness, and pixel limits. `/ready` warms the PP-OCRv6 model
+pipeline and returns `200` once recognition weights are hot.
 
-The API receives these settings through `docker-compose.ocr.yml`:
+The API connects via internal container networking:
 
 ```text
 OCR_BACKEND=service
 OCR_SERVICE_URL=http://ocr:8100
 OCR_SERVICE_TIMEOUT_SECONDS=6
-OCR_SERVICE_MAX_CONCURRENT=2
-OCR_INFERENCE_MAX_CONCURRENT=1
+OCR_SERVICE_MAX_CONCURRENT=4
+DOCUMENT_OCR_PDF_PAGES=3
+DOCUMENT_ENABLE_SPATIAL_OCR=false
 ```
 
-Use `OCR_HOST_PORT` to avoid a local port conflict.  The host binding is
-loopback-only; do not publish this service through a public reverse proxy.
+## Operating Modes
 
-## Host-process development
+| `OCR_BACKEND` | Description |
+| :--- | :--- |
+| `triton` / `service` | Use the dedicated Triton PP-OCRv6 sidecar process with low GPU latency and line-level polygons. |
+| `auto` | Query Triton/sidecar when `OCR_SERVICE_URL` is configured; fall back gracefully to in-process PP-OCR. |
+| `ppocrv6` / `paddleocr` | In-process PP-OCRv6 engine. |
+| `easyocr` | Embedded lightweight CPU fallback. |
+| `disabled` | Disable OCR for strict text-only processing. |
 
-In one terminal, install and start only the OCR runtime:
+## Domain-Specific Alphanumeric Extraction
 
-```bash
-source ../.venv/bin/activate
-pip install -r backend/requirements-ocr.txt
-OCR_BACKEND=easyocr OCR_GPU=false uvicorn app.ocr_service:app --host 127.0.0.1 --port 8100
-```
-
-In a second terminal, point the API process at it:
-
-```bash
-OCR_BACKEND=service OCR_SERVICE_URL=http://127.0.0.1:8100 \
-  uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-## Operating modes
-
-| `OCR_BACKEND` | Behaviour |
-| --- | --- |
-| `service` | Use only the sidecar; report OCR as unavailable if it cannot respond. |
-| `auto` | Use the sidecar when `OCR_SERVICE_URL` is set, then fall back to embedded EasyOCR. |
-| `easyocr` | Use embedded EasyOCR in the API process for small one-process experiments. |
-| `disabled` | Do not attempt OCR. |
-
-The sidecar accepts one raw image per `POST /v1/ocr` request and returns text,
-quadrilateral coordinates and per-region confidence.  OCR requests are capped
-by `OCR_SERVICE_MAX_BYTES` and `OCR_SERVICE_MAX_PIXELS`; the API additionally
-limits sidecar concurrency with `OCR_SERVICE_MAX_CONCURRENT`. Requests are
-also bounded to six seconds by default; scanned-PDF processing has a separate
-document-level budget and downscales oversized rendered pages before OCR.
+The OCR post-processor ([`app.vision.ocr`](../backend/app/vision/ocr.py)) provides specialized recognition for:
+- **TINs**: 10-digit Uganda Taxpayer Identification Numbers (`extract_tin_numbers`).
+- **PRNs**: Payment Registration Numbers starting with 2 (`extract_prn_numbers`).
+- **EFRIS Fiscal Invoices**: Electronic Fiscal Receipt & Invoicing System references (`extract_efris_invoice_numbers`).
+- **Assessment Numbers**: URA tax assessment identifiers (`extract_reference_numbers`).
+- **Monetary Amounts**: Dense UGX / USD amounts across tabular assessment notices (`extract_ugx_amounts`).
 
 ## Validation
 
 ```bash
 cd backend
-PYTHONPATH=. python -m pytest -q tests/test_ocr_service.py tests/test_vision.py
+PYTHONPATH=. python -m pytest -q tests/test_ocr_service.py tests/test_documents.py tests/test_pdf_guards.py tests/test_pdf_corpus.py
 ```
-
-For an end-to-end document check, submit a scanned receipt or tax form to
-`POST /v1/documents/analyze`.  A successful scanned-PDF analysis includes
-`"ocr_used": true` plus OCR backend/status, processed page numbers, region
-count, and mean OCR score in `provenance`. A sidecar outage produces an
-explicit `unavailable` status and extraction warning rather than pretending
-that OCR succeeded.

@@ -335,8 +335,17 @@
   text-decoration: underline;
 }
 
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-md, 14px);
+  margin-bottom: 20px;
+}
+
 .flag-table {
   width: 100%;
+  min-width: 520px;
   border-collapse: collapse;
   background: var(--surface-ink);
   border: 1px solid var(--border-1);
@@ -362,7 +371,8 @@
 }
 
 .flag-table button {
-  padding: 4px 10px;
+  min-height: 36px;
+  padding: 6px 14px;
   border-radius: 999px;
   border: 1px solid var(--border-1);
   background: var(--surface-2);
@@ -370,6 +380,7 @@
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .flag-table button.is-active {

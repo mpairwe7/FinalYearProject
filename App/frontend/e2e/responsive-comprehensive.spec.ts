@@ -8,7 +8,7 @@
  * - Accessibility: Color contrast, Focus indicators, ARIA labels
  */
 
-import { expect, test, devices } from "@playwright/test";
+import { expect, test, devices, type Page } from "@playwright/test";
 import { clearChatStore, mockBackend, seedConsent } from "./helpers";
 
 // Define responsive breakpoints per modern standards (2024)
@@ -259,7 +259,7 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       await page.goto("/");
       const contentArea = page.locator("[role='main']");
       if (await contentArea.isVisible()) {
-        const width = await contentArea.evaluate((el) => el.offsetWidth);
+        const width = await contentArea.evaluate((el) => (el as HTMLElement).offsetWidth);
         expect(width).toBeLessThan(1920); // Should have constraints
       }
     });
@@ -482,7 +482,7 @@ test.describe("Responsive Design — Comprehensive Suite", () => {
       const nav = page.getByLabel("Open conversation history");
       await expect(nav).toBeVisible();
 
-      await page.setViewportSize(1024, 768);
+      await page.setViewportSize({ width: 1024, height: 768 });
       // Desktop: persistent navigation
       const rail = page.locator("aside.conversation-rail");
       await expect(rail).toBeVisible();

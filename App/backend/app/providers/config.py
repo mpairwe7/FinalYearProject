@@ -12,6 +12,7 @@ build site in ``gateway.py``.
 from __future__ import annotations
 
 import functools
+import os
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,7 +20,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class CloudSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=None if os.getenv("APP_ENV") == "testing" or "PYTEST_CURRENT_TEST" in os.environ else ".env",
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -66,6 +67,10 @@ class CloudSettings(BaseSettings):
 @functools.lru_cache(maxsize=1)
 def get_cloud_settings() -> CloudSettings:
     """Cached singleton. Tests should call ``get_cloud_settings.cache_clear()``."""
+    import sys
+
+    if "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ or os.getenv("TESTING") == "1":
+        return CloudSettings(_env_file=None)
     return CloudSettings()
 
 

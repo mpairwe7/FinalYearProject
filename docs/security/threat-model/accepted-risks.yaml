@@ -1,0 +1,32 @@
+# Accepted Security Risks — URA AI Taxpayer Chatbot
+#
+# Each accepted risk MUST have:
+#   - risk_id: matching an ID in risk-register.yaml
+#   - severity: severity at time of acceptance
+#   - accepted_by: name or role of approver
+#   - accepted_date: ISO date of acceptance
+#   - review_date: ISO date when this acceptance must be re-reviewed
+#   - justification: reason why risk is accepted with compensating controls
+#   - ticket: tracking ticket
+#
+# CI validates that review_date has not expired on pipeline runs.
+
+- risk_id: T-FE-02
+  severity: Medium
+  accepted_by: Engineering Lead
+  accepted_date: "2026-03-24"
+  review_date: "2026-09-24"
+  justification: >
+    Client-side UI state tampering is mitigated by mandatory server-side JWT
+    role verification on all protected staff/admin endpoints.
+  ticket: "SEC-102"
+
+- risk_id: T-LLM-04
+  severity: Medium
+  accepted_by: ML Platform Lead
+  accepted_date: "2026-04-10"
+  review_date: "2026-10-10"
+  justification: >
+    Max model context is clamped to 8192 tokens with input validation and rate
+    limiting preventing sustained quadratic attention exhaustion.
+  ticket: "SEC-108"

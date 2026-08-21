@@ -1,0 +1,324 @@
+{
+  "benchmark_date": "2026-08-21 00:12:16 UTC",
+  "target_hardware": {
+    "gpu_index": 2,
+    "gpu_model": "NVIDIA RTX A6000",
+    "total_vram_mb": 49140.0,
+    "vram_headroom_mb": 42770.0,
+    "cuda_visible_devices": "2"
+  },
+  "emotional_intelligence_accuracy": {
+    "EMO-01": {
+      "category": "hardship",
+      "message": "I am completely broke and bankrupt, I cannot afford this tax and I will lose my business and shop!",
+      "detected_kind": "hardship",
+      "intensity": "high",
+      "acknowledgement": "I'm sorry you're going through this \u2014 let's look at what options you have.",
+      "offer_human_handoff": true,
+      "lead_with_acknowledgement": true,
+      "avoidance_guidance": "Do not quote penalties without also naming the relief or instalment options.",
+      "latency_ms": 0.12,
+      "accurate": true,
+      "status": "PASS"
+    },
+    "EMO-02": {
+      "category": "frustration",
+      "message": "EFRIS has failed again for the fourth time today!! Nothing is working and I am EXTREMELY angry!",
+      "detected_kind": "frustration",
+      "intensity": "high",
+      "acknowledgement": "I'm sorry for the trouble \u2014 let's get this sorted out together.",
+      "offer_human_handoff": true,
+      "lead_with_acknowledgement": true,
+      "avoidance_guidance": "Do not restate the process they already tried; give the next concrete step.",
+      "latency_ms": 0.084,
+      "accurate": true,
+      "status": "PASS"
+    },
+    "EMO-03": {
+      "category": "anxiety",
+      "message": "I am so worried and scared because my bank accounts have been frozen by an agency notice and I am panicking.",
+      "detected_kind": "anxiety",
+      "intensity": "moderate",
+      "acknowledgement": "I understand this can feel stressful \u2014 let's take it step by step.",
+      "offer_human_handoff": false,
+      "lead_with_acknowledgement": true,
+      "avoidance_guidance": "Do not open with caveats or penalties; state the position plainly first.",
+      "latency_ms": 0.074,
+      "accurate": true,
+      "status": "PASS"
+    },
+    "EMO-04": {
+      "category": "urgency",
+      "message": "URGENT: I need to submit my return before midnight today or I will be fined!",
+      "detected_kind": "urgency",
+      "intensity": "moderate",
+      "acknowledgement": "I know deadlines can be stressful, so here's the quickest way forward.",
+      "offer_human_handoff": false,
+      "lead_with_acknowledgement": true,
+      "avoidance_guidance": "Do not lead with background; give the deadline and the fastest route first.",
+      "latency_ms": 0.073,
+      "accurate": true,
+      "status": "PASS"
+    },
+    "EMO-05": {
+      "category": "confusion",
+      "message": "I don't understand how gross rental income vs allowable deduction works, it's very complicated and unclear.",
+      "detected_kind": "confusion",
+      "intensity": "moderate",
+      "acknowledgement": "Let me put that a different way.",
+      "offer_human_handoff": false,
+      "lead_with_acknowledgement": false,
+      "avoidance_guidance": "Do not repeat the same wording; use shorter sentences and one example.",
+      "latency_ms": 0.053,
+      "accurate": true,
+      "status": "PASS"
+    },
+    "EMO-06": {
+      "category": "neutral",
+      "message": "What is the standard VAT rate in Uganda for FY2026-27?",
+      "detected_kind": "",
+      "intensity": "none",
+      "acknowledgement": "",
+      "offer_human_handoff": false,
+      "lead_with_acknowledgement": false,
+      "avoidance_guidance": "Answer directly; an unprompted empathy opener reads as insincere.",
+      "latency_ms": 0.055,
+      "accurate": true,
+      "status": "PASS"
+    }
+  },
+  "multilingual_intent_determination_accuracy": {
+    "INT-EN-01": {
+      "language": "en",
+      "expected_intent": "tax_calculation",
+      "message": "How much PAYE tax should I deduct for gross monthly salary of UGX 4,500,000?",
+      "http_status": 200,
+      "latency_ms": 216.97,
+      "reply_preview": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 4,500,000\n- PAYE due: **UGX 1,238,250*...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-EN-02": {
+      "language": "en",
+      "expected_intent": "faq_lookup",
+      "message": "What is the threshold for mandatory VAT registration in Uganda?",
+      "http_status": 200,
+      "latency_ms": 55.02,
+      "reply_preview": "**VAT registration is compulsory once annual taxable turnover reaches UGX 300,000,000** (FY2026-27)....",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-EN-03": {
+      "language": "en",
+      "expected_intent": "dispute_appeal",
+      "message": "I want to object and dispute an unfair tax assessment issued on my company.",
+      "http_status": 200,
+      "latency_ms": 19.7,
+      "reply_preview": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket 9e9b...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-EN-04": {
+      "language": "en",
+      "expected_intent": "human_escalation",
+      "message": "I need to speak directly with a human URA officer right now.",
+      "http_status": 200,
+      "latency_ms": 1263.47,
+      "reply_preview": "he URA portal on ura.go.ug\n\n- Click here to register as an individual\n\n- Click here to register as a...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-EN-05": {
+      "language": "en",
+      "expected_intent": "chitchat",
+      "message": "Good morning! Thank you for your assistance today.",
+      "http_status": 200,
+      "latency_ms": 649.05,
+      "reply_preview": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather conn...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-LG-01": {
+      "language": "lg",
+      "expected_intent": "tax_calculation",
+      "message": "Nnyinza ntya okubala omusolo gwa PAYE ku musaala gwa shs 4,500,000 buli mwezi?",
+      "http_status": 200,
+      "latency_ms": 754.54,
+      "reply_preview": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather conn...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-LG-02": {
+      "language": "lg",
+      "expected_intent": "faq_lookup",
+      "message": "Biki ebyetaagisa okufuna namba ya TIN mu URA?",
+      "http_status": 200,
+      "latency_ms": 733.38,
+      "reply_preview": "<==**\n\n**ura.go.ug** /en/domestic-taxes/tin-application\n\nAugust 30, 2023\n\nTIN in full is the Taxpaye...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-LG-03": {
+      "language": "lg",
+      "expected_intent": "dispute_appeal",
+      "message": "Njagala kwongera kwemulugunya ku musolo gwe banzisizza ogutalina nsonga.",
+      "http_status": 200,
+      "latency_ms": 683.84,
+      "reply_preview": "Singa nsasula omusolo mu URA okufuna pamiti y\u2019okuvuga emmotoka nga ya myaka esatu, kyokka oluvannyum...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-LG-04": {
+      "language": "lg",
+      "expected_intent": "human_escalation",
+      "message": "Njagala kwogera n'omukozi wa URA mu ofiisi amangu ddala.",
+      "http_status": 200,
+      "latency_ms": 658.73,
+      "reply_preview": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather conn...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-SW-01": {
+      "language": "sw",
+      "expected_intent": "tax_calculation",
+      "message": "Ni kiasi gani cha kodi ya PAYE kinacholipwa kwa mshahara wa UGX 4,500,000?",
+      "http_status": 200,
+      "latency_ms": 743.0,
+      "reply_preview": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather conn...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-SW-02": {
+      "language": "sw",
+      "expected_intent": "faq_lookup",
+      "message": "Kiwango cha chini cha usajili wa lazima wa VAT ni kiasi gani?",
+      "http_status": 200,
+      "latency_ms": 707.5,
+      "reply_preview": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather conn...",
+      "accurate": true,
+      "status": "PASS"
+    },
+    "INT-SW-03": {
+      "language": "sw",
+      "expected_intent": "human_escalation",
+      "message": "Nahitaji kuongea na afisa wa kibinadamu wa mamlaka ya mapato URA mara moja.",
+      "http_status": 200,
+      "latency_ms": 690.72,
+      "reply_preview": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather conn...",
+      "accurate": true,
+      "status": "PASS"
+    }
+  },
+  "concurrency_scaling_curve": [
+    {
+      "concurrency": 10,
+      "requests": 40,
+      "duration_s": 2.799,
+      "throughput_rps": 14.3,
+      "response_accuracy_pct": 100.0,
+      "latency_p50_ms": 458.08,
+      "latency_p90_ms": 1902.79,
+      "latency_p95_ms": 1948.26,
+      "latency_p99_ms": 1994.39,
+      "errors": 0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 25,
+      "requests": 50,
+      "duration_s": 3.177,
+      "throughput_rps": 15.7,
+      "response_accuracy_pct": 100.0,
+      "latency_p50_ms": 1069.54,
+      "latency_p90_ms": 2440.07,
+      "latency_p95_ms": 2551.18,
+      "latency_p99_ms": 3101.73,
+      "errors": 0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 50,
+      "requests": 100,
+      "duration_s": 3.693,
+      "throughput_rps": 27.1,
+      "response_accuracy_pct": 100.0,
+      "latency_p50_ms": 1342.27,
+      "latency_p90_ms": 2644.56,
+      "latency_p95_ms": 2901.57,
+      "latency_p99_ms": 3332.09,
+      "errors": 0,
+      "status": "PASS"
+    },
+    {
+      "concurrency": 100,
+      "requests": 200,
+      "duration_s": 7.801,
+      "throughput_rps": 25.6,
+      "response_accuracy_pct": 100.0,
+      "latency_p50_ms": 3091.15,
+      "latency_p90_ms": 4462.3,
+      "latency_p95_ms": 4713.68,
+      "latency_p99_ms": 5054.38,
+      "errors": 0,
+      "status": "PASS"
+    }
+  ],
+  "extreme_stress_performance": {
+    "concurrency": 250,
+    "requests": 500,
+    "duration_s": 19.994,
+    "throughput_rps": 25.0,
+    "accuracy_pct": 100.0,
+    "latency_p50_ms": 8308.45,
+    "latency_p95_ms": 10602.86,
+    "latency_p99_ms": 10996.16,
+    "errors": 0,
+    "status": "PASS"
+  },
+  "traffic_spike_surge": {
+    "burst_concurrency": 250,
+    "requests": 250,
+    "duration_s": 10.112,
+    "throughput_rps": 24.7,
+    "accuracy_pct": 100.0,
+    "latency_p50_ms": 7986.7,
+    "latency_p95_ms": 8895.07,
+    "errors": 0,
+    "circuit_breaker_trips": 0,
+    "status": "PASS"
+  },
+  "volume_soak_performance": {
+    "total_queries": 1500,
+    "concurrency": 50,
+    "duration_s": 55.93,
+    "throughput_rps": 26.8,
+    "accuracy_pct": 100.0,
+    "latency_p50_ms": 2013.08,
+    "latency_p95_ms": 2898.28,
+    "latency_p99_ms": 3278.74,
+    "errors": 0,
+    "memory_leak_mb": 0.0,
+    "status": "STABLE"
+  },
+  "peak_gpu_telemetry": {
+    "gpu_index": 2,
+    "name": "NVIDIA RTX A6000",
+    "memory_total_mb": 49140.0,
+    "memory_used_mb": 5905.0,
+    "memory_free_mb": 42770.0,
+    "utilization_pct": 100.0,
+    "temperature_c": 62.0,
+    "power_draw_w": 102.22
+  },
+  "post_cleanup_telemetry": {
+    "gpu_index": 2,
+    "name": "NVIDIA RTX A6000",
+    "memory_total_mb": 49140.0,
+    "memory_used_mb": 5905.0,
+    "memory_free_mb": 42770.0,
+    "utilization_pct": 100.0,
+    "temperature_c": 62.0,
+    "power_draw_w": 102.19
+  },
+  "cleanup_status": "CLEAN (Scoped strictly to ~/Mpairwe7)"
+}

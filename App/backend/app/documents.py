@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 # Limits & configuration
 # ---------------------------------------------------------------------------
 
-MAX_FILE_BYTES = int(os.getenv("DOCUMENT_MAX_BYTES", str(10 * 1024 * 1024)))
+MAX_FILE_BYTES = int(os.getenv("DOCUMENT_MAX_BYTES", str(40 * 1024 * 1024)))
 DOCUMENT_TTL_SECONDS = int(os.getenv("DOCUMENT_TTL_SECONDS", "7200"))
 DOCUMENT_REGISTRY_MAX = int(os.getenv("DOCUMENT_REGISTRY_MAX", "200"))
 MAX_ATTACHMENTS_PER_TURN = 3
@@ -74,10 +74,12 @@ _MAX_TEXT_ROWS_PER_TABLE = 40
 _MAX_FIELD_ITEMS = 10
 _PASSAGE_CHAR_BUDGET = 6_000
 _SCANNED_PDF_TEXT_THRESHOLD = 40
-_OCR_PDF_PAGES = 3
+_OCR_PDF_PAGES = int(os.getenv("DOCUMENT_OCR_PDF_PAGES", "3"))
+_MAX_OCR_PDF_PAGES = int(os.getenv("DOCUMENT_OCR_MAX_PDF_PAGES", "20"))
+_ENABLE_SPATIAL_OCR = os.getenv("DOCUMENT_ENABLE_SPATIAL_OCR", "false").lower() in ("1", "true", "yes")
 _MAX_ARCHIVE_ENTRIES = int(os.getenv("DOCUMENT_MAX_ARCHIVE_ENTRIES", "1000"))
 _MAX_ARCHIVE_UNCOMPRESSED_BYTES = int(
-    os.getenv("DOCUMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES", str(50 * 1024 * 1024))
+    os.getenv("DOCUMENT_MAX_ARCHIVE_UNCOMPRESSED_BYTES", str(160 * 1024 * 1024))
 )
 _MAX_ARCHIVE_COMPRESSION_RATIO = float(os.getenv("DOCUMENT_MAX_ARCHIVE_COMPRESSION_RATIO", "100"))
 _MAX_IMAGE_PIXELS = int(os.getenv("DOCUMENT_MAX_IMAGE_PIXELS", "20_000_000"))
@@ -447,72 +449,168 @@ def _summarize_table(name: str, rows: list[list[Any]]) -> tuple[TableSummary, st
 # Per-type extractors (all lazy-import + failure-guarded)
 # ---------------------------------------------------------------------------
 
+_pdf_extraction_lock = threading.Lock()
+
 
 def _extract_pdf(data: bytes) -> _Extraction:
     out = _Extraction()
-    try:
-        import fitz  # type: ignore[import-untyped]  # PyMuPDF
-    except ImportError:
-        out.warnings.append("PDF extraction unavailable — PyMuPDF is not installed.")
-        return out
-    try:
-        doc = fitz.open(stream=data, filetype="pdf")
-    except Exception:
-        logger.warning("PDF parse failed", exc_info=True)
-        out.warnings.append("The PDF could not be parsed (corrupt or password-protected).")
-        return out
-    try:
-        page_count = doc.page_count
-        out.meta["page_count"] = page_count
-        if page_count > _MAX_PDF_PAGES:
-            out.warnings.append(
-                f"Only the first {_MAX_PDF_PAGES} of {page_count} pages were processed."
-            )
-        parts = []
-        for i in range(min(page_count, _MAX_PDF_PAGES)):
-            parts.append(doc[i].get_text("text"))
-        text = "\n".join(parts).strip()
-        out.meta["extraction_method"] = "pdf_text"
+    doc_parsed = False
+    page_count = 0
+    parts: list[str] = []
 
-        # Scanned PDF: no embedded text layer — OCR the first few pages.
-        if len(text) < _SCANNED_PDF_TEXT_THRESHOLD and page_count > 0:
-            ocr_text, ocr_meta, ocr_warnings = _ocr_pdf_pages(doc)
-            out.meta.update(ocr_meta)
-            out.warnings.extend(ocr_warnings)
-            if ocr_text:
-                text = ocr_text
-                out.meta["ocr_used"] = True
-                out.meta["extraction_method"] = "pdf_ocr"
+    # 1. Primary: pypdfium2 (Apache-2.0)
+    try:
+        import pypdfium2 as pdfium  # type: ignore[import-untyped]
+
+        with _pdf_extraction_lock:
+            pdf = pdfium.PdfDocument(data)
+            try:
+                page_count = len(pdf)
+                out.meta["page_count"] = page_count
+                if page_count > _MAX_PDF_PAGES:
+                    out.warnings.append(
+                        f"Only the first {_MAX_PDF_PAGES} of {page_count} pages were processed."
+                    )
+                for i in range(min(page_count, _MAX_PDF_PAGES)):
+                    try:
+                        page = pdf[i]
+                        try:
+                            textpage = page.get_textpage()
+                            try:
+                                parts.append(textpage.get_text_range() or "")
+                            finally:
+                                textpage.close()
+                        finally:
+                            page.close()
+                    except Exception:
+                        parts.append("")
+                doc_parsed = True
+            finally:
+                pdf.close()
+    except Exception as pdfium_err:
+        logger.debug("pypdfium2 parse failed, trying pdfplumber: %s", pdfium_err)
+
+    # 2. Secondary: pdfplumber (MIT)
+    if not doc_parsed:
+        try:
+            import pdfplumber  # type: ignore[import-untyped]
+
+            with pdfplumber.open(io.BytesIO(data)) as pdf_plumb:
+                page_count = len(pdf_plumb.pages)
+                out.meta["page_count"] = page_count
+                if page_count > _MAX_PDF_PAGES:
+                    out.warnings.append(
+                        f"Only the first {_MAX_PDF_PAGES} of {page_count} pages were processed."
+                    )
+                for i in range(min(page_count, _MAX_PDF_PAGES)):
+                    parts.append(pdf_plumb.pages[i].extract_text() or "")
+            doc_parsed = True
+        except Exception as plumber_err:
+            logger.debug("pdfplumber parse failed, trying PyMuPDF fallback: %s", plumber_err)
+
+    # 3. Defensive fallback: PyMuPDF (fitz)
+    if not doc_parsed:
+        try:
+            import fitz  # type: ignore[import-untyped]
+
+            doc = fitz.open(stream=data, filetype="pdf")
+            try:
+                page_count = doc.page_count
+                out.meta["page_count"] = page_count
+                if page_count > _MAX_PDF_PAGES:
+                    out.warnings.append(
+                        f"Only the first {_MAX_PDF_PAGES} of {page_count} pages were processed."
+                    )
+                for i in range(min(page_count, _MAX_PDF_PAGES)):
+                    parts.append(doc[i].get_text("text"))
+                doc_parsed = True
+            finally:
+                doc.close()
+        except Exception:
+            logger.warning("PDF parse failed across all engines", exc_info=True)
+            out.warnings.append("The PDF could not be parsed (corrupt or password-protected).")
+            return out
+
+    text = "\n".join(parts).strip()
+    out.meta["extraction_method"] = "pdf_text"
+
+    # Scanned PDF: no embedded text layer — OCR the first few pages.
+    if len(text) < _SCANNED_PDF_TEXT_THRESHOLD and page_count > 0:
+        ocr_text, ocr_meta, ocr_warnings = _ocr_pdf_pages(data, page_count=page_count)
+        out.meta.update(ocr_meta)
+        out.warnings.extend(ocr_warnings)
+        if ocr_text:
+            text = ocr_text
+            out.meta["ocr_used"] = True
+            out.meta["extraction_method"] = "pdf_ocr"
+        else:
+            status = str(ocr_meta.get("ocr_status", "unavailable"))
+            if status == "ready":
+                out.warnings.append(
+                    "This scanned PDF was processed by OCR, but no readable text was found."
+                )
+            elif status == "disabled":
+                out.warnings.append("OCR is disabled, so this scanned PDF could not be read.")
             else:
-                status = str(ocr_meta.get("ocr_status", "unavailable"))
-                if status == "ready":
-                    out.warnings.append(
-                        "This scanned PDF was processed by OCR, but no readable text was found."
-                    )
-                elif status == "disabled":
-                    out.warnings.append("OCR is disabled, so this scanned PDF could not be read.")
-                else:
-                    out.warnings.append(
-                        "This looks like a scanned PDF with no text layer, and OCR is unavailable — "
-                        "little or no text could be extracted."
-                    )
-        out.text = text
-    finally:
-        doc.close()
+                out.warnings.append(
+                    "This looks like a scanned PDF with no text layer, and OCR is unavailable — "
+                    "little or no text could be extracted."
+                )
+    elif _ENABLE_SPATIAL_OCR and page_count > 0:
+        from app.vision.glyph_fusion import extract_page_vector_glyphs, fuse_page_glyphs_and_ocr
+
+        ocr_text, ocr_meta, ocr_warnings = _ocr_pdf_pages(data, page_count=page_count)
+        raw_evidence = ocr_meta.get("ocr_evidence", [])
+
+        page_sections: list[str] = []
+        for p_idx in range(min(page_count, _MAX_PDF_PAGES)):
+            page_glyphs = extract_page_vector_glyphs(data, p_idx)
+            page_ocr_items = [
+                {
+                    "text": ev.get("text"),
+                    "box": ev.get("box"),
+                    "polygon": ev.get("polygon") or ev.get("box"),
+                    "confidence": ev.get("confidence", 0.0),
+                }
+                for ev in raw_evidence
+                if ev.get("page") == p_idx + 1
+            ]
+            fused_tokens = fuse_page_glyphs_and_ocr(page_glyphs, page_ocr_items, page_number=p_idx + 1)
+            if fused_tokens:
+                page_sections.append(" ".join(t.text for t in fused_tokens))
+
+        if page_sections:
+            text = "\n\n".join(page_sections).strip()
+            out.meta.update(ocr_meta)
+            out.meta["ocr_used"] = True
+            out.meta["extraction_method"] = "pdf_spatial_fusion"
+            out.warnings.extend(ocr_warnings)
+        elif ocr_text:
+            text = f"{text}\n\n[Embedded Visual Evidence]\n{ocr_text}".strip()
+            out.meta.update(ocr_meta)
+            out.meta["ocr_used"] = True
+            out.meta["extraction_method"] = "pdf_spatial_fusion"
+            out.warnings.extend(ocr_warnings)
+
+    # Extract structured tables deterministically across pages
+    try:
+        from app.vision.table_structuring import structure_document_tables
+
+        for p_idx in range(min(page_count, _MAX_PDF_PAGES)):
+            t_candidates = structure_document_tables(data, page_number=p_idx + 1)
+            for st in t_candidates:
+                if st.matrix and len(st.matrix) > 1:
+                    summary, _ = _summarize_table(f"Page {p_idx + 1} {st.table_id}", st.matrix)
+                    out.tables.append(summary)
+    except Exception:
+        pass
+
+    out.text = text
     return out
 
 
-def _ocr_pdf_pages(doc: Any) -> tuple[str, dict[str, Any], list[str]]:
-    """OCR bounded PDF pages while retaining backend/status provenance."""
-    try:
-        import fitz  # type: ignore[import-untyped]
-        import numpy as np
-        from PIL import Image  # type: ignore[import-untyped]
-    except ImportError:
-        return "", {"ocr_status": "unavailable", "ocr_backend": "unavailable"}, [
-            "OCR dependencies are not installed."
-        ]
-
+def _ocr_pdf_pages(doc_or_data: Any, *, page_count: int | None = None) -> tuple[str, dict[str, Any], list[str]]:
+    """OCR bounded PDF pages while retaining backend/status provenance (Apache-2.0 pypdfium2 priority)."""
     parts: list[str] = []
     page_numbers: list[int] = []
     confidences: list[float] = []
@@ -524,73 +622,178 @@ def _ocr_pdf_pages(doc: Any) -> tuple[str, dict[str, Any], list[str]]:
         "ocr_regions": 0,
         "ocr_evidence": [],
     }
+
+    # Normalize input data to bytes if duck-typed fitz/pdfium doc passed
+    raw_data: bytes | None = None
+    if isinstance(doc_or_data, (bytes, bytearray)):
+        raw_data = bytes(doc_or_data)
+    elif hasattr(doc_or_data, "tobytes"):
+        try:
+            raw_data = doc_or_data.tobytes()
+        except Exception:
+            raw_data = None
+
     deadline = time.monotonic() + max(0.1, _OCR_DOCUMENT_TIMEOUT_SECONDS)
 
-    for i in range(min(doc.page_count, _OCR_PDF_PAGES)):
-        if time.monotonic() >= deadline:
-            warnings.append("OCR stopped after reaching the document processing time limit.")
-            metadata["ocr_status"] = "timed_out"
-            break
-        try:
-            page = doc[i]
-            rect = page.rect
-            page_area = max(1.0, rect.width * rect.height)
-            scale = 150 / 72
-            if page_area * scale * scale > _MAX_PDF_RENDER_PIXELS:
-                scale = (_MAX_PDF_RENDER_PIXELS / page_area) ** 0.5
-                warnings.append(f"OCR page {i + 1} was downscaled to stay within the pixel limit.")
-            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-            if pix.width * pix.height > _MAX_PDF_RENDER_PIXELS:
-                warnings.append(f"OCR skipped page {i + 1}: rendered image exceeds the pixel limit.")
-                continue
-            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-            result = extract_ocr_result(np.asarray(image))
-            metadata["ocr_backend"] = result.backend
-            metadata["ocr_status"] = result.status
-            if result.used_fallback:
-                metadata["ocr_used_fallback"] = True
-            if result.detail:
-                metadata["ocr_detail"] = result.detail
-            if result.status != "ready":
-                break
-            metadata["ocr_regions"] = int(metadata["ocr_regions"]) + len(result.items)
-            evidence = metadata["ocr_evidence"]
-            for item in result.items:
-                if len(evidence) >= _MAX_OCR_EVIDENCE_REGIONS:
-                    break
-                raw_box = item.get("box")
-                try:
-                    box = [
-                        [round(float(point[0]), 1), round(float(point[1]), 1)]
-                        for point in raw_box
-                    ]
-                except (IndexError, TypeError, ValueError):
-                    box = []
-                evidence.append(
-                    {
-                        "page": i + 1,
-                        "text": str(item.get("text", ""))[:200],
-                        "box": box,
-                        "confidence": float(item.get("confidence", 0.0)),
-                    }
-                )
-            confidences.extend(
-                float(item["confidence"])
-                for item in result.items
-                if isinstance(item.get("confidence"), (int, float))
-            )
-            if result.text:
-                parts.append(result.text)
-                page_numbers.append(i + 1)
-        except Exception:
-            logger.warning("Scanned-PDF OCR failed for page %d", i + 1, exc_info=True)
-            warnings.append(f"OCR failed while processing page {i + 1}.")
-            metadata["ocr_status"] = "failed"
-            break
+    # 1. Primary: pypdfium2 (Apache-2.0)
+    try:
+        import numpy as np
+        import pypdfium2 as pdfium  # type: ignore[import-untyped]
 
-    if confidences:
-        metadata["ocr_mean_confidence"] = round(sum(confidences) / len(confidences), 3)
-    return clean_ocr_text(" ".join(parts)) if parts else "", metadata, warnings
+        if raw_data is not None:
+            pdf = pdfium.PdfDocument(raw_data)
+        elif hasattr(doc_or_data, "__getitem__") and hasattr(doc_or_data, "get_size"):
+            pdf = doc_or_data
+        else:
+            pdf = None
+
+        if pdf is not None:
+            total_pages = len(pdf) if page_count is None else page_count
+            pages_to_process = min(total_pages, max(1, min(_OCR_PDF_PAGES, _MAX_OCR_PDF_PAGES)))
+
+            for i in range(pages_to_process):
+                if time.monotonic() >= deadline:
+                    warnings.append("OCR stopped after reaching the document processing time limit.")
+                    metadata["ocr_status"] = "timed_out"
+                    break
+                try:
+                    page = pdf[i]
+                    width_pt, height_pt = page.get_size()
+                    page_area = max(1.0, width_pt * height_pt)
+                    scale = 150.0 / 72.0
+                    if page_area * scale * scale > _MAX_PDF_RENDER_PIXELS:
+                        scale = (_MAX_PDF_RENDER_PIXELS / page_area) ** 0.5
+                        warnings.append(f"OCR page {i + 1} was downscaled to stay within the pixel limit.")
+                    bitmap = page.render(scale=scale)
+                    pil_img = bitmap.to_pil()
+                    result = extract_ocr_result(np.asarray(pil_img))
+                    metadata["ocr_backend"] = result.backend
+                    metadata["ocr_status"] = result.status
+                    if result.used_fallback:
+                        metadata["ocr_used_fallback"] = True
+                    if result.detail:
+                        metadata["ocr_detail"] = result.detail
+                    if result.status != "ready":
+                        break
+                    metadata["ocr_regions"] = int(metadata["ocr_regions"]) + len(result.items)
+                    evidence = metadata["ocr_evidence"]
+                    for item in result.items:
+                        if len(evidence) >= _MAX_OCR_EVIDENCE_REGIONS:
+                            break
+                        raw_box = item.get("box")
+                        try:
+                            box = [
+                                [round(float(point[0]), 1), round(float(point[1]), 1)]
+                                for point in raw_box
+                            ]
+                        except (IndexError, TypeError, ValueError):
+                            box = []
+                        evidence.append(
+                            {
+                                "page": i + 1,
+                                "text": str(item.get("text", ""))[:200],
+                                "box": box,
+                                "confidence": float(item.get("confidence", 0.0)),
+                            }
+                        )
+                    confidences.extend(
+                        float(item["confidence"])
+                        for item in result.items
+                        if isinstance(item.get("confidence"), (int, float))
+                    )
+                    if result.text:
+                        parts.append(result.text)
+                        page_numbers.append(i + 1)
+                except Exception:
+                    logger.warning("Scanned-PDF OCR failed for page %d", i + 1, exc_info=True)
+                    warnings.append(f"OCR failed while processing page {i + 1}.")
+                    metadata["ocr_status"] = "failed"
+                    break
+
+            if confidences:
+                metadata["ocr_mean_confidence"] = round(sum(confidences) / len(confidences), 3)
+            return clean_ocr_text(" ".join(parts)) if parts else "", metadata, warnings
+    except (ImportError, Exception) as pdfium_err:
+        logger.debug("pypdfium2 OCR rendering skipped/failed: %s", pdfium_err)
+
+    # 2. PyMuPDF fallback
+    try:
+        import fitz  # type: ignore[import-untyped]
+        import numpy as np
+        from PIL import Image  # type: ignore[import-untyped]
+
+        doc = doc_or_data if hasattr(doc_or_data, "page_count") else fitz.open(stream=raw_data, filetype="pdf")
+        total_pages = doc.page_count
+        pages_to_process = min(total_pages, max(1, min(_OCR_PDF_PAGES, _MAX_OCR_PDF_PAGES)))
+
+        for i in range(pages_to_process):
+            if time.monotonic() >= deadline:
+                warnings.append("OCR stopped after reaching the document processing time limit.")
+                metadata["ocr_status"] = "timed_out"
+                break
+            try:
+                page = doc[i]
+                rect = page.rect
+                page_area = max(1.0, rect.width * rect.height)
+                scale = 150 / 72
+                if page_area * scale * scale > _MAX_PDF_RENDER_PIXELS:
+                    scale = (_MAX_PDF_RENDER_PIXELS / page_area) ** 0.5
+                    warnings.append(f"OCR page {i + 1} was downscaled to stay within the pixel limit.")
+                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                if pix.width * pix.height > _MAX_PDF_RENDER_PIXELS:
+                    warnings.append(f"OCR skipped page {i + 1}: rendered image exceeds the pixel limit.")
+                    continue
+                image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                result = extract_ocr_result(np.asarray(image))
+                metadata["ocr_backend"] = result.backend
+                metadata["ocr_status"] = result.status
+                if result.used_fallback:
+                    metadata["ocr_used_fallback"] = True
+                if result.detail:
+                    metadata["ocr_detail"] = result.detail
+                if result.status != "ready":
+                    break
+                metadata["ocr_regions"] = int(metadata["ocr_regions"]) + len(result.items)
+                evidence = metadata["ocr_evidence"]
+                for item in result.items:
+                    if len(evidence) >= _MAX_OCR_EVIDENCE_REGIONS:
+                        break
+                    raw_box = item.get("box")
+                    try:
+                        box = [
+                            [round(float(point[0]), 1), round(float(point[1]), 1)]
+                            for point in raw_box
+                        ]
+                    except (IndexError, TypeError, ValueError):
+                        box = []
+                    evidence.append(
+                        {
+                            "page": i + 1,
+                            "text": str(item.get("text", ""))[:200],
+                            "box": box,
+                            "confidence": float(item.get("confidence", 0.0)),
+                        }
+                    )
+                confidences.extend(
+                    float(item["confidence"])
+                    for item in result.items
+                    if isinstance(item.get("confidence"), (int, float))
+                )
+                if result.text:
+                    parts.append(result.text)
+                    page_numbers.append(i + 1)
+            except Exception:
+                logger.warning("Scanned-PDF OCR fallback failed for page %d", i + 1, exc_info=True)
+                warnings.append(f"OCR failed while processing page {i + 1}.")
+                metadata["ocr_status"] = "failed"
+                break
+
+        if confidences:
+            metadata["ocr_mean_confidence"] = round(sum(confidences) / len(confidences), 3)
+        return clean_ocr_text(" ".join(parts)) if parts else "", metadata, warnings
+    except Exception:
+        warnings.append("OCR dependencies are not installed or failed to initialize.")
+        return "", metadata, warnings
 
 
 def _extract_docx(data: bytes) -> _Extraction:

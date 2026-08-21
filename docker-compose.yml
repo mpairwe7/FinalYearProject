@@ -133,12 +133,15 @@ services:
     tmpfs:
       - /tmp
       - /app/cache
+      - /app/data_store
     volumes:
       - ./artifacts/models:/app/models:ro
       - ./artifacts/offline:/app/offline:ro
       - ./artifacts/quantized:/app/quantized:ro
       - api_logs:/app/logs
-      - analytics_data:/app/data_store
+      # analytics_data volume removed — /app/data_store is already mounted as
+      # tmpfs (required for the read_only container). A named volume and tmpfs
+      # cannot share the same target path in Docker Compose.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
       interval: 30s
@@ -468,7 +471,6 @@ networks:
 # -----------------------------------------------------------------------------
 volumes:
   api_logs:
-  analytics_data:
   qdrant_data:
   redis_data:
   postgres_data:

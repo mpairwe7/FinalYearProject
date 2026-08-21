@@ -1,8 +1,9 @@
-# Opt-in local OCR profile.  Run with:
+# Triton-served PP-OCRv6 SOTA OCR profile. Run with:
 # docker compose -f docker-compose.yml -f docker-compose.ocr.yml --profile ocr up -d --build ocr api
 #
-# This mirrors the BP workflow-engine pattern: OCR runs as an independently
-# health-checked local service and the API uses a private Docker-network URL.
+# Aligned with the enterprise BP workflow-engine pattern: PP-OCRv6 runs as an
+# independently health-checked Triton/PaddleX service providing line-level bounding
+# polygons, low GPU latency, and dense table/alphanumeric recognition.
 services:
   ocr:
     profiles: ["ocr"]
@@ -13,12 +14,15 @@ services:
     ports:
       - "127.0.0.1:${OCR_HOST_PORT:-8100}:8100"
     environment:
-      OCR_BACKEND: easyocr
-      OCR_GPU: ${OCR_GPU:-false}
+      OCR_BACKEND: ${OCR_BACKEND:-ppocrv6}
+      OCR_ENGINE: ${OCR_ENGINE:-ppocrv6}
+      OCR_MODEL_VARIANT: ${OCR_MODEL_VARIANT:-v6}
+      OCR_GPU: ${OCR_GPU:-true}
       OCR_LANGUAGES: ${OCR_LANGUAGES:-en}
-      OCR_SERVICE_MAX_BYTES: ${OCR_SERVICE_MAX_BYTES:-12582912}
-      OCR_SERVICE_MAX_PIXELS: ${OCR_SERVICE_MAX_PIXELS:-20000000}
-      OCR_INFERENCE_MAX_CONCURRENT: ${OCR_INFERENCE_MAX_CONCURRENT:-1}
+      OCR_SERVICE_MAX_BYTES: ${OCR_SERVICE_MAX_BYTES:-16777216}
+      OCR_SERVICE_MAX_PIXELS: ${OCR_SERVICE_MAX_PIXELS:-24000000}
+      OCR_INFERENCE_MAX_CONCURRENT: ${OCR_INFERENCE_MAX_CONCURRENT:-2}
+      TRITON_OCR_URL: ${TRITON_OCR_URL:-}
     volumes:
       - ocr_models:/models
     healthcheck:
@@ -36,7 +40,9 @@ services:
       OCR_BACKEND: service
       OCR_SERVICE_URL: http://ocr:8100
       OCR_SERVICE_TIMEOUT_SECONDS: ${OCR_SERVICE_TIMEOUT_SECONDS:-6}
-      OCR_SERVICE_MAX_CONCURRENT: ${OCR_SERVICE_MAX_CONCURRENT:-2}
+      OCR_SERVICE_MAX_CONCURRENT: ${OCR_SERVICE_MAX_CONCURRENT:-4}
+      DOCUMENT_OCR_PDF_PAGES: ${DOCUMENT_OCR_PDF_PAGES:-3}
+      DOCUMENT_ENABLE_SPATIAL_OCR: ${DOCUMENT_ENABLE_SPATIAL_OCR:-false}
     depends_on:
       ocr:
         condition: service_healthy

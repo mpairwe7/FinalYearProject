@@ -30,9 +30,13 @@ export const LOCALE_OPTIONS: readonly LocaleOption[] = [
   { value: 'en', label: 'English', native: 'English', speechLang: 'en-US' },
   { value: 'lg', label: 'Luganda', native: 'Oluganda', speechLang: 'lg-UG' },
   { value: 'sw', label: 'Swahili', native: 'Kiswahili', speechLang: 'sw-KE' },
-  { value: 'nyn', label: 'Runyankole', native: 'Runyankore', speechLang: 'nyn' },
-  { value: 'ach', label: 'Acholi', native: 'Leb Acoli', speechLang: 'ach' },
 ];
+
+/* Runyankole (nyn) and Acholi (ach) were here and were removed: the assistant
+   offers English, Luganda and Swahili. `normalizeLocale` below coerces a
+   persisted 'nyn'/'ach' back to English rather than leaving a stored value the
+   picker can no longer show. The backend still understands both codes, so
+   restoring them is a matter of adding the two lines back. */
 
 export const DEFAULT_LOCALE = 'en';
 

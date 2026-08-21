@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,59 @@ ABSTENTION_THRESHOLD = float(os.getenv("ABSTENTION_THRESHOLD", "0.15"))
 # P1-5: abstention threshold on the normalized [0,1] reranker scale.
 ABSTENTION_THRESHOLD_NORM = float(os.getenv("ABSTENTION_THRESHOLD_NORM", "0.30"))
 ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
+
+# ---------------------------------------------------------------------------
+# Unicode canonicalization (CVE-mitigation: homoglyph & zero-width evasion)
+# ---------------------------------------------------------------------------
+# Zero-width characters used in prompt-injection obfuscation
+_ZERO_WIDTH_CHARS = re.compile(
+    "[\u200b\u200c\u200d\u200e\u200f\u2060\u2061\u2062\u2063\u2064\ufeff]"
+)
+
+# Cyrillic / Greek / mathematical lookalikes → Latin equivalents.
+# Only the characters most commonly abused in injection obfuscation.
+_CONFUSABLE_MAP = str.maketrans({
+    # Cyrillic lowercase
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p",
+    "\u0441": "c", "\u0443": "y", "\u0456": "i", "\u0445": "x",
+    "\u044a": "b", "\u0455": "s", "\u0458": "j", "\u0491": "r",
+    # Cyrillic uppercase
+    "\u0410": "A", "\u0412": "B", "\u0415": "E", "\u041a": "K",
+    "\u041c": "M", "\u041d": "H", "\u041e": "O", "\u0420": "P",
+    "\u0421": "C", "\u0422": "T", "\u0425": "X",
+    # Greek lowercase
+    "\u03b1": "a", "\u03b5": "e", "\u03bf": "o", "\u03c1": "p",
+    "\u03b9": "i", "\u03ba": "k",
+})
+
+
+def _canonicalize_text(text: str) -> str:
+    """Normalize unicode to defeat homoglyph and zero-width evasion.
+
+    NFKD decomposition converts visually similar characters (fullwidth
+    Ａ → A) to their ASCII-compatible base forms.  Zero-width joiners,
+    non-joiners, and BOM markers are stripped so that injected invisible
+    characters cannot break regex token boundaries.
+
+    A confusable-character table maps the most common Cyrillic, Greek, and
+    mathematical lookalikes to their Latin equivalents.  A final ASCII
+    encode-with-ignore step drops anything that still isn't ASCII; the
+    regex then matches on the remaining skeleton.  This is intentionally
+    lossy — the canonical form is only used for pattern matching, never
+    displayed.
+    """
+    text = _ZERO_WIDTH_CHARS.sub("", text)
+    text = unicodedata.normalize("NFKD", text)
+    # Drop combining marks so accented variants collapse (é → e)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    # Map common confusable homoglyphs to Latin equivalents
+    text = text.translate(_CONFUSABLE_MAP)
+    # Drop remaining non-ASCII after mapping
+    try:
+        text = text.encode("ascii", "ignore").decode("ascii")
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass
+    return text
 
 # System prompt phrases that must never appear verbatim in a model response
 # (LLM07 — System Prompt Leakage, OWASP 2025).  Keep this list in sync with
@@ -189,8 +243,13 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")),
     ("ug_phone", re.compile(r"(?:^|(?<=\s))(?:\+256|0)(?:7[0-9]{8}|4[0-9]{8})\b")),
+    # Standard contiguous TIN
     ("ug_tin", re.compile(r"\b1\d{9}\b")),
+    # Spaced / hyphenated TIN variants (e.g. "100 012 3456" or "100-012-3456")
+    ("ug_tin", re.compile(r"\b1\d{2}[\s-]\d{3}[\s-]\d{4}\b")),
     ("ug_nid", re.compile(r"\bC[MF]\d{2}[A-Z]{5}\d{5}[A-Z]\b")),
+    # Spaced NID variant (e.g. "CM 89 ABCDE 12345 F")
+    ("ug_nid", re.compile(r"\bC[MF]\s?\d{2}\s?[A-Z]{5}\s?\d{5}\s?[A-Z]\b")),
     ("credit_card", re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b")),
     ("amex_card", re.compile(r"\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b")),
     ("ug_passport", re.compile(r"\b[A-Z]{2}\d{7}\b")),
@@ -220,7 +279,7 @@ class InputGuard:
             )
 
         for pattern in _INJECTION_PATTERNS:
-            if pattern.search(text):
+            if pattern.search(text) or pattern.search(_canonicalize_text(text)):
                 logger.warning(
                     "Prompt injection blocked: pattern=%s input_length=%d",
                     pattern.pattern[:60],
@@ -237,7 +296,7 @@ class InputGuard:
                 )
 
         for pattern in _HARMFUL_INTENT_PATTERNS:
-            if pattern.search(text):
+            if pattern.search(text) or pattern.search(_canonicalize_text(text)):
                 logger.warning(
                     "Harmful intent blocked: pattern=%s input_length=%d",
                     pattern.pattern[:60],
@@ -271,9 +330,11 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
     """
     scrubbed = text
     was_scrubbed = False
+    canonical = _canonicalize_text(scrubbed)
     for pattern in _INJECTION_PATTERNS:
-        if pattern.search(scrubbed):
+        if pattern.search(scrubbed) or pattern.search(canonical):
             scrubbed = pattern.sub("[REDACTED_INSTRUCTION]", scrubbed)
+            canonical = _canonicalize_text(scrubbed)
             was_scrubbed = True
     if was_scrubbed:
         logger.warning("Indirect injection scrubbed in retrieved passage (%d chars)", len(text))

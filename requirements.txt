@@ -4,14 +4,14 @@ uvicorn[standard]==0.30.1
 pydantic==2.13.0
 slowapi>=0.1.9
 limits[redis]>=3.13
-sse-starlette>=2.0.0
+sse-starlette>=3.4.6
 httpx>=0.28.1,<0.29
 
 # Data / modeling stack for notebooks (CSV/PDF RAG + tagging + TTS)
 pandas>=1.5,<4.0
 numpy==1.26.4
 sentence-transformers==3.4.1
-langchain==1.2.15
+langchain==1.3.14
 langchain-community==0.4.1
 langchain-core>=1.3.2,<2.0.0
 langchain-text-splitters==1.1.2
@@ -39,7 +39,7 @@ fpdf2>=2.8.7
 beautifulsoup4>=4.12.0
 
 # Text-to-Speech (legacy — kept for notebooks only, not production path)
-TTS==0.21.3; python_version < '3.12'
+TTS==0.22.0; python_version < '3.12'
 gTTS>=2.5.0; python_version >= '3.12'
 pydub==0.25.1
 
@@ -49,7 +49,7 @@ pydub==0.25.1
 # Fine-tuning stack (explicitly pinned — previously imported but missing)
 peft>=0.14.0
 trl>=0.12.0
-bitsandbytes>=0.43.0; sys_platform == 'linux'
+bitsandbytes>=0.50.0; sys_platform == 'linux'
 # ONNX export + quantisation
 optimum[onnxruntime]>=1.24.0
 onnxruntime>=1.20.0
@@ -89,7 +89,7 @@ seaborn>=0.13.0
 
 # OpenTelemetry GenAI observability (opt-in via OTEL_ENABLED=true)
 opentelemetry-api>=1.27.0
-opentelemetry-sdk>=1.27.0
+opentelemetry-sdk>=1.44.0
 opentelemetry-exporter-otlp-proto-grpc>=1.27.0
 
 # RAG evaluation (CI/CD pipeline)

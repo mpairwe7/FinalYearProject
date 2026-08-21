@@ -30,13 +30,10 @@
   background: transparent;
 }
 
-/* Header floats as glass rather than a solid bar. */
-.chatv2 .hdrv2 {
-  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
-  backdrop-filter: blur(14px) saturate(150%);
-  -webkit-backdrop-filter: blur(14px) saturate(150%);
-  border-bottom: 1px solid color-mix(in srgb, var(--border-0) 60%, transparent);
-}
+/* The header is no longer a bar at all — see shell.css. It has no background
+   and no bottom border, so the transcript passes under it and dissolves into
+   the mask rather than meeting a rule. A glass panel here would reinstate
+   exactly the divider the redesign removes, so there is nothing to paint. */
 
 /* ---------------------------------------------------------------------------
  * 2. The transcript column stays transparent.
@@ -87,32 +84,39 @@
 .chatv2 .dlgv2,
 .chatv2 .bubble.user,
 .chatv2 .citations ol,
-.chatv2 .landing-chip {
+.chatv2 .landing-chip,
+/* The conversation row / title menu is portalled to <body> and carries
+   `.chatv2` itself to pick up the tokens — which also matches the
+   `background: transparent` rule at the top of this file, so without a line
+   here it renders see-through and the rows behind it read straight through the
+   panel. Same for the /chats page shell, which is a `.chatv2` root of its own. */
+.convmenu.chatv2,
+.chatv2 .csrch,
+.chatspg-shell.chatv2 {
   background: var(--bg-0);
 }
 
-/* The sidebar is the exception to §3, and deliberately.
+/* The sidebar is a panel, not part of the canvas.
  *
- * It used to be an opaque --bg-0 slab (--bg-1 in dark), which made it the one
- * surface that did not sit on the same ground as the conversation: a visible
- * tonal seam down the left of every screen, and on a phone — where the rail is
- * a drawer over that same conversation — a drawer that looked like a different
- * app. Sharing the canvas is the whole point of the request; painting it "the
- * same colour" is not possible anyway, since the canvas is a gradient.
+ * It was transparent for a while, so that it shared the conversation's ground
+ * and no tonal seam ran down the left of the screen. Two things were wrong with
+ * that. On a phone the rail is a *drawer floating over the conversation*, and a
+ * transparent drawer let the transcript read straight through it — the reply
+ * text and the rail's own labels landed on top of each other. And on a desktop
+ * it left the shell with no panel hierarchy at all: in light theme the rail and
+ * the conversation were both plain white, separated only by a 1px hairline, so
+ * there was nothing to tell you where one ended and the other began.
  *
- * §3's rule is that no glyph renders directly on a moving gradient, and this
- * does not break it, because of what the mesh actually is: a linear-gradient
- * between --bg-0 and --bg-1 with radial tints riding on top at 8% (light) and
- * 22% (dark). Rail text is --text-0/--text-1, specified against exactly those
- * two values, so the worst case is text on --bg-1 — a background it is already
- * contrast-checked against. Measured in-browser after the change, compositing
- * each label onto the ground that actually paints behind it: conversation
- * titles 8.59:1 light / 7.60:1 dark, "New chat" 11.85:1 / 13.63:1. The floor is
- * 4.5:1, and the axe suite re-checks it on every run.
+ * So the rail takes the recessed surface and the conversation keeps the canvas.
+ * That is the relationship both reference designs use, and it is the one thing
+ * a sidebar has to do: read as a different plane from the thing it indexes.
  *
- * The hairline border-right in shell.css is what separates the two now. */
+ * Contrast is unchanged in the direction that matters. Rail text is
+ * --text-0/--text-1, which are specified against --bg-0/--bg-1; the worst case
+ * used to be text over the mesh's --bg-1 stop, and now it is text on --bg-1
+ * flat. The axe suite re-checks it on every run. */
 .chatv2 .conversation-rail {
-  background: transparent;
+  background: var(--bg-1);
 }
 .chatv2 .bubble.user {
   background: var(--cv2-user-bubble);
@@ -127,34 +131,11 @@
 
 /* ---------------------------------------------------------------------------
  * 4. Motion + capability guards.
+ *
+ * These used to keep the header's glass legible without backdrop-filter, under
+ * reduced-motion, and on low-end Android where blur is the most expensive
+ * effect on the page. The header has no glass any more, so there is nothing
+ * left to guard — the strip is transparent in every mode and its controls
+ * carry their own hover surfaces. globals.css still steps the watermark down
+ * at 720px and stops the mesh drift under reduced-motion.
  * ------------------------------------------------------------------------- */
-/* Only the header is glass now, so only the header needs these guards. The
-   transcript is transparent in every mode — giving it an opaque background
-   here would put a solid layer over the ghost logo behind it and undo §2b. */
-@supports not (backdrop-filter: blur(1px)) {
-  .chatv2 .hdrv2 {
-    background: var(--bg-0);
-  }
-}
-
-/* globals.css already stops the drift animation under reduced-motion; the mesh
-   stays as a static gradient, which is the intent. Blur is dropped too — it is
-   a GPU cost with no informational value for a user who asked for less motion. */
-@media (prefers-reduced-motion: reduce) {
-  .chatv2 .hdrv2 {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: var(--bg-0);
-  }
-}
-
-/* Mobile: blur is the single most expensive effect on low-end Android, so the
-   header goes flat there. globals.css already steps the watermark down to
-   180px / 2.5% at this breakpoint. */
-@media (max-width: 720px) {
-  .chatv2 .hdrv2 {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: var(--bg-0);
-  }
-}

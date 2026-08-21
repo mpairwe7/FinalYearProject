@@ -28,6 +28,15 @@ from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
 from starlette.websockets import WebSocket
 
+# Proxy header validation — prevents IP rate-limit bypass via forged
+# X-Forwarded-For headers (CVE-mitigation: rate-limit header spoofing)
+try:
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    _HAS_PROXY_MIDDLEWARE = True
+except ImportError:  # pragma: no cover – uvicorn always present at runtime
+    _HAS_PROXY_MIDDLEWARE = False
+
 from . import database as db
 from . import documents
 from .analytics import AnalyticsMiddleware, metrics
@@ -672,6 +681,23 @@ app.add_middleware(
 # Analytics middleware (must be added after CORS)
 app.add_middleware(AnalyticsMiddleware)
 
+# ---------------------------------------------------------------------------
+# Proxy header validation — rate-limit IP spoofing mitigation
+# ---------------------------------------------------------------------------
+# When behind a trusted reverse proxy (nginx, Cloudflare, K8s ingress),
+# only accept X-Forwarded-For from known gateway IPs. Without this,
+# attackers can forge headers to rotate their apparent IP and bypass
+# per-IP rate limits. TRUSTED_PROXY_HOSTS env is a comma-separated list
+# of IPs or CIDR ranges.  Defaults to loopback only (single-container).
+if _HAS_PROXY_MIDDLEWARE:
+    _trusted_hosts: list[str] = [
+        h.strip()
+        for h in os.getenv("TRUSTED_PROXY_HOSTS", "127.0.0.1,::1").split(",")
+        if h.strip()
+    ]
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=_trusted_hosts)
+    logger.info("ProxyHeadersMiddleware enabled")
+
 
 # ---------------------------------------------------------------------------
 # Security headers middleware (OWASP, NIST SSDF PW.6)
@@ -930,6 +956,14 @@ async def chat_stream(
                 _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
                 continue
             if event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
+                # Retrieval boundaries go out live, as a name and nothing else.
+                # The client needs them to say what it is doing right now, and
+                # the buffered agent_trace below cannot serve that: it is held
+                # back until just before `grounding`, which is after generation
+                # has already streamed. The payloads still go into that summary
+                # unchanged — this only adds a frame, it does not divert one.
+                if event_type in ("retrieval.started", "retrieval.completed"):
+                    yield {"event": "phase", "data": event_type}
                 # Buffer for the agent_trace summary; do not forward live.
                 event_dict = payload if isinstance(payload, dict) else {"value": payload}
                 agent_trace.append({"type": event_type, **{k: v for k, v in event_dict.items() if k != "type"}})
@@ -2857,11 +2891,11 @@ async def voice_vision_chat(
     if len(audio_bytes) > 16 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio exceeds 16 MiB limit")
 
-    # Extract image (hard cap: 10 MiB)
+    # Extract image (hard cap: 40 MiB)
     image_file = body.get("image")
     image_bytes = await image_file.read() if image_file else b""
-    if len(image_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image exceeds 10 MiB limit")
+    if len(image_bytes) > 40 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image exceeds 40 MiB limit")
 
     transcript = ""
     ocr_text = ""

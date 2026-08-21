@@ -1,0 +1,119 @@
+{
+  "version": "2.2.0",
+  "summary": {
+    "title": "URA AI Taxpayer Chatbot - Threat Model",
+    "owner": "URA AI DevSecOps Team",
+    "description": "Multi-tier MLOps RAG Chatbot architecture for Uganda Revenue Authority. Next.js frontend, FastAPI backend, Qdrant vector store, vLLM inference, and Merkle audit ledger.",
+    "id": 0
+  },
+  "detail": {
+    "contributors": [
+      { "name": "DevSecOps Team" },
+      { "name": "Backend Team" },
+      { "name": "AI/ML Team" },
+      { "name": "Frontend Team" }
+    ],
+    "diagrams": [
+      {
+        "id": 0,
+        "title": "System Context - URA AI Architecture",
+        "diagramType": "STRIDE",
+        "placeholder": "Complete architecture context showing trust boundaries and data flows",
+        "thumbnail": "",
+        "version": "2.2.0",
+        "cells": [
+          {
+            "position": { "x": 50, "y": 40 },
+            "size": { "width": 140, "height": 70 },
+            "shape": "actor",
+            "id": "taxpayer",
+            "zIndex": 1,
+            "data": {
+              "name": "Taxpayer",
+              "description": "Ugandan citizen or business querying tax laws, exemptions, and obligations",
+              "type": "tm.Actor",
+              "hasOpenThreats": false,
+              "provides": ["HTTPS Client Requests", "Tax Queries"],
+              "threats": []
+            }
+          },
+          {
+            "position": { "x": 300, "y": 40 },
+            "size": { "width": 160, "height": 80 },
+            "shape": "process",
+            "id": "frontend-app",
+            "zIndex": 2,
+            "data": {
+              "name": "Frontend (Next.js 16)",
+              "description": "React-based UI with DOMPurify sanitization, CSP headers, and WebSockets",
+              "type": "tm.Process",
+              "hasOpenThreats": false,
+              "outOfScope": false,
+              "threats": [
+                {
+                  "id": "T-FE-01",
+                  "title": "XSS in Markdown Output",
+                  "status": "Mitigated",
+                  "severity": "High",
+                  "type": "Spoofing",
+                  "description": "Adversary injects malicious JavaScript via model response or query reflection",
+                  "mitigation": "DOMPurify and rehype-sanitize filter in Markdown.tsx component"
+                }
+              ]
+            }
+          },
+          {
+            "position": { "x": 550, "y": 40 },
+            "size": { "width": 180, "height": 90 },
+            "shape": "process",
+            "id": "fastapi-core",
+            "zIndex": 3,
+            "data": {
+              "name": "FastAPI Core Gateway",
+              "description": "BFF API handling auth, InputGuard, OutputGuard, DeBERTa grounding, and RAG retrieval",
+              "type": "tm.Process",
+              "hasOpenThreats": false,
+              "outOfScope": false,
+              "threats": [
+                {
+                  "id": "T-API-01",
+                  "title": "JWT Auth Forgery",
+                  "status": "Mitigated",
+                  "severity": "Critical",
+                  "type": "Spoofing",
+                  "description": "Attacker attempts to forge staff authorization tokens",
+                  "mitigation": "RS256/HS256 validation with secret rotation and strict claim verification"
+                }
+              ]
+            }
+          },
+          {
+            "position": { "x": 820, "y": 40 },
+            "size": { "width": 160, "height": 80 },
+            "shape": "store",
+            "id": "qdrant-db",
+            "zIndex": 4,
+            "data": {
+              "name": "Qdrant Vector DB",
+              "description": "Stores dense embeddings for indexed official URA tax documents",
+              "type": "tm.Store",
+              "hasOpenThreats": false,
+              "outOfScope": false,
+              "threats": [
+                {
+                  "id": "T-RAG-01",
+                  "title": "Vector Index Poisoning",
+                  "status": "Mitigated",
+                  "severity": "Critical",
+                  "type": "Tampering",
+                  "description": "Adversary injects fraudulent tax advice documents",
+                  "mitigation": "SHA256 checksum verification and signed corpus ingest pipeline"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

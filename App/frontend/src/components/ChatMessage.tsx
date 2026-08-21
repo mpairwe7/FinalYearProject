@@ -8,6 +8,7 @@ import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
 import { authHeaders } from '../lib/authSession';
 import FeedbackButtons from './FeedbackButtons';
 import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon } from './Icons';
+import LoadingState, { formatElapsed } from './LoadingState';
 
 const Markdown = lazy(() => import('./Markdown'));
 
@@ -87,6 +88,10 @@ interface ChatMessageProps {
   ttsLoading: string | null;
   isTransitioning: boolean;
   onListen: (turnId: string, text: string) => void;
+  /** Set only on the turn currently being answered — see page.tsx. */
+  phaseLabel?: string;
+  phaseVariant?: string;
+  phaseStartedAt?: number;
 }
 
 function ChatMessageInner({
@@ -97,6 +102,9 @@ function ChatMessageInner({
   ttsLoading,
   isTransitioning,
   onListen,
+  phaseLabel,
+  phaseVariant,
+  phaseStartedAt,
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
@@ -108,6 +116,14 @@ function ChatMessageInner({
       </div>
       <div className={`bubble ${turn.role}`}>
         <span className="sr-only">{turn.role === 'user' ? 'You said' : 'Assistant replied'}</span>
+        {/* What the working indicator leaves behind. Above the answer, where
+            the indicator itself was, so the turn ends where it was running. */}
+        {isAssistant && phaseLabel && phaseStartedAt != null && (
+          <LoadingState label={phaseLabel} variant={phaseVariant} startedAt={phaseStartedAt} />
+        )}
+        {isAssistant && !isGreeting && !phaseLabel && turn.thoughtForMs != null && (
+          <span className="thought-for">Thought for {formatElapsed(turn.thoughtForMs)}</span>
+        )}
         <div className="msg-content">
           {isAssistant ? (
             <Suspense fallback={turn.content}><Markdown content={turn.content} /></Suspense>
@@ -162,7 +178,7 @@ function ChatMessageInner({
         {/* chatv2: grounding sits outside the citations block — a low-confidence
             answer often has no citations, and that is exactly when the reader
             most needs the warning. */}
-        {isAssistant && !isGreeting && turn.content && turn.faithfulnessScore != null && (
+        {isAssistant && !isGreeting && !phaseLabel && turn.content && turn.faithfulnessScore != null && (
           <div className="grounding-row">
             <span
               className={`grounding-badge ${turn.faithfulnessScore >= 0.6 ? 'grounding-ok' : 'grounding-warn'}`}
@@ -211,7 +227,7 @@ function ChatMessageInner({
           </details>
         )}
 
-        {isAssistant && !isGreeting && turn.content && (
+        {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="bubble-actions">
             <button
               className={`listen-btn ${playingTurnId === turn.id ? 'listen-btn-active' : ''}`}
@@ -249,6 +265,10 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
   return (
     prev.turn.id === next.turn.id &&
     prev.turn.content === next.turn.content &&
+    prev.turn.thoughtForMs === next.turn.thoughtForMs &&
+    prev.phaseLabel === next.phaseLabel &&
+    prev.phaseVariant === next.phaseVariant &&
+    prev.phaseStartedAt === next.phaseStartedAt &&
     prev.turn.faithfulnessScore === next.turn.faithfulnessScore &&
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&

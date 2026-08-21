@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ def generate_conversation_pdf(
     if session_id:
         pdf.set_font(pdf._font_name, "I", 8)
         pdf.set_text_color(*_DARK_GRAY)
-        pdf.cell(0, 5, _safe_text(pdf, f"Session: {session_id}"), ln=True)
+        pdf.cell(0, 5, _safe_text(pdf, f"Session: {session_id}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
     for msg in messages:
@@ -140,7 +141,7 @@ def generate_conversation_pdf(
         label = "You" if is_user else "URA Assistant"
         if timestamp:
             label += f"  ({timestamp})"
-        pdf.cell(0, 5, _safe_text(pdf, label), ln=True)
+        pdf.cell(0, 5, _safe_text(pdf, label), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         # Message body.
         if is_user:
@@ -182,7 +183,7 @@ def generate_tax_summary_pdf(
     if taxpayer_ref:
         pdf.set_font(pdf._font_name, "B", 10)
         pdf.set_text_color(*_URA_NAVY)
-        pdf.cell(0, 6, _safe_text(pdf, f"Reference: {taxpayer_ref}"), ln=True)
+        pdf.cell(0, 6, _safe_text(pdf, f"Reference: {taxpayer_ref}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
     # Summary table.
@@ -262,7 +263,7 @@ def _safe_text(pdf: _URAReport, text: str) -> str:
 def _section_heading(pdf: _URAReport, label: str) -> None:
     pdf.set_font(pdf._font_name, "B", 11)
     pdf.set_text_color(*_URA_NAVY)
-    pdf.cell(0, 7, label, ln=True)
+    pdf.cell(0, 7, label, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_draw_color(*_URA_GOLD)
     pdf.set_line_width(0.4)
     y = pdf.get_y()
@@ -285,7 +286,7 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
     # Document metadata.
     pdf.set_font(pdf._font_name, "B", 10)
     pdf.set_text_color(*_URA_NAVY)
-    pdf.cell(0, 6, _safe_text(pdf, f"File: {filename}"), ln=True)
+    pdf.cell(0, 6, _safe_text(pdf, f"File: {filename}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(pdf._font_name, "I", 8)
     pdf.set_text_color(*_DARK_GRAY)
     analyzed_at = analysis.get("analyzed_at")
@@ -299,7 +300,8 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
         5,
         f"Format: {str(analysis.get('kind', '')).upper()}  |  "
         f"Size: {size_kb:,.0f} KB  |  Analyzed: {when}",
-        ln=True,
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
     )
     pdf.ln(4)
 
@@ -312,7 +314,7 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
     pdf.cell(pdf.get_string_width(badge) + 4, 7, badge, fill=True)
     pdf.set_font(pdf._font_name, size=9)
     pdf.set_text_color(*_DARK_GRAY)
-    pdf.cell(0, 7, f"   Heuristic match score: {confidence:.0%} (not calibrated)", ln=True)
+    pdf.cell(0, 7, f"   Heuristic match score: {confidence:.0%} (not calibrated)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     keywords = analysis.get("matched_keywords") or []
     if keywords:
         pdf.set_font(pdf._font_name, "I", 8)
@@ -320,7 +322,8 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
             0,
             5,
             _safe_text(pdf, "Matched keywords: " + ", ".join(str(k) for k in keywords[:5])),
-            ln=True,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
         )
     pdf.ln(4)
 
