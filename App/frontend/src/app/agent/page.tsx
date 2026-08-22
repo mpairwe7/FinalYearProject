@@ -5,9 +5,20 @@
  *
  * `/admin/tickets` is the full console. This page answers: what should I
  * pick up next, and what do I need before I reply.
+ *
+ * The redesign kept the shape (tabs, split pane, land on the top case) and
+ * fixed what was around it: the queue's keyboard shortcuts were real but only
+ * documented on the *other* page, in an 11px line of grey text, so they now sit
+ * under the tabs as key caps; the counts strip reserves its space instead of
+ * appearing mid-load and shoving the tabs down; and the case pane scrolls under
+ * a sticky header, because "Back to queue", the status and the assign control
+ * were the first things to disappear on a long transcript.
  */
 import React, { useMemo, useRef } from "react";
 import StaffGuard, { type StaffIdentity } from "../../components/StaffGuard";
+import { OpsPage } from "../../components/ops/OpsPage";
+import { KeyHint } from "../../components/ops/Controls";
+import { EmptyState, ErrorState, SkeletonRows } from "../../components/ops/States";
 import { QueueRow } from "../../components/staff/QueueRow";
 import { TicketCase } from "../../components/staff/TicketCase";
 import {
@@ -29,11 +40,17 @@ import "./agent.css";
 const QUEUE_TABS = ["next", "mine", "resolved"] as const;
 type QueueTab = (typeof QUEUE_TABS)[number];
 
+const TAB_LABEL: Record<QueueTab, string> = {
+  next: "Next up",
+  mine: "Mine",
+  resolved: "Resolved",
+};
+
 function AgentQueue({ who }: { who: StaffIdentity }) {
   const handle = officerHandle(who);
   const [view, setView] = useQueueView();
   const status = view.mine ? "assigned" : view.status === "resolved" ? "resolved" : "open";
-  const { data: queue, isLoading, error } = useTicketQueueFull(status, "", "", 50);
+  const { data: queue, isLoading, error, refetch } = useTicketQueueFull(status, "", "", 50);
   const { data: sla } = useTicketSla(30);
   const update = useUpdateTicket();
 
@@ -79,7 +96,7 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
   ).length;
   const awaiting = sla?.awaiting_first_response ?? 0;
 
-  const tab = view.status === "resolved" ? "resolved" : view.mine ? "mine" : "next";
+  const tab: QueueTab = view.status === "resolved" ? "resolved" : view.mine ? "mine" : "next";
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const selectTab = (next: QueueTab) => {
@@ -101,56 +118,67 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
   };
 
   return (
-    <main className="ag-page" id="staff-main">
-      <header className="ag-head">
-        <div>
-          <h1>My queue</h1>
-          <p className="ag-sub">
-            Signed in as {who.email || who.external_id} — claim a case, then reply
-          </p>
-        </div>
+    <OpsPage
+      eyebrow="Work"
+      title="My queue"
+      description={`Signed in as ${who.email || who.external_id}. Claim a case, read the brief, then reply.`}
+      actions={
         <div className="ag-counts">
-          <span className="ag-count">
-            <strong>{tickets.length}</strong> {tab === "mine" ? "mine" : tab === "resolved" ? "resolved" : "next up"}
+          <span className="ops-chip">
+            <strong>{tickets.length}</strong>{" "}
+            {tab === "mine" ? "mine" : tab === "resolved" ? "resolved" : "next up"}
           </span>
-          {urgent > 0 && (
-            <span className="ag-count urgent">
+          {urgent > 0 ? (
+            <span className="ops-chip is-danger">
               <strong>{urgent}</strong> urgent
             </span>
-          )}
-          {breaching > 0 && (
-            <span className="ag-count urgent">
+          ) : null}
+          {breaching > 0 ? (
+            <span className="ops-chip is-danger">
               <strong>{breaching}</strong> past 24h
             </span>
-          )}
-          {awaiting > 0 && (
-            <span className="ag-count warn">
+          ) : null}
+          {awaiting > 0 ? (
+            <span className="ops-chip is-warn">
               <strong>{awaiting}</strong> awaiting first reply
             </span>
-          )}
+          ) : null}
         </div>
-      </header>
+      }
+    >
+      <div className="ag-tabbar">
+        <div className="ops-segmented ag-status-tabs" role="tablist" aria-label="Queue view">
+          {QUEUE_TABS.map((queueTab, index) => (
+            <button
+              key={queueTab}
+              ref={(element) => {
+                tabRefs.current[index] = element;
+              }}
+              type="button"
+              role="tab"
+              id={`ag-tab-${queueTab}`}
+              aria-controls="ag-panel"
+              aria-selected={tab === queueTab}
+              tabIndex={tab === queueTab ? 0 : -1}
+              className={tab === queueTab ? "active" : ""}
+              onClick={() => selectTab(queueTab)}
+              onKeyDown={(event) => onTabKeyDown(event, index)}
+            >
+              {TAB_LABEL[queueTab]}
+              {tab === queueTab && !isLoading ? (
+                <span className="ops-filter-count">{tickets.length}</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
 
-      <div className="ag-status-tabs" role="tablist" aria-label="Queue view">
-        {QUEUE_TABS.map((queueTab, index) => (
-          <button
-            key={queueTab}
-            ref={(element) => {
-              tabRefs.current[index] = element;
-            }}
-            type="button"
-            role="tab"
-            id={`ag-tab-${queueTab}`}
-            aria-controls="ag-panel"
-            aria-selected={tab === queueTab}
-            tabIndex={tab === queueTab ? 0 : -1}
-            className={tab === queueTab ? "active" : ""}
-            onClick={() => selectTab(queueTab)}
-            onKeyDown={(event) => onTabKeyDown(event, index)}
-          >
-            {queueTab === "next" ? "Next up" : queueTab === "mine" ? "Mine" : "Resolved"}
-          </button>
-        ))}
+        {/* The shortcuts were always here; nothing on this page said so. */}
+        <div className="ops-hints ag-hints">
+          <KeyHint keys={["j", "k"]}>move</KeyHint>
+          <KeyHint keys={["r"]}>reply</KeyHint>
+          <KeyHint keys={["a"]}>assign to me</KeyHint>
+          <KeyHint keys={["⌘K"]}>go anywhere</KeyHint>
+        </div>
       </div>
 
       <div
@@ -160,30 +188,40 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
         aria-labelledby={`ag-tab-${tab}`}
       >
         <section className="ag-queue-pane" aria-label="Queue">
-          {isLoading && <p className="ag-empty">Loading the queue…</p>}
-          {error && <p className="ag-empty ag-error">Could not load the queue.</p>}
-          {!isLoading && !error && tickets.length === 0 && (
-            <p className="ag-empty">
-              {tab === "mine"
-                ? "Nothing assigned to you. Pick up a case from Next up."
-                : `Nothing ${tab === "resolved" ? "resolved" : "waiting"}.`}
-            </p>
-          )}
-          <ul className="ag-queue">
-            {tickets.map((ticket) => (
-              <li key={ticket.id}>
-                <QueueRow
-                  ticket={ticket}
-                  selected={ticket.id === activeId}
-                  onSelect={select}
-                />
-              </li>
-            ))}
-          </ul>
+          {isLoading ? <SkeletonRows rows={6} height={62} /> : null}
+          {error ? (
+            <ErrorState body="The queue did not load." onRetry={() => void refetch()} />
+          ) : null}
+          {!isLoading && !error && tickets.length === 0 ? (
+            <EmptyState
+              title={
+                tab === "mine"
+                  ? "Nothing assigned to you"
+                  : tab === "resolved"
+                    ? "Nothing resolved in view"
+                    : "Nothing waiting"
+              }
+              body={
+                tab === "mine"
+                  ? "Pick up a case from Next up and it will move here."
+                  : tab === "resolved"
+                    ? "Resolved cases appear here once someone closes them."
+                    : "Every escalation has a first reply. New arrivals announce themselves at the top of the console."
+              }
+            />
+          ) : null}
+          {tickets.length > 0 ? (
+            <ul className="ag-queue">
+              {tickets.map((ticket) => (
+                <li key={ticket.id}>
+                  <QueueRow ticket={ticket} selected={ticket.id === activeId} onSelect={select} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
 
         <section className="ag-detail" aria-label="Ticket detail">
-          {!activeId && <p className="ag-empty">Pick a ticket to see the brief.</p>}
           {activeId ? (
             <TicketCase
               ticket={detail}
@@ -196,10 +234,12 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
               onPatch={(patch) => update.mutate({ id: activeId, patch })}
               onBack={() => setView({ ticket: "" })}
             />
-          ) : null}
+          ) : (
+            <EmptyState title="Pick a ticket to see the brief" />
+          )}
         </section>
       </div>
-    </main>
+    </OpsPage>
   );
 }
 

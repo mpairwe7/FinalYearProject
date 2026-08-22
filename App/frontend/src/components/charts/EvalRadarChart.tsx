@@ -8,9 +8,9 @@ import {
   PolarRadiusAxis,
   Radar,
   ResponsiveContainer,
-  Legend,
   Tooltip,
 } from "recharts";
+import { AXIS_TICK, AXIS_TICK_SM, ChartLegend, GRID_STROKE, OpsTooltip, SERIES, THRESHOLD_STROKE } from "./chartTheme";
 
 interface EvalMetric {
   name: string;
@@ -27,15 +27,16 @@ interface Props {
 const LABELS: Record<string, string> = {
   faithfulness: "Faithfulness",
   answer_relevancy: "Relevancy",
-  context_precision: "Ctx Precision",
-  context_recall: "Ctx Recall",
+  context_precision: "Ctx precision",
+  context_recall: "Ctx recall",
   groundedness: "Groundedness",
-  citation_accuracy: "Citation Acc",
+  citation_accuracy: "Citation accuracy",
   safety_probe_pass_rate: "Safety",
   abstention_precision: "Abstention",
 };
 
-export default function EvalRadarChart({ metrics, title = "RAG Quality Radar" }: Props) {
+/** Score against threshold across the eight RAG metrics. */
+export default function EvalRadarChart({ metrics, title = "Quality against thresholds" }: Props) {
   const data = metrics.map((m) => ({
     metric: LABELS[m.name] ?? m.name,
     score: Math.round(m.value * 100),
@@ -43,27 +44,41 @@ export default function EvalRadarChart({ metrics, title = "RAG Quality Radar" }:
   }));
 
   return (
-    <div className="chart-card chart-card-wide">
-      <h4 className="chart-title">{title}</h4>
+    <div className="ops-chart-card">
+      <div className="ops-chart-head">
+        <h3 className="ops-chart-title">{title}</h3>
+        <span className="ops-chart-sub">percent</span>
+      </div>
       <ResponsiveContainer width="100%" height={340}>
         <RadarChart data={data} cx="50%" cy="50%" outerRadius="70%">
-          <PolarGrid stroke="#334155" />
-          <PolarAngleAxis dataKey="metric" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
-          <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 9 }} />
-          <Radar name="Score" dataKey="score" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+          <PolarGrid stroke={GRID_STROKE} />
+          <PolarAngleAxis dataKey="metric" tick={AXIS_TICK} />
+          <PolarRadiusAxis angle={30} domain={[0, 100]} tick={AXIS_TICK_SM} />
+          <Radar
+            name="Score"
+            dataKey="score"
+            stroke={SERIES[0]}
+            fill={SERIES[0]}
+            fillOpacity={0.28}
+            isAnimationActive={false}
+          />
           <Radar
             name="Threshold"
             dataKey="threshold"
-            stroke="#ef4444"
+            stroke={THRESHOLD_STROKE}
             strokeDasharray="4 4"
             fill="none"
+            isAnimationActive={false}
           />
-          <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
-          <Tooltip
-            contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-          />
+          <Tooltip content={<OpsTooltip unit="%" />} />
         </RadarChart>
       </ResponsiveContainer>
+      <ChartLegend
+        items={[
+          { label: "Score", color: SERIES[0] },
+          { label: "Threshold", color: THRESHOLD_STROKE },
+        ]}
+      />
     </div>
   );
 }

@@ -1,242 +1,127 @@
-/* Operations overview. Tokens from globals.css; panels use --surface-ink like
-   the analytics dashboard so both themes work without a second palette. */
+/* Operations overview and the admin sub-pages that share its furniture.
+   Layout only — every size, colour and radius comes from styles/ops/tokens.css. */
 
-.ov-page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 26px 20px 56px;
-}
+/* Volume strip -------------------------------------------------------------
+   The trend, the delta and the mix all describe one number (escalations raised
+   in the period), so they share one card instead of being scattered across
+   tiles that count other things. */
 
-.ov-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 22px;
-}
-
-.ov-head h1 {
-  margin: 0;
-  font-size: 23px;
-  font-weight: 700;
-  color: var(--text-0);
-}
-
-.ov-sub {
-  margin: 5px 0 0;
-  font-size: 13px;
-  color: var(--text-2);
-}
-
-/* Three classes — see the note in staffGuard.css for why (0,2,1) from
-   globals.css beats a two-class selector here. */
-.ov-page .ov-head .ov-cta {
-  padding: 10px 16px;
-  border-radius: var(--radius-sm);
-  background: var(--grad-primary);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 650;
-  text-decoration: none;
-  box-shadow: var(--shadow-sm);
-  white-space: nowrap;
-}
-
-.ov-cta:focus-visible,
-.ov-q-wait:focus-visible,
-.ov-links a:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Metric row -------------------------------------------------------------- */
-
-.ov-grid {
+.ov-volume {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
+  grid-template-columns: minmax(180px, 220px) 1fr minmax(200px, 280px);
+  gap: var(--ops-space-5);
+  align-items: center;
+  margin: var(--ops-space-4) 0 var(--ops-space-5);
+  padding: var(--ops-space-4) var(--ops-space-5);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  box-shadow: var(--ops-elev-1);
 }
 
-.ov-metric {
+.ov-volume-lead {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 16px 18px;
-  background: var(--surface-ink);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md, 14px);
-  box-shadow: var(--shadow-sm);
+  gap: var(--ops-space-1);
 }
 
-.ov-metric-label {
-  font-size: 11.5px;
-  font-weight: 650;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-3);
+.ov-volume-chart {
+  min-width: 0;
 }
 
-.ov-metric-value {
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--text-0);
+.ov-volume-mix {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ops-space-2);
+}
+
+.ov-mix {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.ov-mix li {
+  display: grid;
+  grid-template-columns: 62px 1fr 28px;
+  align-items: center;
+  gap: var(--ops-space-2);
+}
+
+.ov-mix-bar {
+  height: 6px;
+  border-radius: var(--ops-radius-pill);
+  background: var(--ops-row-active);
+  overflow: hidden;
+}
+
+.ov-mix-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-3);
+}
+
+/* Priority is an ordered severity, so the fill follows the status scale rather
+   than a categorical hue — and the word itself sits in the chip beside it, so
+   colour is never the only channel. */
+.ov-mix-fill.is-urgent { background: var(--ops-bad); }
+.ov-mix-fill.is-high   { background: var(--ops-warn); }
+.ov-mix-fill.is-normal { background: var(--ops-series-1); }
+.ov-mix-fill.is-low    { background: var(--text-3); }
+
+.ov-mix-count {
+  font-size: var(--ops-text-xs);
   font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  text-align: right;
 }
 
-.ov-metric-hint {
-  font-size: 11.5px;
-  color: var(--text-3);
-}
-
-/* A metric that wants attention gets a left edge, not a colour wash — the
-   value must stay readable at AA on both canvases. */
-.ov-metric.ov-warn {
-  box-shadow: inset 3px 0 0 var(--warning), var(--shadow-sm);
-}
-.ov-metric.ov-danger {
-  box-shadow: inset 3px 0 0 var(--danger), var(--shadow-sm);
-}
-.ov-metric.ov-good {
-  box-shadow: inset 3px 0 0 var(--success), var(--shadow-sm);
-}
-
-/* Panels ------------------------------------------------------------------ */
+/* Two-column body ---------------------------------------------------------- */
 
 .ov-cols {
   display: grid;
   grid-template-columns: 1.45fr 1fr;
-  gap: 14px;
+  gap: var(--ops-space-3);
   align-items: start;
 }
 
-.ov-panel {
-  padding: 18px 20px 16px;
-  background: var(--surface-ink);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md, 14px);
-  box-shadow: var(--shadow-sm);
+.ov-side {
+  display: grid;
+  gap: var(--ops-space-3);
 }
 
-.ov-panel-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.ov-panel h2 {
-  margin: 0;
-  font-size: 14.5px;
-  font-weight: 650;
-  color: var(--text-1);
-}
-
-.ov-panel-note {
-  margin: 0 0 14px;
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: var(--text-2);
-}
-
-.ov-badge-urgent {
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: rgba(251, 113, 133, 0.14);
-  border: 1px solid rgba(251, 113, 133, 0.4);
-  color: var(--danger);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.ov-empty {
-  margin: 0;
-  padding: 14px 0;
-  font-size: 13px;
-  color: var(--text-3);
-}
-
-/* Queue list -------------------------------------------------------------- */
+/* Queue list --------------------------------------------------------------- */
 
 .ov-queue {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
-}
-
-.ov-queue li {
-  padding: 0;
-  border: 1px solid var(--border-0);
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
+  gap: var(--ops-space-1);
 }
 
 .ov-q-link {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 62px 1fr auto;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: var(--ops-space-3);
+  padding: 10px var(--ops-space-3);
+  border-radius: var(--ops-radius-sm);
   text-decoration: none;
   color: inherit;
-  border-radius: inherit;
+  transition: background var(--ops-dur-fast) var(--ops-ease);
 }
 
 .ov-q-link:hover {
-  background: var(--surface-2);
+  background: var(--ops-row-hover);
 }
 
 .ov-q-link:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.ov-metric-link {
-  text-decoration: none;
-  color: inherit;
-}
-
-.ov-metric-link:hover {
-  border-color: var(--border-2);
-}
-
-.ov-q-wait.is-warn {
-  color: var(--warning);
-}
-
-.ov-q-wait.is-breach {
-  color: var(--danger);
-}
-
-.ov-pri {
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-}
-
-.ov-pri-urgent {
-  background: rgba(251, 113, 133, 0.16);
-  border: 1px solid rgba(251, 113, 133, 0.42);
-  color: var(--danger);
-}
-.ov-pri-high {
-  background: rgba(251, 191, 36, 0.16);
-  border: 1px solid rgba(251, 191, 36, 0.42);
-  color: var(--warning);
-}
-.ov-pri-normal,
-.ov-pri-low {
-  background: var(--surface-3);
-  border: 1px solid var(--border-1);
-  color: var(--text-2);
+  outline: var(--ops-focus-ring) solid var(--ops-focus);
+  outline-offset: -1px;
 }
 
 .ov-q-body {
@@ -247,145 +132,197 @@
 }
 
 .ov-q-topic {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
   color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ov-q-query {
-  font-size: 12px;
+  font-size: var(--ops-text-xs);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.ov-q-meta {
+  display: flex;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+}
+
 .ov-q-wait {
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/* Key/value + chips ------------------------------------------------------- */
+.ov-q-wait.is-warn   { color: var(--ops-warn); }
+.ov-q-wait.is-breach { color: var(--ops-bad); }
+
+/* Priority pill — one definition, shared by the overview and the mix bars.
+   /agent and /admin/tickets use the `.st-pri-*` twin in staffTickets.css. */
+
+.ov-pri {
+  display: inline-block;
+  width: 100%;
+  padding: 3px 8px;
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row-active);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: var(--ops-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.ov-pri-urgent {
+  background: var(--ops-bad-fill);
+  border-color: var(--ops-bad-line);
+  color: var(--ops-bad-ink);
+}
+
+.ov-pri-high {
+  background: var(--ops-warn-fill);
+  border-color: var(--ops-warn-line);
+  color: var(--ops-warn-ink);
+}
+
+/* Key/value + chips -------------------------------------------------------- */
 
 .ov-kv {
   margin: 0;
   display: grid;
-  gap: 9px;
+  gap: var(--ops-space-2);
 }
 
 .ov-kv > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--ops-space-3);
+  min-height: 22px;
 }
 
 .ov-kv dt {
-  font-size: 12.5px;
+  font-size: var(--ops-text-xs);
   color: var(--text-3);
 }
 
 .ov-kv dd {
   margin: 0;
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
   color: var(--text-1);
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .ov-chip {
   padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
+  border-radius: var(--ops-radius-pill);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
 }
 
 .ov-chip.good {
-  background: rgba(52, 211, 153, 0.14);
-  border: 1px solid rgba(52, 211, 153, 0.38);
-  color: var(--success);
+  background: var(--ops-good-fill);
+  border: 1px solid var(--ops-good-line);
+  color: var(--ops-good-ink);
 }
 
 .ov-chip.warn {
-  background: rgba(251, 191, 36, 0.16);
-  border: 1px solid rgba(251, 191, 36, 0.42);
-  color: var(--warning);
+  background: var(--ops-warn-fill);
+  border: 1px solid var(--ops-warn-line);
+  color: var(--ops-warn-ink);
 }
 
-.ov-links {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-0);
-}
+/* Shared admin sub-page furniture ------------------------------------------ */
 
-.ov-links a {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ura-blue-bright);
-  text-decoration: none;
-}
-
-.ov-links a:hover {
-  text-decoration: underline;
-}
-
-.table-responsive {
-  width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  border-radius: var(--radius-md, 14px);
-  margin-bottom: 20px;
-}
-
-.flag-table {
-  width: 100%;
-  min-width: 520px;
-  border-collapse: collapse;
-  background: var(--surface-ink);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md, 14px);
-  overflow: hidden;
-}
-
-.flag-table th,
-.flag-table td {
-  text-align: left;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border-0);
-  font-size: 13px;
-  color: var(--text-1);
-  vertical-align: top;
-}
-
-.flag-table th {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.ov-empty {
+  margin: 0;
+  padding: var(--ops-space-4) 0;
+  font-size: var(--ops-text-sm);
   color: var(--text-3);
 }
 
-.flag-table button {
-  min-height: 36px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border-1);
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 650;
-  cursor: pointer;
-  touch-action: manipulation;
+.ov-form {
+  display: grid;
+  gap: var(--ops-space-3);
+  max-width: 720px;
 }
 
-.flag-table button.is-active {
-  color: var(--success);
-  border-color: var(--success);
+.ov-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-3);
+  flex-wrap: wrap;
+}
+
+.ov-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--ops-space-2);
+}
+
+.ov-list-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: var(--ops-space-3);
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-row);
+}
+
+.ov-list-title {
+  margin: 0;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+  overflow-wrap: anywhere;
+}
+
+.ov-list-body {
+  margin: var(--ops-space-1) 0 0;
+  font-size: var(--ops-text-xs);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.ov-list-meta {
+  margin: var(--ops-space-2) 0 0;
+  display: flex;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+}
+
+@media (max-width: 1080px) {
+  .ov-volume {
+    grid-template-columns: minmax(160px, 200px) 1fr;
+  }
+  .ov-volume-mix {
+    grid-column: 1 / -1;
+  }
+  .ov-mix li {
+    grid-template-columns: 62px 1fr 28px;
+  }
 }
 
 @media (max-width: 900px) {
@@ -394,15 +331,13 @@
   }
 }
 
-@media (max-width: 560px) {
-  .ov-page {
-    padding: 18px 14px 40px;
-  }
-  .ov-metric-value {
-    font-size: 22px;
+@media (max-width: 640px) {
+  .ov-volume {
+    grid-template-columns: 1fr;
+    gap: var(--ops-space-3);
   }
   .ov-q-link {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: 56px 1fr;
   }
   .ov-q-wait {
     grid-column: 2;

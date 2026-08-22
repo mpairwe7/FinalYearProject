@@ -4,6 +4,7 @@ import React, { useEffect } from "react";
 import type { TicketDetail, TicketPatch } from "../../services/analyticsApi";
 import { officerHandle, STATUS_LABEL, topicLabel, waitingFor, waitTone } from "../../lib/ticketUi";
 import { analyticsApi } from "../../services/analyticsApi";
+import { Skeleton } from "../ops/States";
 import type { StaffIdentity } from "../StaffGuard";
 import { TicketComposer } from "./TicketComposer";
 import "./staffTickets.css";
@@ -34,6 +35,17 @@ function turnTime(ts: number): string {
   }
 }
 
+/**
+ * One case, everything the officer needs before replying.
+ *
+ * The header is sticky. On a case with a long transcript, "Back to queue", the
+ * status and the priority were the first things to scroll away, which is
+ * exactly backwards: they are the controls, and the transcript is the reading.
+ *
+ * The transcript is still shown in full and unedited, and the two reply fields
+ * are still two fields — both are load-bearing rather than stylistic, and both
+ * are covered by tests that would notice.
+ */
 export function TicketCase({
   ticket,
   loading,
@@ -55,7 +67,17 @@ export function TicketCase({
   onPatch: (patch: TicketPatch) => void;
   onBack?: () => void;
 }) {
-  if (loading) return <p className="st-empty">Loading ticket…</p>;
+  if (loading) {
+    return (
+      <div className="st-case-loading" aria-busy="true">
+        <Skeleton width="55%" height={18} />
+        <Skeleton width="30%" height={14} />
+        <Skeleton height={90} radius="var(--ops-radius-sm)" />
+        <Skeleton height={160} radius="var(--ops-radius-sm)" />
+        <span className="ops-sr-only">Loading the case…</span>
+      </div>
+    );
+  }
   if (error || !ticket) return <p className="st-empty">Could not load this ticket.</p>;
 
   const handoff = ticket.handoff ?? {};
@@ -69,10 +91,10 @@ export function TicketCase({
     <article className="st-case">
       {canAct && handle ? <PresenceBeat ticketId={ticket.id} viewer={handle} /> : null}
       <header className="st-case-head">
-        <div>
+        <div className="st-case-headline">
           {onBack ? (
-            <button type="button" className="st-btn st-back" onClick={onBack}>
-              Back to queue
+            <button type="button" className="ops-btn is-ghost is-sm st-back" onClick={onBack}>
+              ← Back to queue
             </button>
           ) : null}
           <h2>{ticket.reason || topicLabel(ticket)}</h2>
@@ -141,7 +163,7 @@ export function TicketCase({
                   {turn.bot_reply}
                 </p>
                 {turn.created_at ? (
-                  <span className="st-turn-who">{turnTime(turn.created_at)}</span>
+                  <span className="st-turn-meta">{turnTime(turn.created_at)}</span>
                 ) : null}
               </li>
             ))}

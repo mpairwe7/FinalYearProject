@@ -104,7 +104,105 @@ async function prepareStaffSession(page: Page) {
   await page.route("**/api/v1/admin/tickets?**", (route) =>
     route.fulfill({ json: { tickets: [], teams: [], total: 0 } }),
   );
-  await page.route("**/api/v1/admin/flags", (route) => route.fulfill({ json: { flags: [] } }));
+  await page.route("**/api/v1/admin/flags", (route) =>
+    route.fulfill({
+      json: {
+        overrides_are_ephemeral: true,
+        flags: [
+          {
+            name: "ticket_queue",
+            default: true,
+            enabled: true,
+            description: "Human oversight queue for escalated conversations.",
+            protected: true,
+          },
+          {
+            name: "hyde",
+            default: false,
+            enabled: true,
+            overridden: true,
+            description: "Hypothetical document embeddings before retrieval.",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/v1/admin/overrides", (route) =>
+    route.fulfill({
+      json: {
+        overrides: [
+          {
+            id: "ovr-1",
+            match_query: "What is the VAT registration threshold?",
+            reply: "The annual VAT registration threshold is UGX 150 million.",
+            created_by: "accessibility.audit@ura.go.ug",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/v1/admin/outbox", (route) =>
+    route.fulfill({
+      json: {
+        live: false,
+        items: [{ id: "out-000000000001", channel: "email", provider: "mock", status: "queued" }],
+      },
+    }),
+  );
+  await page.route("**/api/v1/feedback/summary**", (route) =>
+    route.fulfill({
+      json: {
+        total: 24,
+        thumbs_up: 19,
+        thumbs_down: 5,
+        satisfaction_pct: 79.2,
+        recent: [
+          {
+            id: "fb-1",
+            rating: "up",
+            comment: "Clear answer about import duty.",
+            user_query: "How much duty do I pay on a used car?",
+            created_at: 1_760_000_000,
+          },
+        ],
+      },
+    }),
+  );
+  // The charts are the point of auditing /analytics: their axis labels, legends
+  // and tooltips were the surfaces carrying hardcoded dark-theme colours, so the
+  // stub has to be rich enough for them to render.
+  await page.route("**/api/v1/analytics/dashboard**", (route) =>
+    route.fulfill({
+      json: {
+        uptime_seconds: 93_600,
+        requests: {
+          counters: {
+            'retrieval_mode_total{mode="hybrid"}': 812,
+            'retrieval_mode_total{mode="keyword"}': 141,
+            'retrieval_mode_total{mode="abstained"}': 37,
+          },
+          latency: {
+            "POST|/v1/chat": { p50: 640, p95: 1820, p99: 2450, avg: 810, count: 990 },
+            "GET|/v1/health": { p50: 4, p95: 11, p99: 18, avg: 6, count: 4200 },
+          },
+        },
+        chat: { event_counts: {} },
+        sessions: { period_days: 30, total_sessions: 412, avg_messages_per_session: 3.4, max_messages_in_session: 22 },
+        conversations: {
+          period_days: 30,
+          total_conversations: 1_402,
+          avg_response_time_ms: 812,
+          avg_confidence: 0.74,
+          top_topics: [
+            { tag: "vat", count: 320 },
+            { tag: "paye", count: 214 },
+            { tag: "customs", count: 168 },
+          ],
+        },
+        feedback: { period_days: 30, total: 24, thumbs_up: 19, thumbs_down: 5, satisfaction_pct: 79.2, recent: [] },
+      },
+    }),
+  );
 }
 
 test.describe("WCAG 2.2 AA automated route audit", () => {
@@ -133,13 +231,24 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
   });
 
   test("has no serious or critical axe violations on every required staff surface in both themes", async ({ page }) => {
+    // Sixteen navigations and sixteen axe passes: eight console routes in two
+    // themes. That is inherently past the 30s default, and was already close to
+    // it at four routes.
+    test.slow();
     await prepareStaffSession(page);
 
+    // Every console route, including the two that used to sit outside it.
+    // /analytics in particular was never audited: it was not behind StaffGuard,
+    // so this suite's staff session did not reach it.
     const routes = [
       ["/admin", "Operations overview"],
       ["/agent", "My queue"],
       ["/admin/tickets", "Escalation queue"],
       ["/admin/flags", "Feature flags"],
+      ["/admin/overrides", "Answer overrides"],
+      ["/admin/outbox", "Notification outbox"],
+      ["/analytics", "Analytics Dashboard"],
+      ["/analytics/evaluation", "Answer evaluation"],
     ] as const;
 
     for (const theme of ["light", "dark"] as const) {

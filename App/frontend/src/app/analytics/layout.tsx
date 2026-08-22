@@ -1,24 +1,29 @@
 import React from "react";
 import type { Metadata } from "next";
-import Link from "next/link";
-import Providers from "../../components/Providers";
-import ThemeToggle from "../../components/ThemeToggle";
 
+/**
+ * `/analytics` used to live outside the operations console entirely.
+ *
+ * It was listed in the console's nav and in the staff account menu, but the
+ * pages themselves were not behind `StaffGuard` and rendered their own three-
+ * link bar — "Overview · Evaluation · Back to Chat" — so an officer who
+ * clicked Analytics lost the console's navigation, its live escalation strip
+ * and its sign-out, and an anonymous visitor got empty panels and a raw
+ * "Failed to load dashboard" string where every other staff route offers a
+ * sign-in. The gate now lives on the pages, next to the roles they require, and
+ * the nav is the console's.
+ *
+ * This layout also wrapped its children in a second `<Providers>`, nesting a
+ * fresh QueryClient inside the root one: two caches, so an invalidation from a
+ * staff page never reached the analytics tree and the same query could be in
+ * flight twice. The root layout already provides it.
+ */
 export const metadata: Metadata = {
-  title: "URA Chatbot — Analytics Dashboard",
-  description: "Production observability: SLO gauges, RAG evaluation, quality comparison, and feedback analytics.",
+  title: "URA Chatbot — Analytics",
+  description:
+    "Production observability: service levels, RAG evaluation, quality comparison, and feedback analytics.",
 };
 
 export default function AnalyticsLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <nav className="analytics-nav">
-        <Link href="/analytics" className="nav-link">Overview</Link>
-        <Link href="/analytics/evaluation" className="nav-link">Evaluation</Link>
-        <Link href="/" className="nav-link nav-back">Back to Chat</Link>
-        <ThemeToggle />
-      </nav>
-      <Providers>{children}</Providers>
-    </>
-  );
+  return <>{children}</>;
 }

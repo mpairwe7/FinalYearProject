@@ -223,7 +223,10 @@ describe("StaffTicketQueue", () => {
     // Rendered from the response's `teams`, so a deployment that renames
     // a team does not need a frontend change.
     expect(await screen.findByRole("button", { name: "customs" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "all teams" })).toBeInTheDocument();
+    // The reset control shows "any" under a "Team" group label; its accessible
+    // name spells out what it resets, so it cannot collide with the priority
+    // reset beside it.
+    expect(screen.getByRole("button", { name: "All teams" })).toBeInTheDocument();
   });
 
   it("says so plainly when nothing is waiting", async () => {
@@ -236,7 +239,8 @@ describe("StaffTicketQueue", () => {
       tickets: [],
     });
     renderPage();
-    expect(await screen.findByText("Nothing waiting.")).toBeInTheDocument();
+    expect(await screen.findByText("Nothing matches")).toBeInTheDocument();
+    expect(screen.getByText(/No case is currently new/i)).toBeInTheDocument();
   });
 
   it("filters the queue by search text", async () => {
@@ -245,7 +249,10 @@ describe("StaffTicketQueue", () => {
     fireEvent.change(screen.getByLabelText("Search tickets"), {
       target: { value: "no-such-case" },
     });
-    expect(screen.getByText("Nothing waiting.")).toBeInTheDocument();
+    expect(screen.getByText("Nothing matches")).toBeInTheDocument();
+    expect(
+      screen.getByText("No case in this status matches the current filters."),
+    ).toBeInTheDocument();
   });
 
   it("claims a ticket for the signed-in officer", async () => {

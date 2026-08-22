@@ -1,46 +1,50 @@
-/* Shared staff nav + access-gate states. Tokens come from globals.css. */
+/* Operations console shell — the nav bar and the access-gate states.
+   Sizes, spacing and colour all come from styles/ops/tokens.css; nothing here
+   invents a value. */
 
 .staff-skip {
   position: absolute;
-  left: 12px;
-  top: -40px;
+  left: var(--ops-space-3);
+  top: -44px;
   z-index: 30;
-  padding: 8px 12px;
-  background: var(--surface-ink);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  background: var(--ops-panel);
   color: var(--text-0);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 650;
+  border: 1px solid var(--ops-line-strong);
+  border-radius: var(--ops-radius-sm);
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
   text-decoration: none;
 }
 
 .staff-skip:focus {
-  top: 10px;
+  top: var(--ops-space-2);
 }
 
+/* Sticky and blurred: the console is a scrolling work surface and the nav is
+   how you leave it. The blur is asserted in e2e — it is the one effect that
+   silently drops on some Blink builds. */
 .staff-nav {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 10px 20px;
-  background: var(--surface-ink);
-  border-bottom: 1px solid var(--border-1);
-  backdrop-filter: blur(16px);
   position: sticky;
   top: 0;
   z-index: 20;
-  flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-4);
+  min-height: var(--ops-nav-h);
+  padding: var(--ops-space-2) var(--ops-space-5);
+  background: var(--ops-panel);
+  border-bottom: 1px solid var(--ops-line);
+  backdrop-filter: blur(16px);
 }
 
 .staff-brand {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  font-size: 13.5px;
-  font-weight: 700;
+  gap: var(--ops-space-2);
+  flex: none;
   color: var(--text-0);
-  letter-spacing: 0.01em;
+  text-decoration: none;
 }
 
 .staff-brand-mark {
@@ -48,74 +52,154 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: var(--ops-radius-sm);
   background: var(--grad-blue);
   color: #fff;
-  font-size: 10.5px;
-  font-weight: 800;
+  font-size: 10px;
+  font-weight: var(--ops-weight-bold);
   letter-spacing: 0.05em;
+}
+
+.staff-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-bold);
+  letter-spacing: 0.01em;
+}
+
+.staff-brand-sub {
+  font-size: 10px;
+  font-weight: var(--ops-weight-medium);
+  letter-spacing: var(--ops-tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* The nav list scrolls inside the bar instead of wrapping it to three rows on a
+   laptop. `min-width: 0` is what lets a flex child shrink below its content. */
+.staff-nav-scroller {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.staff-nav-scroller::-webkit-scrollbar {
+  display: none;
 }
 
 .staff-nav ul {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 2px;
   list-style: none;
   margin: 0;
   padding: 0;
-  flex-wrap: wrap;
+}
+
+/* The hairline between Work / Configure / Observe. Seven identical links in a
+   row are a list; three groups are a structure. */
+.staff-nav-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 var(--ops-space-2);
+  background: var(--ops-line);
+  flex: none;
 }
 
 .staff-nav a {
+  position: relative;
   display: inline-block;
-  padding: 7px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 600;
+  padding: 7px 11px;
+  border-radius: var(--ops-radius-sm);
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-medium);
   color: var(--text-2);
   text-decoration: none;
-  transition: background 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+  transition: background var(--ops-dur-fast) var(--ops-ease), color var(--ops-dur-fast) var(--ops-ease);
 }
 
 .staff-nav a:hover {
-  background: var(--surface-2);
+  background: var(--ops-row-hover);
   color: var(--text-0);
 }
 
+/* The current page is named twice — weight and an underline anchored to the
+   bar — because a surface tint alone was too quiet to find at a glance. */
 .staff-nav a.active {
-  background: var(--surface-3);
   color: var(--text-0);
-  box-shadow: inset 0 0 0 1px var(--border-2);
+  font-weight: var(--ops-weight-semi);
+  background: var(--ops-row-active);
+}
+
+.staff-nav a.active::after {
+  content: "";
+  position: absolute;
+  left: 11px;
+  right: 11px;
+  bottom: -9px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
 }
 
 .staff-nav a:focus-visible,
+.staff-brand:focus-visible,
 .staff-signout:focus-visible,
-.staff-gate-primary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.staff-gate-primary:focus-visible,
+.staff-gate-link:focus-visible {
+  outline: var(--ops-focus-ring) solid var(--ops-focus);
+  outline-offset: var(--ops-focus-gap);
+}
+
+.staff-nav-end {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  flex: none;
+  margin-left: auto;
+}
+
+.staff-live-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.staff-live-dot.is-on {
+  background: var(--ops-good);
+  box-shadow: 0 0 0 3px var(--ops-good-fill);
 }
 
 .staff-who {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  font-size: 12px;
+  gap: var(--ops-space-2);
+  padding-left: var(--ops-space-2);
+  border-left: 1px solid var(--ops-line);
+  font-size: var(--ops-text-xs);
   color: var(--text-2);
 }
 
 .staff-role-pill {
   padding: 3px 9px;
-  border-radius: 999px;
-  background: rgba(0, 168, 143, 0.14);
-  border: 1px solid rgba(0, 168, 143, 0.35);
-  color: var(--ura-teal-light);
-  font-size: 11px;
-  font-weight: 700;
+  border-radius: var(--ops-radius-pill);
+  background: color-mix(in srgb, var(--ura-teal-light) var(--ops-tint), transparent);
+  border: 1px solid color-mix(in srgb, var(--ura-teal-light) 38%, transparent);
+  color: var(--ops-role-ink);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
   white-space: nowrap;
 }
 
 .staff-email {
-  max-width: 200px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -124,11 +208,17 @@
 .staff-signout {
   background: none;
   border: 0;
-  padding: 0;
-  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: var(--ops-radius-xs);
+  font: inherit;
+  font-size: var(--ops-text-xs);
   color: var(--text-3);
-  text-decoration: underline;
   cursor: pointer;
+}
+
+.staff-signout:hover {
+  color: var(--text-0);
+  background: var(--ops-row-hover);
 }
 
 /* Gate states ------------------------------------------------------------- */
@@ -137,42 +227,56 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 148px 20px 32px;
+  padding: var(--ops-space-12) var(--ops-space-5);
 }
 
 .staff-gate-msg {
-  font-size: 14px;
+  font-size: var(--ops-text-base);
   color: var(--text-2);
 }
 
 .staff-gate-card {
   width: 100%;
-  max-width: 520px;
-  padding: 30px 26px;
-  background: var(--surface-ink);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg, 18px);
-  box-shadow: var(--shadow-md);
+  max-width: 460px;
+  padding: var(--ops-space-8) var(--ops-space-6);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-lg);
+  box-shadow: var(--ops-elev-2);
   text-align: center;
 }
 
+.staff-gate-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--ops-space-4);
+  border-radius: var(--ops-radius-md);
+  background: var(--grad-blue);
+  color: #fff;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-bold);
+  letter-spacing: 0.05em;
+}
+
 .staff-gate-card h1 {
-  margin: 0 0 10px;
-  font-size: 21px;
-  font-weight: 700;
+  margin: 0 0 var(--ops-space-2);
+  font-size: var(--ops-text-lg);
+  font-weight: var(--ops-weight-bold);
   color: var(--text-0);
 }
 
 .staff-gate-card p {
-  margin: 0 0 20px;
-  font-size: 13.5px;
-  line-height: 1.6;
+  margin: 0 0 var(--ops-space-5);
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
   color: var(--text-2);
 }
 
 .staff-gate-actions {
   display: flex;
-  gap: 14px;
+  gap: var(--ops-space-4);
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
@@ -183,33 +287,76 @@
    selector is (0,2,1) and beat an earlier two-class attempt, leaving this label
    dark-on-dark against the gradient. */
 .staff-gate-card .staff-gate-actions .staff-gate-primary {
-  padding: 11px 20px;
-  border-radius: var(--radius-sm);
+  padding: 10px 18px;
+  border-radius: var(--ops-radius-sm);
   background: var(--grad-primary);
   color: #fff;
-  font-size: 13.5px;
-  font-weight: 650;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
   text-decoration: none;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--ops-elev-1);
 }
 
 .staff-gate-link {
-  font-size: 13px;
+  font-size: var(--ops-text-sm);
   color: var(--text-3);
   text-decoration: underline;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 1080px) {
   .staff-nav {
-    gap: 10px;
-    padding: 10px 14px;
+    gap: var(--ops-space-3);
+    padding: var(--ops-space-2) var(--ops-space-4);
   }
-  .staff-who {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-start;
+  .staff-brand-text {
+    display: none;
   }
   .staff-email {
-    max-width: 140px;
+    display: none;
+  }
+}
+
+/* Two deliberate rows on a phone — brand and account on the first, the link
+   strip on the second — rather than letting flex wrap decide, which left the
+   brand floating a third of the way across its own line. */
+@media (max-width: 720px) {
+  .staff-nav {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "brand end"
+      "links links";
+    row-gap: var(--ops-space-2);
+    column-gap: var(--ops-space-2);
+    padding: var(--ops-space-2) var(--ops-space-3);
+  }
+  .staff-brand {
+    grid-area: brand;
+  }
+  .staff-nav-end {
+    grid-area: end;
+    margin-left: auto;
+    min-width: 0;
+  }
+  .staff-nav-scroller {
+    grid-area: links;
+    padding-bottom: 2px;
+  }
+  .staff-nav a.active::after {
+    bottom: -3px;
+  }
+  /* No keyboard, no chord — and every destination the palette offers is already
+     one tap away in the strip below. Dropping it is what keeps the first row
+     inside a 390px viewport. */
+  .ops-cmdk-trigger {
+    display: none;
+  }
+}
+
+@media (max-width: 460px) {
+  /* The address is the first thing to go; the role pill and sign-out are not. */
+  .staff-who {
+    padding-left: 0;
+    border-left: 0;
   }
 }
