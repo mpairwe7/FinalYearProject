@@ -4367,12 +4367,27 @@ class ChatModel:
             # same authorization gate must drop the distress preamble too,
             # or it silently re-dilutes match coverage and rejects the very
             # FAQ retrieval_query just found, independent of the search step.
-            binding_query = message
+            #
+            # Bind to the ENGLISH form when there is one. This gate scores the
+            # corpus's own English FAQ question text against binding_query, so
+            # binding a Luganda or Kiswahili question to it cannot cover an
+            # English FAQ by construction: every row scored 0,
+            # _filter_unbound_faq_hits emptied the hit list, and the request
+            # abstained with `no_retrieval_results` even though retrieval had
+            # just returned 4 passages whose best reranker score was 0.831 —
+            # far above the 0.30 abstention threshold. _simple_search's own
+            # translation rescue already binds to the translated text for
+            # exactly this reason ("the user's own words cannot cover an
+            # English FAQ by construction"); this applies the same rule to the
+            # hybrid path. router_message is the canonicalized English form
+            # when MT produced one, and `message` unchanged otherwise, so an
+            # English question and a failed translation both behave as before.
+            binding_query = router_message
             if distress:
                 question_span = extract_question_span(rewritten)
                 if question_span:
                     retrieval_query = question_span
-                message_question_span = extract_question_span(message)
+                message_question_span = extract_question_span(router_message)
                 if message_question_span:
                     binding_query = message_question_span
 
