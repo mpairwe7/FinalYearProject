@@ -18,7 +18,18 @@
 # verify-embedded-stores.sh when present and structural checks otherwise, so it
 # works on any pin.
 #
-# sha-a14ca67 is the roll that makes this Space serve its own corpus again.
+# sha-2e36168 is the operations console redesign — the staff and admin surfaces
+# behind the sign-in. Two of its changes are visible in production rather than
+# only in the repository: /analytics and /analytics/evaluation are now behind
+# the staff gate (they were listed in the console nav but ungated, so an
+# anonymous visitor reached a dashboard shell and a raw error string), and the
+# charts follow the light/dark preference instead of a hardcoded dark palette
+# whose axis labels measured about 1.4:1 on the light canvas.
+#
+# The taxpayer chat is untouched: the console's style layer is namespaced
+# `.ops-*` and loads alongside, not over, globals.css.
+#
+# sha-a14ca67 was the roll that made this Space serve its own corpus again.
 #
 # The Space had been answering every question from the keyword fallback — 499
 # FAQ rows — while a 7,600-document Qdrant collection sat healthy inside the
@@ -713,11 +724,11 @@
 # "sole trader"), prompted translation guards its own input, and the ASR chain
 # distinguishes hearing nothing from every backend failing.
 #
-# All CI green on this commit; merged to main as 34316440cc.
+# All CI green on this commit; merged to main as 2e36168a (PR #348).
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-a14ca67
+FROM landwind/ura-chatbot:sha-2e36168
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.
