@@ -94,18 +94,35 @@ Only "VAT" degrades (→ "vata"), as an English acronym inside Bantu prosody.
 
 ## 5. Capacity results
 
-All phases via the tunnel, mixed en/lg/sw, `RATE_LIMIT=10000/minute`.
+All phases via the tunnel, mixed en/lg/sw, `RATE_LIMIT=10000/minute`. Two
+runs: **run 1** before the language fixes, **run 2** after all of §6 and §7.
+
+### Run 2 — final (after all fixes)
 
 | Phase | Profile | Req | Errors | p50 | p95 | p99 | max | rps |
 |---|---|---|---|---|---|---|---|---|
-| load | 4 VUs, 3 min | 114 | **0%** | 5.81 s | 15.50 s | 19.90 s | 37.27 s | 0.57 |
-| spike | 1→20→1 VUs | 181 | **0%** | 6.23 s | 22.62 s | 26.31 s | 26.74 s | 1.52 |
-| stress | 2→4→8→16→32 VUs | 458 | **0%** | 4.62 s | 23.67 s | 33.00 s | 35.50 s | 1.91 |
-| volume | 6 VUs × 4 min, long multi-clause | 202 | **0%** | 10.79 s | 11.86 s | 15.31 s | 16.32 s | 0.80 |
+| load | 4 VUs, 3 min | 90 | **0%** | 9.25 s | 12.78 s | 14.85 s | 14.85 s | 0.48 |
+| spike | 1→20→1 VUs | 216 | **0%** | 7.16 s | 14.81 s | 19.63 s | 20.29 s | 1.93 |
+| stress | 2→4→8→16→32 VUs | 455 | **0%** | 5.66 s | 22.91 s | 25.63 s | 27.79 s | 2.02 |
+| volume | 6 VUs × 4 min, long multi-clause | 277 | **0%** | 5.28 s | 12.42 s | 12.47 s | 12.53 s | 1.11 |
 
-**955 requests, zero 5xx, zero timeouts, no degradation to 32 concurrent
-users.** Latency grows gracefully (p95 15.5 s → 23.7 s from 4 to 32 VUs)
-rather than collapsing; nothing hung and no request was dropped.
+**1038 requests, zero 5xx, zero timeouts, no degradation to 32 concurrent
+users** — and **100% of requests reported the right locale AND answered in
+the expected language, at every concurrency level** (en 347/347, lg 343/343,
+sw 348/348).
+
+### Run 1 — before the language fixes, for comparison
+
+| Phase | Req | Errors | p50 | p95 | max | Luganda locale correct |
+|---|---|---|---|---|---|---|
+| load | 114 | 0% | 5.81 s | 15.50 s | 37.27 s | 16/38 |
+| spike | 181 | 0% | 6.23 s | 22.62 s | 26.74 s | 23/53 |
+| stress | 458 | 0% | 4.62 s | 23.67 s | 35.50 s | 71/164 |
+| volume | 202 | 0% | 10.79 s | 11.86 s | 16.32 s | reply 38/63 |
+
+Both runs held zero errors; the tail also tightened (worst-case max 37.3 s →
+14.9 s at 4 VUs, 35.5 s → 27.8 s at 32 VUs) because reply localization stopped
+making a blocking cloud call on every non-English turn.
 
 Against NFR-01 (p95 ≤ 3 s) the stack **misses at every concurrency level**
 for generative answers — consistent with the 2026-08-19 finding that one
@@ -145,46 +162,76 @@ of load. lingua calls the same six `lg` at 0.91–0.998 confidence. The fix
 lets lingua pre-empt the markers only for a locale it actually knows and is
 confident about; nyn/ach still detect correctly (verified).
 
-### 6b. Deterministic paths answer in English — open
+### 6b. Replies now localised — was English for lg/sw, fixed
 
-Detection is now right, but the answer often is not. With `locale: lg`
-correctly reported, the `calculator` path returns English verbatim:
+After 6a, detection was right but the answer often was not: with `locale: lg`
+correctly reported, the `calculator` path returned English verbatim, and in
+run 1's volume phase only 38/63 lg and 34/66 sw replies were in-language.
 
-> **expect=lg reported=lg mode=calculator** →
-> "**The standard VAT rate in Uganda is 18%** (FY2026-27). Value Added Tax is
-> charged at 18% on taxable supplies…"
+Cause was in `localize_reply()`, which called `sunbird.translate_from_english`
+directly — cloud-only, so every non-English turn made a blocking network call
+that returned **HTTP 429** once the run had any volume. Its docstring
+justified Sunbird-only on the grounds that the generation model produced
+repetition loops ("kozesa kozesa kozesa…"); that was a property of the old
+prompt shape (see 6c), not of the model. It now tries the local model first
+(`REPLY_MT_BACKEND`, default `local_first`), keeping Sunbird as fallback and
+the existing collapsed-response length guard as the safety net.
 
-Same for `sw`. In the volume phase all 202 requests routed to `calculator`
-and only 38/63 lg and 34/66 sw replies were in the expected language. This
-is issue [#302](https://github.com/mpairwe7/FinalYearProject/issues/302)
-territory and is **not fixed here**.
+Run 2: **1038/1038 replies in the expected language**, all locales, all
+concurrency levels.
 
-### 6c. Cross-language retrieval — open
+### 6c. Translation quality — fixed via the model card's own prompt shape
 
-The same EFRIS question grounds in English (`hybrid`, 2 sources) but
-abstains in lg and sw (`no_retrieval_results`). Contributing causes found:
+`llm.translate_text()` used a generic "you are a professional translator"
+system prompt with the bare text as the user turn. Sunflower-14B's
+[model card](https://huggingface.co/Sunbird/Sunflower-14B) documents the
+opposite: a fixed Sunflower persona system prompt with the directive in the
+**user** turn — `"Translate from Luganda to English: ..."`. The difference is
+not cosmetic; the old shape returned the SOURCE language on some inputs,
+leaving a retrieval query exactly as unsearchable as before.
 
-1. Both retrieval paths called `sunbird.translate_to_english` **directly**,
-   so one cloud timeout took out both. Measured: `/tasks/translate` used its
-   full 30 s and returned nothing (single account, no same-account retry —
-   issue #298). Now consolidated onto `query.translate_query_for_retrieval`,
-   local-first and configurable via `RETRIEVAL_MT_BACKEND`.
+The card's shape alone still **answered** interrogatives instead of
+translating them. `"EFRIS kye ki era ani alina okugikozesa?"` came back as an
+invented definition of EFRIS — refugee data, funds remittance, bribery
+reporting, a different hallucination each run — and temperature made no
+difference (tested 0.0 and 0.3). Adding *"it may be a question — translate
+the question itself, do not answer it"* fixed it:
+
+| Input | Before | After |
+|---|---|---|
+| `EFRIS kye ki era ani alina okugikozesa?` | "…a system that enables the registration of all firearms and their owners." | **"What is EFRIS and who should use it?"** |
+| `Bibonerezo ki ebiriwo bw'olwawo…` | (source language) | **"What are the penalties for late submission of tax returns?"** |
+| `Kiwango cha kodi ya VAT nchini Uganda…` | (Swahili, untranslated) | **"What is the Value Added Tax rate in Uganda?"** |
+| en→lg `What is the VAT rate in Uganda?` | repetition loops | **"Mu Uganda omusolo gwa VAT guli ku bitundu 18 ku buli kikumi."** |
+
+7 of 8 bank items now translate faithfully. Decoding is greedy — the same
+input producing a different invented answer each call is the failure mode
+being guarded against; `_vllm_generate` gained per-call sampling overrides.
+Residual: the Swahili EFRIS item still expands the acronym rather than
+translating it.
+
+Two plumbing bugs found on the way, both fixed:
+
+1. Both retrieval paths called `sunbird.translate_to_english` **directly**, so
+   one cloud timeout took out both. Measured: `/tasks/translate` used its full
+   30 s and returned nothing (single account, no same-account retry — #298).
+   Consolidated onto `query.translate_query_for_retrieval`, local-first and
+   configurable via `RETRIEVAL_MT_BACKEND`, verifying the output is English.
 2. `llm.translate_text()` was **dead on every vLLM deployment** — it went
-   straight to the in-process Transformers model, and `_load_model()`
-   returns early under `LLM_BACKEND=vllm` by design, so it logged
-   "transformers/torch not installed" with both installed. Fixed to dispatch
-   on `LLM_BACKEND`.
-3. Even repaired, prompted MT through Sunflower-14B **hallucinates rather
-   than translates**: "EFRIS kye ki…" → *"The EFRIS is a system that enables
-   the registration of all firearms and their owners."* Naming the source
-   language got English out of it consistently, but not faithful English.
-   Sunbird's Luganda-native NLLB remains the better translator, and
-   [`/tasks/language_id`](https://sunbirdai.mintlify.app/guides/language-detection)
-   distinguishes `lug` from `nyn` natively (0.98 confidence in their docs) —
-   the discrimination our local markers cannot do.
+   straight to the in-process Transformers model, and `_load_model()` returns
+   early under `LLM_BACKEND=vllm` by design, so it logged "transformers/torch
+   not installed" with both installed. Fixed to dispatch on `LLM_BACKEND`.
 
-So lg/sw retrieval abstention is **not closed**. What changed: no 30 s stall,
-and the MT path is live and configurable instead of silently dead.
+### 6c-bis. lg/sw hybrid retrieval still abstains — open
+
+Translation is now correct end to end: `english_retrieval_query()` returns
+`'What is EFRIS and who should use it?'` for the Luganda input, and that exact
+English question grounds (`hybrid`, 2 sources). The Luganda request
+nonetheless still returns `abstained` / `no_retrieval_results`. The
+translate-then-retrieve second pass (`HybridRetriever._merge_translated_leg`,
+G18) is reached and its `translate_retrieve` flag is enabled, so the remaining
+gap is in how that leg's hits are merged or gated, not in translation. Not
+closed here — see #302.
 
 ### 6d. Abstentions are cached
 
@@ -222,8 +269,9 @@ Flush `db0` between correctness runs (§6d).
 
 ## 9. Still open
 
-- Deterministic paths (calculator, rate tables) answer in English for lg/sw (#302).
-- lg/sw hybrid retrieval abstains where English grounds (#302).
+- lg/sw hybrid retrieval abstains where English grounds, now with translation
+  proven correct — so the gap is in the G18 merge/gate (#302).
+- Swahili "EFRIS ni nini" still expands the acronym rather than translating it.
 - p95 misses NFR-01's 3 s for generative answers at every concurrency (#304).
 - One 30/minute bucket for all tunnel traffic — set `TRUSTED_PROXY_HOSTS`.
 - No local English TTS voice; English falls to cloud edge-tts.
