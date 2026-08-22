@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon, GlobeIcon, CloseIcon } from "./Icons";
+import { useTranslation } from "../lib/i18n";
 
 /**
  * Response-language picker for the composer toolbar.
@@ -33,6 +34,7 @@ export default function LanguageMenu({
   options,
   onLocaleChange,
 }: LanguageMenuProps) {
+  const t = useTranslation();
   const [open, setOpen] = useState(false);
   /** null = follow the selected locale; a number = the user has arrowed away. */
   const [focusIdx, setFocusIdx] = useState<number | null>(null);
@@ -176,7 +178,7 @@ export default function LanguageMenu({
                 <CloseIcon />
               </button>
             </div>
-            <div className="lmv2-list" role="radiogroup" aria-label="Language selection">
+            <div className="lmv2-list" role="radiogroup" aria-label={t('language.title')}>
               {options.map((o, i) => (
                 <button
                   key={o.value}

@@ -7,6 +7,7 @@ import { Conversation } from '../store/useChatStore';
 import { sortConversations } from '../lib/conversationGroups';
 import AccountRail from './AccountRail';
 import ConversationMenu from './ConversationMenu';
+import { useTranslation } from '../lib/i18n';
 import {
   ChevronDownIcon,
   KebabIcon,
@@ -151,6 +152,7 @@ function ConversationRailInner({
   onToggleRailCollapse,
   onOpenSettings,
 }: ConversationRailProps) {
+  const t = useTranslation();
   const [chatsOpen, setChatsOpen] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
@@ -208,7 +210,7 @@ function ConversationRailInner({
               className="rail-icon-btn rail-toggle-desktop"
               onClick={onToggleRailCollapse}
               aria-label="Toggle conversation history"
-              title="Close sidebar  Ctrl+B"
+              title={`${t('rail.close')}  Ctrl+B`}
             >
               <PanelLeftIcon />
             </button>
@@ -216,7 +218,7 @@ function ConversationRailInner({
               type="button"
               className="rail-icon-btn rail-toggle-mobile"
               onClick={onClose}
-              aria-label="Close sidebar"
+              aria-label={t('rail.close')}
             >
               <PanelLeftIcon />
             </button>
@@ -224,8 +226,8 @@ function ConversationRailInner({
               type="button"
               className="rail-icon-btn"
               onClick={onOpenSearch}
-              aria-label="Search conversations"
-              title="Search conversations"
+              aria-label={t('rail.search')}
+              title={t('rail.search')}
             >
               <SearchIcon />
             </button>
@@ -233,7 +235,7 @@ function ConversationRailInner({
         </div>
 
         <button className="rail-new" onClick={onNewConversation}>
-          <PlusIcon /> New chat
+          <PlusIcon /> {t('rail.newChat')}
         </button>
 
         <div className="rail-scroll">
@@ -256,7 +258,7 @@ function ConversationRailInner({
               aria-controls="rail-chats-list"
               onClick={() => setChatsOpen((v) => !v)}
             >
-              <span className="rail-group-label">Chats</span>
+              <span className="rail-group-label">{t('rail.chats')}</span>
               <span className={`rail-cat-chevron ${chatsOpen ? '' : 'rail-cat-chevron-up'}`}>
                 <ChevronDownIcon />
               </span>
@@ -276,7 +278,7 @@ function ConversationRailInner({
                 {conversations.length === 0 && (
                   <div className="rail-empty">
                     <MessageSquareIcon />
-                    <span>Your conversations will appear here.</span>
+                    <span>{t('rail.empty')}</span>
                   </div>
                 )}
               </div>
@@ -285,7 +287,7 @@ function ConversationRailInner({
 
           {conversations.length >= VIEW_ALL_THRESHOLD && (
             <Link className="rail-view-all" href="/chats" onClick={onClose}>
-              View all conversations
+              {t('rail.viewAll')}
             </Link>
           )}
         </div>
