@@ -97,19 +97,30 @@ Only "VAT" degrades (→ "vata"), as an English acronym inside Bantu prosody.
 All phases via the tunnel, mixed en/lg/sw, `RATE_LIMIT=10000/minute`. Two
 runs: **run 1** before the language fixes, **run 2** after all of §6 and §7.
 
-### Run 2 — final (after all fixes)
+### Run 3 — final (after all fixes, including the FAQ-binding fix)
 
 | Phase | Profile | Req | Errors | p50 | p95 | p99 | max | rps |
 |---|---|---|---|---|---|---|---|---|
-| load | 4 VUs, 3 min | 90 | **0%** | 9.25 s | 12.78 s | 14.85 s | 14.85 s | 0.48 |
-| spike | 1→20→1 VUs | 216 | **0%** | 7.16 s | 14.81 s | 19.63 s | 20.29 s | 1.93 |
-| stress | 2→4→8→16→32 VUs | 455 | **0%** | 5.66 s | 22.91 s | 25.63 s | 27.79 s | 2.02 |
-| volume | 6 VUs × 4 min, long multi-clause | 277 | **0%** | 5.28 s | 12.42 s | 12.47 s | 12.53 s | 1.11 |
+| load | 4 VUs, 3 min | 90 | **0%** | 8.89 s | 15.35 s | 24.49 s | 24.49 s | 0.48 |
+| spike | 1→20→1 VUs | 169 | **0%** | 9.22 s | 17.66 s | 19.98 s | 20.36 s | 1.40 |
+| stress | 2→4→8→16→32 VUs | 424 | **0%** | 8.74 s | 19.41 s | 21.89 s | 28.03 s | 1.80 |
+| volume | 6 VUs × 4 min, long multi-clause | 282 | **0%** | 5.25 s | 12.42 s | 12.55 s | 12.85 s | 1.14 |
 
-**1038 requests, zero 5xx, zero timeouts, no degradation to 32 concurrent
-users** — and **100% of requests reported the right locale AND answered in
-the expected language, at every concurrency level** (en 347/347, lg 343/343,
-sw 348/348).
+**965 requests, zero 5xx, no degradation to 32 concurrent users**, and **100%
+of requests reported the right locale AND answered in the expected language**
+at every concurrency level (en 316/316, lg 323/323, sw 326/326).
+
+Grounded answers roughly doubled once the FAQ-binding fix landed (§6c-bis),
+which is the point of the whole translate-retrieve-translate-back pipeline:
+
+| Phase | `hybrid` before → after | `abstained` before → after |
+|---|---|---|
+| load | 7 → **25** | 54 → **36** |
+| spike | 17 → **48** | 117 → **60** |
+| stress | 58 → **108** | 233 → **160** |
+
+Latency improved despite doing more real retrieval work (stress p95 22.91 s →
+19.41 s), because reply localisation no longer makes a blocking cloud call.
 
 ### Run 1 — before the language fixes, for comparison
 
@@ -222,16 +233,49 @@ Two plumbing bugs found on the way, both fixed:
    early under `LLM_BACKEND=vllm` by design, so it logged "transformers/torch
    not installed" with both installed. Fixed to dispatch on `LLM_BACKEND`.
 
-### 6c-bis. lg/sw hybrid retrieval still abstains — open
+### 6c-bis. lg/sw retrieval abstention — root-caused and fixed
 
-Translation is now correct end to end: `english_retrieval_query()` returns
-`'What is EFRIS and who should use it?'` for the Luganda input, and that exact
-English question grounds (`hybrid`, 2 sources). The Luganda request
-nonetheless still returns `abstained` / `no_retrieval_results`. The
-translate-then-retrieve second pass (`HybridRetriever._merge_translated_leg`,
-G18) is reached and its `translate_retrieve` flag is enabled, so the remaining
-gap is in how that leg's hits are merged or gated, not in translation. Not
-closed here — see #302.
+The corpus, Qdrant payloads and cached answers are English by design: a
+Luganda or Kiswahili question is translated into English to retrieve, and the
+answer is translated back. The **retrieval half was already working** —
+instrumenting the G18 leg (it had no logging at all, so "leg found nothing"
+was indistinguishable from "leg never ran") showed:
+
+```
+G18 translate-leg (lg -> en): 'Electronic Fiscal Receipting and Invoicing System (EFRIS) ky'
+  -> 'What is the Electronic Fiscal Receipting and Invoicing Syste'
+  first_pass=4(best=0.831) en_leg=4(best=0.731) merged=4(best=0.831)
+```
+
+4 passages, best reranker score **0.831** against an abstention threshold of
+**0.30** — and the request still returned `abstained` / `no_retrieval_results`
+with 0 sources.
+
+`_filter_unbound_faq_hits()` was emptying the list. It scores the corpus's own
+English FAQ question text against `binding_query`, and `binding_query` was the
+**raw user message** — so English FAQ rows were being scored against Luganda
+words. No shared vocabulary, every row zero, every hit dropped.
+
+This is the same trap `_simple_search`'s translation rescue documents and
+avoids ("Authorization binds to the TRANSLATED text… The user's own words
+cannot cover an English FAQ by construction"). The hybrid path simply never
+got the same rule. Fixed by binding to `router_message` — the canonicalized
+English form when MT produced one, the message unchanged otherwise, so English
+questions and failed translations behave exactly as before.
+
+Luganda now completes the intended round trip:
+
+> `EFRIS kye ki era ani alina okugikozesa?` → `mode=hybrid`, **2 sources** →
+> *"Electronic Fiscal Receipting and Invoicing System (EFRIS) kye kikozesebwa
+> okufulumya lisiiti n'ebiwandiiko by'omusolo mu Uganda. Buli muntu alina
+> bizinensi eri mu mateeka alina okukozesa EFRIS…"*
+
+Across the functional bank, grounded answers went from **2/18 to 5/18** and
+abstentions from 9 to 6. `qdrant_retrieval_lg` moved FAIL → PASS.
+
+Kiswahili grounds on 2 of 3 spot-check questions; the one that still abstains
+is the EFRIS item whose translation is the residual hallucination in 6c, so
+the remaining gap there is MT quality on that input, not the binding gate.
 
 ### 6d. Abstentions are cached
 
@@ -269,9 +313,10 @@ Flush `db0` between correctness runs (§6d).
 
 ## 9. Still open
 
-- lg/sw hybrid retrieval abstains where English grounds, now with translation
-  proven correct — so the gap is in the G18 merge/gate (#302).
-- Swahili "EFRIS ni nini" still expands the acronym rather than translating it.
+- Swahili "EFRIS ni nini" still expands the acronym rather than translating
+  it, and that one input still abstains as a result (#302).
+- Abstention remains the majority outcome overall (6/18 functional) — the
+  corpus simply does not cover every question in the bank.
 - p95 misses NFR-01's 3 s for generative answers at every concurrency (#304).
 - One 30/minute bucket for all tunnel traffic — set `TRUSTED_PROXY_HOSTS`.
 - No local English TTS voice; English falls to cloud edge-tts.
