@@ -799,6 +799,24 @@ def classify_choice(reply: str, options: list[str]) -> str:
         return ""
 
 
+# One-shot exemplars for prompted MT into English, keyed by source locale.
+#
+# Deliberately everyday sentences with no tax vocabulary. A tax-domain
+# exemplar primes its own subject: a VAT example made "Omusolo ogukwatibwa
+# nga tennasasulwa kye ki?" (withholding tax) translate as "What is Value
+# Added Tax?" — fluent, confident, and about the wrong tax. These carry only
+# the question-in / question-out shape, which is the part the model was
+# getting wrong, and left the whole verification bank correct.
+#
+# Each pair was checked by hand against this model before being used; an
+# exemplar that is itself a bad translation teaches the bad shape. Verify the
+# same way before adding a locale.
+_MT_ONESHOT: dict[str, tuple[str, str]] = {
+    "lg": ("Ekitabo kino kya ani?", "Whose book is this?"),
+    "sw": ("Kitabu hiki ni cha nani?", "Whose book is this?"),
+}
+
+
 def translate_text(
     text: str,
     source_lang: str = "en",
@@ -851,10 +869,30 @@ def translate_text(
         "translations, factual question answering, summaries, explanations, "
         "and multilingual reasoning."
     )
+    # One worked example, into English only. The instruction alone still lost
+    # to the model's own knowledge on questions about an acronym it thinks it
+    # recognises: "EFRIS ni nini na ni nani anapaswa kuitumia?" came back as
+    # "EFRIS is an acronym for Electronic Funds Transfer for Rural
+    # Development. It is a mobile money platform…" — a definition, invented,
+    # and not a translation. A single exemplar of the question-in/question-out
+    # shape fixes it ("What is EFRIS and who should use it?"). Restricting a
+    # question-mark rule to the instruction was tried instead and produced
+    # "EFRIS is what and who should use it?" — the right sentence type,
+    # mangled — so the exemplar is doing real work that a rule did not.
+    #
+    # Into-English only: the reverse direction's failure mode was repetition
+    # loops, which the prompt shape above already fixed, and inventing
+    # exemplars in a language this file cannot verify would be worse than
+    # having none. Pairs without an exemplar simply fall back to the
+    # instruction, which is where every pair was before this.
+    oneshot = _MT_ONESHOT.get(source_lang) if target_lang == "en" else None
+    example = ""
+    if oneshot:
+        example = f"\n\n{src_name}: {oneshot[0]}\n{lang_name}: {oneshot[1]}"
     user_prompt = (
         f"Translate the following {src_name} text into {lang_name}. "
         "It may be a question — translate the question itself, do not answer "
-        f"it.\n\n{src_name}: {text}\n{lang_name}:"
+        f"it.{example}\n\n{src_name}: {text}\n{lang_name}:"
     )
     messages = [
         {"role": "system", "content": system_prompt},
