@@ -18,7 +18,19 @@
 # verify-embedded-stores.sh when present and structural checks otherwise, so it
 # works on any pin.
 #
-# sha-ba30887 makes the app installable and shareable.
+# sha-7a18ff0 translates the interface into Luganda and Swahili.
+#
+# The assistant already answered in all three languages — the backend keys
+# translation, TTS voices and its LoRA adapters on en/lg/sw — but the screen
+# around those answers was English only, so a Luganda speaker read a Luganda
+# reply inside an interface that said "New chat" and "Ask anything about URA".
+# The header's language picker now drives both; it does more rather than
+# something different.
+#
+# The Luganda and Swahili strings still want a native-speaker review. Every
+# untranslated key falls back to English, so this is safe to serve meanwhile.
+#
+# sha-ba30887 made the app installable and shareable.
 #
 # Every PWA icon the manifest and the HTML pointed at was an SVG. Chromium
 # decodes a raster icon when it evaluates installability and does not accept
@@ -734,11 +746,11 @@
 # "sole trader"), prompted translation guards its own input, and the ASR chain
 # distinguishes hearing nothing from every backend failing.
 #
-# All CI green on this commit; merged to main as ba308871 (PR #351).
+# All CI green on this commit; merged to main as 7a18ff08 (PR #354).
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-ba30887
+FROM landwind/ura-chatbot:sha-7a18ff0
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.
