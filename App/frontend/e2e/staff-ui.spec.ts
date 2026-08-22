@@ -198,13 +198,15 @@ test.describe("Staff UI on Chromium", () => {
   });
 
   test.describe("shared nav", () => {
-    test("is sticky, scoped to the role, and survives backdrop-filter", async ({ page }) => {
+    test("is a fixed rail, scoped to the role, and survives backdrop-filter", async ({ page }) => {
       await signedInAs(page, "ura_staff");
       await page.goto("/agent");
 
-      const nav = page.locator("nav.staff-nav");
+      // The nav is a fixed vertical rail, not a sticky bar — see
+      // components/staffGuard.css for why the horizontal strip was dropped.
+      const nav = page.locator("nav.staff-rail");
       await expect(nav).toBeVisible();
-      await expect(nav).toHaveCSS("position", "sticky");
+      await expect(nav).toHaveCSS("position", "fixed");
       // Blink needs the -webkit- prefix on some builds; either property resolving
       // to a blur means the effect is live rather than silently dropped.
       const blurred = await nav.evaluate((el) => {
@@ -218,8 +220,10 @@ test.describe("Staff UI on Chromium", () => {
       expect(blurred).toBe(true);
 
       // ura_staff has no Analytics or Overview entry (StaffGuard NAV roles).
-      await expect(nav.getByRole("link", { name: "My queue" })).toBeVisible();
-      await expect(nav.getByRole("link", { name: "All tickets" })).toBeVisible();
+      // Labels are opacity-0 while collapsed but still in the a11y tree, so
+      // these match on accessible name regardless of rail width.
+      await expect(nav.getByRole("link", { name: "My queue" })).toBeAttached();
+      await expect(nav.getByRole("link", { name: "All tickets" })).toBeAttached();
       await expect(nav.getByRole("link", { name: "Analytics" })).toHaveCount(0);
       await expect(nav.getByRole("link", { name: "Overview" })).toHaveCount(0);
 
@@ -431,7 +435,7 @@ test.describe("Staff UI on Chromium", () => {
         await page.setViewportSize({ width, height: 900 });
         for (const route of ROUTES) {
           await page.goto(route);
-          await expect(page.locator("nav.staff-nav")).toBeVisible();
+          await expect(page.locator("nav.staff-rail")).toBeVisible();
           const overflow = await page.evaluate(
             () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
           );

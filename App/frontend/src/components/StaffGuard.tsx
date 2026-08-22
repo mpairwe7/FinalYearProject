@@ -36,6 +36,19 @@ import {
   CommandPaletteTrigger,
   useCommandPalette,
 } from "./ops/CommandPalette";
+import {
+  BeakerIcon,
+  ChartIcon,
+  FlagIcon,
+  GaugeIcon,
+  InboxIcon,
+  ListIcon,
+  PanelLeftIcon,
+  PinIcon,
+  SendIcon,
+  SlidersIcon,
+} from "./ops/icons";
+import { useSidebarMode } from "../hooks/useSidebarMode";
 import { TicketLiveBanner } from "./staff/TicketLiveBanner";
 import ThemeToggle from "./ThemeToggle";
 import "./staffGuard.css";
@@ -65,6 +78,41 @@ function signOut() {
   window.location.assign("/signin");
 }
 
+/**
+ * Icon per staff destination, keyed by href.
+ *
+ * Lives here rather than on StaffDestination because lib/roles.ts is imported
+ * by the command palette and by server-safe code; giving it JSX would drag
+ * React into modules that only want the route table.
+ */
+const DESTINATION_ICON: Record<string, () => React.JSX.Element> = {
+  "/admin": GaugeIcon,
+  "/agent": InboxIcon,
+  "/admin/tickets": ListIcon,
+  "/admin/flags": FlagIcon,
+  "/admin/overrides": SlidersIcon,
+  "/admin/outbox": SendIcon,
+  "/analytics": ChartIcon,
+  "/analytics/evaluation": BeakerIcon,
+};
+
+/**
+ * The operations sidebar.
+ *
+ * Was a horizontal bar. It became a rail because the console outgrew it: eight
+ * destinations in three groups scrolled sideways below 1080px, which hid the
+ * group structure exactly where screen space made it most useful. A vertical
+ * rail shows all three sections at once at every width.
+ *
+ * Collapsed it is 52px of icons; expanded, 208px with labels and section
+ * headings. `hover` mode expands on pointer-over and collapses on leave;
+ * `always-open` pins it. Both widths are driven by a CSS custom property on
+ * the shell so the main content's offset stays in lockstep with the rail
+ * instead of being duplicated as a magic number in two stylesheets.
+ *
+ * On mobile there is no rail: it becomes an off-canvas drawer behind a menu
+ * button, since 52px of permanent chrome on a phone is most of the gutter.
+ */
 export function StaffNav({
   who,
   current,
@@ -78,76 +126,155 @@ export function StaffNav({
   onOpenPalette?: () => void;
 }) {
   const sections = staffSectionsFor(who.role);
+  const { mode, setMode, ready } = useSidebarMode();
+  const [hovered, setHovered] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const expanded = mode === "always-open" || (mode === "hover" && hovered);
+
+  // Route changes close the drawer. Without this, tapping a destination on a
+  // phone navigates behind a drawer that stays open over the new page.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [current]);
+
+  // Escape closes the drawer, matching the command palette's affordance.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+
+  const shellClass = [
+    "staff-rail",
+    expanded ? "is-expanded" : "is-collapsed",
+    drawerOpen ? "is-drawer-open" : "",
+    ready ? "" : "is-preload",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <nav className="staff-nav" aria-label="Operations">
+    <>
       <a className="staff-skip" href="#staff-main">
         Skip to content
       </a>
 
-      {/* Named explicitly: below 1080px `.staff-brand-text` is display:none and
-          the mark is decorative, which left this link with no accessible name
-          at all on a phone — a failure only the mobile axe project could see. */}
-      <Link className="staff-brand" href="/admin" aria-label="URA Operations console">
-        <span className="staff-brand-mark" aria-hidden="true">
-          URA
-        </span>
-        <span className="staff-brand-text">
-          Operations
-          <span className="staff-brand-sub">Taxpayer assistant</span>
-        </span>
-      </Link>
+      {/* Phone-only. The rail is display:none below the breakpoint, so without
+          this there is no way to reach any destination. */}
+      <button
+        type="button"
+        className="staff-rail-toggle"
+        aria-expanded={drawerOpen}
+        aria-controls="staff-rail"
+        onClick={() => setDrawerOpen((open) => !open)}
+      >
+        <PanelLeftIcon />
+        <span className="ops-sr-only">{drawerOpen ? "Close navigation" : "Open navigation"}</span>
+      </button>
 
-      {/* Below 1080px this strip scrolls inside the bar rather than wrapping
-          the whole nav to a second and third row, which is what pushed the
-          console's content below the fold on a laptop. */}
-      <div className="staff-nav-scroller">
-        <ul>
-          {sections.map((section, index) => (
-            <React.Fragment key={section.group}>
-              {index > 0 ? <li className="staff-nav-sep" aria-hidden="true" /> : null}
-              {section.items.map((item) => {
-                const active = item.href === current;
-                return (
-                  <li key={item.href}>
-                    <a
-                      href={item.href}
-                      className={active ? "active" : ""}
-                      aria-current={active ? "page" : undefined}
-                    >
-                      {item.navLabel}
-                    </a>
-                  </li>
-                );
-              })}
-            </React.Fragment>
+      {/* Click-catcher for the drawer. aria-hidden because the drawer itself
+          is the thing screen readers should be in. */}
+      <div
+        className="staff-rail-scrim"
+        aria-hidden="true"
+        onClick={() => setDrawerOpen(false)}
+      />
+
+      <nav
+        id="staff-rail"
+        className={shellClass}
+        aria-label="Operations"
+        onMouseEnter={() => mode === "hover" && setHovered(true)}
+        onMouseLeave={() => mode === "hover" && setHovered(false)}
+      >
+        <div className="staff-rail-head">
+          <Link className="staff-brand" href="/admin" aria-label="URA Operations console">
+            <span className="staff-brand-mark" aria-hidden="true">
+              URA
+            </span>
+            <span className="staff-brand-text">
+              Operations
+              <span className="staff-brand-sub">Taxpayer assistant</span>
+            </span>
+          </Link>
+        </div>
+
+        <div className="staff-rail-scroll">
+          {sections.map((section) => (
+            <div className="staff-rail-group" key={section.group}>
+              {/* Hidden from sight when collapsed, never from the a11y tree —
+                  the grouping is the whole point of the hierarchy. */}
+              <p className="staff-rail-group-label" id={`rail-group-${section.group}`}>
+                {section.label}
+              </p>
+              <ul aria-labelledby={`rail-group-${section.group}`}>
+                {section.items.map((item) => {
+                  const active = item.href === current;
+                  const Icon = DESTINATION_ICON[item.href] ?? ListIcon;
+                  return (
+                    <li key={item.href}>
+                      <a
+                        href={item.href}
+                        className={active ? "active" : ""}
+                        aria-current={active ? "page" : undefined}
+                        title={item.navLabel}
+                      >
+                        <span className="staff-rail-icon" aria-hidden="true">
+                          <Icon />
+                        </span>
+                        <span className="staff-rail-label">{item.navLabel}</span>
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           ))}
-        </ul>
-      </div>
+        </div>
 
-      <div className="staff-nav-end">
-        {onOpenPalette ? <CommandPaletteTrigger onOpen={onOpenPalette} /> : null}
-        <span
-          className={`staff-live-dot${connected ? " is-on" : ""}`}
-          title={connected ? "Live escalations connected" : "Reconnecting to the escalation stream"}
-          role="status"
-        >
-          <span className="ops-sr-only">
-            {connected ? "Live escalations connected" : "Reconnecting to the escalation stream"}
-          </span>
-        </span>
-        <ThemeToggle className="ops-icon-btn" />
-        <span className="staff-who">
-          <span className="staff-role-pill">{roleLabel(who.role)}</span>
-          <span className="staff-email" title={who.email || who.external_id}>
-            {who.email || who.external_id}
-          </span>
-          <button type="button" className="staff-signout" onClick={signOut}>
-            Sign out
-          </button>
-        </span>
-      </div>
-    </nav>
+        <div className="staff-rail-foot">
+          <div className="staff-rail-tools">
+            {onOpenPalette ? <CommandPaletteTrigger onOpen={onOpenPalette} /> : null}
+            <ThemeToggle className="ops-icon-btn" />
+            <button
+              type="button"
+              className={`ops-icon-btn staff-rail-pin${mode === "always-open" ? " is-on" : ""}`}
+              onClick={() => setMode(mode === "always-open" ? "hover" : "always-open")}
+              aria-pressed={mode === "always-open"}
+              title={mode === "always-open" ? "Unpin sidebar" : "Keep sidebar open"}
+            >
+              <PinIcon />
+              <span className="ops-sr-only">
+                {mode === "always-open" ? "Unpin sidebar" : "Keep sidebar open"}
+              </span>
+            </button>
+            <span
+              className={`staff-live-dot${connected ? " is-on" : ""}`}
+              title={connected ? "Live escalations connected" : "Reconnecting to the escalation stream"}
+              role="status"
+            >
+              <span className="ops-sr-only">
+                {connected ? "Live escalations connected" : "Reconnecting to the escalation stream"}
+              </span>
+            </span>
+          </div>
+
+          <div className="staff-who">
+            <span className="staff-role-pill">{roleLabel(who.role)}</span>
+            <span className="staff-email" title={who.email || who.external_id}>
+              {who.email || who.external_id}
+            </span>
+            <button type="button" className="staff-signout" onClick={signOut}>
+              Sign out
+            </button>
+          </div>
+        </div>
+      </nav>
+    </>
   );
 }
 
@@ -228,22 +355,26 @@ export default function StaffGuard({
   }
 
   return (
-    <>
+    <div className="staff-shell">
       <StaffNav
         who={state.who}
         current={current}
         connected={live.connected}
         onOpenPalette={() => palette.setOpen(true)}
       />
-      <TicketLiveBanner latest={live.latest as LiveEscalation | null} />
-      {children(state.who)}
+      {/* The rail is fixed, so everything else lives in a column that is
+          offset by the rail's current width. */}
+      <div className="staff-shell-content">
+        <TicketLiveBanner latest={live.latest as LiveEscalation | null} />
+        {children(state.who)}
+      </div>
       <CommandPalette
         role={state.who.role}
         open={palette.open}
         onClose={() => palette.setOpen(false)}
         onSignOut={signOut}
       />
-    </>
+    </div>
   );
 }
 

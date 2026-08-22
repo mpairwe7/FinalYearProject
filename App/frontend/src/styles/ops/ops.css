@@ -102,11 +102,12 @@
 
 /* ── Panels ───────────────────────────────────────────────────────────────── */
 
+/* Square and flat, matching the tile grid. The console is a dense work
+   surface; rounded, shadowed cards read as separate documents floating over
+   it, which is the wrong metaphor for panels that are all one view. */
 .ops-panel {
   background: var(--ops-panel);
   border: 1px solid var(--ops-line);
-  border-radius: var(--ops-radius-md);
-  box-shadow: var(--ops-elev-1);
 }
 
 .ops-panel-head {
@@ -149,10 +150,18 @@
 
 /* ── Stat tiles ───────────────────────────────────────────────────────────── */
 
+/* One hairline between tiles instead of a gap and eight borders.
+   The grid paints the line colour and the 1px gap lets it through, so
+   neighbours share a single rule and the block reads as one instrument panel
+   rather than a scatter of cards. Consequence worth knowing: the tiles must
+   NOT carry their own border, or every interior line doubles. */
 .ops-stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: var(--ops-space-3);
+  gap: 1px;
+  background: var(--ops-line);
+  border: 1px solid var(--ops-line);
+  overflow: hidden;
 }
 
 .ops-stat {
@@ -162,11 +171,8 @@
   gap: var(--ops-space-1);
   padding: var(--ops-space-4);
   background: var(--ops-panel);
-  border: 1px solid var(--ops-line);
-  border-radius: var(--ops-radius-md);
-  box-shadow: var(--ops-elev-1);
-  transition: border-color var(--ops-dur-fast) var(--ops-ease),
-    transform var(--ops-dur-fast) var(--ops-ease);
+  transition: background var(--ops-dur-fast) var(--ops-ease),
+    color var(--ops-dur-fast) var(--ops-ease);
 }
 
 a.ops-stat {
@@ -174,8 +180,16 @@ a.ops-stat {
   color: inherit;
 }
 
+/* Square, borderless tiles cannot signal hover with a border, so the surface
+   lifts instead — the same cue the console's table rows already use. */
 a.ops-stat:hover {
-  border-color: var(--ops-line-strong);
+  background: var(--ops-row-hover);
+}
+
+/* A tile outside a grid keeps its own outline, otherwise it floats. */
+.ops-stat-grid > .ops-stat:only-child,
+.ops-stat:not(.ops-stat-grid > *) {
+  border: 1px solid var(--ops-line);
 }
 
 .ops-stat-label {
@@ -209,10 +223,11 @@ a.ops-stat:hover {
 }
 
 /* Attention reads as an inset edge, never a wash: the value has to hold AA on
-   the panel colour in both themes. */
-.ops-stat.is-warn   { box-shadow: inset 3px 0 0 var(--ops-warn), var(--ops-elev-1); }
-.ops-stat.is-danger { box-shadow: inset 3px 0 0 var(--ops-bad),  var(--ops-elev-1); }
-.ops-stat.is-good   { box-shadow: inset 3px 0 0 var(--ops-good), var(--ops-elev-1); }
+   the panel colour in both themes. The elevation that used to ride along with
+   these is gone with the tile's own shadow — the grid is flat now. */
+.ops-stat.is-warn   { box-shadow: inset 3px 0 0 var(--ops-warn); }
+.ops-stat.is-danger { box-shadow: inset 3px 0 0 var(--ops-bad); }
+.ops-stat.is-good   { box-shadow: inset 3px 0 0 var(--ops-good); }
 
 .ops-delta {
   display: inline-flex;
