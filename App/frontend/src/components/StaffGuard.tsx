@@ -126,17 +126,11 @@ export function StaffNav({
   onOpenPalette?: () => void;
 }) {
   const sections = staffSectionsFor(who.role);
-  const { mode, setMode, ready } = useSidebarMode();
+  const { mode, setMode } = useSidebarMode();
   const [hovered, setHovered] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const expanded = mode === "always-open" || (mode === "hover" && hovered);
-
-  // Route changes close the drawer. Without this, tapping a destination on a
-  // phone navigates behind a drawer that stays open over the new page.
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [current]);
 
   // Escape closes the drawer, matching the command palette's affordance.
   useEffect(() => {
@@ -148,12 +142,7 @@ export function StaffNav({
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
 
-  const shellClass = [
-    "staff-rail",
-    expanded ? "is-expanded" : "is-collapsed",
-    drawerOpen ? "is-drawer-open" : "",
-    ready ? "" : "is-preload",
-  ]
+  const shellClass = ["staff-rail", expanded ? "is-expanded" : "is-collapsed", drawerOpen ? "is-drawer-open" : ""]
     .filter(Boolean)
     .join(" ");
 
@@ -222,6 +211,10 @@ export function StaffNav({
                         className={active ? "active" : ""}
                         aria-current={active ? "page" : undefined}
                         title={item.navLabel}
+                        // Closes here rather than in a route-change effect:
+                        // tapping a destination on a phone otherwise navigates
+                        // behind a drawer that stays open over the new page.
+                        onClick={() => setDrawerOpen(false)}
                       >
                         <span className="staff-rail-icon" aria-hidden="true">
                           <Icon />

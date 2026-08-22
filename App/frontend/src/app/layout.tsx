@@ -10,6 +10,7 @@ import ConsentBanner from '../components/ConsentBanner';
 import Providers from '../components/Providers';
 import ServiceWorkerRegistrar from '../components/ServiceWorkerRegistrar';
 import { THEME_INIT_SCRIPT } from '../lib/theme';
+import { SIDEBAR_INIT_SCRIPT } from '../lib/sidebarMode';
 
 import OfflineBanner from '../components/OfflineBanner';
 
@@ -106,6 +107,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {/* Set the theme attribute before paint to avoid a flash. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* Stamps the rail width before paint so a pinned sidebar does not
+            animate open on every staff page load. */}
+        <script dangerouslySetInnerHTML={{ __html: SIDEBAR_INIT_SCRIPT }} />
         <ServiceWorkerRegistrar />
         <Providers>
           <OfflineBanner />

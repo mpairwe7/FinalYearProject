@@ -67,11 +67,18 @@
   box-shadow: var(--ops-elev-3);
 }
 
-/* First paint only: the stored preference is applied in an effect, and without
-   this the rail visibly slides open on every load for pinned users. */
-.staff-rail.is-preload,
-.staff-rail.is-preload ~ .staff-shell-content {
-  transition: none;
+/* Pre-paint width, before React has hydrated.
+   lib/sidebarMode.ts stamps data-rail-mode on <html> from an inline script in
+   the head — the same trick lib/theme.ts uses — so a pinned rail is already
+   208px in the very first frame. Without it the rail renders collapsed, then
+   widens once hydration applies the stored preference, animating open on every
+   page load. React's own .is-expanded takes over after that and the two agree. */
+:root[data-rail-mode="always-open"] .staff-rail {
+  width: var(--rail-w-expanded);
+}
+
+:root[data-rail-mode="always-open"] .staff-shell {
+  --rail-w: var(--rail-w-expanded);
 }
 
 .staff-rail-head {
