@@ -549,9 +549,12 @@ The `live_smoke.sh` script (see `App/scripts/live_smoke.sh`) verifies:
 - `POST /v1/chat/stream` → SSE metadata + token + done events
 - Same set proxied via `/api/*` (Next.js rewrites)
 
-> The smoke asserts `model="Qwen/Qwen3-8B"`. When `LLM_BACKEND=vllm`
-> with a non-Qwen model, this assertion will fail — patch the smoke
-> assertions or override `LLM_MODEL` to match what vLLM is serving.
+> The smoke asserts `model="${EXPECTED_MODEL}"`, defaulting to
+> `Sunbird/Sunflower-14B-FP8` (the default `LLM_MODEL`, served via
+> `LLM_BACKEND=vllm` — see docs/MODEL_SWAP_GUIDE.md). Deploying a different
+> model: set `EXPECTED_MODEL` to match what vLLM is actually serving rather
+> than hardcoding a new value in the script — that hardcoding is exactly
+> what broke this assertion the last time the default model changed.
 
 ---
 

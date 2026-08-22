@@ -4,6 +4,12 @@ set -euo pipefail
 BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:8887}"
 FRONTEND_URL="${FRONTEND_URL:-http://127.0.0.1:13000}"
 TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-60}"
+# What LLM_MODEL the deployment under test is expected to report. Was a bare
+# hardcoded "Qwen/Qwen3-8B" in six places below; drifted the moment the
+# default model changed (Sunbird/Sunflower-14B-FP8 via LLM_BACKEND=vllm — see
+# docs/MODEL_SWAP_GUIDE.md) and would have failed every one of those
+# assertions on a correctly-running deployment. Override for any other model.
+EXPECTED_MODEL="${EXPECTED_MODEL:-Sunbird/Sunflower-14B-FP8}"
 RUN_ID="${SMOKE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 TMP_DIR="$(mktemp -d)"
 
@@ -160,7 +166,7 @@ check_backend_chat() {
   assert_status 200 "$HTTP_CODE" "backend /v1/chat workflow"
   assert_json \
     "$workflow_out" \
-    '.model == "Qwen/Qwen3-8B"
+    '.model == "'"${EXPECTED_MODEL}"'"
       and .retrieval_mode == "workflow"
       and .agent_role == "workflow_guide"
       and (.workflow.id == "tin_registration")
@@ -180,7 +186,7 @@ check_backend_chat() {
   assert_status 200 "$HTTP_CODE" "backend /v1/chat rag"
   assert_json \
     "$rag_out" \
-    '.model == "Qwen/Qwen3-8B"
+    '.model == "'"${EXPECTED_MODEL}"'"
       and (.retrieval_mode == "hybrid" or .retrieval_mode == "hybrid_corrected")
       and .agent_role == "rag_answerer"
       and (.citations | length > 0)
@@ -203,7 +209,7 @@ check_backend_stream() {
   perform_stream_request "$BACKEND_URL/v1/chat/stream" "$outfile" "$body"
   assert_status 200 "$HTTP_CODE" "backend /v1/chat/stream"
   assert_file_contains "$outfile" '^event: metadata$' "backend /v1/chat/stream"
-  assert_file_contains "$outfile" '"model": "Qwen/Qwen3-8B"' "backend /v1/chat/stream"
+  assert_file_contains "$outfile" "\"model\": \"${EXPECTED_MODEL}\"" "backend /v1/chat/stream"
   assert_file_contains "$outfile" '^event: token$' "backend /v1/chat/stream"
   assert_file_contains "$outfile" 'Taxpayer Identification Number|10-digit' "backend /v1/chat/stream"
   assert_file_not_contains \
@@ -240,7 +246,7 @@ check_frontend_proxy() {
   assert_status 200 "$HTTP_CODE" "frontend /api/v1/chat workflow"
   assert_json \
     "$workflow_out" \
-    '.model == "Qwen/Qwen3-8B"
+    '.model == "'"${EXPECTED_MODEL}"'"
       and .retrieval_mode == "workflow"
       and .agent_role == "workflow_guide"
       and (.workflow.id == "tin_registration")' \
@@ -259,7 +265,7 @@ check_frontend_proxy() {
   assert_status 200 "$HTTP_CODE" "frontend /api/v1/chat rag"
   assert_json \
     "$rag_out" \
-    '.model == "Qwen/Qwen3-8B"
+    '.model == "'"${EXPECTED_MODEL}"'"
       and (.retrieval_mode == "hybrid" or .retrieval_mode == "hybrid_corrected")
       and .agent_role == "rag_answerer"
       and (.citations | length > 0)
@@ -281,7 +287,7 @@ check_frontend_stream() {
   perform_stream_request "$FRONTEND_URL/api/v1/chat/stream" "$outfile" "$body"
   assert_status 200 "$HTTP_CODE" "frontend /api/v1/chat/stream"
   assert_file_contains "$outfile" '^event: metadata$' "frontend /api/v1/chat/stream"
-  assert_file_contains "$outfile" '"model": "Qwen/Qwen3-8B"' "frontend /api/v1/chat/stream"
+  assert_file_contains "$outfile" "\"model\": \"${EXPECTED_MODEL}\"" "frontend /api/v1/chat/stream"
   assert_file_contains "$outfile" '^event: token$' "frontend /api/v1/chat/stream"
   assert_file_contains "$outfile" 'Taxpayer Identification Number|10-digit' "frontend /api/v1/chat/stream"
   assert_file_not_contains \

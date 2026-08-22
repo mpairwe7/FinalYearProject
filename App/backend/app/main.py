@@ -799,6 +799,11 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     capabilities = {
         "language_detection": language_detection_backend(),
         "translation": "sunbird" if sunbird.is_available() else "unavailable",
+        # Not the same question as "translation": Sunbird's per-account retry
+        # falls over to a second account, and with only one configured there
+        # is nowhere to fall over to. "fallback" alone means the primary token
+        # is missing, not that the fallback is doing its job.
+        "sunbird_accounts": sunbird.account_summary(),
         "retrieval": retrieval_mode,
     }
     return HealthResponse(

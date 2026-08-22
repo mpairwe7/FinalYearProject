@@ -114,8 +114,13 @@ QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=              # Optional, for Qdrant Cloud
 QDRANT_COLLECTION=ura_knowledge_base_v1
 
-# LLM Generation (Qwen3-8B, ~16 GB auto-download)
-LLM_MODEL=Qwen/Qwen3-8B
+# LLM Generation — Sunbird/Sunflower-14B-FP8 via vLLM (default; ~16GB FP8,
+# already downloaded at App/Model/Sunflower-14B-FP8). Requires LLM_BACKEND=vllm
+# and a vLLM sidecar — see App/docker-compose.local-sunflower.yml and
+# docs/MODEL_SWAP_GUIDE.md. Qwen/Qwen3-8B remains the simple local-Transformers
+# fallback (no vLLM needed; also what the lg/sw/nyn/ach LoRA adapters target).
+LLM_MODEL=Sunbird/Sunflower-14B-FP8
+LLM_BACKEND=vllm
 LLM_ENABLED=true
 LLM_DEVICE=auto              # auto|cpu|cuda
 LLM_TORCH_DTYPE=auto         # float16|bfloat16|float32|auto

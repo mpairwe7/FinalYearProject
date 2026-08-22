@@ -93,12 +93,29 @@ class ResolveEdgeVoiceTests(unittest.TestCase):
                 )
 
     def test_other_ugandan_locales_get_the_english_standin(self):
-        for locale in ("nyn", "ach", "sw"):
+        """Runyankole and Acholi only — edge-tts has no voice for either."""
+        for locale in ("nyn", "ach"):
             with self.subTest(locale=locale):
                 self.assertEqual(
                     resolve_edge_voice(locale, "salt_nyn_0001"),
                     speech_service.SPEECH_EN_EDGE_VOICE,
                 )
+
+    def test_kiswahili_gets_a_native_edge_voice_not_an_english_one(self):
+        """The exception to the stand-in rule: edge really does speak Swahili.
+
+        sw-KE and sw-TZ voices are in `edge_tts.list_voices()`, so a Kiswahili
+        answer was being read aloud by an American English speaker while a
+        native voice sat there free. Found by the trilingual coverage run for
+        issue #303, where /v1/tts returned voice=en_US-lessac-medium for a
+        Kiswahili question after the Sunbird call timed out.
+        """
+        for voice in (None, "waxal_swa_0006", "en-GB-SoniaNeural"):
+            with self.subTest(voice=voice):
+                self.assertEqual(
+                    resolve_edge_voice("sw", voice), speech_service.SPEECH_SW_EDGE_VOICE
+                )
+        self.assertTrue(speech_service.SPEECH_SW_EDGE_VOICE.startswith("sw-"))
 
 
 class EdgeSynthesisForwardingTests(unittest.TestCase):

@@ -65,7 +65,12 @@ FULL_DELIVERY: dict[str, str] = {
         "Git-backed FAQ editor later. Exact-match overrides are enough for "
         "staff corrections. SEED_PROTOTYPE must stay false."
     ),
-    "G33": "Apply infra/k8s/hpa-chat.yaml and keda-chat.yaml after a measured p95.",
+    "G33": (
+        "Measured p95 is in docs/runbooks/capacity-slo.md "
+        "(2026-08-19, one A6000). Apply infra/k8s/hpa-chat.yaml and "
+        "keda-chat.yaml only after agreeing the hybrid vs blended SLI; "
+        "do not invent replica counts."
+    ),
     "G34": "Run a cluster game day. In-process fail-closed tests are not that drill.",
     "G35": (
         "The DPO/legal owner must sign the DPIA, record the PDPO registration "
