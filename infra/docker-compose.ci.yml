@@ -1,0 +1,38 @@
+# =============================================================================
+# CI Compose override — used by the DAST workflow step only
+#
+# Problem: The production compose mounts a named Docker volume
+# (analytics_data:/app/data_store). On a fresh GitHub Actions runner that
+# volume is created as root-owned, so the non-root appuser (uid 10001) cannot
+# write to it → sqlite3.OperationalError: unable to open database file →
+# API lifespan crashes before the health-check endpoint becomes available.
+#
+# Fix: Replace the named volume with a tmpfs mount for /app/data_store. tmpfs
+# is always writable by all users regardless of ownership, and its contents
+# are ephemeral — which is exactly what we want in a throwaway CI container.
+#
+# Also remove the read_only constraint so uvicorn can write its .pid file to
+# /tmp (already a tmpfs in production) without permission errors.
+#
+# Usage (in CI step):
+#   docker compose -f docker-compose.yml -f infra/docker-compose.ci.yml \
+#     up -d qdrant api
+# =============================================================================
+
+services:
+  api:
+    # Override the named-volume mount for data_store with an ephemeral tmpfs.
+    # The 'volumes' key merges with the base file; we shadow the named volume
+    # entry by providing a tmpfs binding for the same target path.
+    volumes:
+      - type: tmpfs
+        target: /app/data_store
+    # Ensure the DB directory env var points to the tmpfs path (belt-and-braces:
+    # docker-compose.yml already sets this, but we restate it here so the
+    # override is self-documenting).
+    environment:
+      - ANALYTICS_DB_DIR=/app/data_store
+      # Disable speech to avoid the `ml` module import error (ml/ is not
+      # copied into the image; the error is caught but pollutes logs).
+      - SPEECH_ENABLED=false
+      - LLM_ENABLED=false
