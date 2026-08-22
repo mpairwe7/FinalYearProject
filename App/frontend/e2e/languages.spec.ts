@@ -163,13 +163,14 @@ test.describe("Every configured language, through the UI", () => {
 
       await page.goto("/");
       await chooseLanguage(page, locale.label);
-      await page.getByRole("button", { name: "Start speaking" }).click();
+      await page.locator('[data-testid="composer-mic"]').click();
 
       // The recognizer gets this language's BCP-47 tag, not the default en-US.
       await expect
         .poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__recogLang))
         .toBe(locale.speechLang);
-      await expect(page.getByLabel("Type your message")).toHaveValue(/sample utterance/);
+      // Same reason as helpers.sendMessage: the label is Swahili by this point.
+      await expect(page.locator("#composer-input")).toHaveValue(/sample utterance/);
     });
   }
 
@@ -273,15 +274,15 @@ test.describe("Voice round-trip carries the language", () => {
 
     await page.goto("/");
     await chooseLanguage(page, "Luganda");
-    await page.getByRole("button", { name: "Start speaking" }).click();
-    const stop = page.getByRole("button", { name: "Stop and insert text" });
+    await page.locator('[data-testid="composer-mic"]').click();
+    const stop = page.locator('[data-testid="composer-rec-confirm"]');
     await expect(stop).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(1200);
     await stop.click();
 
     await expect.poll(() => urls.length, { timeout: 20_000 }).toBeGreaterThan(0);
     expect(urls[0]).toContain("language=lg");
-    await expect(page.getByLabel("Type your message")).toHaveValue(/emisolo/);
+    await expect(page.locator("#composer-input")).toHaveValue(/emisolo/);
   });
 
   test("voice mode POSTs /v1/voice/chat with the chosen language", async ({ page }) => {
@@ -306,13 +307,13 @@ test.describe("Voice round-trip carries the language", () => {
 
     await page.goto("/");
     await chooseLanguage(page, "Luganda");
-    await page.getByRole("button", { name: "Enter voice mode" }).click();
-    await page.getByRole("button", { name: "Start speaking" }).click();
-    await expect(page.getByRole("button", { name: "Send recording" })).toBeVisible({
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    await page.locator('[data-testid="composer-mic"]').click();
+    await expect(page.locator('[data-testid="composer-rec-confirm"]')).toBeVisible({
       timeout: 10_000,
     });
     await page.waitForTimeout(1200);
-    await page.getByRole("button", { name: "Send recording" }).click();
+    await page.locator('[data-testid="composer-rec-confirm"]').click();
 
     await expect.poll(() => urls.length, { timeout: 20_000 }).toBeGreaterThan(0);
     expect(urls[0]).toContain("language=lg");

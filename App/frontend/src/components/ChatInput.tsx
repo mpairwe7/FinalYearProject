@@ -1,4 +1,5 @@
 import React, { memo, useLayoutEffect, useRef } from 'react';
+import { useTranslation } from '../lib/i18n';
 import {
   MicIcon,
   SendIcon,
@@ -84,6 +85,7 @@ function ChatInputInner({
   dictationNotice,
   onStop,
 }: ChatInputProps) {
+  const t = useTranslation();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
@@ -110,25 +112,27 @@ function ChatInputInner({
   // dictating: they tap expecting their question to go, and get text in a box.
   // Both the accessible name and the hint follow the flow now.
   if (isRecording) {
-    const confirmLabel = voiceMode ? 'Send recording' : 'Stop and insert text';
+    const confirmLabel = voiceMode ? t('composer.sendRecording') : t('composer.stopAndInsert');
     return (
       <>
         <div className="composer cmpv2 composer-active-recording">
           <div className="composer-rec-label">
             <span className="composer-rec-dot" aria-hidden="true" />
-            Listening...
+            {t('composer.listening')}
           </div>
           <div className="composer-rec-controls">
             <InlineWaveform />
             <button
               className="composer-rec-cancel"
+              data-testid="composer-rec-cancel"
               onClick={onCancelRecording}
-              aria-label="Cancel recording"
+              aria-label={t('composer.cancelRecording')}
             >
               <CloseIcon />
             </button>
             <button
               className="composer-rec-confirm"
+              data-testid="composer-rec-confirm"
               onClick={onMicClick}
               disabled={isTransitioning}
               aria-label={confirmLabel}
@@ -140,8 +144,8 @@ function ChatInputInner({
         </div>
         <p className="composer-hint">
           {voiceMode
-            ? 'Tap checkmark to send, or X to cancel.'
-            : 'Tap checkmark to add what you said to the message, or X to discard.'}
+            ? t('composer.recHintVoice')
+            : t('composer.recHintDictation')}
         </p>
       </>
     );
@@ -182,9 +186,9 @@ function ChatInputInner({
           ref={inputRef}
           className="input"
           id="composer-input"
-          aria-label="Type your message"
+          aria-label={t('composer.label')}
           aria-multiline="true"
-          placeholder={voiceMode ? 'Voice mode on — speak, or type' : 'Ask anything about URA...'}
+          placeholder={voiceMode ? t('composer.placeholderVoice') : t('composer.placeholder')}
           value={message}
           rows={1}
           enterKeyHint="send"
@@ -243,18 +247,19 @@ function ChatInputInner({
                which one talks back. */
             aria-label={
               speechState === 'listening'
-                ? 'Stop listening'
+                ? t('composer.micStop')
                 : speechState === 'processing'
-                  ? 'Transcribing'
-                  : 'Start speaking'
+                  ? t('composer.transcribing')
+                  : t('composer.micStart')
             }
             data-tip={
               speechState === 'listening'
-                ? 'Stop listening'
+                ? t('composer.micStop')
                 : speechState === 'processing'
-                  ? 'Transcribing…'
-                  : 'Dictate'
+                  ? t('composer.transcribingTip')
+                  : t('composer.dictate')
             }
+            data-testid="composer-mic"
           >
             <MicIcon />
           </button>
@@ -267,17 +272,18 @@ function ChatInputInner({
               className="composer-circle-btn send-circle-btn stop-circle-btn"
               onClick={onStop}
               aria-label="Stop generating"
-              data-tip="Stop"
+              data-tip={t('composer.stop')}
             >
               <StopIcon />
             </button>
           ) : canSend || !onVoiceModeChange ? (
             <button
               className="composer-circle-btn send-circle-btn"
+              data-testid="composer-send"
               onClick={() => onSend()}
               disabled={isLoading || isUploading || !hasText}
-              aria-label={isUploading ? 'Analysing attachment...' : 'Send message'}
-              data-tip={isUploading ? 'Analysing…' : 'Send message'}
+              aria-label={isUploading ? t('composer.analysing') : t('composer.send')}
+              data-tip={isUploading ? t('composer.analysingTip') : t('composer.send')}
             >
               <SendIcon />
             </button>
@@ -287,8 +293,9 @@ function ChatInputInner({
               onClick={() => onVoiceModeChange(!voiceMode)}
               disabled={voiceModeDisabled}
               aria-pressed={voiceMode}
-              aria-label={voiceMode ? 'Exit voice mode' : 'Enter voice mode'}
-              data-tip={voiceMode ? 'Exit voice mode' : 'Enter voice mode'}
+              data-testid="composer-voicemode"
+              aria-label={voiceMode ? t('composer.voiceExit') : t('composer.voiceEnter')}
+              data-tip={voiceMode ? t('composer.voiceExit') : t('composer.voiceEnter')}
             >
               <VoiceWaveIcon />
             </button>
@@ -304,8 +311,8 @@ function ChatInputInner({
         {dictationNotice
           ? dictationNotice
           : voiceMode
-            ? 'Voice mode: tap the mic to speak, and replies are read back to you.'
-            : 'URA Assistant can make mistakes. Verify important tax information at ura.go.ug.'}
+            ? t('composer.voiceHint')
+            : t('composer.disclaimer')}
       </p>
     </>
   );

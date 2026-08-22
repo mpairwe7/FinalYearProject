@@ -207,6 +207,9 @@ async function prepareStaffSession(page: Page) {
 
 test.describe("WCAG 2.2 AA automated route audit", () => {
   test("has no serious or critical axe violations on every required surface in both themes", async ({ page }) => {
+    // Six navigations, a settings dialog and six axe passes. Same reason as the
+    // staff audit below: inherently past the 30s default under a parallel run.
+    test.slow();
     await seedConsent(page);
     await clearChatStore(page);
     await mockBackend(page);
