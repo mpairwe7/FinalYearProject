@@ -1,35 +1,85 @@
 {
+  "id": "/",
   "name": "URA Tax Assistant",
   "short_name": "URA Chat",
   "description": "AI-powered tax assistant for Uganda Revenue Authority. Ask about TIN registration, VAT, PAYE, customs, and more.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "any",
   "theme_color": "#0A0A12",
   "background_color": "#0A0A12",
   "categories": ["finance", "government", "utilities"],
   "lang": "en",
   "dir": "ltr",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "handle_links": "preferred",
+  "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/icon-192x192.svg",
+      "src": "/icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512x512.svg",
+      "src": "/icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "/apple-touch-icon.svg",
-      "sizes": "180x180",
-      "type": "image/svg+xml"
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-monochrome.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "monochrome"
+    },
+    {
+      "src": "/icon-512x512.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ],
-  "screenshots": [],
-  "prefer_related_applications": false
+  "screenshots": [
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Ask a tax question and get a grounded answer with citations"
+    },
+    {
+      "src": "/screenshot-narrow.png",
+      "sizes": "412x915",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "The assistant on a phone, with voice and starter prompts"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Your conversations",
+      "short_name": "Conversations",
+      "description": "Every conversation you have had with the assistant",
+      "url": "/chats",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Sign in",
+      "short_name": "Sign in",
+      "description": "Sign in to save conversations and keep a tax profile",
+      "url": "/signin",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
 }
