@@ -1209,6 +1209,44 @@ class SpeechModel:
                     self._tts_cache.popitem(last=False)
         return result
 
+    def _synthesize_mock(self, text: str, voice: str, language: str) -> SynthesizeResult:
+        """Deterministic sine-tone WAV. Only ever reached by explicit opt-in."""
+        t0 = time.perf_counter()
+        try:
+            import io
+            import wave
+
+            import numpy as np
+
+            from ml.scripts.tts.infer_tts import _synth_mock  # type: ignore
+
+            samples, sample_rate, _, _ = _synth_mock(text, voice)
+            float_samples = np.asarray(samples, dtype="float32")
+            pcm16 = (float_samples * 32768).clip(-32768, 32767).astype("int16")
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sample_rate)
+                w.writeframes(pcm16.tobytes())
+            audio = buf.getvalue()
+            return SynthesizeResult(
+                audio=audio,
+                sample_rate=sample_rate,
+                num_samples=int(pcm16.size),
+                duration_s=round(float(pcm16.size) / sample_rate, 3),
+                latency_s=round(time.perf_counter() - t0, 3),
+                backend="mock",
+                voice=voice,
+            )
+        except Exception as exc:  # noqa: BLE001 — the double must not mask itself
+            logger.error("Mock TTS failed", exc_info=True)
+            return SynthesizeResult(
+                audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
+                latency_s=round(time.perf_counter() - t0, 3),
+                backend="error", voice=voice, error=f"mock TTS unavailable: {exc}",
+            )
+
     def _synthesize_uncached(
         self,
         text: str,
@@ -1217,6 +1255,22 @@ class SpeechModel:
     ) -> SynthesizeResult:
         """The actual backend fallback chain behind :meth:`synthesize`."""
         from . import spark_tts_salt
+
+        # An explicitly requested test double, before any real backend.
+        #
+        # This is NOT the mock tier that used to sit at the bottom of the chain
+        # — that one is gone on purpose (see the comment where the chain now
+        # ends in backend="error"): serving a 440 Hz beep because every real
+        # backend failed is a false success the caller cannot detect.
+        #
+        # Asking for it by name is a different thing. SPEECH_TTS_BACKEND has
+        # always documented `mock` as a valid value, and the voice E2E job
+        # boots the app with SPEECH_TTS_BACKEND=mock precisely so it can assert
+        # a real WAV comes back without shipping torch or a voice pack into CI.
+        # Removing the tier without removing the option made that documented
+        # setting silently produce "All TTS backends failed".
+        if SPEECH_TTS_BACKEND == "mock":
+            return self._synthesize_mock(text, voice, language)
 
         # Local Piper and edge-tts both default to an English voice for any
         # language they have no model for, and then *succeed* — so left in
