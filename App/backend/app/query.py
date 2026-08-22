@@ -292,6 +292,30 @@ def detect_language(text: str) -> str:
     words = re.findall(r"[a-z\']+", cleaned)
     n_words = max(len(words), 1)
 
+    # Consult the statistical detector BEFORE the marker heuristics below.
+    #
+    # The markers cannot tell Luganda from Runyankole: the two languages share
+    # the oku-/omu-/eby- infinitive and noun-class prefixes that _NYN_PREFIXES
+    # matches on, so any Luganda sentence carrying two of them short-circuited
+    # to "nyn" and never reached lingua at all. That is not a cosmetic
+    # mislabel — nyn is not in SUPPORTED_LOCALES, so service.py's gate then
+    # declines to promote the locale and the question is answered in ENGLISH.
+    # Measured on this project's own Luganda question bank, 3 of 6 questions
+    # went that way (penalties, returns, withholding); lingua calls the same
+    # six "lg" with 0.91-0.998 confidence.
+    #
+    # The markers still run below and still own nyn/ach — lingua has no model
+    # for either language, so it is only trusted here for a locale it actually
+    # knows AND is confident about. Everything else keeps the original order.
+    det = _get_language_detector()
+    if det is not None:
+        try:
+            result = det.detect(text)
+            if result.lang in SUPPORTED_LOCALES and result.is_confident(0.75):
+                return result.lang
+        except Exception:
+            logger.debug("LanguageDetector.detect failed; using marker heuristics")
+
     # Quick heuristic: count marker hits per language
     nyn_hits = len(_NYN_PREFIXES.findall(cleaned)) + len(_NYN_WORDS.findall(cleaned))
     ach_hits = len(_ACH_MARKERS.findall(cleaned))

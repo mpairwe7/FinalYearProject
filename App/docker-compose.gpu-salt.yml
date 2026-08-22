@@ -45,6 +45,16 @@ services:
       # English TTS still falls through to edge-tts: Spark-TTS-SALT ships no
       # English speaker id and no local piper voice is present in artifacts/.
       - RETRIEVAL_MT_BACKEND=${RETRIEVAL_MT_BACKEND:-local}
+      # Same value the app defaults to, exposed here so a capacity run can
+      # raise it. Note what this limit actually is through the tunnel: slowapi
+      # keys on get_remote_address, and TRUSTED_PROXY_HOSTS defaults to
+      # loopback only, so the frontend container is not a trusted proxy and
+      # every public request is attributed to that one container IP. All
+      # tunnel traffic therefore shares ONE 30/minute bucket regardless of how
+      # many distinct callers there are. Raise it (e.g. RATE_LIMIT=10000/minute,
+      # matching docs/traceability/capacity-envelope-2026-08-19.md) to measure
+      # the app rather than the limiter.
+      - RATE_LIMIT=${RATE_LIMIT:-30/minute}
       - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
       # BAAI/bge-m3 (dense retriever) and the reranker are not in the NAS
       # cache — HF_HUB_OFFLINE=1 (base file) silently pushed dense retrieval
