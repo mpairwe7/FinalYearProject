@@ -18,13 +18,23 @@
 # verify-embedded-stores.sh when present and structural checks otherwise, so it
 # works on any pin.
 #
-# sha-2e36168 is the operations console redesign — the staff and admin surfaces
-# behind the sign-in. Two of its changes are visible in production rather than
-# only in the repository: /analytics and /analytics/evaluation are now behind
-# the staff gate (they were listed in the console nav but ungated, so an
-# anonymous visitor reached a dashboard shell and a raw error string), and the
-# charts follow the light/dark preference instead of a hardcoded dark palette
-# whose axis labels measured about 1.4:1 on the light canvas.
+# sha-ba30887 makes the app installable and shareable.
+#
+# Every PWA icon the manifest and the HTML pointed at was an SVG. Chromium
+# decodes a raster icon when it evaluates installability and does not accept
+# SVG there; iOS ignores SVG for apple-touch-icon outright. The Space was
+# therefore serving an app that no browser would offer to install. It now ships
+# PNGs (any + a dedicated maskable), real screenshots for the install dialog,
+# and the manifest keys that decide launch behaviour.
+#
+# It was also serving three OpenGraph tags and no og:image, so every share of
+# the Space's URL on WhatsApp, X, LinkedIn or Slack rendered as a bare text row
+# with no card. There is a 1200x630 share image now, with absolute URLs — which
+# needed metadataBase, without which Next emits the image path relative and
+# every crawler drops it.
+#
+# sha-2e36168 was the operations console redesign — the staff and admin
+# surfaces behind the sign-in.
 #
 # The taxpayer chat is untouched: the console's style layer is namespaced
 # `.ops-*` and loads alongside, not over, globals.css.
@@ -724,11 +734,11 @@
 # "sole trader"), prompted translation guards its own input, and the ASR chain
 # distinguishes hearing nothing from every backend failing.
 #
-# All CI green on this commit; merged to main as 2e36168a (PR #348).
+# All CI green on this commit; merged to main as ba308871 (PR #351).
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-2e36168
+FROM landwind/ura-chatbot:sha-ba30887
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.

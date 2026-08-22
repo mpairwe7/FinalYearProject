@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { restoreFocus } from "../lib/focus";
 import { PencilIcon, PinIcon, PinOffIcon, TrashIcon } from "./Icons";
+import { useTranslation } from "../lib/i18n";
 
 /**
  * Pin / Rename / Delete for one conversation.
@@ -49,6 +50,7 @@ export default function ConversationMenu({
   triggerChildren,
   align = "end",
 }: ConversationMenuProps) {
+  const t = useTranslation();
   /**
    * Position is measured as the menu opens, in the handler, rather than
    * corrected afterwards in a layout effect — so `open` and the coordinates
@@ -159,7 +161,7 @@ export default function ConversationMenu({
             onKeyDown={onMenuKeyDown}
           >
             {pinned ? <PinOffIcon /> : <PinIcon />}
-            {pinned ? "Unpin" : "Pin"}
+            {pinned ? t('rail.unpin') : t('rail.pin')}
           </button>
           <button
             ref={(el) => {
@@ -171,7 +173,7 @@ export default function ConversationMenu({
             onClick={() => runThenClose(onRename)}
             onKeyDown={onMenuKeyDown}
           >
-            <PencilIcon /> Rename
+            <PencilIcon /> {t('rail.rename')}
           </button>
           <button
             ref={(el) => {
@@ -183,7 +185,7 @@ export default function ConversationMenu({
             onClick={() => runThenClose(onDelete)}
             onKeyDown={onMenuKeyDown}
           >
-            <TrashIcon /> Delete
+            <TrashIcon /> {t('rail.delete')}
           </button>
         </div>,
         document.body,

@@ -18,6 +18,7 @@ import Link from "next/link";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useIdentity } from "../hooks/useIdentity";
 import { staffDestinationsFor } from "../lib/roles";
+import { useTranslation } from "../lib/i18n";
 import {
   ChevronUpDownIcon,
   SettingsIcon,
@@ -38,6 +39,7 @@ interface AccountRailProps {
 }
 
 export default function AccountRail({ onOpenSettings }: AccountRailProps) {
+  const t = useTranslation();
   const { status, name, roleName, initials, identity, isStaff, signOut } = useIdentity();
   const [menuOpen, setMenuOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -106,7 +108,7 @@ export default function AccountRail({ onOpenSettings }: AccountRailProps) {
       aria-label="Open settings"
     >
       <SettingsIcon />
-      <span>Settings</span>
+      <span>{t('account.settings')}</span>
     </button>
   );
 
@@ -121,16 +123,16 @@ export default function AccountRail({ onOpenSettings }: AccountRailProps) {
           <p className="rail-acct-pitch">
             {status === "rejected" || status === "unavailable"
               ? "Your saved sign-in is no longer valid."
-              : "Sign in to keep your conversations and profile."}
+              : t('account.prompt')}
           </p>
           <div className="rail-acct-btns">
             <Link className="rail-acct-primary" href="/signin">
               <SignInIcon />
-              Sign in
+              {t('account.signIn')}
             </Link>
             <Link className="rail-acct-ghost" href="/signup">
               <UserPlusIcon />
-              Sign up
+              {t('account.signUp')}
             </Link>
           </div>
         </div>

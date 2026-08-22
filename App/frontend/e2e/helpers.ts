@@ -241,8 +241,16 @@ export async function mockBackend(
   );
 }
 
-/** Type a message into the composer and send it. */
+/**
+ * Type a message into the composer and send it.
+ *
+ * Targets `#composer-input` rather than the accessible name, because the name
+ * is translated: the specs that switch to Luganda or Swahili would otherwise be
+ * looking for an English label the interface no longer renders. The a11y spec
+ * still asserts `getByLabel("Type your message")` at the default locale, which
+ * is where that assertion belongs.
+ */
 export async function sendMessage(page: Page, text: string) {
-  await page.getByLabel("Type your message").fill(text);
-  await page.getByLabel("Send message").click();
+  await page.locator("#composer-input").fill(text);
+  await page.locator('[data-testid="composer-send"]').click();
 }

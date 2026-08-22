@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { useChatStore, ChatTurn, createTurn, cleanResponse } from '../store/useChatStore';
 import { useVoiceStore } from '../store/useVoiceStore';
 import { LOCALE_OPTIONS } from '../lib/locales';
+import { useTranslation, type TranslationKey } from '../lib/i18n';
 import {
   initAnalytics,
   getAnalyticsSessionId,
@@ -105,12 +106,15 @@ const PHASE_UI: Record<TurnPhase, { label: string; variant: string }> = {
 // is a placeholder fallback used until that env var is configured.
 const BLOG_URL = process.env.NEXT_PUBLIC_BLOG_URL || 'https://blog-two-mu-45.vercel.app';
 
+/* Keys, not strings: the label is sent to the assistant verbatim as the
+   question, so translating it means a Luganda speaker asks in Luganda and gets
+   a Luganda answer rather than an English question with a translated reply. */
 const STARTER_PROMPTS = [
-  { label: 'What services does URA provide?', category: 'Getting started' },
-  { label: 'How do I register for a TIN?', category: 'Registration' },
-  { label: 'What is the current VAT rate in Uganda?', category: 'Rates' },
-  { label: 'How do I file my annual tax returns?', category: 'Filing' },
-] as const;
+  { label: 'starters.gettingStarted.label', category: 'starters.gettingStarted.category' },
+  { label: 'starters.registration.label', category: 'starters.registration.category' },
+  { label: 'starters.rates.label', category: 'starters.rates.category' },
+  { label: 'starters.filing.label', category: 'starters.filing.category' },
+] as const satisfies readonly { label: TranslationKey; category: TranslationKey }[];
 
 const getMediaRecorderSupportSnapshot = () => AudioRecorder.isSupported();
 const getServerMediaRecorderSupportSnapshot = () => false;
@@ -147,6 +151,7 @@ export default function Page() {
   const speechState = useChatStore((s) => s.speechState);
   const setSpeechState = useChatStore((s) => s.setSpeechState);
   const locale = useChatStore((s) => s.locale);
+  const t = useTranslation();
   const setLocale = useChatStore((s) => s.setLocale);
   const addTurns = useChatStore((s) => s.addTurns);
   const updateLastTurn = useChatStore((s) => s.updateLastTurn);
@@ -1289,10 +1294,8 @@ export default function Page() {
                   the screen is actually asking down the page. This is now the
                   document's h1: it is the page's real heading, and without it
                   the landing would start at h2 with nothing above it. */}
-              <h1 className="ldv2-headline">How can I help with your taxes?</h1>
-              <p className="landing-sub">
-                Official AI-powered assistant for Uganda Revenue Authority
-              </p>
+              <h1 className="ldv2-headline">{t('landing.headline')}</h1>
+              <p className="landing-sub">{t('landing.subtitle')}</p>
             </div>
 
             <div ref={chatDockRef} className="landing-composer landing-dock chat-dock">
@@ -1301,9 +1304,13 @@ export default function Page() {
 
             <div className="landing-prompts" role="group" aria-label="Suggested questions">
               {STARTER_PROMPTS.map((p) => (
-                <button key={p.label} className="landing-chip" onClick={() => handleStarterPrompt(p.label)}>
-                  <span className="ldv2-cat">{p.category}</span>
-                  <span>{p.label}</span>
+                <button
+                  key={p.label}
+                  className="landing-chip"
+                  onClick={() => handleStarterPrompt(t(p.label))}
+                >
+                  <span className="ldv2-cat">{t(p.category)}</span>
+                  <span>{t(p.label)}</span>
                 </button>
               ))}
             </div>
@@ -1317,10 +1324,14 @@ export default function Page() {
               </p>
             ) : (
               <p className="landing-auth">
-                <Link className="landing-auth-link" href="/signin">Sign in</Link>
-                {' or '}
-                <Link className="landing-auth-link" href="/signup">create an account</Link>
-                {' to save conversations and keep a tax profile — or just start asking.'}
+                <Link className="landing-auth-link" href="/signin">
+                  {t('landing.authPrompt.signIn')}
+                </Link>
+                {` ${t('landing.authPrompt.or')} `}
+                <Link className="landing-auth-link" href="/signup">
+                  {t('landing.authPrompt.signUp')}
+                </Link>
+                {` ${t('landing.authPrompt.tail')}`}
               </p>
             )}
           </div>
