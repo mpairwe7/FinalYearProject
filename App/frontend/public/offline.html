@@ -6,10 +6,13 @@
   <title>Offline — URA Tax Assistant</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; }
+    /* The rest of the app honours the OS scheme; this page was dark-only, so a
+       light-theme user hit a black screen the one time something went wrong. */
+    :root { color-scheme: light dark; }
     body {
       font-family: system-ui, -apple-system, sans-serif;
-      background: #0A0A12;
-      color: #E0E0E8;
+      background: #F5F7FA;
+      color: #0B1220;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -46,6 +49,10 @@
       min-height: 44px;
     }
     button:active { opacity: 0.8; }
+  
+    @media (prefers-color-scheme: dark) {
+      body { background: #0A0A12; color: #E0E0E8; }
+    }
   </style>
 </head>
 <body>

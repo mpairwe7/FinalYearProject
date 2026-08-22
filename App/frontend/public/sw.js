@@ -5,10 +5,19 @@
  * to keep the bundle minimal and avoid build-tool coupling.
  */
 
-// v5: drops entries cached before cross-origin requests were excluded.
-const CACHE_NAME = 'ura-v5';
+// v6: the manifest now points at PNG icons, so the SVG-only precache list
+// warmed files nothing asks for and missed the ones the install prompt reads.
+const CACHE_NAME = 'ura-v6';
 const OFFLINE_PAGE = '/offline.html';
-const STATIC_ASSETS = ['/', '/manifest.json', '/favicon.svg', '/icon-192x192.svg', '/icon-512x512.svg', OFFLINE_PAGE];
+const STATIC_ASSETS = [
+  '/',
+  '/manifest.json',
+  '/favicon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+  OFFLINE_PAGE,
+];
 
 // Install — pre-cache shell assets
 self.addEventListener('install', (event) => {
@@ -18,14 +27,21 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate — clean old caches
+// Activate — clean old caches, and let the browser start the navigation request
+// in parallel with booting this worker. Without navigation preload a cold start
+// pays the worker's startup before the network request even leaves, which is the
+// single biggest cost a service worker adds to a first navigation.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    (async () => {
+      if (self.registration.navigationPreload) {
+        await self.registration.navigationPreload.enable();
+      }
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+      await self.clients.claim();
+    })()
   );
-  self.clients.claim();
 });
 
 // Fetch — network-first for API, cache-first for static assets
@@ -73,14 +89,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for pages (HTML)
+  // Network-first for pages (HTML). Use the preloaded response when the browser
+  // has one in flight rather than issuing a second request for the same URL.
   event.respondWith(
-    fetch(event.request)
-      .then((resp) => {
+    (async () => {
+      try {
+        const preloaded = event.preloadResponse ? await event.preloadResponse : null;
+        const resp = preloaded || (await fetch(event.request));
         const clone = resp.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         return resp;
-      })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match(OFFLINE_PAGE)))
+      } catch {
+        const cached = await caches.match(event.request);
+        return cached || (await caches.match(OFFLINE_PAGE));
+      }
+    })()
   );
 });
