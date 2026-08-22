@@ -18,6 +18,25 @@ from pathlib import Path
 TARGET_PREFIX = "/home/developer/Mpairwe7"
 
 
+def _protected_pids() -> set[int]:
+    """This process plus every ancestor, which must never be terminated."""
+    protected = {os.getpid(), os.getppid()}
+    pid = os.getppid()
+    # Walk up to init. Bounded so a malformed /proc cannot spin here.
+    for _ in range(32):
+        if pid <= 1:
+            break
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+            # comm can contain spaces and parentheses; ppid is the field after
+            # the closing paren and the state character.
+            pid = int(stat[stat.rindex(")") + 2:].split()[1])
+        except Exception:
+            break
+        protected.add(pid)
+    return protected
+
+
 def is_process_in_target_dir(pid: int) -> tuple[bool, str]:
     """Check if the PID originates from /home/developer/Mpairwe7."""
     cwd_path = ""
@@ -65,8 +84,22 @@ def cleanup_mpairwe7_gpu_processes(dry_run: bool = False) -> list[dict[str, Any]
                 gpu_name = parts[1]
                 vram_mb = parts[2]
                 
+                # Never terminate the caller or its ancestors. The benchmark
+                # scripts call this from inside their own process, and a
+                # benchmark that has just loaded models onto the GPU is itself
+                # a ~/Mpairwe7 GPU process — so this used to SIGTERM the very
+                # run that invoked it, killing it between the cleanup step and
+                # the "save JSON report" step that follows. The reports still
+                # appeared historically only because those runs had silently
+                # fallen back to CPU (a CUDA-13 torch wheel on a 12.x driver),
+                # which kept them out of nvidia-smi's compute-app list
+                # entirely. Fixing the GPU fallback exposed the self-kill.
+                if pid in _protected_pids():
+                    print(f"[SKIP] PID {pid} is this process or an ancestor")
+                    continue
+
                 is_target, reason = is_process_in_target_dir(pid)
-                
+
                 if is_target:
                     print(f"[KILL] Target PID {pid} ({gpu_name}, {vram_mb} MiB) -> {reason}")
                     if not dry_run:
