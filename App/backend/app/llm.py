@@ -545,8 +545,19 @@ def is_available() -> bool:
 # ---------------------------------------------------------------------------
 # vLLM HTTP dispatch (LLM_BACKEND=vllm)
 # ---------------------------------------------------------------------------
-def _vllm_generate(messages: list[dict[str, str]]) -> str:
-    """Call a vLLM OpenAI-compatible /chat/completions endpoint."""
+def _vllm_generate(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Call a vLLM OpenAI-compatible /chat/completions endpoint.
+
+    The sampling overrides exist for subtasks whose ideal decoding differs
+    from chat's — translation wants greedy and reproducible, not the chat
+    defaults. Omitted values keep the chat settings.
+    """
     try:
         import json as _json
         import urllib.request
@@ -555,9 +566,9 @@ def _vllm_generate(messages: list[dict[str, str]]) -> str:
             {
                 "model": LLM_MODEL,
                 "messages": messages,
-                "temperature": LLM_TEMPERATURE,
-                "top_p": 0.95,
-                "max_tokens": LLM_MAX_TOKENS,
+                "temperature": LLM_TEMPERATURE if temperature is None else temperature,
+                "top_p": 0.95 if top_p is None else top_p,
+                "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
                 "stream": False,
                 "chat_template_kwargs": {"enable_thinking": False},
             }
@@ -820,20 +831,34 @@ def translate_text(
               "nyn": "Runyankole", "ach": "Acholi"}
     lang_name = _names.get(target_lang, target_lang)
     src_name = _names.get(source_lang, source_lang)
+    # Prompt shape follows Sunflower-14B's own model card, which puts the
+    # translation directive in the USER turn ("Translate from Luganda to
+    # English: ...") under a fixed Sunflower persona system prompt — not, as
+    # this function previously did, a generic "you are a translator" system
+    # prompt with the bare text as the user turn. Measured on this project's
+    # own question bank, the old shape returned the SOURCE language instead of
+    # a translation on some inputs; the card's shape always returned English.
+    #
+    # The "it may be a question" clause is ours, and it is load-bearing: with
+    # the card's shape alone the model answered interrogatives instead of
+    # translating them — "EFRIS kye ki?" came back as an invented definition
+    # of EFRIS (refugee data, funds remittance, bribery reporting — a
+    # different hallucination each run) rather than "What is EFRIS?". Adding
+    # it took this bank from mostly-hallucination to 7 of 8 faithful.
+    system_prompt = (
+        "You are Sunflower, a multilingual assistant made by Sunbird AI who "
+        "understands Ugandan languages and English. You specialise in accurate "
+        "translations, factual question answering, summaries, explanations, "
+        "and multilingual reasoning."
+    )
+    user_prompt = (
+        f"Translate the following {src_name} text into {lang_name}. "
+        "It may be a question — translate the question itself, do not answer "
+        f"it.\n\n{src_name}: {text}\n{lang_name}:"
+    )
     messages = [
-        # Naming the SOURCE language matters, and is not decoration: asked only
-        # to "translate to English", this model answered a Luganda question in
-        # Luganda — leaving the caller with text just as unsearchable as what it
-        # started with. Naming both ends produced English on every prompt
-        # variant tried. The caller should still verify the output language;
-        # instruction-following here is better, not guaranteed.
-        {"role": "system", "content": (
-            f"You are a professional translator. Translate the user's text "
-            f"from {src_name} to {lang_name}. "
-            f"Output ONLY the {lang_name} translation, nothing else. "
-            "No explanations, no notes."
-        )},
-        {"role": "user", "content": text},
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
     ]
 
     # Dispatch on the configured backend, the same way generate() does.
@@ -848,7 +873,14 @@ def translate_text(
     # whenever that cloud call timed out.
     if LLM_BACKEND == "vllm":
         try:
-            return (_vllm_generate(messages) or "").strip()
+            # Greedy: translation should be reproducible, and the same input
+            # producing a different invented answer on each call is exactly
+            # the failure mode the prompt above is guarding against. The
+            # card's suggested 0.5/0.9 is for open-ended chat; top_p and the
+            # 500-token cap follow it.
+            return (_vllm_generate(
+                messages, temperature=0.0, top_p=0.9, max_tokens=500,
+            ) or "").strip()
         except Exception:  # noqa: BLE001 — MT is best-effort; caller falls through
             logger.debug("Prompted MT via vLLM failed", exc_info=True)
             return ""

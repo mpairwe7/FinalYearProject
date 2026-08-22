@@ -45,6 +45,7 @@ services:
       # English TTS still falls through to edge-tts: Spark-TTS-SALT ships no
       # English speaker id and no local piper voice is present in artifacts/.
       - RETRIEVAL_MT_BACKEND=${RETRIEVAL_MT_BACKEND:-local}
+      - REPLY_MT_BACKEND=${REPLY_MT_BACKEND:-local}
       # Same value the app defaults to, exposed here so a capacity run can
       # raise it. Note what this limit actually is through the tunnel: slowapi
       # keys on get_remote_address, and TRUSTED_PROXY_HOSTS defaults to

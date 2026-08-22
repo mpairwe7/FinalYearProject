@@ -1977,13 +1977,56 @@ def _faq_bm25_score(query_tokens: list[str], entry: dict, encoder: Any) -> float
     return score
 
 
+# Same three settings as RETRIEVAL_MT_BACKEND, for the reply direction
+# (English -> locale). Kept separate because the quality bar differs: a weak
+# retrieval translation only costs recall, whereas a weak reply translation is
+# what the taxpayer actually reads.
+REPLY_MT_BACKEND = os.getenv("REPLY_MT_BACKEND", "local_first").lower()
+
+
+def _translate_reply(text: str, locale: str) -> str | None:
+    """English -> *locale* for reply localization. Never raises."""
+
+    def _local() -> str | None:
+        from . import llm as llm_module
+
+        return llm_module.translate_text(text, source_lang="en", target_lang=locale)
+
+    def _cloud() -> str | None:
+        from . import sunbird
+
+        return sunbird.translate_from_english(text, locale)
+
+    if REPLY_MT_BACKEND == "local":
+        order = (("local", _local),)
+    elif REPLY_MT_BACKEND == "sunbird":
+        order = (("sunbird", _cloud),)
+    else:
+        order = (("local", _local), ("sunbird", _cloud))
+
+    for name, fn in order:
+        try:
+            out = fn()
+        except Exception:  # noqa: BLE001 — localization is best-effort
+            logger.debug("Reply localization via %s failed (%s)", name, locale, exc_info=True)
+            continue
+        if out and out.strip():
+            return out
+    return None
+
+
 def localize_reply(reply: str, locale: str) -> str:
     """Render *reply* in *locale*, or return the English unchanged.
 
     Answers are generated in English (see ``llm.can_generate_in_locale``) and
-    translated here by Sunbird's Ugandan-language MT, which is built for
-    lg/nyn/ach. The generation model is not, and asking it directly produced
-    repetition loops ("kozesa kozesa kozesa…") rather than sentences.
+    translated here. Sunbird's Ugandan-language MT is built for lg/nyn/ach and
+    remains the fallback; the generation model is now tried first, which is a
+    reversal of the previous order. That order existed because asking the
+    generation model directly produced repetition loops ("kozesa kozesa
+    kozesa…") rather than sentences — a prompting problem, not a capability
+    one. llm.translate_text now follows Sunflower-14B's own documented prompt
+    shape and decodes greedily, and returns clean sentences for the same
+    inputs. The length guard below stays as the safety net either way.
 
     Every failure path deliberately yields the English text rather than an
     error or an empty string: a taxpayer who reads English as a second
@@ -2000,11 +2043,8 @@ def localize_reply(reply: str, locale: str) -> str:
     text = str(reply or "").strip()
     if not text or locale in ("", "en"):
         return reply
-    try:
-        from . import sunbird  # local import: matches english_retrieval_query
-
-        translated = sunbird.translate_from_english(text, locale)
-    except Exception:
+    translated = _translate_reply(text, locale)
+    if translated is None:
         logger.info("reply localization to %s failed; serving English", locale)
         return reply
     if not translated or not translated.strip():
