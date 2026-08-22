@@ -45,6 +45,25 @@ const nextConfig = {
   turbopack: {
     root: __dirname,
   },
+  experimental: {
+    // The /api/* rewrite below is proxied by Next's bundled http-proxy, which
+    // defaults to a 30s proxyTimeout and answers a bare "Internal Server
+    // Error" when it fires. That is shorter than this backend's own worst
+    // case: a cold hybrid-retrieval answer measured 36.7s end to end, and the
+    // API's vLLM hop alone is allowed 90s (VLLM_HTTP_TIMEOUT). So a slow but
+    // perfectly successful answer surfaced to the caller as a 500 while the
+    // backend went on to return 200 — a misreported failure, not a real one.
+    //
+    // Only the non-streaming POST /v1/chat is affected: /v1/chat/stream sends
+    // headers immediately, so the UI's normal path never hit this. It bites
+    // API clients (and load tests) that use the non-streaming endpoint.
+    //
+    // 180s leaves headroom over the backend's own ceiling without proxying
+    // forever; PROXY_TIMEOUT_MS overrides it for a deployment whose backend
+    // budget differs. next.config.mjs is evaluated by the standalone server
+    // at startup, so this is a runtime env var, not a build-time one.
+    proxyTimeout: Number(process.env.PROXY_TIMEOUT_MS || 180_000),
+  },
   // Same-origin API proxy — the browser calls /api/v1/chat, Next.js
   // proxies it to the backend over the internal network.  Works on
   // localhost, behind Caddy, on SSH port-forward, and in Docker Compose

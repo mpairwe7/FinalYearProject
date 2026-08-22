@@ -816,18 +816,45 @@ def translate_text(
         logger.warning("Prompted MT refused input (reason_length=%d)", len(verdict.reason or ""))
         return ""
 
-    if not _load_model() or _tokenizer is None or _model is None:
-        return ""
-
-    lang_name = {"lg": "Luganda", "en": "English", "sw": "Swahili",
-                 "nyn": "Runyankole", "ach": "Acholi"}.get(target_lang, target_lang)
+    _names = {"lg": "Luganda", "en": "English", "sw": "Swahili",
+              "nyn": "Runyankole", "ach": "Acholi"}
+    lang_name = _names.get(target_lang, target_lang)
+    src_name = _names.get(source_lang, source_lang)
     messages = [
+        # Naming the SOURCE language matters, and is not decoration: asked only
+        # to "translate to English", this model answered a Luganda question in
+        # Luganda — leaving the caller with text just as unsearchable as what it
+        # started with. Naming both ends produced English on every prompt
+        # variant tried. The caller should still verify the output language;
+        # instruction-following here is better, not guaranteed.
         {"role": "system", "content": (
-            f"You are a professional translator. Translate the user's text to {lang_name}. "
-            "Output ONLY the translation, nothing else. No explanations, no notes."
+            f"You are a professional translator. Translate the user's text "
+            f"from {src_name} to {lang_name}. "
+            f"Output ONLY the {lang_name} translation, nothing else. "
+            "No explanations, no notes."
         )},
         {"role": "user", "content": text},
     ]
+
+    # Dispatch on the configured backend, the same way generate() does.
+    # This used to go straight to the in-process Transformers model, which
+    # made prompted MT silently dead on every LLM_BACKEND=vllm deployment:
+    # _load_model() returns early there BY DESIGN (the weights live in the
+    # vLLM server, not in this process), so the call fell through to the
+    # ImportError branch and logged "transformers/torch not installed" with
+    # both very much installed. The visible symptom was a stack explicitly
+    # configured for prompted MT still sending retrieval-time translation to
+    # Sunbird cloud — and abstaining on every Luganda/Kiswahili question
+    # whenever that cloud call timed out.
+    if LLM_BACKEND == "vllm":
+        try:
+            return (_vllm_generate(messages) or "").strip()
+        except Exception:  # noqa: BLE001 — MT is best-effort; caller falls through
+            logger.debug("Prompted MT via vLLM failed", exc_info=True)
+            return ""
+
+    if not _load_model() or _tokenizer is None or _model is None:
+        return ""
 
     try:
         import torch

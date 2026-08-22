@@ -75,6 +75,7 @@ from .query import (
     detect_language,
     english_retrieval_query,
     extract_question_span,
+    translate_query_for_retrieval,
     extract_retrieval_filters,
     gate_locale,
     normalize as normalize_query,
@@ -2106,13 +2107,7 @@ def _simple_search(
     # the rescues without also admitting nonsense. A tax assistant answering an
     # off-topic question with a confident-looking tax FAQ is worse than
     # answering nothing.
-    try:
-        from . import sunbird
-
-        english = sunbird.translate_to_english(query, locale)
-    except Exception:  # noqa: BLE001 — translation is best-effort
-        logger.debug("Retrieval translation failed for locale %s", locale, exc_info=True)
-        return hits
+    english = translate_query_for_retrieval(query, locale)
     if not english or english.strip().lower() == query.strip().lower():
         return hits
 
