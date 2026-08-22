@@ -236,8 +236,10 @@ test.describe("Staff UI on Chromium", () => {
 
     test("renders every metric from the API, humanised", async ({ page }) => {
       // Six since the SLA/assignment board landed: open, awaiting first reply,
-      // past the 24h SLA, unassigned, then the two medians.
-      const metrics = page.locator(".ov-metric");
+      // past the 24h SLA, unassigned, then the two medians. The tiles are the
+      // console's shared `.ops-stat` since the redesign; the numbers and their
+      // order are unchanged.
+      const metrics = page.locator(".ops-stat-grid .ops-stat");
       await expect(metrics).toHaveCount(6);
       // 11_820s → 3.3h and 7_200s → 2.0h: the formatDuration() contract, which
       // reports medians in decimal hours (h+m is kept for per-ticket waits,
@@ -256,7 +258,7 @@ test.describe("Staff UI on Chromium", () => {
       // awaiting_first_response = 3 and 3 unassigned → both tone="warn" → inset
       // 3px left edge. The value must stay on the panel colour so it holds AA
       // contrast. (`breaching` is 0 here, so no danger tone to check.)
-      const warn = page.locator(".ov-metric.ov-warn");
+      const warn = page.locator(".ops-stat.is-warn");
       await expect(warn).toHaveCount(2);
       for (const metric of await warn.all()) {
         const shadow = await metric.evaluate((el) => getComputedStyle(el).boxShadow);
@@ -270,7 +272,7 @@ test.describe("Staff UI on Chromium", () => {
       await expect(rows).toHaveCount(3);
       await expect(rows.nth(0).locator(".ov-pri")).toHaveText("urgent");
       await expect(rows.nth(2).locator(".ov-pri")).toHaveText("low");
-      await expect(page.locator(".ov-badge-urgent")).toContainText("1 urgent");
+      await expect(page.locator(".ov-queue-panel .ops-chip.is-danger")).toContainText("1 urgent");
       // 5h of waiting, formatted by waitingFor().
       await expect(rows.nth(0).locator(".ov-q-wait")).toContainText("5h");
     });
@@ -287,8 +289,10 @@ test.describe("Staff UI on Chromium", () => {
     test("two-column at desktop, single column below 900px", async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 900 });
       expect(await columnCount(page, ".ov-cols")).toBe(2);
-      // The 1.45fr/1fr split must actually favour the queue.
-      const [q, a] = await page.locator(".ov-cols > section").evaluateAll((els) =>
+      // The 1.45fr/1fr split must actually favour the queue. The right column
+      // is now a stack of two panels (authority + workload), so measure the
+      // columns rather than assuming each is a single section.
+      const [q, a] = await page.locator(".ov-cols > *").evaluateAll((els) =>
         els.map((e) => e.getBoundingClientRect().width),
       );
       expect(q).toBeGreaterThan(a);
@@ -320,7 +324,7 @@ test.describe("Staff UI on Chromium", () => {
       // the placeholder never renders at any width.
       await expect(page.locator(".st-row.is-selected")).toHaveCount(1);
       await expect(page.locator(".st-row").first()).toHaveClass(/is-selected/);
-      await expect(page.getByText("Pick a ticket to see the brief.")).toHaveCount(0);
+      await expect(page.getByText("Pick a ticket to see the brief")).toHaveCount(0);
 
       await openRow(page, 0);
       await expect(
@@ -396,6 +400,43 @@ test.describe("Staff UI on Chromium", () => {
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );
         expect(overflow, `horizontal overflow at ${width}px`).toBeLessThanOrEqual(1);
+      }
+    });
+  });
+
+  /**
+   * Every console route, not just the two that happened to have a test.
+   *
+   * `/admin/tickets` overflowed by 363px at 360px wide — its five-column SLA
+   * strip sat in the page header's actions slot, where a flex item's default
+   * `min-width: auto` let it push the whole document sideways. Neither of the
+   * per-page checks above covered that route, so nothing caught it.
+   */
+  test.describe("layout at every width", () => {
+    const ROUTES = [
+      "/admin",
+      "/agent",
+      "/admin/tickets",
+      "/admin/flags",
+      "/admin/overrides",
+      "/admin/outbox",
+      "/analytics",
+      "/analytics/evaluation",
+    ];
+
+    test("no console route scrolls the page sideways", async ({ page }) => {
+      test.slow();
+      await signedInAs(page, "ura_admin");
+      for (const width of [1440, 1024, 900, 720, 560, 412, 360]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const route of ROUTES) {
+          await page.goto(route);
+          await expect(page.locator("nav.staff-nav")).toBeVisible();
+          const overflow = await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(overflow, `${route} overflows at ${width}px`).toBeLessThanOrEqual(1);
+        }
       }
     });
   });

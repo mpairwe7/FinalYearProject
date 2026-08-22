@@ -1,12 +1,17 @@
 /**
  * Consent banner, conversation-rail interactions, and route navigation
- * (analytics dashboard + evaluation). The evaluation page ships static
- * fallback data, so it renders without a backend.
+ * (analytics dashboard + evaluation).
  *
  * The banner is a `region` labelled "Privacy notice", not an `alertdialog`:
  * a86f3b0b ("fix(a11y): close WCAG 2.2 audit gaps") reclassified it, because
  * it interrupts nothing and traps no focus. These assertions were still
  * looking for the old role.
+ *
+ * The analytics routes moved inside the operations console: they are behind
+ * `StaffGuard` like every other staff page, and their old three-link bar
+ * ("Overview · Evaluation · Back to Chat") is gone in favour of the console's
+ * own nav. An anonymous visitor therefore gets the sign-in gate instead of a
+ * dashboard shell with empty panels, which is what these tests now assert.
  */
 import { expect, test } from "@playwright/test";
 
@@ -80,24 +85,22 @@ test.describe("Navigation: analytics + evaluation", () => {
     await mockBackend(page);
   });
 
-  test("analytics dashboard route renders", async ({ page }) => {
+  test("analytics asks an anonymous visitor to sign in", async ({ page }) => {
     await page.goto("/analytics");
-    // The /analytics route mounts and shows its dashboard heading.
-    await expect(page.getByRole("heading", { name: /Analytics Dashboard/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in to continue" })).toBeVisible();
+    // Not the old behaviour: a dashboard shell with empty panels and a raw
+    // "Failed to load dashboard" string.
+    await expect(page.getByRole("heading", { name: /Analytics Dashboard/i })).toHaveCount(0);
   });
 
-  test("evaluation page renders without a backend (static fallback)", async ({ page }) => {
+  test("evaluation is gated the same way", async ({ page }) => {
     await page.goto("/analytics/evaluation");
-    // Renders without a backend (static fallback). A heading is present.
-    await expect(page.getByRole("heading").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in to continue" })).toBeVisible();
   });
 
-  test("can navigate analytics → back to chat", async ({ page }) => {
+  test("the gate offers a way back to the assistant", async ({ page }) => {
     await page.goto("/analytics");
-    const back = page.getByRole("link", { name: /Back to Chat/i });
-    if (await back.count()) {
-      await back.first().click();
-      await expect(page.getByLabel("Type your message")).toBeVisible();
-    }
+    await page.getByRole("link", { name: "Back to the assistant" }).click();
+    await expect(page.getByLabel("Type your message")).toBeVisible();
   });
 });
