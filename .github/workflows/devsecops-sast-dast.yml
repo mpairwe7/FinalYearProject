@@ -357,21 +357,31 @@ jobs:
           WORKERS: "1"
         run: |
           touch .env
-          # Use the CI override so /app/data_store is a writable tmpfs instead
-          # of the named analytics_data volume (which Docker creates as root-owned
-          # on a fresh runner, preventing appuser from opening the SQLite DB).
-          docker compose \
-            -f docker-compose.yml \
-            -f infra/docker-compose.ci.yml \
-            up -d qdrant api || {
-            docker compose \
-              -f docker-compose.yml \
-              -f infra/docker-compose.ci.yml \
-              ps
-            docker compose \
-              -f docker-compose.yml \
-              -f infra/docker-compose.ci.yml \
-              logs --no-color --tail=200 qdrant api
+          # Build, then `up --no-build`: the api service declares both `image:`
+          # and `build:`, and Compose's default pull_policy of "missing" resolves
+          # `landwind/ura-chatbot-api:latest` from Docker Hub rather than
+          # building the commit under test. This job was scanning whatever
+          # happened to be published under that moving tag. A DAST scan that does
+          # not build the code it is scanning is reporting on something else
+          # entirely. Splitting build from up also separates a build failure from
+          # a startup failure in the logs.
+          #
+          # No CI compose override here. 19dbbc60 added infra/docker-compose.ci.yml
+          # to put /app/data_store on a tmpfs, but 6617bbba had already done that
+          # in docker-compose.yml itself by removing the analytics_data mount. The
+          # override therefore appended a SECOND mount for the same target and
+          # compose refused the config outright:
+          #   services.api.volumes[4]: target /app/data_store already mounted as
+          #   services.api.tmpfs[2]
+          # It never surfaced on main because this job is path-filtered and did
+          # not run on that commit.
+          docker compose build api || {
+            echo "::error::failed to build the api image under test"
+            exit 1
+          }
+          docker compose up -d --no-build qdrant api || {
+            docker compose ps
+            docker compose logs --no-color --tail=200 qdrant api
             exit 1
           }
 
@@ -385,14 +395,8 @@ jobs:
           done
 
           echo "::error::API did not become healthy on port ${API_PORT}"
-          docker compose \
-            -f docker-compose.yml \
-            -f infra/docker-compose.ci.yml \
-            ps
-          docker compose \
-            -f docker-compose.yml \
-            -f infra/docker-compose.ci.yml \
-            logs --no-color --tail=200 qdrant api
+          docker compose ps
+          docker compose logs --no-color --tail=200 qdrant api
           exit 1
 
       - name: OWASP ZAP Baseline Scan
@@ -441,10 +445,7 @@ jobs:
         env:
           API_PORT: "8087"
         run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f infra/docker-compose.ci.yml \
-            down -v || true
+          docker compose down -v || true
 
   # ============================================
   # 6. OSSF Scorecard – Supply Chain Security

@@ -1,142 +1,128 @@
-/* Staff ticket console. Tokens from globals.css. */
+/* Staff ticket console — layout only. The rows, the case and the composer are
+   the shared `.st-*` workbench in components/staff/staffTickets.css. */
 
-.tickets-page {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 22px 20px 48px;
-  color: var(--text-0);
+.sla-scroll {
+  max-width: 100%;
+  min-width: 0;
 }
 
-.tickets-header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.tickets-header h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.tickets-subtitle {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--text-2);
+.sla-scroll:focus-visible {
+  outline: var(--ops-focus-ring) solid var(--ops-focus);
+  outline-offset: var(--ops-focus-gap);
+  border-radius: var(--ops-radius-md);
 }
 
 .sla-strip {
   display: flex;
-  gap: 22px;
+  gap: var(--ops-space-5);
   margin: 0;
+  padding: var(--ops-space-2) var(--ops-space-4);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  background: var(--ops-panel);
 }
 
 .sla-strip div {
   text-align: right;
+  flex: none;
 }
 
 .sla-strip dt {
-  font-size: 11px;
+  font-size: var(--ops-text-2xs);
+  letter-spacing: var(--ops-tracking-caps);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--text-3);
+  white-space: nowrap;
 }
 
 .sla-strip dd {
-  margin: 4px 0 0;
-  font-size: 22px;
-  font-weight: 700;
+  margin: 2px 0 0;
+  font-size: var(--ops-text-md);
+  font-weight: var(--ops-weight-bold);
   font-variant-numeric: tabular-nums;
   color: var(--text-0);
 }
 
 .sla-strip dd.is-warn {
-  color: var(--warning);
+  color: var(--ops-warn);
 }
 
-.tickets-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+/* Filter groups ------------------------------------------------------------
+   Fourteen identical pills in one wrap made every filter look independent and
+   equally important. A label per group says what the pills below it choose. */
+
+.tickets-filter-group {
+  display: inline-flex;
   align-items: center;
-  margin-bottom: 14px;
+  gap: var(--ops-space-1);
+  flex-wrap: wrap;
 }
 
-.filter {
-  border: 1px solid var(--border-1);
-  background: var(--surface-1);
+.tickets-filter-label {
+  margin-right: var(--ops-space-1);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.tickets-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--ops-space-3);
+}
+
+.tickets-count {
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
+  font-variant-numeric: tabular-nums;
   color: var(--text-2);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
-.filter.is-active {
-  background: var(--surface-3);
-  color: var(--text-0);
-  border-color: var(--border-2);
-}
-
-.filter:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.filter-sep {
-  width: 1px;
-  height: 1.15rem;
-  background: var(--border-1);
-  margin: 0 4px;
-}
-
-.st-search {
+.tickets-hints {
   margin-left: auto;
-  min-width: 220px;
-  padding: 7px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border-1);
-  background: var(--surface-2);
-  color: var(--text-0);
-  font: inherit;
-  font-size: 13px;
 }
+
+/* Split body --------------------------------------------------------------- */
 
 .tickets-body {
   display: grid;
-  grid-template-columns: minmax(280px, 400px) 1fr;
-  gap: 14px;
+  grid-template-columns: minmax(300px, 400px) 1fr;
+  gap: var(--ops-space-3);
   align-items: start;
 }
 
 .tickets-list,
 .tickets-detail {
-  background: var(--surface-ink);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md, 14px);
-  padding: 12px;
-  min-height: 280px;
-}
-
-.tickets-detail {
-  padding: 18px 20px 20px;
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  box-shadow: var(--ops-elev-1);
 }
 
 .tickets-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 70vh;
+  gap: var(--ops-space-1);
+  padding: var(--ops-space-2);
+  max-height: calc(100dvh - var(--ops-nav-h) - 230px);
+  min-height: 280px;
+  overflow-y: auto;
+}
+
+.tickets-detail {
+  padding: var(--ops-space-5);
+  /* Owns its scroll so the sticky case header has something to stick to. */
+  max-height: calc(100dvh - var(--ops-nav-h) - 230px);
+  min-height: 280px;
   overflow-y: auto;
 }
 
 .st-back {
   display: none;
-  margin-bottom: 10px;
 }
 
 @media (max-width: 900px) {
@@ -149,17 +135,22 @@
   .tickets-body:not(.is-open) .tickets-detail {
     display: none;
   }
+  .tickets-list,
+  .tickets-detail {
+    max-height: none;
+  }
   .st-back {
     display: inline-flex;
   }
-  .st-search {
-    margin-left: 0;
-    width: 100%;
+  .sla-scroll {
+    overflow-x: auto;
   }
-}
-
-@media (max-width: 560px) {
-  .tickets-page {
-    padding: 16px 14px 36px;
+  .sla-strip {
+    width: max-content;
+    gap: var(--ops-space-4);
+  }
+  .tickets-hints {
+    margin-left: 0;
+    flex-basis: 100%;
   }
 }

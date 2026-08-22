@@ -32,6 +32,16 @@ both light and dark themes:
 | Agent work queue | `/agent` |
 | Escalation queue and reply composer | `/admin/tickets` |
 | Feature flag console | `/admin/flags` |
+| Answer overrides | `/admin/overrides` |
+| Notification outbox | `/admin/outbox` |
+| Analytics dashboard | `/analytics` |
+| Answer evaluation | `/analytics/evaluation` |
+
+The last four joined the scan in the operations-console redesign. The two
+analytics routes could not be scanned before it: they were not behind
+`StaffGuard`, so the suite's staff session never reached their content, and
+their charts carried a fixed dark palette whose axis labels measured roughly
+1.4:1 against the light canvas.
 
 The audit does not represent external identity-provider pages, a browser's
 permission prompt for microphone/camera access, or third-party links. Those

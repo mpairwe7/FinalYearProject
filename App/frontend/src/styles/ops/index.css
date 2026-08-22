@@ -1,0 +1,6 @@
+/* Operations console style layer.
+   Loaded once from src/app/layout.tsx, after globals.css so the `--ops-*`
+   tokens can build on the theme tokens defined there. Every rule is namespaced
+   `.ops-*`, so nothing here reaches the taxpayer chat. */
+@import "./tokens.css";
+@import "./ops.css";

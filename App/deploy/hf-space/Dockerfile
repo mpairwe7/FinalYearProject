@@ -8,6 +8,38 @@
 # config (Sunbird/Gemini/Cloudflare secrets, SPEECH_ENABLED, …) is supplied as
 # Space secrets, mirroring the Crane Cloud app's environment.
 #
+# This Space's build now GATES on the two embedded stores rather than trusting
+# the pin: a Qdrant collection seeded from the FAQ JSONL corpus, and an embedded
+# Redis. Neither is fail-closed at runtime — wait-for-qdrant.sh starts the
+# backend anyway on timeout and cache.py falls back to in-process memory — so a
+# base missing either one boots, answers, and looks healthy while serving 499
+# FAQ rows instead of 7,943 documents and recomputing every response. That is
+# how it went unnoticed before. The gate runs the base image's own
+# verify-embedded-stores.sh when present and structural checks otherwise, so it
+# works on any pin.
+#
+# sha-a14ca67 is the roll that makes this Space serve its own corpus again.
+#
+# The Space had been answering every question from the keyword fallback — 499
+# FAQ rows — while a 7,600-document Qdrant collection sat healthy inside the
+# same container. /ready said "vector" and looked fine, because that field
+# reports which backend was SELECTED, not whether it ever served a query.
+# initialize() ranks Vectorize above a sparse-only Qdrant collection (dense-only
+# beats BM25 alone) and keeps the Qdrant client as the fallback, but search()
+# treated _vectorize_mode as an unconditional early return: an open circuit, a
+# spent neuron budget, a failed request or an empty index all returned [] to the
+# caller, which then degraded to keyword. The Qdrant fallback was never reached.
+#
+# Verified on this exact image before pinning it. With Vectorize configured but
+# not answering — the Space's real condition — three probes went from
+# keyword/1, keyword/4, keyword/2 sources to hybrid/4, hybrid/4, hybrid/5.
+#
+# Also carried: PROJECT_ROOT resolves to /app rather than "/" inside the
+# container (it had made every derived path land on the read-only rootfs and
+# made service.py's containment check vacuous), retention cleanup can no longer
+# take the pod down when its store is unreachable, and the DAST job now builds
+# the commit it scans instead of pulling a moving Docker Hub tag.
+#
 # sha-459533c makes OIDC_ROLE_CLAIM fall back instead of locking staff out. The
 # override used to be exclusive, so setting it stopped the default claim probes
 # entirely — a typo, or setting it before the provider mapping exists, resolved
@@ -685,7 +717,51 @@
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-126089b
+FROM landwind/ura-chatbot:sha-a14ca67
+
+# Gate the pin on the two embedded stores this Space depends on: a Qdrant
+# collection seeded from the FAQ JSONL corpus, and an embedded Redis.
+#
+# The Space's failure mode is not a crash. Retrieval falls back to keyword-only
+# search and Redis falls back to in-process memory, so a base image missing
+# either one still boots, still answers, and reports nothing unusual — it just
+# answers from 499 FAQ rows instead of 7,943 documents and recomputes every
+# response. That went unnoticed for a long time precisely because the Space
+# looked healthy. Checking here makes a bad pin a failed Space build.
+#
+# Written to work on ANY pin, including bases older than the verifier: the base
+# image's own script is used when present, and older bases fall back to the
+# structural checks below rather than failing for the wrong reason. A base that
+# fails the fallback is one that predates the sidecars entirely (before
+# sha-41b7296) and must not be deployed.
+RUN set -eux; \
+    if [ -x /usr/local/bin/verify-embedded-stores.sh ]; then \
+        /usr/local/bin/verify-embedded-stores.sh; \
+    else \
+        echo "NOTE: this base predates verify-embedded-stores.sh — running structural checks only."; \
+        echo "NOTE: roll the pin to an image built from a commit that ships it for the full gate."; \
+        test -x /usr/local/bin/qdrant || { echo "FAIL: no Qdrant binary — base predates the sidecar" >&2; exit 1; }; \
+        test -d /app/qdrant/storage || { echo "FAIL: no baked Qdrant collection" >&2; exit 1; }; \
+        test -d /app/Data/faq_jsonl || { echo "FAIL: no FAQ JSONL corpus in the image" >&2; exit 1; }; \
+        command -v redis-server >/dev/null || { echo "FAIL: redis-server not installed" >&2; exit 1; }; \
+        grep -q '^\[program:qdrant\]' /etc/supervisor/conf.d/supervisord.conf \
+            || { echo "FAIL: supervisord does not start Qdrant" >&2; exit 1; }; \
+        grep -q '^\[program:redis\]' /etc/supervisor/conf.d/supervisord.conf \
+            || { echo "FAIL: supervisord does not start Redis" >&2; exit 1; }; \
+        echo "structural checks passed: qdrant binary, baked storage, FAQ corpus, redis-server, both supervised"; \
+    fi
+
+# The base sets these already; repeated here so the Space's configuration is
+# readable without pulling the base image apart, and so a pin whose defaults
+# drift cannot quietly point retrieval or the cache somewhere else.
+ENV QDRANT_ENABLED=true \
+    QDRANT_URL=http://127.0.0.1:6333 \
+    QDRANT_COLLECTION=ura_knowledge_base_active \
+    QDRANT_SIDECAR=true \
+    CACHE_BACKEND=redis \
+    REDIS_URL=redis://127.0.0.1:6379/0 \
+    SLOWAPI_STORAGE_URI=redis://127.0.0.1:6379/1 \
+    REDIS_MAXMEMORY=192mb
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.

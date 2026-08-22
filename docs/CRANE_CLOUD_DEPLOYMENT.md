@@ -254,10 +254,17 @@ keyword fallback remains available and `/ready` reports `degraded`.
 Knowledge base files baked into the image:
 
 ```
-/app/Data/dataset/*.csv          # FAQ corpus (URA forms, FAQs, calendar)
-/app/Data/pdfs/*.pdf             # URA legal/regulatory PDFs (optional)
-/app/Model/bm25_state.json       # Pre-built BM25 posting list + IDF
+/app/Data/dataset/*.csv          # source FAQ CSVs (the JSONL is exported from these)
+/app/Data/faq_jsonl/*.jsonl      # canonical FAQ corpus — what actually seeds Qdrant
+/app/Data/teacher_qa/*.jsonl     # normalised teacher-QA pairs
+/app/Data/pdf_jsonl/*.jsonl      # hierarchical PDF chunks
+/app/Data/crawl_jsonl/*.jsonl    # crawled-page chunks
+/app/Model/bm25_state.json       # BM25 posting list + IDF, rewritten by the index build
 ```
+
+The 500 MB of source PDFs and crawl pages are **not** in the image — only the
+derived JSONL is, which is why the build sets `CORPUS_TRUST_MANIFEST=true` and
+skips the source-hash comparison alone.
 
 The Dockerfile performs the safe build during image creation: it creates a
 versioned candidate, validates source-hash and retrieval canaries, then promotes
@@ -279,6 +286,91 @@ rather than failing loudly at build time.
 
 Do not commit generated `Model/bm25_state.json`: the Docker build derives it
 from the release corpus and embeds a matching copy in Qdrant.
+
+### 6.1 Vectorize is preferred over the sidecar — and must fall back to it
+
+`initialize()` ranks backends: Qdrant-with-dense, then Cloudflare Vectorize,
+then **sparse-only Qdrant**, then keyword. The baked collection is sparse-only
+(`vectors: {}`, one `sparse` vector), so on any deployment where Cloudflare is
+configured the retriever deliberately picks Vectorize over the sidecar — a
+dense-only index beats BM25 alone. `/ready` then reports `retrieval_mode:
+"vector"`, which is **not** a fault: it does not mean Qdrant failed.
+
+What *was* a fault is what happened next. `search()` treated `_vectorize_mode`
+as an unconditional early return, so when Vectorize produced nothing — open
+circuit, exhausted neuron budget, failed request, or an index that answers no
+query — the caller got `[]` and degraded to keyword search over the FAQ CSVs,
+while the sparse-only Qdrant collection `initialize()` had deliberately kept
+alive sat healthy in the same container holding the whole corpus.
+
+Both CPU deployments were observed doing exactly this: `/ready` reporting
+`vector` while every real query answered `retrieval_mode: keyword` from 499 FAQ
+rows instead of 7,600+ documents. Nothing surfaced it, because the backend had
+been *selected* — the health field reports selection, not whether it ever served
+a query. `search()` now falls through to the Qdrant path when Vectorize returns
+nothing, at no measured latency cost (a failed Vectorize call returns
+immediately; the sidecar answers in single-digit ms).
+
+**Operational lever.** Setting `DENSE_FALLBACK_BACKEND=none` (also `off`,
+`disabled`, `false`, `0`) skips the Vectorize tier entirely, so `initialize()`
+settles straight onto the sparse-only sidecar. Use it on a deployment whose
+Vectorize index is unseeded or whose Cloudflare egress is unreliable — it needs
+only an env change and a restart, not a new image.
+
+**Reading the health field.** `/ready` distinguishes four states, and only the
+first two mean dense retrieval is live:
+
+| `retrieval_mode` | Meaning |
+| :--- | :--- |
+| `hybrid` | Qdrant with a dense vector — dense + BM25 + rerank |
+| `vector` | Cloudflare Vectorize — dense-only, client-side lexical re-score |
+| `sparse` | Sparse-only Qdrant — BM25 over the full corpus, no dense half |
+| `keyword` | No retriever — FAQ CSVs only. **Degraded.** |
+
+Images built before ~13 Aug 2026 report only `hybrid`/`keyword` and will say
+`hybrid` while actually serving sparse-only; the four-way field is newer.
+
+### 6.2 Build gate: `verify-embedded-stores.sh`
+
+Neither embedded store is fail-closed at runtime, and that is deliberate — a
+degraded pod beats a dead one. `wait-for-qdrant.sh` starts the backend anyway on
+timeout, and `cache.py` falls back to in-process memory when Redis is
+unreachable. The cost is that a broken store produces **no startup failure to
+notice**: the Space served keyword-only answers over 499 FAQ rows for a full
+minute after a roll before anyone spotted it, and the response cache silently
+returned `None` for weeks.
+
+`App/deploy/cranecloud/verify-embedded-stores.sh` moves both failures to build
+time. It runs as the last `RUN` in the Dockerfile, after the operational `ENV`
+block so it checks the values the image will really use, and fails the build on:
+
+| Fault | Message |
+| :--- | :--- |
+| Collection promoted with no FAQ rows | `the collection holds ZERO faq_jsonl points` |
+| FAQ corpus only partly loaded | `only N faq_jsonl points indexed, below the floor of M` |
+| Dangling alias, or no collection | `neither an alias nor a collection named '…' exists` |
+| FAQ JSONL missing from the image | `no FAQ JSONL corpus at /app/Data/faq_jsonl` |
+| `redis-server` not installed | `redis-server is not installed in this image` |
+| Redis rejects supervisord's flags | `redis-server did not start with the flags supervisord uses` |
+| Cache and rate-limit sharing one db | `… share a keyspace; they must be separate databases` |
+| `maxmemory` unset or wrong policy | `maxmemory is unset` / `expected 'allkeys-lru'` |
+
+The FAQ floor defaults to **90% of the rows on disk** (`FAQ_INDEX_MIN_ROWS`
+overrides it). It is a floor rather than an equality check because ingest drops
+exact-duplicate questions — currently 508 rows on disk against 499 indexed.
+
+It is also runnable against a live pod, which is the quickest post-roll check
+that retrieval is not silently degraded:
+
+```bash
+kubectl exec <pod> -- /usr/local/bin/verify-embedded-stores.sh
+```
+
+When Qdrant is already serving it verifies that instance in place. When it has
+to start one — the build case — it serves from a throwaway copy of the storage,
+because starting Qdrant materialises its sparse segment files (~1 MB on disk
+growing to ~36 MB) and every touched file would otherwise land in the image
+layer.
 
 ---
 

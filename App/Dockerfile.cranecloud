@@ -260,6 +260,13 @@ RUN set -eux; \
 COPY App/deploy/cranecloud/wait-for-qdrant.sh /usr/local/bin/wait-for-qdrant.sh
 RUN chmod +x /usr/local/bin/wait-for-qdrant.sh && sh -n /usr/local/bin/wait-for-qdrant.sh
 
+# Build gate for the two embedded stores, run below once the operational ENV is
+# set so it checks the values the image will really use. Also stays in the image
+# so it can be run against a live pod after a roll.
+COPY App/deploy/cranecloud/verify-embedded-stores.sh /usr/local/bin/verify-embedded-stores.sh
+RUN chmod +x /usr/local/bin/verify-embedded-stores.sh \
+    && sh -n /usr/local/bin/verify-embedded-stores.sh
+
 # Process supervision + reverse proxy.
 COPY App/deploy/cranecloud/nginx.conf       /etc/nginx/nginx.conf
 COPY App/deploy/cranecloud/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -294,6 +301,22 @@ ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
     FLAG_AGENTIC_MODE=false \
     FLAG_AUTH_REQUIRED=false \
     AUTH_ALG=HS256
+
+# Both embedded stores are verified here, at build time, against the ENV set
+# above. Neither is fail-closed at runtime by design — wait-for-qdrant.sh starts
+# the backend anyway on timeout and cache.py falls back to in-process memory —
+# so a broken store produces no startup failure to notice. Two regressions this
+# turns into a failed build instead of a quiet degradation:
+#
+#   * A collection promoted with zero faq_jsonl points. Retrieval then answers
+#     from the keyword fallback and nothing in /ready says the corpus is gone.
+#   * A redis-server that will not take the flags supervisord passes it (a bad
+#     REDIS_MAXMEMORY is the easy one). The cache silently returns None and every
+#     response is recomputed.
+#
+# It is the last step before the entrypoint so it also proves the artefacts
+# survived every layer above it.
+RUN /usr/local/bin/verify-embedded-stores.sh
 
 # tini reaps zombies cleanly under supervisord.
 ENTRYPOINT ["/usr/bin/tini", "--"]

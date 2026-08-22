@@ -37,22 +37,120 @@ export function staffLandingPath(role: string | undefined | null): string {
   return role === "ura_staff" ? "/agent" : "/admin";
 }
 
-/** Operations pages a role may open — drives the account menu's staff links. */
-export const STAFF_DESTINATIONS: readonly {
+/**
+ * Operations pages a role may open.
+ *
+ * One list, three consumers: the console's own nav bar, the command palette,
+ * and the account menu. `navLabel` is the short form the nav bar and palette
+ * show; `label` stays the long form the account menu has always used, so the
+ * existing callers keep rendering exactly what they rendered before.
+ *
+ * `group` is what turns seven sibling links into a hierarchy: an administrator
+ * sees three sections rather than a flat row, which is the difference between
+ * scanning and reading.
+ */
+export type StaffSection = "work" | "configure" | "observe";
+
+export const SECTION_LABEL: Record<StaffSection, string> = {
+  work: "Work",
+  configure: "Configure",
+  observe: "Observe",
+};
+
+export interface StaffDestination {
   href: string;
+  /** Long form — account menu and sign-in landing card. */
   label: string;
+  /** Short form — console nav and command palette. */
+  navLabel: string;
+  group: StaffSection;
+  /** One line of "what is this page for", shown in the command palette. */
+  blurb: string;
   roles: readonly string[];
-}[] = [
-  { href: "/admin", label: "Operations overview", roles: ["ura_admin", "ura_auditor"] },
-  { href: "/agent", label: "My queue", roles: ["ura_staff", "ura_admin"] },
-  { href: "/admin/tickets", label: "All tickets", roles: STAFF_ROLES },
-  { href: "/admin/flags", label: "Flags", roles: ["ura_admin", "ura_auditor"] },
-  { href: "/admin/overrides", label: "Answer overrides", roles: ["ura_admin", "ura_auditor"] },
-  { href: "/admin/outbox", label: "Notification outbox", roles: ["ura_admin", "ura_auditor"] },
-  { href: "/analytics", label: "Analytics", roles: ["ura_admin", "ura_auditor"] },
+}
+
+export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
+  {
+    href: "/admin",
+    label: "Operations overview",
+    navLabel: "Overview",
+    group: "work",
+    blurb: "SLA, escalations waiting longest, answer authority",
+    roles: ["ura_admin", "ura_auditor"],
+  },
+  {
+    href: "/agent",
+    label: "My queue",
+    navLabel: "My queue",
+    group: "work",
+    blurb: "Claim a case and reply, one at a time",
+    roles: ["ura_staff", "ura_admin"],
+  },
+  {
+    href: "/admin/tickets",
+    label: "All tickets",
+    navLabel: "All tickets",
+    group: "work",
+    blurb: "Every escalation, every status, every team",
+    roles: STAFF_ROLES,
+  },
+  {
+    href: "/admin/flags",
+    label: "Flags",
+    navLabel: "Flags",
+    group: "configure",
+    blurb: "What this replica is serving right now",
+    roles: ["ura_admin", "ura_auditor"],
+  },
+  {
+    href: "/admin/overrides",
+    label: "Answer overrides",
+    navLabel: "Overrides",
+    group: "configure",
+    blurb: "Exact-match staff replies for known questions",
+    roles: ["ura_admin", "ura_auditor"],
+  },
+  {
+    href: "/admin/outbox",
+    label: "Notification outbox",
+    navLabel: "Outbox",
+    group: "configure",
+    blurb: "Queued email and SMS rows",
+    roles: ["ura_admin", "ura_auditor"],
+  },
+  {
+    href: "/analytics",
+    label: "Analytics",
+    navLabel: "Analytics",
+    group: "observe",
+    blurb: "Service levels, topics, retrieval and satisfaction",
+    roles: ["ura_admin", "ura_auditor"],
+  },
+  {
+    href: "/analytics/evaluation",
+    label: "Answer evaluation",
+    navLabel: "Evaluation",
+    group: "observe",
+    blurb: "RAG quality metrics against their thresholds",
+    roles: ["ura_admin", "ura_auditor"],
+  },
 ];
 
-export function staffDestinationsFor(role: string | undefined | null) {
+export function staffDestinationsFor(role: string | undefined | null): StaffDestination[] {
   if (!role) return [];
   return STAFF_DESTINATIONS.filter((d) => d.roles.includes(role));
+}
+
+/** The same destinations, bucketed for a nav that shows sections. */
+export function staffSectionsFor(
+  role: string | undefined | null,
+): { group: StaffSection; label: string; items: StaffDestination[] }[] {
+  const allowed = staffDestinationsFor(role);
+  return (["work", "configure", "observe"] as StaffSection[])
+    .map((group) => ({
+      group,
+      label: SECTION_LABEL[group],
+      items: allowed.filter((d) => d.group === group),
+    }))
+    .filter((section) => section.items.length > 0);
 }

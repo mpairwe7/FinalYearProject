@@ -1,0 +1,10 @@
+# Fetched and instanced by build_tex.py on first run; not source.
+fonts/
+
+# Build artefacts. preamble.tex IS source — only the generated document and
+# the LaTeX by-products are ignored here.
+URA_ASSISTANT_PRICING_DOCUMENT.tex
+URA_ASSISTANT_PRICING_DOCUMENT.pdf
+*.log
+*.aux
+*.out

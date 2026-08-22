@@ -1,0 +1,219 @@
+/* =============================================================================
+ * URA Operations Console — design tokens
+ *
+ * The staff surfaces (/admin, /agent, /admin/*, /analytics) had no shared scale:
+ * four page headers with four type sizes, spacing picked per file in half-pixel
+ * steps, priority colours copied as raw rgba() into three stylesheets, and a
+ * chart palette hardcoded to one theme. This file is the one place those are
+ * decided.
+ *
+ * Additive only. Every token here is new and namespaced `--ops-*`; nothing in
+ * globals.css is redefined, so the chat surface is untouched and the light /
+ * dark switch keeps working through the existing --text-*, --surface-* and
+ * --border-* tokens this file builds on.
+ *
+ * The data-viz slots are the validated reference palette from the dataviz
+ * standard, re-checked against *this* app's card surfaces:
+ *   light #FDFDFE — adjacent CVD ΔE 9.1, normal-vision 19.6, 3 sub-3:1 marks
+ *                   (aqua/yellow/magenta) which therefore ship visible labels
+ *   dark  #0D0E17 — adjacent CVD ΔE 8.4, normal-vision 19.3, all marks ≥ 3:1
+ * Both runs pass. Re-run before changing a slot:
+ *   node scripts/validate_palette.js "<slots>" --mode light --surface "#FDFDFE"
+ * ============================================================================ */
+
+:root {
+  /* ── Type ramp ────────────────────────────────────────────────────────────
+     Eight steps, whole pixels. Replaces the 10 / 10.5 / 11 / 11.5 / 12 / 12.5 /
+     13 / 13.5 / 14.5 … ladder that had accumulated across the staff files. */
+  --ops-text-2xs:  11px;
+  --ops-text-xs:   12px;
+  --ops-text-sm:   13px;
+  --ops-text-base: 14px;
+  --ops-text-md:   16px;
+  --ops-text-lg:   20px;
+  --ops-text-xl:   26px;
+  --ops-text-2xl:  34px;
+
+  --ops-lh-tight:  1.2;
+  --ops-lh-snug:   1.4;
+  --ops-lh-normal: 1.55;
+
+  /* Four weights. 650 and 800 are synthesised by the Aptos / Avenir stack and
+     snap to 700 unevenly across engines, so they are not in the scale. */
+  --ops-weight-normal: 400;
+  --ops-weight-medium: 500;
+  --ops-weight-semi:   600;
+  --ops-weight-bold:   700;
+
+  --ops-tracking-caps: 0.04em;
+
+  /* ── Space — 4pt grid ─────────────────────────────────────────────────── */
+  --ops-space-1:  4px;
+  --ops-space-2:  8px;
+  --ops-space-3:  12px;
+  --ops-space-4:  16px;
+  --ops-space-5:  20px;
+  --ops-space-6:  24px;
+  --ops-space-8:  32px;
+  --ops-space-10: 40px;
+  --ops-space-12: 48px;
+
+  /* ── Radii ────────────────────────────────────────────────────────────── */
+  --ops-radius-xs:   6px;
+  --ops-radius-sm:   8px;
+  --ops-radius-md:   12px;
+  --ops-radius-lg:   16px;
+  --ops-radius-pill: 999px;
+
+  /* ── Surfaces ─────────────────────────────────────────────────────────────
+     Three levels only: the page canvas, the panel that sits on it, and the row
+     that sits inside the panel. Anything deeper is a sign the page needs
+     flattening rather than a fourth surface. */
+  --ops-panel:        var(--surface-ink);
+  --ops-panel-inset:  var(--surface-1);
+  --ops-row:          var(--surface-1);
+  --ops-row-hover:    var(--surface-2);
+  --ops-row-active:   var(--surface-3);
+  --ops-hairline:     var(--border-0);
+  --ops-line:         var(--border-1);
+  --ops-line-strong:  var(--border-2);
+
+  /* ── Elevation ────────────────────────────────────────────────────────── */
+  --ops-elev-1: var(--shadow-sm);
+  --ops-elev-2: var(--shadow-md);
+  --ops-elev-3: var(--shadow-lg);
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --ops-ease:      cubic-bezier(0.2, 0, 0.15, 1);
+  --ops-dur-fast:  110ms;
+  --ops-dur-base:  180ms;
+
+  /* ── Focus ────────────────────────────────────────────────────────────── */
+  --ops-focus-ring: 2px;
+  --ops-focus-gap:  2px;
+  --ops-focus:      var(--accent);
+
+  /* ── Status — text-safe ───────────────────────────────────────────────────
+     These are the globals.css semantic colours, which are already stepped per
+     theme to clear 4.5:1 as small text. Aliased here so a staff file asks for
+     "the warning role" rather than reaching for a hue. */
+  --ops-good:     var(--success);
+  --ops-warn:     var(--warning);
+  --ops-bad:      var(--danger);
+  --ops-info:     var(--ura-blue-bright);
+  --ops-neutral:  var(--text-2);
+
+  /* Tinted fills for the chips those colours sit in. `color-mix` keeps one
+     source of truth per role instead of a hand-written rgba() per file.
+     
+     A tinted chip is the awkward case: it puts the role colour on a tint of
+     itself, as 11px text, so the fill darkens the very ground the text has to
+     clear — and globals.css tuned the light-mode semantic colours to clear
+     4.5:1 against a *plain* surface with almost no headroom. At 10% over the
+     darkest ground a chip can land on (surface-3 inside a panel) the tightest
+     roles measure 4.12:1, which is the failure axe caught twice.
+     
+     So the chip's text is a step darker than the role colour rather than the
+     role colour itself. 90% of the base clears 4.8:1 for every role on every
+     ground — panel, page canvas and row — with the fill held at 10%. Dark mode
+     needs none of this: there the tint darkens the ground away from the text
+     and the same chips measure 5.4–10.1:1, so the ink is the role colour. */
+  --ops-tint: 10%;
+  --ops-good-ink: var(--ops-good);
+  --ops-warn-ink: var(--ops-warn);
+  --ops-bad-ink:  var(--ops-bad);
+  --ops-info-ink: var(--ops-info);
+  --ops-role-ink: var(--ura-teal-light);
+  --ops-good-fill: color-mix(in srgb, var(--ops-good) var(--ops-tint), transparent);
+  --ops-good-line: color-mix(in srgb, var(--ops-good) 38%, transparent);
+  --ops-warn-fill: color-mix(in srgb, var(--ops-warn) var(--ops-tint), transparent);
+  --ops-warn-line: color-mix(in srgb, var(--ops-warn) 40%, transparent);
+  --ops-bad-fill:  color-mix(in srgb, var(--ops-bad) var(--ops-tint), transparent);
+  --ops-bad-line:  color-mix(in srgb, var(--ops-bad) 40%, transparent);
+  --ops-info-fill: color-mix(in srgb, var(--ops-info) var(--ops-tint), transparent);
+  --ops-info-line: color-mix(in srgb, var(--ops-info) 36%, transparent);
+
+  /* ── Data-viz — dark mode is the default canvas ───────────────────────── */
+  --ops-series-1: #3987e5;  /* blue    */
+  --ops-series-2: #d95926;  /* orange  */
+  --ops-series-3: #199e70;  /* aqua    */
+  --ops-series-4: #c98500;  /* yellow  */
+  --ops-series-5: #d55181;  /* magenta */
+  --ops-series-6: #008300;  /* green   */
+  --ops-series-7: #9085e9;  /* violet  */
+  --ops-series-8: #e66767;  /* red     */
+
+  /* Sequential ramp, one hue light→dark. Used for magnitude only. */
+  --ops-seq-100: #cde2fb;
+  --ops-seq-250: #86b6ef;
+  --ops-seq-400: #3987e5;
+  --ops-seq-550: #1c5cab;
+  --ops-seq-700: #0d366b;
+
+  /* Ordinal ramp — three steps of the sequential hue, for ordered categories
+     (p50 → p95 → p99). Validated with `--ordinal`: monotone lightness, ΔL ≥
+     0.06 between steps, light end ≥ 2:1 on the surface. Dark flips the anchor,
+     as a sequential ramp must on a dark canvas. */
+  --ops-ord-1: #184f95;
+  --ops-ord-2: #3987e5;
+  --ops-ord-3: #9ec5f4;
+
+  /* Gauge / meter track: a lighter step of the same ramp, so the state reads
+     across the whole bar rather than only where it is filled. */
+  --ops-track: rgba(255, 255, 255, 0.08);
+
+  /* Marks that mean a state rather than an identity. Reserved: never used as
+     "series 4". Always shipped with a label, never colour alone. */
+  --ops-mark-good:     #0ca30c;
+  --ops-mark-warning:  #fab219;
+  --ops-mark-serious:  #ec835a;
+  --ops-mark-critical: #d03b3b;
+
+  /* Chart chrome. Recessive by design — the grid is one shade off the surface. */
+  --ops-grid:         var(--border-0);
+  --ops-axis-text:    var(--text-3);
+  --ops-tooltip-bg:   #14151f;
+  --ops-tooltip-line: rgba(255, 255, 255, 0.14);
+  --ops-tooltip-text: #f8f9fa;
+
+  /* Layout */
+  --ops-max-w:      1440px;
+  --ops-max-w-read: 1180px;
+  --ops-nav-h:      56px;
+}
+
+:root[data-theme="light"] {
+  /* Light steps of the same eight hues — selected for the light surface, not
+     an automatic flip of the dark column. */
+  --ops-series-1: #2a78d6;
+  --ops-series-2: #eb6834;
+  --ops-series-3: #1baf7a;
+  --ops-series-4: #eda100;
+  --ops-series-5: #e87ba4;
+  --ops-series-6: #008300;
+  --ops-series-7: #4a3aa7;
+  --ops-series-8: #e34948;
+
+  --ops-seq-100: #cde2fb;
+  --ops-seq-250: #86b6ef;
+  --ops-seq-400: #2a78d6;
+  --ops-seq-550: #1c5cab;
+  --ops-seq-700: #0d366b;
+
+  --ops-ord-1: #86b6ef;
+  --ops-ord-2: #2a78d6;
+  --ops-ord-3: #104281;
+
+  --ops-track: rgba(15, 23, 42, 0.09);
+
+  --ops-tooltip-bg:   #ffffff;
+  --ops-tooltip-line: rgba(15, 23, 42, 0.14);
+  --ops-tooltip-text: #0b1220;
+
+  /* One step darker than the role colour — see the note above the fills. */
+  --ops-good-ink: color-mix(in srgb, var(--ops-good) 90%, black);
+  --ops-warn-ink: color-mix(in srgb, var(--ops-warn) 90%, black);
+  --ops-bad-ink:  color-mix(in srgb, var(--ops-bad) 90%, black);
+  --ops-info-ink: color-mix(in srgb, var(--ops-info) 90%, black);
+  --ops-role-ink: color-mix(in srgb, var(--ura-teal-light) 90%, black);
+}

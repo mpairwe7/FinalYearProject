@@ -1,0 +1,280 @@
+\documentclass[10pt,a4paper]{article}
+
+% ============================================================ engine + fonts
+\usepackage{fontspec}
+
+\setmainfont{Newsreader}[
+  Path=fonts/, Extension=.ttf,
+  UprightFont=*-400, BoldFont=*-600, ItalicFont=*-It-400,
+  Numbers={Lining}, Ligatures=TeX]
+\setsansfont{LibreFranklin}[
+  Path=fonts/, Extension=.ttf,
+  UprightFont=*-600, BoldFont=*-800, Ligatures=TeX]
+\setmonofont{IBMPlexMono}[
+  Path=fonts/, Extension=.ttf,
+  UprightFont=*-Regular, BoldFont=*-SemiBold, Scale=0.85]
+
+\newfontfamily\displayfont{LibreFranklin}[Path=fonts/,Extension=.ttf,UprightFont=*-800]
+\newfontfamily\labelfont{LibreFranklin}[Path=fonts/,Extension=.ttf,UprightFont=*-700]
+\newfontfamily\subheadfont{LibreFranklin}[Path=fonts/,Extension=.ttf,UprightFont=*-600]
+\newfontfamily\datafont{IBMPlexMono}[Path=fonts/,Extension=.ttf,UprightFont=*-Medium,Scale=0.85]
+
+% ================================================================== packages
+\usepackage[a4paper,top=22mm,bottom=18mm,left=46mm,right=14mm,
+            marginparwidth=25mm,marginparsep=5mm,headsep=7mm,footskip=11mm]{geometry}
+\reversemarginpar
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage[table]{xcolor}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{ragged2e}
+\usepackage{microtype}
+\usepackage{pdflscape}
+\usepackage{eso-pic}
+\usepackage{needspace}
+\usepackage[hidelinks,bookmarks,bookmarksnumbered=false]{hyperref}
+
+% ==================================================================== colour
+\definecolor{ink}{HTML}{19222B}
+\definecolor{inkii}{HTML}{3E4A54}
+\definecolor{inkiii}{HTML}{6E7A83}
+\definecolor{rulec}{HTML}{C6CCC3}
+\definecolor{ruleii}{HTML}{E3E7DF}
+\definecolor{slate}{HTML}{31485A}
+\definecolor{oxblood}{HTML}{7C2E26}
+\definecolor{brass}{HTML}{8A6B1E}
+\definecolor{ground}{HTML}{F1F3EE}
+\definecolor{mkm}{HTML}{EDE5CF}
+\definecolor{mke}{HTML}{E1E7EB}
+\definecolor{mkp}{HTML}{F0E0DD}
+\color{ink}
+
+% ============================================================ body behaviour
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2.6mm}
+\linespread{1.06}
+\raggedbottom
+\widowpenalty=9999 \clubpenalty=9999
+\hyphenpenalty=250 \tolerance=2000 \emergencystretch=2em
+
+% ====================================================== running head / foot
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyhead[L]{\labelfont\fontsize{6.6}{8}\selectfont\textcolor{inkiii}{\leftmark}}
+\fancyhead[R]{\labelfont\fontsize{6.6}{8}\selectfont\textcolor{rulec}{%
+  URA AI INTELLIGENT ASSISTANT \textperiodcentered{} PRICING DOCUMENT}}
+\fancyfoot[L]{\datafont\fontsize{6.4}{8}\selectfont\textcolor{rulec}{Version 1.0 \textperiodcentered{} 21 August 2026}}
+\fancyfoot[R]{\datafont\fontsize{8}{9}\selectfont\textcolor{slate}{\thepage}}
+\fancypagestyle{plain}{\fancyhf{}%
+  \fancyfoot[R]{\datafont\fontsize{8}{9}\selectfont\textcolor{slate}{\thepage}}%
+  \renewcommand{\headrulewidth}{0pt}}
+
+% ================================================================== headings
+% The left margin carries each section's SWEBOK topic reference, the way a
+% statute carries marginal notes. Empty third argument = no note.
+\newcommand{\gutter}[1]{%
+  \ifx\relax#1\relax\else
+    \marginpar{\RaggedLeft\datafont\fontsize{6.8}{9}\selectfont\textcolor{inkiii}{#1}}%
+  \fi}
+
+\newcommand{\PartHead}[3]{%
+  \clearpage
+  \phantomsection
+  \addcontentsline{toc}{section}{\texorpdfstring{#1\quad #2}{#1 #2}}%
+  \markboth{\MakeUppercase{#1\ \textperiodcentered\ #2}}{}%
+  {\color{ink}\hrule height 1.6pt}%
+  \vspace{3mm}%
+  \gutter{#3}%
+  {\datafont\fontsize{7}{9}\selectfont\textcolor{slate}{\MakeUppercase{#1}}\par}
+  \vspace{1.4mm}%
+  {\displayfont\fontsize{19}{21}\selectfont\textcolor{ink}{#2}\par}
+  \vspace{3.5mm}\par\nointerlineskip}
+
+\newcommand{\SecHead}[3]{%
+  \needspace{20mm}%
+  \vspace{3.6mm}%
+  \phantomsection
+  \addcontentsline{toc}{subsection}{\texorpdfstring{#1\quad #2}{#1 #2}}%
+  \gutter{#3}%
+  \ifx\relax#1\relax\else
+    {\datafont\fontsize{7}{9}\selectfont\textcolor{slate}{\MakeUppercase{#1}}\par}
+    \vspace{1.2mm}%
+  \fi
+  {\labelfont\fontsize{11.5}{13.5}\selectfont\textcolor{ink}{#2}\par}
+  \vspace{2mm}\par\nointerlineskip}
+
+\newcommand{\SubHead}[1]{%
+  \needspace{14mm}\vspace{2.4mm}%
+  {\subheadfont\fontsize{9.4}{11}\selectfont\textcolor{inkii}{#1}\par}
+  \vspace{1.2mm}\par\nointerlineskip}
+
+% ================================================== inline typographic objects
+\newcommand{\mkbox}[3]{%
+  {\setlength{\fboxsep}{1.1pt}\colorbox{#1}{\datafont\fontsize{6.6}{6.6}\selectfont
+   \textcolor{#2}{#3}}}}
+\newcommand{\mkM}{\mkbox{mkm}{brass}{M}}
+\newcommand{\mkE}{\mkbox{mke}{slate}{E}}
+\newcommand{\mkP}{\mkbox{mkp}{oxblood}{P}}
+
+\newcommand{\swref}[1]{{\datafont\fontsize{8}{9}\selectfont\textcolor{slate}{#1}}}
+\newcommand{\docref}[1]{{\datafont\fontsize{8}{9}\selectfont\textcolor{inkii}{#1}}}
+\newcommand{\code}[1]{{\datafont\fontsize{8.2}{9}\selectfont\textcolor{inkii}{#1}}}
+
+\newcommand{\rail}{\par\vspace{1.4mm}{\color{ruleii}\hrule height 0.5pt}\par\vspace{2mm}}
+
+\newcommand{\pullquote}[1]{%
+  \par\vspace{2mm}%
+  \noindent\begin{minipage}{\linewidth}%
+  \hspace*{0mm}\textcolor{slate}{\vrule width 1.6pt}\hspace{3mm}%
+  \begin{minipage}{\dimexpr\linewidth-5mm\relax}\itshape\color{inkii}#1\end{minipage}%
+  \end{minipage}\par\vspace{2mm}}
+
+% The headline price: the one place in the document that raises its voice.
+\newcommand{\pricebox}[3]{%
+  \par\vspace{4mm}\needspace{28mm}%
+  \noindent\hspace*{-30mm}\begin{minipage}{\dimexpr\linewidth+30mm\relax}
+  {\color{oxblood}\hrule height 1.6pt}\vspace{3.2mm}
+  {\labelfont\fontsize{6.8}{8}\selectfont\textcolor{oxblood}{\MakeUppercase{#1}}\par}
+  \vspace{2.6mm}
+  {\datafont\fontsize{21}{22}\selectfont\textcolor{oxblood}{#2}\par}
+  \vspace{2.6mm}
+  {\fontsize{9}{11}\selectfont\color{inkii}#3\par}
+  \vspace{3.2mm}{\color{rulec}\hrule height 0.5pt}
+  \end{minipage}\par\vspace{4mm}}
+
+% ==================================================================== tables
+\newcommand{\tbl}{\fontsize{8.2}{10}\selectfont}
+\newcommand{\tblmid}{\fontsize{7.7}{9.4}\selectfont}
+\newcommand{\tblwide}{\fontsize{6.6}{8.2}\selectfont}
+% Short uppercase labels must not break: "NA-TIONAL" reads as a typo.
+\newcommand{\tblhead}[1]{{\labelfont\fontsize{6.4}{8}\selectfont
+  \hyphenpenalty=10000\exhyphenpenalty=10000\textcolor{inkiii}{#1}}}
+\setlength{\LTpre}{2.8mm}\setlength{\LTpost}{3.4mm}
+\setlength{\tabcolsep}{1.3mm}
+\renewcommand{\arraystretch}{1.15}
+\arrayrulecolor{rulec}
+\setlength{\heavyrulewidth}{1.2pt}
+\setlength{\lightrulewidth}{0.5pt}
+\setlength{\cmidrulewidth}{0.4pt}
+
+% Wide tables get a landscape page and a text block to match; \linewidth alone
+% is not enough because longtable sizes itself from \hsize.
+% A rotated page rotates the running head with it, so the long header would run
+% up the edge of the sheet and get clipped. Landscape pages carry the page
+% number alone. The negative skip compensates for the portrait left margin
+% becoming the top margin once the page is turned.
+\fancypagestyle{widepage}{\fancyhf{}%
+  \fancyfoot[R]{\datafont\fontsize{8}{9}\selectfont\textcolor{slate}{\thepage}}%
+  \renewcommand{\headrulewidth}{0pt}}
+
+\newenvironment{widetable}
+  {\begin{landscape}\pagestyle{widepage}\begingroup
+   \setlength{\textwidth}{255mm}\setlength{\linewidth}{255mm}\hsize=255mm
+   \vspace*{-18mm}}
+  {\endgroup\end{landscape}\pagestyle{fancy}}
+
+% ===================================================================== links
+\hypersetup{pdftitle={Pricing the URA Assistant},
+  pdfauthor={Mpairwe Lauben, Rwemera David, Okwel Edgar Mark, Olowo Omondi Philly},
+  pdfsubject={SWEBOK v4 Chapter 15 economic appraisal of the URA AI Intelligent Assistant},
+  pdfkeywords={URA, software engineering economics, SWEBOK, pricing, benefit-cost}}
+
+\begin{document}
+
+% ====================================================================== cover
+\begin{titlepage}
+\hyphenpenalty=10000\exhyphenpenalty=10000
+\AddToShipoutPictureBG*{\AtPageLowerLeft{\color{ground}\rule{\paperwidth}{\paperheight}}}
+\newgeometry{top=26mm,bottom=18mm,left=20mm,right=20mm}
+\thispagestyle{empty}
+{\color{ink}\hrule height 2.4pt}
+\vspace{4mm}
+{\labelfont\fontsize{8.2}{10}\selectfont\textcolor{slate}{UGANDA REVENUE AUTHORITY}%
+ \hspace{6mm}\textcolor{inkiii}{SUBMISSION \textperiodcentered{} 21 AUGUST 2026 \textperiodcentered{} VERSION 1.0}\par}
+
+\vspace{38mm}
+{\displayfont\fontsize{36}{36}\selectfont\textcolor{ink}{Pricing the URA\,Assistant}\par}
+\vspace{8mm}
+{\fontsize{12.5}{17}\selectfont\color{inkii}
+\begin{minipage}{125mm}\RaggedRight
+A feature-by-feature economic appraisal of the \emph{URA AI Intelligent Assistant},
+conducted under the SWEBOK\,Guide\,v4.0, Chapter\,15 --- \emph{Software Engineering
+Economics}. Nineteen work packages measured, characterized, costed by three
+independent estimation techniques, and priced against the alternatives available
+to the Authority.
+\end{minipage}\par}
+
+\vfill
+{\color{rulec}\hrule height 0.5pt}\vspace{5mm}
+\noindent\begin{minipage}[t]{40mm}\RaggedRight
+{\labelfont\fontsize{6.2}{8}\selectfont\textcolor{inkiii}{ONE-TIME FEE, FULL IP}\par}\vspace{2.4mm}
+{\datafont\fontsize{14}{14}\selectfont\textcolor{oxblood}{USD 240,000}\par}\vspace{2mm}
+{\fontsize{7.6}{9.6}\selectfont\color{inkii}UGX 876\,m \textperiodcentered{} Tier 3, all 19 packages\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{43mm}\RaggedRight
+{\labelfont\fontsize{6.2}{8}\selectfont\textcolor{inkiii}{FIVE-YEAR COST OF OWNERSHIP}\par}\vspace{2.4mm}
+{\datafont\fontsize{14}{14}\selectfont\textcolor{oxblood}{USD 936,600}\par}\vspace{2mm}
+{\fontsize{7.6}{9.6}\selectfont\color{inkii}UGX 3.42\,bn \textperiodcentered{} fee, engagement, infrastructure\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{38mm}\RaggedRight
+{\labelfont\fontsize{6.2}{8}\selectfont\textcolor{inkiii}{ANNUAL EQUIVALENT AT 10\%}\par}\vspace{2.4mm}
+{\datafont\fontsize{14}{14}\selectfont\textcolor{ink}{UGX 744\,m}\par}\vspace{2mm}
+{\fontsize{7.6}{9.6}\selectfont\color{inkii}USD 203,875 per year\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{38mm}\RaggedRight
+{\labelfont\fontsize{6.2}{8}\selectfont\textcolor{inkiii}{BREAK-EVEN CONVERSION}\par}\vspace{2.4mm}
+{\datafont\fontsize{14}{14}\selectfont\textcolor{ink}{0.027\%}\par}\vspace{2mm}
+{\fontsize{7.6}{9.6}\selectfont\color{inkii}of the 2.73\,m dormant register, per year\par}
+\end{minipage}
+\vspace{5mm}{\color{rulec}\hrule height 0.5pt}
+
+\vspace{14mm}
+\noindent\begin{minipage}[t]{48mm}\RaggedRight
+{\labelfont\fontsize{6.4}{8}\selectfont\textcolor{inkiii}{PREPARED FOR}\par}\vspace{1.6mm}
+{\fontsize{8}{11}\selectfont Uganda Revenue Authority\\Office of the Deputy Commissioner General\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{62mm}\RaggedRight
+{\labelfont\fontsize{6.4}{8}\selectfont\textcolor{inkiii}{PREPARED BY}\par}\vspace{1.6mm}
+{\fontsize{8}{11}\selectfont Mpairwe Lauben \textperiodcentered{} Rwemera David \textperiodcentered{} Okwel Edgar Mark \textperiodcentered{} Olowo Omondi Philly\\
+School of Computing and Informatics Technology, Makerere University\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{50mm}\RaggedRight
+{\labelfont\fontsize{6.4}{8}\selectfont\textcolor{inkiii}{DISCHARGES}\par}\vspace{1.6mm}
+{\fontsize{8}{11}\selectfont The undertaking at \S5.5 of the \emph{URA AI Intelligent Assistant --- Proposal Summary}, 24 July 2026\par}
+\end{minipage}
+\hyphenpenalty=250\exhyphenpenalty=50
+\restoregeometry
+\end{titlepage}
+
+% =================================================================== contents
+\clearpage
+\pagenumbering{roman}
+\markboth{CONTENTS}{}
+{\displayfont\fontsize{13}{15}\selectfont\textcolor{ink}{Contents}\par}
+\vspace{2mm}{\color{ink}\hrule height 1.4pt}\vspace{3mm}
+\begingroup
+\setlength{\parskip}{0pt}
+\setcounter{tocdepth}{2}
+\makeatletter\renewcommand{\tableofcontents}{\@starttoc{toc}}\makeatother
+\makeatletter
+\renewcommand{\l@section}[2]{\vspace{2.2mm}%
+  \noindent{\labelfont\fontsize{8.6}{10.5}\selectfont\textcolor{ink}{#1}}%
+  \hfill{\datafont\fontsize{7.6}{9}\selectfont\textcolor{slate}{#2}}\par}
+\renewcommand{\l@subsection}[2]{%
+  \noindent\hspace{6mm}\begin{minipage}[t]{\dimexpr\linewidth-16mm\relax}\RaggedRight
+  {\fontsize{8.2}{10}\selectfont\textcolor{inkii}{#1}}\end{minipage}%
+  \hfill{\datafont\fontsize{7.4}{9}\selectfont\textcolor{inkiii}{#2}}\par\vspace{0.6mm}}
+\makeatother
+\tableofcontents
+\endgroup
+
+\clearpage
+\pagenumbering{arabic}
+
+% ======================================================================= body
+%%BODY%%
+
+\end{document}

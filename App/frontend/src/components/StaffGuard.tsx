@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Client-side staff gate + shared nav for the operations pages.
+ * Client-side staff gate + the operations console shell.
  *
  * `/admin/tickets` and `/analytics` shipped with no gating at all: the API
  * enforces `require_admin_access`, so an unauthenticated visitor got 401/403/503
@@ -12,6 +12,13 @@
  * `require_admin_access` in main.py, which needs `AuthUser.is_staff` or a
  * configured operator key. Anyone can edit localStorage; nobody can talk their
  * way past the API. Both layers are needed and neither replaces the other.
+ *
+ * The shell around it owns three things the pages used to do badly or not at
+ * all: navigation with a hierarchy (Work / Configure / Observe rather than
+ * eight sibling links), a theme control on staff pages (there was none — only
+ * /analytics had one, from a nav that no longer exists), and a single live
+ * escalation subscription shared by the nav dot and the arrivals banner instead
+ * of one socket per component that wants to know.
  */
 import Link from "next/link";
 import React, { useEffect, useState, useSyncExternalStore } from "react";
@@ -22,8 +29,15 @@ import {
   getServerAuthToken,
   subscribeAuthToken,
 } from "../lib/authSession";
-import { isStaffRole, roleLabel } from "../lib/roles";
+import { isStaffRole, roleLabel, staffSectionsFor } from "../lib/roles";
+import { useTicketStream, type LiveEscalation } from "../hooks/useTicketStream";
+import {
+  CommandPalette,
+  CommandPaletteTrigger,
+  useCommandPalette,
+} from "./ops/CommandPalette";
 import { TicketLiveBanner } from "./staff/TicketLiveBanner";
+import ThemeToggle from "./ThemeToggle";
 import "./staffGuard.css";
 
 export interface StaffIdentity {
@@ -46,55 +60,93 @@ type State =
   | { kind: "unavailable"; detail: string }
   | { kind: "identified"; who: StaffIdentity };
 
-const NAV = [
-  { href: "/admin", label: "Overview", roles: ["ura_admin", "ura_auditor"] },
-  { href: "/agent", label: "My queue", roles: ["ura_staff", "ura_admin"] },
-  { href: "/admin/tickets", label: "All tickets", roles: ["ura_staff", "ura_admin", "ura_auditor"] },
-  { href: "/admin/flags", label: "Flags", roles: ["ura_admin", "ura_auditor"] },
-  { href: "/admin/overrides", label: "Overrides", roles: ["ura_admin", "ura_auditor"] },
-  { href: "/admin/outbox", label: "Outbox", roles: ["ura_admin", "ura_auditor"] },
-  { href: "/analytics", label: "Analytics", roles: ["ura_admin", "ura_auditor"] },
-];
+function signOut() {
+  clearAuthToken();
+  window.location.assign("/signin");
+}
 
-export function StaffNav({ who, current }: { who: StaffIdentity; current: string }) {
+export function StaffNav({
+  who,
+  current,
+  connected,
+  onOpenPalette,
+}: {
+  who: StaffIdentity;
+  current: string;
+  /** Live-escalation socket state — a dot, not a full-width strip. */
+  connected?: boolean;
+  onOpenPalette?: () => void;
+}) {
+  const sections = staffSectionsFor(who.role);
+
   return (
     <nav className="staff-nav" aria-label="Operations">
       <a className="staff-skip" href="#staff-main">
         Skip to content
       </a>
-      <span className="staff-brand">
+
+      {/* Named explicitly: below 1080px `.staff-brand-text` is display:none and
+          the mark is decorative, which left this link with no accessible name
+          at all on a phone — a failure only the mobile axe project could see. */}
+      <Link className="staff-brand" href="/admin" aria-label="URA Operations console">
         <span className="staff-brand-mark" aria-hidden="true">
           URA
         </span>
-        Operations
-      </span>
-      <ul>
-        {NAV.filter((item) => item.roles.includes(who.role)).map((item) => (
-          <li key={item.href}>
-            <a
-              href={item.href}
-              className={item.href === current ? "active" : ""}
-              aria-current={item.href === current ? "page" : undefined}
-            >
-              {item.label}
-            </a>
-          </li>
-        ))}
-      </ul>
-      <span className="staff-who">
-        <span className="staff-role-pill">{roleLabel(who.role)}</span>
-        <span className="staff-email">{who.email || who.external_id}</span>
-        <button
-          type="button"
-          className="staff-signout"
-          onClick={() => {
-            clearAuthToken();
-            window.location.assign("/signin");
-          }}
+        <span className="staff-brand-text">
+          Operations
+          <span className="staff-brand-sub">Taxpayer assistant</span>
+        </span>
+      </Link>
+
+      {/* Below 1080px this strip scrolls inside the bar rather than wrapping
+          the whole nav to a second and third row, which is what pushed the
+          console's content below the fold on a laptop. */}
+      <div className="staff-nav-scroller">
+        <ul>
+          {sections.map((section, index) => (
+            <React.Fragment key={section.group}>
+              {index > 0 ? <li className="staff-nav-sep" aria-hidden="true" /> : null}
+              {section.items.map((item) => {
+                const active = item.href === current;
+                return (
+                  <li key={item.href}>
+                    <a
+                      href={item.href}
+                      className={active ? "active" : ""}
+                      aria-current={active ? "page" : undefined}
+                    >
+                      {item.navLabel}
+                    </a>
+                  </li>
+                );
+              })}
+            </React.Fragment>
+          ))}
+        </ul>
+      </div>
+
+      <div className="staff-nav-end">
+        {onOpenPalette ? <CommandPaletteTrigger onOpen={onOpenPalette} /> : null}
+        <span
+          className={`staff-live-dot${connected ? " is-on" : ""}`}
+          title={connected ? "Live escalations connected" : "Reconnecting to the escalation stream"}
+          role="status"
         >
-          Sign out
-        </button>
-      </span>
+          <span className="ops-sr-only">
+            {connected ? "Live escalations connected" : "Reconnecting to the escalation stream"}
+          </span>
+        </span>
+        <ThemeToggle className="ops-icon-btn" />
+        <span className="staff-who">
+          <span className="staff-role-pill">{roleLabel(who.role)}</span>
+          <span className="staff-email" title={who.email || who.external_id}>
+            {who.email || who.external_id}
+          </span>
+          <button type="button" className="staff-signout" onClick={signOut}>
+            Sign out
+          </button>
+        </span>
+      </div>
     </nav>
   );
 }
@@ -113,6 +165,11 @@ export default function StaffGuard({
   // mount effect: no cascading render, and a sign-out in another tab is picked up.
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const [state, setState] = useState<State>({ kind: "checking" });
+  const palette = useCommandPalette();
+
+  // One socket for the whole console. TicketLiveBanner used to open its own on
+  // every staff route; the nav dot would have opened a second.
+  const live = useTicketStream(state.kind === "identified");
 
   useEffect(() => {
     // Nothing to ask the API about; the render below derives the anonymous state.
@@ -172,9 +229,20 @@ export default function StaffGuard({
 
   return (
     <>
-      <StaffNav who={state.who} current={current} />
-      <TicketLiveBanner />
+      <StaffNav
+        who={state.who}
+        current={current}
+        connected={live.connected}
+        onOpenPalette={() => palette.setOpen(true)}
+      />
+      <TicketLiveBanner latest={live.latest as LiveEscalation | null} />
       {children(state.who)}
+      <CommandPalette
+        role={state.who.role}
+        open={palette.open}
+        onClose={() => palette.setOpen(false)}
+        onSignOut={signOut}
+      />
     </>
   );
 }
@@ -216,6 +284,9 @@ function AccessGate({
   return (
     <main className="staff-gate">
       <div className="staff-gate-card">
+        <span className="staff-gate-mark" aria-hidden="true">
+          URA
+        </span>
         <h1>{title}</h1>
         <p>{body}</p>
         <div className="staff-gate-actions">

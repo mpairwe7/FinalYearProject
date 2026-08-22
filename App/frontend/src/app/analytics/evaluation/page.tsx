@@ -1,27 +1,37 @@
 "use client";
 
 /**
- * Evaluation Dashboard — RAG quality visualization.
+ * Evaluation dashboard — RAG quality visualization.
  *
- * Shows: radar chart (8 metrics), metrics table with pass/fail,
- * per-segment comparison bars, and confusion matrix heatmap.
- *
- * Data: loaded from Results/ JSON files via static import or fetched
- * from /v1/evaluate endpoint.
+ * Shows: radar (8 metrics), metrics table with pass/fail, per-segment
+ * comparison bars, and the classifier confusion matrix.
  *
  * Standards: ISO 25010:2023 §2 (Functional Suitability),
  * NIST AI RMF MEASURE 2.6 (evaluation evidence)
+ *
+ * The page ships static fallback data so it renders without a backend, and
+ * `/v1/evaluate` is gated behind the operator key — so in an ordinary staff
+ * session the fallback is what you are looking at, essentially always. It used
+ * to say nothing about that: eight metrics, all green, an "ALL GATES PASS"
+ * badge, and no way to tell measured from illustrative. On a page whose purpose
+ * is evaluation *evidence*, that is the one thing it has to get right, so the
+ * provenance is now stated at the top and the badge only claims a result when
+ * there is a live run behind it.
  */
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
+import StaffGuard from "../../../components/StaffGuard";
+import { OpsPage } from "../../../components/ops/OpsPage";
 import EvalRadarChart from "../../../components/charts/EvalRadarChart";
 import MetricsTable from "../../../components/charts/MetricsTable";
 import SegmentComparisonChart from "../../../components/charts/SegmentComparisonChart";
 import ConfusionMatrix from "../../../components/charts/ConfusionMatrix";
+import { AlertTriangleIcon } from "../../../components/ops/icons";
 import { authHeaders } from "@/lib/authSession";
 import "../analytics.css";
 
-// Static eval data (fallback when API is not running)
+// Sample eval data — rendered when no live run is available. Never presented
+// as a measurement; see the banner below.
 const STATIC_RAG_METRICS = [
   { name: "faithfulness", value: 0.77, threshold: 0.6, passed: true },
   { name: "answer_relevancy", value: 0.72, threshold: 0.7, passed: true },
@@ -50,7 +60,7 @@ const STATIC_SEGMENT = {
   },
 };
 
-// Sample confusion matrix (classifier eval)
+// Illustrative classifier matrix. There is no endpoint behind this one at all.
 const CM_LABELS = ["vat", "paye", "customs", "registration", "penalties", "efris", "general"];
 const CM_MATRIX = [
   [18, 1, 0, 0, 0, 1, 0],
@@ -62,9 +72,8 @@ const CM_MATRIX = [
   [0, 1, 1, 0, 1, 0, 22],
 ];
 
-export default function EvaluationPage() {
-  // Try fetching live eval from API; fall back to static data
-  const { data: liveEval } = useQuery({
+function Evaluation() {
+  const { data: liveEval, isFetching } = useQuery({
     queryKey: ["evaluation"],
     queryFn: async () => {
       const res = await fetch("/api/v1/evaluate", {
@@ -79,59 +88,84 @@ export default function EvaluationPage() {
     staleTime: 5 * 60_000,
   });
 
+  const live = Boolean(liveEval?.metrics);
   const metrics = liveEval?.metrics ?? STATIC_RAG_METRICS;
   const bySegment = liveEval?.by_segment ?? STATIC_SEGMENT;
+  const allPass = metrics.every((m: { passed: boolean }) => m.passed);
 
   return (
-    <main className="analytics-page">
-      <header className="analytics-header">
-        <div>
-          <h1>Evaluation Dashboard</h1>
-          <p className="analytics-subtitle">
-            RAG Quality Metrics &bull; Classifier Performance &bull; Per-Segment Comparison
-          </p>
-        </div>
-        <div className="eval-badge">
-          <span className={`status-badge ${metrics.every((m: { passed: boolean }) => m.passed) ? "pass" : "fail"}`}>
-            {metrics.every((m: { passed: boolean }) => m.passed) ? "ALL GATES PASS" : "GATE FAILURE"}
+    <OpsPage
+      eyebrow="Observe"
+      title="Answer evaluation"
+      description="Retrieval-augmented generation measured against the thresholds the release gate enforces, per topic and per language."
+      actions={
+        live ? (
+          <span className={`ops-chip ${allPass ? "is-good" : "is-danger"}`}>
+            {allPass ? "All gates pass" : "Gate failure"}
           </span>
+        ) : (
+          <span className="ops-chip is-warn">Sample data</span>
+        )
+      }
+    >
+      {!live ? (
+        <div className="ops-note" role="note">
+          <span className="ops-note-mark" aria-hidden="true">
+            <AlertTriangleIcon />
+          </span>
+          <div>
+            <p className="ops-note-title">
+              {isFetching ? "Asking for a live evaluation run…" : "Showing sample data, not a measurement"}
+            </p>
+            <p className="ops-note-body">
+              A live run comes from <code>POST /v1/evaluate</code>, which is gated behind the
+              operator key rather than a staff sign-in, so this page falls back to a stored sample
+              set. Treat the numbers below as an illustration of the shape of the report. The
+              authoritative run is the release gate in CI. The confusion matrix is illustrative in
+              every case — no endpoint backs it.
+            </p>
+          </div>
         </div>
-      </header>
+      ) : null}
 
-      {/* Radar + Table */}
-      <section className="chart-grid two-col">
+      <section className="ops-chart-grid is-2" aria-label="Quality against thresholds">
         <EvalRadarChart metrics={metrics} />
-        <MetricsTable metrics={metrics} title="RAG Quality Gates" />
+        <MetricsTable metrics={metrics} title="Quality gates" />
       </section>
 
-      {/* Per-topic comparison */}
-      <section className="chart-grid">
+      <section className="ops-chart-grid" aria-label="Faithfulness by topic">
         <SegmentComparisonChart
           bySegment={bySegment}
           metricName="faithfulness"
-          title="Faithfulness by Topic"
+          title="Faithfulness by topic"
         />
       </section>
 
-      {/* Language parity */}
-      {bySegment.locale && (
-        <section className="chart-grid">
+      {bySegment.locale ? (
+        <section className="ops-chart-grid" aria-label="Language parity">
           <SegmentComparisonChart
             bySegment={{ locale: bySegment.locale }}
             metricName="faithfulness"
-            title="Language Parity — English vs Luganda"
+            title="Language parity — English against Luganda"
           />
         </section>
-      )}
+      ) : null}
 
-      {/* Confusion matrix */}
-      <section className="chart-grid">
+      <section className="ops-chart-grid" aria-label="Classifier confusion">
         <ConfusionMatrix
           matrix={CM_MATRIX}
           labels={CM_LABELS}
-          title="Classifier Confusion Matrix (Normalized)"
+          title="Classifier confusion matrix (illustrative)"
         />
       </section>
-    </main>
+    </OpsPage>
+  );
+}
+
+export default function EvaluationPage() {
+  return (
+    <StaffGuard current="/analytics/evaluation" requireRoles={["ura_admin", "ura_auditor"]}>
+      {() => <Evaluation />}
+    </StaffGuard>
   );
 }

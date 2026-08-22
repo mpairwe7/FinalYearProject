@@ -1,0 +1,1272 @@
+/* =============================================================================
+ * URA Operations Console — shared components
+ *
+ * Every class here is `.ops-*` and consumes only tokens.css, so this layer can
+ * be loaded globally without touching the taxpayer chat. The staff pages keep
+ * their own thin stylesheets for page-specific layout; anything that appears on
+ * more than one staff page lives here instead of being copied.
+ * ============================================================================ */
+
+/* ── Page shell ───────────────────────────────────────────────────────────── */
+
+.ops-page {
+  max-width: var(--ops-max-w);
+  margin: 0 auto;
+  padding: var(--ops-space-6) var(--ops-space-5) var(--ops-space-12);
+  color: var(--text-1);
+}
+
+.ops-page.is-narrow {
+  max-width: var(--ops-max-w-read);
+}
+
+.ops-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--ops-space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--ops-space-5);
+}
+
+/* Both halves must be allowed to shrink. A flex item defaults to
+   `min-width: auto` — its content width — so a wide actions slot (the ticket
+   console's five-column SLA strip) pushed the whole page sideways instead of
+   scrolling inside itself. */
+.ops-page-head > * {
+  min-width: 0;
+}
+
+.ops-eyebrow {
+  display: block;
+  margin-bottom: var(--ops-space-1);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.ops-page-head h1 {
+  margin: 0;
+  font-size: var(--ops-text-lg);
+  line-height: var(--ops-lh-tight);
+  font-weight: var(--ops-weight-bold);
+  letter-spacing: -0.01em;
+  color: var(--text-0);
+}
+
+.ops-page-desc {
+  margin: var(--ops-space-2) 0 0;
+  max-width: 68ch;
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-2);
+}
+
+.ops-page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.ops-page-actions > * {
+  min-width: 0;
+}
+
+/* One filter row above everything it scopes — never a filter inside a card. */
+.ops-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--ops-space-4);
+}
+
+.ops-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 20px;
+  background: var(--ops-line);
+  margin: 0 var(--ops-space-1);
+}
+
+.ops-toolbar-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+}
+
+/* ── Panels ───────────────────────────────────────────────────────────────── */
+
+.ops-panel {
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  box-shadow: var(--ops-elev-1);
+}
+
+.ops-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border-bottom: 1px solid var(--ops-hairline);
+}
+
+.ops-panel-head h2,
+.ops-panel-head h3 {
+  margin: 0;
+  font-size: var(--ops-text-base);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+}
+
+.ops-panel-head .ops-panel-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+}
+
+.ops-panel-body {
+  padding: var(--ops-space-4);
+}
+
+.ops-panel-body.is-flush {
+  padding: var(--ops-space-2);
+}
+
+.ops-panel-note {
+  margin: 0 0 var(--ops-space-3);
+  font-size: var(--ops-text-xs);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-2);
+}
+
+/* ── Stat tiles ───────────────────────────────────────────────────────────── */
+
+.ops-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--ops-space-3);
+}
+
+.ops-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ops-space-1);
+  padding: var(--ops-space-4);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  box-shadow: var(--ops-elev-1);
+  transition: border-color var(--ops-dur-fast) var(--ops-ease),
+    transform var(--ops-dur-fast) var(--ops-ease);
+}
+
+a.ops-stat {
+  text-decoration: none;
+  color: inherit;
+}
+
+a.ops-stat:hover {
+  border-color: var(--ops-line-strong);
+}
+
+.ops-stat-label {
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Proportional figures: tabular-nums makes a display-size number look loose. */
+.ops-stat-value {
+  font-size: var(--ops-text-xl);
+  line-height: var(--ops-lh-tight);
+  font-weight: var(--ops-weight-bold);
+  color: var(--text-0);
+  font-variant-numeric: proportional-nums;
+}
+
+.ops-stat-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+}
+
+.ops-stat-hint {
+  font-size: var(--ops-text-2xs);
+  line-height: var(--ops-lh-snug);
+  color: var(--text-3);
+}
+
+/* Attention reads as an inset edge, never a wash: the value has to hold AA on
+   the panel colour in both themes. */
+.ops-stat.is-warn   { box-shadow: inset 3px 0 0 var(--ops-warn), var(--ops-elev-1); }
+.ops-stat.is-danger { box-shadow: inset 3px 0 0 var(--ops-bad),  var(--ops-elev-1); }
+.ops-stat.is-good   { box-shadow: inset 3px 0 0 var(--ops-good), var(--ops-elev-1); }
+
+.ops-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.ops-delta.is-good { color: var(--ops-good); }
+.ops-delta.is-bad  { color: var(--ops-bad); }
+
+.ops-delta-glyph {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.ops-spark {
+  display: block;
+  width: 100%;
+  height: 28px;
+  margin-top: var(--ops-space-1);
+  overflow: visible;
+}
+
+.ops-spark-line { fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.ops-spark-area { stroke: none; }
+.ops-spark-dot  { stroke: var(--ops-panel); stroke-width: 2; }
+
+/* ── Chips and pills ──────────────────────────────────────────────────────── */
+
+.ops-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row-active);
+  color: var(--text-2);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  white-space: nowrap;
+}
+
+.ops-chip.is-good   { background: var(--ops-good-fill); border-color: var(--ops-good-line); color: var(--ops-good-ink); }
+.ops-chip.is-warn   { background: var(--ops-warn-fill); border-color: var(--ops-warn-line); color: var(--ops-warn-ink); }
+.ops-chip.is-danger { background: var(--ops-bad-fill);  border-color: var(--ops-bad-line);  color: var(--ops-bad-ink); }
+.ops-chip.is-info   { background: var(--ops-info-fill); border-color: var(--ops-info-line); color: var(--ops-info-ink); }
+
+.ops-chip-caps {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 10px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
+.ops-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ops-space-2);
+  min-height: 36px;
+  padding: 8px 14px;
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-line-strong);
+  background: var(--ops-row-active);
+  color: var(--text-0);
+  font: inherit;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ops-dur-fast) var(--ops-ease),
+    border-color var(--ops-dur-fast) var(--ops-ease);
+}
+
+.ops-btn:hover:not(:disabled) { background: var(--surface-4); }
+
+.ops-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ops-btn.is-primary {
+  background: var(--grad-primary);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--ops-elev-1);
+}
+
+.ops-btn.is-primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+.ops-btn.is-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-2);
+}
+
+.ops-btn.is-ghost:hover:not(:disabled) {
+  background: var(--ops-row-hover);
+  color: var(--text-0);
+}
+
+.ops-btn.is-danger {
+  background: var(--ops-bad-fill);
+  border-color: var(--ops-bad-line);
+  color: var(--ops-bad-ink);
+}
+
+.ops-btn.is-sm {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: var(--ops-text-xs);
+}
+
+.ops-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--ops-dur-fast) var(--ops-ease), color var(--ops-dur-fast) var(--ops-ease);
+}
+
+.ops-icon-btn:hover {
+  background: var(--ops-row-hover);
+  color: var(--text-0);
+}
+
+.ops-icon-btn svg { width: 17px; height: 17px; }
+
+/* ── Segmented control (period picker, sub-navigation) ────────────────────── */
+
+.ops-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row);
+}
+
+.ops-segmented > * {
+  min-height: 28px;
+  padding: 4px 11px;
+  border: 0;
+  border-radius: var(--ops-radius-xs);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: background var(--ops-dur-fast) var(--ops-ease), color var(--ops-dur-fast) var(--ops-ease);
+}
+
+.ops-segmented > *:hover { color: var(--text-0); }
+
+.ops-segmented > .is-active,
+.ops-segmented > [aria-selected="true"],
+.ops-segmented > [aria-pressed="true"],
+.ops-segmented > [aria-current="page"] {
+  background: var(--ops-panel);
+  color: var(--text-0);
+  box-shadow: var(--ops-elev-1), inset 0 0 0 1px var(--ops-line);
+}
+
+/* ── Filter pills ─────────────────────────────────────────────────────────── */
+
+.ops-filter {
+  min-height: 30px;
+  padding: 5px 12px;
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
+  cursor: pointer;
+  transition: background var(--ops-dur-fast) var(--ops-ease), color var(--ops-dur-fast) var(--ops-ease);
+}
+
+.ops-filter:hover { background: var(--ops-row-hover); color: var(--text-0); }
+
+.ops-filter.is-active {
+  background: var(--ops-row-active);
+  border-color: var(--ops-line-strong);
+  color: var(--text-0);
+}
+
+.ops-filter-count {
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.ops-filter.is-active .ops-filter-count { color: var(--text-1); }
+
+/* ── Fields ───────────────────────────────────────────────────────────────── */
+
+.ops-field {
+  display: block;
+  min-width: 0;
+}
+
+.ops-field-label {
+  display: block;
+  margin-bottom: var(--ops-space-1);
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-1);
+}
+
+.ops-field-hint {
+  display: block;
+  font-style: normal;
+  margin-top: 1px;
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-normal);
+  color: var(--text-3);
+}
+
+.ops-input,
+.ops-textarea,
+.ops-select {
+  width: 100%;
+  padding: 8px 11px;
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-line);
+  background: var(--surface-2);
+  color: var(--text-0);
+  font: inherit;
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
+  transition: border-color var(--ops-dur-fast) var(--ops-ease);
+}
+
+.ops-input::placeholder,
+.ops-textarea::placeholder { color: var(--text-3); }
+
+.ops-input:hover,
+.ops-textarea:hover { border-color: var(--ops-line-strong); }
+
+.ops-textarea { resize: vertical; }
+
+.ops-search {
+  min-width: 220px;
+  padding-left: 32px;
+  border-radius: var(--ops-radius-pill);
+  background-repeat: no-repeat;
+  background-position: 11px center;
+  background-size: 14px;
+  /* Inline so the icon inherits nothing from a sprite and cannot 404. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23848D9C' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.2-3.2'/%3E%3C/svg%3E");
+}
+
+/* ── Switch ───────────────────────────────────────────────────────────────── */
+
+.ops-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
+  cursor: pointer;
+}
+
+.ops-switch-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  flex: none;
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid var(--ops-line-strong);
+  background: var(--surface-3);
+  transition: background var(--ops-dur-base) var(--ops-ease),
+    border-color var(--ops-dur-base) var(--ops-ease);
+}
+
+.ops-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-1);
+  transition: transform var(--ops-dur-base) var(--ops-ease), background var(--ops-dur-base) var(--ops-ease);
+}
+
+.ops-switch[aria-checked="true"] .ops-switch-track {
+  background: var(--ops-good-fill);
+  border-color: var(--ops-good);
+}
+
+.ops-switch[aria-checked="true"] .ops-switch-thumb {
+  transform: translateX(16px);
+  background: var(--ops-good);
+}
+
+.ops-switch:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+
+.ops-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  background: var(--ops-panel);
+}
+
+.ops-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: var(--ops-text-sm);
+}
+
+.ops-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: var(--ops-space-2) var(--ops-space-4);
+  background: var(--ops-panel);
+  border-bottom: 1px solid var(--ops-line);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.ops-table td {
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border-bottom: 1px solid var(--ops-hairline);
+  color: var(--text-1);
+  vertical-align: top;
+}
+
+.ops-table tbody tr:last-child td { border-bottom: 0; }
+.ops-table tbody tr:hover td { background: var(--ops-row); }
+
+.ops-table .is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-cell-strong {
+  display: block;
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+}
+
+.ops-cell-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--ops-text-xs);
+  line-height: var(--ops-lh-snug);
+  color: var(--text-3);
+}
+
+.ops-cell-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 42ch;
+}
+
+/* ── Loading, empty and error states ──────────────────────────────────────── */
+
+/* Skeletons mirror the final layout so nothing shifts when data lands. */
+.ops-skeleton {
+  display: block;
+  border-radius: var(--ops-radius-xs);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    var(--surface-3) 50%,
+    var(--surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: ops-shimmer 1.4s linear infinite;
+}
+
+@keyframes ops-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-skeleton { animation: none; }
+}
+
+/* A refetch holds the previous render instead of flashing a skeleton. */
+.ops-stale {
+  opacity: 0.55;
+  transition: opacity var(--ops-dur-base) var(--ops-ease);
+}
+
+.ops-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-8) var(--ops-space-5);
+  text-align: center;
+}
+
+.ops-empty-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--ops-radius-md);
+  background: var(--ops-row-active);
+  color: var(--text-3);
+}
+
+.ops-empty-title {
+  margin: 0;
+  font-size: var(--ops-text-base);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-1);
+}
+
+.ops-empty-body {
+  margin: 0;
+  max-width: 44ch;
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-3);
+}
+
+.ops-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ops-space-3);
+  padding: var(--ops-space-4);
+  border-radius: var(--ops-radius-md);
+  border: 1px solid var(--ops-bad-line);
+  background: var(--ops-bad-fill);
+}
+
+.ops-error-title {
+  margin: 0 0 2px;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+}
+
+.ops-error-body {
+  margin: 0;
+  font-size: var(--ops-text-xs);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-2);
+}
+
+/* A caveat that is load-bearing but not an error: amber, not red. Used where
+   acting on a wrong assumption is the failure mode — the flags console's
+   "this replica only", the evaluation page's sample data. */
+.ops-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ops-space-3);
+  margin-bottom: var(--ops-space-4);
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border-radius: var(--ops-radius-md);
+  border: 1px solid var(--ops-warn-line);
+  background: var(--ops-warn-fill);
+}
+
+.ops-note-mark {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ops-warn);
+}
+
+.ops-note-title {
+  margin: 0 0 2px;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+}
+
+.ops-note-body {
+  margin: 0;
+  font-size: var(--ops-text-xs);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-2);
+}
+
+/* A code chip carries its own tinted ground, so it also carries its own ink:
+   the muted text token is tuned against a plain surface and measures 4.29:1
+   here — a fail axe caught on the outbox's reference column. */
+.ops-note code,
+.ops-table code {
+  padding: 1px 5px;
+  border-radius: var(--ops-radius-xs);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.ops-cell-default {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ── Freshness ────────────────────────────────────────────────────────────── */
+
+.ops-fresh {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-fresh-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ops-good);
+  flex: none;
+}
+
+.ops-fresh-dot.is-stale { background: var(--text-3); }
+
+/* ── Keyboard hints ───────────────────────────────────────────────────────── */
+
+.ops-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--ops-radius-xs);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row-active);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.ops-hints {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-3);
+  flex-wrap: wrap;
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+}
+
+.ops-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ── Command palette ──────────────────────────────────────────────────────── */
+
+.ops-cmdk-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  min-height: 32px;
+  padding: 5px 8px 5px 11px;
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row);
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--ops-text-xs);
+  cursor: pointer;
+  transition: border-color var(--ops-dur-fast) var(--ops-ease), color var(--ops-dur-fast) var(--ops-ease);
+}
+
+.ops-cmdk-trigger:hover { border-color: var(--ops-line-strong); color: var(--text-2); }
+
+.ops-cmdk-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: start center;
+  padding: 12vh var(--ops-space-4) var(--ops-space-4);
+  background: rgba(4, 4, 10, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.ops-cmdk {
+  width: 100%;
+  max-width: 560px;
+  border-radius: var(--ops-radius-lg);
+  border: 1px solid var(--ops-line-strong);
+  background: var(--bg-1);
+  box-shadow: var(--ops-elev-3);
+  overflow: hidden;
+}
+
+.ops-cmdk-input {
+  width: 100%;
+  padding: var(--ops-space-4);
+  border: 0;
+  border-bottom: 1px solid var(--ops-hairline);
+  background: transparent;
+  color: var(--text-0);
+  font: inherit;
+  font-size: var(--ops-text-md);
+}
+
+.ops-cmdk-input:focus { outline: none; }
+
+.ops-cmdk-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--ops-space-2);
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.ops-cmdk-group {
+  padding: var(--ops-space-2) var(--ops-space-3) var(--ops-space-1);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.ops-cmdk-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-3);
+  width: 100%;
+  padding: 9px var(--ops-space-3);
+  border: 0;
+  border-radius: var(--ops-radius-sm);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--ops-text-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ops-cmdk-item.is-active {
+  background: var(--ops-row-active);
+  color: var(--text-0);
+}
+
+.ops-cmdk-item-sub {
+  margin-left: auto;
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+}
+
+.ops-cmdk-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-2) var(--ops-space-4);
+  border-top: 1px solid var(--ops-hairline);
+  background: var(--ops-row);
+}
+
+/* ── Charts ───────────────────────────────────────────────────────────────── */
+
+.ops-chart-grid {
+  display: grid;
+  gap: var(--ops-space-3);
+  margin-bottom: var(--ops-space-5);
+}
+
+.ops-chart-grid.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ops-chart-grid.is-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.ops-chart-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--ops-space-4);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  box-shadow: var(--ops-elev-1);
+}
+
+.ops-chart-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ops-space-2);
+  margin-bottom: var(--ops-space-3);
+}
+
+.ops-chart-title {
+  margin: 0;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-1);
+}
+
+.ops-chart-sub {
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+}
+
+/* Legends carry identity for every multi-series chart, so colour is never the
+   only channel. */
+.ops-legend {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: var(--ops-space-3);
+  margin-top: var(--ops-space-3);
+  font-size: var(--ops-text-2xs);
+  color: var(--text-2);
+}
+
+.ops-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+
+.ops-legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.ops-recharts-tip {
+  padding: 8px 10px;
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-tooltip-line);
+  background: var(--ops-tooltip-bg);
+  color: var(--ops-tooltip-text);
+  box-shadow: var(--ops-elev-2);
+  font-size: var(--ops-text-xs);
+}
+
+.ops-recharts-tip-label {
+  margin: 0 0 4px;
+  font-weight: var(--ops-weight-semi);
+}
+
+.ops-recharts-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Gauges, meters and the heatmap ------------------------------------------ */
+
+.ops-gauge {
+  align-items: center;
+  text-align: center;
+}
+
+.ops-gauge .ops-chart-title {
+  margin-bottom: var(--ops-space-2);
+}
+
+/* Proportional figures on a display-size number: tabular gives every digit the
+   width of a zero, which makes something like 121 look loose. */
+.ops-gauge-value {
+  margin: -6px 0 0;
+  font-size: var(--ops-text-xl);
+  font-weight: var(--ops-weight-bold);
+  line-height: var(--ops-lh-tight);
+  color: var(--text-0);
+  font-variant-numeric: proportional-nums;
+}
+
+.ops-gauge-value-lg {
+  margin-top: var(--ops-space-2);
+  font-size: var(--ops-text-2xl);
+}
+
+.ops-gauge-unit {
+  margin-left: 1px;
+  font-size: 0.55em;
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-3);
+}
+
+.ops-gauge-target {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: var(--ops-space-1) 0 0;
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+}
+
+.ops-gauge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.ops-gauge-dot.is-good { background: var(--ops-mark-good); }
+.ops-gauge-dot.is-warn { background: var(--ops-mark-warning); }
+.ops-gauge-dot.is-bad  { background: var(--ops-mark-critical); }
+
+.ops-gauge-note {
+  margin: var(--ops-space-2) 0 0;
+  font-size: 10px;
+  line-height: var(--ops-lh-snug);
+  color: var(--text-3);
+}
+
+/* Meter: the fill carries the state, the track is a recessive step behind it. */
+.ops-meter {
+  display: flex;
+  position: relative;
+  width: 100%;
+  height: 8px;
+  margin: var(--ops-space-3) 0 var(--ops-space-1);
+  border-radius: var(--ops-radius-pill);
+  background: var(--ops-track);
+  overflow: hidden;
+}
+
+.ops-meter-sm {
+  height: 6px;
+  min-width: 90px;
+  margin: 0;
+  overflow: visible;
+}
+
+.ops-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--ops-radius-pill);
+  background: var(--ops-series-1);
+}
+
+/* A 2px surface gap between adjacent fills rather than a border around them. */
+.ops-meter-fill + .ops-meter-fill {
+  margin-left: 2px;
+}
+
+.ops-meter-fill.is-good { background: var(--ops-mark-good); }
+.ops-meter-fill.is-bad  { background: var(--ops-mark-critical); }
+
+.ops-meter-threshold {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--text-2);
+}
+
+/* The table twin — every chart has one, collapsed by default. */
+.ops-chart-table {
+  margin-top: var(--ops-space-3);
+}
+
+.ops-chart-table > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--ops-radius-xs);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.ops-chart-table > summary::-webkit-details-marker { display: none; }
+
+.ops-chart-table > summary::before {
+  content: "▸";
+  font-size: 9px;
+}
+
+.ops-chart-table[open] > summary::before { content: "▾"; }
+
+.ops-chart-table > summary:hover { color: var(--text-1); }
+
+.ops-chart-table > summary:focus-visible {
+  outline: var(--ops-focus-ring) solid var(--ops-focus);
+  outline-offset: var(--ops-focus-gap);
+}
+
+.ops-chart-table .ops-table {
+  min-width: 0;
+}
+
+.ops-chart-table .ops-table thead th,
+.ops-chart-table .ops-table td {
+  padding: 6px var(--ops-space-3);
+  font-size: var(--ops-text-2xs);
+}
+
+.ops-metrics-table .ops-metric-name {
+  text-transform: capitalize;
+  color: var(--text-1);
+}
+
+.ops-metrics-table .ops-metric-threshold {
+  color: var(--text-3);
+}
+
+.ops-metrics-table td {
+  vertical-align: middle;
+}
+
+/* Confusion matrix. Two single-hue ramps — agreement on the diagonal,
+   confusion off it — driven by one --cm-intensity custom property per cell. */
+.ops-cm-table {
+  border-collapse: collapse;
+  font-size: var(--ops-text-2xs);
+  width: 100%;
+}
+
+.ops-cm-corner,
+.ops-cm-header,
+.ops-cm-row-label {
+  background: var(--ops-row-hover);
+  color: var(--text-2);
+  font-weight: var(--ops-weight-semi);
+  padding: 6px var(--ops-space-2);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ops-cm-corner { color: var(--text-3); text-align: center; }
+.ops-cm-header { text-align: center; }
+.ops-cm-row-label { text-align: right; }
+
+.ops-cm-cell {
+  min-width: 38px;
+  padding: 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  background: color-mix(
+    in srgb,
+    var(--ops-mark-critical) calc(var(--cm-intensity, 0) * 62%),
+    transparent
+  );
+}
+
+.ops-cm-cell.is-diag {
+  background: color-mix(
+    in srgb,
+    var(--ops-seq-400) calc(15% + var(--cm-intensity, 0) * 70%),
+    transparent
+  );
+}
+
+.ops-cm-cell.is-deep {
+  color: #fff;
+  font-weight: var(--ops-weight-semi);
+}
+
+/* ── Utilities ────────────────────────────────────────────────────────────── */
+
+.ops-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ops-stack   { display: grid; gap: var(--ops-space-4); }
+.ops-stack-2 { display: grid; gap: var(--ops-space-2); }
+.ops-row-inline { display: flex; align-items: center; gap: var(--ops-space-2); flex-wrap: wrap; }
+
+/* One focus rule for the whole console — the staff files used to repeat a
+   selector list each. */
+.ops-btn:focus-visible,
+.ops-icon-btn:focus-visible,
+.ops-filter:focus-visible,
+.ops-switch:focus-visible,
+.ops-input:focus-visible,
+.ops-textarea:focus-visible,
+.ops-select:focus-visible,
+.ops-search:focus-visible,
+.ops-segmented > *:focus-visible,
+.ops-stat:focus-visible,
+.ops-cmdk-item:focus-visible,
+.ops-cmdk-trigger:focus-visible,
+a.ops-stat:focus-visible {
+  outline: var(--ops-focus-ring) solid var(--ops-focus);
+  outline-offset: var(--ops-focus-gap);
+}
+
+@media (max-width: 1100px) {
+  .ops-chart-grid.is-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 860px) {
+  .ops-chart-grid.is-3,
+  .ops-chart-grid.is-2 { grid-template-columns: 1fr; }
+  .ops-search { min-width: 0; width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .ops-page { padding: var(--ops-space-4) var(--ops-space-3) var(--ops-space-10); }
+  .ops-stat-value { font-size: var(--ops-text-lg); }
+  .ops-panel-body { padding: var(--ops-space-3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-btn,
+  .ops-icon-btn,
+  .ops-filter,
+  .ops-stat,
+  .ops-switch-track,
+  .ops-switch-thumb,
+  .ops-segmented > * { transition: none; }
+}
