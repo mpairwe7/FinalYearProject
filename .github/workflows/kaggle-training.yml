@@ -778,7 +778,7 @@ jobs:
 
       - name: Create release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: model-${{ github.run_number }}
           name: Model Release ${{ github.run_number }}
@@ -1016,7 +1016,7 @@ jobs:
 
       - name: Create fine-tuned model release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: finetuned-model-${{ github.run_number }}
           name: Fine-tuned Model Release ${{ github.run_number }}
