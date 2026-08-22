@@ -1,53 +1,59 @@
 "use client";
 
 import React from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from "recharts";
-
-const COLORS = [
-  "#8b5cf6", "#6366f1", "#3b82f6", "#06b6d4", "#14b8a6",
-  "#22c55e", "#84cc16", "#eab308", "#f97316", "#ef4444",
-];
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { AXIS_TICK, ChartTable, OpsTooltip, SERIES } from "./chartTheme";
 
 interface Props {
   data: { tag: string; count: number }[];
   title: string;
 }
 
+/**
+ * What taxpayers are asking about.
+ *
+ * The bars used to cycle a ten-hue rainbow by row index, which spends the
+ * identity channel on nothing: the colour said only "this is the fourth bar",
+ * which the position already said, and the hue changed whenever the ranking
+ * changed. Topics are nominal and this is one series, so every bar takes the
+ * same hue and the length does the work.
+ */
 export default function TopicBarChart({ data, title }: Props) {
   const sorted = [...data].sort((a, b) => b.count - a.count).slice(0, 12);
+  if (sorted.length === 0) return null;
 
   return (
-    <div className="chart-card">
-      <h4 className="chart-title">{title}</h4>
-      <ResponsiveContainer width="100%" height={280}>
-        <BarChart data={sorted} layout="vertical" margin={{ left: 80, right: 16, top: 8, bottom: 8 }}>
-          <XAxis type="number" tick={{ fill: "#94a3b8", fontSize: 11 }} />
+    <div className="ops-chart-card">
+      <div className="ops-chart-head">
+        <h3 className="ops-chart-title">{title}</h3>
+        <span className="ops-chart-sub">conversations</span>
+      </div>
+      <ResponsiveContainer width="100%" height={Math.max(200, sorted.length * 26 + 40)}>
+        <BarChart data={sorted} layout="vertical" margin={{ left: 4, right: 20, top: 4, bottom: 4 }} barCategoryGap={4}>
+          <XAxis type="number" tick={AXIS_TICK} tickLine={false} axisLine={false} />
           <YAxis
             type="category"
             dataKey="tag"
-            tick={{ fill: "#cbd5e1", fontSize: 11 }}
-            width={75}
+            tick={AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
+            width={96}
           />
-          <Tooltip
-            contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-            labelStyle={{ color: "#e2e8f0" }}
-            itemStyle={{ color: "#a5b4fc" }}
+          <Tooltip cursor={{ fill: "var(--ops-row-hover)" }} content={<OpsTooltip />} />
+          <Bar
+            dataKey="count"
+            name="Conversations"
+            fill={SERIES[0]}
+            radius={[0, 4, 4, 0]}
+            isAnimationActive={false}
           />
-          <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-            {sorted.map((_, i) => (
-              <Cell key={i} fill={COLORS[i % COLORS.length]} />
-            ))}
-          </Bar>
         </BarChart>
       </ResponsiveContainer>
+      <ChartTable
+        caption={title}
+        columns={["Topic", "Conversations"]}
+        rows={sorted.map((d) => [d.tag, d.count])}
+      />
     </div>
   );
 }

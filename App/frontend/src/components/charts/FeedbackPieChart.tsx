@@ -1,51 +1,83 @@
 "use client";
 
 import React from "react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
+import { ChartTable, STATUS_MARK } from "./chartTheme";
 
 interface Props {
   thumbsUp: number;
   thumbsDown: number;
 }
 
+/**
+ * Satisfaction — a figure and one bar, not a two-slice donut.
+ *
+ * A pie with two segments is the canonical "the number is the chart" case: the
+ * reader has to convert two arcs back into one percentage that the component
+ * was already computing and printing underneath. A meter says the same thing in
+ * a tenth of the space and stays readable at 200px wide, which is where this
+ * card actually lives.
+ */
 export default function FeedbackPieChart({ thumbsUp, thumbsDown }: Props) {
-  const data = [
-    { name: "Helpful", value: thumbsUp },
-    { name: "Not helpful", value: thumbsDown },
-  ];
-  const COLORS = ["#22c55e", "#ef4444"];
   const total = thumbsUp + thumbsDown;
-  const satPct = total > 0 ? ((thumbsUp / total) * 100).toFixed(1) : "—";
+  const pct = total > 0 ? (thumbsUp / total) * 100 : null;
 
   return (
-    <div className="chart-card">
-      <h4 className="chart-title">User Satisfaction</h4>
-      <ResponsiveContainer width="100%" height={220}>
-        <PieChart>
-          <Pie
-            data={data}
-            cx="50%"
-            cy="50%"
-            innerRadius={50}
-            outerRadius={80}
-            paddingAngle={3}
-            dataKey="value"
-            label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+    <div className="ops-chart-card">
+      <div className="ops-chart-head">
+        <h3 className="ops-chart-title">Answer satisfaction</h3>
+        <span className="ops-chart-sub">{total} rated</span>
+      </div>
+
+      {pct == null ? (
+        <p className="ops-empty-body">
+          No answer has been rated in this period, so there is nothing to report yet.
+        </p>
+      ) : (
+        <>
+          <p className="ops-gauge-value ops-gauge-value-lg">
+            {pct.toFixed(1)}
+            <span className="ops-gauge-unit">%</span>
+          </p>
+          <p className="ops-gauge-target">rated helpful</p>
+
+          <div
+            className="ops-meter"
+            role="img"
+            aria-label={`${thumbsUp} of ${total} rated answers were marked helpful, ${pct.toFixed(
+              1,
+            )} percent`}
           >
-            {data.map((_, i) => (
-              <Cell key={i} fill={COLORS[i]} />
-            ))}
-          </Pie>
-          <Tooltip
-            contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-          />
-          <Legend
-            wrapperStyle={{ fontSize: 11, color: "#94a3b8" }}
-          />
-        </PieChart>
-      </ResponsiveContainer>
-      <div className="gauge-value" style={{ color: "#22c55e" }}>{satPct}%</div>
-      <div className="gauge-target">{total} total ratings</div>
+            <span
+              className="ops-meter-fill"
+              style={{ width: `${pct}%`, background: STATUS_MARK.good }}
+            />
+            <span
+              className="ops-meter-fill"
+              style={{ width: `${100 - pct}%`, background: STATUS_MARK.critical }}
+            />
+          </div>
+
+          <ul className="ops-legend">
+            <li className="ops-legend-item">
+              <span className="ops-legend-swatch" style={{ background: STATUS_MARK.good }} />
+              Helpful <strong>{thumbsUp}</strong>
+            </li>
+            <li className="ops-legend-item">
+              <span className="ops-legend-swatch" style={{ background: STATUS_MARK.critical }} />
+              Not helpful <strong>{thumbsDown}</strong>
+            </li>
+          </ul>
+        </>
+      )}
+
+      <ChartTable
+        caption="Answer feedback"
+        columns={["Rating", "Count"]}
+        rows={[
+          ["Helpful", thumbsUp],
+          ["Not helpful", thumbsDown],
+        ]}
+      />
     </div>
   );
 }

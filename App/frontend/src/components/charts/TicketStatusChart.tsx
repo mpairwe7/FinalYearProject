@@ -1,22 +1,8 @@
 "use client";
 
 import React from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from "recharts";
-
-const STATUS_COLORS: Record<string, string> = {
-  open: "#ef4444",
-  assigned: "#f97316",
-  resolved: "#22c55e",
-  wontfix: "#64748b",
-};
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { AXIS_TICK, ChartTable, OpsTooltip, SERIES } from "./chartTheme";
 
 interface Props {
   stats: {
@@ -29,6 +15,22 @@ interface Props {
   };
 }
 
+const PRIORITY_TONE: Record<string, string> = {
+  urgent: "is-danger",
+  high: "is-warn",
+  normal: "is-info",
+  low: "",
+};
+
+/**
+ * Where the period's escalations stand.
+ *
+ * One series — a count per status — so one hue. The previous version painted
+ * open red, assigned orange and resolved green, which reads as a severity
+ * scale: it implied that having open tickets is an error state rather than the
+ * normal condition of a queue. The status word on the axis is the label; the
+ * bar length is the number.
+ */
 export default function TicketStatusChart({ stats }: Props) {
   const statusData = [
     { name: "Open", value: stats.open },
@@ -43,31 +45,42 @@ export default function TicketStatusChart({ stats }: Props) {
   }));
 
   return (
-    <div className="chart-card">
-      <h4 className="chart-title">Escalation Queue ({stats.total} tickets)</h4>
+    <div className="ops-chart-card">
+      <div className="ops-chart-head">
+        <h3 className="ops-chart-title">Escalations by status</h3>
+        <span className="ops-chart-sub">{stats.total} raised in the period</span>
+      </div>
       <ResponsiveContainer width="100%" height={180}>
-        <BarChart data={statusData} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-          <XAxis dataKey="name" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
-          <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} />
-          <Tooltip
-            contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
+        <BarChart data={statusData} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
+          <XAxis dataKey="name" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: "var(--ops-grid)" }} />
+          <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={36} allowDecimals={false} />
+          <Tooltip cursor={{ fill: "var(--ops-row-hover)" }} content={<OpsTooltip />} />
+          <Bar
+            dataKey="value"
+            name="Escalations"
+            fill={SERIES[0]}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={64}
+            isAnimationActive={false}
           />
-          <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-            {statusData.map((d) => (
-              <Cell key={d.name} fill={STATUS_COLORS[d.name.toLowerCase().replace("'", "")] ?? "#64748b"} />
-            ))}
-          </Bar>
         </BarChart>
       </ResponsiveContainer>
       {priorityData.length > 0 && (
-        <div className="priority-pills">
+        <ul className="ops-legend">
           {priorityData.map((p) => (
-            <span key={p.name} className={`priority-pill priority-${p.name}`}>
-              {p.name}: {p.value}
-            </span>
+            <li key={p.name}>
+              <span className={`ops-chip ${PRIORITY_TONE[p.name] ?? ""}`}>
+                {p.name}: {p.value}
+              </span>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
+      <ChartTable
+        caption="Escalations by status"
+        columns={["Status", "Escalations"]}
+        rows={statusData.map((d) => [d.name, d.value])}
+      />
     </div>
   );
 }
