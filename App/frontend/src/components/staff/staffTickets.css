@@ -1,38 +1,45 @@
-/* Shared workbench pieces for /agent and /admin/tickets.
-   Tokens from globals.css so both themes stay readable. */
+/* Shared workbench pieces for /agent and /admin/tickets — the queue row, the
+   case, the composer and the live-arrival strip. Sizes and colours come from
+   styles/ops/tokens.css, so the priority language here is the same one the
+   overview uses rather than a third copy of the same rgba() values. */
+
+/* Queue row ---------------------------------------------------------------- */
 
 .st-row {
   width: 100%;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 62px 1fr auto;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-0);
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
+  gap: var(--ops-space-3);
+  padding: 10px var(--ops-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--ops-radius-sm);
+  background: transparent;
   color: inherit;
   cursor: pointer;
   text-align: left;
+  transition: background var(--ops-dur-fast) var(--ops-ease),
+    border-color var(--ops-dur-fast) var(--ops-ease);
 }
 
 .st-row:hover {
-  background: var(--surface-2);
+  background: var(--ops-row-hover);
 }
 
+/* The selected case is named by a filled surface *and* an accent edge — on a
+   dense list a tint alone is easy to lose, especially in light mode. */
 .st-row.is-selected {
-  background: var(--surface-3);
-  border-color: var(--accent);
+  background: var(--ops-row-active);
+  border-color: var(--ops-line-strong);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .st-row:focus-visible,
-.st-btn:focus-visible,
 .st-chip:focus-visible,
 .st-field textarea:focus-visible,
-.st-field input:focus-visible,
-.st-search:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.st-field input:focus-visible {
+  outline: var(--ops-focus-ring) solid var(--ops-focus);
+  outline-offset: var(--ops-focus-gap);
 }
 
 .st-row-body {
@@ -43,8 +50,8 @@
 }
 
 .st-row-topic {
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
   color: var(--text-0);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -53,7 +60,7 @@
 
 .st-row-query,
 .st-row-meta {
-  font-size: 11.5px;
+  font-size: var(--ops-text-2xs);
   color: var(--text-3);
 }
 
@@ -65,106 +72,147 @@
 
 .st-row-meta {
   display: flex;
-  gap: 8px;
+  gap: var(--ops-space-2);
   flex-wrap: wrap;
 }
 
+/* Only the team name is title-cased; an assignee is an email address. */
+.st-row-team {
+  text-transform: capitalize;
+}
+
+.st-row-unclaimed {
+  color: var(--ops-warn);
+  font-weight: var(--ops-weight-semi);
+}
+
 .st-row-wait {
-  font-size: 12px;
-  font-weight: 650;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--text-2);
 }
 
-.st-row-wait.is-warn {
-  color: var(--warning);
-}
+.st-row-wait.is-warn   { color: var(--ops-warn); }
+.st-row-wait.is-breach { color: var(--ops-bad); }
 
-.st-row-wait.is-breach {
-  color: var(--danger);
-}
+/* Priority + status pills -------------------------------------------------- */
 
 .st-pri,
 .st-pill {
   display: inline-block;
   padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 700;
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row-active);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: var(--ops-weight-bold);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   white-space: nowrap;
+  text-align: center;
+}
+
+/* Full width only inside a queue row, where it owns a fixed column. In the
+   case header it is one pill among several and sizes to its label. */
+.st-row .st-pri {
+  width: 100%;
 }
 
 .st-pri-urgent {
-  background: rgba(251, 113, 133, 0.16);
-  border: 1px solid rgba(251, 113, 133, 0.42);
-  color: var(--danger);
+  background: var(--ops-bad-fill);
+  border-color: var(--ops-bad-line);
+  color: var(--ops-bad-ink);
 }
+
 .st-pri-high {
-  background: rgba(251, 191, 36, 0.16);
-  border: 1px solid rgba(251, 191, 36, 0.42);
-  color: var(--warning);
-}
-.st-pri-normal,
-.st-pri-low,
-.st-pill {
-  background: var(--surface-3);
-  border: 1px solid var(--border-1);
-  color: var(--text-2);
+  background: var(--ops-warn-fill);
+  border-color: var(--ops-warn-line);
+  color: var(--ops-warn-ink);
 }
 
 .st-pill-warm {
-  background: rgba(124, 58, 237, 0.12);
-  border-color: rgba(124, 58, 237, 0.38);
+  background: color-mix(in srgb, var(--ops-series-7) var(--ops-tint), transparent);
+  border-color: color-mix(in srgb, var(--ops-series-7) 40%, transparent);
   color: var(--text-1);
 }
 
 .st-pill-sentiment {
-  background: rgba(251, 191, 36, 0.14);
-  border-color: rgba(251, 191, 36, 0.38);
-  color: var(--warning);
+  background: var(--ops-warn-fill);
+  border-color: var(--ops-warn-line);
+  color: var(--ops-warn-ink);
 }
+
+/* Case --------------------------------------------------------------------- */
 
 .st-case {
   display: grid;
-  gap: 16px;
+  gap: var(--ops-space-4);
 }
 
+.st-case-loading {
+  display: grid;
+  gap: var(--ops-space-3);
+}
+
+/* Sticky: on a long transcript the controls were the first thing to scroll
+   away, which is backwards. The pane it sticks inside owns the scroll
+   (.ag-detail / .tickets-detail). */
 .st-case-head {
+  position: sticky;
+  top: calc(var(--ops-space-5) * -1);
+  z-index: 2;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--ops-space-3);
   flex-wrap: wrap;
+  margin: calc(var(--ops-space-5) * -1) calc(var(--ops-space-5) * -1) 0;
+  padding: var(--ops-space-4) var(--ops-space-5) var(--ops-space-3);
+  background: var(--ops-panel);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--ops-hairline);
+}
+
+.st-case-headline {
+  min-width: 0;
 }
 
 .st-case-head h2 {
-  margin: 0 0 8px;
-  font-size: 17px;
-  font-weight: 650;
+  margin: 0 0 var(--ops-space-2);
+  font-size: var(--ops-text-md);
+  font-weight: var(--ops-weight-semi);
+  line-height: var(--ops-lh-snug);
   color: var(--text-0);
+}
+
+.st-back {
+  margin-bottom: var(--ops-space-2);
 }
 
 .st-case-pills {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
   margin: 0;
 }
 
 .st-case-wait {
-  font-size: 12px;
+  flex: none;
+  font-size: var(--ops-text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
 
+/* Handoff brief. "Warm" means brief yourself before engaging, so it takes the
+   gold edge rather than being one more grey block. */
 .st-brief {
-  padding: 14px 16px;
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
+  padding: var(--ops-space-4);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-row);
 }
 
 .st-brief.warm {
@@ -173,40 +221,59 @@
 
 .st-brief-label {
   display: block;
-  margin-bottom: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  margin-bottom: var(--ops-space-2);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-bold);
+  letter-spacing: var(--ops-tracking-caps);
   text-transform: uppercase;
   color: var(--text-3);
 }
 
+.st-brief-label span {
+  font-weight: var(--ops-weight-normal);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .st-brief p,
 .st-brief li {
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
   color: var(--text-1);
 }
 
 .st-brief p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--ops-space-2);
+}
+
+.st-brief strong {
+  font-size: var(--ops-text-xs);
+  color: var(--text-2);
 }
 
 .st-brief ul {
-  margin: 6px 0 0;
+  margin: var(--ops-space-1) 0 0;
   padding-left: 18px;
+  display: grid;
+  gap: 3px;
 }
 
+/* Transcript — full and unedited, on purpose. */
+
 .st-transcript {
-  max-height: 36vh;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 38vh;
   overflow-y: auto;
-  border: 1px solid var(--border-0);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-row);
 }
 
 .st-turn {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-0);
+  padding: var(--ops-space-3);
+  border-bottom: 1px solid var(--ops-hairline);
 }
 
 .st-turn:last-child {
@@ -214,200 +281,261 @@
 }
 
 .st-turn p {
-  margin: 0 0 6px;
-  font-size: 13px;
-  line-height: 1.55;
+  margin: 0 0 var(--ops-space-2);
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
   color: var(--text-1);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
+/* A 2px rule beside each speaker instead of two indistinguishable paragraphs —
+   who said what is the first thing an officer reads for. */
+.st-turn p {
+  padding-left: var(--ops-space-3);
+  border-left: 2px solid var(--ops-line);
+}
+
+.st-turn-bot {
+  color: var(--text-2);
+  border-left-color: color-mix(in srgb, var(--ops-series-1) 55%, transparent);
+}
+
 .st-turn-who {
   display: block;
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-weight: var(--ops-weight-bold);
+  letter-spacing: var(--ops-tracking-caps);
   text-transform: uppercase;
   color: var(--text-3);
   margin-bottom: 2px;
 }
 
-.st-turn-bot {
-  color: var(--text-2);
+.st-turn-meta {
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
 }
+
+/* Composer ----------------------------------------------------------------- */
 
 .st-composer {
   display: grid;
-  gap: 12px;
-  padding-top: 4px;
-  border-top: 1px solid var(--border-0);
+  gap: var(--ops-space-3);
+  padding-top: var(--ops-space-4);
+  border-top: 1px solid var(--ops-hairline);
+}
+
+.st-macros {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ops-space-1);
+}
+
+.st-macros-label {
+  margin-right: var(--ops-space-1);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.st-chip {
+  padding: 4px 10px;
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  cursor: pointer;
+  transition: background var(--ops-dur-fast) var(--ops-ease), color var(--ops-dur-fast) var(--ops-ease);
+}
+
+.st-chip:hover {
+  background: var(--ops-row-hover);
+  color: var(--text-0);
 }
 
 .st-field {
   display: block;
+  padding-left: var(--ops-space-3);
+  border-left: 3px solid var(--ops-line);
 }
+
+/* One of these reaches the taxpayer and the other never does. The edge colour
+   carries that difference at a glance; the label states it in words. */
+.st-field.is-outbound { border-left-color: var(--ops-series-1); }
+.st-field.is-internal { border-left-color: var(--text-3); }
 
 .st-field-label {
   display: block;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 650;
+  margin-bottom: var(--ops-space-1);
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
   color: var(--text-1);
 }
 
 .st-field-label em {
   display: block;
   font-style: normal;
-  font-weight: 500;
-  font-size: 11px;
+  font-weight: var(--ops-weight-normal);
+  font-size: var(--ops-text-2xs);
   color: var(--text-3);
   margin-top: 1px;
-}
-
-.st-field textarea,
-.st-field input {
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-1);
-  background: var(--surface-2);
-  color: var(--text-0);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.st-field textarea {
-  resize: vertical;
 }
 
 .st-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ops-space-2);
   flex-wrap: wrap;
 }
 
-.st-btn {
-  padding: 9px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 650;
-  cursor: pointer;
-  border: 1px solid var(--border-2);
-  background: var(--surface-3);
-  color: var(--text-0);
+.st-status {
+  display: grid;
+  gap: var(--ops-space-1);
+  justify-items: start;
 }
 
-.st-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.st-btn-primary {
-  background: var(--grad-primary);
-  border-color: transparent;
-  color: #fff;
-}
-
-.st-btn.is-current {
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.st-stepper {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.st-stepper button {
+  text-transform: none;
 }
 
 .st-sent,
-.st-note,
-.st-save-ok {
+.st-note {
   margin: 0;
-  font-size: 12px;
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-row);
+  border: 1px solid var(--ops-hairline);
+  font-size: var(--ops-text-xs);
+  line-height: var(--ops-lh-normal);
   color: var(--text-2);
 }
 
-.st-save-ok {
-  color: var(--success);
+.st-note {
+  border-left: 3px solid var(--text-3);
 }
 
-.st-save-err {
-  font-size: 12px;
-  color: var(--danger);
-}
+.st-save-ok  { font-size: var(--ops-text-xs); color: var(--ops-good); }
+.st-save-err { font-size: var(--ops-text-xs); color: var(--ops-bad); }
 
 .st-empty {
   margin: 0;
-  padding: 18px 4px;
-  font-size: 13px;
+  padding: var(--ops-space-4) var(--ops-space-1);
+  font-size: var(--ops-text-sm);
   color: var(--text-3);
 }
 
 .st-readonly {
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  font-size: 12.5px;
+  padding: var(--ops-space-3);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-row-hover);
+  border: 1px solid var(--ops-hairline);
+  font-size: var(--ops-text-xs);
   color: var(--text-2);
-}
-
-.st-kbd {
-  font-size: 11px;
-  color: var(--text-3);
-}
-
-.st-macros {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.st-chip {
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border-1);
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 .st-collision {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
   margin: 0;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  border: 1px solid var(--border-1);
-  font-size: 12.5px;
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-info-fill);
+  border: 1px solid var(--ops-info-line);
+  font-size: var(--ops-text-xs);
   color: var(--text-1);
+}
+
+.st-collision.is-locked {
+  background: var(--ops-warn-fill);
+  border-color: var(--ops-warn-line);
+}
+
+.st-collision-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ops-info);
+}
+
+/* Live arrivals ------------------------------------------------------------ */
+
+/* The region is always in the DOM so `aria-live` has somewhere to announce
+   into; the strip inside it is only there when something arrived. */
+.st-live-region {
+  position: relative;
 }
 
 .st-live {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 20px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border-0);
-  font-size: 12px;
-  color: var(--text-2);
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-2) var(--ops-space-5);
+  background: var(--ops-info-fill);
+  border-bottom: 1px solid var(--ops-info-line);
+  font-size: var(--ops-text-xs);
+  color: var(--text-1);
+  animation: st-live-in var(--ops-dur-base) var(--ops-ease);
 }
 
 .st-live a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ops-space-2);
   color: var(--text-0);
-  font-weight: 650;
+  font-weight: var(--ops-weight-semi);
   text-decoration: none;
 }
 
-.st-live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--text-3);
+.st-live a:hover {
+  text-decoration: underline;
 }
 
-.st-live-dot.is-on {
-  background: var(--success);
+.st-live-dismiss {
+  margin-left: auto;
+}
+
+.st-live-pulse {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ops-info);
+  box-shadow: 0 0 0 0 var(--ops-info-line);
+  animation: st-live-pulse 2s var(--ops-ease) infinite;
+}
+
+@keyframes st-live-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes st-live-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--ops-info-line); }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-live { animation: none; }
+  .st-live-pulse { animation: none; }
+}
+
+@media (max-width: 560px) {
+  .st-case-head {
+    position: static;
+    margin: 0;
+    padding: 0 0 var(--ops-space-3);
+    backdrop-filter: none;
+  }
+  .st-live {
+    padding: var(--ops-space-2) var(--ops-space-3);
+  }
 }

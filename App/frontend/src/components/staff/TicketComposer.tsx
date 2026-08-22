@@ -61,16 +61,18 @@ export function TicketComposer({
     <div className="st-composer">
       {others.length > 0 ? (
         <p className="st-collision" role="status">
+          <span className="st-collision-dot" aria-hidden="true" />
           Also viewing: {others.join(", ")}
         </p>
       ) : null}
       {locked ? (
-        <p className="st-collision" role="alert">
+        <p className="st-collision is-locked" role="alert">
           Assigned to {ticket.assignee}. Assign to me before you reply so two
           officers do not write to the same taxpayer.
         </p>
       ) : null}
       <div className="st-macros" role="group" aria-label="Canned replies">
+        <span className="st-macros-label">Insert</span>
         {TICKET_MACROS.map((macro) => (
           <button
             key={macro.id}
@@ -82,12 +84,16 @@ export function TicketComposer({
           </button>
         ))}
       </div>
-      <label className="st-field">
+      {/* Two fields, never one. One reaches the taxpayer and one does not, so
+          the difference is stated on the label rather than left to be
+          remembered — and shown, by the edge each field carries. */}
+      <label className="st-field is-outbound">
         <span className="st-field-label">
           Reply to the taxpayer
           <em>They see this on their next turn, exactly as written.</em>
         </span>
         <textarea
+          className="ops-textarea"
           data-ticket-reply="1"
           rows={4}
           value={reply}
@@ -97,12 +103,13 @@ export function TicketComposer({
         />
       </label>
 
-      <label className="st-field">
+      <label className="st-field is-internal">
         <span className="st-field-label">
           Internal note
           <em>Staff only. Never shown to the taxpayer.</em>
         </span>
         <textarea
+          className="ops-textarea"
           rows={2}
           value={note}
           placeholder="Context for the next officer…"
@@ -114,7 +121,7 @@ export function TicketComposer({
       <div className="st-actions">
         <button
           type="button"
-          className="st-btn st-btn-primary"
+          className="ops-btn is-primary"
           disabled={!reply.trim() || pending || locked}
           onClick={() => sendReply(false)}
         >
@@ -122,7 +129,7 @@ export function TicketComposer({
         </button>
         <button
           type="button"
-          className="st-btn"
+          className="ops-btn"
           disabled={pending || locked || (!reply.trim() && !note.trim())}
           onClick={() => sendReply(true)}
         >
@@ -130,7 +137,7 @@ export function TicketComposer({
         </button>
         <button
           type="button"
-          className="st-btn"
+          className="ops-btn"
           disabled={!note.trim() || pending}
           onClick={() => {
             onPatch({ staff_note: note.trim() });
@@ -142,7 +149,7 @@ export function TicketComposer({
         {handle ? (
           <button
             type="button"
-            className="st-btn"
+            className="ops-btn"
             disabled={pending || Boolean(mine)}
             onClick={() =>
               onPatch({
@@ -174,14 +181,14 @@ export function TicketComposer({
       ) : null}
       {ticket.staff_note ? <p className="st-note">{ticket.staff_note}</p> : null}
 
-      <div>
+      <div className="st-status">
         <span className="st-field-label">Status</span>
-        <div className="st-stepper" role="group" aria-label="Ticket status">
+        <div className="ops-segmented st-stepper" role="group" aria-label="Ticket status">
           {STATUSES.map((status) => (
             <button
               key={status}
               type="button"
-              className={`st-btn${ticket.status === status ? " is-current" : ""}`}
+              className={ticket.status === status ? "is-active" : undefined}
               disabled={ticket.status === status || pending}
               aria-pressed={ticket.status === status}
               onClick={() => onPatch({ status })}
