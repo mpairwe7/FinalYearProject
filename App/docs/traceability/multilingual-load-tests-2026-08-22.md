@@ -311,6 +311,61 @@ python3 tests/load/ngrok_multilang_suite.py --phase load,spike,stress,volume \
 
 Flush `db0` between correctness runs (§6d).
 
+## 8b. Rerun of the 2026-08-21 benchmark suite
+
+The four language-relevant scripts behind the 2026-08-21 `Results/metrics`
+cluster were rerun after the fixes above. Two findings about the *harness*
+matter more than the numbers.
+
+**The 2026-08-21 speech benchmark was measuring mocks, not models.** Its own
+telemetry proves it: peak GPU VRAM **5905 MiB** — exactly this box's
+other-tenant baseline, i.e. the run allocated nothing — at **30.27 W**, an
+idle card. The rerun peaks at **23899 MiB / 116.26 W**. So the headline
+figures it published (131 RPS soak, 355 ms p50) were an `ASR
+backend=mock` path, not Whisper-large-v3-SALT. Real local models on GPU
+measure **1.8 RPS / 29.4 s p50** for the same soak. The old numbers should
+not be quoted as speech capacity.
+
+The cause is the same CUDA-13 wheel documented in §3: the host `.venv` had
+`torch 2.13.0+cu130` against a 12.x driver, so `cuda.is_available()` was
+False there too. Fixed the same way (`torch`/`torchaudio` 2.11.0+cu128).
+
+**`cleanup_mpairwe7_gpu_processes()` killed its own caller.** The benchmarks
+call it in a phase that runs *before* they write their JSON report, and a
+benchmark holding models on the GPU is itself a `~/Mpairwe7` GPU process — so
+it SIGTERMed the run that invoked it. The log ended at "ChatModel shut down."
+with no error and no report. This never surfaced while those runs were
+accidentally CPU-only, because a CPU process never appears in nvidia-smi's
+compute-app list. Fixed to skip the current process and its ancestors.
+
+| Suite | Result |
+|---|---|
+| `multilingual_faq_accuracy_stress` | all 6 phases, report saved. 100% accuracy through c=250, a 250-burst and a 1,500-query soak, 0 errors |
+| `single_gpu_multilingual_speech_stress` | all 6 phases, report saved, now on real GPU models |
+| `load_stress_voice_isolation_test` | all 6 phases, report saved, 0 errors |
+| `docker_gpu_multilingual_stress` | all 6 phases against a live container on :8090, report saved. Spike 213 RPS, soak 209 RPS, tenant isolation 600 mixed ops 0 errors |
+
+Keyword-coverage change in the FAQ suite — the metric that tracks how well an
+answer is grounded in the corpus:
+
+| locale | before | after |
+|---|---|---|
+| en | 0.56 | 0.32 * |
+| lg | 0.16 | **0.24** |
+| sw | 0.08 | **0.28** |
+
+\* not comparable: English was served from a warm semantic cache in the rerun
+(p50 **24 ms**, and Redis reported 4,263 keyspace hits), so those answers were
+cached strings rather than fresh generations. lg/sw were not cached (8.9 s and
+10.1 s) and improved genuinely. Their *latency* rose from ~620 ms because the
+baseline was abstaining instantly rather than answering — fast because it was
+doing no work.
+
+Two suite-level caveats worth carrying forward: the staff bearer token these
+scripts send is the container's `INDEX_API_KEY`, and Sunbird's daily quota was
+exhausted during this session, so the reruns forced the local speech/MT tiers
+by clearing the Sunbird tokens.
+
 ## 9. Still open
 
 - Swahili "EFRIS ni nini" still expands the acronym rather than translating
