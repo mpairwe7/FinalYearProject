@@ -1,6 +1,9 @@
 import './globals.css';
 // chatv2 redesign layer — scoped under `.chatv2`, must load after globals.css.
 import '../styles/chatv2/index.css';
+// Operations console layer — scoped `.ops-*`, must load after globals.css so its
+// tokens can build on the theme tokens defined there.
+import '../styles/ops/index.css';
 import type { Metadata, Viewport } from 'next';
 import React from 'react';
 import ConsentBanner from '../components/ConsentBanner';
