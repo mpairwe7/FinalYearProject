@@ -419,3 +419,13 @@ with a driver new enough for `torch==2.12.1` — the same, already-documented
 prerequisite as everywhere else in this file. Re-run step 4 against the
 image directly (not the separate venv) the next time this is verified on a
 host that actually has one.
+
+### Full-stack live verification — GPU-pinned, ngrok-exposed (2026-08-22)
+
+Both tiers above have now been brought up together with the rest of the
+stack (Redis, Qdrant, local Sunflower-14B-FP8 via vLLM), pinned to a single
+named GPU, and reached over the project's public ngrok tunnel — not just
+verified in isolation as in the two runs above. Full record, including the
+new `App/docker-compose.gpu-salt.yml` overlay and a real (not dummy-token)
+Spark-TTS-SALT `/v1/tts` request's timing under CPU fallback:
+`App/docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`.

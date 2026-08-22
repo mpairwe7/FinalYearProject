@@ -1641,6 +1641,46 @@ curl -sS http://127.0.0.1:8083/health
 curl -sS http://127.0.0.1:8083/ready
 ```
 
+**Option B (GPU + SALT speech) — Sunflower-14B-FP8 with Whisper-SALT +
+Spark-TTS-SALT baked in, pinned to a single GPU, ngrok-exposed:**
+
+```bash
+# From App/
+GPU_ID=2 docker compose \
+  -f docker-compose.yml -f docker-compose.local-sunflower.yml \
+  -f docker-compose.gpu-salt.yml up -d --build
+```
+
+Same as Option B, plus: builds `api` from `Dockerfile.gpu` (repo root)
+instead of the base `Dockerfile` so Spark-TTS-SALT's BiCodec checkout
+(`SPARK_TTS_REPO_DIR`) is present, and pins both GPU consumers (`api`,
+`vllm`) to `${GPU_ID:-2}` instead of whatever the base files default to.
+Override `GPU_ID` to target a different free card.
+
+Both SALT tiers (`Sunbird/asr-whisper-large-v3-salt`,
+`Sunbird/spark-tts-salt`) are on by default and gated on HF — the project's
+existing `HF_TOKEN` already has access. `Dockerfile.gpu` bakes
+`SPARK_TTS_DEVICE=cuda`/`WHISPER_SALT_DEVICE=cuda`, but
+`docker-compose.gpu-salt.yml` overrides both to `cpu`: on a host whose
+NVIDIA driver predates the CUDA generation `torch==2.12.1`'s wheel bundles
+(driver reporting CUDA 12.2 — confirmed on this project's sandbox), `cuda`
+raises `RuntimeError: driver too old` at load instead of degrading
+gracefully, so both tiers are forced into their documented CPU-fallback
+mode rather than disabled. **CPU fallback is slow** — a real non-English
+`/v1/tts` request measured ~2.5–3 minutes end to end (model load + CPU
+generation); size client timeouts accordingly. Full verified run, including
+the driver-mismatch root cause and the exact request timing:
+[`docs/runbooks/salt-speech-backends.md`](../docs/runbooks/salt-speech-backends.md#full-stack-live-verification--gpu-pinned-ngrok-exposed-2026-08-22),
+[`docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`](../docs/traceability/local-gpu-salt-ngrok-2026-08-22.md).
+
+The `bge-m3` dense-retrieval model and reranker are not always present in
+the shared read-only NAS HF cache the base file mounts
+(`HF_HUB_OFFLINE=1`) — when absent, dense retrieval silently falls back to
+Cloudflare Vectorize instead of local Qdrant. `docker-compose.gpu-salt.yml`
+remounts that same NAS path read-write and sets `HF_HUB_OFFLINE=0` for
+`api` only, so the one-time fetch persists to the shared cache for future
+runs instead of re-downloading every time.
+
 **Option C — manual vLLM inference (Qwen3-8B) with full voice pipeline:**
 
 ```bash
@@ -1969,6 +2009,13 @@ curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/ti
 | Qdrant | 6333 | CPU | dense + sparse retrieval index |
 | Redis | internal 6379 | CPU | semantic cache and distributed rate-limit storage |
 | ngrok | public HTTPS -> 3032 | — | silent background tunnel to the frontend; no GPU is used by ngrok |
+
+**GPU + SALT speech variant** (`docker-compose.gpu-salt.yml`, see Option B
+above): `vllm` and `api` both pin to a single `GPU_ID` (default 2) instead
+of the default split above; `api` builds from `Dockerfile.gpu` and runs
+both Sunbird SALT speech tiers under CPU fallback on hosts with a
+pre-CUDA-13-generation driver. Verified 2026-08-22:
+[`docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`](../docs/traceability/local-gpu-salt-ngrok-2026-08-22.md).
 
 Current latency note: if `LLM_BACKEND=local`, generation runs through the
 single-process HF Transformers path and is serialized for LoRA adapter safety.

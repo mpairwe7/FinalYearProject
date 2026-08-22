@@ -1,0 +1,53 @@
+# Local GPU overlay — Sunbird SALT speech backends baked in.
+#
+# Layers on top of docker-compose.yml + docker-compose.local-sunflower.yml:
+# builds `api` from Dockerfile.gpu (repo root) instead of the base Dockerfile
+# so Spark-TTS-SALT's BiCodec checkout is present (SPARK_TTS_REPO_DIR),
+# and forces both SALT tiers' device to cpu — Dockerfile.gpu bakes
+# SPARK_TTS_DEVICE=cuda/WHISPER_SALT_DEVICE=cuda, which on a host whose
+# driver doesn't match the pinned torch build (see
+# docs/runbooks/salt-speech-backends.md) raises at load() instead of
+# gracefully degrading. Autodetection (leaving the var unset) would resolve
+# to cpu anyway on such a host; setting it explicitly here just documents
+# that intent instead of relying on it silently.
+#
+#   cd App && GPU_ID=2 docker compose \
+#     -f docker-compose.yml -f docker-compose.local-sunflower.yml \
+#     -f docker-compose.gpu-salt.yml up -d --build
+services:
+  api:
+    build:
+      dockerfile: Dockerfile.gpu
+    image: ${DOCKER_IMAGE_API:-app-api}:gpu
+    environment:
+      - WHISPER_SALT_DEVICE=cpu
+      - SPARK_TTS_DEVICE=cpu
+      - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
+      # BAAI/bge-m3 (dense retriever) and the reranker are not in the NAS
+      # cache — HF_HUB_OFFLINE=1 (base file) silently pushed dense retrieval
+      # to the Cloudflare Vectorize fallback instead of local Qdrant. Allow
+      # one-time network fetch; the NAS mount below is read-write so it
+      # persists for the next run instead of re-downloading every time.
+      - HF_HUB_OFFLINE=0
+    volumes:
+      - type: bind
+        source: /mnt/nas1/caches/huggingface_cache
+        target: /app/hf_cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_ID:-2}"]
+              capabilities: [gpu]
+
+  vllm:
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_ID:-2}"]
+              capabilities: [gpu]
