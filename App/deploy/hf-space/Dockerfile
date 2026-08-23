@@ -18,6 +18,14 @@
 # verify-embedded-stores.sh when present and structural checks otherwise, so it
 # works on any pin.
 #
+# sha-72518c0 updates the staff operations console and translation grounding.
+#
+# - Collapsible sidebar with persistent preferences in the staff console.
+# - FAQ ground truth binding to English form for multilingual retrieval (lg/sw).
+# - MT one-shot exemplar and prompt shape compliance with Sunflower-14B.
+# - Lingua prioritized before custom dialect heuristics.
+# - Mock TTS explicit backend restore.
+#
 # sha-7a18ff0 translates the interface into Luganda and Swahili.
 #
 # The assistant already answered in all three languages — the backend keys
@@ -746,11 +754,11 @@
 # "sole trader"), prompted translation guards its own input, and the ASR chain
 # distinguishes hearing nothing from every backend failing.
 #
-# All CI green on this commit; merged to main as 7a18ff08 (PR #354).
+# All CI green on this commit; merged to dev as 72518c0f.
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-7a18ff0
+FROM landwind/ura-chatbot:sha-72518c0
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.
