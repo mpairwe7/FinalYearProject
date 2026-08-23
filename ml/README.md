@@ -738,10 +738,10 @@ package versions. Written alongside every artefact for full audit trail.
 
 ```bash
 # Login
-huggingface-cli login
+hf auth login
 
 # Upload model
-huggingface-cli upload \
+hf upload \
     your-username/ura-tax-assistant-gemma \
     artifacts/ura-gemma-finetuned/final
 ```

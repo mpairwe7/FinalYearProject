@@ -815,13 +815,25 @@ jobs:
 
       - name: Install data-augmentation dependencies
         run: |
-          # Core pipeline
+          # ONE resolve, and numpy pinned.
+          #
+          # This was two `uv pip install` calls, and the second was free to move
+          # numpy out from under the first. It did: `pandas>=1.5,<2.0` resolves
+          # to pandas 1.5.3, whose C extensions are built against the numpy 1.x
+          # ABI, and the classifier step then pulled numpy 2.x. Importing pandas
+          # afterwards died with
+          #   ValueError: numpy.dtype size changed, may indicate binary
+          #   incompatibility. Expected 96 from C header, got 88 from PyObject
+          # in train_quality_classifier.py's load_csv_faqs — reproduced exactly
+          # on python 3.11 before this change.
+          #
+          # 1.26.4 is not a new number: the sibling jobs in this workflow
+          # already pin it, so every job in the pipeline now agrees on the ABI
+          # rather than three of them agreeing and this one drifting.
           uv pip install --system \
-            'pandas>=1.5,<2.0' 'pydantic>=2.5' pyyaml \
+            'numpy==1.26.4' 'pandas>=1.5,<2.0' 'pydantic>=2.5' pyyaml \
             'datasketch==1.6.5' 'pyarrow==18.1.0' ftfy \
-            pymupdf4llm pymupdf
-          # Quality classifier (FineWeb-Edu style)
-          uv pip install --system \
+            pymupdf4llm pymupdf \
             'scikit-learn>=1.3' joblib 'sentence-transformers>=3.0' \
             --extra-index-url https://download.pytorch.org/whl/cpu
 
