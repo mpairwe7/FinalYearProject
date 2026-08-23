@@ -1124,7 +1124,32 @@ jobs:
       - name: Install evaluation dependencies
         run: uv pip install --system -r requirements.txt
 
+      # There is nothing to evaluate on an ordinary CI run, and saying so is
+      # better than dying on a missing file.
+      #
+      # `train-model` is a DRY RUN by name and by flag: it validates the
+      # fine-tuning config and writes no weights. The only thing that produces
+      # Model/tag_classifier.joblib is ml/pipelines/train.py, which no workflow
+      # invokes, and Model/*.joblib is gitignored — so the artifact this job
+      # downloads can never contain a classifier. It failed with
+      #   FileNotFoundError: 'Model/tag_classifier.joblib'
+      # the first time it was allowed to run at all; before that it sat skipped
+      # behind a permanently-failing upstream job, which is why nobody saw it.
+      #
+      # Guarding on the file rather than deleting the job keeps it honest: wire
+      # real training in and this evaluates for real, with no workflow edit.
+      - name: Check for a trained model
+        id: model
+        run: |
+          if [ -f Model/tag_classifier.joblib ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No trained classifier — upstream training is a dry run, so evaluation and its quality gates are skipped."
+          fi
+
       - name: Run model evaluation
+        if: steps.model.outputs.present == 'true'
         run: |
           mkdir -p Results/metrics Results/reports
           python ml/pipelines/evaluate.py \
@@ -1132,12 +1157,14 @@ jobs:
             --output-dir Results
 
       - name: Upload evaluation results
+        if: steps.model.outputs.present == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: evaluation-results
           path: Results/
 
       - name: Check model quality gates
+        if: steps.model.outputs.present == 'true'
         run: python ml/pipelines/quality_gates.py
 
   # ============================================
