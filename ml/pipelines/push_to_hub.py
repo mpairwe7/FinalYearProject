@@ -48,6 +48,25 @@ def push_to_hub(
     return url
 
 
+def _metric(value: object) -> str:
+    """Render a metric for the model card: 4 decimal places, or ``N/A``.
+
+    The card used to inline this as
+    ``{metrics.get('test_accuracy', 'N/A'):.4f if isinstance(...) else 'N/A'}``.
+    That conditional sits in the *format-spec* position, where Python does not
+    evaluate it — it is taken as a literal spec string, so the card blew up with
+    ``ValueError: Invalid format specifier`` and the whole Hub push failed
+    before it uploaded anything. Formatting has to happen before the f-string,
+    not inside its spec.
+
+    bool is excluded deliberately: it is a subclass of int, and ``True`` would
+    otherwise render as ``1.0000``.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "N/A"
+    return f"{value:.4f}"
+
+
 def create_model_card(model_dir: Path, repo_id: str) -> str:
     """Generate HF model card."""
     # Load metrics if available
@@ -93,10 +112,10 @@ This model classifies Uganda Revenue Authority (URA) queries into relevant topic
 
 | Metric | Value |
 |--------|-------|
-| Accuracy | {metrics.get('test_accuracy', 'N/A'):.4f if isinstance(metrics.get('test_accuracy'), float) else 'N/A'} |
-| F1 (macro) | {metrics.get('test_f1_macro', 'N/A'):.4f if isinstance(metrics.get('test_f1_macro'), float) else 'N/A'} |
-| Precision | {metrics.get('test_precision', 'N/A'):.4f if isinstance(metrics.get('test_precision'), float) else 'N/A'} |
-| Recall | {metrics.get('test_recall', 'N/A'):.4f if isinstance(metrics.get('test_recall'), float) else 'N/A'} |
+| Accuracy | {_metric(metrics.get('test_accuracy'))} |
+| F1 (macro) | {_metric(metrics.get('test_f1_macro'))} |
+| Precision | {_metric(metrics.get('test_precision'))} |
+| Recall | {_metric(metrics.get('test_recall'))} |
 
 ## Available Formats
 
