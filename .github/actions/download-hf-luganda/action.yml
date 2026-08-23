@@ -14,7 +14,8 @@ runs:
   steps:
     - name: Install HuggingFace dependencies
       shell: bash
-      run: uv pip install --system --quiet huggingface_hub[cli] datasets pandas
+      # No [cli] extra: nothing here shells out to the CLI any more (see below).
+      run: uv pip install --system --quiet huggingface_hub datasets pandas
 
     - name: Download Luganda-English parallel corpus
       shell: bash
@@ -22,7 +23,18 @@ runs:
         HF_TOKEN: ${{ inputs.hf-token }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
       run: |
-        huggingface-cli login --token "$HF_TOKEN"
+        # No `huggingface-cli login` here. That command was renamed to `hf` in
+        # huggingface_hub 1.0 and the old name now exits non-zero with
+        # "`huggingface-cli` is deprecated and no longer works. Use `hf`
+        # instead." — which is what failed this job on every push to main,
+        # printing the `hf` help text into the log before the download could
+        # even start.
+        #
+        # Swapping in `hf auth login` would work, but writing a token file is
+        # not needed at all: huggingface_hub resolves HF_TOKEN from the
+        # environment (get_token() reads it directly), and it is already
+        # exported above, so `datasets` authenticates without a login step.
+        # Dropping the call removes the CLI-name coupling rather than moving it.
         python3 << 'PYEOF'
         import os
         from datasets import load_dataset

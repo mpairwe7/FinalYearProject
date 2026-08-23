@@ -427,7 +427,7 @@ echo "   Training data:   $TRAINING_DATA_DIR/ (messages + parquet + manifest + d
 echo ""
 echo "Next steps:"
 echo "   1. Inspect data card:    cat $TRAINING_DATA_DIR/DATA_CARD.md"
-echo "   2. Push model:           huggingface-cli upload <repo> $OUTPUT_DIR/final"
+echo "   2. Push model:           hf upload <repo> $OUTPUT_DIR/final"
 echo "   3. Evaluate:             python3 ml/pipelines/evaluate.py --model $OUTPUT_DIR/final"
 echo "   4. Convert for mobile:   python3 ml/scripts/export_mobile.py"
 echo ""

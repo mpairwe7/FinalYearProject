@@ -571,8 +571,10 @@ docker compose up -d api
 ### Model rollback from Hugging Face Hub
 
 ```bash
-# List model revisions
-huggingface-cli repo info mpairweLandwind/ura-chatbot --revision main
+# List model revisions. (`huggingface-cli` was removed in huggingface_hub 1.0
+# and `hf repos` has no `info` subcommand, so this reads the refs directly.)
+python -c "from huggingface_hub import HfApi; \
+  [print(r.ref, r.target_commit) for r in HfApi().list_repo_refs('mpairweLandwind/ura-chatbot').branches]"
 
 # Pin to a specific commit
 HF_MODEL_REPO=mpairweLandwind/ura-chatbot

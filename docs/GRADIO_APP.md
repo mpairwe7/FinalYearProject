@@ -75,7 +75,7 @@ python App/app.py
 
 ```bash
 # Login to Hugging Face
-huggingface-cli login
+hf auth login
 
 # Create space (via web UI or CLI)
 # Go to: huggingface.co/new-space
