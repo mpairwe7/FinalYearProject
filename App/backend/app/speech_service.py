@@ -24,6 +24,11 @@ Environment flags:
 * ``SPEECH_MT_BACKEND``     — ``auto|onnx|transformers|prompted|mock``.
 * ``SPEECH_DEADLINE_S``     — hard wall-clock budget for one inference.
 * ``WHISPER_DEVICE``        — device for Whisper LoRA adapters (default: cpu).
+* ``WHISPER_SALT_ENABLED``  — Sunbird/asr-whisper-large-v3-salt, every locale
+                               in one fine-tune; the top ASR tier by default
+                               (default: true; set false to opt out).
+* ``WHISPER_SALT_MODEL``    — HF repo id (default: Sunbird/asr-whisper-large-v3-salt).
+* ``WHISPER_SALT_DEVICE``   — device for it (default: ``$WHISPER_DEVICE``).
 
 Commercial posture: all default models are MIT / Apache-2.0. No CC-BY-NC
 paths are enabled by default.
@@ -219,6 +224,15 @@ SPEECH_EN_EDGE_VOICE = os.getenv("SPEECH_EN_EDGE_VOICE", "en-US-AriaNeural")
 # English (Kenya borders Uganda) and Chilemba is male, matching the intent of
 # the previous value.
 SPEECH_LG_EDGE_VOICE = os.getenv("SPEECH_LG_EDGE_VOICE", "en-KE-ChilembaNeural")
+# Kiswahili is the one non-English locale edge-tts genuinely speaks: sw-KE and
+# sw-TZ are real, listed voices (verified against `edge_tts.list_voices()` from
+# the running image, alongside sw-KE-RafikiNeural, sw-TZ-DaudiNeural and
+# sw-TZ-RehemaNeural). It was falling through to SPEECH_EN_EDGE_VOICE, so a
+# Kiswahili answer was read aloud by an American English speaker while a
+# native voice was available and free. Sunbird also lists a Swahili voice
+# (waxal_swa_0006) and still gets tried first; this is the fallback for when
+# that call fails — which it did, on timeout, in the run that found this.
+SPEECH_SW_EDGE_VOICE = os.getenv("SPEECH_SW_EDGE_VOICE", "sw-KE-ZuriNeural")
 
 # Locales that ship a genuine local (Piper/Sherpa) voice model. Anything outside
 # this set can only be synthesized locally by an *English* model reading foreign
@@ -257,17 +271,22 @@ def en_edge_voice_choices() -> tuple[str, ...]:
 def resolve_edge_voice(language: str, voice: str | None = None) -> str:
     """The edge-tts speaker for *language*, honouring the caller's pick.
 
-    Only English is a real choice. edge-tts has no Ugandan-language voice at
-    all, so for those locales this returns the configured English stand-in and
+    Only English is a caller-facing choice. edge-tts has no Ugandan-language
+    voice at all, so for those locales this returns the configured stand-in and
     ignores *voice* — which by that point in the chain is a Sunbird catalog tag
     naming a speaker edge cannot produce. Forwarding it would raise "No audio
     was received" and lose the fallback that exists precisely because Sunbird
     was unreachable.
+
+    Kiswahili is the exception: edge does speak it, so it gets a native voice
+    rather than an English one.
     """
     if (language or "en") == "en":
         return voice if voice in en_edge_voice_choices() else SPEECH_EN_EDGE_VOICE
     if language == "lg":
         return SPEECH_LG_EDGE_VOICE
+    if language == "sw":
+        return SPEECH_SW_EDGE_VOICE
     return SPEECH_EN_EDGE_VOICE
 
 
@@ -308,6 +327,73 @@ WHISPER_ADAPTERS: dict[str, str | None] = {
 }
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu").strip().lower() or "cpu"
 
+# Sunbird/asr-whisper-large-v3-salt — a full fine-tune (not a LoRA) of
+# whisper-large-v3 covering all five locales this deployment offers, plus
+# Ateso and Lugbara. Unlike WHISPER_ADAPTERS above, which is per-language and
+# has real weights checked in for Luganda only (fine-tuning/adapters/ is
+# otherwise empty — English and Kiswahili silently ran through the
+# Luganda-merged model), this is one model that covers the whole set:
+# published WER eng 0.018, lug 0.142. Enabled by default, same as
+# LLM_MODEL — an HF repo id that is pulled on first use whenever the class of
+# dependency (torch + transformers) is importable; set WHISPER_SALT_ENABLED=false
+# to opt out on a deployment that would rather not carry the extra ~6GB.
+WHISPER_SALT_ENABLED = os.getenv("WHISPER_SALT_ENABLED", "true").strip().lower() in (
+    "1", "true", "yes",
+)
+WHISPER_SALT_MODEL = os.getenv("WHISPER_SALT_MODEL", "Sunbird/asr-whisper-large-v3-salt")
+WHISPER_SALT_DEVICE = os.getenv("WHISPER_SALT_DEVICE", "") or WHISPER_DEVICE
+
+# SALT special-token ids to force, keyed by this deployment's locale codes.
+#
+# en (50259) and sw (50318) sit in Whisper's ORIGINAL, fixed 99-language
+# table and decode to "<|en|>" / "<|sw|>" — straightforwardly correct,
+# confirmed by decode.
+#
+# lg/nyn/ach do NOT decode to anything sensible on this checkpoint: this
+# tokenizer's special-token vocabulary was inspected directly
+# (`tokenizer.get_added_vocab()`) and tops out at id 50358 (`<|yue|>`,
+# Cantonese — the last of Whisper's ORIGINAL 99 languages). No
+# Ugandan-language token was ever added. The ids the model card's own usage
+# example lists for lug (50355), nyn (50354) and ach (50357) decode on this
+# tokenizer to Bashkir, Hausa and Sundanese.
+#
+# That looks like a stale/wrong table — the first-pass conclusion here was
+# to stop forcing anything for these three and let the model's own language
+# detection run instead (`language=None`). It was wrong. A controlled A/B
+# (same process, same model instance, same two Luganda clips, only the
+# `language=` argument varied) showed forcing id 50355 matches or BEATS
+# `None`: one clip identical either way, the other correct only when 50355
+# was forced ("Yali tasaana kugoba..." vs `None`'s "Yaritasaana kugoba...").
+# A separate check — forcing the *confirmed-correct* `en` token on the same
+# Luganda audio — produced visibly worse text than either, which rules out
+# "forcing never mattered" as an explanation for the first result.
+#
+# Conclusion: the fine-tune's continued pretraining most likely repurposed
+# these specific base-Whisper language-token EMBEDDINGS as stand-ins for its
+# own custom languages without extending the tokenizer's vocab_size — the
+# numeric id carries fine-tuned meaning even though decoding it still shows
+# the original Whisper-base string. So the ids are used, on the strength of
+# that measurement, while the misleading `decode()` step from the model
+# card's own example (which produced the stale-looking string in the first
+# place) is not.
+#
+# nyn and ach were NOT independently verified this way — no Runyankole or
+# Acholi audio was available to test with — and are set from the model
+# card's table only on the strength of the lg result plus the shared
+# training methodology (one continued-pretraining run, same repurposing
+# mechanism most likely applied uniformly). If either sounds wrong in
+# practice, that is the assumption to revisit first; do not "fix" it by
+# reverting to `None` without re-running the same kind of controlled
+# comparison that overturned the first attempt at this — see
+# docs/runbooks/salt-speech-backends.md.
+SALT_LANGUAGE_TOKEN_IDS: dict[str, int] = {
+    "en": 50259,   # <|en|> — Whisper's original table; decode-verified
+    "sw": 50318,   # <|sw|> — Whisper's original table; decode-verified
+    "lg": 50355,   # decodes to <|ba|> (Bashkir); A/B-verified to help anyway
+    "nyn": 50354,  # decodes to <|ha|> (Hausa); NOT independently verified
+    "ach": 50357,  # decodes to <|su|> (Sundanese); NOT independently verified
+}
+
 PROJECT_ROOT = _PROJECT_ROOT_P
 SPEECH_ASR_SHERPA_DIR = Path(
     os.getenv(
@@ -320,6 +406,19 @@ SPEECH_ASR_SHERPA_DIR = Path(
 # ---------------------------------------------------------------------------
 # Result dataclasses
 # ---------------------------------------------------------------------------
+
+
+class LocalVoiceUnavailable(RuntimeError):
+    """No local Piper/Sherpa model for the requested voice.
+
+    Raised by :meth:`SpeechModel._do_synthesize` so the backend chain in
+    :meth:`SpeechModel._synthesize_uncached` moves on to its cloud tiers
+    instead of serving the mock tone as if it were speech.
+    """
+
+    def __init__(self, voice: str) -> None:
+        super().__init__(f"no local TTS model for voice {voice!r}")
+        self.voice = voice
 
 
 @dataclass
@@ -400,6 +499,8 @@ class SpeechModel:
         self._asr = None
         self._whisper_peft = None  # (model, processor) — legacy single adapter
         self._whisper_adapters: dict[str, tuple] = {}  # lang -> (model, processor)
+        self._whisper_salt = None  # (model, processor) for WHISPER_SALT_MODEL
+        self._spark_tts = None  # spark_tts_salt.SparkTtsSalt, if SPARK_TTS_ENABLED
         self._mt = None
         self._lang_det = None
         self._chat_model = None  # set externally for prompted MT
@@ -490,6 +591,47 @@ class SpeechModel:
             except Exception:
                 logger.exception("Failed to initialize Whisper adapters")
 
+        # Sunbird/asr-whisper-large-v3-salt — one full fine-tune covering every
+        # locale, loaded independently of the (optional, Luganda-only) LoRA
+        # adapters above so it works whether or not fine-tuning/adapters/ has
+        # been populated. Tried first in _transcribe_chain (tier ⓪): a full
+        # fine-tune with a real English and Kiswahili WER beats routing those
+        # locales through a model merged for Luganda.
+        if WHISPER_SALT_ENABLED:
+            try:
+                import torch
+                from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+                salt_dtype = (
+                    torch.float16 if WHISPER_SALT_DEVICE.startswith("cuda") else torch.float32
+                )
+                logger.info(
+                    "Loading Whisper-SALT '%s' (device=%s)", WHISPER_SALT_MODEL, WHISPER_SALT_DEVICE
+                )
+                _salt_processor = WhisperProcessor.from_pretrained(WHISPER_SALT_MODEL)
+                _salt_model = WhisperForConditionalGeneration.from_pretrained(
+                    # attn_implementation="sdpa": explicit rather than relying
+                    # on transformers' implicit auto-selection, which falls
+                    # back to "eager" (no fused kernel) on some combinations
+                    # of transformers/torch versions with no warning. SDPA is
+                    # a pure kernel-selection change (same math, fused
+                    # softmax/matmul) — safe on CPU too, just without the CUDA
+                    # fused-kernel speedup. See docs/runbooks/salt-speech-
+                    # backends.md's "faster inference" section for why this
+                    # alone does not fix CPU-bound latency: the dominant cost
+                    # by far is not running on the GPU at all.
+                    WHISPER_SALT_MODEL, torch_dtype=salt_dtype, attn_implementation="sdpa",
+                )
+                if WHISPER_SALT_DEVICE != "auto":
+                    _salt_model = _salt_model.to(WHISPER_SALT_DEVICE)
+                _salt_model.eval()
+                self._whisper_salt = (_salt_model, _salt_processor)
+                logger.info("SpeechModel: Whisper-SALT ready")
+            except ImportError:
+                logger.warning("transformers not installed; skipping Whisper-SALT")
+            except Exception:
+                logger.exception("Failed to initialize Whisper-SALT (%s)", WHISPER_SALT_MODEL)
+
         try:
             from ml.scripts.lang_id import LanguageDetector  # type: ignore
 
@@ -515,6 +657,22 @@ class SpeechModel:
                 logger.info("SpeechModel: accent detector ready")
         except Exception:
             logger.debug("Accent detector init skipped", exc_info=True)
+
+        # Sunbird/spark-tts-salt — verified end-to-end on GPU (see the module
+        # docstring in app.spark_tts_salt), enabled by default like
+        # Whisper-SALT above. Still a practical no-op without an external
+        # BiCodec checkout: spark_tts_salt.load() checks SPARK_TTS_REPO_DIR
+        # and raises SparkTtsUnavailable immediately when it is unset, so
+        # this import is cheap on every deployment that has not provided one.
+        try:
+            from . import spark_tts_salt
+
+            self._spark_tts = spark_tts_salt.load()
+            logger.info("SpeechModel: Spark-TTS-SALT ready")
+        except spark_tts_salt.SparkTtsUnavailable as exc:
+            logger.debug("Spark-TTS-SALT not active: %s", exc)
+        except Exception:
+            logger.exception("Failed to initialize Spark-TTS-SALT")
 
         self._initialised = True
 
@@ -553,7 +711,10 @@ class SpeechModel:
     ) -> TranscribeResult:
         """The backend fallback chain itself.
 
+            ⓪ Whisper-SALT       — Sunbird/asr-whisper-large-v3-salt, every
+                                    locale in one fine-tune, offline
             ① Whisper + LoRA     — fine-tuned, language-specific, offline
+                                    (fallback for when SALT is disabled/unloaded)
             ② Local Sherpa ASR   — offline, if model available
             ③ faster-whisper     — CTranslate2 int8, good multilingual
             ④ Sunbird API        — cloud fallback when all local backends fail
@@ -573,7 +734,18 @@ class SpeechModel:
         # taxpayer should ever see.
         heard_nothing: str | None = None
 
-        # ⓪ Accent detection — route to the best Whisper adapter automatically
+        # ⓪ Whisper-SALT (one fine-tune, every locale — tried first when loaded)
+        if self._whisper_salt is not None:
+            try:
+                result = self._transcribe_whisper_salt(audio_bytes, sample_rate, language)
+                if result and result.text:
+                    return result
+                if result:
+                    heard_nothing = heard_nothing or result.backend
+            except Exception:
+                logger.debug("Whisper-SALT failed", exc_info=True)
+
+        # ① Accent detection — route to the best Whisper adapter automatically
         if (
             self._accent_detector is not None
             and self._whisper_adapters
@@ -600,7 +772,7 @@ class SpeechModel:
             except Exception:
                 logger.debug("Accent detection failed — using default adapter", exc_info=True)
 
-        # ① Whisper + LoRA (fine-tuned, language-specific, offline — primary)
+        # ② Whisper + LoRA (fine-tuned, language-specific, offline — fallback)
         whisper_pair = self._whisper_adapters.get(language) if language else None
         if whisper_pair is None and self._whisper_peft is not None:
             whisper_pair = self._whisper_peft  # fallback to default adapter
@@ -616,7 +788,7 @@ class SpeechModel:
             except Exception:
                 logger.debug("Whisper+LoRA failed", exc_info=True)
 
-        # ② Local Sherpa ASR (if initialised by ml.scripts.asr)
+        # ③ Local Sherpa ASR (if initialised by ml.scripts.asr)
         if self._asr is not None and self._breakers["asr"].allow_request():
             future = self._executor.submit(self._do_transcribe, audio_bytes, sample_rate)
             try:
@@ -633,7 +805,7 @@ class SpeechModel:
                 self._breakers["asr"].record_failure()
                 logger.debug("Local ASR failed (%s), trying faster-whisper", exc)
 
-        # ③ faster-whisper (CTranslate2 — int8 quantised, offline)
+        # ④ faster-whisper (CTranslate2 — int8 quantised, offline)
         try:
             result = self._transcribe_faster_whisper(audio_bytes, sample_rate, language)
             if result and result.text:
@@ -643,7 +815,7 @@ class SpeechModel:
         except Exception:
             logger.debug("faster-whisper failed", exc_info=True)
 
-        # ③.5 Cloudflare Workers AI — PRIMARY cloud STT for English (configurable
+        # ④.5 Cloudflare Workers AI — PRIMARY cloud STT for English (configurable
         # model). Sunbird is preferred for Luganda, so this tier is English-gated.
         if (language or "en") == "en":
             try:
@@ -655,7 +827,7 @@ class SpeechModel:
             if cf_text:
                 return TranscribeResult(text=cf_text, language="en", backend="cf_workers_ai")
 
-        # ④ Sunbird cloud (fallback when all local backends unavailable)
+        # ⑤ Sunbird cloud (fallback when all local backends unavailable)
         try:
             from . import sunbird
             if sunbird.is_available():
@@ -694,7 +866,7 @@ class SpeechModel:
         except Exception:
             logger.debug("Sunbird STT fallback also failed")
 
-        # ⑤ Cloudflare Workers AI Whisper (final cloud net; flag/budget-gated)
+        # ⑥ Cloudflare Workers AI Whisper (final cloud net; flag/budget-gated)
         try:
             cf_text = _cloud_call(
                 "Workers AI STT", self._cf_whisper_transcribe, audio_bytes, sample_rate, language
@@ -717,7 +889,7 @@ class SpeechModel:
 
         return TranscribeResult(
             text="", backend="unavailable",
-            error="All ASR backends failed (Whisper+LoRA, Sherpa, faster-whisper, Sunbird, Workers AI)",
+            error="All ASR backends failed (Whisper-SALT, Whisper+LoRA, Sherpa, faster-whisper, Sunbird, Workers AI)",
         )
 
     def _cf_whisper_transcribe(
@@ -861,6 +1033,69 @@ class SpeechModel:
             backend="whisper_peft",
         )
 
+    def _transcribe_whisper_salt(
+        self, audio_bytes: bytes, sample_rate: int, language: str | None
+    ) -> TranscribeResult | None:
+        """Offline STT via Sunbird/asr-whisper-large-v3-salt — one model, every locale.
+
+        Same shape as :meth:`_transcribe_whisper_peft` (both are plain
+        WhisperForConditionalGeneration + WhisperProcessor pairs, so they
+        share ``_decode_audio_bytes``), but this one needs no per-language
+        model dict: it is a single fine-tune, steered per call by forcing
+        the decoder's language token per :data:`SALT_LANGUAGE_TOKEN_IDS` —
+        see the long comment there for why those ids are trusted (a
+        controlled A/B test) rather than the model card's own decode of
+        them (misleading — see the same comment).
+        """
+        import torch
+
+        pair = self._whisper_salt
+        if pair is None:
+            return None
+        model, processor = pair
+        t0 = time.perf_counter()
+        samples = self._decode_audio_bytes(audio_bytes, target_sr=16000)
+
+        input_features = processor.feature_extractor(
+            samples, sampling_rate=16000, return_tensors="pt",
+        ).input_features.to(model.device, dtype=model.dtype)
+
+        # generate()'s `language` kwarg expects the literal string form of a
+        # language token, not a bare code or a numeric id — the decode()
+        # here just converts SALT_LANGUAGE_TOKEN_IDS's numeric id to whatever
+        # string form generate() will map back to that same id, it does not
+        # imply that string's Whisper-base meaning is what actually gets
+        # requested (see the long comment on SALT_LANGUAGE_TOKEN_IDS: it does
+        # not, for lg/nyn/ach). A locale outside the map falls through to
+        # `forced_language = None` — the model's own detection.
+        token_id = SALT_LANGUAGE_TOKEN_IDS.get(language or "")
+        forced_language = processor.tokenizer.decode([token_id]) if token_id is not None else None
+
+        # See the matching comment on _transcribe_whisper_peft: this is
+        # Whisper ASR fed a mel spectrogram (input_features), not user text —
+        # there is no prompt for LLM01 to inject into. The transcript IS
+        # guarded downstream, at service.generate()'s InputGuard.check(message).
+        with torch.no_grad():
+            # nosemgrep: ura-llm01-raw-user-input-to-llm
+            predicted_ids = model.generate(
+                input_features, language=forced_language, forced_decoder_ids=None, max_new_tokens=225,
+            )
+        text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
+
+        latency = time.perf_counter() - t0
+        duration = len(samples) / max(sample_rate, 1)
+        logger.info(
+            "Whisper-SALT STT completed (chars=%d, %.1fs, lang=%s)", len(text), latency, language or "auto"
+        )
+        return TranscribeResult(
+            text=text,
+            language=language,
+            duration_s=round(duration, 2),
+            latency_s=round(latency, 3),
+            rtf=round(latency / max(duration, 0.01), 2),
+            backend="whisper_salt",
+        )
+
     def _transcribe_faster_whisper(
         self, audio_bytes: bytes, sample_rate: int, language: str | None
     ) -> TranscribeResult | None:
@@ -974,6 +1209,44 @@ class SpeechModel:
                     self._tts_cache.popitem(last=False)
         return result
 
+    def _synthesize_mock(self, text: str, voice: str, language: str) -> SynthesizeResult:
+        """Deterministic sine-tone WAV. Only ever reached by explicit opt-in."""
+        t0 = time.perf_counter()
+        try:
+            import io
+            import wave
+
+            import numpy as np
+
+            from ml.scripts.tts.infer_tts import _synth_mock  # type: ignore
+
+            samples, sample_rate, _, _ = _synth_mock(text, voice)
+            float_samples = np.asarray(samples, dtype="float32")
+            pcm16 = (float_samples * 32768).clip(-32768, 32767).astype("int16")
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sample_rate)
+                w.writeframes(pcm16.tobytes())
+            audio = buf.getvalue()
+            return SynthesizeResult(
+                audio=audio,
+                sample_rate=sample_rate,
+                num_samples=int(pcm16.size),
+                duration_s=round(float(pcm16.size) / sample_rate, 3),
+                latency_s=round(time.perf_counter() - t0, 3),
+                backend="mock",
+                voice=voice,
+            )
+        except Exception as exc:  # noqa: BLE001 — the double must not mask itself
+            logger.error("Mock TTS failed", exc_info=True)
+            return SynthesizeResult(
+                audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
+                latency_s=round(time.perf_counter() - t0, 3),
+                backend="error", voice=voice, error=f"mock TTS unavailable: {exc}",
+            )
+
     def _synthesize_uncached(
         self,
         text: str,
@@ -981,21 +1254,42 @@ class SpeechModel:
         language: str,
     ) -> SynthesizeResult:
         """The actual backend fallback chain behind :meth:`synthesize`."""
+        from . import spark_tts_salt
+
+        # An explicitly requested test double, before any real backend.
+        #
+        # This is NOT the mock tier that used to sit at the bottom of the chain
+        # — that one is gone on purpose (see the comment where the chain now
+        # ends in backend="error"): serving a 440 Hz beep because every real
+        # backend failed is a false success the caller cannot detect.
+        #
+        # Asking for it by name is a different thing. SPEECH_TTS_BACKEND has
+        # always documented `mock` as a valid value, and the voice E2E job
+        # boots the app with SPEECH_TTS_BACKEND=mock precisely so it can assert
+        # a real WAV comes back without shipping torch or a voice pack into CI.
+        # Removing the tier without removing the option made that documented
+        # setting silently produce "All TTS backends failed".
+        if SPEECH_TTS_BACKEND == "mock":
+            return self._synthesize_mock(text, voice, language)
+
         # Local Piper and edge-tts both default to an English voice for any
         # language they have no model for, and then *succeed* — so left in
         # their natural order they answer a Runyankole question in an English
-        # voice and the chain never reaches Sunbird's native speaker.
+        # voice and the chain never reaches a native speaker at all.
         #
-        # So for languages whose only genuine voice is Sunbird's, try Sunbird
-        # FIRST rather than removing the other backends from the chain.
-        # Ordering, not exclusion: an earlier revision skipped local and edge
-        # outright, which turned a Sunbird outage into silence. It did exactly
-        # that in production — Sunbird's TTS endpoint had been answering 405
-        # since it moved, so those locales returned no audio at all. Degraded
-        # audio beats no audio; a wrong-sounding voice is still recoverable
-        # information, silence is not.
-        prefer_native_cloud = (
-            language not in LOCAL_TTS_VOICES and _sunbird_has_native_voice(language)
+        # So for languages whose only genuine voice is Spark-TTS-SALT's or
+        # Sunbird's, try those FIRST rather than removing the other backends
+        # from the chain. Ordering, not exclusion: an earlier revision
+        # skipped local and edge outright, which turned a Sunbird outage
+        # into silence. It did exactly that in production — Sunbird's TTS
+        # endpoint had been answering 405 since it moved, so those locales
+        # returned no audio at all. Degraded audio beats no audio; a
+        # wrong-sounding voice is still recoverable information, silence is
+        # not — which is also why, local-first, Spark-TTS-SALT does not
+        # REPLACE the Sunbird attempt below, only goes before it.
+        prefer_native_voice = (
+            language not in LOCAL_TTS_VOICES
+            and (language in spark_tts_salt.SPARK_TTS_SPEAKER_IDS or _sunbird_has_native_voice(language))
         )
 
         def _try_sunbird() -> SynthesizeResult | None:
@@ -1051,15 +1345,57 @@ class SpeechModel:
                 logger.debug("Sunbird TTS attempt failed", exc_info=True)
             return None
 
-        # ⓪ Native cloud voice first, for languages that have one there and
-        #    nowhere else. Falls through on failure rather than giving up.
-        if prefer_native_cloud:
+        def _try_spark_salt() -> SynthesizeResult | None:
+            """One attempt at the LOCAL neural voice. None if unavailable."""
+            if self._spark_tts is None:
+                return None
+            t_spark = time.perf_counter()
+            try:
+                import io as _io, wave as _wave
+
+                import numpy as np
+
+                samples, sr = self._spark_tts.synthesize(text, language=language)
+                pcm16 = (
+                    np.asarray(samples, dtype="float32") * 32768
+                ).clip(-32768, 32767).astype("int16")
+                buf = _io.BytesIO()
+                with _wave.open(buf, "wb") as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(sr)
+                    w.writeframes(pcm16.tobytes())
+                return SynthesizeResult(
+                    audio=buf.getvalue(),
+                    sample_rate=int(sr),
+                    num_samples=int(len(pcm16)),
+                    duration_s=round(len(pcm16) / max(sr, 1), 3),
+                    latency_s=round(time.perf_counter() - t_spark, 3),
+                    backend="spark_tts_salt",
+                    voice=f"spark_salt_{language}",
+                )
+            except Exception:
+                logger.debug("Spark-TTS-SALT attempt failed", exc_info=True)
+                return None
+
+        # ⓪ Native voice first, for languages that have one there and nowhere
+        #    else — LOCAL before cloud, cloud before the generic chain that
+        #    defaults to an English speaker. self._spark_tts is only non-None
+        #    when SPARK_TTS_ENABLED=true and the external BiCodec checkout is
+        #    present (see app.spark_tts_salt's module docstring), so this is
+        #    a no-op read on any deployment that has not opted in — the
+        #    Sunbird-first behaviour from before this tier existed is exactly
+        #    what such a deployment still gets.
+        if prefer_native_voice:
+            result = _try_spark_salt()
+            if result:
+                return result
             result = _try_sunbird()
             if result:
                 return result
             logger.info(
-                "Sunbird native voice unavailable for %s; degrading to the "
-                "generic chain rather than returning silence",
+                "No native voice reachable for %s (local or cloud); "
+                "degrading to the generic chain rather than returning silence",
                 language,
             )
 
@@ -1070,6 +1406,13 @@ class SpeechModel:
                 result = future.result(timeout=SPEECH_DEADLINE_S)
                 self._breakers["tts"].record_success()
                 return result
+            except LocalVoiceUnavailable as exc:
+                # Not an outage: this image simply has no voice pack for this
+                # locale, and it never will until one is installed. Counting it
+                # as a breaker failure would leave `speech.tts` permanently
+                # open and stop the state meaning anything about health, while
+                # a half-open retry every backoff re-ran the same doomed lookup.
+                logger.debug("No local TTS voice (%s), trying the cloud tiers", exc)
             except (concurrent.futures.TimeoutError, Exception) as exc:
                 self._breakers["tts"].record_failure()
                 logger.debug("Local TTS failed (%s), trying edge-tts", exc)
@@ -1084,20 +1427,25 @@ class SpeechModel:
             except Exception:
                 logger.debug("Workers AI TTS failed", exc_info=True)
 
-        # ①.75 Native cloud voice for a locale that has a local voice on paper
-        #      but whose local model may be absent from the running image —
-        #      today that is Luganda, whose luganda-vits-v1 does not ship in the
-        #      slim deploy image.
+        # ①.75 Native voice for a locale that has a local voice on paper but
+        #      whose local model may be absent from the running image —
+        #      today that is Luganda, whose luganda-vits-v1 does not ship in
+        #      the slim deploy image. Spark-TTS-SALT is a DIFFERENT local
+        #      voice for the same locale set, so it gets the same chance here
+        #      that it gets at tier ⓪ before this falls through to Sunbird.
         #
         #      This MUST come before edge-tts. edge has no voice for any Ugandan
         #      language, so it answers Luganda with an English one; letting it
-        #      run first means it always succeeds and Sunbird's native Luganda
-        #      speaker at ③ is never reached. That is not hypothetical — while
-        #      the edge voice was misconfigured, stage ② failed and the chain
-        #      fell through to Sunbird; repairing the edge voice would have
+        #      run first means it always succeeds and a native Luganda speaker
+        #      at ③ is never reached. That is not hypothetical — while the
+        #      edge voice was misconfigured, stage ② failed and the chain fell
+        #      through to Sunbird; repairing the edge voice would have
         #      silently swapped Luganda's native speaker for an English one,
         #      leaving it the only local language without a native voice.
-        if not prefer_native_cloud and (language or "en") != "en":
+        if not prefer_native_voice and (language or "en") != "en":
+            result = _try_spark_salt()
+            if result:
+                return result
             result = _try_sunbird()
             if result:
                 return result
@@ -1115,13 +1463,19 @@ class SpeechModel:
             logger.debug("edge-tts failed", exc_info=True)
 
         # ③ Sunbird cloud TTS — English only by this point; every other locale
-        #    already tried it at ⓪ or ①.75, and the gates are mutually exclusive
-        #    so Sunbird is still attempted at most once per request.
-        if not prefer_native_cloud and (language or "en") == "en":
+        #    already tried it (and Spark-TTS-SALT before it) at ⓪ or ①.75, and
+        #    the gates are mutually exclusive so Sunbird is still attempted at
+        #    most once per request.
+        if not prefer_native_voice and (language or "en") == "en":
             result = _try_sunbird()
             if result:
                 return result
 
+        # No mock tier here, deliberately. `_synth_mock` is a 440 Hz sine beep
+        # ("so CI tests have audio"), and serving it is not degradation, it is
+        # a false success: /v1/voice/chat has a graceful text-only branch for
+        # `backend="error"`, and a caller who hears beeps has no way to know
+        # the answer was never spoken.
         return SynthesizeResult(
             audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
             latency_s=0.0, backend="error", voice=voice, error="All TTS backends failed",
@@ -1472,17 +1826,10 @@ class SpeechModel:
         result = synth.synthesize(text)
         latency = time.perf_counter() - t0
 
-        # Convert the samples (which the wrapper produces as float32) to WAV bytes.
-        import io
-        import wave
-
-        import numpy as np
-
         # NOTE: the wrapper returned the metrics but not the samples. Re-run the
         # synth via the streaming path to grab bytes. This keeps the TtsResult
         # API narrow while still giving us audio for /tts.
         from ml.scripts.tts.infer_tts import (  # type: ignore
-            _synth_mock,
             _synth_piper,
             _synth_sherpa,
         )
@@ -1504,24 +1851,29 @@ class SpeechModel:
                 if r is not None:
                     samples, sample_rate, _, _ = r
             except Exception:
-                logger.warning("Piper TTS failed, falling back to mock", exc_info=True)
+                logger.warning("Piper TTS failed for voice=%s", voice, exc_info=True)
                 samples = None
         if samples is None:
-            try:
-                r = _synth_mock(text, voice)
-                samples, sample_rate, _, _ = r
-            except Exception:
-                logger.error("All TTS backends failed for voice=%s", voice, exc_info=True)
-                return SynthesizeResult(
-                    audio=b"",
-                    sample_rate=0,
-                    num_samples=0,
-                    duration_s=0.0,
-                    latency_s=round(latency, 3),
-                    backend="error",
-                    voice=voice,
-                    error="All TTS backends failed",
-                )
+            # No local voice model is installed for `voice`. Returning mock
+            # audio here made this tier *succeed* — and the caller
+            # (_synthesize_uncached) advances only on an exception, so
+            # Cloudflare, Sunbird's native speakers and edge-tts below were
+            # unreachable on any image without Piper/Sherpa voice packs.
+            # Measured: en, lg and sw all came back backend="mock" while
+            # edge-tts was working from the same container.
+            #
+            # Raising is what lets the chain continue. The mock beep is gone
+            # rather than relocated: the chain already ends in
+            # `backend="error"`, which /v1/voice/chat handles by returning the
+            # text reply without audio — honest, and better than a tone the
+            # caller cannot distinguish from speech.
+            raise LocalVoiceUnavailable(voice)
+
+        # Convert the samples (which the wrapper produces as float32) to WAV bytes.
+        import io
+        import wave
+
+        import numpy as np
 
         float_samples = np.asarray(samples, dtype="float32")
         pcm16 = (float_samples * 32768).clip(-32768, 32767).astype("int16")

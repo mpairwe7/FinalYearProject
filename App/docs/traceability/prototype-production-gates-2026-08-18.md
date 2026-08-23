@@ -52,7 +52,7 @@ How a later reviewer traces each feature from claim → code → gate → test.
 | G30 tenancy | `tenancy.py`, `infra/postgres/rls.sql` | RLS ack | `tests/chaos` | Predicate shipped. RLS not auto-applied. |
 | G31 overrides | `cms.py`, `/admin/overrides` | `SEED_PROTOTYPE` false | `test_seed_prototype` | Exact-match CMS. |
 | G32 tickets | staff workbench + `ticket_queue` | flag must stay on | existing ticket suites | Shipped. |
-| G33 / G34 | `infra/k8s/*`, `tests/chaos/` | not a start blocker | `test_failure_modes` | Deferred. |
+| G33 / G34 | `infra/k8s/*`, `tests/chaos/` | not a start blocker | `test_failure_modes`; envelope: `capacity-envelope-2026-08-19.md` | G33 p95 measured 2026-08-19; HPA/KEDA still not applied. G34 still deferred. |
 | Startup safety | `main._validate_production_env` | calls `gap_gate_errors()` | `test_production_hardening` (CI FastAPI) | Existing RS256 / OIDC / Postgres checks remain. |
 | Gap probe | `app/production_readiness.py` | CLI `--as-production` | `test_production_readiness` | Exit 2 lists blockers. |
 
@@ -132,7 +132,9 @@ fail-closed signal.
 - Dedicated parse pool / gVisor (G13 remainder).
 - Applied Postgres RLS on a live database (G30).
 - Axolotl / DPO trainer (G29).
-- Applied HPA / KEDA and a cluster game day (G33 / G34).
+- Applied HPA / KEDA and a cluster game day (G33 / G34). Envelope
+  numbers exist (`capacity-envelope-2026-08-19.md`); they are not an
+  applied autoscaler.
 - `FLAG_TOOL_RAG` / HyDE / graph-fusion measurement before raising percent.
 
 ## 8. Audit verdict (2026-08-18)

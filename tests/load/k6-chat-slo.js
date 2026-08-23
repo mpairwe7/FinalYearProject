@@ -1,8 +1,12 @@
 /**
  * k6 Load Test — URA Chatbot API SLO Validation
  *
- * Validates NFR-01 (p95 <= 3s), NFR-02 (99.5% uptime), and DEPLOYMENT.md
- * SLO targets (p95 < 2s for /v1/chat, error rate < 1%).
+ * Validates NFR-01 (p95 <= 3s), NFR-02 (99.5% uptime). DEPLOYMENT.md
+ * still lists p95 < 2s for /v1/chat — those tables disagree; measured
+ * hybrid generation on one A6000 already misses 3s from 4 concurrent
+ * (App/docs/traceability/capacity-envelope-2026-08-19.md). This script
+ * is not in CI, hits /v1/chat only (not /v1/chat/stream), and will
+ * mostly measure FAQ/calculator unless queries are hybrid-pinned.
  *
  * Run:
  *   k6 run tests/load/k6-chat-slo.js

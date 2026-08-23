@@ -189,4 +189,5 @@ networks:
 volumes:
   redis_data:
   qdrant_data:
+  qdrant_backups:
   api_logs:

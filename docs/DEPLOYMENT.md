@@ -135,6 +135,13 @@ CONVERSATION_TTL_DAYS=7
 # --- Models ---
 HF_TOKEN=hf_...
 HF_MODEL_REPO=mpairweLandwind/ura-chatbot
+# This block is the LOCAL-Transformers + LoRA-adapters path. The default
+# LLM_MODEL for this project is now Sunbird/Sunflower-14B-FP8 via
+# LLM_BACKEND=vllm (see docs/MODEL_SWAP_GUIDE.md) — it does not use the
+# LORA_ADAPTER_* lines below, being natively multilingual instead. Keep
+# LLM_MODEL=Qwen/Qwen3-8B here specifically because that is the base these
+# adapters were fine-tuned against; swapping the model without also dropping
+# these lines silently loads adapters onto weights they do not match.
 LLM_MODEL=Qwen/Qwen3-8B
 LLM_LOAD_IN_4BIT=true
 LORA_ADAPTER_LG=/app/adapters/luganda-lora
@@ -519,16 +526,29 @@ Include this disclosure in the App Store Connect privacy section and in the app'
 
 ## 10. SLO Targets
 
+Measured 2026-08-19 on one RTX A6000 + Sunflower-14B-FP8 via vLLM:
+see `App/docs/traceability/capacity-envelope-2026-08-19.md` and
+`docs/runbooks/capacity-slo.md`. A blended `/v1/chat` p95 is not the
+generation SLO (FAQ/calculator finish in tens of ms). k6 NFR-01 is
+**p95 ≤ 3s**; this table still lists **&lt; 2s**. Hybrid generation p95
+on one GPU is already **&gt; 3s from 4 concurrent** uncached turns.
+
 | SLI | Target | Measurement |
 |---|---|---|
 | **Availability** | 99.9% (43 min downtime/month) | `1 - (http_errors_total{status=~"5.."} / http_requests_total)` |
-| **Latency (p95)** | < 2 seconds | `http_request_duration_ms{quantile="0.95",path="/v1/chat"}` |
+| **Latency (p95, blended chat)** | < 2 seconds (this table) / < 3s (k6) | `http_request_duration_ms{quantile="0.95",path="/v1/chat"}` |
+| **Latency (p95, hybrid generation)** | NFR-01 ≤ 3s; unmet at ≥4 concurrent on one A6000 | slice by `retrieval_mode=hybrid` |
 | **Voice Latency (p95)** | < 1.2 seconds | `voice_stream_total_latency_seconds{quantile="0.95"}` |
 | **Voice TTS First Byte (p95)** | < 800 ms | `voice_stream_tts_first_chunk_seconds{quantile="0.95"}` |
 | **Error rate** | < 1% | `rate(http_errors_total[5m]) / rate(http_requests_total[5m])` |
 | **Faithfulness (p50)** | > 0.7 | `faithfulness_score{quantile="0.5"}` |
 
-Set Prometheus alerting rules to fire when any SLO is breached over a 5-minute window.
+Single-instance headroom (short answers, `LLM_BACKEND=vllm`): ~3 rps
+before generation p95 crosses ~3s; ~13 rps at 64 in-flight with p95
+~11s and 0% errors. Public `RATE_LIMIT` default 30/minute sheds via
+**HTTP 429** long before the GPU saturates.
+
+Set Prometheus alerting rules to fire when any SLO is breached over a 5-minute window. Do not apply `infra/k8s/hpa-chat.yaml` until that p95 is the agreed hybrid SLI.
 
 ---
 

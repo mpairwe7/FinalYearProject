@@ -1466,6 +1466,15 @@ class HybridRetriever:
             return hits
         english = english_retrieval_query(query, locale)
         if not english or english.casefold() == (query or "").strip().casefold():
+            # Worth logging at INFO: this is the branch where a non-English
+            # question silently keeps whatever the untranslated first pass
+            # found (usually nothing), and it is indistinguishable from "the
+            # leg ran and found nothing" without a line here.
+            logger.info(
+                "G18 translate-leg skipped (%s): translation absent or unchanged, "
+                "first pass kept %d hit(s)",
+                locale, len(hits),
+            )
             return hits
         en_hits = self.search(
             english,
@@ -1475,9 +1484,26 @@ class HybridRetriever:
             subject=subject,
         )
         if not en_hits:
+            logger.info(
+                "G18 translate-leg (%s -> en): %r -> %r, first_pass=%d en_leg=0",
+                locale, (query or "")[:60], english[:60], len(hits),
+            )
             return hits
         merged = merge_retrieval_hits([hits, en_hits], top_k=top_k)
-        return apply_preference_boost(merged, prefer)
+        merged = apply_preference_boost(merged, prefer)
+
+        def _best(rows: list[dict[str, Any]]) -> float:
+            vals = [r for h in rows if (r := hit_relevance(h)) is not None]
+            return max(vals) if vals else -1.0
+
+        logger.info(
+            "G18 translate-leg (%s -> en): %r -> %r, first_pass=%d(best=%.3f) "
+            "en_leg=%d(best=%.3f) merged=%d(best=%.3f)",
+            locale, (query or "")[:60], english[:60],
+            len(hits), _best(hits), len(en_hits), _best(en_hits),
+            len(merged), _best(merged),
+        )
+        return merged
 
     # -- Grounding helpers ---------------------------------------------------
     @staticmethod

@@ -241,6 +241,7 @@ class TestCloudDeadline(unittest.TestCase):
         model.enabled = True
         model._tts_cache = OrderedDict()
         model._tts_cache_lock = threading.Lock()
+        model._spark_tts = None  # opt-in tier; not under test here
         breaker = MagicMock()
         breaker.allow_request.return_value = False  # skip the local tier
         model._breakers = {"tts": breaker}

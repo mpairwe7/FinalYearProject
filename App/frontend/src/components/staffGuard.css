@@ -21,99 +21,186 @@
   top: var(--ops-space-2);
 }
 
-/* Sticky and blurred: the console is a scrolling work surface and the nav is
-   how you leave it. The blur is asserted in e2e — it is the one effect that
-   silently drops on some Blink builds. */
-.staff-nav {
-  position: sticky;
-  top: 0;
+/* --------------------------------------------------------------------------
+   The rail.
+
+   Was a sticky horizontal bar. Eight destinations in three groups scrolled
+   sideways below 1080px, which hid the Work/Configure/Observe structure
+   exactly where the screen made it most valuable. A vertical rail shows all
+   three at every width.
+
+   Both widths live on the shell as custom properties so the rail and the
+   content offset cannot drift apart — previously the only way to keep them in
+   sync was the same magic number written in two places.
+   -------------------------------------------------------------------------- */
+.staff-shell {
+  --rail-w-collapsed: 52px;
+  --rail-w-expanded: 208px;
+  --rail-w: var(--rail-w-collapsed);
+}
+
+.staff-shell:has(.staff-rail.is-expanded) {
+  --rail-w: var(--rail-w-expanded);
+}
+
+.staff-shell-content {
+  margin-left: var(--rail-w);
+  transition: margin-left var(--ops-dur-base) var(--ops-ease);
+}
+
+.staff-rail {
+  position: fixed;
+  inset: 0 auto 0 0;
   z-index: 20;
   display: flex;
-  align-items: center;
-  gap: var(--ops-space-4);
-  min-height: var(--ops-nav-h);
-  padding: var(--ops-space-2) var(--ops-space-5);
+  flex-direction: column;
+  width: var(--rail-w-collapsed);
   background: var(--ops-panel);
-  border-bottom: 1px solid var(--ops-line);
+  border-right: 1px solid var(--ops-line);
   backdrop-filter: blur(16px);
+  overflow: hidden;
+  transition: width var(--ops-dur-base) var(--ops-ease);
+}
+
+.staff-rail.is-expanded {
+  width: var(--rail-w-expanded);
+  box-shadow: var(--ops-elev-3);
+}
+
+/* Pre-paint width, before React has hydrated.
+   lib/sidebarMode.ts stamps data-rail-mode on <html> from an inline script in
+   the head — the same trick lib/theme.ts uses — so a pinned rail is already
+   208px in the very first frame. Without it the rail renders collapsed, then
+   widens once hydration applies the stored preference, animating open on every
+   page load. React's own .is-expanded takes over after that and the two agree. */
+:root[data-rail-mode="always-open"] .staff-rail {
+  width: var(--rail-w-expanded);
+}
+
+:root[data-rail-mode="always-open"] .staff-shell {
+  --rail-w: var(--rail-w-expanded);
+}
+
+.staff-rail-head {
+  display: flex;
+  align-items: center;
+  min-height: var(--ops-nav-h);
+  padding: var(--ops-space-2);
+  border-bottom: 1px solid var(--ops-line);
+  flex: none;
 }
 
 .staff-brand {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--ops-space-2);
-  flex: none;
+  min-width: 0;
   color: var(--text-0);
   text-decoration: none;
+  white-space: nowrap;
 }
 
+/* Sized to the collapsed rail: the mark is the only thing that fits in 52px,
+   and it must not shrink when the label appears beside it. */
 .staff-brand-mark {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
   border-radius: var(--ops-radius-sm);
-  background: var(--grad-blue);
-  color: #fff;
+  background: var(--accent);
+  /* Near-black rather than white: the accent is URA gold in both themes, and
+     white on it measures 1.57:1 — a serious WCAG AA failure at this size. */
+  color: color-mix(in srgb, var(--accent) 18%, black);
   font-size: 10px;
   font-weight: var(--ops-weight-bold);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.02em;
 }
 
+/* Two lines, not one: as an inline run "Operations" and "Taxpayer assistant"
+   concatenated into "OperationsTaxpayer assist…" and overflowed the rail. */
 .staff-brand-text {
   display: flex;
   flex-direction: column;
-  line-height: 1.15;
+  min-width: 0;
+  line-height: var(--ops-lh-tight);
   font-size: var(--ops-text-sm);
-  font-weight: var(--ops-weight-bold);
-  letter-spacing: 0.01em;
+  font-weight: var(--ops-weight-semi);
+  opacity: 0;
+  transition: opacity var(--ops-dur-fast) var(--ops-ease);
+}
+
+.staff-rail.is-expanded .staff-brand-text {
+  opacity: 1;
 }
 
 .staff-brand-sub {
-  font-size: 10px;
-  font-weight: var(--ops-weight-medium);
-  letter-spacing: var(--ops-tracking-caps);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-normal, 400);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.staff-rail-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--ops-space-3) 0;
+  scrollbar-width: thin;
+}
+
+.staff-rail-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.staff-rail-group + .staff-rail-group {
+  margin-top: var(--ops-space-3);
+  padding-top: var(--ops-space-3);
+  border-top: 1px solid var(--ops-line);
+}
+
+/* Collapsed, the heading would be a truncated word next to an icon column, so
+   it is clipped to nothing visually — but it still names the list for screen
+   readers via aria-labelledby, which is why this is not display:none. */
+.staff-rail-group-label {
+  margin: 0 0 var(--ops-space-1);
+  padding: 0 var(--ops-space-3);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-3);
+  white-space: nowrap;
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+  transition: opacity var(--ops-dur-fast) var(--ops-ease);
 }
 
-/* The nav list scrolls inside the bar instead of wrapping it to three rows on a
-   laptop. `min-width: 0` is what lets a flex child shrink below its content. */
-.staff-nav-scroller {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+.staff-rail.is-expanded .staff-rail-group-label {
+  opacity: 1;
+  height: auto;
+  margin-bottom: var(--ops-space-1);
 }
 
-.staff-nav-scroller::-webkit-scrollbar {
-  display: none;
-}
-
-.staff-nav ul {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+.staff-rail ul {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 var(--ops-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-/* The hairline between Work / Configure / Observe. Seven identical links in a
-   row are a list; three groups are a structure. */
-.staff-nav-sep {
-  width: 1px;
-  height: 18px;
-  margin: 0 var(--ops-space-2);
-  background: var(--ops-line);
-  flex: none;
-}
-
-.staff-nav a {
+.staff-rail a {
   position: relative;
-  display: inline-block;
-  padding: 7px 11px;
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  padding: 8px;
   border-radius: var(--ops-radius-sm);
   font-size: var(--ops-text-sm);
   font-weight: var(--ops-weight-medium);
@@ -123,45 +210,169 @@
   transition: background var(--ops-dur-fast) var(--ops-ease), color var(--ops-dur-fast) var(--ops-ease);
 }
 
-.staff-nav a:hover {
+.staff-rail-icon {
+  display: inline-flex;
+  flex: none;
+  width: 20px;
+  justify-content: center;
+}
+
+.staff-rail-label {
+  opacity: 0;
+  transition: opacity var(--ops-dur-fast) var(--ops-ease);
+}
+
+.staff-rail.is-expanded .staff-rail-label {
+  opacity: 1;
+}
+
+.staff-rail a:hover {
   background: var(--ops-row-hover);
   color: var(--text-0);
 }
 
-/* The current page is named twice — weight and an underline anchored to the
-   bar — because a surface tint alone was too quiet to find at a glance. */
-.staff-nav a.active {
+/* The current page is named twice — weight and a bar on the leading edge —
+   because a surface tint alone was too quiet to find at a glance. On a rail
+   the marker moves from the bottom edge to the left, where the eye already is. */
+.staff-rail a.active {
   color: var(--text-0);
   font-weight: var(--ops-weight-semi);
   background: var(--ops-row-active);
 }
 
-.staff-nav a.active::after {
+.staff-rail a.active::before {
   content: "";
   position: absolute;
-  left: 11px;
-  right: 11px;
-  bottom: -9px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
   background: var(--accent);
 }
 
-.staff-nav a:focus-visible,
+.staff-rail a:focus-visible,
 .staff-brand:focus-visible,
 .staff-signout:focus-visible,
+.staff-rail-toggle:focus-visible,
 .staff-gate-primary:focus-visible,
 .staff-gate-link:focus-visible {
   outline: var(--ops-focus-ring) solid var(--ops-focus);
   outline-offset: var(--ops-focus-gap);
 }
 
-.staff-nav-end {
+.staff-rail-foot {
+  flex: none;
+  padding: var(--ops-space-2);
+  border-top: 1px solid var(--ops-line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ops-space-2);
+}
+
+.staff-rail-tools {
   display: flex;
   align-items: center;
-  gap: var(--ops-space-2);
-  flex: none;
-  margin-left: auto;
+  gap: var(--ops-space-1);
+  flex-wrap: wrap;
+}
+
+.staff-rail-pin.is-on {
+  color: var(--accent);
+  background: var(--ops-row-active);
+}
+
+/* Collapsed, the footer is a 52px column: the palette trigger keeps its glyph
+   and drops the word and the chord, which otherwise clipped mid-letter. */
+.staff-rail.is-collapsed .staff-rail-tools {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.staff-rail.is-collapsed .ops-cmdk-trigger {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.staff-rail.is-collapsed .ops-cmdk-trigger-text,
+.staff-rail.is-collapsed .ops-kbd {
+  display: none;
+}
+
+/* The pin only means anything while the rail can collapse, and on a phone it
+   cannot. */
+.staff-rail-toggle {
+  position: fixed;
+  top: var(--ops-space-2);
+  left: var(--ops-space-2);
+  z-index: 22;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-line-strong);
+  background: var(--ops-panel);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.staff-rail-scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  background: rgb(0 0 0 / 45%);
+}
+
+/* Phones: no permanent rail. 52px of chrome is most of the gutter, so it
+   becomes a drawer and the content reclaims the full width. */
+@media (max-width: 720px) {
+  .staff-shell-content {
+    margin-left: 0;
+  }
+
+  .staff-rail-toggle {
+    display: inline-flex;
+  }
+
+  .staff-rail {
+    width: var(--rail-w-expanded);
+    transform: translateX(-100%);
+    transition: transform var(--ops-dur-base) var(--ops-ease);
+  }
+
+  .staff-rail .staff-rail-label,
+  .staff-rail .staff-rail-group-label {
+    opacity: 1;
+    height: auto;
+  }
+
+  .staff-rail.is-drawer-open {
+    transform: translateX(0);
+  }
+
+  /* The scrim precedes the rail in the DOM (it must paint under it), so this
+     is a backwards match — :has is the only way to express it without
+     reordering the markup and putting the click-catcher above the drawer. */
+  .staff-rail-scrim:has(~ .staff-rail.is-drawer-open) {
+    display: block;
+  }
+
+  /* The pin is meaningless in drawer mode. */
+  .staff-rail-pin {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .staff-rail,
+  .staff-shell-content,
+  .staff-rail-label,
+  .staff-rail-group-label {
+    transition: none;
+  }
 }
 
 .staff-live-dot {
@@ -177,14 +388,26 @@
   box-shadow: 0 0 0 3px var(--ops-good-fill);
 }
 
+/* A column, not a row: 208px cannot hold a pill, an address and a button side
+   by side — they wrapped into an unreadable three-line jumble. Hidden entirely
+   while collapsed, where none of it fits at all. */
 .staff-who {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ops-space-2);
-  padding-left: var(--ops-space-2);
-  border-left: 1px solid var(--ops-line);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
   font-size: var(--ops-text-xs);
   color: var(--text-2);
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+  transition: opacity var(--ops-dur-fast) var(--ops-ease);
+}
+
+.staff-rail.is-expanded .staff-who {
+  opacity: 1;
+  height: auto;
 }
 
 .staff-role-pill {
@@ -303,51 +526,18 @@
   text-decoration: underline;
 }
 
+/* The rail collapses by width, not by breakpoint, so the 1080px rules the
+   horizontal bar needed are gone. The address is still the first thing to go
+   on a narrow rail — it is the widest thing in the footer. */
 @media (max-width: 1080px) {
-  .staff-nav {
-    gap: var(--ops-space-3);
-    padding: var(--ops-space-2) var(--ops-space-4);
-  }
-  .staff-brand-text {
-    display: none;
-  }
   .staff-email {
     display: none;
   }
 }
 
-/* Two deliberate rows on a phone — brand and account on the first, the link
-   strip on the second — rather than letting flex wrap decide, which left the
-   brand floating a third of the way across its own line. */
 @media (max-width: 720px) {
-  .staff-nav {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-areas:
-      "brand end"
-      "links links";
-    row-gap: var(--ops-space-2);
-    column-gap: var(--ops-space-2);
-    padding: var(--ops-space-2) var(--ops-space-3);
-  }
-  .staff-brand {
-    grid-area: brand;
-  }
-  .staff-nav-end {
-    grid-area: end;
-    margin-left: auto;
-    min-width: 0;
-  }
-  .staff-nav-scroller {
-    grid-area: links;
-    padding-bottom: 2px;
-  }
-  .staff-nav a.active::after {
-    bottom: -3px;
-  }
-  /* No keyboard, no chord — and every destination the palette offers is already
-     one tap away in the strip below. Dropping it is what keeps the first row
-     inside a 390px viewport. */
+  /* No keyboard, no chord — and inside the drawer every destination the
+     palette offers is already one tap away. */
   .ops-cmdk-trigger {
     display: none;
   }

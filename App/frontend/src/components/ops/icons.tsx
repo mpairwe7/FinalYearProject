@@ -95,3 +95,55 @@ export const InboxEmptyIcon = () => (
     <path d="M3.5 12.5h4l1.4 2.4h6.2l1.4-2.4h4" />
   </svg>
 );
+
+/* --------------------------------------------------------------------------
+ * Sidebar rail glyphs
+ *
+ * The console nav became a collapsed 52px rail where the icon is the ONLY
+ * label, so every staff destination needs one — a text-only row is invisible
+ * there. Same conventions as above.
+ * ------------------------------------------------------------------------ */
+
+export const ListIcon = () => (
+  <svg {...base}>
+    <path d="M8 6h12" /><path d="M8 12h12" /><path d="M8 18h12" />
+    <path d="M4 6h.01" /><path d="M4 12h.01" /><path d="M4 18h.01" />
+  </svg>
+);
+
+export const SlidersIcon = () => (
+  <svg {...base}>
+    <path d="M4 6h9" /><path d="M17 6h3" />
+    <path d="M4 12h3" /><path d="M11 12h9" />
+    <path d="M4 18h9" /><path d="M17 18h3" />
+    <circle cx="15" cy="6" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="15" cy="18" r="2" />
+  </svg>
+);
+
+export const SendIcon = () => (
+  <svg {...base}>
+    <path d="M20 4 3 10.5l6.5 2.6L12 20l8-16Z" />
+    <path d="M9.5 13.1 20 4" />
+  </svg>
+);
+
+export const BeakerIcon = () => (
+  <svg {...base}>
+    <path d="M9.5 3v6.2L4.6 17a2 2 0 0 0 1.7 3h11.4a2 2 0 0 0 1.7-3l-4.9-7.8V3" />
+    <path d="M8 3h8" /><path d="M7 14h10" />
+  </svg>
+);
+
+export const PanelLeftIcon = () => (
+  <svg {...base}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </svg>
+);
+
+export const PinIcon = () => (
+  <svg {...base}>
+    <path d="M12 17v5" />
+    <path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z" />
+  </svg>
+);

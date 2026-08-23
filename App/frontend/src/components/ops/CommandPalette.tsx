@@ -44,9 +44,20 @@ export function useCommandPalette() {
 
 export function CommandPaletteTrigger({ onOpen }: { onOpen: () => void }) {
   return (
-    <button type="button" className="ops-cmdk-trigger" onClick={onOpen} aria-haspopup="dialog">
+    // Named explicitly: the collapsed rail hides the word "Search", and a
+    // display:none label is gone from the accessibility tree too, which left
+    // this button with no discernible name at all (axe: button-name, critical).
+    <button
+      type="button"
+      className="ops-cmdk-trigger"
+      onClick={onOpen}
+      aria-haspopup="dialog"
+      aria-label="Search"
+    >
       <CommandIcon />
-      Search
+      {/* Wrapped so the collapsed 52px rail can hide the words and keep the
+          glyph — the bare text node could not be targeted by CSS. */}
+      <span className="ops-cmdk-trigger-text">Search</span>
       <kbd className="ops-kbd">⌘K</kbd>
     </button>
   );

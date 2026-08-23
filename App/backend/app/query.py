@@ -292,6 +292,30 @@ def detect_language(text: str) -> str:
     words = re.findall(r"[a-z\']+", cleaned)
     n_words = max(len(words), 1)
 
+    # Consult the statistical detector BEFORE the marker heuristics below.
+    #
+    # The markers cannot tell Luganda from Runyankole: the two languages share
+    # the oku-/omu-/eby- infinitive and noun-class prefixes that _NYN_PREFIXES
+    # matches on, so any Luganda sentence carrying two of them short-circuited
+    # to "nyn" and never reached lingua at all. That is not a cosmetic
+    # mislabel — nyn is not in SUPPORTED_LOCALES, so service.py's gate then
+    # declines to promote the locale and the question is answered in ENGLISH.
+    # Measured on this project's own Luganda question bank, 3 of 6 questions
+    # went that way (penalties, returns, withholding); lingua calls the same
+    # six "lg" with 0.91-0.998 confidence.
+    #
+    # The markers still run below and still own nyn/ach — lingua has no model
+    # for either language, so it is only trusted here for a locale it actually
+    # knows AND is confident about. Everything else keeps the original order.
+    det = _get_language_detector()
+    if det is not None:
+        try:
+            result = det.detect(text)
+            if result.lang in SUPPORTED_LOCALES and result.is_confident(0.75):
+                return result.lang
+        except Exception:
+            logger.debug("LanguageDetector.detect failed; using marker heuristics")
+
     # Quick heuristic: count marker hits per language
     nyn_hits = len(_NYN_PREFIXES.findall(cleaned)) + len(_NYN_WORDS.findall(cleaned))
     ach_hits = len(_ACH_MARKERS.findall(cleaned))
@@ -553,6 +577,78 @@ def plan_retrieval(query: str) -> dict[str, Any]:
     }
 
 
+# Which translator the retrieval paths use to turn a non-English question
+# into something that shares vocabulary with the English corpus.
+#
+#   local_first  prompted MT through the already-loaded generation model,
+#                falling back to Sunbird cloud   (default)
+#   local        prompted MT only — no network
+#   sunbird      Sunbird cloud only (the historical behaviour)
+#
+# Defaults to local_first because the cloud tier is a single-account
+# dependency with a hard timeout and no same-account retry (issue #298).
+# Measured here: a cold /tasks/translate took the full 30s and returned
+# nothing, and because both retrieval paths treat translation as
+# best-effort, every Luganda and Kiswahili question in that window came
+# back `no_retrieval_results` even though the corpus held matching
+# passages. The local tier adds no model and no network — it reuses the
+# generation model that is already resident.
+#
+# Quality note: Sunbird's Luganda-native NLLB translates lg->en better than
+# a prompted LLM does. That matters less here than it looks, because this
+# text is only ever used to *search*; candidates are still bound and gated
+# by the same coverage check, so a weak translation costs recall rather
+# than admitting a wrong answer. Set RETRIEVAL_MT_BACKEND=sunbird to
+# restore cloud-first ordering.
+RETRIEVAL_MT_BACKEND = os.getenv("RETRIEVAL_MT_BACKEND", "local_first").lower()
+
+
+def translate_query_for_retrieval(query: str, locale: str) -> str | None:
+    """Best-effort non-English -> English for retrieval. Never raises.
+
+    Shared by both retrieval paths — ``english_retrieval_query`` below (the
+    hybrid retriever, G18) and service.py's FAQ translation rescue. They each
+    used to call ``sunbird.translate_to_english`` directly, so a single cloud
+    timeout took out both.
+    """
+
+    def _local() -> str | None:
+        from . import llm as llm_module
+
+        return llm_module.translate_text(query, source_lang=locale, target_lang="en")
+
+    def _cloud() -> str | None:
+        from . import sunbird
+
+        return sunbird.translate_to_english(query, locale)
+
+    if RETRIEVAL_MT_BACKEND == "local":
+        order = (("local", _local),)
+    elif RETRIEVAL_MT_BACKEND == "sunbird":
+        order = (("sunbird", _cloud),)
+    else:
+        order = (("local", _local), ("sunbird", _cloud))
+
+    for name, fn in order:
+        try:
+            english = fn()
+        except Exception:  # noqa: BLE001 — translation is best-effort
+            logger.debug("Retrieval translation via %s failed (%s)", name, _log_safe(locale))
+            continue
+        if not (english and english.strip()):
+            continue
+        # Verify it actually came back in English. A prompted model asked to
+        # translate sometimes answers in the SOURCE language instead, and
+        # returning that would be worse than returning nothing: the text is
+        # just as unsearchable against an English corpus, AND a non-empty
+        # result stops the next tier from ever being tried.
+        if detect_language(english) != "en":
+            logger.debug("Retrieval translation via %s was not English", name)
+            continue
+        return english.strip()
+    return None
+
+
 def english_retrieval_query(query: str, locale: str | None) -> str:
     """Query text to search the English corpus with (G18).
 
@@ -564,17 +660,7 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
     loc = (locale or "en").strip().lower().split("-")[0]
     if not text or loc in ("", "en"):
         return text
-    try:
-        from . import sunbird
-
-        english = sunbird.translate_to_english(text, loc)
-    except Exception:
-        logger.debug(
-            "english_retrieval_query: translation failed locale=%s",
-            _log_safe(loc),
-            exc_info=True,
-        )
+    english = translate_query_for_retrieval(text, loc)
+    if not english or english.casefold() == text.casefold():
         return text
-    if not english or english.strip().casefold() == text.casefold():
-        return text
-    return english.strip()
+    return english

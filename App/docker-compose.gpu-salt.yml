@@ -1,0 +1,87 @@
+# Local GPU overlay — Sunbird SALT speech backends baked in.
+#
+# Layers on top of docker-compose.yml + docker-compose.local-sunflower.yml:
+# builds `api` from Dockerfile.gpu (repo root) instead of the base Dockerfile
+# so Spark-TTS-SALT's BiCodec checkout is present (SPARK_TTS_REPO_DIR) and
+# torch comes from the cu128 index instead of requirements.txt's CUDA-13 pin.
+#
+# Both SALT tiers run on the GPU. They previously ran on cpu here because
+# the image's torch==2.12.1 is a CUDA-13 build and this host's driver
+# reports CUDA 12.2, so torch.cuda.is_available() was False. That was a
+# wheel problem, not a driver problem — CUDA minor-version compatibility
+# means any cu12x build runs on a >=525 driver, and vllm proves it on this
+# very host with torch 2.6.0+cu124. Dockerfile.gpu now pins a matched
+# cu128 torch/torchaudio pair; see its header and
+# docs/runbooks/salt-speech-backends.md.
+#
+#   cd App && GPU_ID=2 docker compose \
+#     -f docker-compose.yml -f docker-compose.local-sunflower.yml \
+#     -f docker-compose.gpu-salt.yml up -d --build
+services:
+  api:
+    build:
+      dockerfile: Dockerfile.gpu
+    image: ${DOCKER_IMAGE_API:-app-api}:gpu
+    environment:
+      # cuda:0 — the container sees exactly one card (device_ids below), so
+      # index 0 inside is GPU_ID outside. Same convention the base file's
+      # RETRIEVER_DENSE_DEVICE already uses.
+      - WHISPER_SALT_DEVICE=${SPEECH_DEVICE:-cuda:0}
+      - SPARK_TTS_DEVICE=${SPEECH_DEVICE:-cuda:0}
+      # The base file pins the reranker to cpu to dodge a GPU-0 startup stall
+      # on the shared box. This overlay already reserves one specific card, so
+      # that hazard doesn't apply — and with a working CUDA build the reranker
+      # is one of the two CPU-bound stages that made a cold hybrid answer take
+      # ~37s. Cross-encoder reranking is exactly the small-batch GPU work a
+      # card this size absorbs for free next to vLLM.
+      - RERANKER_DEVICE=${RERANKER_DEVICE:-cuda:0}
+      # Everything this stack can serve from a locally cached model, it does:
+      # ASR is Whisper-SALT and non-English TTS is Spark-TTS-SALT (both baked
+      # in above, both on the GPU), and retrieval-time translation runs as
+      # prompted MT through the already-loaded Sunflower rather than calling
+      # out to Sunbird. Cloud translate was measured timing out at its full
+      # 30s here, and because the retrieval rescue treats translation as
+      # best-effort, that silently abstained every Luganda/Kiswahili question.
+      # English TTS still falls through to edge-tts: Spark-TTS-SALT ships no
+      # English speaker id and no local piper voice is present in artifacts/.
+      - RETRIEVAL_MT_BACKEND=${RETRIEVAL_MT_BACKEND:-local}
+      - REPLY_MT_BACKEND=${REPLY_MT_BACKEND:-local}
+      # Same value the app defaults to, exposed here so a capacity run can
+      # raise it. Note what this limit actually is through the tunnel: slowapi
+      # keys on get_remote_address, and TRUSTED_PROXY_HOSTS defaults to
+      # loopback only, so the frontend container is not a trusted proxy and
+      # every public request is attributed to that one container IP. All
+      # tunnel traffic therefore shares ONE 30/minute bucket regardless of how
+      # many distinct callers there are. Raise it (e.g. RATE_LIMIT=10000/minute,
+      # matching docs/traceability/capacity-envelope-2026-08-19.md) to measure
+      # the app rather than the limiter.
+      - RATE_LIMIT=${RATE_LIMIT:-30/minute}
+      - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
+      # BAAI/bge-m3 (dense retriever) and the reranker are not in the NAS
+      # cache — HF_HUB_OFFLINE=1 (base file) silently pushed dense retrieval
+      # to the Cloudflare Vectorize fallback instead of local Qdrant. Allow
+      # one-time network fetch; the NAS mount below is read-write so it
+      # persists for the next run instead of re-downloading every time.
+      - HF_HUB_OFFLINE=0
+    volumes:
+      - type: bind
+        source: /mnt/nas1/caches/huggingface_cache
+        target: /app/hf_cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_ID:-2}"]
+              capabilities: [gpu]
+
+  vllm:
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_ID:-2}"]
+              capabilities: [gpu]

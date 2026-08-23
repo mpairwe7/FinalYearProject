@@ -284,10 +284,20 @@ groups:
 
 ## 7. SLO Definitions
 
+These targets are **published, not yet enforced as a single measured
+SLI**. k6 (`tests/load/k6-chat-slo.js`) and
+`monitoring/prometheus-rules.yaml` use **p95 &lt; 3s**; this table and
+`monitoring/alerting-rules.yml` use **p95 &lt; 2s**. Measured 2026-08-19
+(`App/docs/traceability/capacity-envelope-2026-08-19.md`): FAQ/calculator
+p95 is tens of ms; **uncached hybrid generation p95 already exceeds 3s
+at 4 concurrent** on one A6000. Do not treat a blended `/v1/chat` p95 as
+the generation SLO.
+
 | SLO              | Target  | Window   | Metric basis                                                  |
 |-------------------|---------|----------|---------------------------------------------------------------|
 | Availability      | 99.9%   | 30 days  | `1 - (5xx responses / total requests)`                        |
-| Latency (chat)    | p95 < 2s| 30 days  | `http_request_duration_ms{quantile="0.95",path="/v1/chat"}`   |
+| Latency (chat, blended) | p95 < 2s (table) / < 3s (k6 NFR-01) | 30 days | `http_request_duration_ms{quantile="0.95",path="/v1/chat"}` — dominated by FAQ/calculator unless sliced by `retrieval_mode` |
+| Latency (hybrid generation) | p95 < 3s is NFR-01; **unmet from 4 concurrent** on one A6000 vLLM | 30 days | measure `retrieval_mode=hybrid` only |
 | Error budget      | 0.1%    | 30 days  | Max 43.2 minutes of downtime / month                          |
 | Faithfulness      | median > 0.6 | 7 days | `faithfulness_score{quantile="0.5"}`                      |
 

@@ -10,7 +10,11 @@ without restrictions.
 
 ```bash
 # Current defaults (set in .env or docker-compose.yml)
-LLM_MODEL=Sunbird/Sunflower-14B-FP8  # llm.py — answer generation (gated on HF)
+LLM_MODEL=Sunbird/Sunflower-14B-FP8   # llm.py — answer generation, via vLLM
+                                        # (gated on HF; LLM_BACKEND=vllm — see
+                                        # §1 below; llm.py's own code-level
+                                        # fallback, used only when LLM_MODEL is
+                                        # unset entirely, stays Qwen/Qwen3-8B)
 DENSE_MODEL=BAAI/bge-m3            # retriever.py / indexer.py — dense embeddings
 DENSE_DIM=1024                     # must match DENSE_MODEL output dimension
 RERANKER_MODEL=mixedbread-ai/mxbai-rerank-base-v2  # retriever.py — cross-encoder reranking
@@ -31,10 +35,14 @@ remains the zero-setup fallback for CPU-only or infra-constrained dev boxes.
 
 | What changed | Re-index? | Restart API? | Update training_config.yaml? |
 |-------------|-----------|-------------|------------------------------|
-| `LLM_MODEL` | No | Yes | `models.generation.web_inference` |
+| `LLM_MODEL` | No | Yes\* | `models.generation.web_inference` |
 | `DENSE_MODEL` / `DENSE_DIM` | **Yes** (`./scripts/reindex.sh`) | Yes | `models.embedding` |
 | `RERANKER_MODEL` | No | Yes | No (not in training config) |
 | `RERANK_ENABLED=false` | No | Yes | No |
+
+\* Switching to Sunflower-14B-FP8 also means setting `LLM_BACKEND=vllm` — it
+ships pre-quantized (FP8_DYNAMIC, compressed-tensors) and is not validated
+against the local in-process Transformers+BitsAndBytes path. See §1.
 
 ---
 
@@ -42,8 +50,8 @@ remains the zero-setup fallback for CPU-only or infra-constrained dev boxes.
 
 | Model | Params | MMLU | License | VRAM | Context | Notes |
 |-------|--------|------|---------|------|---------|-------|
-| **Sunbird/Sunflower-14B-FP8** (default) | 14.8B (FP8) | n/a (multilingual-focused, not MMLU-optimized) | Apache-2.0 | ~15.3 GB (vLLM weight-only-FP8) / ~29.5 GB (transformers bf16 dequant) | 40960 (configured 8192) | Qwen3-14B arch; natively multilingual across 31 Ugandan languages + English; **gated on HF**, needs an approved HF_TOKEN or a local download; best served via `LLM_BACKEND=vllm` (Marlin FP8 kernel, ~42 tok/s on Ampere) — plain `local` backend is ~4.5-5 tok/s |
-| Qwen/Qwen3-8B (previous default; rollback) | 8B | 74.7 | Apache-2.0 | 16 GB | 128K | Best quality per GPU dollar for English-centric use; ungated; hybrid thinking mode |
+| **Sunbird/Sunflower-14B-FP8** (default) | 14.8B (FP8) | n/a (multilingual-focused, not MMLU-optimized) | Apache-2.0 | ~15.3 GB (vLLM weight-only-FP8) / ~29.5 GB (transformers bf16 dequant) | 4K (measured; native window untested beyond that) | Qwen3-14B arch; natively multilingual across 31 Ugandan languages + English — best translation accuracy in 24/31 measured pairs per its model card; **gated on HF**, needs an approved HF_TOKEN or a local download. **vLLM only** (compressed-tensors FP8_DYNAMIC); local in-process loading not validated — best served via `LLM_BACKEND=vllm` (Marlin FP8 kernel, ~42 tok/s on Ampere), plain `local` backend is ~4.5-5 tok/s. Tool-calling verified compatible with vLLM's `hermes` parser, but under `tool_choice=auto` it has been observed answering a tool-shaped question in prose instead of calling the tool — see `App/docker-compose.local-sunflower.yml`'s comment for the measurement. Does not use this project's lg/sw/nyn/ach LoRA adapters (shape-bound to the 8B base, only load on `LLM_BACKEND=local`) — it does not need them, being natively trained for these languages instead. |
+| Qwen/Qwen3-8B (previous default; simple/no-vLLM fallback) | 8B | 74.7 | Apache-2.0 | 16 GB | 128K | `llm.py`'s own code-level default when `LLM_MODEL` is unset entirely; ungated; hybrid thinking mode. The one path the lg/sw/nyn/ach LoRA adapters (`fine-tuning/adapters/`) apply to — they are trained against this base and loaded via `set_adapter()`, only on `LLM_BACKEND=local`. |
 | Qwen/Qwen3-30B-A3B | 30B (3B active) | 81.4 | Apache-2.0 | 18 GB | 128K | MoE — 30B quality at 3B cost; needs vLLM/SGLang |
 | Qwen/Qwen3-4B | 4B | ~68 | Apache-2.0 | 8 GB | 128K | Matches Qwen2.5-7B; fits small GPUs |
 | microsoft/Phi-4-mini-instruct | 3.8B | 68 | MIT | 8 GB | 128K | Strong math/logic; MIT license |
@@ -54,10 +62,13 @@ remains the zero-setup fallback for CPU-only or infra-constrained dev boxes.
 
 ```bash
 # Current default — multilingual, gated (requires approved HF_TOKEN)
-LLM_MODEL=Sunbird/Sunflower-14B-FP8 LLM_CONTEXT_WINDOW=8192 LLM_BACKEND=vllm
+# Proven recipe: docs/runbooks/capacity-slo.md
+LLM_MODEL=Sunbird/Sunflower-14B-FP8 LLM_BACKEND=vllm LLM_CONTEXT_WINDOW=8192
+# local dev: cd App && docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml up -d
 
-# Ungated rollback — fits on RTX A6000 easily, English-centric
-LLM_MODEL=Qwen/Qwen3-8B LLM_CONTEXT_WINDOW=8192
+# Ungated rollback — fits on RTX A6000 easily, English-centric, no vLLM sidecar needed
+# (also what the lg/sw/nyn/ach LoRA adapters target)
+LLM_MODEL=Qwen/Qwen3-8B LLM_BACKEND=local LLM_CONTEXT_WINDOW=8192
 
 # Budget option: MoE (30B quality, 3B active params)
 LLM_MODEL=Qwen/Qwen3-30B-A3B LLM_CONTEXT_WINDOW=8192 LLM_BACKEND=vllm
@@ -183,6 +194,7 @@ LLM_BACKEND=vllm                      # Marlin FP8 kernel on Ampere — ~42 tok/
 DENSE_MODEL=Qwen/Qwen3-Embedding-8B
 RERANKER_MODEL=mixedbread-ai/mxbai-rerank-large-v2
 # Total VRAM: ~15.3 GB (Sunflower, vLLM weight-only-FP8) + KV cache + embed/rerank
+# (measured ~16 GB for Sunflower alone, FP8)
 # On a shared multi-GPU host, pin an idle GPU: NVIDIA_VISIBLE_DEVICES=<idx>
 # (docker) or CUDA_VISIBLE_DEVICES=<idx> (bare process) — check `nvidia-smi`
 # for 0% utilization before picking one.
@@ -190,10 +202,9 @@ RERANKER_MODEL=mixedbread-ai/mxbai-rerank-large-v2
 
 ### RTX 4090 / A6000 (24 GB VRAM) — Balanced, English-centric
 ```bash
-LLM_MODEL=Qwen/Qwen3-8B
+LLM_MODEL=Sunbird/Sunflower-14B-FP8   # LLM_BACKEND=vllm
 DENSE_MODEL=BAAI/bge-m3
 RERANKER_MODEL=mixedbread-ai/mxbai-rerank-base-v2
-# Total VRAM: ~18 GB
 ```
 
 ### RTX 3090 / 4080 (16 GB VRAM) — Budget

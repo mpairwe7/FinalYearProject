@@ -58,7 +58,17 @@ jsonschema>=4.23
 fpdf2>=2.8
 Pillow>=10.4
 
-# LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch)
+# LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch). Also
+# covers the ASR half of the Sunbird SALT speech stack
+# (WHISPER_SALT_MODEL, app/speech_service.py): a plain
+# WhisperForConditionalGeneration + WhisperProcessor, no extra dependency.
+#
+# The TTS half (SPARK_TTS_MODEL, app/spark_tts_salt.py) is NOT covered here —
+# it needs BiCodec from a second, separately-licensed GitHub repository that
+# ships no setup.py/pyproject.toml and so cannot be a normal requirements.txt
+# entry. It is off by default; see docs/runbooks/salt-speech-backends.md for
+# the checkout + its own requirements.txt (torch/torchaudio/einx/einops/
+# omegaconf/soundfile/soxr) before setting SPARK_TTS_ENABLED=true.
 transformers>=4.46.0
 torch==2.12.1
 accelerate>=1.2.0

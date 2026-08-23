@@ -545,8 +545,19 @@ def is_available() -> bool:
 # ---------------------------------------------------------------------------
 # vLLM HTTP dispatch (LLM_BACKEND=vllm)
 # ---------------------------------------------------------------------------
-def _vllm_generate(messages: list[dict[str, str]]) -> str:
-    """Call a vLLM OpenAI-compatible /chat/completions endpoint."""
+def _vllm_generate(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Call a vLLM OpenAI-compatible /chat/completions endpoint.
+
+    The sampling overrides exist for subtasks whose ideal decoding differs
+    from chat's — translation wants greedy and reproducible, not the chat
+    defaults. Omitted values keep the chat settings.
+    """
     try:
         import json as _json
         import urllib.request
@@ -555,9 +566,9 @@ def _vllm_generate(messages: list[dict[str, str]]) -> str:
             {
                 "model": LLM_MODEL,
                 "messages": messages,
-                "temperature": LLM_TEMPERATURE,
-                "top_p": 0.95,
-                "max_tokens": LLM_MAX_TOKENS,
+                "temperature": LLM_TEMPERATURE if temperature is None else temperature,
+                "top_p": 0.95 if top_p is None else top_p,
+                "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
                 "stream": False,
                 "chat_template_kwargs": {"enable_thinking": False},
             }
@@ -788,6 +799,24 @@ def classify_choice(reply: str, options: list[str]) -> str:
         return ""
 
 
+# One-shot exemplars for prompted MT into English, keyed by source locale.
+#
+# Deliberately everyday sentences with no tax vocabulary. A tax-domain
+# exemplar primes its own subject: a VAT example made "Omusolo ogukwatibwa
+# nga tennasasulwa kye ki?" (withholding tax) translate as "What is Value
+# Added Tax?" — fluent, confident, and about the wrong tax. These carry only
+# the question-in / question-out shape, which is the part the model was
+# getting wrong, and left the whole verification bank correct.
+#
+# Each pair was checked by hand against this model before being used; an
+# exemplar that is itself a bad translation teaches the bad shape. Verify the
+# same way before adding a locale.
+_MT_ONESHOT: dict[str, tuple[str, str]] = {
+    "lg": ("Ekitabo kino kya ani?", "Whose book is this?"),
+    "sw": ("Kitabu hiki ni cha nani?", "Whose book is this?"),
+}
+
+
 def translate_text(
     text: str,
     source_lang: str = "en",
@@ -816,18 +845,86 @@ def translate_text(
         logger.warning("Prompted MT refused input (reason_length=%d)", len(verdict.reason or ""))
         return ""
 
+    _names = {"lg": "Luganda", "en": "English", "sw": "Swahili",
+              "nyn": "Runyankole", "ach": "Acholi"}
+    lang_name = _names.get(target_lang, target_lang)
+    src_name = _names.get(source_lang, source_lang)
+    # Prompt shape follows Sunflower-14B's own model card, which puts the
+    # translation directive in the USER turn ("Translate from Luganda to
+    # English: ...") under a fixed Sunflower persona system prompt — not, as
+    # this function previously did, a generic "you are a translator" system
+    # prompt with the bare text as the user turn. Measured on this project's
+    # own question bank, the old shape returned the SOURCE language instead of
+    # a translation on some inputs; the card's shape always returned English.
+    #
+    # The "it may be a question" clause is ours, and it is load-bearing: with
+    # the card's shape alone the model answered interrogatives instead of
+    # translating them — "EFRIS kye ki?" came back as an invented definition
+    # of EFRIS (refugee data, funds remittance, bribery reporting — a
+    # different hallucination each run) rather than "What is EFRIS?". Adding
+    # it took this bank from mostly-hallucination to 7 of 8 faithful.
+    system_prompt = (
+        "You are Sunflower, a multilingual assistant made by Sunbird AI who "
+        "understands Ugandan languages and English. You specialise in accurate "
+        "translations, factual question answering, summaries, explanations, "
+        "and multilingual reasoning."
+    )
+    # One worked example, into English only. The instruction alone still lost
+    # to the model's own knowledge on questions about an acronym it thinks it
+    # recognises: "EFRIS ni nini na ni nani anapaswa kuitumia?" came back as
+    # "EFRIS is an acronym for Electronic Funds Transfer for Rural
+    # Development. It is a mobile money platform…" — a definition, invented,
+    # and not a translation. A single exemplar of the question-in/question-out
+    # shape fixes it ("What is EFRIS and who should use it?"). Restricting a
+    # question-mark rule to the instruction was tried instead and produced
+    # "EFRIS is what and who should use it?" — the right sentence type,
+    # mangled — so the exemplar is doing real work that a rule did not.
+    #
+    # Into-English only: the reverse direction's failure mode was repetition
+    # loops, which the prompt shape above already fixed, and inventing
+    # exemplars in a language this file cannot verify would be worse than
+    # having none. Pairs without an exemplar simply fall back to the
+    # instruction, which is where every pair was before this.
+    oneshot = _MT_ONESHOT.get(source_lang) if target_lang == "en" else None
+    example = ""
+    if oneshot:
+        example = f"\n\n{src_name}: {oneshot[0]}\n{lang_name}: {oneshot[1]}"
+    user_prompt = (
+        f"Translate the following {src_name} text into {lang_name}. "
+        "It may be a question — translate the question itself, do not answer "
+        f"it.{example}\n\n{src_name}: {text}\n{lang_name}:"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    # Dispatch on the configured backend, the same way generate() does.
+    # This used to go straight to the in-process Transformers model, which
+    # made prompted MT silently dead on every LLM_BACKEND=vllm deployment:
+    # _load_model() returns early there BY DESIGN (the weights live in the
+    # vLLM server, not in this process), so the call fell through to the
+    # ImportError branch and logged "transformers/torch not installed" with
+    # both very much installed. The visible symptom was a stack explicitly
+    # configured for prompted MT still sending retrieval-time translation to
+    # Sunbird cloud — and abstaining on every Luganda/Kiswahili question
+    # whenever that cloud call timed out.
+    if LLM_BACKEND == "vllm":
+        try:
+            # Greedy: translation should be reproducible, and the same input
+            # producing a different invented answer on each call is exactly
+            # the failure mode the prompt above is guarding against. The
+            # card's suggested 0.5/0.9 is for open-ended chat; top_p and the
+            # 500-token cap follow it.
+            return (_vllm_generate(
+                messages, temperature=0.0, top_p=0.9, max_tokens=500,
+            ) or "").strip()
+        except Exception:  # noqa: BLE001 — MT is best-effort; caller falls through
+            logger.debug("Prompted MT via vLLM failed", exc_info=True)
+            return ""
+
     if not _load_model() or _tokenizer is None or _model is None:
         return ""
-
-    lang_name = {"lg": "Luganda", "en": "English", "sw": "Swahili",
-                 "nyn": "Runyankole", "ach": "Acholi"}.get(target_lang, target_lang)
-    messages = [
-        {"role": "system", "content": (
-            f"You are a professional translator. Translate the user's text to {lang_name}. "
-            "Output ONLY the translation, nothing else. No explanations, no notes."
-        )},
-        {"role": "user", "content": text},
-    ]
 
     try:
         import torch

@@ -208,6 +208,21 @@ retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registrat
 - `Data/eval/rag_eval_lg.jsonl` — Luganda eval set (12 samples), same format:
   Covers: TIN, VAT, penalties, e-services, EFRIS, mobile payments, withholding tax, tax clearance, VAT exemptions, late filing, corporate tax, objections. Evaluated as a blocking CI step.
 
+- `Data/eval/coverage_bank.jsonl` — corpus-coverage question bank (105 questions
+  x en/lg/sw, 23 tax domains), JSONL format:
+  ```json
+  {"id": "...", "domain": "vat", "theme": "...",
+   "question": {"en": "...", "lg": "...", "sw": "..."},
+   "expect_any": ["18%"], "origin": "contact-centre-theme"}
+  ```
+  Unlike the two sets above it is **not derived from the corpus**: the questions
+  are phrased the way contact-centre callers phrase them, so the run finds
+  subjects nothing indexed answers. `expect_any` names the facts a correct
+  answer must carry, which is what separates "retrieved something" from
+  "answered". Domain registry, per-domain floors and the domain-owner review
+  record live in `Data/eval/coverage_domains.yaml`. Runbook:
+  `docs/runbooks/corpus-coverage.md`.
+
 ## Regression Gates
 
 ### Classifier Gates
@@ -229,11 +244,26 @@ retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registrat
 | Safety Probe Pass Rate | >= 1.0 | Block HF push |
 | Abstention Precision | >= 0.5 | Block HF push |
 
+### Corpus Coverage Gate (CI step: `Corpus coverage gate`)
+`python -m ml.pipelines.corpus_coverage --languages en --fail-under-floor`
+
+| Check | Threshold | Action |
+|-------|-----------|--------|
+| Answered rate per tax domain | per-domain `floor` in `coverage_domains.yaml` | Block merge |
+| Answered rate over the whole bank | `overall_floor` (0.80) | Block merge |
+| Every `ura_*_faqs.csv` claimed by a domain | — | Block merge |
+| Every domain has a bank question | — | Block merge |
+| Every domain has a review record | — | Block merge |
+
+English only: the corpus is English, so a Luganda or Kiswahili figure measured
+here would be a figure about the translator. Those are measured with
+`--mode api` / `--mode voice` against a running deployment.
+
 ### Governance Gate (CI job: `governance-check`)
 | Check | Action |
 |-------|--------|
-| 10 required files exist | Block merge |
-| 29 content keywords present | Block merge |
+| 20 required files exist | Block merge |
+| 36 content keywords present | Block merge |
 
 ## Feedback Loop
 

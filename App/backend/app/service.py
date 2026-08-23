@@ -75,6 +75,7 @@ from .query import (
     detect_language,
     english_retrieval_query,
     extract_question_span,
+    translate_query_for_retrieval,
     extract_retrieval_filters,
     gate_locale,
     normalize as normalize_query,
@@ -1976,13 +1977,56 @@ def _faq_bm25_score(query_tokens: list[str], entry: dict, encoder: Any) -> float
     return score
 
 
+# Same three settings as RETRIEVAL_MT_BACKEND, for the reply direction
+# (English -> locale). Kept separate because the quality bar differs: a weak
+# retrieval translation only costs recall, whereas a weak reply translation is
+# what the taxpayer actually reads.
+REPLY_MT_BACKEND = os.getenv("REPLY_MT_BACKEND", "local_first").lower()
+
+
+def _translate_reply(text: str, locale: str) -> str | None:
+    """English -> *locale* for reply localization. Never raises."""
+
+    def _local() -> str | None:
+        from . import llm as llm_module
+
+        return llm_module.translate_text(text, source_lang="en", target_lang=locale)
+
+    def _cloud() -> str | None:
+        from . import sunbird
+
+        return sunbird.translate_from_english(text, locale)
+
+    if REPLY_MT_BACKEND == "local":
+        order = (("local", _local),)
+    elif REPLY_MT_BACKEND == "sunbird":
+        order = (("sunbird", _cloud),)
+    else:
+        order = (("local", _local), ("sunbird", _cloud))
+
+    for name, fn in order:
+        try:
+            out = fn()
+        except Exception:  # noqa: BLE001 — localization is best-effort
+            logger.debug("Reply localization via %s failed (%s)", name, locale, exc_info=True)
+            continue
+        if out and out.strip():
+            return out
+    return None
+
+
 def localize_reply(reply: str, locale: str) -> str:
     """Render *reply* in *locale*, or return the English unchanged.
 
     Answers are generated in English (see ``llm.can_generate_in_locale``) and
-    translated here by Sunbird's Ugandan-language MT, which is built for
-    lg/nyn/ach. The generation model is not, and asking it directly produced
-    repetition loops ("kozesa kozesa kozesa…") rather than sentences.
+    translated here. Sunbird's Ugandan-language MT is built for lg/nyn/ach and
+    remains the fallback; the generation model is now tried first, which is a
+    reversal of the previous order. That order existed because asking the
+    generation model directly produced repetition loops ("kozesa kozesa
+    kozesa…") rather than sentences — a prompting problem, not a capability
+    one. llm.translate_text now follows Sunflower-14B's own documented prompt
+    shape and decodes greedily, and returns clean sentences for the same
+    inputs. The length guard below stays as the safety net either way.
 
     Every failure path deliberately yields the English text rather than an
     error or an empty string: a taxpayer who reads English as a second
@@ -1999,11 +2043,8 @@ def localize_reply(reply: str, locale: str) -> str:
     text = str(reply or "").strip()
     if not text or locale in ("", "en"):
         return reply
-    try:
-        from . import sunbird  # local import: matches english_retrieval_query
-
-        translated = sunbird.translate_from_english(text, locale)
-    except Exception:
+    translated = _translate_reply(text, locale)
+    if translated is None:
         logger.info("reply localization to %s failed; serving English", locale)
         return reply
     if not translated or not translated.strip():
@@ -2106,13 +2147,7 @@ def _simple_search(
     # the rescues without also admitting nonsense. A tax assistant answering an
     # off-topic question with a confident-looking tax FAQ is worse than
     # answering nothing.
-    try:
-        from . import sunbird
-
-        english = sunbird.translate_to_english(query, locale)
-    except Exception:  # noqa: BLE001 — translation is best-effort
-        logger.debug("Retrieval translation failed for locale %s", locale, exc_info=True)
-        return hits
+    english = translate_query_for_retrieval(query, locale)
     if not english or english.strip().lower() == query.strip().lower():
         return hits
 
@@ -4332,12 +4367,27 @@ class ChatModel:
             # same authorization gate must drop the distress preamble too,
             # or it silently re-dilutes match coverage and rejects the very
             # FAQ retrieval_query just found, independent of the search step.
-            binding_query = message
+            #
+            # Bind to the ENGLISH form when there is one. This gate scores the
+            # corpus's own English FAQ question text against binding_query, so
+            # binding a Luganda or Kiswahili question to it cannot cover an
+            # English FAQ by construction: every row scored 0,
+            # _filter_unbound_faq_hits emptied the hit list, and the request
+            # abstained with `no_retrieval_results` even though retrieval had
+            # just returned 4 passages whose best reranker score was 0.831 —
+            # far above the 0.30 abstention threshold. _simple_search's own
+            # translation rescue already binds to the translated text for
+            # exactly this reason ("the user's own words cannot cover an
+            # English FAQ by construction"); this applies the same rule to the
+            # hybrid path. router_message is the canonicalized English form
+            # when MT produced one, and `message` unchanged otherwise, so an
+            # English question and a failed translation both behave as before.
+            binding_query = router_message
             if distress:
                 question_span = extract_question_span(rewritten)
                 if question_span:
                     retrieval_query = question_span
-                message_question_span = extract_question_span(message)
+                message_question_span = extract_question_span(router_message)
                 if message_question_span:
                     binding_query = message_question_span
 

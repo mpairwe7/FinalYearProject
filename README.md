@@ -138,7 +138,7 @@ User Query
 | **Query Rewriting** | `query.py` | Abbreviation expansion (15+ URA terms), spell correction, coreference resolution |
 | **Semantic Cache** | `cache.py` | Cosine similarity matching, configurable TTL/threshold/max-size |
 | **Corrective RAG** | `corrective_rag.py` | Re-retrieve with expanded query when initial quality is low |
-| **Generation** | `Qwen/Qwen3-8B` | Local Transformers with optional BitsAndBytes NF4 4-bit quantization, or vLLM HTTP |
+| **Generation** | `Sunbird/Sunflower-14B-FP8` | vLLM HTTP (FP8 compressed-tensors, natively multilingual for Ugandan languages); `Qwen/Qwen3-8B` + local Transformers/BnB 4-bit is the simple fallback and what the lg/sw/nyn/ach LoRA adapters target |
 | **LoRA Routing** | Qwen3 adapters for `lg`, `sw`, `nyn`, `ach` | Per-locale PEFT adapters loaded from `fine-tuning/adapters/` and selected with `set_adapter()` |
 | **Multi-turn Memory** | `database.py` | 5-turn sliding window from SQLite conversation history |
 | **Safety** | OWASP LLM Top 10 guardrails | Injection detection, PII redaction, XSS sanitization, grounding verification |
