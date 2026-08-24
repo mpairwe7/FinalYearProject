@@ -89,7 +89,7 @@ sacrebleu==2.6.0
 
 # Visualization & reporting
 matplotlib>=3.8.0
-seaborn>=0.13.0
+seaborn>=0.13.2
 
 # Cross-encoder reranking (included in sentence-transformers)
 # sentence-transformers already listed above
