@@ -59,10 +59,30 @@ export interface Conversation {
   titleCustom?: boolean;
 }
 
-/** `processing` = recording stopped, transcription in flight. Only the
- *  server-ASR dictation path reaches it; the browser Speech API returns its
- *  transcript synchronously in onresult and goes straight back to `idle`. */
-export type SpeechState = 'idle' | 'listening' | 'processing' | 'unavailable' | 'error';
+/**
+ * `starting` = the mic has been asked for and has not opened yet.
+ *
+ * This state exists because of a reported bug, not for polish: "one has to
+ * press the button twice before they can even listen". Opening a mic is slow
+ * — a permission prompt the first time, then the speech engine warming up —
+ * and until this state existed the button stayed on `idle` throughout, so it
+ * looked untouched and invited a second press. That second press called
+ * `start()` on a recognizer that was already starting, which throws
+ * `InvalidStateError`, and the handler read the throw as a failure and put the
+ * mic in `error`. The first press had worked; the second one broke it, and a
+ * third was needed. Naming the interval is what removes the invitation.
+ *
+ * `processing` = recording stopped, transcription in flight. Only the
+ * server-ASR dictation path reaches it; the browser Speech API returns its
+ * transcript synchronously in onresult and goes straight back to `idle`.
+ */
+export type SpeechState =
+  | 'idle'
+  | 'starting'
+  | 'listening'
+  | 'processing'
+  | 'unavailable'
+  | 'error';
 
 interface ChatStore {
   message: string;

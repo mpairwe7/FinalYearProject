@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { ChartTable, STATUS_MARK } from "./chartTheme";
+import { ChartNote, ChartTable, STATUS_MARK } from "./chartTheme";
 
 interface Props {
   thumbsUp: number;
@@ -24,8 +24,8 @@ export default function FeedbackPieChart({ thumbsUp, thumbsDown }: Props) {
   return (
     <div className="ops-chart-card">
       <div className="ops-chart-head">
-        <h3 className="ops-chart-title">Answer satisfaction</h3>
-        <span className="ops-chart-sub">{total} rated</span>
+        <h3 className="ops-chart-title">Were the answers helpful?</h3>
+        <span className="ops-chart-sub">{total} rated by taxpayers</span>
       </div>
 
       {pct == null ? (
@@ -70,6 +70,12 @@ export default function FeedbackPieChart({ thumbsUp, thumbsDown }: Props) {
         </>
       )}
 
+      {pct != null && (
+        <ChartNote>
+          Out of {total} answers taxpayers rated, {thumbsUp} were marked helpful. Only
+          answers someone chose to rate are counted here.
+        </ChartNote>
+      )}
       <ChartTable
         caption="Answer feedback"
         columns={["Rating", "Count"]}

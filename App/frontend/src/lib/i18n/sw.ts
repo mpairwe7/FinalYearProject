@@ -40,6 +40,8 @@ export const sw: Partial<Dictionary> = {
   'composer.micStop': 'Acha kusikiliza',
   'composer.voiceEnter': 'Ingia hali ya sauti',
   'composer.voiceExit': 'Toka hali ya sauti',
+  'composer.micStarting': 'Ninafungua maikrofoni',
+  'composer.micStartingTip': 'Ninafungua maikrofoni…',
   'composer.transcribing': 'Ninanukuu',
   'composer.transcribingTip': 'Ninanukuu…',
   'composer.dictate': 'Imba maandishi',
@@ -102,7 +104,21 @@ export const sw: Partial<Dictionary> = {
   'message.helpful': 'Imesaidia',
   'message.notHelpful': 'Haikusaidia',
   'message.thinking': 'Ninatafuta katika hifadhi ya URA…',
+  'phase.thinking': 'Ninafikiri',
+  'phase.searching': 'Ninatafuta katika hifadhi ya URA',
+  'phase.churning': 'Ninaandika jibu',
+  'phase.translating': 'Ninatafsiri jibu',
   'message.latest': 'Ya hivi punde',
+
+  'handoff.ask': 'Zungumza na afisa wa URA',
+  'handoff.requesting': 'Ninaomba afisa…',
+  'handoff.reference': 'Kumbukumbu',
+  'handoff.queued':
+    'Afisa wa URA ameombwa kuangalia hili. Jibu lake litaonekana hapa.',
+  'handoff.failed':
+    'Hili halikuweza kufikishwa kwa afisa. Piga simu bila malipo 0800 117 000.',
+  'handoff.offline':
+    'Inaonekana huna mtandao. Jaribu tena ukiunganishwa, au piga 0800 117 000.',
 
   'common.cancel': 'Ghairi',
   'common.delete': 'Futa',

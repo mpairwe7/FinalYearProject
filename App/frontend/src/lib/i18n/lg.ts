@@ -42,6 +42,8 @@ export const lg: Partial<Dictionary> = {
   'composer.micStop': 'Lekera awo okuwuliriza',
   'composer.voiceEnter': 'Yingira mu ddoboozi',
   'composer.voiceExit': 'Va mu ddoboozi',
+  'composer.micStarting': 'Nzigula maykolofoni',
+  'composer.micStartingTip': 'Nzigula maykolofoni…',
   'composer.transcribing': 'Nkyusa mu bigambo',
   'composer.transcribingTip': 'Nkyusa mu bigambo…',
   'composer.dictate': 'Yogera owandiike',
@@ -104,7 +106,21 @@ export const lg: Partial<Dictionary> = {
   'message.helpful': 'Kiyambye',
   'message.notHelpful': 'Tekiyambye',
   'message.thinking': 'Nnoonya mu tterekero lya URA…',
+  'phase.thinking': 'Nlowooza',
+  'phase.searching': 'Nnoonya mu tterekero lya URA',
+  'phase.churning': 'Mpandiika eky’okuddamu',
+  'phase.translating': 'Nvvuunula eky’okuddamu',
   'message.latest': 'Ekisembayo',
+
+  'handoff.ask': 'Yogera n’omukozi wa URA',
+  'handoff.requesting': 'Nsaba omukozi…',
+  'handoff.reference': 'Namba y’ekiwandiiko',
+  'handoff.queued':
+    'Omukozi wa URA asabiddwa okutunuulira kino. Eky’okuddamu kijja kulabika wano.',
+  'handoff.failed':
+    'Kino tekisobose kutuusibwa ku mukozi. Kuba essimu ya bwereere ku 0800 117 000.',
+  'handoff.offline':
+    'Olabika toli ku yintaneeti. Gezaako nate bw’oddamu okuyingira, oba kuba 0800 117 000.',
 
   'common.cancel': 'Sazaamu',
   'common.delete': 'Gyawo',

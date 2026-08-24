@@ -10,7 +10,17 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
-import { AXIS_TICK, AXIS_TICK_SM, ChartLegend, GRID_STROKE, OpsTooltip, SERIES, THRESHOLD_STROKE } from "./chartTheme";
+import {
+  AXIS_TICK,
+  AXIS_TICK_SM,
+  ChartLegend,
+  ChartNote,
+  EVAL_METRIC,
+  GRID_STROKE,
+  OpsTooltip,
+  SERIES,
+  THRESHOLD_STROKE,
+} from "./chartTheme";
 
 interface EvalMetric {
   name: string;
@@ -24,21 +34,18 @@ interface Props {
   title?: string;
 }
 
-const LABELS: Record<string, string> = {
-  faithfulness: "Faithfulness",
-  answer_relevancy: "Relevancy",
-  context_precision: "Ctx precision",
-  context_recall: "Ctx recall",
-  groundedness: "Groundedness",
-  citation_accuracy: "Citation accuracy",
-  safety_probe_pass_rate: "Safety",
-  abstention_precision: "Abstention",
-};
-
-/** Score against threshold across the eight RAG metrics. */
+/**
+ * Score against the release threshold, across the eight quality checks.
+ *
+ * The axis labels used to be the metric names shortened — "Ctx precision",
+ * "Abstention", "Groundedness". Abbreviating a term the reader does not know
+ * does not help them; it only makes the wall narrower. The shared EVAL_METRIC
+ * table names each check as the question it asks about the assistant's
+ * behaviour, and the `short` form is what fits on a radar spoke.
+ */
 export default function EvalRadarChart({ metrics, title = "Quality against thresholds" }: Props) {
   const data = metrics.map((m) => ({
-    metric: LABELS[m.name] ?? m.name,
+    metric: EVAL_METRIC[m.name]?.short ?? m.name.replaceAll("_", " "),
     score: Math.round(m.value * 100),
     threshold: Math.round(m.threshold * 100),
   }));
@@ -55,7 +62,7 @@ export default function EvalRadarChart({ metrics, title = "Quality against thres
           <PolarAngleAxis dataKey="metric" tick={AXIS_TICK} />
           <PolarRadiusAxis angle={30} domain={[0, 100]} tick={AXIS_TICK_SM} />
           <Radar
-            name="Score"
+            name="Measured"
             dataKey="score"
             stroke={SERIES[0]}
             fill={SERIES[0]}
@@ -63,7 +70,7 @@ export default function EvalRadarChart({ metrics, title = "Quality against thres
             isAnimationActive={false}
           />
           <Radar
-            name="Threshold"
+            name="Minimum required"
             dataKey="threshold"
             stroke={THRESHOLD_STROKE}
             strokeDasharray="4 4"
@@ -75,10 +82,15 @@ export default function EvalRadarChart({ metrics, title = "Quality against thres
       </ResponsiveContainer>
       <ChartLegend
         items={[
-          { label: "Score", color: SERIES[0] },
-          { label: "Threshold", color: THRESHOLD_STROKE },
+          { label: "Measured", color: SERIES[0] },
+          { label: "Minimum required", color: THRESHOLD_STROKE },
         ]}
       />
+      <ChartNote>
+        The filled shape is how the assistant scored; the dashed outline is the minimum each
+        check has to clear before a release is allowed. Wherever the filled shape reaches past
+        the outline, that check passed.
+      </ChartNote>
     </div>
   );
 }

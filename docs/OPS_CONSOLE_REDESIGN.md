@@ -243,3 +243,65 @@ its meaning:
 3. **Real evaluation data.** `/analytics/evaluation` was reviewed in its
    sample-data state, which is what a staff session sees; the live-run branch is
    code-reviewed but not rendered.
+
+
+---
+
+## Follow-up, 2026-08-24 — a dashboard its readers can read
+
+The redesign above fixed how the console *looked* and what it *claimed*. It did
+not touch the one thing a reviewer raised afterwards: **"graphs may have to be
+more accurate and have understanding data that even non-IT personnel can
+understand."**
+
+Every panel was captioned in the vocabulary of the system it monitors. "Chat p95
+latency". "Average confidence". "Endpoint latency", over an axis of URL paths,
+in milliseconds. "retrieval_mode = hybrid · keyword · abstained". "Replica
+uptime". "abstention_precision 0.75". Each is a fact the person accountable for
+the service needs, and not one of them is a fact they can read — the reader has
+to be taught what a quantile is before the page tells them anything.
+
+### What changed
+
+| Was | Now |
+|---|---|
+| "Chat p95 latency · 1400ms · ≤ 2000ms" | "Answer speed · 1.4 seconds · target at most 2 seconds" + *19 out of every 20 answers arrive faster than this* |
+| "Endpoint latency", `/v1/chat` on the axis | "How long each thing takes", *Answering a question* on the axis |
+| "p50 (median) · p95 · p99" | "Half are faster · 19 in 20 are faster · 99 in 100 are faster" |
+| "How answers were produced: hybrid 62%" | "Where answers came from: Found in URA documents 62%" |
+| "Escalations by status: Open / Assigned / Won't fix" | "Questions passed to an officer: Waiting / With an officer / Closed unanswered" |
+| "Replica uptime · this process, not the period" | "Running without a restart · since the service last started, not the period above" |
+| "faithfulness · abstention_precision · context_recall" | "Sticks to the documents · Says when it does not know · Finds all the documents", each with a sentence saying what it measures |
+| "Confusion matrix · rows predicted · columns true" | "Sorting questions into the right topic · each row is what the assistant guessed, each column is the real topic" |
+
+Three structural changes went with the language:
+
+1. **Every chart states its own reading.** A visible one-sentence `ChartNote`
+   under the plot — *"The slowest of these is Answering a question — 19 in 20
+   finish within 2.4 seconds, against a target of 2 seconds"* — rather than
+   leaving the reader to derive it by comparing bar heights to a dashed line. It
+   is not a tooltip: an explanation you have to discover is an explanation for
+   people who already know.
+
+2. **The last gauge became a meter.** `SloGaugeCard` was a half-donut, which is
+   a two-slice pie — gap 14 in the table above, and the same call already made
+   for the satisfaction card. A meter shows the one thing the arc could not:
+   *where the target is*, as a position on the track rather than a colour the
+   reader has to have been taught.
+
+3. **The technical term is kept, not primary.** `Answer speed (p95 latency)` —
+   the plain name leads and the term rides beside it in secondary weight, so an
+   engineer looking for a specific metric still finds it.
+
+The mapping lives in `components/charts/chartTheme.tsx`
+(`QUANTILE_LABEL`, `RETRIEVAL_MODE_LABEL`, `EVAL_METRIC`, `plainSeconds`) so
+every panel says the same thing, and is pinned by
+`src/__tests__/components/charts/plainLanguage.test.tsx`.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `bunx tsc --noEmit` | clean |
+| `bun run lint` | clean (same pre-existing `<img>` warning) |
+| `bun run test` (vitest) | **221 / 221 pass** |

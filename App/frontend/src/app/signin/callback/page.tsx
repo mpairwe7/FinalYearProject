@@ -98,7 +98,9 @@ export default function OidcCallbackPage() {
         return;
       }
 
-      setAuthToken(body.access_token);
+      // Tagged as OIDC so sign-out knows there is a provider session to end
+      // as well — see lib/authSession's AuthMethod.
+      setAuthToken(body.access_token, "oidc");
       clearOidcFlowState();
 
       // Confirm the backend accepts it, and find out which role we hold, before

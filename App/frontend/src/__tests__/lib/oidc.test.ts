@@ -106,4 +106,24 @@ describe("discoverOidc", () => {
     // only would silently force a second discovery round-trip.
     expect(TOKEN_ENDPOINT_KEY).toBe("ura_oidc_token_endpoint");
   });
+
+  /**
+   * The logout endpoint is how sign-out reaches the provider. Without it,
+   * signing out only makes this application forget who you were, and the next
+   * sign-in is answered silently from the provider's surviving cookie.
+   */
+  it("reads the logout endpoint when the provider publishes one", async () => {
+    mockFetch({ ...DOC, end_session_endpoint: "https://tenant.us.auth0.com/oidc/logout" });
+    const endpoints = await discoverOidc("https://tenant.us.auth0.com");
+    expect(endpoints.end_session_endpoint).toBe("https://tenant.us.auth0.com/oidc/logout");
+  });
+
+  it("does not treat a missing logout endpoint as a broken document", async () => {
+    // Optional in the spec, and a provider without one is usable for
+    // everything except remote logout — which the caller degrades from.
+    mockFetch(DOC);
+    const endpoints = await discoverOidc("https://tenant.us.auth0.com");
+    expect(endpoints.end_session_endpoint).toBeUndefined();
+    expect(endpoints.token_endpoint).toBe(DOC.token_endpoint);
+  });
 });

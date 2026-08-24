@@ -3,6 +3,30 @@ const DEFAULT_AUTH_TOKEN_KEY = 'ura_auth_token';
 export const AUTH_TOKEN_STORAGE_KEY =
   process.env.NEXT_PUBLIC_AUTH_TOKEN_STORAGE_KEY || DEFAULT_AUTH_TOKEN_KEY;
 
+/**
+ * How the current token was obtained.
+ *
+ * Recorded because signing out has to do different things for each. An OIDC
+ * token means there is a session at the identity provider that must ALSO be
+ * ended — without that, sign-out is a local gesture and the next sign-in is
+ * answered silently from the surviving provider cookie, which is what made
+ * "sign in as another user" hand back the previous account. A dev token has no
+ * provider behind it, so redirecting anywhere would be nonsense.
+ */
+export type AuthMethod = 'oidc' | 'dev';
+
+const AUTH_METHOD_STORAGE_KEY = `${AUTH_TOKEN_STORAGE_KEY}_method`;
+
+export function getAuthMethod(): AuthMethod | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const value = window.localStorage.getItem(AUTH_METHOD_STORAGE_KEY);
+    return value === 'oidc' || value === 'dev' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getAuthToken(): string {
   if (typeof window === 'undefined') return '';
   try {
@@ -45,13 +69,15 @@ export function getServerAuthToken(): string {
   return '';
 }
 
-export function setAuthToken(token: string): void {
+export function setAuthToken(token: string, method?: AuthMethod): void {
   if (typeof window === 'undefined') return;
   try {
     if (token) {
       window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+      if (method) window.localStorage.setItem(AUTH_METHOD_STORAGE_KEY, method);
     } else {
       window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      window.localStorage.removeItem(AUTH_METHOD_STORAGE_KEY);
     }
   } catch {
     // Storage can be unavailable in private contexts.

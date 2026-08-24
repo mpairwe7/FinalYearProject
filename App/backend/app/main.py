@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -58,6 +59,8 @@ from .models import (
     ClassifyRequest,
     ClassifyResponse,
     DocumentAnalysisResponse,
+    EscalationRequest,
+    EscalationResponse,
     ExportConversationRequest,
     ExportTaxSummaryRequest,
     FAQResponse,
@@ -81,7 +84,8 @@ from .models import (
     VoiceChatResponse,
     VoiceVisionChatResponse,
 )
-from .service import ChatModel
+from .query import gate_locale
+from .service import ChatModel, localize_reply
 from .speech_service import (
     SPEECH_ASR_BACKEND,
     SPEECH_ENABLED,
@@ -496,6 +500,22 @@ async def lifespan(app: FastAPI):
                 SPEECH_TTS_BACKEND,
                 SPEECH_MT_BACKEND,
             )
+            # Warm the synthesis chain off the request path. The model objects
+            # are built above, but the tiers behind them are lazy — the
+            # Spark-TTS codec, the edge-tts session, the Sunbird client — and
+            # without this the first taxpayer to press Listen waits for all of
+            # it. On a background thread, so a slow or unreachable tier delays
+            # nobody's startup; failures are logged and change nothing.
+            from .speech_service import SPEECH_WARMUP
+
+            if SPEECH_WARMUP:
+                def _warm_speech(speech: SpeechModel = app.state.speech) -> None:
+                    outcomes = speech.warmup()
+                    logger.info("SpeechModel warm-up: %s", outcomes or "skipped")
+
+                threading.Thread(
+                    target=_warm_speech, name="speech-warmup", daemon=True
+                ).start()
         except Exception:
             logger.exception("SpeechModel initialisation failed — speech endpoints will 503")
             app.state.speech = None
@@ -598,6 +618,30 @@ async def lifespan(app: FastAPI):
 # deploys.  When unset, the limiter uses an in-process memory bucket — this
 # is fine for a single-worker dev server but will NOT correctly enforce a
 # shared limit across workers or Kubernetes replicas.
+# What a taxpayer is told after asking for a person. English source text —
+# localize_reply renders it into their language on the way out, the same path
+# every chat answer takes, so these get the figure and collapse guards too.
+#
+# Deliberately concrete about what happens next and where the answer will
+# appear. "An officer will be in touch" is the sentence that makes people
+# phone the contact centre and start over, which is the outcome escalation
+# exists to avoid.
+_ESCALATION_CREATED_MESSAGE = (
+    "A URA officer has been asked to look at this. Their reply will appear "
+    "here in this conversation, so you do not need to start again. You can "
+    "also call URA toll-free on 0800 117 000 or 0800 217 000."
+)
+_ESCALATION_REUSED_MESSAGE = (
+    "A URA officer is already looking at this conversation. Their reply will "
+    "appear here, so there is no need to ask again. You can also call URA "
+    "toll-free on 0800 117 000 or 0800 217 000."
+)
+_ESCALATION_QUEUE_OFF_MESSAGE = (
+    "This assistant cannot pass your question to an officer right now. "
+    "Please call URA toll-free on 0800 117 000 or 0800 217 000, or visit "
+    "ura.go.ug."
+)
+
 _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
 _EXPORT_RATE_LIMIT = os.getenv("EXPORT_RATE_LIMIT", "10/minute")
 _DOCUMENT_RATE_LIMIT = os.getenv("DOCUMENT_RATE_LIMIT", "10/minute")
@@ -979,6 +1023,12 @@ async def chat_stream(
                 continue
             if event_type == "_log":
                 _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
+                continue
+            if event_type.startswith("translation."):
+                # Reply localization is the slow leg of a non-English turn and
+                # the client shows it as its own phase. Not buffered into
+                # agent_trace: it is a presentation cue, not a retrieval step.
+                yield {"event": "phase", "data": event_type}
                 continue
             if event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
                 # Retrieval boundaries go out live, as a name and nothing else.
@@ -1992,6 +2042,107 @@ def submit_feedback(
         bot_reply=_CM.redact_for_storage(body.bot_reply),
     )
     return FeedbackResponse(**result)
+
+
+@app.post("/v1/escalate", response_model=EscalationResponse, tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+def request_human_officer(
+    request: Request,
+    body: EscalationRequest,
+    model: ChatModel = Depends(get_model),
+    ctx: AuthContext = Depends(optional_user),
+) -> EscalationResponse:
+    """Hand this conversation to a human URA officer, because the taxpayer asked.
+
+    Every other route into the ticket queue is a judgement the system makes on
+    the taxpayer's behalf: the supervisor's ESCALATE route, the response judge
+    escalating a low-confidence answer, the ``escalate_to_human`` tool the
+    model may call mid-turn. Someone who has simply decided the assistant
+    cannot help them had no way to say so — they were told to phone a number
+    that starts the conversation over. This is the missing direction.
+
+    Reuses ``_maybe_create_ticket``, which is what makes the ticket worth
+    anything rather than a row in a table: it snapshots the transcript for the
+    officer, redacts it, routes it to the owning team, notifies, publishes to
+    the live staff stream — and, crucially, reuses an already-open ticket for
+    this conversation, so a taxpayer who asks three times gets one officer
+    rather than three each starting from the beginning.
+
+    Open to unauthenticated callers on purpose. A taxpayer who cannot get an
+    answer is exactly the person least likely to have an account, and asking
+    them to make one first is a worse failure than the one they are reporting.
+    The rate limit and the redaction path are what bound the abuse surface.
+
+    Honours the ``ticket_queue`` flag (see AGENTS.md): with the queue off this
+    answers ``ok: false`` and says how to reach URA instead of claiming a
+    handoff that will never arrive.
+
+    Depends on the ChatModel, so it 503s when the model failed to initialise.
+    That is a deliberate consequence of reusing ``_maybe_create_ticket`` rather
+    than growing a second, thinner path into the ticket table that would drift
+    from it — the transcript snapshot, the redaction, the team routing and the
+    open-ticket reuse all live there. It is reachable in practice: the control
+    is offered under an assistant turn, which means the model answered. The
+    client treats any non-`ok` response the same way, by showing the
+    contact-centre numbers.
+    """
+    from .flags import flags
+
+    locale = gate_locale(body.locale)
+    if not flags.is_enabled("ticket_queue"):
+        metrics.inc("escalation_requested_total", labels={"outcome": "queue_disabled"})
+        return EscalationResponse(
+            ok=False,
+            status="queue_disabled",
+            message=localize_reply(_ESCALATION_QUEUE_OFF_MESSAGE, locale),
+        )
+
+    reason = (body.reason or "").strip() or "The taxpayer asked to speak to a URA officer."
+    conversation_id = body.conversation_id or ""
+    handoff: dict[str, Any] = {
+        "topic": "general",
+        "summary": reason[:500],
+        "priority": "normal",
+        # Named so an officer opening the queue can tell an answer the system
+        # doubted from a person who asked for help — they need different
+        # first replies.
+        "requested_by": "taxpayer",
+    }
+    ticket_id = model._maybe_create_ticket(
+        reason=reason,
+        user_query=reason,
+        bot_reply="",
+        session_id=body.session_id,
+        conversation_id=conversation_id,
+        priority="normal",
+        handoff=handoff,
+        user_id=ctx.user_id or "",
+    )
+    if not ticket_id:
+        # _maybe_create_ticket logs the failure as ESCALATION LOST. The
+        # taxpayer must not be told a human is coming when none is.
+        metrics.inc("escalation_requested_total", labels={"outcome": "failed"})
+        return EscalationResponse(
+            ok=False,
+            status="failed",
+            message=localize_reply(_ESCALATION_QUEUE_OFF_MESSAGE, locale),
+        )
+
+    reused = bool(handoff.get("reused_existing_ticket"))
+    metrics.inc(
+        "escalation_requested_total",
+        labels={"outcome": "reused" if reused else "created"},
+    )
+    return EscalationResponse(
+        ok=True,
+        ticket_id=ticket_id,
+        status="open",
+        reused_existing=reused,
+        message=localize_reply(
+            _ESCALATION_REUSED_MESSAGE if reused else _ESCALATION_CREATED_MESSAGE,
+            locale,
+        ),
+    )
 
 
 @app.patch("/v1/feedback/{message_id}/comment", tags=["feedback"])
