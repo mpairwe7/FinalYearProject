@@ -74,7 +74,7 @@ websockets>=12.0
 # (via fastapi / qdrant-client); only these two are new. boto3 is used only by
 # the R2 client (lazy-imported), so it does not bloat cold-start.
 pydantic-settings>=2.5.0
-boto3>=1.34.0
+boto3>=1.43.77
 
 # DNS-over-HTTPS resolver (doh_resolver.py) — RENU pods have no working upstream
 # DNS; this resolves external hostnames via 1.1.1.1 over TCP/443 when USE_DOH=true.
