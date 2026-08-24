@@ -157,16 +157,34 @@ here, and the cu128 pin in `Dockerfile.gpu` has since made the GPU path real.
 | Corpus | 41 tags, 515 FAQ entries; BM25 state loaded |
 | ngrok tunnel | `started tunnel … url=https://struttingly-nongeological-briella.ngrok-free.dev` |
 
+### Functional run through the tunnel (2026-08-24, after the API finished loading Whisper-SALT)
+
+`python3 scripts/verify_seven_issues.py` against
+`https://struttingly-nongeological-briella.ngrok-free.dev` — 20 pass, 1 fail,
+4 info. The fail is a harness comparison, not a figure-guard miss; see below.
+
+| Check | Result |
+|---|---|
+| `/api/health`, `/api/v1/speech/health` | alive; asr=auto tts=auto mt=prompted |
+| Issue 1 — plain-language dashboard labels in the shipped bundle | 6/6 present; `Chat p95 latency` / `Endpoint latency` / `Replica uptime` gone |
+| Issue 2 — Luganda typed with no locale, `/v1/chat` | `locale=lg`, Luganda reply, 3.4s |
+| Issue 2 — Swahili typed with no locale, `/v1/chat` | `locale=sw`, Swahili reply, 2.3s |
+| Issue 2 — English stays English | `locale=en`, 0.5s |
+| Issue 2 — streaming `/v1/chat/stream` | `metadata.locale=lg`, `translation.started` announced. The body was the Luganda abstention line, not the TIN-registration procedure the non-streaming path returned for the same question. Language is correct; content is a retrieval short-circuit. |
+| Issue 3 — figure fidelity | **FAIL in the harness.** English `locale=en` answered the VAT threshold as UGX 300,000,000 (FY2026-27). The same English question with `locale=lg` abstained and served the Contact Centre numbers (0800 117 000 / 0800 217 000). Those are two independent generations, not a translation of one reply, so the digit scrape is not `figures_survived`. The guard itself was confirmed in the running image before this run (`figures_survived('VAT is 18%', 'VAT ebitundu 18 ku buli kikumi')` → True) and by `test_mt_cache.py`. |
+| Issue 4 — `POST /v1/escalate` | 200, ticket created, second call reuses it, Luganda acknowledgement |
+| Issue 5 — TTS after warm-up | en 1.0s `edge_tts` then 0.7s cached; lg 6.5s `spark_tts_salt` then 0.8s cached |
+| Issue 6 — English vs Luganda chat | cold x18 (0.5s vs 9.2s), warm x5.36 (0.5s vs 2.8s). The memo closes the repeat; the first Luganda turn still pays for retrieval + prompted MT. |
+| Issue 7 — RP-initiated logout | provider publishes `end_session_endpoint`; this build sends the registered bare origin; `/signin` carries "Sign in as a different user" |
+
 ### Still outstanding
 
-1. **The functional run.** `scripts`-side harness exists (see the commit's
-   verification script) and covers: Luganda auto-detect answered in Luganda on
-   both `/v1/chat` and `/v1/chat/stream`; the `translation.*` phase frames;
-   figure fidelity across a translated answer; `POST /v1/escalate` including
-   ticket reuse and the officer's view of it; TTS cold-vs-cached timings; and
-   the English-vs-Luganda latency ratio the MT memo is meant to close.
-2. **Perceptual verification** of Spark-TTS-SALT output — still open from
+1. **Perceptual verification** of Spark-TTS-SALT output — still open from
    2026-08-22, unchanged by this work.
-3. **A real browser pass** over the redesigned dashboard. The sandbox cannot
+2. **A real browser pass** over the redesigned dashboard. The sandbox cannot
    paint (see `docs/TEST_REPORT_2026-06-10.md`); the labels are asserted from
    the bundle and from `plainLanguage.test.tsx`, not from a screenshot.
+3. **Streaming vs non-streaming retrieval.** The same Luganda TIN-registration
+   question answered on `/v1/chat` and abstained on `/v1/chat/stream`. The
+   language fix held (the abstention was in Luganda); the content did not.
+   Not closed by this change set.

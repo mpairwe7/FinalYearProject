@@ -84,6 +84,11 @@ ENGLISH_MARKERS = re.compile(
     r"\b(the|you|your|register|application|please|and|with|for)\b", re.I
 )
 
+# The Luganda abstention / "I could not find this in the knowledge base" line.
+# When the lg path short-circuits here, the two replies are not a translation
+# pair and a digit scrape is not figures_survived.
+_ABSTENTION_MARKERS = ("sisobodde kufuna", "nsonyiwa")
+
 
 def looks_english(text: str) -> bool:
     words = re.findall(r"[A-Za-z']+", text)
@@ -173,12 +178,13 @@ def check_issue2_streaming():
     final = revisions[-1] if revisions else "".join(tokens)
     saw_translation = any(p.startswith("translation.") for p in phases)
     ok = meta_locale == "lg" and not looks_english(final)
+    abstained = any(marker in final.lower() for marker in _ABSTENTION_MARKERS)
     record(
         "issue2-streaming",
         ok,
         f"metadata.locale={meta_locale} phases={phases} "
-        f"translation_announced={saw_translation} {time.perf_counter()-t0:.1f}s "
-        f"final={final[:110]!r}",
+        f"translation_announced={saw_translation} abstained={abstained} "
+        f"{time.perf_counter()-t0:.1f}s final={final[:110]!r}",
     )
 
 
@@ -206,6 +212,17 @@ def check_issue3_figures():
     en_figs, lg_figs = _figures(en_reply), _figures(lg_reply)
     # Either the figures survived, or the guard refused and served English.
     served_english = lg_reply.strip() == en_reply.strip()
+    lg_lower = lg_reply.lower()
+    abstained = any(marker in lg_lower for marker in _ABSTENTION_MARKERS)
+    if abstained:
+        record(
+            "issue3-figures",
+            None,
+            "lg path abstained — not a translation of the English reply, so "
+            f"the digit scrape is not figures_survived. en_figures={sorted(en_figs)} "
+            f"lg_figures={sorted(lg_figs)} en={en_reply[:80]!r} lg={lg_reply[:80]!r}",
+        )
+        return
     ok = bool(en_figs) and (lg_figs == en_figs or served_english or not lg_figs)
     record(
         "issue3-figures",
