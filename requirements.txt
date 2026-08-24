@@ -63,7 +63,7 @@ onnxruntime>=1.20.0
 # Unified on-device audio runtime (ASR + VAD + TTS + lang-ID)
 sherpa-onnx>=1.11.0
 # ASR eval
-jiwer>=3.0.0
+jiwer>=4.0.0
 # Audio I/O for eval + training pipelines
 librosa>=0.10.0
 soundfile>=0.12.0
