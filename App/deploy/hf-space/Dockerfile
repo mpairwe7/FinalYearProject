@@ -756,9 +756,37 @@
 #
 # All CI green on this commit; merged to dev as 72518c0f.
 #
+# ---------------------------------------------------------------------------
+# sha-7d7167b — seven reported issues: language, figures, voice, escalation,
+# sign-out, and a dashboard a non-IT reader can follow.
+#
+# The streaming core (SSE and WebSocket, i.e. what the web client uses)
+# localized against the caller's locale parameter. Detection runs inside
+# generate_retrieval_only, so a taxpayer who types Luganda arrived with
+# locale="en" and got English. ChatModel.generate had been fixed; this twin
+# had not. SYSTEM_PROMPT rule 10 also told the model to "respond in the same
+# language" on an adapter-less deployment — the kozesa-loop. The language
+# directive is now built per request where can_generate_in_locale is in scope.
+#
+# A contradicted rate was caught, escalated, ticketed, and still printed.
+# withhold_if_contradicted replaces that answer. Contradicted claims only.
+#
+# One non-English turn translated the same question twice with nothing
+# memoised. app/mt.py caches both directions per process; figures_survived
+# pools money and percentages because Luganda writes a rate as "ebitundu 18
+# ku buli kikumi", with no percent sign.
+#
+# The mic button stayed idle while opening, so a second press threw. A
+# starting state, an 8s watchdog, and SpeechModel.warmup() at boot. The
+# taxpayer can POST /v1/escalate themselves. Sign-out is RP-Initiated Logout
+# 1.0 plus prompt=login; NEXT_PUBLIC_OIDC_POST_LOGOUT_PATH is empty for the
+# ngrok origin and /signin for this Space, because Auth0 matches Allowed
+# Logout URLs exactly. Dashboard captions dropped p95/hybrid for "Answer
+# speed" / "Found in URA documents".
+#
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-72518c0
+FROM landwind/ura-chatbot:sha-7d7167b
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.
