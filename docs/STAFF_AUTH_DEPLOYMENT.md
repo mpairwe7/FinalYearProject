@@ -56,6 +56,7 @@ origin must appear in `connect-src` — see *CSP* below.
 | Discovery | `https://dev-s16d7m00eyrksjy2.us.auth0.com/.well-known/openid-configuration` |
 | Authorization endpoint | `/authorize` |
 | Token endpoint | `/oauth/token` |
+| End-session endpoint | `/oidc/logout` (RP-Initiated Logout 1.0) |
 | JWKS | `/.well-known/jwks.json` |
 | Application type | Single Page Application (public client, PKCE `S256`) |
 | API audience | `https://ura-chatbot/api` |
@@ -63,6 +64,42 @@ origin must appear in `connect-src` — see *CSP* below.
 
 Endpoints are **discovered at runtime**, not hardcoded — Auth0's paths differ from
 Keycloak's (`/protocol/openid-connect/{auth,token}`), and Entra/Okta differ again.
+
+### Signing out — one setting the provider needs
+
+Signing out ends the session **at the provider as well as in the browser**
+(`lib/oidcFlow.endOidcSession`, RP-Initiated Logout 1.0 §2). Without it,
+sign-out was a local gesture: the token was dropped and the provider's session
+cookie survived, so the next authorize request came back instantly with a fresh
+token for the same person and no login screen — reported as *"when I want to
+sign in as another user, it just automatically signs me in the older account."*
+
+That requires the post-logout URL to be **registered at the provider**, exactly
+as the callback URL is:
+
+| | |
+|---|---|
+| Post-logout redirect URI | `<app-origin>/signin` |
+| Auth0 | Application → Settings → **Allowed Logout URLs** |
+| Keycloak | Client → Settings → **Valid post logout redirect URIs** |
+
+An unregistered value makes the provider refuse the logout and land the browser
+on its own error page, so add it in the same place you added
+`<app-origin>/signin/callback`.
+
+`id_token_hint` is deliberately not sent: this client never accepts an ID token
+(it reads `access_token` and nothing else, and identity comes from `/v1/me`).
+The spec's alternative applies — `client_id` MUST accompany
+`post_logout_redirect_uri` when the hint is absent — and some providers then
+show a "are you sure you want to sign out" confirmation, which is correct
+behaviour rather than a fault: without a hint they cannot know which session
+the request is for.
+
+A provider that publishes **no** `end_session_endpoint` cannot be logged out
+remotely at all. Sign-out then clears the browser only, exactly as before, and
+the sign-in page's **"Sign in as a different user"** control is the way through:
+it sends `prompt=login` (OIDC Core 1.0 §3.1.2.1), which requires the provider
+to reauthenticate whatever session it is holding.
 
 ## Where each value lives
 
@@ -175,6 +212,8 @@ blocked and sign-in fails with an opaque `NetworkError`.
 | `invalid_request` — *Client "…" is not authorized to access resource server "…"* | the API exists but the application is not authorized for it (Auth0 side) |
 | `access_denied` — *Service not found: <audience>* | no API registered with that identifier |
 | "Sign up" opens the **login** screen, with no way to register | self-registration is off at the provider: Auth0 → Authentication → Database → *Disable Sign Ups* is on (Keycloak: Realm settings → Login → *User registration*). The hints are sent either way, and a provider that does not offer registration simply ignores them |
+| Signing out lands on the provider's error page | `<app-origin>/signin` is not in **Allowed Logout URLs** — see *Signing out* above |
+| Signing in returns the **previous** account with no login screen | the provider's session was never ended. Either the post-logout URL is unregistered, or this provider publishes no `end_session_endpoint`. Use *Sign in as a different user*, which sends `prompt=login` |
 
 ## Diagnosing an authorization-request failure
 

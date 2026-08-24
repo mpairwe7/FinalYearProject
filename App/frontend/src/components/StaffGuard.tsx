@@ -25,10 +25,12 @@ import React, { useEffect, useState, useSyncExternalStore } from "react";
 import {
   authHeaders,
   clearAuthToken,
+  getAuthMethod,
   getAuthToken,
   getServerAuthToken,
   subscribeAuthToken,
 } from "../lib/authSession";
+import { endOidcSession } from "../lib/oidcFlow";
 import { isStaffRole, roleLabel, staffSectionsFor } from "../lib/roles";
 import { useTicketStream, type LiveEscalation } from "../hooks/useTicketStream";
 import {
@@ -74,8 +76,15 @@ type State =
   | { kind: "identified"; who: StaffIdentity };
 
 function signOut() {
+  const method = getAuthMethod();
   clearAuthToken();
-  window.location.assign("/signin");
+  // The other half of signing out: end the session at the identity provider,
+  // or the next sign-in is answered silently from its surviving cookie and
+  // hands back the same account. See useIdentity's signOut for the full note.
+  // The provider's logout already redirects to /signin (OIDC_POST_LOGOUT_PATH),
+  // so this only lands us there when there was nothing to log out of; issuing
+  // both would cancel the logout navigation with a same-tab assign.
+  if (method === "dev" || !endOidcSession()) window.location.assign("/signin");
 }
 
 /**

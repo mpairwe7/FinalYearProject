@@ -15,6 +15,8 @@ import os
 import re
 from typing import Any
 
+from . import mt
+
 logger = logging.getLogger(__name__)
 
 # CodeQL py/log-injection: a request-supplied locale reaches a log call
@@ -610,7 +612,20 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
     hybrid retriever, G18) and service.py's FAQ translation rescue. They each
     used to call ``sunbird.translate_to_english`` directly, so a single cloud
     timeout took out both.
+
+    Cached (``mt.cache``). One non-English turn translates the same question
+    twice as a matter of course — the deterministic routers translate it in
+    service.py before retrieval runs, and the hybrid retriever translates it
+    again for the corpus — and a taxpayer assistant is asked the same
+    questions repeatedly besides. The second call was a whole extra MT round
+    trip for a string already translated milliseconds earlier.
     """
+    text = (query or "").strip()
+    if not text:
+        return None
+    cached = mt.cache.get(locale, "en", text)
+    if cached is not None:
+        return cached
 
     def _local() -> str | None:
         from . import llm as llm_module
@@ -645,7 +660,9 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
         if detect_language(english) != "en":
             logger.debug("Retrieval translation via %s was not English", name)
             continue
-        return english.strip()
+        result = english.strip()
+        mt.cache.put(locale, "en", text, result)
+        return result
     return None
 
 

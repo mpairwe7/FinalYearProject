@@ -4,6 +4,41 @@ Operator guide for the two Sunbird SALT models wired into
 `App/backend/app/speech_service.py`: ASR (`Sunbird/asr-whisper-large-v3-salt`)
 and TTS (`Sunbird/spark-tts-salt`).
 
+## Warm-up — who pays for the cold path
+
+`SpeechModel.__init__` builds the model objects during startup, but everything
+downstream of them is lazy: the Spark-TTS codec, the edge-tts session, the
+Sunbird httpx client. Before warm-up existed, whoever pressed Listen first
+absorbed all of it — reported as *"the listening model takes quite a while to
+load and speak back."*
+
+`SpeechModel.warmup()` synthesizes one short phrase per locale on a background
+thread after startup, so the work happens where nobody is waiting. It cannot
+fail a boot: a gated repo, no egress, a Sunbird outage all leave the service
+running and the speech endpoints answering exactly as before, with the failure
+logged as `SpeechModel warm-up: {'lg': 'error: …'}`.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `SPEECH_WARMUP` | `true` | Set `false` where the extra boot traffic is unwanted — a metered egress, a cold HF Space |
+| `SPEECH_WARMUP_LOCALES` | `en,lg,sw` | Comma-separated; one synthesis each, sequentially |
+| `SPEECH_TTS_CACHE_SIZE` | `64` | Repeated short phrases skip the backend chain entirely |
+
+Warming is sequential on purpose: three locales at once would contend for the
+same bounded speech executor that live requests use, which is the opposite of
+the point.
+
+Check it landed:
+
+```bash
+docker logs <container> 2>&1 | grep 'SpeechModel warm-up'
+# SpeechModel warm-up: {'en': 'edge_tts', 'lg': 'spark_tts_salt', 'sw': 'sunbird_cloud'}
+```
+
+A locale reporting `error: …` here is the same failure a taxpayer would have
+hit on their first request — it is now visible at boot instead of in one
+person's session.
+
 ## ASR — `Sunbird/asr-whisper-large-v3-salt`
 
 One `whisper-large-v3` fine-tune covering English, Luganda, Kiswahili,

@@ -73,6 +73,22 @@ SPEECH_DEADLINE_S = float(os.getenv("SPEECH_DEADLINE_S", "60"))
 # prompts). 0 disables. Keyed by (text, voice, language).
 TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "64"))
 
+# Synthesize one throwaway phrase per configured locale at startup, in the
+# background, so the first taxpayer to press Listen does not pay for a cold
+# path. Reported as "the listening model takes quite a while to load and speak
+# back": the model objects are built in __init__, but everything downstream of
+# them is lazy — Spark-TTS-SALT's codec, the edge-tts session, the Sunbird
+# httpx client — and whoever asked first absorbed all of it.
+#
+# The work is real either way; this only decides who waits for it. Off by
+# setting SPEECH_WARMUP=false where the extra boot traffic is unwanted.
+SPEECH_WARMUP = os.getenv("SPEECH_WARMUP", "true").lower() == "true"
+SPEECH_WARMUP_LOCALES = tuple(
+    part.strip()
+    for part in os.getenv("SPEECH_WARMUP_LOCALES", "en,lg,sw").split(",")
+    if part.strip()
+)
+
 # Hard ceiling for ONE cloud speech-tier call (Sunbird / edge-tts / Workers
 # AI). Sunbird latency swings 25s→90s+; a hung upstream must fail the TIER
 # (fall through to the next backend or a degraded JSON reply) — never the
@@ -1208,6 +1224,29 @@ class SpeechModel:
                 while len(self._tts_cache) > TTS_CACHE_SIZE:
                     self._tts_cache.popitem(last=False)
         return result
+
+    def warmup(self) -> dict[str, str]:
+        """Run one short synthesis per warm-up locale. Never raises.
+
+        Returns a locale -> backend (or ``"error: ..."``) map, logged by the
+        caller. Deliberately a *different* phrase per locale and deliberately
+        short: the point is to build whatever each tier constructs lazily, not
+        to pre-fill the phrase cache with text a taxpayer will never hear.
+
+        Sequential rather than concurrent. Warming three locales at once would
+        contend for the same bounded speech executor that live requests use,
+        which is the opposite of the point.
+        """
+        outcomes: dict[str, str] = {}
+        if not self.enabled:
+            return outcomes
+        for locale in SPEECH_WARMUP_LOCALES:
+            try:
+                result = self.synthesize(text="URA.", language=locale)
+                outcomes[locale] = result.backend if not result.error else f"error: {result.error}"
+            except Exception as exc:  # noqa: BLE001 — warm-up must never fail a boot
+                outcomes[locale] = f"error: {exc}"
+        return outcomes
 
     def _synthesize_mock(self, text: str, voice: str, language: str) -> SynthesizeResult:
         """Deterministic sine-tone WAV. Only ever reached by explicit opt-in."""

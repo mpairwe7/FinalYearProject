@@ -42,6 +42,7 @@ from typing import Any, Callable
 from . import database as db
 from . import documents as documents_module
 from . import llm as llm_module
+from . import mt
 from .agents import AgentRoute, supervisor
 from .agents.evaluator import RevisionBudget, evaluate
 from .analytics import metrics
@@ -87,6 +88,7 @@ from .text_signals import (
     ABSTENTION_REPLY,
     CLARIFICATION_PROMPT,
     CONTACT_FOOTER,
+    CONTRADICTED_CLAIM_REPLY,
     ESCALATION_REPLY_FOOTER,
     ESCALATION_REPLY_LEAD,
     FAREWELL_REPLY,
@@ -1072,6 +1074,19 @@ def _apply_output_guards(
         escalate = True
         if not esc_reason:
             esc_reason = "; ".join(response_judge.get("reasons") or [])
+
+    # A figure that contradicts its own cited passage does not get printed.
+    # Everything above already escalated it; this is what stops the taxpayer
+    # reading the wrong number while the banner explains it might be wrong.
+    reply, withheld = withhold_if_contradicted(reply, claim_report)
+    if withheld:
+        revised = True
+        escalate = True
+        esc_reason = esc_reason or "answer contradicted its cited URA passages"
+        response_judge["final_decision"] = "escalate"
+        response_judge["withheld_contradicted"] = True
+        faith = None
+
     if claim_report is not None:
         response_judge["claim_verification"] = claim_report
     response_judge.pop("revised_reply", None)
@@ -1212,12 +1227,25 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             attachments=attachments,
         )
 
+        # The *effective* locale, not the one the caller passed. Mirrors the
+        # same reassignment in ChatModel.generate: generate_retrieval_only runs
+        # detect_language on the message and records the answer on the result,
+        # so a taxpayer who simply types Luganda without touching the picker
+        # arrives here with locale="en" and everything downstream — the token
+        # stream's locale hint, the agentic branch, and all three
+        # localize_reply calls — would key off English and hand back an English
+        # answer. That is the "the model replies in English" report: the
+        # non-streaming path was fixed for it and this one, which is what the
+        # web and WebSocket clients actually use, was not.
+        locale = str(result.get("locale") or locale or "en")
+
         yield (
             "retrieval.completed",
             {
                 "hit_count": len(result.get("_hits", []) or []),
                 "retrieval_mode": result.get("retrieval_mode"),
                 "sources": result.get("sources", []),
+                "locale": locale,
             },
         )
 
@@ -1235,7 +1263,11 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             yield ("metadata", _metadata_payload(result, include_short_circuit=True))
             # These branches emit the whole reply as one frame, so it can be
             # localized before it is sent rather than corrected afterwards.
+            if locale not in ("", "en"):
+                yield ("translation.started", {"locale": locale})
             full_reply = localize_reply(result.get("reply", ""), locale)
+            if locale not in ("", "en"):
+                yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
             yield ("token", full_reply)
             yield ("done", "")
@@ -1303,6 +1335,16 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 full_reply = guard["reply"]
                 if guard["revised"]:
                     yield ("revision", full_reply)
+                # Same localization the token branch does below. The agentic
+                # path had none at all, so enabling `tool_use` silently turned
+                # every non-English conversation back into an English one.
+                if locale not in ("", "en"):
+                    yield ("translation.started", {"locale": locale})
+                    localized = localize_reply(full_reply, locale)
+                    yield ("translation.completed", {"locale": locale})
+                    if localized != full_reply:
+                        full_reply = localized
+                        yield ("revision", full_reply)
                 result["handoff"] = guard["handoff"]
                 result["response_judge"] = guard["response_judge"]
                 result["ticket_id"] = guard["ticket_id"]
@@ -1426,6 +1468,15 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 full_reply = result.get("reply", "")
                 if distress and full_reply:
                     full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
+                # One frame, so localize before sending rather than revising
+                # after — and localize at all, which this branch did not: an
+                # open breaker or an empty stream answered a Luganda question
+                # with the English extractive fallback.
+                if locale not in ("", "en"):
+                    yield ("translation.started", {"locale": locale})
+                full_reply = localize_reply(full_reply, locale)
+                if locale not in ("", "en"):
+                    yield ("translation.completed", {"locale": locale})
                 yield ("token", full_reply)
                 yield ("done", "")
                 yield (
@@ -1466,7 +1517,14 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             # grounded revisions above. Emitted only when translation actually
             # changed something, so an English session sees no extra frame.
             if locale not in ("", "en"):
+                # Announced, because it is the slow part of a non-English turn
+                # and the reader is looking at a finished English answer while
+                # it runs. Without a frame here the wait reads as the assistant
+                # having answered in the wrong language and then changing its
+                # mind — which is exactly how it was reported.
+                yield ("translation.started", {"locale": locale})
                 localized = localize_reply(full_reply, locale)
+                yield ("translation.completed", {"locale": locale})
                 if localized != full_reply:
                     full_reply = localized
                     yield ("revision", full_reply)
@@ -1518,7 +1576,11 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             if distress and full_reply:
                 full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
             # One frame, so localize before sending rather than revising after.
+            if locale not in ("", "en"):
+                yield ("translation.started", {"locale": locale})
             full_reply = localize_reply(full_reply, locale)
+            if locale not in ("", "en"):
+                yield ("translation.completed", {"locale": locale})
             yield ("token", full_reply)
 
         yield ("done", "")
@@ -1985,7 +2047,13 @@ REPLY_MT_BACKEND = os.getenv("REPLY_MT_BACKEND", "local_first").lower()
 
 
 def _translate_reply(text: str, locale: str) -> str | None:
-    """English -> *locale* for reply localization. Never raises."""
+    """English -> *locale* for reply localization. Never raises.
+
+    Uncached on purpose — ``localize_reply`` owns the cache, because it owns
+    the guards. A translation is only worth remembering once it has passed
+    them, and a collapsed or figure-mangling response pinned here would be
+    served for the life of the process.
+    """
 
     def _local() -> str | None:
         from . import llm as llm_module
@@ -2013,6 +2081,52 @@ def _translate_reply(text: str, locale: str) -> str | None:
         if out and out.strip():
             return out
     return None
+
+
+#: Withhold an answer whose figures contradict the URA passage it cites.
+#: Env, not a feature flag, because it is a safety threshold in the same family
+#: as GROUNDING_THRESHOLD and SELF_REFLECT_THRESHOLD — and because the failure
+#: mode of turning it off is a wrong tax figure on screen, which nobody should
+#: reach through the flag console at runtime.
+WITHHOLD_CONTRADICTED_CLAIMS = (
+    os.getenv("WITHHOLD_CONTRADICTED_CLAIMS", "true").lower() == "true"
+)
+
+
+def withhold_if_contradicted(
+    reply: str,
+    claim_report: dict[str, Any] | None,
+) -> tuple[str, bool]:
+    """Replace *reply* when a claim contradicts the passage it cites.
+
+    Returns ``(reply, withheld)``.
+
+    Claim verification already finds these — ``entailment.numeric_contradiction``
+    is a deliberately high-precision check: a percentage the cited passage does
+    not state, or, for rule-shaped sentences only, an amount it does not state.
+    The response judge already escalates them and a ticket is already raised.
+    What none of that did was stop the figure being printed, and a taxpayer
+    acts on the figure, not on the amber banner above it. A detected
+    contradiction that is still shown is the same as an undetected one.
+
+    Deliberately narrow: *contradicted* claims only, not merely unsupported
+    ones. An unsupported claim is one this lexical verifier could not confirm,
+    which happens often and legitimately — paraphrase, a synonym, a figure the
+    passage expresses differently. A contradicted claim is one where both sides
+    state a figure and they are not the same figure. Withholding the first
+    would silence most correct answers; withholding the second is the whole
+    point of having detected it.
+    """
+    if not WITHHOLD_CONTRADICTED_CLAIMS or not reply or not claim_report:
+        return reply, False
+    if not claim_report.get("contradicted_claims"):
+        return reply, False
+    metrics.inc("contradicted_reply_withheld_total")
+    logger.warning(
+        "withheld a reply whose figures contradicted its cited passages (%d claim(s))",
+        len(claim_report.get("contradicted_claims") or []),
+    )
+    return CONTRADICTED_CLAIM_REPLY, True
 
 
 def localize_reply(reply: str, locale: str) -> str:
@@ -2043,6 +2157,16 @@ def localize_reply(reply: str, locale: str) -> str:
     text = str(reply or "").strip()
     if not text or locale in ("", "en"):
         return reply
+    # Cached (``mt.cache``), read here and written at the bottom so the memo
+    # only ever holds a translation that passed every guard below.
+    # Deterministic replies dominate this direction — greetings, the
+    # TIN-registration and return-filing procedure templates, clarification
+    # prompts, the abstention line — and they are byte-identical every time,
+    # so each one is translated once per process rather than once per
+    # taxpayer.
+    cached = mt.cache.get("en", locale, text)
+    if cached is not None:
+        return cached
     translated = _translate_reply(text, locale)
     if translated is None:
         logger.info("reply localization to %s failed; serving English", locale)
@@ -2058,7 +2182,23 @@ def localize_reply(reply: str, locale: str) -> str:
             len(text),
         )
         return reply
-    return translated.strip()
+    localized = translated.strip()
+    # Figures must survive the round trip. Machine translation paraphrases,
+    # and a paraphrased amount is a different amount: a reply that said
+    # "UGX 235,000" and comes back saying "UGX 253,000" is indistinguishable
+    # from the assistant inventing a figure, which is the one failure a
+    # revenue authority's assistant cannot ship. Serving the English text is
+    # the worse read and the only safe one — the same policy every other
+    # failure path here already takes.
+    if not mt.figures_survived(text, localized):
+        metrics.inc("reply_localization_figures_changed_total", labels={"locale": locale})
+        logger.warning(
+            "reply localization to %s changed the figures; serving English",
+            locale,
+        )
+        return reply
+    mt.cache.put("en", locale, text, localized)
+    return localized
 
 
 def _simple_search(
@@ -5357,6 +5497,19 @@ class ChatModel:
                 )
             if response_judge["final_decision"] == "escalate":
                 escalate = True
+
+            # Parity with run_chat_turn's guard pipeline: a figure that
+            # contradicts its own cited passage is not printed. The escalation
+            # above tells the taxpayer a person is looking; withholding is what
+            # stops them acting on the wrong number in the meantime.
+            reply, withheld_contradicted = withhold_if_contradicted(reply, claim_report)
+            if withheld_contradicted:
+                escalate = True
+                esc_reason = esc_reason or "answer contradicted its cited URA passages"
+                faithfulness_score = None
+                response_judge["final_decision"] = "escalate"
+                response_judge["withheld_contradicted"] = True
+
             response_judge.pop("revised_reply", None)
 
             handoff = None

@@ -231,16 +231,31 @@ function ChatInputInner({
             </>
           )}
           <div className="cmpv2-spacer" />
-          {/* Dictation — fills the textarea. Stays put in all three states so
-              it never moves under a thumb that is already reaching for it.
+          {/* Dictation — fills the textarea. Stays put in every state so it
+              never moves under a thumb that is already reaching for it.
+
+              `starting` is the state a reported bug asked for: opening a mic
+              is slow (a permission prompt the first time, then engine
+              warm-up), and while the button said "Start speaking" and looked
+              untouched people pressed it again — which threw inside the
+              speech engine and left the mic in an error state, so a third
+              press was needed. It says what it is doing now, and refuses the
+              press that used to break it.
+
               `processing` only appears on the server-ASR path, where the
               transcript arrives over the network: without it the button just
               sat there looking idle while the upload was in flight, and the
               second tap that invites cancels nothing and loses the recording. */}
           <button
-            className={`composer-circle-btn mic-circle-btn ${speechState === 'listening' ? 'btn-recording' : ''} ${speechState === 'processing' ? 'is-processing' : ''}`}
+            className={`composer-circle-btn mic-circle-btn ${speechState === 'listening' ? 'btn-recording' : ''} ${speechState === 'processing' || speechState === 'starting' ? 'is-processing' : ''}`}
             onClick={onMicClick}
-            disabled={speechUnavailable || isLoading || isTransitioning || speechState === 'processing'}
+            disabled={
+              speechUnavailable ||
+              isLoading ||
+              isTransitioning ||
+              speechState === 'processing' ||
+              speechState === 'starting'
+            }
             /* The tip says "Dictate" while the accessible name stays "Start
                speaking": two speech controls sit side by side here, and the
                one thing a user must not have to guess is which one types and
@@ -248,16 +263,20 @@ function ChatInputInner({
             aria-label={
               speechState === 'listening'
                 ? t('composer.micStop')
-                : speechState === 'processing'
-                  ? t('composer.transcribing')
-                  : t('composer.micStart')
+                : speechState === 'starting'
+                  ? t('composer.micStarting')
+                  : speechState === 'processing'
+                    ? t('composer.transcribing')
+                    : t('composer.micStart')
             }
             data-tip={
               speechState === 'listening'
                 ? t('composer.micStop')
-                : speechState === 'processing'
-                  ? t('composer.transcribingTip')
-                  : t('composer.dictate')
+                : speechState === 'starting'
+                  ? t('composer.micStartingTip')
+                  : speechState === 'processing'
+                    ? t('composer.transcribingTip')
+                    : t('composer.dictate')
             }
             data-testid="composer-mic"
           >

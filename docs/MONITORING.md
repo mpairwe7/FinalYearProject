@@ -100,8 +100,29 @@ All metrics are emitted by the `MetricsStore` singleton in
 | `faithfulness_score`         | summary   | --           | Grounding faithfulness (0-1)            |
 | `escalation_total`           | counter   | --           | Human-escalation events                 |
 | `escalation_required_total`  | counter   | --           | Escalation flagged in middleware         |
+| `escalation_requested_total` | counter   | `outcome`    | **Taxpayer-initiated** handoff (`POST /v1/escalate`): `created`, `reused`, `queue_disabled`, `failed` |
 | `feedback_total`             | counter   | `rating`     | User feedback (`up` / `down`)           |
 | `classification_errors_total`| counter   | --           | Classifier failures during chat         |
+
+### Answer-integrity counters
+
+These count the times a guard withheld or replaced something rather than
+serving it. A rising number is not a failure of the guard — it is the guard
+working — but a *sustained* rise says the generation or translation tier has
+degraded.
+
+| Metric                                    | Type    | Labels   | Description |
+|-------------------------------------------|---------|----------|-------------|
+| `contradicted_reply_withheld_total`        | counter | --       | An answer whose figures contradicted its cited passage was replaced rather than shown (`service.withhold_if_contradicted`) |
+| `reply_localization_figures_changed_total` | counter | `locale` | A translation changed a money amount or percentage, so the English text was served instead (`mt.figures_survived`) |
+| `numeric_verification_rejected_total`      | counter | --       | A money figure disagreed with the calculator that produced it |
+| `numeric_revision_fixed_total`             | counter | --       | The one bounded revision corrected it |
+| `numeric_revision_failed_total`            | counter | --       | The revision did not correct it |
+
+`escalation_requested_total{outcome="queue_disabled"}` above zero means
+taxpayers are asking for a person on a deployment where `ticket_queue` is off —
+they are being given the contact-centre number instead, and nobody is picking
+those requests up.
 
 ### OpenTelemetry metrics (via `tracing.py`, exported to OTLP)
 
@@ -198,6 +219,9 @@ http_request_duration_ms{quantile="0.95",method="POST",path="/v1/chat"} 892.1100
 | Cache hit ratio       | `rate(retrieval_mode_total{mode="cache"}[5m]) / rate(chat_requests_total[5m])`     |
 | Faithfulness dist.    | `faithfulness_score{quantile="0.5"}` (median, p95, p99)                            |
 | Escalation rate       | `rate(escalation_total[5m])`                                                       |
+| Taxpayers asking for a person | `rate(escalation_requested_total[15m])` grouped by `outcome`               |
+| Answers withheld      | `rate(contradicted_reply_withheld_total[1h])`                                      |
+| Translations refused  | `rate(reply_localization_figures_changed_total[1h])` grouped by `locale`           |
 | Retrieval mode split  | `rate(retrieval_mode_total[5m])` grouped by `mode`                                 |
 | Token usage           | `rate(gen_ai_client_token_usage[5m])` by `gen_ai.token.type`                       |
 | Qdrant query latency  | `gen_ai_retrieval_duration` (histogram from OTLP)                                  |

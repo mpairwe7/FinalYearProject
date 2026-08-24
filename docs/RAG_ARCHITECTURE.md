@@ -168,11 +168,21 @@ User Query
 
 | Event | Data | Description |
 |-------|------|-------------|
+| `phase` | string | `retrieval.started` · `retrieval.completed` · `translation.started` · `translation.completed` |
 | `metadata` | JSON | Sources, citations, retrieval_mode, locale |
 | `token` | string | Generated text chunk (sanitized per-token) |
+| `revision` | string | The whole reply, replacing what was streamed (judge revision, or the localized text) |
 | `grounding` | JSON | faithfulness_score, escalation_required, escalation_reason |
 | `done` | empty | Stream complete |
 | `error` | string | Error message |
+
+**Locale in the streaming path.** `run_chat_turn` reassigns its `locale` from
+the retrieval result immediately after `generate_retrieval_only` returns, not
+from the caller's parameter. Detection runs *inside* that call, so a taxpayer
+who simply types Luganda arrives with `locale="en"` and the resolved value is
+only on the result. Keying off the parameter is what made the streaming path —
+the one the web and WebSocket clients actually use — answer non-English
+questions in English while `ChatModel.generate()` handled them correctly.
 
 **Security in streaming path:**
 - Each token is XSS-sanitized via `OutputGuard.sanitize()`
@@ -531,9 +541,11 @@ reflect retry on low faithfulness or a reasoning miss. Soft “this fiscal
 year” boost follows `current_fiscal_year()`.
 
 The corpus is English. Non-English questions take a merged English
-translation pass (`FLAG_TRANSLATE_RETRIEVE`, default on); generation stays
-in the user locale. Citations carry `url` / `effective_date` when the
-index stored them (crawl chunks do).
+translation pass (`FLAG_TRANSLATE_RETRIEVE`, default on). Generation is
+**English too** unless a locale LoRA adapter is loaded (`llm.can_generate_in_locale`),
+and the reply is translated on the way out — see *Answer language* below.
+Citations carry `url` / `effective_date` when the index stored them (crawl
+chunks do).
 
 | Control | Default | Effect |
 |---------|---------|--------|
@@ -547,6 +559,73 @@ index stored them (crawl chunks do).
 | `FLAG_GRAPH_FUSION` + `FLAG_TAX_GRAPH` | **off** | Statutory graph as a third RRF leg |
 | `FLAG_TOOL_RAG` | **off** | Top-k tool schemas + rails. Dense embedder is injected from the retriever when loaded; a miss keeps rails only. A/B via `FLAG_TOOL_RAG_PERCENT`. |
 | `python -m app.freshness --check --write-status --notify` | — | Exit 1 on drift; writes status for `GET /v1/index/freshness`; Slack if `FRESHNESS_SLACK_WEBHOOK` is https |
+
+### Answer language
+
+The answer is produced in English and translated into the taxpayer's language
+by `service.localize_reply`, in one place, because `_generate_en` has a dozen
+or so exits (blocked, workflow, calculator, greeting, clarification,
+deterministic, abstained, escalated, generated) and translating at each of them
+is how one branch quietly answers a Luganda question in English.
+
+`llm._build_messages` states the answer language explicitly on every request,
+in an `## Answer language` section. The system prompt used to carry an
+unconditional rule — "if the user writes in Luganda … respond in the same
+language" — where nothing could see whether the deployment can do that. The CPU
+deployments and the vLLM backend load no locale adapter, and the base model
+asked for Luganda anyway returned a degenerate repetition loop rather than
+sentences. Two instructions pointing opposite ways, with the language of the
+question breaking the tie.
+
+Two guards sit on the translated text, both of which prefer the English answer
+to a bad localized one:
+
+* **Collapse** — a translation shorter than a tenth of the source is a degraded
+  model response, not an answer.
+* **Figures** (`mt.figures_survived`) — machine translation paraphrases, and a
+  paraphrased amount is a different amount. A reply that said "UGX 235,000" and
+  comes back saying "UGX 253,000" is indistinguishable from the assistant
+  inventing a figure. Money amounts and percentages are pooled into one set
+  before comparison, because the *category* does not survive translation even
+  when the number does — Luganda states a rate as "ebitundu 18 ku buli kikumi",
+  with no percent sign.
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `RETRIEVAL_MT_BACKEND` | `local_first` | Question → English, for searching the corpus |
+| `REPLY_MT_BACKEND` | `local_first` | Answer → the taxpayer's language |
+| `MT_CACHE_SIZE` | 512 | Per-process translation memo (`app/mt.py`); 0 disables |
+| `MT_CACHE_MAX_CHARS` | 4000 | Longer text is translated but not memoised |
+
+The cache is why a non-English turn is no longer two to three times slower than
+the same question in English. One turn translated the same question **twice** —
+the deterministic routers translate it in `service.py` before retrieval runs,
+and the hybrid retriever translates it again for the corpus — and the
+deterministic replies (greetings, the TIN and return-filing templates, the
+abstention line) are byte-identical every time. Entries hold a digest of the
+text, never the text itself: taxpayer questions reach this cache and can carry
+a TIN or a name.
+
+### Withholding a contradicted answer
+
+`entailment.numeric_contradiction` is a deliberately high-precision check: a
+percentage the cited passage does not state, or — for rule-shaped sentences
+only — an amount it does not state. Claim verification has always caught these
+and the response judge has always escalated them. What none of that did was
+stop showing the figure, and a taxpayer acts on the number rather than on the
+amber banner above it.
+
+`service.withhold_if_contradicted` replaces such an answer with
+`CONTRADICTED_CLAIM_REPLY`, forces escalation, and drops the faithfulness score
+(the score described text that is no longer being sent). It fires on
+**contradicted** claims only, never on merely *unsupported* ones — an
+unsupported claim is one the lexical verifier could not confirm, which happens
+constantly and legitimately, and withholding those would silence most correct
+answers.
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `WITHHOLD_CONTRADICTED_CLAIMS` | `true` | Off only to diagnose a suspected false positive |
 
 Eval set: `Data/eval/rag_eval.jsonl` (30 English rows, including `reg-*` regression ids). Keyword self-retrieval gate: `App/backend/tests/test_retrieval_regression_gate.py`. Completeness: `test_eval_set_completeness.py`.
 

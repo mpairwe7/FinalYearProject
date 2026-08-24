@@ -43,6 +43,8 @@ export const en = {
   'composer.micStop': 'Stop listening',
   'composer.voiceEnter': 'Enter voice mode',
   'composer.voiceExit': 'Exit voice mode',
+  'composer.micStarting': 'Opening the microphone',
+  'composer.micStartingTip': 'Opening the microphone…',
   'composer.transcribing': 'Transcribing',
   'composer.transcribingTip': 'Transcribing…',
   'composer.dictate': 'Dictate',
@@ -112,9 +114,28 @@ export const en = {
   'message.helpful': 'Helpful',
   'message.notHelpful': 'Not helpful',
   'message.thinking': 'Searching the URA knowledge base…',
+  // Turn phases. `phase.translating` is the one that matters most to
+  // translate: it only ever shows on a non-English turn, and it is there to
+  // explain a wait to someone who has just been shown an English answer.
+  'phase.thinking': 'Thinking',
+  'phase.searching': 'Searching the URA knowledge base',
+  'phase.churning': 'Writing the answer',
+  'phase.translating': 'Translating the answer',
   'message.escalated':
     'This has been passed to a URA officer. They will reply here.',
   'message.latest': 'Latest',
+
+  // Human handoff. The taxpayer's own way into the officer queue — every
+  // other route into it is a judgement the system makes for them.
+  'handoff.ask': 'Talk to a URA officer',
+  'handoff.requesting': 'Asking an officer…',
+  'handoff.reference': 'Reference',
+  'handoff.queued':
+    'A URA officer has been asked to look at this. Their reply will appear here.',
+  'handoff.failed':
+    'This could not be passed to an officer. Call URA toll-free on 0800 117 000.',
+  'handoff.offline':
+    'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.',
 
   // Shared ----------------------------------------------------------------
   'common.cancel': 'Cancel',

@@ -1067,10 +1067,22 @@ a.ops-stat:hover {
 .ops-gauge-dot.is-warn { background: var(--ops-mark-warning); }
 .ops-gauge-dot.is-bad  { background: var(--ops-mark-critical); }
 
-.ops-gauge-note {
+/* The sentence under a chart saying what the reader is looking at.
+   Always visible, never a tooltip: an explanation you have to discover is an
+   explanation for people who already know. Replaces .ops-gauge-note, which was
+   the same idea for gauges only. */
+.ops-chart-note {
   margin: var(--ops-space-2) 0 0;
-  font-size: 10px;
+  font-size: var(--ops-text-2xs);
   line-height: var(--ops-lh-snug);
+  color: var(--text-3);
+  text-wrap: pretty;
+}
+
+/* The technical name kept beside a plain-language title, for the engineer who
+   came looking for it — secondary weight, so it never becomes the label. */
+.ops-chart-term {
+  font-weight: var(--ops-weight-reg);
   color: var(--text-3);
 }
 
@@ -1090,6 +1102,12 @@ a.ops-stat:hover {
   height: 6px;
   min-width: 90px;
   margin: 0;
+  overflow: visible;
+}
+
+/* A meter that shows where its target sits. The marker overhangs the track by
+   3px at each end, which the default `overflow: hidden` would clip. */
+.ops-meter-tracked {
   overflow: visible;
 }
 
@@ -1162,8 +1180,22 @@ a.ops-stat:hover {
 }
 
 .ops-metrics-table .ops-metric-name {
-  text-transform: capitalize;
   color: var(--text-1);
+}
+
+/* The sentence saying what the check actually measures, under its name. The
+   table is the one place on this page with room for both, and without it the
+   reader has to already know what "abstention precision" means to read whether
+   it passed. */
+.ops-metrics-table .ops-metric-meaning {
+  display: block;
+  max-width: 34ch;
+  margin-top: 2px;
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-reg);
+  line-height: var(--ops-lh-snug);
+  color: var(--text-3);
+  text-wrap: pretty;
 }
 
 .ops-metrics-table .ops-metric-threshold {

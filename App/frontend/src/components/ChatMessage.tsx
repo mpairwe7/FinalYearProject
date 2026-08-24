@@ -7,6 +7,7 @@ import { localeLabel } from '../lib/locales';
 import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
 import { authHeaders } from '../lib/authSession';
 import FeedbackButtons from './FeedbackButtons';
+import HumanHandoff from './HumanHandoff';
 import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon } from './Icons';
 import LoadingState, { formatElapsed } from './LoadingState';
 
@@ -88,10 +89,34 @@ interface ChatMessageProps {
   ttsLoading: string | null;
   isTransitioning: boolean;
   onListen: (turnId: string, text: string) => void;
+  /** Where an officer's reply comes back to. Null before the first turn. */
+  conversationId: string | null;
   /** Set only on the turn currently being answered — see page.tsx. */
   phaseLabel?: string;
   phaseVariant?: string;
   phaseStartedAt?: number;
+}
+
+/**
+ * When to offer a person.
+ *
+ * Not on every answer — an offer that is always there is chrome, and on a good
+ * answer it reads as the assistant hedging. These are the three states in
+ * which the assistant has actually failed the taxpayer:
+ *
+ *   - it escalated the turn itself (the judge or the supervisor said so);
+ *   - it abstained, which means it found nothing it was willing to stand
+ *     behind; or
+ *   - it answered but scored its own grounding low, which is the same warning
+ *     the "Verify with URA" badge already shows.
+ *
+ * That last one is the case the reader is most likely to act on and the one
+ * that previously ended in a phone number.
+ */
+function needsHuman(turn: ChatTurn): boolean {
+  if (turn.escalationRequired) return true;
+  if (turn.retrievalMode === 'abstained') return true;
+  return turn.faithfulnessScore != null && turn.faithfulnessScore < 0.6;
 }
 
 function ChatMessageInner({
@@ -102,6 +127,7 @@ function ChatMessageInner({
   ttsLoading,
   isTransitioning,
   onListen,
+  conversationId,
   phaseLabel,
   phaseVariant,
   phaseStartedAt,
@@ -156,7 +182,7 @@ function ChatMessageInner({
             <span aria-hidden="true">!</span> Human review recommended
             {turn.escalationReason ? ` — ${turn.escalationReason}` : ''}
             <div className="escalation-contacts">
-              Contact URA:{' '}
+              Or contact URA:{' '}
               {URA_CONTACTS.tollFree.map((n, idx) => (
                 <React.Fragment key={n}>
                   {idx > 0 && ' / '}
@@ -173,6 +199,20 @@ function ChatMessageInner({
               </a>
             </div>
           </div>
+        )}
+
+        {/* The way out, offered exactly where the assistant ran out of answer.
+            It sits above the grounding badge and the citations on purpose: by
+            the time someone is reading "Verify with URA" they have already
+            decided this answer is not enough, and the next thing they should
+            find is a person rather than a phone number that starts the
+            conversation over. */}
+        {isAssistant && !isGreeting && !phaseLabel && turn.content && needsHuman(turn) && (
+          <HumanHandoff
+            conversationId={conversationId}
+            locale={locale}
+            reason={userQuery}
+          />
         )}
 
         {/* chatv2: grounding sits outside the citations block — a low-confidence
@@ -269,6 +309,7 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.phaseLabel === next.phaseLabel &&
     prev.phaseVariant === next.phaseVariant &&
     prev.phaseStartedAt === next.phaseStartedAt &&
+    prev.conversationId === next.conversationId &&
     prev.turn.faithfulnessScore === next.turn.faithfulnessScore &&
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&

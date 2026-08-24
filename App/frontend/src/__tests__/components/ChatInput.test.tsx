@@ -179,6 +179,31 @@ describe("ChatInput attachments", () => {
       expect(mic).toBeEnabled();
       expect(mic).toHaveAttribute("data-tip", "Dictate");
     });
+
+    /**
+     * The reported bug: "one has to press the button twice before they can
+     * even listen". Opening a mic is slow — a permission prompt the first
+     * time, then engine warm-up — and while the button stayed on `idle` it
+     * looked untouched and invited a second press. That press called start()
+     * on an already-starting recognizer, which throws, and the throw was read
+     * as a failure that put the mic in `error`. A third press was then needed.
+     */
+    it("says the microphone is opening and refuses the press that broke it", () => {
+      const onMicClick = vi.fn();
+      render(<ChatInput {...defaults} speechState="starting" onMicClick={onMicClick} />);
+      const mic = screen.getByLabelText("Opening the microphone");
+      expect(mic).toBeDisabled();
+      expect(mic).toHaveAttribute("data-tip", "Opening the microphone…");
+      // Not the recording pulse: nothing is being recorded yet, and claiming
+      // otherwise is how someone starts talking into a mic that is not open.
+      expect(mic.className).not.toContain("btn-recording");
+      expect(mic.className).toContain("is-processing");
+    });
+
+    it("never leaves the idle affordance up while the mic is opening", () => {
+      render(<ChatInput {...defaults} speechState="starting" />);
+      expect(screen.queryByLabelText("Start speaking")).not.toBeInTheDocument();
+    });
   });
 
   /**

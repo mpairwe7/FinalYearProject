@@ -348,6 +348,26 @@ GROUNDED_REVISION_PREAMBLE = (
     "Here's the most relevant guidance I found in official URA sources:"
 )
 
+# What replaces an answer whose figure contradicts the URA passage it cites.
+#
+# Claim verification already caught these — a reply saying "VAT is 20%" against
+# a passage saying 18%, or a threshold that a budget has since moved — and the
+# response judge already escalated them. What it did not do was stop showing
+# the figure. A taxpayer acts on the number, not on the amber banner above it,
+# so on a revenue authority's assistant a detected contradiction that is still
+# printed is the same as not having detected it.
+#
+# The withheld answer says what happened rather than pretending the question
+# was never asked: "I could not find anything" is a different, and false,
+# statement about a turn where retrieval worked and generation went wrong.
+CONTRADICTED_CLAIM_REPLY = (
+    "I drafted an answer to this, but the figures in it disagreed with the "
+    "URA documents I was reading — so I have not shown it, because a wrong "
+    "figure here is worse than no figure. The passages I found are listed "
+    "below; a URA officer has been asked to give you a definitive answer. "
+    "You can also call URA toll-free on 0800 117 000 / 0800 217 000."
+)
+
 
 # A model asked to "cite passages like [1]" routinely groups its references
 # instead — "[1, 3]" — and every consumer in this codebase reads citations with

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { AXIS_TICK, ChartTable, OpsTooltip, SERIES } from "./chartTheme";
+import { AXIS_TICK, ChartNote, ChartTable, OpsTooltip, SERIES } from "./chartTheme";
 
 interface Props {
   stats: {
@@ -33,10 +33,10 @@ const PRIORITY_TONE: Record<string, string> = {
  */
 export default function TicketStatusChart({ stats }: Props) {
   const statusData = [
-    { name: "Open", value: stats.open },
-    { name: "Assigned", value: stats.assigned },
-    { name: "Resolved", value: stats.resolved },
-    { name: "Won't fix", value: stats.wontfix },
+    { name: "Waiting", value: stats.open },
+    { name: "With an officer", value: stats.assigned },
+    { name: "Answered", value: stats.resolved },
+    { name: "Closed unanswered", value: stats.wontfix },
   ];
 
   const priorityData = Object.entries(stats.by_priority || {}).map(([k, v]) => ({
@@ -47,8 +47,8 @@ export default function TicketStatusChart({ stats }: Props) {
   return (
     <div className="ops-chart-card">
       <div className="ops-chart-head">
-        <h3 className="ops-chart-title">Escalations by status</h3>
-        <span className="ops-chart-sub">{stats.total} raised in the period</span>
+        <h3 className="ops-chart-title">Questions passed to an officer</h3>
+        <span className="ops-chart-sub">{stats.total} raised in this period</span>
       </div>
       <ResponsiveContainer width="100%" height={180}>
         <BarChart data={statusData} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
@@ -76,9 +76,16 @@ export default function TicketStatusChart({ stats }: Props) {
           ))}
         </ul>
       )}
+      {/* Waiting is the number an officer's manager acts on; the others are
+          context for it. */}
+      <ChartNote>
+        {stats.open === 0
+          ? "Nothing is waiting — every question raised in this period has been picked up."
+          : `${stats.open} ${stats.open === 1 ? "question is" : "questions are"} waiting for an officer to pick up.`}
+      </ChartNote>
       <ChartTable
-        caption="Escalations by status"
-        columns={["Status", "Escalations"]}
+        caption="Questions passed to an officer"
+        columns={["Where it stands", "Questions"]}
         rows={statusData.map((d) => [d.name, d.value])}
       />
     </div>

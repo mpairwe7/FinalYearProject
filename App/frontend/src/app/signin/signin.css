@@ -431,3 +431,16 @@
     align-items: flex-start;
   }
 }
+
+/* "Sign in as a different user" — sits under the primary redirect button.
+
+   Present because signing out cannot always reach the provider: one that
+   publishes no end_session_endpoint has no remote logout at all, and on a
+   shared machine there is always a session somebody forgot to end. Styled as
+   a quiet secondary action, not a second primary — it is the exception, and
+   the ordinary path is the button above it. */
+.signin-switch-account {
+  display: block;
+  margin: 0.6rem auto 0;
+  font-size: 0.82rem;
+}

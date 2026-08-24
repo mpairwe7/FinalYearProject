@@ -19,6 +19,7 @@ function renderMsg(turn: ChatTurn, overrides = {}) {
       ttsLoading={null}
       isTransitioning={false}
       onListen={vi.fn()}
+      conversationId="conv-1"
       {...overrides}
     />,
   );
@@ -114,6 +115,7 @@ describe("ChatMessage", () => {
         ttsLoading={null}
         isTransitioning={false}
         onListen={vi.fn()}
+        conversationId="conv-1"
       />,
     );
 

@@ -908,6 +908,74 @@ main {
 .escalation-contacts .md-link { white-space: nowrap; }
 
 /* -----------------------------------------------------------------------------
+   Human handoff — "Talk to a URA officer"
+
+   Shown only where the assistant has actually failed the taxpayer (see
+   needsHuman in ChatMessage), so it is styled as an offered action rather than
+   a warning: the warning above it has already been made, and repeating the
+   alarm would bury the one thing on screen that is useful.
+   -------------------------------------------------------------------------- */
+.handoff {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.handoff-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong, rgba(148, 163, 184, 0.35));
+  background: var(--surface-2, rgba(148, 163, 184, 0.08));
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.handoff-btn:hover:not(:disabled) {
+  background: var(--surface-3, rgba(148, 163, 184, 0.16));
+  border-color: var(--ura-teal, #00a88f);
+}
+.handoff-btn:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--ura-teal, #00a88f));
+  outline-offset: 2px;
+}
+.handoff-btn:disabled { cursor: progress; opacity: 0.75; }
+.handoff-btn svg { width: 14px; height: 14px; flex: none; }
+
+.handoff-msg {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-2, inherit);
+}
+.handoff-failed { color: var(--danger, #ef4444); }
+
+/* The receipt. A request that leaves no reference reads as not having
+   happened, and it is what a taxpayer quotes if they do phone the centre. */
+.handoff-queued {
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0, 168, 143, 0.32);
+  background: rgba(0, 168, 143, 0.09);
+}
+.handoff-ref {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-2, inherit);
+}
+.handoff-ref code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+}
+
+/* -----------------------------------------------------------------------------
    Composer (floating input)
    -------------------------------------------------------------------------- */
 .composer {

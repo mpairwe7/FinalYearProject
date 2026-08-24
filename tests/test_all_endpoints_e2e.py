@@ -4,7 +4,7 @@ This module is the completeness guarantee for the HTTP/WS API surface. It has
 three jobs:
 
 1. **Drift guard** (``test_route_table_matches_manifest``) — enumerates the live
-   ``app.routes`` table and asserts it equals a hand-declared manifest of all 62
+   ``app.routes`` table and asserts it equals a hand-declared manifest of all 69
    application endpoints. Add or remove a route without updating the manifest and
    this test fails, so the surface can never silently grow untested.
 
@@ -86,6 +86,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Chat ---
     ("POST", "/v1/chat"),
     ("POST", "/v1/chat/stream"),
+    ("POST", "/v1/escalate"),
     # --- Classification + knowledge (public) ---
     ("POST", "/classify"),
     ("POST", "/classify/batch"),
@@ -171,6 +172,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/metrics"): "this:test_health_ready_metrics",
     ("GET", "/v1/index/freshness"): "this:test_index_freshness",
     ("POST", "/v1/chat"): "this:test_chat_happy_path + test_api_endpoints.ChatEndpoints",
+    ("POST", "/v1/escalate"): "this:test_answer_integrity_integration + App/backend/tests/test_taxpayer_escalation.py",
     ("POST", "/v1/chat/stream"): "test_fallback_integration.TestChatStreamEndpointFallback",
     ("POST", "/classify"): "test_api_endpoints.ClassificationKnowledge",
     ("POST", "/classify/batch"): "test_api_endpoints.ClassificationKnowledge",
@@ -362,10 +364,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (64 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (65 HTTP + 4 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 64, f"expected 64 HTTP endpoints, found {len(http)}"
+    assert len(http) == 65, f"expected 65 HTTP endpoints, found {len(http)}"
     assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
 
 

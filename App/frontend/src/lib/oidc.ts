@@ -13,10 +13,29 @@ export interface OidcEndpoints {
   issuer: string;
   authorization_endpoint: string;
   token_endpoint: string;
+  /**
+   * RP-Initiated Logout 1.0 §2. Optional: not every provider publishes one,
+   * and a deployment without it can only clear the token in this browser —
+   * which is precisely the state that made "sign in as someone else" sign you
+   * back in as yourself.
+   */
+  end_session_endpoint?: string;
 }
 
 /** sessionStorage key holding the token endpoint across the redirect. */
 export const TOKEN_ENDPOINT_KEY = "ura_oidc_token_endpoint";
+
+/**
+ * localStorage key holding the provider's logout endpoint.
+ *
+ * localStorage, not sessionStorage, unlike everything else the flow stashes:
+ * the other values are single-use secrets that must die with the tab, and this
+ * one has to outlive the whole session so sign-out — which can happen days
+ * later, in a tab that never ran the sign-in leg — does not have to re-fetch
+ * a discovery document before it can log anyone out. It is a public URL from
+ * a public document.
+ */
+export const END_SESSION_ENDPOINT_KEY = "ura_oidc_end_session_endpoint";
 
 const DISCOVERY_PATH = "/.well-known/openid-configuration";
 
@@ -58,5 +77,8 @@ export async function discoverOidc(issuer: string): Promise<OidcEndpoints> {
     issuer: doc.issuer || base,
     authorization_endpoint: doc.authorization_endpoint,
     token_endpoint: doc.token_endpoint,
+    // Not required — a provider that omits it simply cannot be logged out
+    // remotely, and the caller degrades to a local sign-out.
+    end_session_endpoint: doc.end_session_endpoint,
   };
 }
