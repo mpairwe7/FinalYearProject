@@ -24,7 +24,7 @@ accelerate==1.13.0
 torch>=2.6.0
 huggingface-hub==0.27.1
 sentencepiece==0.2.1
-kagglehub==0.3.12
+kagglehub==1.0.2
 openpyxl==3.1.5
 
 # Hybrid retrieval (BM25 sparse + cross-encoder reranking)
