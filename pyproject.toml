@@ -40,44 +40,9 @@ source = ["ml", "App/backend"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    "ml/scripts/data_augmentation.py",
-    "ml/scripts/fine_tune_gemma.py",
-    "ml/scripts/export_tpu_ready_data.py",
-    "ml/scripts/teacher_qa_generation.py",
-    "ml/scripts/train_quality_classifier.py",
-    "ml/scripts/train_all.py",
-    "ml/scripts/merge_lora_adapter.py",
-    "ml/scripts/monitor_kaggle.py",
-    "ml/scripts/prepare_kaggle_notebook.py",
-    "ml/scripts/process_kaggle_output.py",
-    "ml/scripts/repro.py",
-    "ml/scripts/benchmark_inference.py",
-    "ml/scripts/asr/*",
-    "ml/scripts/tts/*",
-    "ml/scripts/mt/*",
-    "ml/scripts/speech/*",
     "ml/scripts/data_aug/crawler.py",
-    "ml/scripts/data_aug/dataset_downloader.py",
-    "ml/scripts/data_aug/faq_translator.py",
-    "ml/scripts/data_aug/quality_classifier.py",
-    "ml/scripts/data_aug/mt_loaders.py",
-    "ml/scripts/data_aug/asr_loaders.py",
-    "ml/scripts/data_aug/speech_schema.py",
-    "ml/pipelines/continuous_training.py",
-    "ml/pipelines/train.py",
-    "ml/pipelines/push_to_hub.py",
-    "ml/pipelines/evaluate.py",
     "ml/pipelines/evaluate_rag.py",
     "ml/pipelines/evaluate_rag_offline.py",
-    "ml/pipelines/evaluate_safety.py",
-    "ml/pipelines/evaluate_speech.py",
-    "ml/pipelines/evaluate_mt.py",
-    "ml/pipelines/evaluate_tts.py",
-    "ml/pipelines/benchmark_mobile.py",
-    "ml/pipelines/redteam_voice.py",
-    "ml/pipelines/calibrate.py",
-    "ml/pipelines/generate_model_card.py",
-    "ml/pipelines/audit_tokenizer.py",
     "ml/pipelines/validate_data.py",
     "ml/pipelines/quality_gates.py",
     "ml/pipelines/export_feedback.py",
@@ -94,10 +59,6 @@ omit = [
     # (the "Retrieval ranking gate" step runs it with --min-hit1), so its
     # behaviour is verified by execution rather than by coverage.
     "ml/scripts/eval_retrieval.py",
-    "ml/scripts/build_static_index.py",
-    "ml/scripts/static_dense.py",
-    "ml/huggingface/*",
-    "ml/plots/*",
     # Backend runtime modules (require full app / integration tests)
     "App/backend/app/main.py",
     "App/backend/app/llm.py",
@@ -186,8 +147,6 @@ ignore = [
 # stay on, because these run against live deployments and real credentials.
 "scripts/**" = ["T201"]
 "ml/pipelines/**" = ["T201", "S311", "S110", "S112", "S310", "E741"]
-"ml/plots/**" = ["T201", "E741"]
-"ml/huggingface/**" = ["T201"]
 # Backend CLI entry-points (audit verifier, etc.)
 "App/backend/app/audit/verifier.py" = ["T201"]
 # Best-effort exception handlers are intentional in resilience code

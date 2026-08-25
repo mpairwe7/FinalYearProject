@@ -8,9 +8,8 @@
 # Training data (explicit review for data poisoning defence)
 /Data/                  @mpairweLandwind
 
-# ML pipeline and notebooks
+# ML quality gates and corpus tooling
 /ml/                    @mpairweLandwind
-/Notebooks/             @mpairweLandwind
 
 # Backend API
 /App/backend/           @mpairweLandwind

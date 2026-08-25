@@ -20,9 +20,6 @@ behaviour they describe.
 
 ```
 App/
-├── app.py              # Main Gradio app (HF Spaces deployment)
-├── classifier.py       # Legacy classifier interface
-├── requirements.txt    # Python dependencies
 ├── README.md          # This file
 ├── backend/           # FastAPI backend API
 │   ├── app/
@@ -57,25 +54,7 @@ App/
 
 ## Components
 
-### 1. Gradio App (`app.py`)
-
-Modern chat interface for Hugging Face Spaces deployment.
-
-**Features:**
-- 💬 Natural language chat interface
-- 🎨 Modern dark theme matching frontend design
-- 📱 Responsive layout with sidebar
-- 🏷️ AI-powered query classification
-- 📚 Knowledge base integration
-
-**Run locally:**
-```bash
-cd App
-pip install -r requirements.txt
-python app.py
-```
-
-### 2. Backend API (`backend/`)
+### 1. Backend API (`backend/`)
 
 FastAPI REST API with a production-hardened agentic RAG pipeline, durable
 conversation threading, guided workflows, human handoff, and Qwen3-backed
@@ -822,7 +801,7 @@ MCP routing, authorization and the `mcp_tax_calculator` server, and
 [`docs/tax-rate-tables.md`](docs/tax-rate-tables.md) for how fiscal rates
 are versioned, dated and sourced.
 
-### 3. Frontend (`frontend/`)
+### 2. Frontend (`frontend/`)
 
 Next.js 16 + React 19 PWA with SSE streaming, voice modal, and IEEE evaluation dashboards.
 
@@ -984,9 +963,9 @@ bun run preflight:deploy
 
 ### Hugging Face Spaces
 
-1. Copy `app.py` and `requirements.txt` to your Space
-2. Create a Space `README.md` from the relevant App runtime notes
-3. Ensure model files are in the HF Model repository
+The Space is a Docker Space (`App/deploy/hf-space/`) that reuses the same
+prebuilt image Crane Cloud runs — see `App/deploy/hf-space/README.md` and
+`App/deploy/hf-space/Dockerfile`.
 
 ### Docker
 
@@ -1717,18 +1696,6 @@ docker compose --profile postgres --profile vllm --profile tls up -d
 
 Requires ports 80/443 free, a public domain pointing at the host,
 and NVIDIA Container Toolkit with a GPU to spare.
-
-### Legacy HF Spaces entry point
-
-```bash
-pip install -r requirements.txt
-python app.py     # Gradio 5 on http://localhost:7860
-```
-
-When `App.backend.app.service` is importable, `app.py` delegates to
-the full hardened `ChatModel` pipeline automatically.  On HF Spaces
-where only the minimal classifier is shipped, the legacy keyword
-fallback runs unchanged.
 
 ## Phase 14 A-D — Agentic workflows (feat/agentic-workflows)
 

@@ -339,12 +339,10 @@ These are supplemented by JW300 (parallel MT), OPUS Mozilla-I10n
   WAXAL + SALT + Common Voice data.
 - MT training uses SALT parallel text + JW300 + OPUS, covering all
   4 non-English target languages.
-- All datasets are downloadable via a single command:
-  `python -m ml.scripts.data_aug.dataset_downloader`
-
-See: `ml/scripts/data_aug/dataset_downloader.py`,
-`ml/docs/data_cards/mt_salt_multilingual.md`,
-`ml/docs/data_cards/asr_tts_waxal.md`.
+- All datasets were downloadable via a single command in the training
+  pipeline; that tooling was removed along with `ml/`'s training-only
+  scripts, so re-fetching these datasets is now a manual step against
+  the sources listed above.
 
 ---
 

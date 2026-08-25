@@ -29,7 +29,6 @@ build/
 artifacts/
 Model/
 Results/
-Notebooks/
 Data/pdfs/
 Data/lgaudio/
 Data/TTT/

@@ -35,7 +35,6 @@ concurrency:
 env:
   TRIVY_VERSION: "0.69.3"
   API_IMAGE: "landwind/ura-chatbot-api:trivy-scan"
-  ML_IMAGE: "landwind/ura-chatbot-trainer:trivy-scan"
   FRONTEND_IMAGE: "landwind/ura-chatbot-frontend:trivy-scan"
 
 jobs:
@@ -48,7 +47,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       api: ${{ steps.filter.outputs.api }}
-      ml: ${{ steps.filter.outputs.ml }}
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - name: Checkout code
@@ -61,12 +59,10 @@ jobs:
           set -euo pipefail
 
           api=true
-          ml=true
           frontend=true
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             api=false
-            ml=false
             frontend=false
 
             git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
@@ -80,11 +76,6 @@ jobs:
                   ;;
               esac
               case "$path" in
-                Dockerfile.ml|.dockerignore|trivy.yaml|requirements.txt|ml/*|Data/dataset/*)
-                  ml=true
-                  ;;
-              esac
-              case "$path" in
                 trivy.yaml|App/frontend/*)
                   frontend=true
                   ;;
@@ -94,7 +85,6 @@ jobs:
 
           {
             echo "api=$api"
-            echo "ml=$ml"
             echo "frontend=$frontend"
           } >> "$GITHUB_OUTPUT"
 
@@ -102,7 +92,6 @@ jobs:
           echo "| Image | Scan? |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| API | $api |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| ML trainer | $ml |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Frontend | $frontend |" >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
@@ -353,71 +342,6 @@ jobs:
             trivy-api-secrets.json
           retention-days: 90
 
-  container-scan-ml:
-    name: "Container: ML Trainer Image"
-    runs-on: ubuntu-latest
-    # Same build-then-scan shape as the API job above, and the trainer image is
-    # the heavier of the two (it carries the ML stack), so it has at least the
-    # same exposure to the cold-cache build blowing the budget. Raised on that
-    # reasoning rather than its own measurement — it has been skipped in recent
-    # runs, so there is no duration history for it here.
-    timeout-minutes: 50
-    needs: image-change-filter
-    if: needs.image-change-filter.outputs.ml == 'true'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-
-      - name: Build ML image (local, no push)
-        uses: docker/build-push-action@v6.18.0
-        with:
-          context: .
-          file: ./Dockerfile.ml
-          push: false
-          load: true
-          tags: ${{ env.ML_IMAGE }}
-          cache-from: type=gha,scope=ml
-          cache-to: type=gha,scope=ml,mode=max
-
-      - name: Trivy vulnerability scan (SARIF)
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
-        with:
-          image-ref: ${{ env.ML_IMAGE }}
-          scanners: vuln
-          severity: CRITICAL,HIGH
-          format: sarif
-          output: trivy-ml-image.sarif
-          trivy-config: trivy.yaml
-          ignore-unfixed: true
-
-      - name: Upload ML image SARIF
-        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-ml-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
-        with:
-          sarif_file: trivy-ml-image.sarif
-          category: trivy-ml-image
-
-      - name: Generate SBOM (CycloneDX)
-        if: always()
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
-        with:
-          image-ref: ${{ env.ML_IMAGE }}
-          format: cyclonedx
-          output: sbom-ml.cdx.json
-
-      - name: Upload ML scan artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: trivy-ml-results
-          path: |
-            trivy-ml-image.sarif
-            sbom-ml.cdx.json
-          retention-days: 90
-
   container-scan-frontend:
     name: "Container: Frontend Image"
     runs-on: ubuntu-latest
@@ -490,7 +414,6 @@ jobs:
       - iac-scan
       - license-scan
       - container-scan-api
-      - container-scan-ml
       - container-scan-frontend
     # `always()` also ran the gate when the RUN ITSELF had been cancelled —
     # which `concurrency.cancel-in-progress` does routinely as soon as a newer
@@ -515,7 +438,7 @@ jobs:
           results='${{ toJson(needs) }}'
           overall="pass"
 
-          for job in filesystem-scan iac-scan license-scan container-scan-api container-scan-ml container-scan-frontend; do
+          for job in filesystem-scan iac-scan license-scan container-scan-api container-scan-frontend; do
             status=$(echo "$results" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('${job}',{}).get('result','unknown'))" 2>/dev/null || echo "unknown")
             if [ "$status" = "success" ]; then
               icon="✅"

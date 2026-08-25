@@ -63,8 +63,6 @@ jobs:
             --severity=WARNING \
             --exclude='Data/' \
             --exclude='Results/' \
-            --exclude='Notebooks/' \
-            --exclude='*.ipynb' \
             --exclude='node_modules/' \
             --exclude='*.lock' \
             --metrics=off \
@@ -111,8 +109,6 @@ jobs:
             --severity=WARNING \
             --exclude='Data/' \
             --exclude='Results/' \
-            --exclude='Notebooks/' \
-            --exclude='*.ipynb' \
             --exclude='node_modules/' \
             --exclude='*.lock' \
             --metrics=off \
@@ -315,7 +311,7 @@ jobs:
           output_format: cli,sarif
           output_file_path: console,checkov-results.sarif
           soft_fail: true
-          skip_path: node_modules/,Data/,Results/,Notebooks/,.next/
+          skip_path: node_modules/,Data/,Results/,.next/
           config_file: .checkov.yaml
 
       - name: Upload Checkov SARIF
