@@ -22,6 +22,9 @@ ml/
 │   ├── lang_id.py             # EN/LG/SW language detection — baked into the
 │   │                          # Crane Cloud image; see App/Dockerfile.cranecloud
 │   ├── eval_retrieval.py      # Retrieval ranking gate (Hit@k / MRR)
+│   ├── static_dense.py        # eval_retrieval.py's optional dense-comparison
+│   │                          # arm; degrades to "unavailable" without
+│   │                          # sentence-transformers (not installed in CI)
 │   ├── asr/infer_asr.py       # Local Whisper/Sherpa ASR — speech_service.py's
 │   │                          # local tier (asr/'s other scripts are dev-only:
 │   │                          # ONNX export, model download, fine-tuning)
