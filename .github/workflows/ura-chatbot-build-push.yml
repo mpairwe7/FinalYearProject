@@ -163,7 +163,7 @@ jobs:
 
       - name: Build & push (linux/amd64)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: App/Dockerfile.cranecloud
