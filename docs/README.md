@@ -88,7 +88,7 @@ FinalYearProject/
 ├── ml/                    # Production quality gates + corpus tooling
 │   ├── configs/          # RAG quality gate thresholds
 │   ├── pipelines/        # RAG eval, corpus coverage, quality gates, feedback export
-│   └── scripts/          # Language ID (prod), retrieval eval, corpus chunking
+│   └── scripts/          # Language ID (prod), retrieval eval, local ASR/MT/TTS, corpus chunking
 ├── Model/                 # Trained model artifacts
 ├── Results/               # Metrics and reports
 │   ├── metrics/          # Training metrics

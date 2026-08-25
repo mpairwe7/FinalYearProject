@@ -59,6 +59,13 @@ omit = [
     # (the "Retrieval ranking gate" step runs it with --min-hit1), so its
     # behaviour is verified by execution rather than by coverage.
     "ml/scripts/eval_retrieval.py",
+    # On-device ASR/MT/TTS inference wrappers speech_service.py imports
+    # lazily for the local backend tier; hardware/model-file dependent,
+    # exercised by App/backend/tests but not measured for line coverage.
+    "ml/scripts/asr/*",
+    "ml/scripts/tts/*",
+    "ml/scripts/mt/*",
+    "ml/scripts/speech/*",
     # Backend runtime modules (require full app / integration tests)
     "App/backend/app/main.py",
     "App/backend/app/llm.py",

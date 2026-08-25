@@ -1,9 +1,11 @@
 # ml/ — production quality gates & corpus tooling
 
-This package used to be a full model-training pipeline. The training,
-fine-tuning, quantization, and ASR/MT/TTS tooling was removed — model
-training now happens outside this repository. What remains are the pieces
-that `App/backend` and CI actually depend on at runtime or as release gates.
+This package used to be a full model-training pipeline. The training-only
+tooling (data augmentation CLI, fine-tuning, quantization/mobile export,
+model/data cards) was removed — model training now happens outside this
+repository. What remains are the pieces `App/backend` and CI actually
+depend on at runtime, plus the on-device speech inference wrappers
+`speech_service.py` imports for its local backend tier.
 
 ## What's here
 
@@ -20,6 +22,12 @@ ml/
 │   ├── lang_id.py             # EN/LG/SW language detection — baked into the
 │   │                          # Crane Cloud image; see App/Dockerfile.cranecloud
 │   ├── eval_retrieval.py      # Retrieval ranking gate (Hit@k / MRR)
+│   ├── asr/infer_asr.py       # Local Whisper/Sherpa ASR — speech_service.py's
+│   │                          # local tier (asr/'s other scripts are dev-only:
+│   │                          # ONNX export, model download, fine-tuning)
+│   ├── mt/infer_mt.py         # Local MT inference — same local-tier role
+│   ├── tts/infer_tts.py       # Local TTS synthesis — same local-tier role
+│   ├── speech/speech_pipeline.py # Dev end-to-end ASR→MT→TTS pipeline runner
 │   └── data_aug/              # Corpus ingest/clean/split package. App/backend's
 │                              # pdf_corpus.py and crawl_corpus.py import
 │                              # `chunkers` from here for offline corpus export.
@@ -34,11 +42,23 @@ ml/
   Crane Cloud production image (see the comment in
   `App/Dockerfile.cranecloud` — dropping it silently degrades Luganda
   detection to a character heuristic).
+- **`asr/infer_asr.py`, `mt/infer_mt.py`, `tts/infer_tts.py`** are imported
+  lazily by `App/backend/app/speech_service.py` for its local/on-device
+  ASR, MT, and TTS backend tier (guarded — the cloud/Sunbird tiers are
+  tried first). Crane Cloud's production image does not ship these (no
+  persistent storage for local models there), but the full checkout — what
+  CI tests against — does, and `App/backend/tests/test_tts_backend_chain.py`
+  and related tests assert the exact fallback behaviour when the local
+  model file (not the module) is missing. The other scripts in `asr/`,
+  `mt/`, `tts/` (ONNX export, model download, fine-tuning) are dev/training
+  tooling, not imported by anything at runtime.
 - **`data_aug/chunkers.py`** (plus its dependencies `text_utils.py`,
   `schema.py`, `provenance.py`, `loaders.py`, `dedup.py`, `quality.py`,
   `splitters.py`, `formatters.py`, `pipeline.py`) is imported lazily by
   `App/backend/app/pdf_corpus.py` and `crawl_corpus.py` for offline corpus
   export (`python -m app.indexer --export-pdf-jsonl --export-crawl-jsonl`).
+  `data_aug/crawler.py` is the live crawler `.github/workflows/scheduled-crawl.yml`
+  runs daily — not training tooling either.
 - **`eval_retrieval.py`**, **`corpus_coverage.py`**, and
   **`evaluate_rag_offline.py`** run in CI (`.github/workflows/ci-ml-pipeline.yml`,
   `lint-and-test` job) as regression gates against `App/backend`'s retriever.

@@ -696,6 +696,7 @@ FinalYearProject/
 │   └── scripts/
 │       ├── lang_id.py            # EN/LG/SW detection (baked into Crane Cloud image)
 │       ├── eval_retrieval.py     # Retrieval ranking gate (Hit@k / MRR)
+│       ├── asr/, mt/, tts/       # infer_*.py: speech_service.py's local backend tier
 │       └── data_aug/             # Corpus chunking/cleaning used by App/backend's
 │                                  # PDF/crawl export tooling
 │
