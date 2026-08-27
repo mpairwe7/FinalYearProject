@@ -52,27 +52,49 @@ interface SettingsDialogProps {
    */
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
-  /** Narration is page state (the composer's voice mode also drives it). */
-  autoNarrate: boolean;
-  onAutoNarrateChange: (on: boolean) => void;
-  speechReady: boolean;
-  blogUrl: string;
+  /**
+   * Which sections to show, in order. Defaults to all of them — the taxpayer
+   * chat wants the lot. The operations console passes a subset: Voice narrates
+   * an answer that surface never renders, and Tax profile is a taxpayer's own
+   * TIN, so an officer's console offers neither.
+   */
+  tabs?: readonly SettingsTab[];
+  /**
+   * Narration is page state (the composer's voice mode also drives it), so it
+   * is supplied by whoever owns that state. Optional because a caller that
+   * excludes the Voice tab has none to give.
+   */
+  autoNarrate?: boolean;
+  onAutoNarrateChange?: (on: boolean) => void;
+  speechReady?: boolean;
+  /** Omitted by callers with no blog to link — the footer link is then absent. */
+  blogUrl?: string;
 }
+
+const NO_OP = () => {};
 
 export default function SettingsDialog({
   open,
   onClose,
   tab,
   onTabChange,
-  autoNarrate,
-  onAutoNarrateChange,
-  speechReady,
+  tabs: allowedTabs,
+  autoNarrate = false,
+  onAutoNarrateChange = NO_OP,
+  speechReady = false,
   blogUrl,
 }: SettingsDialogProps) {
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const identity = useIdentity();
+
+  // Order comes from TABS, not from the caller's array, so two callers asking
+  // for the same sections always present them in the same order.
+  const tabs = useMemo(
+    () => (allowedTabs ? TABS.filter((t) => allowedTabs.includes(t.id)) : TABS),
+    [allowedTabs],
+  );
 
   /**
    * Take focus on open, give it back on close, and lock the page behind.
@@ -137,8 +159,8 @@ export default function SettingsDialog({
   const onTabKey = useCallback(
     (e: React.KeyboardEvent, index: number) => {
       const move = (next: number) => {
-        const clamped = (next + TABS.length) % TABS.length;
-        onTabChange(TABS[clamped].id);
+        const clamped = (next + tabs.length) % tabs.length;
+        onTabChange(tabs[clamped].id);
         tabRefs.current[clamped]?.focus();
       };
       if (e.key === "ArrowDown" || e.key === "ArrowRight") {
@@ -152,10 +174,10 @@ export default function SettingsDialog({
         move(0);
       } else if (e.key === "End") {
         e.preventDefault();
-        move(TABS.length - 1);
+        move(tabs.length - 1);
       }
     },
-    [onTabChange],
+    [onTabChange, tabs],
   );
 
   const requestConfirm = useCallback((request: ConfirmRequest) => {
@@ -236,7 +258,7 @@ export default function SettingsDialog({
 
           <div className="setv2-body">
             <div className="setv2-tabs" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
-              {TABS.map((t, i) => (
+              {tabs.map((t, i) => (
                 <button
                   key={t.id}
                   ref={(el) => {
@@ -270,9 +292,11 @@ export default function SettingsDialog({
 
           <footer className="setv2-foot">
             <span>URA Tax Assistant — answers cite the URA sources they came from.</span>
-            <a href={blogUrl} target="_blank" rel="noopener noreferrer">
-              Project blog ↗
-            </a>
+            {blogUrl ? (
+              <a href={blogUrl} target="_blank" rel="noopener noreferrer">
+                Project blog ↗
+              </a>
+            ) : null}
           </footer>
         </div>
       </div>

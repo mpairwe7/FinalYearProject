@@ -30,16 +30,6 @@ export const RefreshIcon = () => (
   </svg>
 );
 
-export const CommandIcon = () => (
-  <svg {...base}>
-    <path d="M15 6a3 3 0 1 1 3 3h-3V6Z" />
-    <path d="M9 6a3 3 0 1 0-3 3h3V6Z" />
-    <path d="M15 18a3 3 0 1 0 3-3h-3v3Z" />
-    <path d="M9 18a3 3 0 1 1-3-3h3v3Z" />
-    <rect x="9" y="9" width="6" height="6" rx="1" />
-  </svg>
-);
-
 export const InboxIcon = () => (
   <svg {...base}>
     <path d="M4 13h4l1.5 3h5L16 13h4" />
@@ -141,9 +131,52 @@ export const PanelLeftIcon = () => (
   </svg>
 );
 
-export const PinIcon = () => (
+/* --------------------------------------------------------------------------
+ * Sidebar chrome
+ *
+ * The rail's own controls, as opposed to its destinations: the search field's
+ * glyph, the collapse/expand arrows, and the account menu's help item.
+ * ------------------------------------------------------------------------ */
+
+/** The search field's leading glyph. Was the ⌘ command loop, which read as a
+ *  decoration rather than "type here to find something". */
+export const SearchIcon = () => (
   <svg {...base}>
-    <path d="M12 17v5" />
-    <path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z" />
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-3.7-3.7" />
+  </svg>
+);
+
+/* Double chevrons rather than a pin: the control widens and narrows the rail,
+   and an arrow pointing the way it will move says that without a metaphor. */
+export const ChevronsLeftIcon = () => (
+  <svg {...base}>
+    <path d="m12.5 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
+  </svg>
+);
+
+export const ChevronsRightIcon = () => (
+  <svg {...base}>
+    <path d="m11.5 7 5 5-5 5" /><path d="m6 7 5 5-5 5" />
+  </svg>
+);
+
+export const ChevronDownIcon = () => (
+  <svg {...base}>
+    <path d="m6 9.5 6 6 6-6" />
+  </svg>
+);
+
+export const HelpCircleIcon = () => (
+  <svg {...base}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.6c0 1.7-2.5 2-2.5 3.6" />
+    <path d="M12 17.3h.01" />
+  </svg>
+);
+
+export const CheckIcon = () => (
+  <svg {...base}>
+    <path d="m5 12.5 4.5 4.5L19 7.5" />
   </svg>
 );

@@ -55,16 +55,40 @@
   display: flex;
   flex-direction: column;
   width: var(--rail-w-collapsed);
-  background: var(--ops-panel);
-  border-right: 1px solid var(--ops-line);
-  backdrop-filter: blur(16px);
+  /* Glass, through the shared tokens. This was a bare `blur(16px)` with no
+     -webkit- pair and no saturation, so Safari got nothing and Chrome got a
+     grey haze — blur alone desaturates the mesh behind the rail. */
+  background: var(--ops-glass-bg);
+  border-right: 1px solid var(--ops-glass-line);
+  box-shadow: var(--ops-glass-spec);
+  -webkit-backdrop-filter: var(--ops-glass-blur);
+  backdrop-filter: var(--ops-glass-blur);
   overflow: hidden;
+  contain: paint;
   transition: width var(--ops-dur-base) var(--ops-ease);
 }
 
 .staff-rail.is-expanded {
   width: var(--rail-w-expanded);
   box-shadow: var(--ops-elev-3);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .staff-rail {
+    background: var(--ops-panel);
+    border-right-color: var(--ops-line);
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .staff-rail {
+    background: var(--ops-panel);
+    border-right-color: var(--ops-line);
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 /* Pre-paint width, before React has hydrated.
@@ -84,9 +108,10 @@
 .staff-rail-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--ops-space-1);
   min-height: var(--ops-nav-h);
   padding: var(--ops-space-2);
-  border-bottom: 1px solid var(--ops-line);
   flex: none;
 }
 
@@ -144,6 +169,39 @@
   text-overflow: ellipsis;
 }
 
+/* The collapse/expand arrow. Only meaningful once the rail is open — in 52px
+   there is room for the brand mark and nothing else — so it takes no space at
+   all while collapsed rather than being merely transparent, which would push
+   the mark off-centre. */
+.staff-rail-pin {
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+
+.staff-rail.is-collapsed .staff-rail-pin {
+  display: none;
+}
+
+.staff-rail-pin.is-on {
+  color: var(--accent);
+}
+
+/* The search field. Directly under the brand and above the destinations,
+   which is where a reader looks for it; it used to sit in the footer below
+   eight links. The border under it is the rail's one head/body divider — the
+   head no longer carries its own, so the two do not stack into a double rule. */
+.staff-rail-search {
+  flex: none;
+  padding: 0 var(--ops-space-2) var(--ops-space-2);
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.staff-rail-search .ops-cmdk-trigger {
+  width: 100%;
+  min-height: 34px;
+}
+
 .staff-rail-scroll {
   flex: 1;
   overflow-y: auto;
@@ -152,8 +210,16 @@
   scrollbar-width: thin;
 }
 
+/* Safari path only (see ops.css): narrower than the console default, with a
+   proportionally thinner inset — the 3px transparent border ops.css uses to
+   float the thumb would otherwise consume this track and leave nothing to see
+   on hover. */
 .staff-rail-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+}
+
+.staff-rail-scroll::-webkit-scrollbar-thumb {
+  border-width: 2px;
 }
 
 .staff-rail-group + .staff-rail-group {
@@ -231,29 +297,19 @@
   color: var(--text-0);
 }
 
-/* The current page is named twice — weight and a bar on the leading edge —
-   because a surface tint alone was too quiet to find at a glance. On a rail
-   the marker moves from the bottom edge to the left, where the eye already is. */
+/* The current page is named by weight and a filled surface. It also carried a
+   2px accent bar on the leading edge; that is gone — the console does not put
+   coloured bars down the left of anything. */
 .staff-rail a.active {
   color: var(--text-0);
   font-weight: var(--ops-weight-semi);
   background: var(--ops-row-active);
 }
 
-.staff-rail a.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 7px;
-  bottom: 7px;
-  width: 2px;
-  border-radius: 0 2px 2px 0;
-  background: var(--accent);
-}
-
 .staff-rail a:focus-visible,
 .staff-brand:focus-visible,
-.staff-signout:focus-visible,
+.staff-acct-trigger:focus-visible,
+.staff-acct-item:focus-visible,
 .staff-rail-toggle:focus-visible,
 .staff-gate-primary:focus-visible,
 .staff-gate-link:focus-visible {
@@ -261,41 +317,25 @@
   outline-offset: var(--ops-focus-gap);
 }
 
+/* One row now. The theme button and the live dot used to sit above the
+   identity in a toolbar of their own — a strip of unrelated controls whose left
+   edges lined up with nothing, since the rail collapsed it into a vertical
+   stack. The theme control moved into the account menu and the dot onto the
+   account row, which leaves this as the account row's padding. */
 .staff-rail-foot {
   flex: none;
   padding: var(--ops-space-2);
   border-top: 1px solid var(--ops-line);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ops-space-2);
 }
 
-.staff-rail-tools {
-  display: flex;
-  align-items: center;
-  gap: var(--ops-space-1);
-  flex-wrap: wrap;
-}
-
-.staff-rail-pin.is-on {
-  color: var(--accent);
-  background: var(--ops-row-active);
-}
-
-/* Collapsed, the footer is a 52px column: the palette trigger keeps its glyph
-   and drops the word and the chord, which otherwise clipped mid-letter. */
-.staff-rail.is-collapsed .staff-rail-tools {
-  flex-direction: column;
-  align-items: stretch;
-}
-
+/* Collapsed, the rail is a 52px column: the search field keeps its magnifier
+   and drops the word, which otherwise clipped mid-letter. */
 .staff-rail.is-collapsed .ops-cmdk-trigger {
   justify-content: center;
   padding-inline: 0;
 }
 
-.staff-rail.is-collapsed .ops-cmdk-trigger-text,
-.staff-rail.is-collapsed .ops-kbd {
+.staff-rail.is-collapsed .ops-cmdk-trigger-text {
   display: none;
 }
 
@@ -343,11 +383,31 @@
     transition: transform var(--ops-dur-base) var(--ops-ease);
   }
 
+  /* The drawer is always at full width, so everything the collapsed rail hides
+     is shown here regardless of the .is-expanded class React computes from
+     hover and pinning — neither of which exists on a phone. */
   .staff-rail .staff-rail-label,
   .staff-rail .staff-rail-group-label {
     opacity: 1;
     height: auto;
   }
+
+  .staff-rail .staff-brand-text {
+    opacity: 1;
+  }
+
+  .staff-rail.is-collapsed .ops-cmdk-trigger {
+    justify-content: flex-start;
+    padding-inline: 8px;
+  }
+
+  .staff-rail.is-collapsed .ops-cmdk-trigger-text {
+    display: inline;
+  }
+
+  /* The account row's drawer rules are NOT here: they have to out-rank
+     `.staff-rail.is-collapsed .staff-acct-*`, which is declared further down
+     the file, and a media query adds no specificity. See the block at the end. */
 
   .staff-rail.is-drawer-open {
     transform: translateX(0);
@@ -375,6 +435,9 @@
   }
 }
 
+/* Escalation-socket state, on the account row. `is-on` is the connected
+   state; without it the dot is the same grey as muted text, which is how
+   "reconnecting" should read — present, but not claiming to be live. */
 .staff-live-dot {
   width: 7px;
   height: 7px;
@@ -388,60 +451,256 @@
   box-shadow: 0 0 0 3px var(--ops-good-fill);
 }
 
-/* A column, not a row: 208px cannot hold a pill, an address and a button side
-   by side — they wrapped into an unreadable three-line jumble. Hidden entirely
-   while collapsed, where none of it fits at all. */
-.staff-who {
+/* --------------------------------------------------------------------------
+   The account row.
+
+   Was three stacked pieces — a role pill, the raw address, a bare "Sign out" —
+   which is 208px of rail spent restating what one line can say. Now: initials,
+   name, account type, chevron; everything else moved into the menu it opens.
+   -------------------------------------------------------------------------- */
+.staff-acct {
+  position: relative;
+}
+
+.staff-acct-trigger {
+  /* Anchors the collapsed rail's live-dot badge to this row rather than to the
+     wrapper, which also holds the menu. */
+  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: center;
+  gap: var(--ops-space-2);
+  width: 100%;
   min-width: 0;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--ops-radius-sm);
+  background: none;
+  font: inherit;
   font-size: var(--ops-text-xs);
-  color: var(--text-2);
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ops-dur-fast) var(--ops-ease);
+}
+
+.staff-acct-trigger:hover,
+.staff-acct-trigger[aria-expanded="true"] {
+  background: var(--ops-row-hover);
+}
+
+/* The letters are the account TYPE, not a person's — see roleInitials(). The
+   same near-black-on-accent pairing as the brand mark, for the same reason:
+   white on URA gold measures 1.57:1. */
+.staff-acct-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: color-mix(in srgb, var(--accent) 18%, black);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-bold);
+  letter-spacing: 0.02em;
+}
+
+/* Collapsed, the avatar is the whole row — the name and chevron have nowhere
+   to go, and unlike the old block the identity itself stays visible. */
+.staff-acct-label,
+.staff-acct-caret {
   opacity: 0;
-  height: 0;
-  overflow: hidden;
   transition: opacity var(--ops-dur-fast) var(--ops-ease);
 }
 
-.staff-rail.is-expanded .staff-who {
+.staff-rail.is-expanded .staff-acct-label,
+.staff-rail.is-expanded .staff-acct-caret {
   opacity: 1;
-  height: auto;
 }
 
-.staff-role-pill {
-  padding: 3px 9px;
-  border-radius: var(--ops-radius-pill);
-  background: color-mix(in srgb, var(--ura-teal-light) var(--ops-tint), transparent);
-  border: 1px solid color-mix(in srgb, var(--ura-teal-light) 38%, transparent);
-  color: var(--ops-role-ink);
-  font-size: var(--ops-text-2xs);
-  font-weight: var(--ops-weight-semi);
-  white-space: nowrap;
+.staff-rail.is-collapsed .staff-acct-trigger {
+  justify-content: center;
+  padding-inline: 0;
 }
 
-.staff-email {
-  max-width: 180px;
+.staff-rail.is-collapsed .staff-acct-label,
+.staff-rail.is-collapsed .staff-acct-caret {
+  display: none;
+}
+
+/* Shrinks but does not grow, so the live dot lands immediately after the name
+   it qualifies instead of being pushed to the far edge by a greedy label. The
+   caret takes the leftover space with `margin-left: auto`. */
+.staff-acct-label {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
 }
 
-.staff-signout {
-  background: none;
+.staff-acct-dot {
+  color: var(--text-3);
+  font-weight: var(--ops-weight-normal);
+}
+
+.staff-acct-type {
+  font-weight: var(--ops-weight-normal);
+  color: var(--text-2);
+}
+
+/* Expanded, the dot follows the name it qualifies, with the caret after it.
+   Collapsed there is no name to follow, so it becomes a badge on the avatar's
+   corner — the same shape every presence indicator uses, and the only place in
+   a 52px column where it does not fight the avatar for the centre line. */
+.staff-rail.is-collapsed .staff-live-dot {
+  position: absolute;
+  right: 3px;
+  bottom: 5px;
+  width: 9px;
+  height: 9px;
+  /* A ring in the rail's own colour, so the badge reads as sitting on top of
+     the avatar rather than as a hole punched in it. */
+  border: 2px solid var(--ops-panel);
+  box-shadow: none;
+}
+
+.staff-acct-caret {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+  color: var(--text-3);
+}
+
+.staff-acct-caret svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Opens upward — the row is the last thing in the rail — and is sized to the
+   rail's own width, because `.staff-rail` is `overflow: hidden` and anything
+   wider is clipped. That is also why Language expands in place below rather
+   than flying out to the side. */
+.staff-acct-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--ops-space-1);
+  border: 1px solid var(--ops-line-strong);
+  border-radius: var(--ops-radius-md);
+  background: var(--ops-panel);
+  box-shadow: var(--ops-elev-3);
+}
+
+.staff-acct-menu-id {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.staff-acct-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  width: 100%;
+  padding: 7px 8px;
   border: 0;
-  padding: 4px 6px;
-  border-radius: var(--ops-radius-xs);
+  border-radius: var(--ops-radius-sm);
+  background: none;
   font: inherit;
   font-size: var(--ops-text-xs);
-  color: var(--text-3);
+  color: var(--text-1);
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.staff-signout:hover {
-  color: var(--text-0);
+.staff-acct-item:first-of-type {
+  margin-top: var(--ops-space-1);
+}
+
+.staff-acct-item svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--text-3);
+}
+
+.staff-acct-item:hover {
   background: var(--ops-row-hover);
+  color: var(--text-0);
+}
+
+.staff-acct-item:hover svg {
+  color: var(--text-1);
+}
+
+.staff-acct-item-danger:hover {
+  background: var(--ops-bad-fill);
+  color: var(--ops-bad-ink);
+}
+
+.staff-acct-item-danger:hover svg {
+  color: var(--ops-bad-ink);
+}
+
+.staff-acct-expand .staff-acct-trail {
+  margin-left: auto;
+  display: inline-flex;
+  transition: transform var(--ops-dur-fast) var(--ops-ease);
+}
+
+.staff-acct-expand.is-open .staff-acct-trail {
+  transform: rotate(180deg);
+}
+
+.staff-acct-sub {
+  padding: 2px 0 var(--ops-space-1);
+}
+
+.staff-acct-subitem {
+  padding-left: var(--ops-space-2);
+  font-size: var(--ops-text-2xs);
+}
+
+/* A fixed slot, so the three languages line up whether or not they are the
+   selected one. */
+.staff-acct-tick {
+  display: inline-flex;
+  justify-content: center;
+  flex: none;
+  width: 15px;
+  color: var(--accent);
+}
+
+.staff-acct-tick svg {
+  color: inherit;
+}
+
+.staff-acct-native {
+  color: var(--text-3);
+}
+
+.staff-acct-note {
+  margin: var(--ops-space-1) 0 0;
+  padding: 0 8px;
+  font-size: var(--ops-text-2xs);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-3);
+  white-space: normal;
 }
 
 /* Gate states ------------------------------------------------------------- */
@@ -453,7 +712,35 @@
   padding: var(--ops-space-12) var(--ops-space-5);
 }
 
+.staff-gate-checking {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ops-space-4);
+}
+
+/* A spinner, not a skeleton: there is no incoming layout to stand in for — the
+   next paint is either a console or a sign-in card, and guessing wrong would be
+   worse than showing nothing shaped. */
+.staff-gate-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--ops-line);
+  border-top-color: var(--accent);
+  animation: staff-gate-spin 800ms linear infinite;
+}
+
+@keyframes staff-gate-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .staff-gate-spinner { animation: none; border-top-color: var(--ops-line-strong); }
+}
+
 .staff-gate-msg {
+  margin: 0;
   font-size: var(--ops-text-base);
   color: var(--text-2);
 }
@@ -527,26 +814,29 @@
 }
 
 /* The rail collapses by width, not by breakpoint, so the 1080px rules the
-   horizontal bar needed are gone. The address is still the first thing to go
-   on a narrow rail — it is the widest thing in the footer. */
-@media (max-width: 1080px) {
-  .staff-email {
-    display: none;
-  }
-}
+   horizontal bar needed are gone, and the address they used to hide is no
+   longer a permanent line — it heads the account menu instead. */
 
+/* The account row in the phone drawer.
+
+   Last in the file on purpose. The drawer is always at full width, so it has
+   to undo `.staff-rail.is-collapsed .staff-acct-*` — and those are declared
+   above at equal specificity, which a media query does nothing to change.
+   Placing this block earlier (with the rest of the 720px rules) left the row
+   as a lone centred avatar in a 208px drawer. */
 @media (max-width: 720px) {
-  /* No keyboard, no chord — and inside the drawer every destination the
-     palette offers is already one tap away. */
-  .ops-cmdk-trigger {
-    display: none;
+  .staff-rail.is-collapsed .staff-acct-trigger {
+    justify-content: flex-start;
+    padding-inline: 6px;
   }
-}
 
-@media (max-width: 460px) {
-  /* The address is the first thing to go; the role pill and sign-out are not. */
-  .staff-who {
-    padding-left: 0;
-    border-left: 0;
+  .staff-rail.is-collapsed .staff-acct-label,
+  .staff-rail.is-collapsed .staff-acct-caret {
+    display: inline-flex;
+    opacity: 1;
+  }
+
+  .staff-rail.is-collapsed .staff-acct-label {
+    display: block;
   }
 }

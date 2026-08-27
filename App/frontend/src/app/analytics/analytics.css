@@ -6,7 +6,11 @@
    priority meant one colour on /admin and a different one here. */
 
 .an-stats {
-  margin-bottom: var(--ops-space-5);
+  /* Five, not the console default of three: these are five one-word counters
+     rather than /admin's six labelled SLA figures, so they stay legible in a
+     narrower track. Collapses to 3 / 2 / 1 with the breakpoints in ops.css. */
+  --ops-stat-cols: 5;
+  margin-bottom: var(--ops-band);
 }
 
 /* Open escalation list beside the status chart */

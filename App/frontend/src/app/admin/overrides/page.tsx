@@ -82,7 +82,7 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
           id="new-override"
           title="Add an override"
           note="The taxpayer's question must match exactly, character for character. Anything close but not identical falls through to normal retrieval."
-          className="ov-form-panel"
+          glass
         >
           <form
             className="ov-form"
@@ -168,6 +168,7 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
         title="Live overrides"
         end={<span className="ops-chip">{overrides.length}</span>}
         flush
+        bare
       >
         {isLoading ? <SkeletonRows rows={3} height={72} /> : null}
         {error ? (

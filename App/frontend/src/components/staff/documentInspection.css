@@ -286,18 +286,6 @@
   transform: translateY(-1px);
 }
 
-.doc-inspect-card.review_required {
-  border-left: 4px solid #fb7185;
-}
-
-.doc-inspect-card.use_with_warning {
-  border-left: 4px solid #fbbf24;
-}
-
-.doc-inspect-card.auto_use {
-  border-left: 4px solid #34d399;
-}
-
 .doc-inspect-card-head {
   display: flex;
   justify-content: space-between;

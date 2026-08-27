@@ -74,7 +74,7 @@ function OutboxBoard() {
         </div>
       ) : null}
 
-      <OpsPanel id="outbox" title="Queued messages" flush>
+      <OpsPanel id="outbox" title="Queued messages" flush bare>
         {isLoading ? <SkeletonRows rows={4} height={48} /> : null}
         {error ? (
           <ErrorState body="The outbox did not answer." onRetry={() => void refetch()} />

@@ -51,20 +51,54 @@
    Fourteen identical pills in one wrap made every filter look independent and
    equally important. A label per group says what the pills below it choose. */
 
+/* The group is the unit that wraps, not the pills inside it. Letting the pills
+   wrap individually broke PRIORITY across two rows and left the search box
+   stranded on a line with the tail of TEAM — a control sitting next to filters
+   it has nothing to do with. */
 .tickets-filter-group {
   display: inline-flex;
   align-items: center;
   gap: var(--ops-space-1);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .tickets-filter-label {
   margin-right: var(--ops-space-1);
+  font-family: var(--ops-font-mono);
   font-size: var(--ops-text-2xs);
-  font-weight: var(--ops-weight-semi);
-  letter-spacing: var(--ops-tracking-caps);
+  font-weight: var(--ops-weight-light);
+  letter-spacing: var(--ops-tracking-meta);
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--text-3);
+}
+
+/* Search belongs to the whole queue rather than to any one filter group, so it
+   takes the end of the row on a wide screen and its own full-width row as soon
+   as the groups need the space. */
+.tickets-toolbar-search {
+  margin-left: auto;
+  min-width: 240px;
+}
+
+@media (max-width: 1180px) {
+  .tickets-toolbar-search {
+    margin-left: 0;
+    flex-basis: 100%;
+    min-width: 0;
+  }
+}
+
+/* Below this there is not enough room for a whole group on one line, and
+   `nowrap` stops being a grouping cue and becomes 4px of horizontal page
+   scroll — a flex item defaults to `min-width: auto`, so the group pushes the
+   document sideways rather than wrapping. The label still separates the groups
+   once they wrap, so the cue survives and the overflow does not. */
+@media (max-width: 720px) {
+  .tickets-filter-group {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
 }
 
 .tickets-meta {
@@ -90,9 +124,12 @@
 
 .tickets-body {
   display: grid;
-  grid-template-columns: minmax(300px, 400px) 1fr;
-  gap: var(--ops-space-3);
-  align-items: start;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: var(--ops-gutter);
+  /* Stretch, not start: the queue and the case are two halves of one view, and
+     letting each size to its own content left an empty-state pane sitting
+     beside a full-height one. */
+  align-items: stretch;
 }
 
 .tickets-list,

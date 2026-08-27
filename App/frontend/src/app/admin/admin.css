@@ -11,7 +11,7 @@
   grid-template-columns: minmax(180px, 220px) 1fr minmax(200px, 280px);
   gap: var(--ops-space-5);
   align-items: center;
-  margin: var(--ops-space-4) 0 var(--ops-space-5);
+  margin: var(--ops-space-4) 0 var(--ops-band);
   padding: var(--ops-space-4) var(--ops-space-5);
   background: var(--ops-panel);
   border: 1px solid var(--ops-line);
@@ -81,16 +81,20 @@
 
 /* Two-column body ---------------------------------------------------------- */
 
+/* Wider than the console gutter, because the three sections below are bare —
+   with no border between them, space is the only thing saying where one ends
+   and the next begins. A card can afford to sit 20px from its neighbour; a
+   heading and a list cannot. */
 .ov-cols {
   display: grid;
   grid-template-columns: 1.45fr 1fr;
-  gap: var(--ops-space-3);
+  gap: var(--ops-band);
   align-items: start;
 }
 
 .ov-side {
   display: grid;
-  gap: var(--ops-space-3);
+  gap: var(--ops-band);
 }
 
 /* Queue list --------------------------------------------------------------- */
@@ -178,10 +182,10 @@
   border: 1px solid var(--ops-line);
   background: var(--ops-row-active);
   color: var(--text-2);
-  font-size: 10px;
-  font-weight: var(--ops-weight-bold);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--ops-tracking-caps);
   white-space: nowrap;
   text-align: center;
 }

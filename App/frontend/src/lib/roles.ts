@@ -27,6 +27,39 @@ export const ROLE_LABEL: Record<string, string> = {
   ura_auditor: "Auditor",
 };
 
+/**
+ * A name an officer recognises as their own.
+ *
+ * The console rendered `who.email || who.external_id`, and on a deployment
+ * where the identity provider returns no email that second branch shows the
+ * raw subject — `/agent` greeted its user with
+ * "Signed in as auth0|6a7d7af3ace1faccc70dc644". That is the system's
+ * vocabulary, not the reader's, and it is not even identifying: an opaque hex
+ * string tells an officer nothing about which account they are in.
+ *
+ * So: the email when there is one. A provider-prefixed subject
+ * (`auth0|…`, `google-oauth2|…`) has no human part, so it becomes the role
+ * name with a short tail — enough to tell two accounts apart, without pretending
+ * the digits mean something. Anything else is passed through, because an
+ * identity provider that returns a username should show the username.
+ */
+export function signedInName(
+  who: { email?: string; external_id?: string; role?: string } | null | undefined,
+): string {
+  if (!who) return "your account";
+  if (who.email) return who.email;
+
+  const id = who.external_id ?? "";
+  if (!id) return "your account";
+
+  const opaque = /^[a-z0-9-]+\|(.+)$/i.exec(id);
+  if (opaque) {
+    const tail = opaque[1].slice(-6);
+    return `${roleLabel(who.role)} · …${tail}`;
+  }
+  return id;
+}
+
 export function roleLabel(role: string | undefined | null): string {
   if (!role) return "Visitor";
   return ROLE_LABEL[role] ?? role;
@@ -153,4 +186,65 @@ export function staffSectionsFor(
       items: allowed.filter((d) => d.group === group),
     }))
     .filter((section) => section.items.length > 0);
+}
+
+/* --------------------------------------------------------------------------
+ * The console's account row
+ *
+ * The sidebar footer used to be three stacked pieces — a role pill, the raw
+ * email, and a "Sign out" button — which is the whole account surface spelled
+ * out in a 208px column. It is now one row that opens a menu, so it needs the
+ * three short strings that row is made of: an avatar's letters, a name, and the
+ * account type after a middle dot.
+ * ------------------------------------------------------------------------ */
+
+/** Two letters for the avatar, taken from the account type: there is no
+ *  person's name in a token — only an email and a role — so initials of a name
+ *  we do not have would be invented. `ura_admin` → "AD", `ura_staff` → "ST". */
+export function roleInitials(role: string | undefined | null): string {
+  switch (role) {
+    case "ura_admin":
+      return "AD";
+    case "ura_staff":
+      return "ST";
+    case "ura_auditor":
+      return "AU";
+    default:
+      return roleLabel(role).slice(0, 2).toUpperCase();
+  }
+}
+
+/** The one-word account type shown after the dot — "Admin", not
+ *  "Administrator", which does not fit beside a name in the rail. */
+export function roleShortLabel(role: string | undefined | null): string {
+  switch (role) {
+    case "ura_admin":
+      return "Admin";
+    case "ura_staff":
+      return "Staff";
+    case "ura_auditor":
+      return "Auditor";
+    default:
+      return roleLabel(role);
+  }
+}
+
+/**
+ * A first name for the account row.
+ *
+ * The closest thing to one an OIDC token carries is the local part of the
+ * email: `officer.admin@ura.go.ug` → "Officer". Anything without a usable local
+ * part (no email, or a provider-prefixed subject like `auth0|6a7d…`) returns an
+ * empty string, and the row then shows the account type alone rather than
+ * "Admin · Admin".
+ */
+export function accountDisplayName(
+  who: { email?: string; external_id?: string } | null | undefined,
+): string {
+  const email = who?.email?.trim();
+  if (!email) return "";
+  const local = email.slice(0, email.indexOf("@") === -1 ? undefined : email.indexOf("@"));
+  const first = local.split(/[.\-_+\s]+/).filter(Boolean)[0];
+  if (!first || /^\d+$/.test(first)) return "";
+  return first.charAt(0).toUpperCase() + first.slice(1);
 }
