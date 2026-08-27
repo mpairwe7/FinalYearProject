@@ -140,7 +140,7 @@ function Evaluation() {
 
       <section className="ops-chart-grid is-2" aria-label="Quality against the release minimums">
         <EvalRadarChart metrics={metrics} />
-        <MetricsTable metrics={metrics} title="What each check measures" />
+        <MetricsTable metrics={metrics} title="What each check measures" bare />
       </section>
 
       <section className="ops-chart-grid" aria-label="How well answers stick to the documents, by topic">

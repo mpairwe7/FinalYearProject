@@ -39,9 +39,11 @@
 
 .ag-split {
   display: grid;
-  grid-template-columns: minmax(300px, 380px) 1fr;
-  gap: var(--ops-space-3);
-  align-items: start;
+  grid-template-columns: minmax(320px, 400px) 1fr;
+  gap: var(--ops-gutter);
+  /* See tickets.css — the queue and the case are one view, so they share a
+     baseline instead of each sizing to its own content. */
+  align-items: stretch;
 }
 
 .ag-queue-pane,

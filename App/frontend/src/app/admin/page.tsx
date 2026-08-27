@@ -24,6 +24,7 @@ import { OpsPage, OpsPanel } from "../../components/ops/OpsPage";
 import { StatCard } from "../../components/ops/StatCard";
 import { Freshness, PeriodPicker } from "../../components/ops/Controls";
 import { EmptyState, ErrorState, Skeleton, SkeletonRows, SkeletonStats } from "../../components/ops/States";
+import { useSkeletonVisible } from "../../hooks/useLoadingPhase";
 import { Sparkline } from "../../components/ops/Sparkline";
 import { ArrowUpRightIcon } from "../../components/ops/icons";
 import { useTicketQueueFull, useTicketSla, useTicketStats } from "../../hooks/useAnalyticsDashboard";
@@ -124,6 +125,19 @@ function Overview() {
   const anyFetching = stats.isFetching || sla.isFetching || queue.isFetching;
   const periodLabel = `previous ${days} days`;
 
+  // The summary tiles are fed by two independent queries, and this used to read
+  // `stats.isLoading && sla.isLoading` — so whichever resolved first tore the
+  // skeleton down and the tiles fed by the other one rendered 0. It has to be
+  // OR: the summary is loading until both halves have arrived.
+  //
+  // Each flag then goes through the ladder (see useLoadingPhase), so a request
+  // that returns inside 300ms never flashes a skeleton at all.
+  const summaryLoading = useSkeletonVisible(stats.isLoading || sla.isLoading);
+  const queueLoading = useSkeletonVisible(queue.isLoading);
+  const arrivalsLoading = useSkeletonVisible(all.isLoading);
+  const authorityLoading = useSkeletonVisible(authority.loading);
+  const workloadLoading = useSkeletonVisible(stats.isLoading || sla.isLoading);
+
   return (
     <OpsPage
       eyebrow="Work"
@@ -153,7 +167,7 @@ function Overview() {
       ) : null}
 
       <section aria-label="Escalation summary">
-        {stats.isLoading && sla.isLoading ? (
+        {summaryLoading ? (
           <SkeletonStats count={6} />
         ) : (
           <div className="ops-stat-grid">
@@ -168,21 +182,18 @@ function Overview() {
               label="Awaiting first response"
               value={String(awaiting)}
               hint="nobody has replied yet"
-              tone={awaiting > 0 ? "warn" : "good"}
               href="/admin/tickets?status=open"
             />
             <StatCard
               label="Past 24-hour SLA"
               value={String(breaching)}
               hint="open or in progress, first- or next-reply over 24h"
-              tone={breaching > 0 ? "danger" : "good"}
               href="/admin/tickets?status=open"
             />
             <StatCard
               label="Unassigned"
               value={String(unassigned)}
               hint="waiting to be claimed"
-              tone={unassigned > 0 ? "warn" : "good"}
               href="/admin/tickets?status=open"
             />
             <StatCard
@@ -232,7 +243,11 @@ function Overview() {
           </span>
         </div>
         <div className="ov-volume-chart">
-          {arrivals && !arrivals.truncated ? (
+          {arrivalsLoading ? (
+            /* Sized to the sparkline it replaces, so the strip does not jump
+               when the shape arrives. */
+            <Skeleton height={54} radius="var(--ops-radius-sm)" />
+          ) : arrivals && !arrivals.truncated ? (
             <Sparkline
               points={arrivals.points}
               label={`Escalations raised per day over the last ${days} days, from ${Math.min(
@@ -242,11 +257,9 @@ function Overview() {
             />
           ) : (
             <p className="ops-stat-hint">
-              {all.isLoading
-                ? "Loading the arrival history…"
-                : arrivals?.truncated
-                  ? "More than 200 tickets are on file, and the queue endpoint returns the most urgent first — a daily shape drawn from that page would be the wrong shape, so it is not drawn."
-                  : "No escalations in this period."}
+              {arrivals?.truncated
+                ? "More than 200 tickets are on file, and the queue endpoint returns the most urgent first — a daily shape drawn from that page would be the wrong shape, so it is not drawn."
+                : "No escalations in this period."}
             </p>
           )}
         </div>
@@ -281,6 +294,7 @@ function Overview() {
           title="Waiting longest"
           className="ov-queue-panel"
           flush
+          bare
           end={
             <>
               {urgent > 0 ? (
@@ -292,7 +306,7 @@ function Overview() {
             </>
           }
         >
-          {queue.isLoading ? (
+          {queueLoading ? (
             <SkeletonRows rows={5} height={52} />
           ) : queue.isError ? (
             <ErrorState body="The queue did not load." onRetry={() => void queue.refetch()} />
@@ -335,6 +349,7 @@ function Overview() {
           <OpsPanel
             id="a-h"
             title="Answer authority"
+            bare
             note="Rate answers are refused outright when this manifest is stale, so it is the first thing to check when the assistant starts declining figures."
             end={
               authority.loading ? null : (
@@ -344,7 +359,7 @@ function Overview() {
               )
             }
           >
-            {authority.loading ? (
+            {authorityLoading ? (
               <SkeletonRows rows={4} height={20} />
             ) : authority.error ? (
               <ErrorState title="Authority status unavailable" body={authority.error} />
@@ -378,7 +393,10 @@ function Overview() {
             )}
           </OpsPanel>
 
-          <OpsPanel id="w-h" title="Workload">
+          <OpsPanel id="w-h" title="Workload" bare>
+            {workloadLoading ? (
+              <SkeletonRows rows={4} height={20} />
+            ) : (
             <dl className="ov-kv">
               <div>
                 <dt>Assigned, in progress</dt>
@@ -397,6 +415,7 @@ function Overview() {
                 <dd>{formatDuration(sla.data?.median_next_reply_seconds)}</dd>
               </div>
             </dl>
+            )}
           </OpsPanel>
         </div>
       </div>

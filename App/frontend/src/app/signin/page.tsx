@@ -36,6 +36,8 @@ import {
   getAuthToken,
   clearAuthToken,
   getServerAuthToken,
+  looksLikeJwt,
+  sanitizeAuthToken,
   subscribeAuthToken,
 } from "../../lib/authSession";
 import {
@@ -126,30 +128,40 @@ export default function SignInPage() {
   }, [startOidc]);
 
   const useDevToken = useCallback(async () => {
-    const token = devToken.trim();
+    // Not `.trim()`: a token pasted from a terminal or a chat client can carry a
+    // zero-width space or a BOM, which trim leaves in place. Anything outside
+    // base64url is stripped — see sanitizeAuthToken for why that matters.
+    const token = sanitizeAuthToken(devToken);
     if (!token) {
       setStatus({ kind: "error", message: "Paste a token first." });
       return;
     }
-    // Tagged `dev` so sign-out does not try to end a provider session that
-    // never existed — see lib/authSession's AuthMethod.
-    setAuthToken(token, "dev");
-    // Prove the token is actually accepted before sending anyone to a dashboard
-    // that would just render empty panels.
+    if (!looksLikeJwt(token)) {
+      setStatus({
+        kind: "error",
+        message:
+          "That does not look like a token. A token is three dot-separated parts starting with \"eyJ\" — check the whole string was copied.",
+      });
+      return;
+    }
+    // Verify BEFORE storing. Storing first meant a token the browser could not
+    // even put in a header was already in localStorage, so every later request
+    // failed the same way and the only way out was clearing site data.
     try {
       const res = await fetch("/api/v1/me", {
         headers: { Authorization: `Bearer ${token}` },
       });
       const body = await res.json();
       if (!res.ok || !body?.authenticated) {
-        clearAuthToken();
         setStatus({
           kind: "error",
           message: "The backend rejected that token. Check it was minted with this deployment's AUTH_DEV_SECRET.",
         });
         return;
       }
-      // No setSignedIn: setAuthToken above already notified the token store.
+      // Accepted — only now does it go into storage. Tagged `dev` so sign-out
+      // does not try to end a provider session that never existed.
+      setAuthToken(token, "dev");
       const staff = isStaffRole(body.role);
       setStatus({
         kind: "ok",
@@ -158,7 +170,9 @@ export default function SignInPage() {
           : `Token accepted, but role "${body.role}" is not staff — the dashboards will refuse it.`,
       });
     } catch (err) {
-      clearAuthToken();
+      // Nothing was stored on this path, so there is nothing to roll back —
+      // and clearing here would sign out a session that this attempt never
+      // touched.
       setStatus({ kind: "error", message: `Could not reach the backend: ${(err as Error).message}` });
     }
   }, [devToken]);

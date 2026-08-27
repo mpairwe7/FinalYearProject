@@ -31,8 +31,9 @@ import {
   subscribeAuthToken,
 } from "../lib/authSession";
 import { endOidcSession } from "../lib/oidcFlow";
-import { isStaffRole, roleLabel, staffSectionsFor } from "../lib/roles";
+import { isStaffRole, signedInName, staffSectionsFor } from "../lib/roles";
 import { useTicketStream, type LiveEscalation } from "../hooks/useTicketStream";
+import AccountMenu from "./ops/AccountMenu";
 import {
   CommandPalette,
   CommandPaletteTrigger,
@@ -41,18 +42,19 @@ import {
 import {
   BeakerIcon,
   ChartIcon,
+  ChevronsLeftIcon,
+  ChevronsRightIcon,
   FlagIcon,
   GaugeIcon,
   InboxIcon,
   ListIcon,
   PanelLeftIcon,
-  PinIcon,
   SendIcon,
   SlidersIcon,
 } from "./ops/icons";
+import SettingsDialog, { type SettingsTab } from "./settings/SettingsDialog";
 import { useSidebarMode } from "../hooks/useSidebarMode";
 import { TicketLiveBanner } from "./staff/TicketLiveBanner";
-import ThemeToggle from "./ThemeToggle";
 import "./staffGuard.css";
 
 export interface StaffIdentity {
@@ -106,6 +108,16 @@ const DESTINATION_ICON: Record<string, () => React.JSX.Element> = {
 };
 
 /**
+ * Settings sections the console offers.
+ *
+ * Voice and Tax profile are the taxpayer's, not the officer's: one controls
+ * narration of an answer this surface never renders, the other is a taxpayer's
+ * own TIN and filing details. What is left is what an officer at a console
+ * actually changes — appearance, response language, stored data, the account.
+ */
+const CONSOLE_SETTINGS_TABS: readonly SettingsTab[] = ["general", "privacy", "account"];
+
+/**
  * The operations sidebar.
  *
  * Was a horizontal bar. It became a rail because the console outgrew it: eight
@@ -127,19 +139,26 @@ export function StaffNav({
   current,
   connected,
   onOpenPalette,
+  onOpenSettings,
 }: {
   who: StaffIdentity;
   current: string;
   /** Live-escalation socket state — a dot, not a full-width strip. */
   connected?: boolean;
   onOpenPalette?: () => void;
+  onOpenSettings?: () => void;
 }) {
   const sections = staffSectionsFor(who.role);
   const { mode, setMode } = useSidebarMode();
   const [hovered, setHovered] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
 
-  const expanded = mode === "always-open" || (mode === "hover" && hovered);
+  // `accountOpen` holds the rail open the same way the pointer does. Without it
+  // the account menu closes itself the moment the pointer leaves the 52px
+  // column on its way to the menu — and `.staff-rail` is `overflow: hidden`,
+  // so it would be clipped to a sliver on the way out.
+  const expanded = mode === "always-open" || (mode === "hover" && (hovered || accountOpen));
 
   // Escape closes the drawer, matching the command palette's affordance.
   useEffect(() => {
@@ -199,7 +218,34 @@ export function StaffNav({
               <span className="staff-brand-sub">Taxpayer assistant</span>
             </span>
           </Link>
+
+          {/* Was a pin in the footer toolbar, three groups of links away from
+              the thing it resizes. It belongs at the top-right corner of the
+              panel it controls, and an arrow pointing the way the rail will
+              move says what it does without asking anyone to read a pin as
+              "stay open". */}
+          <button
+            type="button"
+            className={`ops-icon-btn staff-rail-pin${mode === "always-open" ? " is-on" : ""}`}
+            onClick={() => setMode(mode === "always-open" ? "hover" : "always-open")}
+            aria-pressed={mode === "always-open"}
+            title={mode === "always-open" ? "Collapse the sidebar" : "Keep the sidebar open"}
+          >
+            {mode === "always-open" ? <ChevronsLeftIcon /> : <ChevronsRightIcon />}
+            <span className="ops-sr-only">
+              {mode === "always-open" ? "Collapse the sidebar" : "Keep the sidebar open"}
+            </span>
+          </button>
         </div>
+
+        {/* Directly under the brand, where every sidebar-and-search layout puts
+            it — it was at the bottom of the rail, below eight destinations, in
+            the one place nobody looks for a search field. */}
+        {onOpenPalette ? (
+          <div className="staff-rail-search">
+            <CommandPaletteTrigger onOpen={onOpenPalette} />
+          </div>
+        ) : null}
 
         <div className="staff-rail-scroll">
           {sections.map((section) => (
@@ -238,42 +284,19 @@ export function StaffNav({
           ))}
         </div>
 
+        {/* One row — initials, name, account type, live dot, chevron — in place
+            of a toolbar, a role pill, the raw address and a bare "Sign out"
+            stacked four deep. All of it still exists, inside the menu the row
+            opens; the theme control moved in there too. */}
         <div className="staff-rail-foot">
-          <div className="staff-rail-tools">
-            {onOpenPalette ? <CommandPaletteTrigger onOpen={onOpenPalette} /> : null}
-            <ThemeToggle className="ops-icon-btn" />
-            <button
-              type="button"
-              className={`ops-icon-btn staff-rail-pin${mode === "always-open" ? " is-on" : ""}`}
-              onClick={() => setMode(mode === "always-open" ? "hover" : "always-open")}
-              aria-pressed={mode === "always-open"}
-              title={mode === "always-open" ? "Unpin sidebar" : "Keep sidebar open"}
-            >
-              <PinIcon />
-              <span className="ops-sr-only">
-                {mode === "always-open" ? "Unpin sidebar" : "Keep sidebar open"}
-              </span>
-            </button>
-            <span
-              className={`staff-live-dot${connected ? " is-on" : ""}`}
-              title={connected ? "Live escalations connected" : "Reconnecting to the escalation stream"}
-              role="status"
-            >
-              <span className="ops-sr-only">
-                {connected ? "Live escalations connected" : "Reconnecting to the escalation stream"}
-              </span>
-            </span>
-          </div>
-
-          <div className="staff-who">
-            <span className="staff-role-pill">{roleLabel(who.role)}</span>
-            <span className="staff-email" title={who.email || who.external_id}>
-              {who.email || who.external_id}
-            </span>
-            <button type="button" className="staff-signout" onClick={signOut}>
-              Sign out
-            </button>
-          </div>
+          <AccountMenu
+            who={who}
+            open={accountOpen}
+            onOpenChange={setAccountOpen}
+            onOpenSettings={() => onOpenSettings?.()}
+            onSignOut={signOut}
+            connected={connected}
+          />
         </div>
       </nav>
     </>
@@ -295,6 +318,13 @@ export default function StaffGuard({
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const [state, setState] = useState<State>({ kind: "checking" });
   const palette = useCommandPalette();
+  // The console's Settings is the app's Settings — theme, response language,
+  // privacy and the account itself are the same preferences whichever surface
+  // you reach them from, and a second dialog would be a second copy of them.
+  // Voice and Tax profile are left out: neither has a reader in an operations
+  // console (see SettingsDialog's `tabs`).
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
 
   // One socket for the whole console. TicketLiveBanner used to open its own on
   // every staff route; the nav dot would have opened a second.
@@ -340,9 +370,12 @@ export default function StaffGuard({
   if (state.kind === "checking") {
     return (
       <main className="staff-gate">
-        <p className="staff-gate-msg" role="status">
-          Checking your access…
-        </p>
+        <div className="staff-gate-checking" aria-busy="true">
+          <span className="staff-gate-spinner" aria-hidden="true" />
+          <p className="staff-gate-msg" role="status">
+            Checking your access…
+          </p>
+        </div>
       </main>
     );
   }
@@ -363,6 +396,10 @@ export default function StaffGuard({
         current={current}
         connected={live.connected}
         onOpenPalette={() => palette.setOpen(true)}
+        onOpenSettings={() => {
+          setSettingsTab("general");
+          setSettingsOpen(true);
+        }}
       />
       {/* The rail is fixed, so everything else lives in a column that is
           offset by the rail's current width. */}
@@ -376,6 +413,18 @@ export default function StaffGuard({
         onClose={() => palette.setOpen(false)}
         onSignOut={signOut}
       />
+      {/* Inside a `.chatv2` scope because that is where the dialog's tokens and
+          styles live — the class is a token scope, not a layout, so a wrapper
+          holding nothing but a fixed-position overlay changes no geometry. */}
+      <div className="chatv2">
+        <SettingsDialog
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          tab={settingsTab}
+          onTabChange={setSettingsTab}
+          tabs={CONSOLE_SETTINGS_TABS}
+        />
+      </div>
     </div>
   );
 }
@@ -405,7 +454,7 @@ function AccessGate({
     body =
       "These pages show taxpayer escalations and operational data, so they need a staff sign-in.";
   } else if (kind === "forbidden" && who) {
-    body = `You are signed in as ${who.email || who.external_id} with the role "${who.role}". ${
+    body = `You are signed in as ${signedInName(who)} with the role "${who.role}". ${
       requireRoles?.length
         ? `This page is limited to ${requireRoles.join(", ")}.`
         : "Staff access is required."

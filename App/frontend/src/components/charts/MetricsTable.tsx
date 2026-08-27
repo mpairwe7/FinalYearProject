@@ -14,6 +14,9 @@ interface Metric {
 interface Props {
   metrics: Metric[];
   title?: string;
+  /** Drop the card and sit the table directly on the page — see
+   *  `.ops-chart-card.is-bare` and OpsPanel's `bare`. */
+  bare?: boolean;
 }
 
 /**
@@ -29,9 +32,9 @@ interface Props {
  * the plain name leads and the sentence explaining it sits underneath, so
  * nobody has to already know what was measured to read whether it passed.
  */
-export default function MetricsTable({ metrics, title = "Evaluation metrics" }: Props) {
+export default function MetricsTable({ metrics, title = "Evaluation metrics", bare }: Props) {
   return (
-    <div className="ops-chart-card">
+    <div className={`ops-chart-card${bare ? " is-bare" : ""}`}>
       <div className="ops-chart-head">
         <h3 className="ops-chart-title">{title}</h3>
         <span className="ops-chart-sub">{metrics.length} measured</span>

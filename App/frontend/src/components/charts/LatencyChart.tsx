@@ -42,7 +42,51 @@ const ROUTE_LABEL: Record<string, string> = {
   "/v1/escalate": "Passing a question to an officer",
   "/v1/feedback": "Recording feedback",
   "/v1/me": "Loading an account",
+  // The console polling itself. These dominate the chart on a quiet day, so
+  // leaving them as raw paths meant the busiest eight rows were all jargon.
+  "/v1/analytics/dashboard": "Loading this dashboard",
+  "/v1/analytics/event": "Recording a page view",
+  "/v1/admin/tickets": "Loading the queue",
+  "/v1/admin/tickets/sla": "Checking service levels",
+  "/v1/admin/tickets/stats": "Counting escalations",
+  "/v1/authority/status": "Checking answer authority",
+  "/v1/feedback/summary": "Summarising feedback",
+  "/v1/speech/health": "Checking the speech service",
+  "/v1/evaluate": "Running an evaluation",
+  // The container healthcheck. Usually the single busiest row on a quiet
+  // deployment, so leaving it as a bare path put a slash at the top of the axis.
+  "/health": "Health check",
 };
+
+/**
+ * Pull the route out of whatever key the metrics backend used.
+ *
+ * This is where the axis was breaking. The code assumed keys of the form
+ * `GET|/v1/chat` and stripped that prefix with a regex — but what
+ * `metrics.snapshot()` actually returns is the full Prometheus series
+ * selector:
+ *
+ *     http_request_duration_ms{method="GET",path="/v1/me"}
+ *
+ * The regex never matched, so nothing was stripped, nothing matched
+ * ROUTE_LABEL, and the whole selector went to the axis. Rotated at -20° with
+ * eight of them side by side, the labels overlapped, clipped at both ends and
+ * printed `method=`/`path=` at a taxpayer-service supervisor. That is exactly
+ * the failure AGENTS.md is describing when it says console charts are labelled
+ * in plain words, not in the system's vocabulary.
+ *
+ * Both shapes are handled, plus a bare path, because the key format is the
+ * backend's to change and this panel should not break again if it does.
+ */
+export function routeFromMetricKey(key: string): string {
+  const labelled = /[{,]\s*path\s*=\s*"([^"]+)"/.exec(key);
+  if (labelled) return labelled[1];
+
+  const piped = /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\|(.+)$/.exec(key);
+  if (piped) return piped[1];
+
+  return key;
+}
 
 const SERIES = [
   { key: "p50", label: QUANTILE_LABEL.p50, term: "p50", color: ORDINAL[0] },
@@ -71,7 +115,7 @@ const TARGET_MS = 2000;
 export default function LatencyChart({ latency }: Props) {
   const data = Object.entries(latency)
     .map(([path, v]) => {
-      const route = path.replace(/^(GET|POST)\|/, "");
+      const route = routeFromMetricKey(path);
       return {
         path: ROUTE_LABEL[route] ?? route,
         route,

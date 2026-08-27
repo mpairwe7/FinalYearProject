@@ -20,6 +20,7 @@ import { OpsPage } from "../../components/ops/OpsPage";
 import { KeyHint } from "../../components/ops/Controls";
 import { EmptyState, ErrorState, SkeletonRows } from "../../components/ops/States";
 import { QueueRow } from "../../components/staff/QueueRow";
+import { signedInName } from "../../lib/roles";
 import { TicketCase } from "../../components/staff/TicketCase";
 import {
   useTicket,
@@ -121,7 +122,7 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
     <OpsPage
       eyebrow="Work"
       title="My queue"
-      description={`Signed in as ${who.email || who.external_id}. Claim a case, read the brief, then reply.`}
+      description={`Signed in as ${signedInName(who)}. Claim a case, read the brief, then reply.`}
       actions={
         <div className="ag-counts">
           <span className="ops-chip">

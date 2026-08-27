@@ -48,7 +48,7 @@ import { plainSeconds } from "../../components/charts/chartTheme";
 import TopicBarChart from "../../components/charts/TopicBarChart";
 import FeedbackPieChart from "../../components/charts/FeedbackPieChart";
 import RetrievalModeChart from "../../components/charts/RetrievalModeChart";
-import LatencyChart from "../../components/charts/LatencyChart";
+import LatencyChart, { routeFromMetricKey } from "../../components/charts/LatencyChart";
 import TicketStatusChart from "../../components/charts/TicketStatusChart";
 import "./analytics.css";
 
@@ -64,6 +64,34 @@ function compact(n: number | undefined): string {
   return new Intl.NumberFormat("en-GB", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 }
 
+/**
+ * A date, or an em-dash if the payload did not carry one.
+ *
+ * `Intl.DateTimeFormat().format(NaN)` THROWS — it does not return "Invalid
+ * Date" the way `String(new Date(NaN))` does. So `ticket.updated_at * 1000` on
+ * a record with no `updated_at` took down the whole /analytics route through
+ * the error boundary, showing "Analytics unavailable — Invalid time value"
+ * where a dashboard should be.
+ *
+ * The type says `updated_at: number`, which is why nothing caught this: the
+ * field is required in TypeScript and optional in practice. Neither the axe
+ * suite nor the deployment showed it, because both happen to have an empty
+ * queue and the row never rendered.
+ *
+ * This is the same class of failure the console redesign recorded as gap 18 —
+ * one field of one record missing, and the entire page is gone. A missing
+ * timestamp should cost a timestamp.
+ */
+const DATE_FMT = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" });
+
+function formatSeconds(seconds: number | undefined | null): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  const ms = seconds * 1000;
+  if (!Number.isFinite(ms)) return "—";
+  return DATE_FMT.format(ms);
+}
+
+
 function Dashboard() {
   const [days, setDays] = useState(30);
   const dash = useDashboard(days);
@@ -78,7 +106,19 @@ function Dashboard() {
   const raw = dash.data;
   const data = raw?.conversations && raw?.sessions && raw?.requests ? raw : undefined;
   const malformed = Boolean(raw && !data);
-  const chatP95 = data?.requests?.latency?.["POST|/v1/chat"]?.p95;
+  // The same key-format bug the X axis had, in the page's headline gauge: this
+  // read `latency["POST|/v1/chat"]`, but the backend emits Prometheus series
+  // selectors, so the lookup always missed and "Answer speed" reported 0
+  // milliseconds — on a service that was answering in about a second. Match on
+  // the parsed route instead of on the raw key.
+  const chatP95 = React.useMemo(() => {
+    const rows = Object.entries(data?.requests?.latency ?? {});
+    const hit = rows.find(([key]) => {
+      const route = routeFromMetricKey(key);
+      return route === "/v1/chat" || route === "/v1/chat/stream";
+    });
+    return hit?.[1]?.p95;
+  }, [data]);
   const conversations = data?.conversations?.total_conversations ?? 0;
   const rated = feedback.data?.total ?? 0;
   const ratedShare = conversations > 0 ? Math.round((rated / conversations) * 100) : null;
@@ -136,7 +176,7 @@ function Dashboard() {
               </div>
             ))}
           </div>
-          <SkeletonStats count={5} />
+          <SkeletonStats count={5} cols={5} />
         </>
       ) : null}
 
@@ -248,6 +288,7 @@ function Dashboard() {
                   </a>
                 }
                 flush
+                bare
               >
                 {ticketQueue.data && ticketQueue.data.tickets.length > 0 ? (
                   <ul className="an-queue">
@@ -277,9 +318,7 @@ function Dashboard() {
                             </span>
                           </span>
                           <span className="an-queue-time">
-                            {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(
-                              ticket.updated_at * 1000,
-                            )}
+                            {formatSeconds(ticket.updated_at)}
                           </span>
                         </a>
                       </li>
@@ -301,6 +340,7 @@ function Dashboard() {
               title="What taxpayers said"
               note="Ratings and comments on specific answers. Questions are shown exactly as they were typed."
               flush
+              bare
             >
               <TableScroll label="Recent feedback">
                 <table className="ops-table">
@@ -329,9 +369,7 @@ function Dashboard() {
                           <span className="ops-cell-clamp ops-cell-sub">{f.comment || "—"}</span>
                         </td>
                         <td className="an-when">
-                          {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(
-                            f.created_at * 1000,
-                          )}
+                          {formatSeconds(f.created_at)}
                         </td>
                       </tr>
                     ))}
