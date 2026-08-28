@@ -165,8 +165,14 @@
   --text-0:      #0B1220;
   --text-1:      #28303B;
   --text-2:      #55606E;
-  /* Muted small labels must still clear 4.5:1 on the #F5F7FA canvas. */
-  --text-3:      #66717D;
+  /* Muted small labels must still clear 4.5:1 — and the canvas is the easy
+     case. This tone is mostly rendered on a panel, not on bare #F5F7FA: the
+     surface-1..3 washes sit 6-16 ink units darker, and #66717D cleared AA on
+     the canvas (4.63) while failing on every one of them (4.40 / 4.24 / 4.02).
+     That is what the a11y suite caught on .ov-list-meta over an .ov-list-item.
+     This value clears 4.5:1 on all four (5.28 / 5.01 / 4.84 / 4.58) and stays a
+     visible step quieter than --text-2. */
+  --text-3:      #5E6873;
 
   /* Deep blue accent for data UIs reads better than the bright on white. */
   --accent-data: var(--ura-blue);

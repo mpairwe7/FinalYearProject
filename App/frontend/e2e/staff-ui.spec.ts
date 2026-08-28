@@ -5,9 +5,10 @@
  * the dev sandbox), so this spec exists to confirm the layout in Blink. It
  * asserts computed styles and geometry rather than comparing screenshots,
  * because the engine-specific risks here are numeric: CSS-grid track resolution,
- * `backdrop-filter` on the sticky nav, `box-shadow: inset` accent edges, and one
- * selector that has to out-specify `:root[data-theme="light"] a` from
- * globals.css. A pixel diff would flag antialiasing noise and miss all four.
+ * `backdrop-filter` on the fixed rail, and one selector that has to out-specify
+ * `:root[data-theme="light"] a` from globals.css. A pixel diff would flag
+ * antialiasing noise and miss all three. (The inset accent edges this also used
+ * to guard went with the console rebuild — the tiles carry no status colour.)
  *
  * No backend: `/api/**` is intercepted, same as the other browser specs.
  */
@@ -227,7 +228,14 @@ test.describe("Staff UI on Chromium", () => {
       await expect(nav.getByRole("link", { name: "Analytics" })).toHaveCount(0);
       await expect(nav.getByRole("link", { name: "Overview" })).toHaveCount(0);
 
-      await expect(page.locator(".staff-role-pill")).toHaveText("Tax agent");
+      // The role used to sit in its own `.staff-role-pill`. The rail rebuild
+      // folded the toolbar, the pill, the address and "Sign out" into the one
+      // account row at the foot, so the role now rides in that row's trigger as
+      // the short label ("Staff", not "Tax agent") — see AccountMenu. Asserted
+      // on the accessible name rather than the visible span, because the span is
+      // `display: none` while the rail is collapsed and the name is what the
+      // role is announced by in either state.
+      await expect(nav.locator(".staff-acct-trigger")).toHaveAttribute("aria-label", /\bStaff\b/);
     });
   });
 
@@ -258,17 +266,30 @@ test.describe("Staff UI on Chromium", () => {
       await expect(metrics.nth(3)).toContainText("3");
     });
 
-    test("the attention metric gets an inset accent edge, not a colour wash", async ({ page }) => {
-      // awaiting_first_response = 3 and 3 unassigned → both tone="warn" → inset
-      // 3px left edge. The value must stay on the panel colour so it holds AA
-      // contrast. (`breaching` is 0 here, so no danger tone to check.)
-      const warn = page.locator(".ops-stat.is-warn");
-      await expect(warn).toHaveCount(2);
-      for (const metric of await warn.all()) {
-        const shadow = await metric.evaluate((el) => getComputedStyle(el).boxShadow);
-        expect(shadow).toMatch(/inset/);
-        expect(shadow).not.toBe("none");
-      }
+    test("attention is carried by the figures, not by tinting the tiles", async ({ page }) => {
+      // The tiles used to take a `tone` and paint a 3px inset accent edge for
+      // it. The console rebuild dropped both: a coloured bar down the side of a
+      // card is decoration this console does not use, and what a tile means is
+      // in its label, value and hint. So the two tiles that would once have been
+      // tinted — awaiting_first_response = 3 and 3 unassigned — have to read
+      // just as clearly with nothing colouring them.
+      const metrics = page.locator(".ops-stat-grid .ops-stat");
+      await expect(metrics.nth(1)).toContainText("Awaiting first response");
+      await expect(metrics.nth(1)).toContainText("3");
+      await expect(metrics.nth(1)).toContainText("nobody has replied yet");
+      await expect(metrics.nth(3)).toContainText("Unassigned");
+      await expect(metrics.nth(3)).toContainText("3");
+      await expect(metrics.nth(3)).toContainText("waiting to be claimed");
+
+      // No tile carries a status class, and every tile shares one surface —
+      // the guard against the accent edge or a colour wash coming back.
+      await expect(page.locator(".ops-stat.is-warn, .ops-stat.is-danger, .ops-stat.is-good")).toHaveCount(
+        0,
+      );
+      const backgrounds = new Set(
+        await metrics.evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor)),
+      );
+      expect(backgrounds.size).toBe(1);
     });
 
     test("queue is ordered urgent-first with real waits", async ({ page }) => {
@@ -336,7 +357,7 @@ test.describe("Staff UI on Chromium", () => {
       ).toBeVisible();
     });
 
-    test("handoff brief shows the warm-transfer edge and what to have ready", async ({ page }) => {
+    test("handoff brief shows the warm-transfer pill and what to have ready", async ({ page }) => {
       await openRow(page, 0);
       // The warm-transfer and sentiment markers moved out of the brief and into
       // the case header pills when /agent and /admin/tickets were merged onto
@@ -345,11 +366,12 @@ test.describe("Staff UI on Chromium", () => {
       await expect(pills.getByText("warm transfer")).toBeVisible();
       await expect(pills.getByText("frustrated")).toBeVisible();
 
+      // The brief used to repeat the warm-transfer signal as its own accent
+      // edge. The console rebuild dropped the edge along with the tiles' — the
+      // pill above is where a warm transfer is announced now, and the brief is
+      // left to carry the guidance.
       const brief = page.locator(".st-brief");
-      await expect(brief).toHaveClass(/warm/);
-      const shadow = await brief.evaluate((el) => getComputedStyle(el).boxShadow);
-      expect(shadow).toMatch(/inset/);
-
+      await expect(brief).toBeVisible();
       await expect(brief.getByText("Import declaration number")).toBeVisible();
       await expect(brief.getByText(/Acknowledge the double charge/)).toBeVisible();
     });

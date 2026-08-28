@@ -119,8 +119,19 @@ class CalcPlan:
 
 _CALC_VERB_RE = re.compile(
     r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|figure\s+out"
-    r"|what\s+(?:will|is|would|'s|are|do|does|tax)\b"
-    r"|what\s+(?:are\s+(?:the|my)|will\s+(?:the|my|i)|do\s+i\s+(?:pay|owe)|duties|charges)\b)",
+    r"|what\s+(?:will|would|tax)\b"
+    r"|what\s+(?:will\s+(?:the|my|i)|do\s+i\s+(?:pay|owe)|duties|charges)\b)",
+    re.IGNORECASE,
+)
+
+#: "What is VAT?" opens a definition, not a calculation — but "what is the tax
+#: on 5,000,000?" is a calculation wearing the same words. The opener alone is
+#: too weak to route on, so it only counts as a calculation ask when the message
+#: also carries a figure to compute against. Without this split every
+#: "what is <tax>?" — the most common question the assistant gets — was answered
+#: with a calculator wizard asking for an amount instead of an explanation.
+_DEFINITIONAL_OPENER_RE = re.compile(
+    r"\bwhat\s+(?:is|'s|are|does|do)\b",
     re.IGNORECASE,
 )
 _INFO_ONLY_RE = re.compile(
@@ -246,7 +257,10 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
 
     Conservative on purpose: fires only on an explicit calculation verb
     ("calculate", "how much", ...) and never on informational questions
-    like "how is PAYE calculated" or "what is the VAT rate".
+    like "how is PAYE calculated" or "what is the VAT rate". A bare
+    definitional opener ("what is VAT?") is not a calculation verb — it
+    only routes here when the message also carries a figure to compute
+    against.
     """
     text = (message or "").strip()
     if not text or _INFO_ONLY_RE.search(text):
@@ -266,24 +280,9 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
                 missing.append("annual_turnover")
             return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])
 
-    if not _CALC_VERB_RE.search(text):
-        return None
-
-    # "Must I register for VAT?" is a threshold test, not a calculation,
-    # so it is matched before the calculation-verb gate — the natural
-    # phrasing carries no "calculate"/"how much".
-    if _VAT_WORD_RE.search(text) and _REGISTER_WORD_RE.search(text):
-        turnover_amounts = extract_amounts(text)
-        if turnover_amounts or _OBLIGATION_RE.search(text):
-            params: dict[str, object] = {}
-            missing: list[str] = []
-            if len(turnover_amounts) == 1:
-                params["annual_turnover"] = turnover_amounts[0][0]
-            else:
-                missing.append("annual_turnover")
-            return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])
-
-    if not _CALC_VERB_RE.search(text):
+    if not _CALC_VERB_RE.search(text) and not (
+        _DEFINITIONAL_OPENER_RE.search(text) and has_money_amount(text)
+    ):
         return None
 
     intent = detect_calculator_intent(text)

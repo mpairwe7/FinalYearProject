@@ -80,6 +80,37 @@ class PlanCalculationTests(unittest.TestCase):
         self.assertIsNone(plan_calculation("how is PAYE calculated?"))
         self.assertIsNone(plan_calculation("what is the VAT rate in Uganda?"))
 
+    def test_bare_definitional_questions_do_not_open_a_calculator(self) -> None:
+        """"What is VAT?" wants an explanation, not a wizard asking for a figure.
+
+        Widening the calculation-verb gate to catch "what will my PAYE be on 2m"
+        also swallowed every "what is <tax>?" — the most common question the
+        assistant gets — and answered it with a calculator prompt. The opener is
+        only a calculation ask when a figure comes with it.
+        """
+        for question in (
+            "What is VAT?",
+            "What is PAYE?",
+            "What is withholding tax?",
+            "What is customs duty?",
+            "What is capital gains tax?",
+            "What is rental income tax?",
+            "what is corporation tax",
+            "What does VAT mean?",
+        ):
+            with self.subTest(question=question):
+                self.assertIsNone(plan_calculation(question))
+
+    def test_definitional_opener_with_a_figure_is_still_a_calculation(self) -> None:
+        """The widening this guards still has to do the job it was added for."""
+        plan = plan_calculation("what is VAT on 1.5m")
+        self.assertEqual(plan.tool, "calculate_vat")
+        self.assertEqual(plan.params["amount"], 1_500_000.0)
+
+        plan = plan_calculation("what is the tax on a 5,000,000 salary")
+        self.assertEqual(plan.tool, "calculate_paye")
+        self.assertEqual(plan.params["monthly_gross"], 5_000_000.0)
+
     def test_rental_monthly_rent_annualised(self) -> None:
         plan = plan_calculation("calculate rental tax on 2m per month")
         self.assertEqual(plan.tool, "calculate_rental_tax")

@@ -223,10 +223,16 @@ jobs:
             exit 0
           fi
           # Cold start: nginx + uvicorn + node in sequence, plus Crane Cloud's
-          # image pull from Docker Hub.  Empirically ~90 s on RENU for the
-          # 675 MB image.  Poll every 10 s for up to 5 min.
+          # image pull from Docker Hub.  Typically ~90 s on RENU for this image
+          # and most deploys are green inside two minutes — but the platform
+          # intermittently takes far longer for the same image (2026-08-22 and
+          # 2026-08-28 both served 503 for the whole window and then came up on
+          # their own, unchanged, with no redeploy).  A gate that fails while the
+          # rollout is still healthy teaches people to ignore it, so the budget
+          # covers the slow case: poll every 10 s for up to 10 min.
           echo "Probing $URL/health…"
-          for i in $(seq 1 30); do
+          CODE=000
+          for i in $(seq 1 60); do
             CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$URL/health" || echo "000")
             echo "  [$i] /health → $CODE"
             if [[ "$CODE" == "200" ]]; then
@@ -236,7 +242,14 @@ jobs:
             fi
             sleep 10
           done
-          echo "::error::App did not return /health 200 within 5 min."
+          # The last code separates the two failure shapes: 503 is the ingress
+          # answering for a pod that never became ready (image pull, crash loop,
+          # or a slow boot still in progress), 000 is the URL not resolving or
+          # not answering at all — a different problem with a different fix.
+          echo "::error::App did not return /health 200 within 10 min (last code: $CODE)."
+          if [[ "$CODE" == "503" ]]; then
+            echo "::error::503 means the route is live but no pod is ready. Re-probe $URL/health before redeploying — this has cleared itself after the window before."
+          fi
           exit 1
 
       - name: Post-deploy summary
