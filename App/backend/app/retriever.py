@@ -1270,6 +1270,15 @@ class HybridRetriever:
         try:
             from qdrant_client import models
         except ImportError:
+            # Stand-ins for the query-builder constructors so this path still
+            # composes where qdrant_client is not installed. Nothing built from
+            # them is ever sent: `self._client` is None in those environments
+            # and the readiness guard above has already returned.
+            #
+            # This shim guards the import ONLY. Keep the search body in its own
+            # `try` below — folding it in here left it reachable only when
+            # qdrant_client was missing, so with the client installed (i.e. in
+            # production) `search()` ran nothing and returned None.
             from types import SimpleNamespace
 
             models = SimpleNamespace(  # type: ignore[assignment]
@@ -1283,6 +1292,7 @@ class HybridRetriever:
                 Fusion=SimpleNamespace(RRF="rrf"),
             )
 
+        try:
             from .hyde import dense_query_text
 
             # HyDE (when flagged) rewrites only the dense embedding. BM25
