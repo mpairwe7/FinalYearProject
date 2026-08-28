@@ -183,7 +183,7 @@ _TIN_ORG_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 _TIN_INDIVIDUAL_QUERY_RE = re.compile(
-    r"\b(individuals?|myself|personal|for\s+me|my\s+own|nin)\b",
+    r"\b(individuals?|myself|personal|for\s+me|my\s+own|nin|sole\s+(?:proprietor|trader)|person|natural\s+person)\b",
     re.IGNORECASE,
 )
 
@@ -211,7 +211,10 @@ _TIN_ORG_STEPS = (
     "Note: Instant TIN is only available to individuals with a NIN."
 )
 _RETURN_FILING_QUERY_RE = re.compile(
-    r"\b(?:file|submit|lodge)\b.*\b(?:return|returns)\b|\b(?:return|returns)\b.*\b(?:file|submit|lodge)\b",
+    r"\b(?:file|submit|lodge|procedure|how)\b.*\b(?:return|returns)\b"
+    r"|\b(?:return|returns)\b.*\b(?:file|submit|lodge|procedure)\b"
+    r"|\bannual\s+(?:tax\s+)?returns?\b"
+    r"|\bfiling\s+(?:a\s+)?(?:tax\s+)?returns?\b",
     re.IGNORECASE,
 )
 _REGISTRATION_QUERY_RE = re.compile(
@@ -3282,12 +3285,21 @@ class ChatModel:
             if _TIN_ORG_QUERY_RE.search(query):
                 return self._tin_procedure_reply("organisation"), True
 
+            if _TIN_INDIVIDUAL_QUERY_RE.search(query):
+                return self._tin_procedure_reply("individual", CONTACT_FOOTER), True
+
             apply_hit = next(
                 (
                     h
                     for h in hits
-                    if h.get("source") == "ura_instant_tin_application_faqs.csv"
-                    and "apply for an instant tin" in str(h.get("question", "")).lower()
+                    if (
+                        "ura_instant_tin_application_faqs.csv" in str(h.get("source", "")).lower()
+                        or "instant_tin_application" in str(h.get("section", "")).lower()
+                    )
+                    and (
+                        "apply for an instant tin" in str(h.get("question", "")).lower()
+                        or "instant tin" in str(h.get("text", "")).lower()
+                    )
                 ),
                 None,
             )
@@ -3295,12 +3307,15 @@ class ChatModel:
                 (
                     h
                     for h in hits
-                    if h.get("source") == "ura_instant_tin_application_faqs.csv"
-                    and "contact" in str(h.get("question", "")).lower()
+                    if (
+                        "ura_instant_tin_application_faqs.csv" in str(h.get("source", "")).lower()
+                        or "instant_tin_application" in str(h.get("section", "")).lower()
+                    )
+                    and "contact" in (str(h.get("question", "")) + " " + str(h.get("text", ""))).lower()
                 ),
                 None,
             )
-            if apply_hit:
+            if apply_hit or not _TIN_ORG_QUERY_RE.search(query):
                 contact = CONTACT_FOOTER
                 if help_hit:
                     contact = self._extract_grounded_answer_text(help_hit)
@@ -3320,20 +3335,46 @@ class ChatModel:
                 (
                     h
                     for h in hits
-                    if h.get("source") == "ura_processes_systems_faqs.csv"
-                    and "how do i file a return" in str(h.get("question", "")).lower()
+                    if (
+                        "ura_processes_systems_faqs.csv" in str(h.get("source", "")).lower()
+                        or "processes_systems" in str(h.get("section", "")).lower()
+                    )
+                    and (
+                        "how do i file a return" in str(h.get("question", "")).lower()
+                        or "file a return" in str(h.get("text", "")).lower()
+                    )
                 ),
                 None,
             )
+            if not file_hit and "processes_systems" in self._faq_index:
+                file_hit = next(
+                    (
+                        dict(e, source="ura_processes_systems_faqs.csv", tag="processes_systems")
+                        for e in self._faq_index["processes_systems"]
+                        if "how do i file a return" in e.get("question", "").lower()
+                    ),
+                    None,
+                )
+
             due_hit = next(
                 (
                     h
                     for h in hits
-                    if "return" in str(h.get("question", "")).lower()
-                    and "due" in str(h.get("question", "")).lower()
+                    if "return" in (str(h.get("question", "")) + " " + str(h.get("text", ""))).lower()
+                    and "due" in (str(h.get("question", "")) + " " + str(h.get("text", ""))).lower()
                 ),
                 None,
             )
+            if not due_hit and "taxpayer_starter_pack" in self._faq_index:
+                due_hit = next(
+                    (
+                        dict(e, source="ura_taxpayer_starter_pack_faqs.csv", tag="taxpayer_starter_pack")
+                        for e in self._faq_index["taxpayer_starter_pack"]
+                        if "due" in e.get("question", "").lower()
+                    ),
+                    None,
+                )
+
             if file_hit:
                 lines = [
                     self._format_procedure_steps(

@@ -20,8 +20,13 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
+try:
+    from datetime import UTC, datetime
+except ImportError:
+    from datetime import datetime, timezone
+
+    UTC = timezone.utc  # type: ignore[assignment]
 from typing import TYPE_CHECKING, Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen

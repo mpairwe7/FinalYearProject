@@ -118,11 +118,16 @@ class CalcPlan:
 
 
 _CALC_VERB_RE = re.compile(
-    r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|what\s+will|figure\s+out)\b",
+    r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|figure\s+out"
+    r"|what\s+(?:will|is|would|'s|are|do|does|tax)\b"
+    r"|what\s+(?:are\s+(?:the|my)|will\s+(?:the|my|i)|do\s+i\s+(?:pay|owe)|duties|charges)\b)",
     re.IGNORECASE,
 )
 _INFO_ONLY_RE = re.compile(
-    r"\bhow\s+(is|are|does)\b.*\b(calculated|computed|charged|determined)\b", re.IGNORECASE
+    r"\bhow\s+(is|are|does)\b.*\b(calculated|computed|charged|determined)\b"
+    r"|\bwhat\s+(is|are|was|were|'s)\b.*\b(rates?|thresholds?|percentages?)\b"
+    r"|\b(rates?|thresholds?)\s+(of|for)\b",
+    re.IGNORECASE,
 )
 
 _ANNUAL_RE = re.compile(r"\b(a\s+year|per\s+year|annual(?:ly)?|p\.?a\.?|yearly)\b", re.IGNORECASE)
@@ -156,19 +161,23 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     (
         "paye",
         re.compile(
-            r"\b(paye|take[-\s]?home|net\s+(pay|salary)|salary\s+tax"
-            r"|pay\s+as\s+you\s+earn|tax\s+on\s+(my\s+)?salary)\b",
+            r"\b(paye|take[-\s]?home|net[-\s]?pay|gross[-\s]?pay|net[-\s]?salary|gross[-\s]?salary|salary\s+tax"
+            r"|pay\s+as\s+you\s+earn|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salary|income|earnings|pay)"
+            r"|tax\s+on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salary|income|earnings|pay)"
+            r"|tax\b.*\b(?:salary|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salary|income))\b",
             re.IGNORECASE,
         ),
     ),
-    ("rental", re.compile(r"\b(rent(?:al)?\s+(income|tax)|tax\s+on\s+(my\s+)?rent)\b", re.IGNORECASE)),
+    ("rental", re.compile(r"\b(rent(?:al)?\s+(?:income|tax)|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?|tax\b.*\brent(?:al)?)\b", re.IGNORECASE)),
     ("capital_gains", re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
     (
         "corporation",
-        re.compile(r"\b(corporation|corporate|company)\s+(income\s+)?tax\b", re.IGNORECASE),
+        re.compile(
+            r"\b(corporation|corporate|company)\s+(?:income\s+)?tax\b", re.IGNORECASE
+        ),
     ),
-    ("customs", re.compile(r"\b(customs|import\s+(duty|tax)|cif)\b", re.IGNORECASE)),
-    ("vat", re.compile(r"\bv\.?a\.?t\.?\b", re.IGNORECASE)),
+    ("customs", re.compile(r"\b(customs|import\s+(?:duty|tax|charges?|cost)|cif)\b", re.IGNORECASE)),
+    ("vat", re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)),
 ]
 
 # Ordered most specific first: "management fees" must beat the looser
@@ -193,8 +202,8 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
         "foreign_interest",
         re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
     ),
-    ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*)\b", re.IGNORECASE)),
-    ("goods", re.compile(r"\b(goods|supplies|supply)\b", re.IGNORECASE)),
+    ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*|supplier\w*|vendor\w*|freelanc\w*|individual)\b", re.IGNORECASE)),
+    ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock)\b", re.IGNORECASE)),
 ]
 
 
@@ -285,12 +294,24 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     single = amounts[0][0] if len(amounts) == 1 else None
 
     if intent == "paye":
+        include_nssf = bool(
+            re.search(
+                r"\b(take[-\s]?home|net[-\s]?(?:pay|salary|income)|after\s+tax|nssf)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
         params: dict[str, object] = {
-            "residency": "non_resident" if _NON_RESIDENT_RE.search(text) else "resident"
+            "residency": "non_resident" if _NON_RESIDENT_RE.search(text) else "resident",
+            "include_nssf": include_nssf,
         }
         assumptions = []
         if params["residency"] == "resident" and not re.search(r"resident", text, re.IGNORECASE):
             assumptions.append("resident employee (say “non-resident” if not)")
+        elif params["residency"] == "non_resident":
+            assumptions.append("non-resident employee tax rates applied")
+        if include_nssf:
+            assumptions.append("includes 5% employee NSSF deduction")
         missing = []
         if single is not None:
             if _ANNUAL_RE.search(text):
@@ -452,14 +473,20 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
         band = result.get("band") or {}
         upper = band.get("upper")
         band_span = f"{_ugx(band.get('lower', 0))}–{_ugx(upper)}" if upper else f"above {_ugx(band.get('lower', 0))}"
+        residency_label = " — non-resident" if result.get("residency") == "non_resident" else ""
+        eff_pct = float(result.get("effective_rate", 0)) * 100
+        gross_val = float(result.get("monthly_gross", 0))
         lines = [
-            f"**PAYE calculation ({fy})**",
+            f"**PAYE calculation{residency_label} ({fy})**",
             "",
             f"- Gross monthly salary: {_ugx(result['monthly_gross'])}",
-            f"- PAYE due: **{_ugx(result['paye'])}** per month",
+            f"- PAYE due ({eff_pct:.1f}% effective): **{_ugx(result['paye'])}** per month",
         ]
         if result.get("nssf_included"):
-            lines.append(f"- NSSF employee contribution: {_ugx(result['nssf_employee'])}")
+            lines.append(f"- NSSF employee contribution: {_ugx(result['nssf_employee'])} (5% of gross)")
+            tot_ded = float(result.get("paye", 0)) + float(result.get("nssf_employee", 0))
+            tot_pct = (tot_ded / gross_val * 100) if gross_val > 0 else 0
+            lines.append(f"- Total statutory deductions ({tot_pct:.1f}%): **{_ugx(tot_ded)}**")
         lines += [
             f"- Net take-home: **{_ugx(result['net_take_home'])}**",
             f"- Band applied: {float(band.get('marginal_rate', 0)) * 100:.0f}% marginal ({band_span})",

@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -13,6 +13,9 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="User message text")
     conversation_id: str | None = Field(
         None,
+        validation_alias=AliasChoices(
+            "conversation_id", "thread_id", "conversationId", "session_id", "sessionId"
+        ),
         pattern=r"^[a-zA-Z0-9_-]{1,64}$",
         description="Optional conversation/session id",
     )
@@ -27,6 +30,8 @@ class ChatRequest(BaseModel):
         max_length=3,
         description="Ids of analysed documents (POST /v1/documents/analyze) to ground this turn",
     )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
 class Citation(BaseModel):
@@ -201,6 +206,9 @@ class EscalationRequest(BaseModel):
 
     conversation_id: str | None = Field(
         None,
+        validation_alias=AliasChoices(
+            "conversation_id", "thread_id", "conversationId", "session_id", "sessionId"
+        ),
         pattern=r"^[a-zA-Z0-9_-]{1,64}$",
         description="Conversation to attach the transcript to and deliver the reply into",
     )
@@ -218,6 +226,8 @@ class EscalationRequest(BaseModel):
         pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
         description="Language to acknowledge in",
     )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
 class EscalationResponse(BaseModel):

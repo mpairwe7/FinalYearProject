@@ -1,0 +1,172 @@
+[
+  {
+    "id": "CUST-01",
+    "topic": "Basis for Declaring Imported Goods (Sea vs Air)",
+    "direct_query": "What is the basis for declaring imported goods in Uganda?",
+    "direct_reply": "Here's the most relevant guidance I found in official URA sources:\n\nSea/road: CIF to port of discharge (invoice cost + ocean freight + insurance). Air: cost + insurance to Entebbe.",
+    "sources": [
+      "ura_customs_valuation_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 2.74,
+    "emotion_query": "I am so anxious about my shipment arriving tomorrow! What is the basis for declaring imported goods in Uganda?",
+    "emotion_reply": "Here's the most relevant guidance I found in official URA sources:\n\nSea/road: CIF to port of discharge (invoice cost + ocean freight + insurance). Air: cost + insurance to Entebbe.",
+    "latency_eq_s": 2.53,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-02",
+    "topic": "Challenging Customs Valuation / Appeal",
+    "direct_query": "Can an importer challenge Customs valuation?",
+    "direct_reply": "Here's the most relevant guidance I found in official URA sources:\n\nYes. ACV allows administrative and judicial appeal without penalty.",
+    "sources": [
+      "ura_customs_valuation_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 1.78,
+    "emotion_query": "I am furious that customs rejected my receipt! Can an importer challenge Customs valuation?",
+    "emotion_reply": "Here's the most relevant guidance I found in official URA sources:\n\nYes. ACV allows administrative and judicial appeal without penalty.",
+    "latency_eq_s": 2.22,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-03",
+    "topic": "Customs Valuation Methods under ACV",
+    "direct_query": "What are the Customs valuation methods under ACV?",
+    "direct_reply": "Here's the most relevant guidance I found in official URA sources:\n\nSix methods applied sequentially (methods 4 and 5 can swap on importer request): transaction value; transaction value of identical goods; transaction value of similar goods; deductive value; computed value; fallback method.\n\nYou might also want to know: Why are the first five methods inapplicable to used vehicles?",
+    "sources": [
+      "ura_customs_valuation_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 9.24,
+    "emotion_query": "I'm completely lost with all these acronyms. What are the Customs valuation methods under ACV?",
+    "emotion_reply": "Here's the most relevant guidance I found in official URA sources:\n\nSix methods applied sequentially (methods 4 and 5 can swap on importer request): transaction value; transaction value of identical goods; transaction value of similar goods; deductive value; computed value; fallback method.\n\nYou might also want to know: What should I do if my goods are consolidated with other exporters?",
+    "latency_eq_s": 11.59,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-04",
+    "topic": "Point of Entry Required Documents",
+    "direct_query": "Which documents are required at the point of entry for goods?",
+    "direct_reply": "The documents required at the point of entry for goods include:\n\n1. **Bill of Lading/Airway Bill** (contract/receipt/title)\n2. **Insurance Certificate**\n3. **Proforma Invoice**\n4. **Commercial Invoice**\n5. **Certificate of Origin** (for preference)\n6. **Permits for restricted goods**\n7. **Purchase Order**\n8. **Packing List** (contents/weights/measures)\n9. **Sales Contract**\n10. **Evidence of payment** (receipts/bank proof)\n\nThese documents are essential for customs officials to assess the goods and ensure compliance with tax and regulatory requirements.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+    "sources": [
+      "ura_documents_point_of_entry_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 8.79,
+    "emotion_query": "Urgent! My truck is at Malaba border right now. Which documents are required at the point of entry for goods?",
+    "emotion_reply": "At the point of entry for goods at Malaba border, the required documents are:\n\n1. **Bill of Lading/Airway Bill** (contract/receipt/title)\n2. **Insurance Certificate**\n3. **Proforma Invoice**\n4. **Commercial Invoice**\n5. **Certificate of Origin** (for preference)\n6. **Permits for restricted goods**\n7. **Purchase Order**\n8. **Packing List** (contents/weights/measures)\n9. **Sales Contract**\n10. **Evidence of payment** (receipts/bank proof)\n\nThese documents are essential for customs officials to process your goods efficiently.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+    "latency_eq_s": 4.94,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-05",
+    "topic": "International Traveler Entry Requirements",
+    "direct_query": "What documents must international travelers present when entering Uganda?",
+    "direct_reply": "Here's the most relevant guidance I found in official URA sources:\n\nPassport valid ≥6 months; appropriate visa (e-visa/embassy/visa-free or on-arrival where eligible); yellow fever vaccination certificate (over 1 year old travelers); COVID-19 PCR within 72 hours if required by current health rules; proof of onward/return ticket.\n\nYou might also want to know: What documents are needed for a foreign company to register and operate in Uganda?",
+    "sources": [
+      "ura_documents_point_of_entry_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 3.24,
+    "emotion_query": "I'm nervous about traveling for the first time. What documents must international travelers present when entering Uganda?",
+    "emotion_reply": "Here's the most relevant guidance I found in official URA sources:\n\nPassport valid ≥6 months; appropriate visa (e-visa/embassy/visa-free or on-arrival where eligible); yellow fever vaccination certificate (over 1 year old travelers); COVID-19 PCR within 72 hours if required by current health rules; proof of onward/return ticket.\n\nYou might also want to know: What must I have when importing via groupage (shared containers)?",
+    "latency_eq_s": 3.09,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-06",
+    "topic": "Cargo Surplus / Deficiency Offence",
+    "direct_query": "Is deficiency or surplus in cargo an offence?",
+    "direct_reply": "Here's the most relevant guidance I found in official URA sources:\n\nYes; missing reported goods (deficiency) or extra unmanifested goods (surplus) both are offences; goods liable to forfeiture.",
+    "sources": [
+      "ura_customs_offences_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 1.72,
+    "emotion_query": "I'm terrified my container will be seized! Is deficiency or surplus in cargo an offence?",
+    "emotion_reply": "Here's the most relevant guidance I found in official URA sources:\n\nYes; missing reported goods (deficiency) or extra unmanifested goods (surplus) both are offences; goods liable to forfeiture.",
+    "latency_eq_s": 2.21,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-07",
+    "topic": "Deductive Value Method",
+    "direct_query": "What is the deductive value method?",
+    "direct_reply": "Here's the most relevant guidance I found in official URA sources:\n\nWhen earlier methods fail, base value on domestic selling price of imported/identical/similar goods at first commercial level after import (within set period), deducting specified costs.",
+    "sources": [
+      "ura_customs_valuation_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 2.21,
+    "emotion_query": "Can you please explain in simple terms, what is the deductive value method?",
+    "emotion_reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+    "latency_eq_s": 0.68,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-08",
+    "topic": "Transaction Value Method",
+    "direct_query": "What is the transaction value method?",
+    "direct_reply": "Here's the most relevant guidance I found in official URA sources:\n\nPrimary method: price actually paid or payable for goods sold for export to Uganda, adjusted per Article 8 for dutiable costs not in the invoice price.\n\nValue = cost of materials/fabrication/labour + profit & general expenses typical for such exports + transport and related costs to port of import. Used only when earlier methods fail and transaction is direct with manufacturer.\n\nYou might also want to know: What is the transaction value of identical goods?",
+    "sources": [
+      "ura_customs_valuation_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 2.66,
+    "emotion_query": "I really need clear guidance: what is the transaction value method?",
+    "emotion_reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+    "latency_eq_s": 0.67,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-09",
+    "topic": "Definition of Customs Offence & Penalties",
+    "direct_query": "What is a customs offence?",
+    "direct_reply": "Here's the most relevant guidance I found in official URA sources:\n\nAny breach or attempted breach of statutory/regulatory provisions under the EAC Customs Management Act (EACCMA); penalties vary by severity.\n\nIf they solicit/receive unauthorized rewards or connive/agree to acts that defraud customs revenue.",
+    "sources": [
+      "ura_customs_offences_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 1.85,
+    "emotion_query": "I am worried about getting into trouble with the law. What is a customs offence?",
+    "emotion_reply": "Here's the most relevant guidance I found in official URA sources:\n\nAny breach or attempted breach of statutory/regulatory provisions under the EAC Customs Management Act (EACCMA); penalties vary by severity.\n\nIf they solicit/receive unauthorized rewards or connive/agree to acts that defraud customs revenue.",
+    "latency_eq_s": 1.79,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  },
+  {
+    "id": "CUST-10",
+    "topic": "Groupage Cargo Clearance",
+    "direct_query": "What is groupage cargo?",
+    "direct_reply": "Groupage cargo is a method of shipping where multiple consignments from different clients are combined into one container, typically a 20ft or 40ft container, to benefit from lower freight costs and more efficient handling. This service is offered by registered cargo consolidators, who handle the logistics of grouping the shipments, securing the container, and coordinating the customs clearance process.\n\n---\n*Note: This response may not be fully supported by the retrieved documents. Please verify with official URA sources at https://ura.go.ug.*\n\nYou might also want to know: Step-by-step: how do I clear groupage cargo using my TIN?",
+    "sources": [
+      "ura_groupage_cargo_faqs.csv"
+    ],
+    "retrieval_mode": "hybrid",
+    "latency_direct_s": 3.28,
+    "emotion_query": "I am a small trader and feeling overwhelmed by shipping terms. What is groupage cargo?",
+    "emotion_reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+    "latency_eq_s": 0.71,
+    "factual_match": true,
+    "conversational": true,
+    "eq_handled": true
+  }
+]

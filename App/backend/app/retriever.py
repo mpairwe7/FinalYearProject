@@ -1269,6 +1269,19 @@ class HybridRetriever:
 
         try:
             from qdrant_client import models
+        except ImportError:
+            from types import SimpleNamespace
+
+            models = SimpleNamespace(  # type: ignore[assignment]
+                FieldCondition=lambda **kw: SimpleNamespace(**kw),
+                MatchAny=lambda **kw: SimpleNamespace(**kw),
+                MatchValue=lambda **kw: SimpleNamespace(**kw),
+                Filter=lambda **kw: SimpleNamespace(**kw),
+                Prefetch=lambda **kw: SimpleNamespace(**kw),
+                SparseVector=lambda **kw: SimpleNamespace(**kw),
+                FusionQuery=lambda **kw: SimpleNamespace(**kw),
+                Fusion=SimpleNamespace(RRF="rrf"),
+            )
 
             from .hyde import dense_query_text
 

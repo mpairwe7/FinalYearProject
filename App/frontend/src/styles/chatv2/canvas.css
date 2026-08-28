@@ -96,28 +96,21 @@
   background: var(--bg-0);
 }
 
-/* The sidebar is a panel, not part of the canvas.
+/* The sidebar shares the exact same background as the main chat UI.
  *
- * It was transparent for a while, so that it shared the conversation's ground
- * and no tonal seam ran down the left of the screen. Two things were wrong with
- * that. On a phone the rail is a *drawer floating over the conversation*, and a
- * transparent drawer let the transcript read straight through it — the reply
- * text and the rail's own labels landed on top of each other. And on a desktop
- * it left the shell with no panel hierarchy at all: in light theme the rail and
- * the conversation were both plain white, separated only by a 1px hairline, so
- * there was nothing to tell you where one ended and the other began.
- *
- * So the rail takes the recessed surface and the conversation keeps the canvas.
- * That is the relationship both reference designs use, and it is the one thing
- * a sidebar has to do: read as a different plane from the thing it indexes.
- *
- * Contrast is unchanged in the direction that matters. Rail text is
- * --text-0/--text-1, which are specified against --bg-0/--bg-1; the worst case
- * used to be text over the mesh's --bg-1 stop, and now it is text on --bg-1
- * flat. The axe suite re-checks it on every run. */
+ * On desktop (grid), it is transparent to seamlessly share the main chat UI's
+ * canvas/mesh ground without any jarring tonal seam. On mobile drawer, it uses
+ * var(--bg-0) (the main chat UI's root background) so transcript text does not
+ * bleed through when the drawer floats over it. */
 .chatv2 .conversation-rail {
-  background: var(--bg-1);
+  background: var(--bg-0);
 }
+@media (min-width: 1024px) {
+  .chatv2 .conversation-rail {
+    background: transparent;
+  }
+}
+
 .chatv2 .bubble.user {
   background: var(--cv2-user-bubble);
 }

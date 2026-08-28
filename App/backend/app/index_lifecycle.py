@@ -161,7 +161,17 @@ def validate_candidate_retrieval(
 
 def promote_alias(client: Any, *, alias: str, collection: str, previous: str = "") -> None:
     """Atomically point the serving alias at a validated candidate collection."""
-    from qdrant_client import models
+    try:
+        from qdrant_client import models
+    except ImportError:
+        from types import SimpleNamespace
+
+        models = SimpleNamespace(  # type: ignore[assignment]
+            DeleteAliasOperation=lambda **kw: SimpleNamespace(**kw),
+            DeleteAlias=lambda **kw: SimpleNamespace(**kw),
+            CreateAliasOperation=lambda **kw: SimpleNamespace(**kw),
+            CreateAlias=lambda **kw: SimpleNamespace(**kw),
+        )
 
     operations: list[Any] = []
     if previous:

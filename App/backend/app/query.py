@@ -191,25 +191,71 @@ def rewrite_with_history(
     query: str,
     history: list[dict[str, str]],
 ) -> str:
-    """Resolve coreferences using conversation history.
+    """Resolve coreferences and elliptical responses using conversation history.
 
-    Simple heuristic: if the query contains pronouns like "it", "that",
-    "this", "they" without a clear subject, prepend context from the
-    last assistant reply.
+    Handles:
+    1. Short follow-up answers to assistant prompts (e.g. "individual", "as an individual",
+       "company", "resident", "yes", "monthly") by anchoring to the active task.
+    2. Explicit coreferences and pronouns ("it", "that", "this", "they", "the same").
+    3. Context prepend fallback when the follow-up asks a dependent question.
     """
     if not history:
         return query
 
+    q = (query or "").strip()
+    if not q:
+        return query
+
+    last_turn = history[-1]
+    last_user = last_turn.get("user_message", "")
+    last_bot = last_turn.get("bot_reply", "")
+    combined_prev = f"{last_user} {last_bot}".lower()
+
+    # 1. Elliptical answers to TIN registration clarification questions:
+    if re.search(r"\btin\b", combined_prev, re.IGNORECASE) and re.search(
+        r"\b(register|registration|get|obtain|apply|application)\b", combined_prev, re.IGNORECASE
+    ):
+        if re.search(
+            r"^\s*(?:as|for)?\s*(?:an?|the|my)?\s*(?:individuals?|myself|personal|person|sole\s+(?:proprietor|trader))\b",
+            q,
+            re.IGNORECASE,
+        ):
+            return "How do I register for a TIN as an individual"
+        if re.search(
+            r"^\s*(?:as|for)?\s*(?:an?|the|my)?\s*(?:organisations?|organizations?|compan(?:y|ies)|ngos?|partnerships?|business(?:es)?|institution|trusts?|saccos?)\b",
+            q,
+            re.IGNORECASE,
+        ):
+            return "How do I register for a TIN as an organisation"
+
+    # 2. Elliptical answers to PAYE / Salary questions:
+    if re.search(r"\b(paye|salary|gross|net\s*pay|take[-\s]?home)\b", combined_prev, re.IGNORECASE):
+        if re.search(r"^\s*(?:as\s+(?:a\s+)?)?non[-\s]?residents?\b", q, re.IGNORECASE):
+            prev_amounts = re.findall(
+                r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?|\b\d+(?:\.\d+)?\s*(?:m|k|million|thousand)\b",
+                last_user,
+                re.IGNORECASE,
+            )
+            if prev_amounts:
+                return f"calculate PAYE for a non-resident on {prev_amounts[-1]} gross salary"
+            return "calculate PAYE for a non-resident"
+        if re.search(r"^\s*(?:as\s+(?:a\s+)?)?residents?\b", q, re.IGNORECASE):
+            prev_amounts = re.findall(
+                r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?|\b\d+(?:\.\d+)?\s*(?:m|k|million|thousand)\b",
+                last_user,
+                re.IGNORECASE,
+            )
+            if prev_amounts:
+                return f"calculate PAYE for a resident on {prev_amounts[-1]} gross salary"
+            return "calculate PAYE for a resident"
+
+    # 3. Pronoun / coreference resolution
     pronoun_pattern = re.compile(
         r"\b(it|that|this|they|them|those|its|their|the above|the same)\b",
         re.IGNORECASE,
     )
 
-    if pronoun_pattern.search(query):
-        last_turn = history[-1]
-        last_user = last_turn.get("user_message", "")
-        last_bot = last_turn.get("bot_reply", "")
-
+    if pronoun_pattern.search(q):
         # Prefer a concrete entity from the previous user turn. This keeps
         # follow-ups like "How do I register for it?" anchored to "TIN"
         # instead of the whole prior assistant answer.
@@ -221,22 +267,31 @@ def rewrite_with_history(
         if subject:
             subject_phrase = _ABBREVIATIONS.get(subject.lower(), subject)
             replacement = subject_phrase
-            if re.search(r"\bregister(?:ing)?\s+for\s+(it|that|this|the same)\b", query, re.IGNORECASE):
+            if re.search(r"\bregister(?:ing)?\s+for\s+(it|that|this|the same)\b", q, re.IGNORECASE):
                 article = "an" if subject_phrase[:1].lower() in "aeiou" else "a"
                 replacement = f"{article} {subject_phrase}"
 
-            rewritten = pronoun_pattern.sub(replacement, query)
-            logger.debug("Query rewritten with user-turn subject (input_length=%d)", len(query))
+            rewritten = pronoun_pattern.sub(replacement, q)
+            logger.debug("Query rewritten with user-turn subject (input_length=%d)", len(q))
             return rewritten
 
         # Fallback: use the first assistant sentence as a broad context hint.
         first_sentence = re.split(r"(?<=[^A-Z])[.!?]\s", last_bot)[0].strip()
         if first_sentence and len(first_sentence) > 10:
-            rewritten = f"Regarding '{first_sentence[:100]}': {query}"
-            logger.debug("Query rewritten with assistant context (input_length=%d)", len(query))
+            rewritten = f"Regarding '{first_sentence[:100]}': {q}"
+            logger.debug("Query rewritten with assistant context (input_length=%d)", len(q))
             return rewritten
 
-    return query
+    # 4. Short follow-up without pronouns (<= 5 words) where previous turn asked a question
+    words = q.split()
+    if len(words) <= 5 and not re.search(r"\b(hello|hi|hey|thanks|thank you|bye|goodbye)\b", q, re.IGNORECASE):
+        if "?" in last_bot or "please choose" in last_bot.lower() or "choose one" in last_bot.lower():
+            for abbrev in ("TIN", "VAT", "PAYE", "EFRIS", "WHT", "CGT", "CIT"):
+                if re.search(rf"\b{abbrev}\b", combined_prev, re.IGNORECASE):
+                    expanded = _ABBREVIATIONS.get(abbrev.lower(), abbrev)
+                    return f"{expanded} {q}"
+
+    return q
 
 
 # Lingua eager-preloads its language models, so constructing the detector is
@@ -495,13 +550,13 @@ _TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # already collapses whitespace runs to one space — independently removing
 # the long-run precondition these patterns would otherwise need.
 _DECOMPOSE_SPLIT_RE = re.compile(
-    r"\s++(?:and also|as well as|and then)\s++|"
-    r"\s*+;\s++|"
-    r"\?\s++(?=(?:what|how|when|where|which|who)\b)",
+    r"\s+(?:and also|as well as|and then)\s+|"
+    r"\s*;\s+|"
+    r"\?\s+(?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
 _AND_QUESTION_RE = re.compile(
-    r"\s++and\s++(?=(?:what|how|when|where|which|who)\b)",
+    r"\s+and\s+(?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
 

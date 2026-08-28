@@ -1865,8 +1865,8 @@ main {
   right: auto;
   z-index: 200;
   width: min(85vw, 320px);
-  background: var(--bg-1);
-  border-right: 1px solid var(--border-1);
+  background: var(--bg-0);
+  border-right: 1px solid var(--border-0);
   /* Clear the safe-area inset as well as the panel's own width. `left` holds
      this 12px off the edge, so a plain -100% parks its right edge at exactly
      12px — leaving a sliver of the drawer on screen at all times. That went
