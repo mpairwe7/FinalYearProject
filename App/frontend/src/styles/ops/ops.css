@@ -527,10 +527,9 @@ a.ops-stat:hover {
   color: var(--text-3);
 }
 
-/* No status edge. `tone` still lands on the tile as `.is-warn` / `.is-danger` /
-   `.is-good`, but it paints nothing: a coloured bar down the left of a card is
-   decoration this console does not use. What a tile means is in its label,
-   value and hint. */
+/* No status edge, and no `tone` to set one: a coloured bar down the left of a
+   card is decoration this console does not use. What a tile means is in its
+   label, value and hint. StatCard dropped the prop with the rule. */
 
 .ops-delta {
   display: inline-flex;
