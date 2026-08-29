@@ -6,8 +6,6 @@ import { formatDelta } from "../../lib/trends";
 import { Sparkline } from "./Sparkline";
 import { Skeleton } from "./States";
 
-export type StatTone = "neutral" | "good" | "warn" | "danger";
-
 /**
  * The console's KPI tile.
  *
@@ -23,11 +21,49 @@ export type StatTone = "neutral" | "good" | "warn" | "danger";
  * more breaching is not, so the direction→colour mapping is the caller's to
  * state via `higherIsBetter`.
  */
+/**
+ * Split "0 milliseconds" into the figure and its unit so the unit can be set
+ * smaller.
+ *
+ * At full display size the unit competes with the number: "0 milliseconds"
+ * wrapped to two lines at 26px while the four tiles beside it stayed on one,
+ * and the whole row of labels and hints below went ragged. `.ops-gauge-unit`
+ * already solves this for the gauges; this brings the tiles into line.
+ *
+ * The separator stays inside the unit span rather than being dropped or
+ * re-added by CSS, so `textContent` is byte-identical to the string that came
+ * in. The e2e suite asserts on rendered text like "3.3h", and a stray space
+ * would silently break it.
+ */
+const MEASURE = /^([-+]?\d+(?:[.,  ]\d+)*)(\s*)([^\d\s].*)$/;
+
+function splitMeasure(value: React.ReactNode): React.ReactNode {
+  if (typeof value !== "string") return value;
+
+  const match = MEASURE.exec(value);
+  if (!match) return value;
+
+  const [, figure, gap, unit] = match;
+  // A compound figure — "1d 8h 55m" — is measurement all the way through, so
+  // shrinking the tail would shrink half the number. Only a single trailing
+  // unit gets stepped down.
+  if (/\d/.test(unit)) return value;
+
+  return (
+    <>
+      {figure}
+      <span className="ops-stat-unit">
+        {gap}
+        {unit}
+      </span>
+    </>
+  );
+}
+
 export function StatCard({
   label,
   value,
   hint,
-  tone = "neutral",
   href,
   delta,
   deltaPeriod,
@@ -39,7 +75,6 @@ export function StatCard({
   label: string;
   value: React.ReactNode;
   hint?: React.ReactNode;
-  tone?: StatTone;
   href?: string;
   delta?: Delta;
   /** Named comparison window, e.g. "previous 30 days". */
@@ -50,8 +85,6 @@ export function StatCard({
   trendLabel?: string;
   loading?: boolean;
 }) {
-  const toneClass = tone === "neutral" ? "" : ` is-${tone}`;
-
   let deltaClass = "";
   if (delta && delta.direction !== "flat" && higherIsBetter !== undefined) {
     const isGood = delta.direction === "up" ? higherIsBetter : !higherIsBetter;
@@ -65,7 +98,7 @@ export function StatCard({
         <Skeleton width="45%" height={26} />
       ) : (
         <span className="ops-stat-row">
-          <strong className="ops-stat-value">{value}</strong>
+          <strong className="ops-stat-value">{splitMeasure(value)}</strong>
           {delta ? (
             <span className={`ops-delta${deltaClass}`}>
               <span className="ops-delta-glyph" aria-hidden="true">
@@ -89,10 +122,10 @@ export function StatCard({
 
   if (href) {
     return (
-      <a className={`ops-stat${toneClass}`} href={href}>
+      <a className="ops-stat" href={href}>
         {body}
       </a>
     );
   }
-  return <div className={`ops-stat${toneClass}`}>{body}</div>;
+  return <div className="ops-stat">{body}</div>;
 }

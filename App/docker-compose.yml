@@ -161,12 +161,31 @@ services:
       dockerfile: Dockerfile
       args:
         INTERNAL_API_URL: http://api:8000
+        NEXT_PUBLIC_OIDC_ISSUER: ${NEXT_PUBLIC_OIDC_ISSUER:-https://dev-s16d7m00eyrksjy2.us.auth0.com/}
+        NEXT_PUBLIC_OIDC_CLIENT_ID: ${NEXT_PUBLIC_OIDC_CLIENT_ID:-jjOlcY4Td9AmmaQZIPkxEY6dLO60YagX}
+        NEXT_PUBLIC_OIDC_AUDIENCE: ${NEXT_PUBLIC_OIDC_AUDIENCE:-https://ura-chatbot/api}
+        NEXT_PUBLIC_OIDC_SCOPE: ${NEXT_PUBLIC_OIDC_SCOPE:-openid profile email}
+        # Registered at Auth0 under "Allowed Logout URLs", matched exactly.
+        # The HF Space is registered as <origin>/signin; the ngrok tunnel as
+        # the bare origin, so a local tunnel run sets this to "".
+        #
+        # `-` and not `:-`: an EXPLICIT empty value is a real choice here (it
+        # means "the origin, no path"), and `:-` would silently replace it with
+        # the default — sending an unregistered URL that the provider refuses.
+        NEXT_PUBLIC_OIDC_POST_LOGOUT_PATH: ${NEXT_PUBLIC_OIDC_POST_LOGOUT_PATH-/signin}
+        NEXT_PUBLIC_DEV_SIGNIN: ${NEXT_PUBLIC_DEV_SIGNIN:-true}
     container_name: ura-app-frontend
     ports:
       - "3032:3000"
     environment:
       - NODE_ENV=production
       - INTERNAL_API_URL=http://api:8000
+      - NEXT_PUBLIC_OIDC_ISSUER=${NEXT_PUBLIC_OIDC_ISSUER:-https://dev-s16d7m00eyrksjy2.us.auth0.com/}
+      - NEXT_PUBLIC_OIDC_CLIENT_ID=${NEXT_PUBLIC_OIDC_CLIENT_ID:-jjOlcY4Td9AmmaQZIPkxEY6dLO60YagX}
+      - NEXT_PUBLIC_OIDC_AUDIENCE=${NEXT_PUBLIC_OIDC_AUDIENCE:-https://ura-chatbot/api}
+      - NEXT_PUBLIC_OIDC_SCOPE=${NEXT_PUBLIC_OIDC_SCOPE:-openid profile email}
+      - NEXT_PUBLIC_OIDC_POST_LOGOUT_PATH=${NEXT_PUBLIC_OIDC_POST_LOGOUT_PATH-/signin}
+      - NEXT_PUBLIC_DEV_SIGNIN=${NEXT_PUBLIC_DEV_SIGNIN:-true}
     init: true
     security_opt:
       - no-new-privileges:true

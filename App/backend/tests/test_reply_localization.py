@@ -22,11 +22,19 @@ from __future__ import annotations
 import unittest
 import unittest.mock as mock
 
-from app import service
+from app import mt, service
 
 
 class LocalizeReplyTest(unittest.TestCase):
     ENGLISH = "The standard VAT rate in Uganda is 18% on taxable supplies."
+
+    def setUp(self) -> None:
+        # localize_reply memoises a translation once it has passed its guards
+        # (see app/mt.py). That is right in production — a backend that fails
+        # after one success should still serve the translation it already
+        # produced — and it makes these cases order-dependent, because they
+        # all translate the same sentence with different backend behaviour.
+        mt.cache.clear()
 
     def test_english_locale_is_passed_through_untouched(self) -> None:
         for locale in ("en", ""):

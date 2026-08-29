@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../../hooks/useTheme";
 import { staffSectionsFor, type StaffDestination } from "../../lib/roles";
-import { CommandIcon } from "./icons";
+import { SearchIcon } from "./icons";
 
 /**
  * ⌘K / Ctrl-K — jump to any console page from anywhere.
@@ -54,11 +54,15 @@ export function CommandPaletteTrigger({ onOpen }: { onOpen: () => void }) {
       aria-haspopup="dialog"
       aria-label="Search"
     >
-      <CommandIcon />
+      {/* A magnifier, not the ⌘ loop. The trigger reads as a search field, and
+          the loop plus a `⌘K` chip beside it was two pieces of Mac keyboard
+          notation on a control most officers reach with the mouse — on Windows
+          the chord is Ctrl+K, so the chip was also wrong for them. The chord
+          still works; the palette itself lists it in its footer hints. */}
+      <SearchIcon />
       {/* Wrapped so the collapsed 52px rail can hide the words and keep the
           glyph — the bare text node could not be targeted by CSS. */}
       <span className="ops-cmdk-trigger-text">Search</span>
-      <kbd className="ops-kbd">⌘K</kbd>
     </button>
   );
 }

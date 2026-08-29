@@ -6,6 +6,15 @@
  * Shows: radar (8 metrics), metrics table with pass/fail, per-segment
  * comparison bars, and the classifier confusion matrix.
  *
+ * Every one of those is named on screen by what it asks about the assistant's
+ * behaviour rather than by its term — "Sticks to the documents", not
+ * "faithfulness"; "Sorting questions into the right topic", not "confusion
+ * matrix". The audience for evaluation evidence is the people accountable for
+ * the service, not the people who chose the metrics, and a page they cannot
+ * read is not evidence. The mapping lives in components/charts/chartTheme's
+ * EVAL_METRIC table so the radar, the table and any future panel say the same
+ * thing.
+ *
  * Standards: ISO 25010:2023 §2 (Functional Suitability),
  * NIST AI RMF MEASURE 2.6 (evaluation evidence)
  *
@@ -97,11 +106,11 @@ function Evaluation() {
     <OpsPage
       eyebrow="Observe"
       title="Answer evaluation"
-      description="Retrieval-augmented generation measured against the thresholds the release gate enforces, per topic and per language."
+      description="Eight checks on the quality of the assistant's answers, measured against the minimum each one has to clear before a release is allowed — broken down by tax topic and by language."
       actions={
         live ? (
           <span className={`ops-chip ${allPass ? "is-good" : "is-danger"}`}>
-            {allPass ? "All gates pass" : "Gate failure"}
+            {allPass ? "Every check passed" : "A check failed"}
           </span>
         ) : (
           <span className="ops-chip is-warn">Sample data</span>
@@ -118,44 +127,45 @@ function Evaluation() {
               {isFetching ? "Asking for a live evaluation run…" : "Showing sample data, not a measurement"}
             </p>
             <p className="ops-note-body">
-              A live run comes from <code>POST /v1/evaluate</code>, which is gated behind the
-              operator key rather than a staff sign-in, so this page falls back to a stored sample
-              set. Treat the numbers below as an illustration of the shape of the report. The
-              authoritative run is the release gate in CI. The confusion matrix is illustrative in
-              every case — no endpoint backs it.
+              A live run comes from <code>POST /v1/evaluate</code>, which needs the operator key
+              rather than an ordinary staff sign-in, so this page is showing a stored sample
+              instead. Read the numbers below as an illustration of what the report looks like,
+              not as a measurement of the assistant right now — the authoritative run is the one
+              that gates every release. The topic-sorting grid at the bottom is illustrative in
+              every case; nothing measures it live.
             </p>
           </div>
         </div>
       ) : null}
 
-      <section className="ops-chart-grid is-2" aria-label="Quality against thresholds">
+      <section className="ops-chart-grid is-2" aria-label="Quality against the release minimums">
         <EvalRadarChart metrics={metrics} />
-        <MetricsTable metrics={metrics} title="Quality gates" />
+        <MetricsTable metrics={metrics} title="What each check measures" bare />
       </section>
 
-      <section className="ops-chart-grid" aria-label="Faithfulness by topic">
+      <section className="ops-chart-grid" aria-label="How well answers stick to the documents, by topic">
         <SegmentComparisonChart
           bySegment={bySegment}
           metricName="faithfulness"
-          title="Faithfulness by topic"
+          title="How well answers stick to the documents, by tax topic"
         />
       </section>
 
       {bySegment.locale ? (
-        <section className="ops-chart-grid" aria-label="Language parity">
+        <section className="ops-chart-grid" aria-label="English against Luganda">
           <SegmentComparisonChart
             bySegment={{ locale: bySegment.locale }}
             metricName="faithfulness"
-            title="Language parity — English against Luganda"
+            title="Are Luganda answers as good as English ones?"
           />
         </section>
       ) : null}
 
-      <section className="ops-chart-grid" aria-label="Classifier confusion">
+      <section className="ops-chart-grid" aria-label="Sorting questions into the right topic">
         <ConfusionMatrix
           matrix={CM_MATRIX}
           labels={CM_LABELS}
-          title="Classifier confusion matrix (illustrative)"
+          title="Sorting questions into the right topic (illustrative)"
         />
       </section>
     </OpsPage>

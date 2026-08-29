@@ -205,11 +205,33 @@ POST /v1/chat/stream
 
 | Event | Data | Description |
 |-------|------|-------------|
+| `phase` | string | What the server is doing right now — see the table below |
 | `metadata` | JSON | Sources, citations, retrieval mode, locale (sent first) |
 | `token` | string | Generated text chunk (sanitized, XSS-safe) |
+| `revision` | string | The **whole** reply, replacing what was streamed so far |
+| `agent_trace` | JSON | Buffered retrieval/tool trace, emitted just before `grounding` |
 | `grounding` | JSON | `faithfulness_score`, `escalation_required`, `escalation_reason` |
 | `done` | empty | Stream complete |
 | `error` | string | Error message |
+
+**`phase` values**
+
+| Value | Meaning |
+|-------|---------|
+| `retrieval.started` | Searching the knowledge base |
+| `retrieval.completed` | Search finished; generation about to begin |
+| `translation.started` | Translating the finished English answer into the caller's language |
+| `translation.completed` | Translation done; a `revision` follows if the text changed |
+
+The two `translation.*` phases fire only on a non-English turn. Answers are
+generated in English and translated on the way out (see
+`docs/RAG_ARCHITECTURE.md`), so a non-English turn ends with a wait during
+which a complete English answer is already on screen — without a phase frame
+that reads as the assistant having answered in the wrong language.
+
+The locale those phases carry is the **effective** one. A caller that sends no
+`locale` gets `en`, and the server detects the real language from the message;
+`retrieval.completed` reports what it resolved.
 
 **cURL Example**
 ```bash
@@ -281,6 +303,71 @@ POST /v1/index
 curl -X POST http://localhost:8887/v1/index \
   -H "Authorization: Bearer my-secret-key"
 ```
+
+---
+
+### Ask for a Human Officer
+
+Hand the conversation to a URA officer because the **taxpayer asked**.
+
+Every other route into the ticket queue is a judgement the system makes on the
+taxpayer's behalf — the supervisor's ESCALATE route, the response judge
+escalating an answer it doubts, the `escalate_to_human` tool the model may call
+mid-turn. This is the taxpayer's own way in.
+
+```http
+POST /v1/escalate
+```
+
+Open to unauthenticated callers: a taxpayer who cannot get an answer is the
+person least likely to hold an account. Rate-limited with the same `RATE_LIMIT`
+as `/v1/chat`.
+
+**Request Body**
+```json
+{
+  "conversation_id": "conv_abc123",
+  "session_id": "sess_abc123",
+  "reason": "The VAT answer does not match my assessment notice.",
+  "locale": "lg"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `conversation_id` | No | Attaches the transcript, and is where the officer's reply is delivered back |
+| `session_id` | No | Analytics session |
+| `reason` | No | The taxpayer's own words, max 1000 chars. Defaults to a generic request |
+| `locale` | No | Language to acknowledge in; the message is translated on the way out |
+
+There is deliberately **no `priority` field**. Self-declared urgency is not
+urgency, and a queue where every taxpayer can mark their own ticket urgent
+stops sorting anything — staff re-prioritise from the officer console.
+
+**Response**
+```json
+{
+  "ok": true,
+  "ticket_id": "6f1c...",
+  "status": "open",
+  "reused_existing": false,
+  "message": "A URA officer has been asked to look at this. Their reply will appear here in this conversation..."
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `ok` | `false` when the queue is off or the write failed; `message` then says how to reach URA instead |
+| `status` | `open` · `queue_disabled` · `failed` |
+| `reused_existing` | `true` when this conversation already had an open ticket — one conversation, one officer |
+
+Honours the `ticket_queue` flag. With it off the endpoint answers `ok: false`
+and gives the contact-centre numbers rather than promising a handoff that will
+never arrive.
+
+The officer's reply is delivered back into the same conversation on the
+taxpayer's next turn (`_deliver_officer_reply` in `service.py`), which is why
+`conversation_id` matters more than anything else in the body.
 
 ---
 

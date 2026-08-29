@@ -19,7 +19,7 @@
  * OIDC Core 1.0 §3.1, OIDC Discovery 1.0 §4.
  */
 
-import { discoverOidc, TOKEN_ENDPOINT_KEY } from "./oidc";
+import { discoverOidc, END_SESSION_ENDPOINT_KEY, TOKEN_ENDPOINT_KEY } from "./oidc";
 
 export const OIDC_ISSUER = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
 export const OIDC_CLIENT_ID = (process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "").trim();
@@ -45,6 +45,36 @@ export const OIDC_CONFIGURED = Boolean(OIDC_ISSUER && OIDC_CLIENT_ID);
 
 type AuthorizeMode = "signin" | "signup";
 
+/**
+ * Where the browser lands after the provider has ended its session.
+ *
+ * `/signin` by default, rather than the assistant: the only reason to log out
+ * of the provider is to sign in as somebody else, and finishing on a page with
+ * no sign-in control makes the person hunt for one.
+ *
+ * Configurable because this URL has to match a value **registered at the
+ * provider** — Auth0's *Allowed Logout URLs*, Keycloak's *Valid post logout
+ * redirect URIs* — and those are matched exactly, not by prefix. Our own two
+ * deployments are registered differently: the HF Space as
+ * `https://…hf.space/signin`, the ngrok tunnel as the bare origin with no
+ * path. An unregistered value does not fail quietly; the provider refuses the
+ * logout and shows its own error page instead of signing anyone out.
+ *
+ * Empty (or `/`) means the origin itself. Anything else is normalised to a
+ * single leading slash so `signin`, `/signin` and `/signin/` cannot produce
+ * three different URLs, only one of which is registered.
+ */
+function normalisePostLogoutPath(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "/") return "";
+  const withSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withSlash.endsWith("/") ? withSlash.slice(0, -1) : withSlash;
+}
+
+export const OIDC_POST_LOGOUT_PATH = normalisePostLogoutPath(
+  process.env.NEXT_PUBLIC_OIDC_POST_LOGOUT_PATH ?? "/signin",
+);
+
 function randomHex(bytes = 32): string {
   const buf = new Uint8Array(bytes);
   crypto.getRandomValues(buf);
@@ -62,6 +92,23 @@ async function pkceChallenge(verifier: string): Promise<string> {
 interface BeginOidcOptions {
   /** `signup` asks the provider for its registration screen. */
   mode?: AuthorizeMode;
+  /**
+   * Force the provider to re-authenticate instead of reusing its session.
+   *
+   * This is the fix for "when I want to sign in as another user, it just
+   * automatically signs me in the older account". Signing out cleared the
+   * token in this browser and nothing else — the provider's own session
+   * cookie survived, so the next authorize request was answered silently from
+   * it, with no login screen and the previous account's identity.
+   *
+   * `prompt=login` (OIDC Core 1.0 §3.1.2.1) requires reauthentication.
+   * `select_account` is the gentler form, offering a chooser when the
+   * provider has several sessions; providers that do not support it are
+   * required to fall through rather than fail, and every major one treats
+   * `login` as the stronger guarantee. `login` is what "sign in as someone
+   * else" actually means, so that is the default here.
+   */
+  prompt?: "login" | "select_account";
   /**
    * Path to land on after a successful exchange, for people who are not staff
    * and have no dashboard to be sent to (a taxpayer who signed up from the
@@ -96,6 +143,7 @@ export function isEmbedded(): boolean {
 export async function beginOidcFlow({
   mode = "signin",
   returnTo,
+  prompt,
 }: BeginOidcOptions = {}): Promise<void> {
   if (!OIDC_CONFIGURED) {
     throw new Error("No identity provider is configured for this deployment.");
@@ -129,6 +177,9 @@ export async function beginOidcFlow({
     const target = new URL(mode === "signup" ? "/signup" : "/signin", window.location.origin);
     target.searchParams.set("continue", mode);
     if (returnTo) target.searchParams.set("returnTo", returnTo);
+    // Carried through, or the new tab starts an ordinary flow and the
+    // provider signs the person straight back in as whoever it remembers.
+    if (prompt) target.searchParams.set("prompt", prompt);
     window.open(target.toString(), "_blank", "noopener");
     return;
   }
@@ -146,6 +197,11 @@ export async function beginOidcFlow({
   // Carry the token endpoint over so the callback does not have to discover
   // again; it re-discovers if this is missing.
   sessionStorage.setItem(TOKEN_ENDPOINT_KEY, endpoints.token_endpoint);
+  // Remembered for sign-out, which can happen days later in a tab that never
+  // ran this leg — see END_SESSION_ENDPOINT_KEY.
+  if (endpoints.end_session_endpoint) {
+    localStorage.setItem(END_SESSION_ENDPOINT_KEY, endpoints.end_session_endpoint);
+  }
   if (returnTo) sessionStorage.setItem(OIDC_RETURN_TO_KEY, returnTo);
   else sessionStorage.removeItem(OIDC_RETURN_TO_KEY);
 
@@ -175,9 +231,61 @@ export async function beginOidcFlow({
   if (mode === "signup") {
     url.searchParams.set("prompt", "create");
     url.searchParams.set("screen_hint", "signup");
+  } else if (prompt) {
+    url.searchParams.set("prompt", prompt);
   }
 
   window.location.assign(url.toString());
+}
+
+/**
+ * End the provider's session as well as this browser's — RP-Initiated Logout
+ * 1.0 §2.
+ *
+ * Without this, "sign out" was a local gesture: the token was dropped and the
+ * provider's session cookie stayed. Pressing sign-in again produced no login
+ * screen at all, just an immediate redirect back with a fresh token for the
+ * same person — reported as "when I want to sign in as another user it just
+ * automatically signs me in the older account". The account was never signed
+ * out of; only this application had forgotten about it.
+ *
+ * Returns false when the provider publishes no `end_session_endpoint`, or
+ * when this deployment has no identity provider at all. The caller has
+ * already cleared local state by then, so a false means "signed out here, but
+ * the provider still remembers you" — which is exactly when the sign-in page
+ * should offer to force a fresh login instead.
+ *
+ * `id_token_hint` is not sent because this client never accepts an ID token
+ * (see the note on `nonce` above — it reads `access_token` and nothing else).
+ * The spec's alternative applies: `client_id` MUST accompany
+ * `post_logout_redirect_uri` when the hint is absent, and that is what goes
+ * out. Some providers then show a confirmation screen, which is correct
+ * behaviour rather than a bug — without a hint they cannot know which session
+ * the request is for.
+ */
+export function endOidcSession(): boolean {
+  if (typeof window === "undefined" || !OIDC_CONFIGURED) return false;
+  const endSession = localStorage.getItem(END_SESSION_ENDPOINT_KEY);
+  if (!endSession) return false;
+
+  let url: URL;
+  try {
+    url = new URL(endSession);
+  } catch {
+    // A stored value that is not a URL is corrupt, not a reason to throw in
+    // the middle of signing someone out.
+    localStorage.removeItem(END_SESSION_ENDPOINT_KEY);
+    return false;
+  }
+
+  url.searchParams.set("client_id", OIDC_CLIENT_ID);
+  url.searchParams.set(
+    "post_logout_redirect_uri",
+    `${window.location.origin}${OIDC_POST_LOGOUT_PATH}`,
+  );
+  url.searchParams.set("state", randomHex(8));
+  window.location.assign(url.toString());
+  return true;
 }
 
 /** Clear the single-use redirect state (called by the callback once consumed). */
@@ -186,4 +294,7 @@ export function clearOidcFlowState(): void {
   sessionStorage.removeItem(OIDC_STATE_KEY);
   sessionStorage.removeItem(TOKEN_ENDPOINT_KEY);
   sessionStorage.removeItem(OIDC_RETURN_TO_KEY);
+  // END_SESSION_ENDPOINT_KEY is deliberately NOT cleared here: it is not
+  // single-use state, it is the address sign-out will need long after this
+  // redirect is finished.
 }

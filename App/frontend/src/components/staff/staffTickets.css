@@ -26,12 +26,11 @@
   background: var(--ops-row-hover);
 }
 
-/* The selected case is named by a filled surface *and* an accent edge — on a
-   dense list a tint alone is easy to lose, especially in light mode. */
+/* The selected case is named by a filled surface and a stronger border. It
+   also carried an accent bar down the left edge; that bar is gone. */
 .st-row.is-selected {
   background: var(--ops-row-active);
   border-color: var(--ops-line-strong);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .st-row:focus-visible,
@@ -107,10 +106,10 @@
   border: 1px solid var(--ops-line);
   background: var(--ops-row-active);
   color: var(--text-2);
-  font-size: 10px;
-  font-weight: var(--ops-weight-bold);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--ops-tracking-caps);
   white-space: nowrap;
   text-align: center;
 }
@@ -171,9 +170,14 @@
   flex-wrap: wrap;
   margin: calc(var(--ops-space-5) * -1) calc(var(--ops-space-5) * -1) 0;
   padding: var(--ops-space-4) var(--ops-space-5) var(--ops-space-3);
-  background: var(--ops-panel);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--ops-hairline);
+  /* The header stays put while a long transcript scrolls under it, so it is
+     chrome and takes the material. Same missing -webkit- pair as the rail. */
+  background: var(--ops-glass-bg);
+  -webkit-backdrop-filter: var(--ops-glass-blur);
+  backdrop-filter: var(--ops-glass-blur);
+  box-shadow: var(--ops-glass-spec);
+  border-bottom: 1px solid var(--ops-glass-line);
+  contain: paint;
 }
 
 .st-case-headline {
@@ -213,10 +217,6 @@
   border: 1px solid var(--ops-line);
   border-radius: var(--ops-radius-sm);
   background: var(--ops-row);
-}
-
-.st-brief.warm {
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .st-brief-label {
@@ -289,22 +289,20 @@
   overflow-wrap: anywhere;
 }
 
-/* A 2px rule beside each speaker instead of two indistinguishable paragraphs —
-   who said what is the first thing an officer reads for. */
+/* Indent alone separates the speakers; the label above each turn names them.
+   There is no rule down the leading edge — this console does not use one. */
 .st-turn p {
   padding-left: var(--ops-space-3);
-  border-left: 2px solid var(--ops-line);
 }
 
 .st-turn-bot {
   color: var(--text-2);
-  border-left-color: color-mix(in srgb, var(--ops-series-1) 55%, transparent);
 }
 
 .st-turn-who {
   display: block;
-  font-size: 10px;
-  font-weight: var(--ops-weight-bold);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-normal);
   letter-spacing: var(--ops-tracking-caps);
   text-transform: uppercase;
   color: var(--text-3);
@@ -362,13 +360,10 @@
 .st-field {
   display: block;
   padding-left: var(--ops-space-3);
-  border-left: 3px solid var(--ops-line);
 }
 
-/* One of these reaches the taxpayer and the other never does. The edge colour
-   carries that difference at a glance; the label states it in words. */
-.st-field.is-outbound { border-left-color: var(--ops-series-1); }
-.st-field.is-internal { border-left-color: var(--text-3); }
+/* One of these reaches the taxpayer and the other never does. That was an edge
+   colour; it is the label's job now — `.st-field-label` states it in words. */
 
 .st-field-label {
   display: block;
@@ -414,10 +409,6 @@
   font-size: var(--ops-text-xs);
   line-height: var(--ops-lh-normal);
   color: var(--text-2);
-}
-
-.st-note {
-  border-left: 3px solid var(--text-3);
 }
 
 .st-save-ok  { font-size: var(--ops-text-xs); color: var(--ops-good); }

@@ -22,6 +22,19 @@
  * ============================================================================ */
 
 :root {
+  /* ── Families ─────────────────────────────────────────────────────────────
+     IBM Plex, self-hosted from `app/fonts` and wired up in `app/layout.tsx`.
+     Chosen as a designed pair: Plex Sans was drawn for interfaces where the
+     data has to be read exactly (1/l/I and 0/O are unambiguous, and the figures
+     are tabular), and Plex Mono is its sibling rather than an assembled match.
+
+     The console had no family token at all before this — it inherited the local
+     stack from globals.css, so the type depended on the officer's machine. The
+     fallbacks below are the previous stack, so a missing file degrades to what
+     the console rendered yesterday rather than to Times. */
+  --ops-font-sans: var(--font-plex-sans), "Segoe UI", "Aptos", "Avenir Next", system-ui, sans-serif;
+  --ops-font-mono: var(--font-plex-mono), "Cascadia Code", "SFMono-Regular", "Fira Code", monospace;
+
   /* ── Type ramp ────────────────────────────────────────────────────────────
      Eight steps, whole pixels. Replaces the 10 / 10.5 / 11 / 11.5 / 12 / 12.5 /
      13 / 13.5 / 14.5 … ladder that had accumulated across the staff files. */
@@ -38,14 +51,25 @@
   --ops-lh-snug:   1.4;
   --ops-lh-normal: 1.55;
 
-  /* Four weights. 650 and 800 are synthesised by the Aptos / Avenir stack and
-     snap to 700 unevenly across engines, so they are not in the scale. */
+  /* Five weights, every one a real master in the shipped subsets — nothing here
+     is synthesised. `light` is Plex Mono only: it is the metadata voice (see
+     `.ops-meta` in ops.css), not a body weight, and Plex Sans 300 is not
+     shipped precisely so it cannot be reached for by accident.
+
+     `--ops-weight-reg` is an alias for `normal`. It is not a new idea: ops.css
+     referenced it in two places for months without it ever being defined, so
+     both declarations were invalid and silently inherited instead of
+     de-emphasising. Defining it fixes those two rules. */
+  --ops-weight-light:  300;
   --ops-weight-normal: 400;
+  --ops-weight-reg:    var(--ops-weight-normal);
   --ops-weight-medium: 500;
   --ops-weight-semi:   600;
   --ops-weight-bold:   700;
 
-  --ops-tracking-caps: 0.04em;
+  --ops-tracking-caps:  0.04em;
+  --ops-tracking-meta:  0.06em;
+  --ops-tracking-tight: -0.01em;
 
   /* ── Space — 4pt grid ─────────────────────────────────────────────────── */
   --ops-space-1:  4px;
@@ -57,6 +81,14 @@
   --ops-space-8:  32px;
   --ops-space-10: 40px;
   --ops-space-12: 48px;
+  --ops-space-16: 64px;
+
+  /* Gutter between two panels that each carry their own border. 12px read as
+     crowding because the two borders sit 12px apart; 20px is the first step
+     where they read as separate objects. */
+  --ops-gutter: var(--ops-space-5);
+  /* Vertical rhythm between the major bands of a page. */
+  --ops-band:   var(--ops-space-8);
 
   /* ── Radii ────────────────────────────────────────────────────────────── */
   --ops-radius-xs:   6px;
@@ -78,15 +110,67 @@
   --ops-line:         var(--border-1);
   --ops-line-strong:  var(--border-2);
 
+  /* ── Scrollbars ───────────────────────────────────────────────────────────
+     The thumb only. globals.css paints one in URA blue-to-teal, which on a
+     console panel reads as a live element rather than a scroll position — the
+     bar down the right of the case pane was the brightest thing on it. Here it
+     is the same neutral as a strong border, and it only appears on hover. */
+  --ops-scroll-thumb:       var(--border-2);
+  --ops-scroll-thumb-hover: var(--text-3);
+
   /* ── Elevation ────────────────────────────────────────────────────────── */
   --ops-elev-1: var(--shadow-sm);
   --ops-elev-2: var(--shadow-md);
   --ops-elev-3: var(--shadow-lg);
 
+  /* ── Glass ────────────────────────────────────────────────────────────────
+     The material for console chrome. Five ingredients, not one blur:
+
+       bg    a top-lit gradient, not a flat wash — glass is brighter where the
+             light enters it
+       line  the boundary
+       blur  blur AND saturate. Blur alone desaturates whatever is behind, so a
+             panel over the navy/teal mesh goes grey; pushing saturation back up
+             is what keeps the colour alive under the pane
+       spec  the specular edge. This single inset hairline is what separates
+             "glass" from "translucent grey box"
+       cast  the shadow the pane throws
+
+     Applied through `.ops-glass` in ops.css, and only to chrome — rail, sticky
+     headers, palette, stat tiles, notes. Never behind a queue row, a table or a
+     chart plot: text over a blurred, moving backdrop is harder to read, and an
+     ops console is read under time pressure. */
+  --ops-glass-bg: linear-gradient(
+                    150deg,
+                    rgba(255, 255, 255, 0.11) 0%,
+                    rgba(255, 255, 255, 0.04) 46%,
+                    rgba(255, 255, 255, 0.015) 100%);
+  --ops-glass-line: rgba(255, 255, 255, 0.16);
+  --ops-glass-blur: blur(22px) saturate(165%);
+  --ops-glass-spec: inset 0 1px 0 rgba(255, 255, 255, 0.22),
+                    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  --ops-glass-cast: 0 16px 40px rgba(0, 0, 0, 0.34);
+  /* A deeper cast for a pane that should read as floating clear of the page
+     rather than lying on it — two shadows, because one soft blur alone reads as
+     fog: a near contact shadow anchors the edge, a far one lifts the whole. */
+  --ops-glass-cast-lift: 0 2px 6px rgba(0, 0, 0, 0.22),
+                         0 28px 64px rgba(0, 0, 0, 0.42);
+  /* What every glass surface falls back to where backdrop-filter is refused,
+     or where the reader has asked for less transparency. */
+  --ops-glass-solid: var(--ops-panel);
+
+  /* ── Skeleton ─────────────────────────────────────────────────────────────
+     A static grey block reads as broken; the same block with a gradient pass
+     reads as working. Both are doing nothing — one of them says so. */
+  --ops-skeleton-base: var(--surface-2);
+  --ops-skeleton-hi:   var(--surface-4);
+
   /* ── Motion ───────────────────────────────────────────────────────────── */
-  --ops-ease:      cubic-bezier(0.2, 0, 0.15, 1);
-  --ops-dur-fast:  110ms;
-  --ops-dur-base:  180ms;
+  --ops-ease:        cubic-bezier(0.2, 0, 0.15, 1);
+  --ops-dur-fast:    110ms;
+  --ops-dur-base:    180ms;
+  --ops-dur-slow:    320ms;
+  --ops-dur-shimmer: 1500ms;
 
   /* ── Focus ────────────────────────────────────────────────────────────── */
   --ops-focus-ring: 2px;
@@ -123,7 +207,6 @@
   --ops-warn-ink: var(--ops-warn);
   --ops-bad-ink:  var(--ops-bad);
   --ops-info-ink: var(--ops-info);
-  --ops-role-ink: var(--ura-teal-light);
   --ops-good-fill: color-mix(in srgb, var(--ops-good) var(--ops-tint), transparent);
   --ops-good-line: color-mix(in srgb, var(--ops-good) 38%, transparent);
   --ops-warn-fill: color-mix(in srgb, var(--ops-warn) var(--ops-tint), transparent);
@@ -183,6 +266,29 @@
 }
 
 :root[data-theme="light"] {
+  /* Glass, rebuilt for a light ground rather than inverted.
+
+     On dark, glass is a white film over a dark backdrop. On light, the same
+     recipe produces a washed-out smear: the film and the backdrop are both
+     bright, so the boundary disappears. The light instance is therefore a
+     denser white with a near-opaque top edge and a much softer cast — the pane
+     reads as frosted rather than tinted, and the border does the separating
+     that the shadow does on dark. Text contrast is unchanged either way,
+     because glass never sits behind body copy. */
+  --ops-glass-bg: linear-gradient(
+                    150deg,
+                    rgba(255, 255, 255, 0.82) 0%,
+                    rgba(255, 255, 255, 0.62) 100%);
+  --ops-glass-line: rgba(15, 23, 42, 0.10);
+  --ops-glass-blur: blur(22px) saturate(135%);
+  --ops-glass-spec: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  --ops-glass-cast: 0 12px 32px rgba(15, 23, 42, 0.10);
+  --ops-glass-cast-lift: 0 2px 6px rgba(15, 23, 42, 0.08),
+                         0 24px 56px rgba(15, 23, 42, 0.16);
+
+  --ops-skeleton-base: rgba(15, 23, 42, 0.06);
+  --ops-skeleton-hi:   rgba(15, 23, 42, 0.13);
+
   /* Light steps of the same eight hues — selected for the light surface, not
      an automatic flip of the dark column. */
   --ops-series-1: #2a78d6;

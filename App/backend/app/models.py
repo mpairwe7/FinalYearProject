@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -13,6 +13,9 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="User message text")
     conversation_id: str | None = Field(
         None,
+        validation_alias=AliasChoices(
+            "conversation_id", "thread_id", "conversationId", "session_id", "sessionId"
+        ),
         pattern=r"^[a-zA-Z0-9_-]{1,64}$",
         description="Optional conversation/session id",
     )
@@ -27,6 +30,8 @@ class ChatRequest(BaseModel):
         max_length=3,
         description="Ids of analysed documents (POST /v1/documents/analyze) to ground this turn",
     )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
 class Citation(BaseModel):
@@ -179,6 +184,60 @@ class FeedbackResponse(BaseModel):
 
 class FeedbackCommentRequest(BaseModel):
     comment: str = Field(..., min_length=1, max_length=1000, description="Follow-up comment text")
+
+
+# ---------------------------------------------------------------------------
+# Escalation (taxpayer-initiated)
+# ---------------------------------------------------------------------------
+class EscalationRequest(BaseModel):
+    """A taxpayer asking for a person.
+
+    Every other route into the ticket queue is a decision the system makes on
+    the taxpayer's behalf — the supervisor's ESCALATE route, the response
+    judge, the ``escalate_to_human`` tool the model may call. Someone who has
+    decided the assistant cannot help them had no way to say so, which is the
+    gap this request closes.
+
+    ``conversation_id`` is what makes the ticket worth anything: it is how the
+    officer gets the transcript, and how their reply finds its way back into
+    this conversation. Optional, because a taxpayer can ask for a person
+    before saying anything at all.
+    """
+
+    conversation_id: str | None = Field(
+        None,
+        validation_alias=AliasChoices(
+            "conversation_id", "thread_id", "conversationId", "session_id", "sessionId"
+        ),
+        pattern=r"^[a-zA-Z0-9_-]{1,64}$",
+        description="Conversation to attach the transcript to and deliver the reply into",
+    )
+    session_id: str | None = Field(None, max_length=128)
+    reason: str = Field(
+        "",
+        max_length=1000,
+        description="What the taxpayer needs, in their own words. Shown to the officer.",
+    )
+    # No `priority` field, deliberately. Self-declared urgency is not urgency,
+    # and a queue where every taxpayer can mark their own ticket "urgent"
+    # stops sorting anything. Staff re-prioritise from the officer console.
+    locale: str = Field(
+        "en",
+        pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
+        description="Language to acknowledge in",
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class EscalationResponse(BaseModel):
+    ok: bool = Field(..., description="False when the queue is off; see `message`")
+    ticket_id: str = Field("", description="Reference to quote when contacting URA")
+    status: str = Field("", description="open | queue_disabled | failed")
+    reused_existing: bool = Field(
+        False, description="True when this conversation already had an open ticket"
+    )
+    message: str = Field(..., description="What happens next, in the taxpayer's language")
 
 
 class FeedbackSummary(BaseModel):

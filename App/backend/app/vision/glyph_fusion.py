@@ -78,7 +78,37 @@ def extract_page_vector_glyphs(
     glyphs: list[VectorGlyph] = []
     scale = dpi / 72.0
 
-    # 1. Try pdfplumber (MIT) for word-level bounding boxes
+    # 1. Try PyMuPDF (fitz) for word-level bounding boxes
+    try:
+        import fitz
+
+        with fitz.open(stream=pdf_data, filetype="pdf") as doc:
+            if 0 <= page_index < len(doc):
+                page = doc[page_index]
+                words = page.get_text("words") or []
+                for w in words:
+                    text = str(w[4]).strip()
+                    if not text:
+                        continue
+                    x0 = float(w[0]) * scale
+                    top = float(w[1]) * scale
+                    x1 = float(w[2]) * scale
+                    bottom = float(w[3]) * scale
+                    glyphs.append(
+                        VectorGlyph(
+                            text=text,
+                            bbox=[x0, top, x1, bottom],
+                            page=page_index + 1,
+                            confidence=1.0,
+                            source="vector_glyph",
+                        )
+                    )
+                if glyphs:
+                    return glyphs
+    except Exception as fitz_err:
+        logger.debug("fitz word extraction failed on page %d: %s", page_index, fitz_err)
+
+    # 2. Try pdfplumber (MIT) for word-level bounding boxes
     try:
         import pdfplumber
 

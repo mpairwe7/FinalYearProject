@@ -5,6 +5,7 @@ import '../styles/chatv2/index.css';
 // tokens can build on the theme tokens defined there.
 import '../styles/ops/index.css';
 import type { Metadata, Viewport } from 'next';
+import localFont from 'next/font/local';
 import React from 'react';
 import ConsentBanner from '../components/ConsentBanner';
 import Providers from '../components/Providers';
@@ -13,6 +14,60 @@ import { THEME_INIT_SCRIPT } from '../lib/theme';
 import { SIDEBAR_INIT_SCRIPT } from '../lib/sidebarMode';
 
 import OfflineBanner from '../components/OfflineBanner';
+
+/**
+ * Console typography — IBM Plex, self-hosted.
+ *
+ * The staff console had no font of its own: it inherited the local stack in
+ * `globals.css` ("Aptos", "Avenir Next", …), so the console an officer saw
+ * depended on which fonts their machine happened to ship. Aptos is Windows,
+ * Avenir Next is macOS, and neither carries a Light master — so the thin
+ * metadata treatment this design calls for could not exist at all.
+ *
+ * The files are vendored under `src/app/fonts` rather than fetched, because
+ * `globals.css` states the build must not reach the network for type. Both
+ * families are SIL OFL 1.1 (see `fonts/LICENSE.txt`) and the subsets are latin
+ * only — 104KB for the five faces.
+ *
+ * These are exposed as CSS variables and consumed by `--ops-font-*` in
+ * `styles/ops/tokens.css`. The taxpayer chat is deliberately NOT switched over:
+ * `AGENTS.md` treats the two surfaces separately and the chat has had its own
+ * design pass.
+ */
+const plexSans = localFont({
+  src: [
+    { path: './fonts/IBMPlexSans-Regular.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/IBMPlexSans-Medium.woff2', weight: '500', style: 'normal' },
+    { path: './fonts/IBMPlexSans-SemiBold.woff2', weight: '600', style: 'normal' },
+  ],
+  variable: '--font-plex-sans',
+  display: 'swap',
+  // Matched against the Segoe UI / system fallback so the swap does not reflow.
+  fallback: ['Segoe UI', 'system-ui', 'sans-serif'],
+  adjustFontFallback: false,
+  // NOT preloaded. The variables are declared on <html> in the root layout, so
+  // Next emits a preload for every face on every route — including `/`, the
+  // taxpayer chat, which never renders a glyph in either family. That is 104KB
+  // fetched at preload priority on the highest-traffic public page to no
+  // effect, and it counts against the Lighthouse performance budget in
+  // lighthouserc.json. Without preload the console fetches each face when the
+  // CSS first matches; `display: swap` covers the gap and the fallback stack
+  // above is the console's previous type, so the worst case is what shipped
+  // yesterday for a few hundred milliseconds.
+  preload: false,
+});
+
+const plexMono = localFont({
+  src: [
+    { path: './fonts/IBMPlexMono-Light.woff2', weight: '300', style: 'normal' },
+    { path: './fonts/IBMPlexMono-Regular.woff2', weight: '400', style: 'normal' },
+  ],
+  variable: '--font-plex-mono',
+  display: 'swap',
+  fallback: ['Cascadia Code', 'SFMono-Regular', 'monospace'],
+  adjustFontFallback: false,
+  preload: false, // see plexSans
+});
 
 /**
  * Canonical origin for absolute URLs in metadata.
@@ -103,7 +158,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`} suppressHydrationWarning>
       <body>
         {/* Set the theme attribute before paint to avoid a flash. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

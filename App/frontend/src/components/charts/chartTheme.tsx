@@ -47,6 +47,146 @@ export const STATUS_MARK = {
   critical: "var(--ops-mark-critical)",
 } as const;
 
+/**
+ * Plain-language layer.
+ *
+ * The charts were already accurate and already accessible; what they were not
+ * was *readable by the people who run the service*. A dashboard captioned
+ * "Chat p95 latency", "retrieval_mode = hybrid" and "SLO 2s" answers questions
+ * only an engineer knows how to ask, and the reader who most needs it — a
+ * supervisor deciding whether the assistant is serving taxpayers well — cannot
+ * get a single fact out of it without being told what a quantile is.
+ *
+ * The rule applied throughout: **name the thing in words, and say what the
+ * number means.** The technical term is kept as a secondary line wherever an
+ * engineer would otherwise lose the thread, never as the primary label.
+ */
+
+/** Seconds, when milliseconds are a unit nobody thinks in. */
+export function plainSeconds(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  if (ms < 1000) return `${Math.round(ms)} milliseconds`;
+  const seconds = ms / 1000;
+  return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} seconds`;
+}
+
+/** Compact form for an axis or a tile, same rounding as `plainSeconds`. */
+export function shortSeconds(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = ms / 1000;
+  return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+}
+
+/**
+ * The quantiles, as the sentences they actually mean.
+ *
+ * "p95" is not a hard idea, it is an unexplained one: nobody reading a service
+ * report has to be taught "19 out of 20 answers arrive faster than this", and
+ * everybody has to be taught what the 95th percentile is.
+ */
+export const QUANTILE_LABEL = {
+  p50: "Half are faster",
+  p95: "19 in 20 are faster",
+  p99: "99 in 100 are faster",
+} as const;
+
+/** The technical name, kept for the reader who came looking for it. */
+export const QUANTILE_TERM = { p50: "p50", p95: "p95", p99: "p99" } as const;
+
+/**
+ * How an answer was produced, in words.
+ *
+ * These strings are the `retrieval_mode` values the backend records. Shown
+ * raw, the pie read "hybrid 62%, keyword 21%, abstained 9%" — three words a
+ * taxpayer-service manager has no reason to know, describing the single most
+ * useful thing on the page.
+ */
+export const RETRIEVAL_MODE_LABEL: Record<string, string> = {
+  hybrid: "Found in URA documents",
+  hybrid_corrected: "Found after a second search",
+  keyword: "Found by keyword match only",
+  abstained: "Declined — nothing reliable found",
+  blocked: "Blocked as unsafe or out of scope",
+  escalated: "Passed to a URA officer",
+  clarification: "Asked the taxpayer a follow-up",
+  workflow: "Guided step-by-step",
+  calculator: "Calculated an amount",
+  officer_reply: "Delivered an officer's reply",
+  answer_override: "Used a staff-written answer",
+};
+
+export function retrievalModeLabel(mode: string): string {
+  return RETRIEVAL_MODE_LABEL[mode] ?? mode.replaceAll("_", " ");
+}
+
+/**
+ * The evaluation metrics, in words.
+ *
+ * These eight names are the RAG-evaluation literature's, and on a page whose
+ * purpose is to show a non-specialist whether the assistant is trustworthy,
+ * "context_precision 1.00 · abstention_precision 0.75" is a wall. Each one is
+ * a plain question about the assistant's behaviour, and asking the question is
+ * shorter than the term.
+ */
+export const EVAL_METRIC: Record<string, { label: string; short: string; meaning: string }> = {
+  faithfulness: {
+    label: "Sticks to the documents",
+    short: "Sticks to documents",
+    meaning: "How much of each answer is actually stated in the URA documents behind it.",
+  },
+  answer_relevancy: {
+    label: "Answers the question asked",
+    short: "Answers the question",
+    meaning: "Whether the reply addresses what the taxpayer asked, rather than a related topic.",
+  },
+  context_precision: {
+    label: "Finds the right documents",
+    short: "Right documents",
+    meaning: "How much of what the search pulled up was actually relevant.",
+  },
+  context_recall: {
+    label: "Finds all the documents",
+    short: "All documents",
+    meaning: "How much of the material needed to answer was found at all.",
+  },
+  groundedness: {
+    label: "Backs up what it says",
+    short: "Backed up",
+    meaning: "Whether each statement can be traced to a specific passage.",
+  },
+  citation_accuracy: {
+    label: "Cites the right source",
+    short: "Right source",
+    meaning: "Whether the source an answer points at really says what the answer claims.",
+  },
+  safety_probe_pass_rate: {
+    label: "Refuses unsafe requests",
+    short: "Refuses unsafe",
+    meaning: "Share of deliberate attempts to make it give harmful or illegal advice that it turned down.",
+  },
+  abstention_precision: {
+    label: "Says when it does not know",
+    short: "Admits not knowing",
+    meaning: "Whether it declines for the right reason, rather than declining questions it could have answered.",
+  },
+};
+
+export function evalMetricLabel(name: string): string {
+  return EVAL_METRIC[name]?.label ?? name.replaceAll("_", " ");
+}
+
+/**
+ * One sentence under a chart saying what the reader is looking at.
+ *
+ * Not a tooltip and not a `details` block: an explanation the reader has to
+ * discover is an explanation for people who already know. This is always
+ * visible and always short — if it needs a paragraph, the chart is wrong.
+ */
+export function ChartNote({ children }: { children: React.ReactNode }) {
+  return <p className="ops-chart-note">{children}</p>;
+}
+
 export const AXIS_TICK = { fill: "var(--ops-axis-text)", fontSize: 11 } as const;
 export const AXIS_TICK_SM = { fill: "var(--ops-axis-text)", fontSize: 10 } as const;
 export const GRID_STROKE = "var(--ops-grid)";

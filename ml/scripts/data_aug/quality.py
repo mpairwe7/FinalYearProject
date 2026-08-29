@@ -42,7 +42,9 @@ class QualityConfig:
 
     # Optional FineWeb-Edu style learned quality classifier. When set, we
     # load the classifier from disk and drop rows below ``quality_threshold``.
-    # See ``ml/scripts/train_quality_classifier.py`` for training.
+    # The training script for this classifier was removed with the rest of
+    # ml/'s training-only tooling; this path only works with a pre-trained
+    # joblib artifact supplied some other way.
     quality_classifier_path: Path | None = None
     quality_threshold: float | None = None  # overrides the model's own default
 

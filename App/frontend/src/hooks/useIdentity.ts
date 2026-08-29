@@ -16,10 +16,12 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   clearAuthToken,
+  getAuthMethod,
   getAuthToken,
   getServerAuthToken,
   subscribeAuthToken,
 } from "../lib/authSession";
+import { endOidcSession } from "../lib/oidcFlow";
 import { isStaffRole, roleLabel } from "../lib/roles";
 import { accountApi, ApiError, type Identity } from "../services/accountApi";
 
@@ -88,12 +90,24 @@ export function useIdentity(): IdentityState {
   }, [queryClient]);
 
   const signOut = useCallback(() => {
+    // Read the method BEFORE clearing — clearAuthToken drops it too.
+    const method = getAuthMethod();
     clearAuthToken();
     // Drop the identity and everything derived from it, so no panel keeps
     // rendering the previous person's data until its own staleTime expires.
     queryClient.removeQueries({ queryKey: ["me"] });
     queryClient.removeQueries({ queryKey: ["profile"] });
     queryClient.removeQueries({ queryKey: ["consents"] });
+    // Then end the session at the provider, which is the half that was
+    // missing. Dropping the token here only made THIS APPLICATION forget who
+    // you were; the provider's own cookie survived, so the next sign-in was
+    // answered silently from it and handed back the same account — reported
+    // as "when I want to sign in as another user it just signs me in the
+    // older account". A dev token has no provider behind it, so it stays
+    // local; and a provider that publishes no end_session_endpoint returns
+    // false and this stays local too, which is the previous behaviour rather
+    // than a broken redirect.
+    if (method !== "dev") endOidcSession();
   }, [queryClient]);
 
   return useMemo(() => {

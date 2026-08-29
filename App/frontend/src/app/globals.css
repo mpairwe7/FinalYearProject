@@ -165,8 +165,14 @@
   --text-0:      #0B1220;
   --text-1:      #28303B;
   --text-2:      #55606E;
-  /* Muted small labels must still clear 4.5:1 on the #F5F7FA canvas. */
-  --text-3:      #66717D;
+  /* Muted small labels must still clear 4.5:1 — and the canvas is the easy
+     case. This tone is mostly rendered on a panel, not on bare #F5F7FA: the
+     surface-1..3 washes sit 6-16 ink units darker, and #66717D cleared AA on
+     the canvas (4.63) while failing on every one of them (4.40 / 4.24 / 4.02).
+     That is what the a11y suite caught on .ov-list-meta over an .ov-list-item.
+     This value clears 4.5:1 on all four (5.28 / 5.01 / 4.84 / 4.58) and stays a
+     visible step quieter than --text-2. */
+  --text-3:      #5E6873;
 
   /* Deep blue accent for data UIs reads better than the bright on white. */
   --accent-data: var(--ura-blue);
@@ -906,6 +912,74 @@ main {
   color: rgba(253, 224, 71, 0.88);
 }
 .escalation-contacts .md-link { white-space: nowrap; }
+
+/* -----------------------------------------------------------------------------
+   Human handoff — "Talk to a URA officer"
+
+   Shown only where the assistant has actually failed the taxpayer (see
+   needsHuman in ChatMessage), so it is styled as an offered action rather than
+   a warning: the warning above it has already been made, and repeating the
+   alarm would bury the one thing on screen that is useful.
+   -------------------------------------------------------------------------- */
+.handoff {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.handoff-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong, rgba(148, 163, 184, 0.35));
+  background: var(--surface-2, rgba(148, 163, 184, 0.08));
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.handoff-btn:hover:not(:disabled) {
+  background: var(--surface-3, rgba(148, 163, 184, 0.16));
+  border-color: var(--ura-teal, #00a88f);
+}
+.handoff-btn:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--ura-teal, #00a88f));
+  outline-offset: 2px;
+}
+.handoff-btn:disabled { cursor: progress; opacity: 0.75; }
+.handoff-btn svg { width: 14px; height: 14px; flex: none; }
+
+.handoff-msg {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-2, inherit);
+}
+.handoff-failed { color: var(--danger, #ef4444); }
+
+/* The receipt. A request that leaves no reference reads as not having
+   happened, and it is what a taxpayer quotes if they do phone the centre. */
+.handoff-queued {
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0, 168, 143, 0.32);
+  background: rgba(0, 168, 143, 0.09);
+}
+.handoff-ref {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-2, inherit);
+}
+.handoff-ref code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+}
 
 /* -----------------------------------------------------------------------------
    Composer (floating input)
@@ -1797,8 +1871,8 @@ main {
   right: auto;
   z-index: 200;
   width: min(85vw, 320px);
-  background: var(--bg-1);
-  border-right: 1px solid var(--border-1);
+  background: var(--bg-0);
+  border-right: 1px solid var(--border-0);
   /* Clear the safe-area inset as well as the panel's own width. `left` holds
      this 12px off the edge, so a plain -100% parks its right edge at exactly
      12px — leaving a sliver of the drawer on screen at all times. That went

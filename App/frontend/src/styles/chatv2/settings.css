@@ -653,7 +653,7 @@
      lands on the home indicator unless the inset is reserved. */
   padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border-0);
-  background: var(--bg-1);
+  background: transparent;
 }
 
 .chatv2 .rail-acct-cta {

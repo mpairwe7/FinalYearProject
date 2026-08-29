@@ -7,6 +7,191 @@
  * more than one staff page lives here instead of being copied.
  * ============================================================================ */
 
+/* ── Families ─────────────────────────────────────────────────────────────────
+   Scoped to the console shell and the page, deliberately. Setting the family on
+   `body` would restyle the taxpayer chat, which is a separate surface with its
+   own design pass (see AGENTS.md). `.staff-shell` covers the rail and the gate;
+   `.ops-page` covers the eight routes' content.
+
+   `font-variant-numeric` is set here rather than per-component: this is a
+   console about counts, durations and SLA clocks, and proportional figures
+   make a column of them ripple. Anything that should NOT be tabular has to say
+   so, which is the right way round. */
+.staff-shell,
+.ops-page,
+.staff-gate {
+  font-family: var(--ops-font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Scrollbars ───────────────────────────────────────────────────────────────
+   Present only while the pane is being used.
+
+   globals.css paints every scrollbar in a URA blue-to-teal gradient. On the
+   taxpayer chat that is a nice touch; on a console panel it is the brightest
+   thing in the frame — the case pane's bar read as a status indicator rather
+   than a scroll position, and it was drawn permanently whether or not anyone
+   was in that pane. So: the gutter is always reserved (nothing reflows), the
+   thumb is invisible until the pointer or the keyboard is in the scrolling
+   element, and it is then the same neutral as a strong border.
+
+   Scoped to the console shell — `*` reaches nested panes (the queue, the case,
+   the transcript, the reply boxes, the rail) without each one restating this.
+
+   Two mechanisms, and the order matters: from Chrome 121 an element that sets
+   `scrollbar-width` or `scrollbar-color` opts out of `::-webkit-scrollbar`
+   styling entirely, so on Chrome and Edge it is the standard properties at the
+   bottom of this block that do the work — `thin` is also what drops the stepper
+   arrows there. The `::-webkit-` rules are the Safari path (it implements
+   neither standard property) and the pre-121 Chromium path. Keep the two in
+   agreement: same hidden default, same hover colour. */
+.staff-shell ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.staff-shell ::-webkit-scrollbar-track,
+.staff-shell ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* The stepper arrows at each end — a Windows affordance nobody reaches for on a
+   trackpad or a wheel, and two chevrons in the accent gradient were most of what
+   made this bar loud. (Chrome gets the same result from `scrollbar-width: thin`
+   below; this is for Safari.) */
+.staff-shell ::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* `background-clip: padding-box` behind a transparent border is what insets the
+   thumb from the panel edge — a 10px gutter with a 4px thumb floating in it,
+   rather than a bar welded to the border. */
+.staff-shell ::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--ops-radius-pill);
+  transition: background-color var(--ops-dur-fast) var(--ops-ease);
+}
+
+.staff-shell *:hover::-webkit-scrollbar-thumb,
+.staff-shell *:focus-within::-webkit-scrollbar-thumb {
+  background-color: var(--ops-scroll-thumb);
+}
+
+.staff-shell *:hover::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ops-scroll-thumb-hover);
+}
+
+/* Firefox has no thumb pseudo-element, so the same two states are expressed
+   with `scrollbar-color`. `thin` also suppresses the stepper arrows there. */
+.staff-shell * {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.staff-shell *:hover,
+.staff-shell *:focus-within {
+  scrollbar-color: var(--ops-scroll-thumb) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .staff-shell ::-webkit-scrollbar-thumb { transition: none; }
+}
+
+/* ── The metadata voice ───────────────────────────────────────────────────────
+   Plex Mono Light. Used for the things that describe the data rather than being
+   the data: eyebrows, timestamps, freshness stamps, column labels, wait
+   figures. It is quiet enough to recede at 11px and monospaced, so a stack of
+   timestamps or durations lines up on its own.
+
+   This is one class rather than a repeated declaration because the treatment
+   has to stay identical across five stylesheets — that consistency IS the
+   effect. Anything that reads as a label wears it. */
+.ops-meta,
+.ops-eyebrow,
+.ops-stat-label,
+.ops-fresh,
+.ops-chart-sub,
+.ops-legend,
+.staff-rail-group-label,
+.sla-strip dt,
+.st-turn-who,
+.tickets-filter-label {
+  font-family: var(--ops-font-mono);
+  font-weight: var(--ops-weight-light);
+  letter-spacing: var(--ops-tracking-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Figures wear the same face and weight, but none of the tracking. Letter-space
+   is what makes a short uppercase label read as a label; on a row of monospaced
+   digits it just prises them apart — "3h 17m" came out looking like two
+   separate numbers. */
+.ops-figure,
+.st-row-wait,
+.an-when,
+.ops-kbd {
+  font-family: var(--ops-font-mono);
+  font-weight: var(--ops-weight-light);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Glass ────────────────────────────────────────────────────────────────────
+   One class, applied only to chrome. See the token block in tokens.css for why
+   this is five ingredients rather than a blur.
+
+   `contain: paint` is not optional. A backdrop filter rasterises everything
+   behind the element, and this console can have a rail, a page header, six stat
+   tiles and a note on screen at once; without containment each one re-rasterises
+   on every scroll frame and interaction latency goes with it. */
+.ops-glass,
+.ops-panel.is-glass,
+.ops-stat {
+  background: var(--ops-glass-bg);
+  border: 1px solid var(--ops-glass-line);
+  box-shadow: var(--ops-glass-spec), var(--ops-glass-cast);
+  contain: paint;
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ops-glass,
+  .ops-panel.is-glass,
+  .ops-stat {
+    -webkit-backdrop-filter: var(--ops-glass-blur);
+    backdrop-filter: var(--ops-glass-blur);
+  }
+}
+
+/* Where the backdrop cannot be filtered, the gradient alone is a grey haze over
+   whatever is behind it — worse than no effect. Fall back to the solid panel. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ops-glass,
+  .ops-panel.is-glass,
+  .ops-stat {
+    background: var(--ops-glass-solid);
+    border-color: var(--ops-line);
+    box-shadow: var(--ops-elev-1);
+  }
+}
+
+/* A reader who has asked their OS for less transparency has usually asked
+   because layered translucency is hard for them to parse. Honour it. */
+@media (prefers-reduced-transparency: reduce) {
+  .ops-glass,
+  .ops-panel.is-glass,
+  .ops-stat {
+    background: var(--ops-glass-solid);
+    border-color: var(--ops-line);
+    box-shadow: var(--ops-elev-1);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 /* ── Page shell ───────────────────────────────────────────────────────────── */
 
 .ops-page {
@@ -37,22 +222,22 @@
   min-width: 0;
 }
 
+/* Weight and tracking come from the `.ops-meta` block above — the eyebrow is
+   part of that voice. Only what is specific to it is set here. */
 .ops-eyebrow {
   display: block;
-  margin-bottom: var(--ops-space-1);
+  margin-bottom: var(--ops-space-2);
   font-size: var(--ops-text-2xs);
-  font-weight: var(--ops-weight-semi);
-  letter-spacing: var(--ops-tracking-caps);
   text-transform: uppercase;
   color: var(--text-3);
 }
 
 .ops-page-head h1 {
   margin: 0;
-  font-size: var(--ops-text-lg);
+  font-size: var(--ops-text-xl);
   line-height: var(--ops-lh-tight);
-  font-weight: var(--ops-weight-bold);
-  letter-spacing: -0.01em;
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-tight);
   color: var(--text-0);
 }
 
@@ -148,6 +333,104 @@
   color: var(--text-2);
 }
 
+/* A panel with the card taken off.
+
+   A card says "this is one object among several". The overview's three lower
+   sections are not that — they are the page's own content, and boxing each of
+   them put three borders, three surfaces and three sets of inner padding
+   between the reader and four numbers. Bare, they sit on the page at the same
+   left edge as the page title, and what separates them is a rule under each
+   heading plus real space below, which is what separation is for.
+
+   Opt in per panel (`bare`), never by default: a table beside a chart, or one
+   of a row of equals, still needs its own edges. */
+.ops-panel.is-bare {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* The heading keeps its rule — a horizontal one, under the title, where it
+   reads as "a section starts here" rather than as a box lid. */
+.ops-panel.is-bare .ops-panel-head {
+  padding: 0 0 var(--ops-space-2);
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.ops-panel.is-bare .ops-panel-head h2,
+.ops-panel.is-bare .ops-panel-head h3 {
+  font-size: var(--ops-text-lg);
+}
+
+.ops-panel.is-bare .ops-panel-body,
+.ops-panel.is-bare .ops-panel-body.is-flush {
+  padding: var(--ops-space-4) 0 0;
+}
+
+/* Rows keep their own inline padding so the hover surface has shape, which
+   would otherwise indent their text past the heading. Pulling the list out by
+   that much lines the text up and lets the hover bleed to the section's edges —
+   the usual treatment for a list that is not inside a box. */
+.ops-panel.is-bare .ov-queue {
+  margin-inline: calc(var(--ops-space-3) * -1);
+}
+
+/* The opposite treatment: a panel lifted off the page.
+
+   For the one section on a page that is an *instrument* rather than a reading —
+   something you act in, like the override composer, sitting above the list it
+   writes into. It takes the console's glass material (see `.ops-glass`, whose
+   selector list this joins so the backdrop-filter, the no-backdrop-filter
+   fallback and the reduced-transparency fallback all apply here too) and swaps
+   the standard cast for the deeper two-shadow lift.
+
+   One per page at most. Two things floating is nothing floating. */
+.ops-panel.is-glass {
+  border-radius: var(--ops-radius-lg);
+  box-shadow: var(--ops-glass-spec), var(--ops-glass-cast-lift);
+  overflow: hidden;
+}
+
+/* The head's divider is the panel's own line, not a hairline: on glass a
+   0.5-alpha rule disappears into the gradient. */
+.ops-panel.is-glass .ops-panel-head {
+  padding: var(--ops-space-4) var(--ops-space-5) var(--ops-space-3);
+  border-bottom-color: var(--ops-glass-line);
+}
+
+.ops-panel.is-glass .ops-panel-body {
+  padding: var(--ops-space-5);
+}
+
+/* Inputs sit ON the glass, so they need a surface of their own or the text in
+   them floats over the blurred page behind. */
+.ops-panel.is-glass .ops-input,
+.ops-panel.is-glass .ops-textarea,
+.ops-panel.is-glass .ops-select {
+  background: var(--ops-panel);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ops-panel.is-glass { box-shadow: var(--ops-elev-2); }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ops-panel.is-glass { box-shadow: var(--ops-elev-2); }
+}
+
+/* Sections that are not cards need the page to space them, because they have no
+   edges of their own to do it. A card can sit 20px from its neighbour and still
+   read as a separate object; a heading and a table cannot. Scoped to direct
+   children of `.ops-page` so the same variants nest inside a grid (the
+   overview's two columns) without doubling that grid's gap. */
+.ops-page > .ops-panel.is-bare,
+.ops-page > .ops-panel.is-glass,
+.ops-page > .ops-panel.is-bare + *,
+.ops-page > .ops-panel.is-glass + * {
+  margin-top: var(--ops-band);
+}
+
 /* ── Stat tiles ───────────────────────────────────────────────────────────── */
 
 /* One hairline between tiles instead of a gap and eight borders.
@@ -155,13 +438,20 @@
    neighbours share a single rule and the block reads as one instrument panel
    rather than a scatter of cards. Consequence worth knowing: the tiles must
    NOT carry their own border, or every interior line doubles. */
+/* The column count is declared by the page, not inferred from the tile width.
+   `repeat(auto-fit, minmax(190px, 1fr))` looks adaptive and is not: at the
+   console's 1440px it resolves to five tracks, so /admin's six tiles left one
+   orphaned on a second row — and because the grid painted its own background
+   through a 1px gap, the empty track beside that orphan rendered as a solid
+   ~1000×110px grey slab. Invisible on the dark theme, glaring on the light one.
+
+   Tiles now carry their own border, so the grid paints nothing and an
+   unoccupied track is simply empty. Pages set `--ops-stat-cols` to a number
+   that divides their tile count: /admin 3 (six tiles → 3×2), /analytics 5. */
 .ops-stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 1px;
-  background: var(--ops-line);
-  border: 1px solid var(--ops-line);
-  overflow: hidden;
+  grid-template-columns: repeat(var(--ops-stat-cols, 3), minmax(0, 1fr));
+  gap: var(--ops-space-3);
 }
 
 .ops-stat {
@@ -169,9 +459,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--ops-space-1);
-  padding: var(--ops-space-4);
-  background: var(--ops-panel);
+  padding: var(--ops-space-5);
+  border-radius: var(--ops-radius-md);
   transition: background var(--ops-dur-fast) var(--ops-ease),
+    border-color var(--ops-dur-fast) var(--ops-ease),
     color var(--ops-dur-fast) var(--ops-ease);
 }
 
@@ -180,33 +471,47 @@ a.ops-stat {
   color: inherit;
 }
 
-/* Square, borderless tiles cannot signal hover with a border, so the surface
-   lifts instead — the same cue the console's table rows already use. */
+/* On a dark ground a shadow barely registers, so hover is carried by the
+   border stepping up and the surface lifting — the cue the table rows use. */
 a.ops-stat:hover {
+  border-color: var(--ops-line-strong);
   background: var(--ops-row-hover);
-}
-
-/* A tile outside a grid keeps its own outline, otherwise it floats. */
-.ops-stat-grid > .ops-stat:only-child,
-.ops-stat:not(.ops-stat-grid > *) {
-  border: 1px solid var(--ops-line);
 }
 
 .ops-stat-label {
   font-size: var(--ops-text-2xs);
-  font-weight: var(--ops-weight-semi);
-  letter-spacing: var(--ops-tracking-caps);
   text-transform: uppercase;
   color: var(--text-3);
 }
 
-/* Proportional figures: tabular-nums makes a display-size number look loose. */
+/* Proportional figures: tabular-nums makes a display-size number look loose.
+
+   `min-height` holds one line-box even when the value wraps to two. Without it
+   a tile whose value wrapped ("0 milliseconds") grew taller than its
+   neighbours, and the whole row of labels and hints below went ragged. */
 .ops-stat-value {
   font-size: var(--ops-text-xl);
   line-height: var(--ops-lh-tight);
-  font-weight: var(--ops-weight-bold);
+  min-height: calc(var(--ops-text-xl) * var(--ops-lh-tight));
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-tight);
   color: var(--text-0);
   font-variant-numeric: proportional-nums;
+  text-wrap: balance;
+}
+
+/* The unit is not the measurement. At full value size "0 milliseconds" reads as
+   one long number; stepping the unit down lets the figure carry the tile. This
+   is the treatment `.ops-gauge-unit` already uses. */
+/* The separator is part of the span's text, not a margin — see splitMeasure()
+   in StatCard.tsx, which keeps textContent identical to the string it was
+   handed so the e2e assertions on rendered figures still match. */
+.ops-stat-value .ops-stat-unit {
+  font-size: 0.6em;
+  font-weight: var(--ops-weight-normal);
+  letter-spacing: 0;
+  color: var(--text-2);
+  white-space: pre;
 }
 
 .ops-stat-row {
@@ -222,12 +527,9 @@ a.ops-stat:hover {
   color: var(--text-3);
 }
 
-/* Attention reads as an inset edge, never a wash: the value has to hold AA on
-   the panel colour in both themes. The elevation that used to ride along with
-   these is gone with the tile's own shadow — the grid is flat now. */
-.ops-stat.is-warn   { box-shadow: inset 3px 0 0 var(--ops-warn); }
-.ops-stat.is-danger { box-shadow: inset 3px 0 0 var(--ops-bad); }
-.ops-stat.is-good   { box-shadow: inset 3px 0 0 var(--ops-good); }
+/* No status edge, and no `tone` to set one: a coloured bar down the left of a
+   card is decoration this console does not use. What a tile means is in its
+   label, value and hint. StatCard dropped the prop with the rule. */
 
 .ops-delta {
   display: inline-flex;
@@ -324,6 +626,24 @@ a.ops-stat:hover {
 }
 
 .ops-btn.is-primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* Buttons that are links have to out-specify the global light-theme link rule.
+ *
+ * `globals.css` carries `:root[data-theme="light"] a { color: var(--ura-blue) }`
+ * at specificity (0,2,1). `.ops-btn.is-primary` is (0,2,0), so in light mode the
+ * link version of the primary button lost its white and rendered URA navy — on
+ * the navy end of its own gradient. Measured 1:1. "Open the full queue", the one
+ * call to action on /admin, was invisible text on a blue slab.
+ *
+ * axe did not catch it because contrast checks skip elements with a gradient
+ * background, and the dark theme is unaffected, so nothing flagged it.
+ *
+ * Re-stating these as `a.ops-btn…` matches or beats (0,2,1), and this layer
+ * loads after globals.css, so the tie goes to the more local rule. */
+a.ops-btn { color: var(--text-0); }
+a.ops-btn.is-primary,
+a.ops-btn.is-primary:hover { color: #fff; }
+a.ops-btn.is-ghost { color: var(--text-2); }
 
 .ops-btn.is-ghost {
   background: transparent;
@@ -625,26 +945,35 @@ a.ops-stat:hover {
 /* ── Loading, empty and error states ──────────────────────────────────────── */
 
 /* Skeletons mirror the final layout so nothing shifts when data lands. */
+/* The sweep is the whole point. A static grey block reads as broken; the same
+   block with a gradient passing over it reads as working. Both are doing
+   nothing — one of them says so.
+
+   The gradient is off-centre and eased rather than linear, so the highlight
+   accelerates through and settles, instead of scrolling past at constant speed
+   like a loading bar. */
 .ops-skeleton {
   display: block;
   border-radius: var(--ops-radius-xs);
-  background: linear-gradient(
-    90deg,
-    var(--surface-2) 0%,
-    var(--surface-3) 50%,
-    var(--surface-2) 100%
+  background-color: var(--ops-skeleton-base);
+  background-image: linear-gradient(
+    100deg,
+    transparent 12%,
+    var(--ops-skeleton-hi) 46%,
+    transparent 80%
   );
-  background-size: 200% 100%;
-  animation: ops-shimmer 1.4s linear infinite;
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  animation: ops-shimmer var(--ops-dur-shimmer) cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 @keyframes ops-shimmer {
-  from { background-position: 200% 0; }
-  to   { background-position: -200% 0; }
+  from { background-position: 160% 0; }
+  to   { background-position: -60% 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ops-skeleton { animation: none; }
+  .ops-skeleton { animation: none; background-image: none; }
 }
 
 /* A refetch holds the previous render instead of flashing a skeleton. */
@@ -853,9 +1182,11 @@ a.ops-stat:hover {
   width: 100%;
   max-width: 560px;
   border-radius: var(--ops-radius-lg);
-  border: 1px solid var(--ops-line-strong);
-  background: var(--bg-1);
-  box-shadow: var(--ops-elev-3);
+  border: 1px solid var(--ops-glass-line);
+  background: var(--ops-glass-bg);
+  box-shadow: var(--ops-glass-spec), var(--ops-elev-3);
+  -webkit-backdrop-filter: var(--ops-glass-blur);
+  backdrop-filter: var(--ops-glass-blur);
   overflow: hidden;
 }
 
@@ -930,12 +1261,29 @@ a.ops-stat:hover {
 
 .ops-chart-grid {
   display: grid;
-  gap: var(--ops-space-3);
+  gap: var(--ops-gutter);
   margin-bottom: var(--ops-space-5);
+}
+
+/* A bare section beside a card has no edges of its own, so the grid's own gap
+   is the only thing holding them apart — the console gutter is too tight for
+   that job. Widened for the whole row, or the two halves sit on different
+   rhythms. */
+.ops-chart-grid:has(> .is-bare) {
+  gap: var(--ops-band);
 }
 
 .ops-chart-grid.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .ops-chart-grid.is-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* A grid of three that is handed one card drew it at a third width with two
+   thirds of the row empty — /analytics does exactly this when only the feedback
+   panel has data. A lone child takes the full row instead, and a pair in a
+   three-track grid splits it. */
+.ops-chart-grid.is-3 > :only-child { grid-column: 1 / -1; }
+.ops-chart-grid.is-3 > :first-child:nth-last-child(2),
+.ops-chart-grid.is-3 > :first-child:nth-last-child(2) ~ * { grid-column: span 1; }
+.ops-chart-grid.is-2 > :only-child { grid-column: 1 / -1; }
 
 .ops-chart-card {
   display: flex;
@@ -946,6 +1294,27 @@ a.ops-stat:hover {
   border: 1px solid var(--ops-line);
   border-radius: var(--ops-radius-md);
   box-shadow: var(--ops-elev-1);
+}
+
+/* Same idea as `.ops-panel.is-bare`: the card comes off and the section sits on
+   the page, separated by a rule under its heading and by space below. */
+.ops-chart-card.is-bare {
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ops-chart-card.is-bare .ops-chart-head {
+  padding-bottom: var(--ops-space-2);
+  margin-bottom: var(--ops-space-4);
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.ops-chart-card.is-bare .ops-chart-title {
+  font-size: var(--ops-text-lg);
+  color: var(--text-0);
 }
 
 .ops-chart-head {
@@ -1067,10 +1436,22 @@ a.ops-stat:hover {
 .ops-gauge-dot.is-warn { background: var(--ops-mark-warning); }
 .ops-gauge-dot.is-bad  { background: var(--ops-mark-critical); }
 
-.ops-gauge-note {
+/* The sentence under a chart saying what the reader is looking at.
+   Always visible, never a tooltip: an explanation you have to discover is an
+   explanation for people who already know. Replaces .ops-gauge-note, which was
+   the same idea for gauges only. */
+.ops-chart-note {
   margin: var(--ops-space-2) 0 0;
-  font-size: 10px;
+  font-size: var(--ops-text-2xs);
   line-height: var(--ops-lh-snug);
+  color: var(--text-3);
+  text-wrap: pretty;
+}
+
+/* The technical name kept beside a plain-language title, for the engineer who
+   came looking for it — secondary weight, so it never becomes the label. */
+.ops-chart-term {
+  font-weight: var(--ops-weight-reg);
   color: var(--text-3);
 }
 
@@ -1090,6 +1471,12 @@ a.ops-stat:hover {
   height: 6px;
   min-width: 90px;
   margin: 0;
+  overflow: visible;
+}
+
+/* A meter that shows where its target sits. The marker overhangs the track by
+   3px at each end, which the default `overflow: hidden` would clip. */
+.ops-meter-tracked {
   overflow: visible;
 }
 
@@ -1162,8 +1549,22 @@ a.ops-stat:hover {
 }
 
 .ops-metrics-table .ops-metric-name {
-  text-transform: capitalize;
   color: var(--text-1);
+}
+
+/* The sentence saying what the check actually measures, under its name. The
+   table is the one place on this page with room for both, and without it the
+   reader has to already know what "abstention precision" means to read whether
+   it passed. */
+.ops-metrics-table .ops-metric-meaning {
+  display: block;
+  max-width: 34ch;
+  margin-top: 2px;
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-reg);
+  line-height: var(--ops-lh-snug);
+  color: var(--text-3);
+  text-wrap: pretty;
 }
 
 .ops-metrics-table .ops-metric-threshold {
@@ -1260,19 +1661,28 @@ a.ops-stat:focus-visible {
   outline-offset: var(--ops-focus-gap);
 }
 
+@media (max-width: 1240px) {
+  /* Five tiles stop being readable before they stop fitting: the label wraps
+     first, then the value. Drop to three and let the row become two. */
+  .ops-stat-grid { --ops-stat-cols: 3; }
+}
+
 @media (max-width: 1100px) {
   .ops-chart-grid.is-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 860px) {
+  .ops-stat-grid { --ops-stat-cols: 2; }
   .ops-chart-grid.is-3,
   .ops-chart-grid.is-2 { grid-template-columns: 1fr; }
   .ops-search { min-width: 0; width: 100%; }
 }
 
 @media (max-width: 560px) {
+  .ops-stat-grid { --ops-stat-cols: 1; }
   .ops-page { padding: var(--ops-space-4) var(--ops-space-3) var(--ops-space-10); }
-  .ops-stat-value { font-size: var(--ops-text-lg); }
+  .ops-stat { padding: var(--ops-space-4); }
+  .ops-stat-value { font-size: var(--ops-text-lg); min-height: 0; }
   .ops-panel-body { padding: var(--ops-space-3); }
 }
 

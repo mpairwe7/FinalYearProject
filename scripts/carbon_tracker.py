@@ -8,7 +8,7 @@ Standards: week01 ethics concern E9 (environmental impact),
            ISO/IEC 42001:2023 §6.1.3 (AI system impact assessment)
 
 Usage:
-    python scripts/carbon_tracker.py --task training --script ml/pipelines/train.py
+    python scripts/carbon_tracker.py --task training --script ml/pipelines/evaluate_rag.py
     python scripts/carbon_tracker.py --task inference --duration 3600
 
 Requires: pip install codecarbon

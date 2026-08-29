@@ -11,9 +11,6 @@ Complete documentation for the URA Chatbot MLOps project.
 | **Setup & Getting Started** |
 | [Project Setup](PROJECT_SETUP.md) | Complete installation and setup guide |
 | [Quick Start](../QUICKSTART.md) | 5-minute quick start guide |
-| **CI/CD & MLOps** |
-| [MLOps Workflows](mlops-workflows.md) | Comprehensive CI/CD pipeline documentation |
-| [MLOps Pipeline](MLOPS_PIPELINE.md) | Pipeline architecture and implementation details |
 | **Application** |
 | [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming + WebSocket voice) and usage |
 | [RAG Architecture](RAG_ARCHITECTURE.md) | 12-stage production RAG pipeline + streaming voice engine (2026) |
@@ -53,20 +50,14 @@ Complete documentation for the URA Chatbot MLOps project.
 
 ### For Developers
 1. Read [Project Setup](PROJECT_SETUP.md) for complete installation
-2. Review [MLOps Workflows](mlops-workflows.md) for CI/CD pipeline
-3. Configure GitHub secrets as documented
-4. Run `gh workflow run ci-ml-pipeline.yml` to trigger a build
+2. Configure GitHub secrets as documented
+3. Run `gh workflow run ci-ml-pipeline.yml` to trigger a build
 
 ### For ML Engineers
-1. Configure Kaggle credentials ([see setup guide](PROJECT_SETUP.md#environment-configuration))
-2. Update training config in `ml/configs/training_config.yaml`
-3. Trigger training (TPU default): `gh workflow run kaggle-training.yml -f notebook=ura-training`
-4. Optional explicit mode: `-f accelerator=tpu|gpu` and `-f run_data_eda=false`
-5. Monitor results in `Results/` folder
-6. Review RAG pipeline configuration in `Notebooks/ura-training.ipynb` (Sections 8–11)
-   - Embedding model: change `EMBED_TARGET` in cell 3 (`fast_cpu` / `multilingual` / `multilingual_light`)
-   - Index version: bump `INDEX_VERSION` when re-indexing with schema changes
-   - Evaluation thresholds: adjust `MRR_THRESHOLD`, `HITATK_THRESHOLD`, `GROUNDING_THRESHOLD` in eval cells
+1. RAG quality gates live in `ml/configs/training_config.yaml` (`rag_quality_gates`)
+2. Run `python -m ml.pipelines.evaluate_rag --eval-set Data/eval/rag_eval.jsonl` locally
+3. Monitor results in `Results/` folder
+4. Corpus coverage (issue #303): `python -m ml.pipelines.corpus_coverage --languages en --fail-under-floor`
 
 ### For Frontend Developers
 1. Run `cd App/frontend && bun run dev` for local development
@@ -84,7 +75,6 @@ Complete documentation for the URA Chatbot MLOps project.
 FinalYearProject/
 ├── .github/workflows/     # CI/CD pipeline definitions
 ├── App/                   # Application code
-│   ├── app.py            # Gradio HF Spaces app
 │   ├── backend/          # FastAPI backend
 │   └── frontend/         # Next.js frontend
 ├── Data/                  # Training and reference data
@@ -95,17 +85,15 @@ FinalYearProject/
 ├── governance/            # Compliance & risk management
 │   ├── compliance_check.py
 │   └── ai_risk_manifest.yaml
-├── ml/                    # ML pipeline implementation
-│   ├── configs/          # Training configuration + RAG quality gates
-│   ├── pipelines/        # Training, evaluation, RAG eval, feedback export
-│   ├── scripts/          # Kaggle integration
-│   └── huggingface/      # HF Spaces files
+├── ml/                    # Production quality gates + corpus tooling
+│   ├── configs/          # RAG quality gate thresholds
+│   ├── pipelines/        # RAG eval, corpus coverage, quality gates, feedback export
+│   └── scripts/          # Language ID (prod), retrieval eval, local ASR/MT/TTS, corpus chunking
 ├── Model/                 # Trained model artifacts
 ├── Results/               # Metrics and reports
 │   ├── metrics/          # Training metrics
 │   ├── reports/          # Validation reports
 │   └── plots/            # Visualizations
-├── Notebooks/             # Jupyter notebooks
 ├── monitoring/            # Prometheus, Grafana, alerting
 │   ├── prometheus.yml    # Scrape config
 │   ├── alerting-rules.yml # SLO-based alert rules (5 rules)
@@ -129,14 +117,14 @@ FinalYearProject/
 Code → Pre-commit (4 secret scanners) → Push → CI Lint + Test + Secret Scan → Review → Merge
 ```
 
-### 2. ML Training Workflow
+### 2. Quality Gate Workflow
 ```
-Data Validation → Training → Classifier Eval → RAG Eval (8 metrics) → Quality Gates → Deployment
+Data Validation → RAG Eval (8 metrics) → Corpus Coverage Gate → Production Quality Gates → Deployment
 ```
 
 ### 3. Release Workflow
 ```
-Main Branch → Governance Check → Docker Build → HF Push → Production Deploy → Feedback Loop
+Main Branch → Governance Check → Docker Build → Production Deploy → Feedback Loop
 ```
 
 ### 4. Current PR Security Workflow
@@ -158,7 +146,7 @@ PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Triv
 | File | Purpose |
 |------|---------|
 | `requirements.txt` | Python dependencies |
-| `ml/configs/training_config.yaml` | Training hyperparameters |
+| `ml/configs/training_config.yaml` | RAG/production quality gate thresholds |
 | `docker-compose.yml` | Local development + monitoring (`--profile monitoring`) |
 | `Dockerfile` | Production container image |
 | `.pre-commit-config.yaml` | Pre-commit hook definitions (11 hooks: secrets, SAST, hygiene) |

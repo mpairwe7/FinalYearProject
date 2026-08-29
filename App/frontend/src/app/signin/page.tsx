@@ -32,12 +32,20 @@ import Link from "next/link";
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   setAuthToken,
+  getAuthMethod,
   getAuthToken,
   clearAuthToken,
   getServerAuthToken,
+  looksLikeJwt,
+  sanitizeAuthToken,
   subscribeAuthToken,
 } from "../../lib/authSession";
-import { beginOidcFlow, isEmbedded, OIDC_CONFIGURED } from "../../lib/oidcFlow";
+import {
+  beginOidcFlow,
+  endOidcSession,
+  isEmbedded,
+  OIDC_CONFIGURED,
+} from "../../lib/oidcFlow";
 import { isStaffRole } from "../../lib/roles";
 import "./signin.css";
 
@@ -63,10 +71,19 @@ export default function SignInPage() {
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const signedIn = Boolean(token);
 
-  const startOidc = useCallback(async () => {
+  /**
+   * `prompt` is what makes "sign in as somebody else" work.
+   *
+   * Without it the provider answers the authorize request from its own session
+   * cookie — no login screen, straight back with a token for whoever it
+   * remembers. Reported as "when I want to sign in as another user, it doesn't
+   * do that but just automatically signs me in the older account". `login`
+   * (OIDC Core 1.0 §3.1.2.1) requires reauthentication.
+   */
+  const startOidc = useCallback(async (prompt?: "login") => {
     if (!OIDC_CONFIGURED) return;
     try {
-      await beginOidcFlow({ mode: "signin" });
+      await beginOidcFlow({ mode: "signin", prompt });
       if (isEmbedded()) {
         // See the signup page: framed, the flow moves to a new top-level tab.
         setStatus({
@@ -95,39 +112,56 @@ export default function SignInPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isEmbedded() || !OIDC_CONFIGURED) return;
-    if (new URLSearchParams(window.location.search).get("continue") !== "signin") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("continue") !== "signin") return;
+    // Carried from the framed tab that opened this one — without it the fresh
+    // tab starts an ordinary flow and the provider signs the person back in as
+    // whoever it remembers.
+    const prompt = params.get("prompt") === "login" ? "login" : undefined;
     // queueMicrotask, not a bare call: startOidc sets its pending state before
     // its first await, and doing that synchronously inside an effect cascades a
     // render. Deferring past commit avoids the cascade rather than suppressing
     // the warning about it.
-    queueMicrotask(() => void startOidc());
+    queueMicrotask(() => void startOidc(prompt));
     // Once only: the parameter is stripped so a reload does not redirect again.
     window.history.replaceState({}, "", window.location.pathname);
   }, [startOidc]);
 
   const useDevToken = useCallback(async () => {
-    const token = devToken.trim();
+    // Not `.trim()`: a token pasted from a terminal or a chat client can carry a
+    // zero-width space or a BOM, which trim leaves in place. Anything outside
+    // base64url is stripped — see sanitizeAuthToken for why that matters.
+    const token = sanitizeAuthToken(devToken);
     if (!token) {
       setStatus({ kind: "error", message: "Paste a token first." });
       return;
     }
-    setAuthToken(token);
-    // Prove the token is actually accepted before sending anyone to a dashboard
-    // that would just render empty panels.
+    if (!looksLikeJwt(token)) {
+      setStatus({
+        kind: "error",
+        message:
+          "That does not look like a token. A token is three dot-separated parts starting with \"eyJ\" — check the whole string was copied.",
+      });
+      return;
+    }
+    // Verify BEFORE storing. Storing first meant a token the browser could not
+    // even put in a header was already in localStorage, so every later request
+    // failed the same way and the only way out was clearing site data.
     try {
       const res = await fetch("/api/v1/me", {
         headers: { Authorization: `Bearer ${token}` },
       });
       const body = await res.json();
       if (!res.ok || !body?.authenticated) {
-        clearAuthToken();
         setStatus({
           kind: "error",
           message: "The backend rejected that token. Check it was minted with this deployment's AUTH_DEV_SECRET.",
         });
         return;
       }
-      // No setSignedIn: setAuthToken above already notified the token store.
+      // Accepted — only now does it go into storage. Tagged `dev` so sign-out
+      // does not try to end a provider session that never existed.
+      setAuthToken(token, "dev");
       const staff = isStaffRole(body.role);
       setStatus({
         kind: "ok",
@@ -136,15 +170,22 @@ export default function SignInPage() {
           : `Token accepted, but role "${body.role}" is not staff — the dashboards will refuse it.`,
       });
     } catch (err) {
-      clearAuthToken();
+      // Nothing was stored on this path, so there is nothing to roll back —
+      // and clearing here would sign out a session that this attempt never
+      // touched.
       setStatus({ kind: "error", message: `Could not reach the backend: ${(err as Error).message}` });
     }
   }, [devToken]);
 
   const signOut = useCallback(() => {
+    const method = getAuthMethod();
     clearAuthToken();
     setDevToken("");
     setStatus({ kind: "idle", message: "Signed out." });
+    // And at the provider, or this only makes the application forget you while
+    // the provider's cookie signs you straight back in. Navigates away when it
+    // succeeds, so nothing after this runs in that case.
+    if (method !== "dev") endOidcSession();
   }, []);
 
   return (
@@ -169,11 +210,28 @@ export default function SignInPage() {
           <button
             type="button"
             className="signin-primary"
-            onClick={startOidc}
+            onClick={() => void startOidc()}
             disabled={!OIDC_CONFIGURED}
           >
             {OIDC_CONFIGURED ? "Continue with URA identity provider" : "Identity provider not configured"}
           </button>
+          {/* The escape hatch from "it signed me in as the wrong person".
+              Signing out now ends the provider session too, so this should
+              rarely be needed — but a provider that publishes no
+              end_session_endpoint cannot be logged out remotely at all, and on
+              a shared machine there is always a session somebody forgot to
+              end. `prompt=login` makes the provider ask, whatever it
+              remembers. */}
+          {OIDC_CONFIGURED && (
+            <button
+              type="button"
+              className="signin-link signin-switch-account"
+              onClick={() => void startOidc("login")}
+              data-testid="signin-different-account"
+            >
+              Sign in as a different user
+            </button>
+          )}
           {!OIDC_CONFIGURED && (
             <p className="signin-hint">
               Set <code>NEXT_PUBLIC_OIDC_ISSUER</code> and{" "}

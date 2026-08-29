@@ -7,6 +7,9 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+
+pytest.importorskip("qdrant_client")
+
 from app.analytics import MetricsStore
 from app.freshness import FreshnessReport, compare_index_hash
 from app.index_lifecycle import (

@@ -93,12 +93,28 @@ const RAIL_COLLAPSED_KEY = 'ura-rail-collapsed';
  * generation is about to begin. Turns that never retrieve (voice, the
  * non-stream fallback) simply go thinking → churning.
  */
-type TurnPhase = 'thinking' | 'searching' | 'churning';
+type TurnPhase = 'thinking' | 'searching' | 'churning' | 'translating';
 
-const PHASE_UI: Record<TurnPhase, { label: string; variant: string }> = {
-  thinking: { label: 'Thinking', variant: 'Dots' },
-  searching: { label: 'Searching the URA knowledge base', variant: 'Orbit' },
-  churning: { label: 'Churning', variant: 'Drive' },
+/* The label is a dictionary key, not a string: these are the only words on
+   screen while the assistant is working, and leaving them English on a Luganda
+   conversation is the same drift the rest of the surface was translated to
+   remove. `phase.translating` matters most — it only ever shows on a
+   non-English turn, and it is there to explain a wait to someone who has just
+   been shown an English answer. */
+/**
+ * How long to wait for a microphone to open before saying it did not.
+ *
+ * Long enough for a first-use permission prompt to be read and accepted on a
+ * slow phone, short enough that an unanswered prompt does not leave the
+ * composer claiming to be listening.
+ */
+const MIC_ARM_TIMEOUT_MS = 8000;
+
+const PHASE_UI: Record<TurnPhase, { label: TranslationKey; variant: string }> = {
+  thinking: { label: 'phase.thinking', variant: 'Dots' },
+  searching: { label: 'phase.searching', variant: 'Orbit' },
+  churning: { label: 'phase.churning', variant: 'Drive' },
+  translating: { label: 'phase.translating', variant: 'Orbit' },
 };
 
 // Project blog (separate Vercel deployment). Set NEXT_PUBLIC_BLOG_URL in the
@@ -179,8 +195,54 @@ export default function Page() {
   // back too fast to be a real utterance; any session that lasted resets it.
   const dictationStartedAtRef = useRef(0);
   const dictationRapidEndsRef = useRef(0);
+  /**
+   * Watchdog for the gap between asking for the mic and the mic opening.
+   *
+   * `start()` resolves immediately and `onstart` fires whenever the engine and
+   * the permission prompt are done, which can be seconds and, if the person
+   * dismisses the prompt, never. Without a timer the composer would sit on
+   * `starting` for good — a button that says it is working and is not, which
+   * is a worse failure than the double-press this replaced.
+   */
+  const micArmTimerRef = useRef<number | null>(null);
   // One line about the last dictation attempt, shown under the composer.
   const [dictationNotice, setDictationNotice] = useState<string | null>(null);
+
+  /** Cancel the arming watchdog. Safe to call when nothing is armed. */
+  const disarmMic = useCallback(() => {
+    if (micArmTimerRef.current !== null) {
+      window.clearTimeout(micArmTimerRef.current);
+      micArmTimerRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Enter `starting` and set the watchdog.
+   *
+   * Both capture paths need this — the browser Speech API and getUserMedia
+   * both open a mic asynchronously behind a permission prompt, and a prompt
+   * nobody answers leaves the promise pending forever. *onOpenFailed* undoes
+   * whatever the caller set up before it started waiting.
+   */
+  const armMic = useCallback(
+    (onOpenFailed: () => void) => {
+      setDictationNotice(null);
+      setSpeechState('starting');
+      disarmMic();
+      micArmTimerRef.current = window.setTimeout(() => {
+        micArmTimerRef.current = null;
+        // Someone else already resolved this — onstart, onerror, a stop. The
+        // watchdog has nothing to say.
+        if (useChatStore.getState().speechState !== 'starting') return;
+        onOpenFailed();
+        setDictationNotice(
+          'The microphone did not open. Check your browser’s microphone permission, or type instead.',
+        );
+        setSpeechState('idle');
+      }, MIC_ARM_TIMEOUT_MS);
+    },
+    [disarmMic, setSpeechState],
+  );
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [turnPhase, setTurnPhase] = useState<TurnPhase | null>(null);
@@ -484,10 +546,11 @@ export default function Page() {
         recorderRef.current.cancel();
         recorderRef.current = null;
       }
+      disarmMic();
       stopPlayback();
       closePlaybackContext();
     };
-  }, []);
+  }, [disarmMic]);
 
   /**
    * Browser Speech Recognition — live transcription, re-created on locale change.
@@ -530,6 +593,7 @@ export default function Page() {
     recog.interimResults = true;
     recog.onstart = () => {
       dictationStartedAtRef.current = Date.now();
+      disarmMic();
       setSpeechState('listening');
     };
     recog.onerror = (event) => {
@@ -537,7 +601,16 @@ export default function Page() {
       // and onend restarts it. Treating it as an error put the mic in a red
       // state for thinking. "aborted" is our own stop() or teardown.
       if (event.error === 'no-speech' || event.error === 'aborted') return;
+      disarmMic();
       dictationActiveRef.current = false;
+      // Say which failure it was. "not-allowed" is a permission the person can
+      // grant, and telling them so is the difference between a fixable state
+      // and a mic that is simply red.
+      setDictationNotice(
+        event.error === 'not-allowed' || event.error === 'service-not-allowed'
+          ? 'Microphone access is blocked. Allow it in your browser’s address bar, or type instead.'
+          : 'Speech recognition is unavailable right now — you can type instead.',
+      );
       setSpeechState('error');
     };
     recog.onend = () => {
@@ -582,7 +655,7 @@ export default function Page() {
       dictationActiveRef.current = false;
       recog.abort();
     };
-  }, [locale, hasMediaRecorder, setSpeechState, setMessage]);
+  }, [locale, hasMediaRecorder, setSpeechState, setMessage, disarmMic]);
 
   // Auto-narrate new assistant messages
   const lastChatLength = useRef(chat.length);
@@ -843,7 +916,13 @@ export default function Page() {
               // for the same reason agent_trace does — see the note below: an
               // unhandled event falls through to the token branch and its raw
               // data is appended straight into the visible reply.
-              if (data.trim() === 'retrieval.started') setTurnPhase('searching');
+              const name = data.trim();
+              if (name === 'retrieval.started') setTurnPhase('searching');
+              // Localization runs after the English answer is complete, so
+              // this arrives last and is the only phase that can follow
+              // churning.
+              else if (name === 'translation.started') setTurnPhase('translating');
+              else if (name === 'translation.completed') setTurnPhase('churning');
               evt = 'token';
               continue;
             }
@@ -932,6 +1011,11 @@ export default function Page() {
 
   const handleMicClick = useCallback(async () => {
     if (isTransitioning) return;
+    // A press while the mic is opening is the press that used to break it —
+    // `start()` on an already-starting recognizer throws, and the throw was
+    // read as a failure. The button is disabled in this state, so this only
+    // catches the keyboard shortcut and a synthetic event.
+    if (speechState === 'starting') return;
     if (voiceMode && hasMediaRecorder) {
       setIsTransitioning(true);
       try {
@@ -974,15 +1058,39 @@ export default function Page() {
             }
           } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); setTurnPhase(null); saveCurrentSession(); }
         } else {
-          // Start recording
+          // Start recording. `starting` and the watchdog for the same reason
+          // the dictation path uses them: getUserMedia shows a permission
+          // prompt on first use, resolves only once it is answered, and stays
+          // pending forever if it never is. An idle-looking button across that
+          // gap is what got pressed twice.
           try {
             const rec = new AudioRecorder();
             recorderRef.current = rec;
+            armMic(() => {
+              rec.cancel();
+              if (recorderRef.current === rec) recorderRef.current = null;
+            });
             await rec.start();
+            // The watchdog may have given up while getUserMedia was still
+            // waiting on an unanswered permission prompt. If it did, this
+            // recorder is no longer the one anybody is holding — stop it
+            // rather than leaving a live mic with no UI state attached.
+            if (recorderRef.current !== rec) {
+              rec.cancel();
+              return;
+            }
+            disarmMic();
             setIsRecording(true);
             setSpeechState('listening');
             trackVoiceUsed();
-          } catch { setSpeechState('error'); }
+          } catch {
+            disarmMic();
+            recorderRef.current = null;
+            setDictationNotice(
+              'The microphone did not open. Check your browser’s microphone permission, or type instead.',
+            );
+            setSpeechState('error');
+          }
         }
       } finally { setIsTransitioning(false); }
       return;
@@ -1002,16 +1110,28 @@ export default function Page() {
       // would otherwise have to depend on `message` and be rebuilt on every
       // keystroke, and a stale closure here would silently erase whatever was
       // typed between renders.
-      setDictationNotice(null);
       dictationBaseRef.current = useChatStore.getState().message;
       dictationFinalRef.current = '';
       dictationActiveRef.current = true;
       dictationRapidEndsRef.current = 0;
       trackVoiceUsed();
+      // Announced BEFORE start(), not after onstart. The engine takes anywhere
+      // from a moment to several seconds to open — a permission prompt on the
+      // first use, then warm-up — and `idle` for all of it is what made the
+      // button look untouched and invited the second press that broke it.
+      armMic(() => {
+        dictationActiveRef.current = false;
+        try {
+          recognitionRef.current?.abort();
+        } catch {
+          // Already torn down.
+        }
+      });
       try {
         recognitionRef.current.start();
       } catch {
         // start() throws if a previous session has not finished tearing down.
+        disarmMic();
         dictationActiveRef.current = false;
         setSpeechState('error');
       }
@@ -1026,7 +1146,6 @@ export default function Page() {
     // *also* missing. Record and let the server's ASR transcribe instead; the
     // endpoint is already there and voice mode has been using it all along.
     if (!hasMediaRecorder) return;
-    setDictationNotice(null);
     setIsTransitioning(true);
     try {
       if (isRecording) {
@@ -1071,29 +1190,46 @@ export default function Page() {
         try {
           const rec = new AudioRecorder();
           recorderRef.current = rec;
+          armMic(() => {
+            rec.cancel();
+            if (recorderRef.current === rec) recorderRef.current = null;
+          });
           await rec.start();
+          // See the voice-mode branch: the watchdog can fire while
+          // getUserMedia is still waiting on an unanswered prompt, and the
+          // recorder that eventually opens must not be left running.
+          if (recorderRef.current !== rec) {
+            rec.cancel();
+            return;
+          }
+          disarmMic();
           setIsRecording(true);
           setSpeechState('listening');
           trackVoiceUsed();
         } catch {
+          disarmMic();
           recorderRef.current = null;
+          setDictationNotice(
+            'The microphone did not open. Check your browser’s microphone permission, or type instead.',
+          );
           setSpeechState('error');
         }
       }
     } finally {
       setIsTransitioning(false);
     }
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, armMic, disarmMic]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {
       recorderRef.current.cancel();
       recorderRef.current = null;
     }
+    disarmMic();
     setIsRecording(false);
     setSpeechState('idle');
     setIsTransitioning(false);
-  }, [setSpeechState]);
+  }, [disarmMic, setSpeechState]);
 
   const handleStarterPrompt = useCallback((prompt: string) => {
     trackStarterPromptUsed(prompt);
@@ -1358,7 +1494,8 @@ export default function Page() {
                     ttsLoading={ttsLoading}
                     isTransitioning={isTransitioning}
                     onListen={handleListenToReply}
-                    phaseLabel={isPending ? PHASE_UI[turnPhase].label : undefined}
+                    conversationId={activeConversationId}
+                    phaseLabel={isPending ? t(PHASE_UI[turnPhase].label) : undefined}
                     phaseVariant={isPending ? PHASE_UI[turnPhase].variant : undefined}
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
                   />
@@ -1372,7 +1509,7 @@ export default function Page() {
                 <article className="message-row message-row-assistant">
                   <div className="bubble assistant">
                     <LoadingState
-                      label={PHASE_UI[turnPhase].label}
+                      label={t(PHASE_UI[turnPhase].label)}
                       variant={PHASE_UI[turnPhase].variant}
                       startedAt={turnStartedAt}
                     />

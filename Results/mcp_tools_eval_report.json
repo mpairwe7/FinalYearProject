@@ -1,0 +1,276 @@
+[
+  {
+    "id": "PAYE-01",
+    "description": "PAYE on 5m gross (resident) \u2014 full net pay breakdown",
+    "query": "Calculate my PAYE on a gross monthly salary of 5,000,000 UGX",
+    "status": "FAIL",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_paye",
+    "assertion_results": {
+      "monthly_gross": false,
+      "PAYE": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.56,
+    "reply_excerpt": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 5,000,000\n- PAYE due: **UGX 1,388,250** per month\n- Net take-home: **UGX 3,611,750**\n- Band applied: 30% marginal (UGX 485,000\u2013UGX 10,000,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n\n_Assumptions: resident employ",
+    "full_reply": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 5,000,000\n- PAYE due: **UGX 1,388,250** per month\n- Net take-home: **UGX 3,611,750**\n- Band applied: 30% marginal (UGX 485,000\u2013UGX 10,000,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n\n_Assumptions: resident employee (say \u201cnon-resident\u201d if not)._\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "PAYE-02",
+    "description": "PAYE with NSSF included \u2014 actual take-home pay",
+    "query": "What is my take-home pay if I earn 3,000,000 per month?",
+    "status": "FAIL",
+    "tool_triggered": false,
+    "retrieval_mode": "abstained",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_paye",
+    "assertion_results": {
+      "net": false
+    },
+    "has_fy_citation": false,
+    "has_markdown": false,
+    "latency_s": 0.83,
+    "reply_excerpt": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+    "full_reply": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000."
+  },
+  {
+    "id": "PAYE-03",
+    "description": "PAYE on salary below tax threshold",
+    "query": "Calculate PAYE on a monthly salary of 200,000 UGX",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_paye",
+    "assertion_results": {
+      "0": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.54,
+    "reply_excerpt": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 200,000\n- PAYE due: **UGX 0** per month\n- Net take-home: **UGX 200,000**\n- Band applied: 0% marginal (UGX 0\u2013UGX 335,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n\n_Assumptions: resident employee (say \u201cnon-resident\u201d",
+    "full_reply": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 200,000\n- PAYE due: **UGX 0** per month\n- Net take-home: **UGX 200,000**\n- Band applied: 0% marginal (UGX 0\u2013UGX 335,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n\n_Assumptions: resident employee (say \u201cnon-resident\u201d if not)._\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "PAYE-04",
+    "description": "Non-resident PAYE \u2014 higher flat rate",
+    "query": "Calculate PAYE for a non-resident earning 4,000,000 per month",
+    "status": "FAIL",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_paye",
+    "assertion_results": {
+      "non": false
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.54,
+    "reply_excerpt": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 4,000,000\n- PAYE due: **UGX 1,125,500** per month\n- Net take-home: **UGX 2,874,500**\n- Band applied: 30% marginal (UGX 410,000\u2013UGX 10,000,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n\nFigures use the official URA ",
+    "full_reply": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 4,000,000\n- PAYE due: **UGX 1,125,500** per month\n- Net take-home: **UGX 2,874,500**\n- Band applied: 30% marginal (UGX 410,000\u2013UGX 10,000,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "VAT-01",
+    "description": "Add 18% VAT to 10m",
+    "query": "Calculate VAT on 10,000,000 UGX",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_vat",
+    "assertion_results": {
+      "18%": true,
+      "1,800,000": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.54,
+    "reply_excerpt": "**VAT calculation (FY2026-27)**\n\n- Net amount: UGX 10,000,000\n- VAT at 18%: **UGX 1,800,000**\n- Gross (VAT-inclusive): **UGX 11,800,000**\n\n_Assumptions: adding 18% VAT to a net amount (say \u201cVAT-inclusive\u201d to extract instead)._\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**VAT calculation (FY2026-27)**\n\n- Net amount: UGX 10,000,000\n- VAT at 18%: **UGX 1,800,000**\n- Gross (VAT-inclusive): **UGX 11,800,000**\n\n_Assumptions: adding 18% VAT to a net amount (say \u201cVAT-inclusive\u201d to extract instead)._\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "VAT-02",
+    "description": "Extract VAT from gross 11.8m",
+    "query": "How much VAT is included in a VAT-inclusive price of 11,800,000?",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_vat",
+    "assertion_results": {
+      "18%": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.54,
+    "reply_excerpt": "**VAT calculation (FY2026-27)**\n\n- Net amount: UGX 10,000,000\n- VAT at 18%: **UGX 1,800,000**\n- Gross (VAT-inclusive): **UGX 11,800,000**\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**VAT calculation (FY2026-27)**\n\n- Net amount: UGX 10,000,000\n- VAT at 18%: **UGX 1,800,000**\n- Gross (VAT-inclusive): **UGX 11,800,000**\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "VATREG-01",
+    "description": "VAT registration threshold check \u2014 above",
+    "query": "Must I register for VAT if my annual turnover is 400,000,000 UGX?",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "check_vat_registration",
+    "assertion_results": {
+      "compulsory": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.56,
+    "reply_excerpt": "**VAT registration check (FY2026-27)**\n\n- Annual turnover: UGX 400,000,000\n- Registration threshold: UGX 300,000,000 per year\n- **Registration is compulsory** \u2014 you are at or above the threshold.\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**VAT registration check (FY2026-27)**\n\n- Annual turnover: UGX 400,000,000\n- Registration threshold: UGX 300,000,000 per year\n- **Registration is compulsory** \u2014 you are at or above the threshold.\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "VATREG-02",
+    "description": "VAT registration threshold check \u2014 below",
+    "query": "Do I need to register for VAT with annual turnover of 100,000,000?",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "check_vat_registration",
+    "assertion_results": {
+      "not compulsory": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.57,
+    "reply_excerpt": "**VAT registration check (FY2026-27)**\n\n- Annual turnover: UGX 100,000,000\n- Registration threshold: UGX 300,000,000 per year\n- **Registration is not compulsory** \u2014 you are below the threshold (headroom UGX 200,000,000). Voluntary registration is still available.\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**VAT registration check (FY2026-27)**\n\n- Annual turnover: UGX 100,000,000\n- Registration threshold: UGX 300,000,000 per year\n- **Registration is not compulsory** \u2014 you are below the threshold (headroom UGX 200,000,000). Voluntary registration is still available.\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "CORP-01",
+    "description": "Corporation tax on 500m chargeable income",
+    "query": "Calculate corporation tax on chargeable income of 500,000,000 UGX",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_corporation_tax",
+    "assertion_results": {
+      "30%": true,
+      "150,000,000": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.56,
+    "reply_excerpt": "**Corporation tax calculation (FY2026-27)**\n\n- Chargeable income: UGX 500,000,000\n- Tax at 30%: **UGX 150,000,000**\n- After-tax income: UGX 350,000,000\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**Corporation tax calculation (FY2026-27)**\n\n- Chargeable income: UGX 500,000,000\n- Tax at 30%: **UGX 150,000,000**\n- After-tax income: UGX 350,000,000\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "CGT-01",
+    "description": "Capital gains \u2014 sold land at 200m, cost 120m",
+    "query": "Calculate capital gains tax on a sale price of 200,000,000 and cost base of 120,000,000",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_capital_gains",
+    "assertion_results": {
+      "gain": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.55,
+    "reply_excerpt": "**Capital gains calculation (FY2026-27)**\n\n- Sale price: UGX 200,000,000\n- Cost base: UGX 120,000,000\n- Gain: UGX 80,000,000\n- Tax at 30%: **UGX 24,000,000**\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**Capital gains calculation (FY2026-27)**\n\n- Sale price: UGX 200,000,000\n- Cost base: UGX 120,000,000\n- Gain: UGX 80,000,000\n- Tax at 30%: **UGX 24,000,000**\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "CUST-01",
+    "description": "Customs duty on CIF 50m (general goods)",
+    "query": "Calculate customs duty on imported goods with CIF value of 50,000,000 UGX",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_customs_duty",
+    "assertion_results": {
+      "duty": true,
+      "landed": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.55,
+    "reply_excerpt": "**Customs duty estimate (FY2026-27)**\n\n- CIF value: UGX 50,000,000\n- Duty at 25%: **UGX 12,500,000**\n- VAT on (CIF + duty + levy): UGX 11,250,000\n- Estimated landed cost: **UGX 73,750,000**\n\n_Assumptions: common external tariff duty of 25% (tell me the exact rate to refine)._\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**Customs duty estimate (FY2026-27)**\n\n- CIF value: UGX 50,000,000\n- Duty at 25%: **UGX 12,500,000**\n- VAT on (CIF + duty + levy): UGX 11,250,000\n- Estimated landed cost: **UGX 73,750,000**\n\n_Assumptions: common external tariff duty of 25% (tell me the exact rate to refine)._\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "RENT-01",
+    "description": "Individual rental tax on 24m annual rent",
+    "query": "Calculate rental income tax on annual gross rent of 24,000,000 UGX",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_rental_tax",
+    "assertion_results": {
+      "12%": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.56,
+    "reply_excerpt": "**Rental income tax \u2014 individual (FY2026-27)**\n\n- Gross annual rent: UGX 24,000,000\n- Tax-free threshold: UGX 2,820,000 per year\n- Taxable amount: UGX 21,180,000\n- Tax at 12%: **UGX 2,541,600**\n\n_Assumptions: individual landlord (say \u201ccompany\u201d if it is a company)._\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**Rental income tax \u2014 individual (FY2026-27)**\n\n- Gross annual rent: UGX 24,000,000\n- Tax-free threshold: UGX 2,820,000 per year\n- Taxable amount: UGX 21,180,000\n- Tax at 12%: **UGX 2,541,600**\n\n_Assumptions: individual landlord (say \u201ccompany\u201d if it is a company)._\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "WHT-01",
+    "description": "Withholding tax on services payment of 10m",
+    "query": "Calculate withholding tax on a services payment of 10,000,000 UGX",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_withholding",
+    "assertion_results": {
+      "6%": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.54,
+    "reply_excerpt": "**Withholding tax \u2014 services (FY2026-27)**\n\n- Gross payment: UGX 10,000,000\n- WHT at 6%: **UGX 600,000**\n- Net payable to payee: UGX 9,400,000\n\nFigures use the official URA FY2026-27 rate table.",
+    "full_reply": "**Withholding tax \u2014 services (FY2026-27)**\n\n- Gross payment: UGX 10,000,000\n- WHT at 6%: **UGX 600,000**\n- Net payable to payee: UGX 9,400,000\n\nFigures use the official URA FY2026-27 rate table."
+  },
+  {
+    "id": "NLP-01",
+    "description": "Natural language: 'how much tax on 8m salary'",
+    "query": "How much tax will I pay on a monthly salary of 8,000,000?",
+    "status": "FAIL",
+    "tool_triggered": false,
+    "retrieval_mode": "abstained",
+    "agent_role": "rag_answerer",
+    "expected_tool": "calculate_paye",
+    "assertion_results": {
+      "PAYE": false
+    },
+    "has_fy_citation": false,
+    "has_markdown": false,
+    "latency_s": 0.81,
+    "reply_excerpt": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+    "full_reply": "I'm sorry \u2014 I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000."
+  },
+  {
+    "id": "NLP-02",
+    "description": "Natural language: 'what is my net pay on 2m'",
+    "query": "What will be my net pay if my gross salary is 2,000,000 per month?",
+    "status": "PASS",
+    "tool_triggered": true,
+    "retrieval_mode": "calculator",
+    "agent_role": "tool_specialist",
+    "expected_tool": "calculate_paye",
+    "assertion_results": {
+      "net": true
+    },
+    "has_fy_citation": true,
+    "has_markdown": true,
+    "latency_s": 0.53,
+    "reply_excerpt": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 2,000,000\n- PAYE due: **UGX 488,250** per month\n- Net take-home: **UGX 1,511,750**\n- Band applied: 30% marginal (UGX 485,000\u2013UGX 10,000,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n\n_Assumptions: resident employee",
+    "full_reply": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 2,000,000\n- PAYE due: **UGX 488,250** per month\n- Net take-home: **UGX 1,511,750**\n- Band applied: 30% marginal (UGX 485,000\u2013UGX 10,000,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n\n_Assumptions: resident employee (say \u201cnon-resident\u201d if not)._\n\nFigures use the official URA FY2026-27 rate table."
+  }
+]

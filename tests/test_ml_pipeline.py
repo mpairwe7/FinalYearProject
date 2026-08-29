@@ -1,6 +1,6 @@
 """
 Unit Tests for ML Pipelines
-Tests for data validation, training, and quality gates
+Tests for data validation and quality gates
 """
 
 import json
@@ -10,7 +10,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -88,111 +87,6 @@ class TestDataValidation:
             assert result["stats"]["columns"] == 2
             assert "question" in result["stats"]["column_names"]
             assert "answer" in result["stats"]["column_names"]
-
-
-class TestTrainingPipeline:
-    """Tests for model training pipeline."""
-    
-    def test_load_config(self):
-        """Test configuration loading."""
-        config_path = PROJECT_ROOT / "ml" / "configs" / "training_config.yaml"
-        
-        if config_path.exists():
-            from ml.pipelines.train import load_config
-            
-            config = load_config(str(config_path))
-            
-            assert "data" in config
-            assert "models" in config
-            assert "training" in config
-            assert "quality_gates" in config
-    
-    def test_clean_text(self):
-        """Test text cleaning function."""
-        from ml.pipelines.train import clean_text
-        
-        # Test newline normalization
-        assert clean_text("Hello\nWorld") == "Hello World"
-        assert clean_text("Hello\r\nWorld") == "Hello World"
-        
-        # Test multiple spaces
-        assert clean_text("Hello   World") == "Hello World"
-        
-        # Test combined
-        assert clean_text("Hello\n\n  World  with   spaces") == "Hello World with spaces"
-        
-        # Test NaN handling
-        assert clean_text(np.nan) == ''
-        assert clean_text(None) == ''
-    
-    def test_load_qa_data_empty_dir(self):
-        """Test loading from empty directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            from ml.pipelines.train import load_qa_data
-            
-            config = {
-                'data': {
-                    'min_question_words': 3,
-                    'min_answer_words': 3,
-                    'max_words': 512
-                }
-            }
-            
-            df = load_qa_data(Path(tmpdir), config)
-            
-            assert isinstance(df, pd.DataFrame)
-            assert len(df) == 0
-    
-    def test_load_qa_data_with_csv(self):
-        """Test loading CSV with Q&A data."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            csv_path = Path(tmpdir) / "ura_vat_faqs.csv"
-            df = pd.DataFrame({
-                "question": [
-                    "What is the VAT rate in Uganda?",
-                    "How do I register for VAT?",
-                    "When is VAT due?"
-                ],
-                "answer": [
-                    "The standard VAT rate is 18 percent.",
-                    "You can register online at the URA portal.",
-                    "VAT returns are due by the 15th of each month."
-                ]
-            })
-            df.to_csv(csv_path, index=False)
-            
-            from ml.pipelines.train import load_qa_data
-            
-            config = {
-                'data': {
-                    'min_question_words': 3,
-                    'min_answer_words': 3,
-                    'max_words': 512
-                }
-            }
-            
-            result = load_qa_data(Path(tmpdir), config)
-            
-            assert len(result) == 3
-            assert "question" in result.columns
-            assert "answer" in result.columns
-            assert "tag" in result.columns
-            assert "source" in result.columns
-    
-    def test_label_encoding(self):
-        """Test label encoder functionality."""
-        from sklearn.preprocessing import LabelEncoder
-        
-        labels = ["vat", "tin", "customs", "vat", "tin"]
-        encoder = LabelEncoder()
-        encoded = encoder.fit_transform(labels)
-        
-        assert len(encoder.classes_) == 3
-        assert all(isinstance(e, (int, np.integer)) for e in encoded)
-        
-        decoded = encoder.inverse_transform([0, 1, 2])
-        assert len(decoded) == 3
-        assert set(decoded) == {"customs", "tin", "vat"}
 
 
 class TestQualityGates:
@@ -392,23 +286,6 @@ class TestIntegration:
             
             assert results["files_checked"] > 0
             assert results["files_passed"] > 0
-    
-    @pytest.mark.slow
-    def test_data_loading(self):
-        """Test loading actual dataset."""
-        datasets_dir = PROJECT_ROOT / "Data" / "dataset"
-        
-        if datasets_dir.exists():
-            from ml.pipelines.train import load_qa_data, load_config
-            
-            config_path = PROJECT_ROOT / "ml" / "configs" / "training_config.yaml"
-            if config_path.exists():
-                config = load_config(str(config_path))
-                df = load_qa_data(datasets_dir, config)
-                
-                assert len(df) > 0
-                assert "question" in df.columns
-                assert "tag" in df.columns
 
 
 if __name__ == "__main__":

@@ -23,14 +23,27 @@ services:
       retries: 5
       start_period: 5s
     restart: unless-stopped
+    # Run as the image's own redis user (999:1000) rather than starting as root
+    # and dropping down.
+    #
+    # The entrypoint's root branch does `find . \! -user redis -exec chown redis`
+    # over /data before switching users. Root normally walks any directory via
+    # CAP_DAC_OVERRIDE — but `cap_drop: ALL` removes it, and the `appendonlydir`
+    # redis itself creates is mode 0700. So the very first restart after redis
+    # had written an AOF failed with
+    #     find: ./appendonlydir: Permission denied
+    # and exited 1, into a crash loop. Wiping the volume does not fix it: the
+    # next AOF write recreates the same 0700 directory and the next restart
+    # fails again.
+    #
+    # Starting as the target user skips that branch entirely — nothing needs to
+    # chown anything — so CHOWN/SETGID/SETUID are no longer needed either. This
+    # is a strictly smaller capability set than before, not a relaxation.
+    user: "999:1000"
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
     networks:
       - ura-network
 
@@ -297,35 +310,6 @@ services:
         condition: service_started
     profiles:
       - tls
-    networks:
-      - ura-network
-
-  # ---------------------------------------------------------------------------
-  # Model Training Service (for local training)
-  # ---------------------------------------------------------------------------
-  trainer:
-    build:
-      context: .
-      dockerfile: Dockerfile.ml
-    image: ${DOCKER_IMAGE:-landwind/ura-chatbot-trainer}:latest
-    container_name: ura-chatbot-trainer
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-mlruns}
-    init: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    tmpfs:
-      - /tmp
-    volumes:
-      - ./Data/dataset:/app/datasets:ro
-      - ./ml:/app/ml:ro
-      - ./artifacts:/app/artifacts
-    command: python ml/pipelines/train.py --config ml/configs/training_config.yaml
-    profiles:
-      - training
     networks:
       - ura-network
 

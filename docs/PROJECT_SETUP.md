@@ -219,8 +219,6 @@ docker compose --profile dev up api-dev
 docker compose logs -f api
 ```
 
-> Note: The `trainer` container runs as a non-root user (UID 1000). Ensure `./artifacts` is writable on the host before running training profile.
-
 ### Option 2: Manual Start
 
 ```bash
@@ -231,16 +229,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8887
 # Terminal 2: Frontend (port 3300)
 cd App/frontend
 bun run dev
-
-# Terminal 3: Gradio App (optional)
-python App/app.py
-```
-
-### Option 3: Gradio Only
-
-```bash
-# Simple classifier demo
-python App/classifier.py
 ```
 
 ## Sign-In and Sign-Up (OIDC)
@@ -605,12 +593,9 @@ FinalYearProject/
 │   └── workflows/           # CI/CD pipelines
 │       ├── ci-ml-pipeline.yml
 │       ├── frontend-deploy.yml
-│       ├── kaggle-training.yml
 │       └── secret-scanning.yml  # 4-layer secret scanning
 │
 ├── App/                     # Application Code
-│   ├── app.py              # Full Gradio app (HF Spaces)
-│   ├── classifier.py       # Simple classifier demo
 │   ├── backend/            # FastAPI REST API (v1.3.0)
 │   │   ├── app/
 │   │   │   ├── main.py     # 50+ API routes, SSE streaming, CORS, rate limiting, auth
@@ -698,23 +683,22 @@ FinalYearProject/
 │   ├── compliance_check.py # CI gate (NIST/ISO/OWASP/EU AI Act)
 │   └── ai_risk_manifest.yaml
 │
-├── ml/                      # ML Pipeline Code
+├── ml/                      # Production quality gates + corpus tooling
 │   ├── configs/
 │   │   └── training_config.yaml  # Includes rag_quality_gates
 │   ├── pipelines/
-│   │   ├── train.py
-│   │   ├── evaluate.py
 │   │   ├── evaluate_rag.py       # RAG evaluation (8 metrics)
+│   │   ├── evaluate_rag_offline.py
+│   │   ├── corpus_coverage.py    # Issue #303 taxpayer-question coverage gate
 │   │   ├── export_feedback.py    # Feedback → JSONL for tuning
 │   │   ├── validate_data.py
-│   │   ├── quality_gates.py
-│   │   └── push_to_hub.py
-│   ├── scripts/
-│   │   ├── prepare_kaggle_notebook.py
-│   │   ├── export_tpu_ready_data.py
-│   │   ├── monitor_kaggle.py
-│   │   └── process_kaggle_output.py
-│   └── huggingface/
+│   │   └── quality_gates.py
+│   └── scripts/
+│       ├── lang_id.py            # EN/LG/SW detection (baked into Crane Cloud image)
+│       ├── eval_retrieval.py     # Retrieval ranking gate (Hit@k / MRR)
+│       ├── asr/, mt/, tts/       # infer_*.py: speech_service.py's local backend tier
+│       └── data_aug/             # Corpus chunking/cleaning used by App/backend's
+│                                  # PDF/crawl export tooling
 │
 ├── Model/                   # Trained Models
 │   ├── tag_classifier.joblib
@@ -726,9 +710,6 @@ FinalYearProject/
 │   ├── plots/              # PNG visualizations
 │   └── reports/            # CSV reports
 │
-├── Notebooks/               # Jupyter Notebooks
-│   └── ura-training.ipynb
-│
 ├── tests/                   # Unit Tests
 │   ├── test_ml_pipeline.py
 │   └── test_api.py
@@ -736,7 +717,6 @@ FinalYearProject/
 ├── docs/                    # Documentation
 │
 ├── Dockerfile              # API container
-├── Dockerfile.ml           # Training container
 ├── docker-compose.yml      # Service orchestration
 ├── requirements.txt        # Python dependencies
 └── pyproject.toml          # Python tooling config
@@ -845,20 +825,6 @@ pytest tests/test_api.py -v
 
 ## ML Pipeline Commands
 
-### Train Model Locally
-```bash
-python ml/pipelines/train.py \
-  --config ml/configs/training_config.yaml \
-  --output-dir Model
-```
-
-### Evaluate Model
-```bash
-python ml/pipelines/evaluate.py \
-  --model-path Model \
-  --output-dir Results
-```
-
 ### Validate Data
 ```bash
 python ml/pipelines/validate_data.py
@@ -898,13 +864,6 @@ python -m ml.pipelines.export_feedback
 # Outputs: retriever_negatives.jsonl, regression_candidates.jsonl
 ```
 
-### Push to Hugging Face
-```bash
-python ml/pipelines/push_to_hub.py \
-  --model-path Model \
-  --repo-id mpairweLandwind/ura-chatbot
-```
-
 ## Triggering CI/CD Workflows
 
 ### Via GitHub CLI
@@ -915,22 +874,8 @@ gh auth login
 # List workflows
 gh workflow list
 
-# Run ML pipeline with training
-gh workflow run ci-ml-pipeline.yml -f run_training=true -f deploy_model=true
-
-# Run Kaggle training
-gh workflow run kaggle-training.yml -f notebook=ura-training
-
-# Run explicit TPU mode and skip EDA in data-ingestion stage
-gh workflow run kaggle-training.yml \
-  -f notebook=ura-training \
-  -f accelerator=tpu \
-  -f run_data_eda=false
-
-# Run explicit GPU mode
-gh workflow run kaggle-training.yml \
-  -f notebook=ura-training \
-  -f accelerator=gpu
+# Run ML pipeline
+gh workflow run ci-ml-pipeline.yml
 
 # View run status
 gh run list --workflow=ci-ml-pipeline.yml
@@ -1057,6 +1002,6 @@ docker compose --profile monitoring up -d
 4. Review [Agent Architecture](AGENT_ARCHITECTURE.md) for tool-calling and supervisor routing
 5. Review [Model Swap Guide](MODEL_SWAP_GUIDE.md) for LLM/embedding/reranker alternatives
 6. Configure GitHub secrets for deployment
-7. Set up Hugging Face Space for the Gradio app
+7. Set up the Hugging Face Docker Space (`App/deploy/hf-space/`)
 8. Review [Model Card](MODEL_CARD.md) for EU AI Act compliance
 9. Review [PIA](capstone/PIA.md) for NDPA 2019 privacy assessment

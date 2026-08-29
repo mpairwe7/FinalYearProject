@@ -47,9 +47,13 @@ export function SkeletonRows({ rows = 4, height = 56 }: { rows?: number; height?
   );
 }
 
-export function SkeletonStats({ count = 6 }: { count?: number }) {
+export function SkeletonStats({ count = 6, cols = 3 }: { count?: number; cols?: number }) {
   return (
-    <div className="ops-stat-grid" aria-hidden="true">
+    <div
+      className="ops-stat-grid"
+      aria-hidden="true"
+      style={{ "--ops-stat-cols": cols } as React.CSSProperties}
+    >
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="ops-stat">
           <Skeleton width="60%" height={10} />

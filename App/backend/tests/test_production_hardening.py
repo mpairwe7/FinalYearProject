@@ -70,7 +70,7 @@ class ProductionHardeningTests(unittest.TestCase):
             json.dumps(
                 {
                     "version": "test",
-                    "generated_at": dt.datetime.now(dt.UTC).isoformat(),
+                    "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                     "max_age_days": 30,
                     "sources": [
                         {

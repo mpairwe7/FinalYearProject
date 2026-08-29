@@ -48,8 +48,6 @@ KNOWN_SKIPS: dict[str, int] = {
     "App/backend/tests/test_providers.py": 1,
     # FastAPI TestClient / lifespan smoke covered by the deploy smoke scripts.
     "tests/test_api.py": 5,
-    # torch / peft / transformers are deliberately absent from the test venv.
-    "tests/test_fine_tune_gemma.py": 5,
     # Agent-parity suites gated on optional backend fixtures.
     "tests/agents/test_backend_column_parity.py": 1,
     "tests/agents/test_backend_shim.py": 1,

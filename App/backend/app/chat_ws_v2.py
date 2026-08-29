@@ -337,6 +337,8 @@ async def _run_response_create(
                 "error": "response.error",
                 "retrieval.started": "response.retrieval.started",
                 "retrieval.completed": "response.retrieval.completed",
+                "translation.started": "response.translation.started",
+                "translation.completed": "response.translation.completed",
                 "iteration.started": "response.iteration.started",
                 "iteration.final": "response.iteration.final",
                 "tool_call.started": "response.tool_call.started",
@@ -387,7 +389,7 @@ async def _run_response_create(
                         "confirm_token": confirm_token,
                     },
                 )
-            elif event_type.startswith(("retrieval.", "iteration.", "tool_call.")):
+            elif event_type.startswith(("retrieval.", "iteration.", "tool_call.", "translation.")):
                 evt_dict = payload if isinstance(payload, dict) else {"value": payload}
                 evt_dict = {k: v for k, v in evt_dict.items() if k != "type"}
                 await _send_json(websocket, {"type": frame_type, **evt_dict})

@@ -25,6 +25,7 @@ import { KeyHint } from "../../../components/ops/Controls";
 import {
   EmptyState,
   ErrorState,
+  Skeleton,
   SkeletonRows,
 } from "../../../components/ops/States";
 import { QueueRow } from "../../../components/staff/QueueRow";
@@ -221,12 +222,15 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
             </>
           ) : null}
 
-          <span className="ops-toolbar-end">
+          <span className="ops-toolbar-end tickets-toolbar-search">
             <input
               type="search"
               className="ops-input ops-search"
               data-ticket-search="1"
-              placeholder="Search reason, taxpayer, assignee…"
+              /* The long form clipped to "Search reason, taxpayer, ass…" in the
+                 field's own width; the accessible name below carries the full
+                 meaning for anyone who needs it. */
+              placeholder="Search the queue…"
               value={view.q}
               onChange={(event) => setView({ q: event.target.value })}
               aria-label="Search tickets"
@@ -237,10 +241,14 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
     >
       <div className="tickets-meta">
         <span className="tickets-count" aria-live="polite">
-          {isLoading
-            ? "Loading…"
-            : `${tickets.length} ${tickets.length === 1 ? "case" : "cases"}`}
-          {narrowed ? " matching" : ""}
+          {isLoading ? (
+            <Skeleton width={64} height={13} />
+          ) : (
+            <>
+              {`${tickets.length} ${tickets.length === 1 ? "case" : "cases"}`}
+              {narrowed ? " matching" : ""}
+            </>
+          )}
         </span>
         {narrowed ? (
           <button

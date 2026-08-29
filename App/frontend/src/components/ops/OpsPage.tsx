@@ -64,6 +64,8 @@ export function OpsPanel({
   end,
   note,
   flush,
+  bare,
+  glass,
   children,
   className = "",
 }: {
@@ -74,12 +76,30 @@ export function OpsPanel({
   note?: React.ReactNode;
   /** Tighter padding for a panel whose body is a list of rows. */
   flush?: boolean;
+  /**
+   * Drop the card — no surface, border or radius — and sit the section directly
+   * on the page, its heading and content aligned to the page gutter like the
+   * page title above them. A rule under the heading and a wider gap below do
+   * the separating a border used to.
+   *
+   * For a section that is the page's own content rather than an object on it.
+   * A panel that has to be told apart from its neighbours *at a glance* — a
+   * table beside a chart, one of a row of equals — should stay a card.
+   */
+  bare?: boolean;
+  /**
+   * The opposite: lift the panel off the page on the console's glass material,
+   * with a deeper shadow behind it. For the one section on a page that is acted
+   * *in* rather than read — a composer above the list it writes into. At most
+   * one per page; two things floating is nothing floating.
+   */
+  glass?: boolean;
   children: React.ReactNode;
   className?: string;
 }) {
   return (
     <section
-      className={`ops-panel${className ? ` ${className}` : ""}`}
+      className={`ops-panel${bare ? " is-bare" : ""}${glass ? " is-glass" : ""}${className ? ` ${className}` : ""}`}
       aria-labelledby={id}
     >
       <div className="ops-panel-head">

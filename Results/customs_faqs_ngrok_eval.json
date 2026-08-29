@@ -1,0 +1,170 @@
+{
+  "summary": {
+    "total_faqs": 10,
+    "avg_correctness_pct": 26.6,
+    "avg_conversational_pct": 97.5,
+    "avg_eq_pct": 84.5,
+    "avg_overall_pct": 65.2,
+    "avg_latency_s": 6.66
+  },
+  "evaluations": [
+    {
+      "id": "CUST-01",
+      "topic": "Customs Valuation Basis (Sea/Road vs Air)",
+      "user_emotion": "Neutral / Factual Inquiry",
+      "query": "What is the basis for declaring imported goods for customs valuation in Uganda? Is freight included for both air and sea cargo?",
+      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+      "sources": [],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "abstained",
+      "correctness_score": 0.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "overall_score": 0.57,
+      "latency_s": 29.3
+    },
+    {
+      "id": "CUST-02",
+      "topic": "Challenging Customs Valuation / Appeal",
+      "user_emotion": "Frustrated / Disputing Valuation",
+      "query": "Customs rejected my invoice price at the border and valued my goods way higher! I am so frustrated. Can I challenge this customs valuation or am I forced to pay?",
+      "reply": "Here's the most relevant guidance I found in official URA sources:\n\nYes. ACV allows administrative and judicial appeal without penalty.",
+      "sources": [
+        "ura_customs_valuation_faqs.csv"
+      ],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "hybrid",
+      "correctness_score": 0.33,
+      "conversational_score": 0.75,
+      "eq_score": 0.8,
+      "overall_score": 0.6,
+      "latency_s": 3.05
+    },
+    {
+      "id": "CUST-03",
+      "topic": "Valuation Methods under ACV",
+      "user_emotion": "Confused Trader",
+      "query": "I am completely confused about how URA determines customs value when transaction value cannot be used. What are the sequential methods under ACV?",
+      "reply": "Here's the most relevant guidance I found in official URA sources:\n\nSix methods applied sequentially (methods 4 and 5 can swap on importer request): transaction value; transaction value of identical goods; transaction value of similar goods; deductive value; computed value; fallback method.\n\nYou might also want to know: How do I know if I am tax resident in another jurisdiction?",
+      "sources": [
+        "ura_customs_valuation_faqs.csv"
+      ],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "hybrid",
+      "correctness_score": 1.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.6,
+      "overall_score": 0.88,
+      "latency_s": 10.11
+    },
+    {
+      "id": "CUST-04",
+      "topic": "Required Documents at Point of Entry",
+      "user_emotion": "Urgent Importer",
+      "query": "Urgent help needed! My container just arrived at the border point of entry. Exactly what documents must I present to customs to clear the goods?",
+      "reply": "Here's the most relevant guidance I found in official URA sources:\n\n(1) Lodge the export SAD in ASYCUDA; (2) pay any applicable fees or levies; (3) present goods and documents for customs verification/scanning if required; (4) obtain release and exit note; (5) the carrier exits with sealed cargo.\n\nYou might also want to know: What are the key steps to clear goods for export at the border?",
+      "sources": [
+        "ura_export_process_faqs.csv"
+      ],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "hybrid",
+      "correctness_score": 0.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.95,
+      "overall_score": 0.58,
+      "latency_s": 5.23
+    },
+    {
+      "id": "CUST-05",
+      "topic": "Passenger Baggage Duty-Free Allowance",
+      "user_emotion": "Anxious Traveler",
+      "query": "I am flying into Entebbe airport tonight with personal gifts for my family and I am terrified of getting stopped and penalized. What passenger baggage items are duty-free?",
+      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+      "sources": [],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "abstained",
+      "correctness_score": 0.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.8,
+      "overall_score": 0.54,
+      "latency_s": 0.75
+    },
+    {
+      "id": "CUST-06",
+      "topic": "Customs Offences and Seizure of Goods",
+      "user_emotion": "Distressed Importer / Potential Penalty",
+      "query": "Please help, I am panicking! Customs detained my shipment claiming undeclared surplus goods. Is surplus cargo considered a customs offence and could my goods be forfeited?",
+      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+      "sources": [],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "abstained",
+      "correctness_score": 0.33,
+      "conversational_score": 1.0,
+      "eq_score": 0.8,
+      "overall_score": 0.67,
+      "latency_s": 13.16
+    },
+    {
+      "id": "CUST-07",
+      "topic": "Deductive vs Computed Value Methods",
+      "user_emotion": "Neutral / Clarification",
+      "query": "Can you explain the difference between the Deductive Value method and the Computed Value method in customs valuation?",
+      "reply": "I can work that out for you — I just need a detail or two.\n\n_I'll assume: common external tariff duty of 25% (tell me the exact rate to refine) — correct me if that's wrong._\n\nWhat is the **CIF value** (cost + insurance + freight) of the goods in UGX? (e.g. 5,000,000 or 5m)",
+      "sources": [],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "workflow",
+      "correctness_score": 0.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "overall_score": 0.57,
+      "latency_s": 0.54
+    },
+    {
+      "id": "CUST-08",
+      "topic": "International Traveler Entry Requirements",
+      "user_emotion": "Traveler Preparation",
+      "query": "What health and immigration documents must international travelers present when entering Uganda through Entebbe airport?",
+      "reply": "Here's the most relevant guidance I found in official URA sources:\n\nPassport valid ≥6 months; appropriate visa (e-visa/embassy/visa-free or on-arrival where eligible); yellow fever vaccination certificate (over 1 year old travelers); COVID-19 PCR within 72 hours if required by current health rules; proof of onward/return ticket.\n\nYou might also want to know: What documents are needed for a foreign company to register and operate in Uganda?",
+      "sources": [
+        "ura_documents_point_of_entry_faqs.csv"
+      ],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "hybrid",
+      "correctness_score": 1.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "overall_score": 0.97,
+      "latency_s": 2.99
+    },
+    {
+      "id": "CUST-09",
+      "topic": "Export Procedures and Documentation",
+      "user_emotion": "First-time Small Exporter",
+      "query": "I am a first-time local farmer trying to export dried fruits to Kenya. The customs process feels so intimidating. What basic export procedures must I follow?",
+      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+      "sources": [],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "abstained",
+      "correctness_score": 0.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "overall_score": 0.57,
+      "latency_s": 0.68
+    },
+    {
+      "id": "CUST-10",
+      "topic": "Authorised Economic Operator (AEO) Benefits",
+      "user_emotion": "Growing Business Owner",
+      "query": "My logistics company is handling high trade volumes and customs delays are costing us money. What is the Authorised Economic Operator (AEO) scheme and what benefits does URA offer?",
+      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+      "sources": [],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "abstained",
+      "correctness_score": 0.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "overall_score": 0.57,
+      "latency_s": 0.77
+    }
+  ]
+}

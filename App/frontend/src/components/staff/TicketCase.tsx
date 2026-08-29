@@ -118,7 +118,7 @@ export function TicketCase({
       </header>
 
       {handoff.summary || handoff.opening_guidance || handoff.required_details?.length ? (
-        <section className={`st-brief${warm ? " warm" : ""}`}>
+        <section className="st-brief">
           <span className="st-brief-label">Handoff brief</span>
           {handoff.summary ? <p>{handoff.summary}</p> : null}
           {warm && handoff.opening_guidance ? (

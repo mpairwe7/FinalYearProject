@@ -18,7 +18,12 @@ import logging
 import os
 import sys
 import time
-from datetime import UTC, datetime
+try:
+    from datetime import UTC, datetime
+except ImportError:
+    from datetime import datetime, timezone
+
+    UTC = timezone.utc  # type: ignore[assignment]
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
