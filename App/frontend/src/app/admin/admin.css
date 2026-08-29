@@ -174,33 +174,21 @@
 /* Priority pill — one definition, shared by the overview and the mix bars.
    /agent and /admin/tickets use the `.st-pri-*` twin in staffTickets.css. */
 
+/* Three levels, told apart by ink alone — see `.ops-chip` in ops.css for why
+   the capsule went. Left-aligned rather than centred: it owns a fixed column,
+   and as text a ragged centre line is harder to scan down than a flush edge. */
 .ov-pri {
   display: inline-block;
   width: 100%;
-  padding: 3px 8px;
-  border-radius: var(--ops-radius-pill);
-  border: 1px solid var(--ops-line);
-  background: var(--ops-row-active);
-  color: var(--text-2);
+  padding: 0;
+  color: var(--text-3);
   font-size: var(--ops-text-2xs);
-  font-weight: var(--ops-weight-semi);
   text-transform: uppercase;
-  letter-spacing: var(--ops-tracking-caps);
   white-space: nowrap;
-  text-align: center;
 }
 
-.ov-pri-urgent {
-  background: var(--ops-bad-fill);
-  border-color: var(--ops-bad-line);
-  color: var(--ops-bad-ink);
-}
-
-.ov-pri-high {
-  background: var(--ops-warn-fill);
-  border-color: var(--ops-warn-line);
-  color: var(--ops-warn-ink);
-}
+.ov-pri-urgent { color: var(--ops-bad-ink); }
+.ov-pri-high   { color: var(--ops-warn-ink); }
 
 /* Key/value + chips -------------------------------------------------------- */
 
@@ -233,23 +221,13 @@
 }
 
 .ov-chip {
-  padding: 3px 9px;
-  border-radius: var(--ops-radius-pill);
+  padding: 0;
   font-size: var(--ops-text-2xs);
-  font-weight: var(--ops-weight-semi);
+  color: var(--text-3);
 }
 
-.ov-chip.good {
-  background: var(--ops-good-fill);
-  border: 1px solid var(--ops-good-line);
-  color: var(--ops-good-ink);
-}
-
-.ov-chip.warn {
-  background: var(--ops-warn-fill);
-  border: 1px solid var(--ops-warn-line);
-  color: var(--ops-warn-ink);
-}
+.ov-chip.good { color: var(--ops-good-ink); }
+.ov-chip.warn { color: var(--ops-warn-ink); }
 
 /* Shared admin sub-page furniture ------------------------------------------ */
 

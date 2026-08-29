@@ -119,7 +119,12 @@
 .staff-rail-group-label,
 .sla-strip dt,
 .st-turn-who,
-.tickets-filter-label {
+.tickets-filter-label,
+.ops-chip,
+.ov-pri,
+.ov-chip,
+.st-pri,
+.st-pill {
   font-family: var(--ops-font-mono);
   font-weight: var(--ops-weight-light);
   letter-spacing: var(--ops-tracking-meta);
@@ -563,24 +568,45 @@ a.ops-stat:hover {
 
 /* ── Chips and pills ──────────────────────────────────────────────────────── */
 
+/* A status label, not a control.
+
+   These were pills: a tinted fill, a 1px border and a pill radius around 11px
+   of semibold text. Nothing here is clickable, and a bordered capsule in a
+   console is what a button looks like — "protected", "queued" and "this
+   replica" all read as things to press. They are readings.
+
+   So the capsule goes and the state moves into the ink, in the same mono-light
+   voice as every other label on the page (see the metadata block above). The
+   `-ink` tokens are the text-safe step of each role, which is exactly what a
+   colour has to be once there is no fill under it. */
 .ops-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 9px;
-  border-radius: var(--ops-radius-pill);
-  border: 1px solid var(--ops-line);
-  background: var(--ops-row-active);
-  color: var(--text-2);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-3);
   font-size: var(--ops-text-2xs);
-  font-weight: var(--ops-weight-semi);
   white-space: nowrap;
 }
 
-.ops-chip.is-good   { background: var(--ops-good-fill); border-color: var(--ops-good-line); color: var(--ops-good-ink); }
-.ops-chip.is-warn   { background: var(--ops-warn-fill); border-color: var(--ops-warn-line); color: var(--ops-warn-ink); }
-.ops-chip.is-danger { background: var(--ops-bad-fill);  border-color: var(--ops-bad-line);  color: var(--ops-bad-ink); }
-.ops-chip.is-info   { background: var(--ops-info-fill); border-color: var(--ops-info-line); color: var(--ops-info-ink); }
+/* Space between two readings, now that neither carries a capsule to supply it.
+
+   The pills had 9px of padding a side, so a row of them read as separated even
+   on an 8px gap — 26px of daylight all told. Stripped to text, that same gap
+   ran "49 flags" into "11 on" into "all at default", four different facts as
+   one sentence. The margin rides on the adjacency, so a lone label in a table
+   cell is unaffected. */
+.ops-chip + .ops-chip {
+  margin-left: var(--ops-space-3);
+}
+
+.ops-chip.is-good   { color: var(--ops-good-ink); }
+.ops-chip.is-warn   { color: var(--ops-warn-ink); }
+.ops-chip.is-danger { color: var(--ops-bad-ink); }
+.ops-chip.is-info   { color: var(--ops-info-ink); }
 
 .ops-chip-caps {
   text-transform: uppercase;
