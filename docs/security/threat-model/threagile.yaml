@@ -1,12 +1,15 @@
 threagile_version: 1.0.0
 
 title: URA AI Taxpayer Chatbot - Threat Model
-date: 2026-08-21
+date: 2026-08-29
 author:
   name: URA AI Security Team
   homepage: https://github.com/mpairwe7/FinalYearProject
 
-management_overview_comment: ""
+management_overview_comment: >
+  Threat model for the official AI-powered Taxpayer Assistant for the
+  Uganda Revenue Authority (URA). Covers hybrid retrieval-augmented generation
+  (RAG), Merkle audit logging, PII sanitization, and staff ticket escalation.
 
 business_criticality: critical
 
@@ -48,6 +51,9 @@ abuse_cases:
     An adversary attempts to inject malicious tax advice into ingested PDF
     laws or publications to manipulate retrieval results.
 
+# ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
 tags_available:
   - next.js
   - react
@@ -63,6 +69,9 @@ tags_available:
   - crane-cloud
   - cloudflare
 
+# ---------------------------------------------------------------------------
+# Security Requirements
+# ---------------------------------------------------------------------------
 security_requirements:
   Input Validation: Strict InputGuard validation on all taxpayer queries
   Authentication: JWT / API key authentication for staff and admin endpoints
@@ -70,6 +79,9 @@ security_requirements:
   Data Protection: Automatic PII redaction and cryptographic Merkle audit logging
   Grounding: Cross-encoder DeBERTa NLI grounding verification (>0.65 threshold)
 
+# ---------------------------------------------------------------------------
+# Trust Boundaries
+# ---------------------------------------------------------------------------
 trust_boundaries:
   internet-to-edge:
     id: internet-to-edge
@@ -78,85 +90,361 @@ trust_boundaries:
     technical_assets_inside:
       - nextjs-frontend
       - cloudflare-proxy
+    trust_boundaries_nested: []
 
   edge-to-backend:
     id: edge-to-backend
-    type: network-dedicated
-    description: Edge to Crane Cloud internal VPC network.
+    type: network-cloud-provider
+    description: Cloudflare Tunnel to Crane Cloud internal VPC network.
     technical_assets_inside:
       - fastapi-api
       - qdrant-vectordb
       - redis-cache
       - database-store
+      - vllm-inference
+    trust_boundaries_nested: []
 
+# ---------------------------------------------------------------------------
+# Data Assets
+# ---------------------------------------------------------------------------
+data_assets:
+  taxpayer-queries:
+    id: taxpayer-queries
+    description: Inbound tax inquiries submitted by taxpayers (pre-redaction)
+    usage: business
+    origin: taxpayer-users
+    owner: security-team
+    confidentiality: strictly-confidential
+    integrity: critical
+    availability: important
+    quantity: many
+    justification_cia_rating: >
+      Taxpayer queries may contain sensitive personal data (TIN, NID, salary).
+      Integrity is critical to ensure accurate guidance.
+
+  tax-law-corpus:
+    id: tax-law-corpus
+    description: Statutory acts, practice notes, and tariffs ingested into vector DB
+    usage: business
+    origin: ura-publications
+    owner: legal-team
+    confidentiality: internal
+    integrity: mission-critical
+    availability: mission-critical
+    quantity: many
+    justification_cia_rating: >
+      Tax law grounding is the single source of truth for all calculations.
+      Tampering could cause systemic miscalculation of taxes.
+
+  audit-ledger:
+    id: audit-ledger
+    description: Cryptographically hashed Merkle-tree interaction & triage ledger
+    usage: business
+    origin: fastapi-api
+    owner: security-team
+    confidentiality: confidential
+    integrity: mission-critical
+    availability: important
+    quantity: many
+    justification_cia_rating: >
+      Required for regulatory compliance and dispute resolution under Uganda NDPA 2019.
+
+  user-credentials:
+    id: user-credentials
+    description: Staff JWT tokens, admin passwords, and session keys
+    usage: business
+    origin: staff-users
+    owner: security-team
+    confidentiality: strictly-confidential
+    integrity: critical
+    availability: important
+    quantity: few
+
+  api-keys-and-secrets:
+    id: api-keys-and-secrets
+    description: JWT_SECRET_KEY, CLOUDFLARE_API_TOKEN, DATABASE_URL, SUNBIRD_API_KEY
+    usage: business
+    origin: devops-team
+    owner: security-team
+    confidentiality: strictly-confidential
+    integrity: mission-critical
+    availability: mission-critical
+    quantity: few
+
+# ---------------------------------------------------------------------------
+# Technical Assets
+# ---------------------------------------------------------------------------
 technical_assets:
+  cloudflare-proxy:
+    id: cloudflare-proxy
+    description: Cloudflare Edge CDN, DDoS mitigation, and Tunnel gateway.
+    type: process
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    technology: reverse-proxy
+    custom_developed_parts: false
+    size: service
+    tags: [cloudflare]
+    internet: true
+    machine: serverless
+    encryption: transparent
+    multi_tenant: false
+    redundant: true
+    owner: devops-team
+    confidentiality: confidential
+    integrity: critical
+    availability: mission-critical
+    justification_cia_rating: Edge gateway protecting all backend infrastructure.
+    data_assets_processed:
+      - taxpayer-queries
+    data_assets_stored: []
+    data_formats_accepted: [json, file]
+    communication_links:
+      tunnel-to-frontend:
+        target: nextjs-frontend
+        description: Proxied HTTP requests to Next.js frontend
+        protocol: https
+        authentication: none
+        authorization: none
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent: [taxpayer-queries]
+        data_assets_received: [taxpayer-queries]
+
   nextjs-frontend:
     id: nextjs-frontend
     description: Next.js 16 React Web UI for taxpayers and URA staff.
     type: process
     usage: business
     used_as_client_by_human: true
-    in_scope: true
-    technology: web-client
+    out_of_scope: false
+    technology: web-application
+    custom_developed_parts: true
+    size: service
     tags: [next.js, react]
     internet: true
+    machine: container
+    encryption: transparent
+    multi_tenant: false
+    redundant: false
+    owner: frontend-team
+    confidentiality: confidential
+    integrity: important
+    availability: important
+    justification_cia_rating: Taxpayer and staff client application.
+    data_assets_processed:
+      - taxpayer-queries
+      - user-credentials
+    data_assets_stored: []
+    data_formats_accepted: [json, file]
+    communication_links:
+      frontend-to-backend-api:
+        target: fastapi-api
+        description: REST & WebSocket API communication with Bearer JWT / session auth
+        protocol: https
+        authentication: token
+        authorization: technical-user
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - taxpayer-queries
+          - user-credentials
+        data_assets_received:
+          - taxpayer-queries
+          - user-credentials
 
   fastapi-api:
     id: fastapi-api
-    description: FastAPI core API service with RAG orchestrator and guardrails.
+    description: FastAPI core API service with RAG orchestrator, guardrails, and audit logging.
     type: process
     usage: business
-    in_scope: true
-    technology: application
-    tags: [fastapi, python]
-    confidentiality: high
-    integrity: critical
-    availability: high
+    used_as_client_by_human: false
+    out_of_scope: false
+    technology: web-service-rest
+    custom_developed_parts: true
+    size: service
+    tags: [fastapi, python, crane-cloud]
+    internet: false
+    machine: container
+    encryption: transparent
+    multi_tenant: true
+    redundant: false
+    owner: backend-team
+    confidentiality: strictly-confidential
+    integrity: mission-critical
+    availability: important
+    justification_cia_rating: Central hub executing RAG, PII sanitization, and audit ledger.
+    data_assets_processed:
+      - taxpayer-queries
+      - tax-law-corpus
+      - audit-ledger
+      - user-credentials
+      - api-keys-and-secrets
+    data_assets_stored: []
+    data_formats_accepted: [json, file]
+    communication_links:
+      api-to-qdrant:
+        target: qdrant-vectordb
+        description: Vector search and dense embedding queries via gRPC/HTTP
+        protocol: nosql-access-protocol-encrypted
+        authentication: credentials
+        authorization: technical-user
+        vpn: false
+        ip_filtered: true
+        readonly: false
+        usage: business
+        data_assets_sent: [taxpayer-queries]
+        data_assets_received: [tax-law-corpus]
+
+      api-to-vllm:
+        target: vllm-inference
+        description: LLM text completion and NLI reranking inference requests
+        protocol: http
+        authentication: credentials
+        authorization: technical-user
+        vpn: false
+        ip_filtered: true
+        readonly: false
+        usage: business
+        data_assets_sent: [taxpayer-queries, tax-law-corpus]
+        data_assets_received: [taxpayer-queries]
+
+      api-to-database:
+        target: database-store
+        description: SQL queries for analytics, user sessions, and Merkle audit logging
+        protocol: sql-access-protocol-encrypted
+        authentication: credentials
+        authorization: technical-user
+        vpn: false
+        ip_filtered: true
+        readonly: false
+        usage: business
+        data_assets_sent: [audit-ledger, taxpayer-queries, user-credentials]
+        data_assets_received: [audit-ledger, user-credentials]
+
+      api-to-redis:
+        target: redis-cache
+        description: In-memory cache queries for rate limiting and semantic response caching
+        protocol: nosql-access-protocol-encrypted
+        authentication: credentials
+        authorization: technical-user
+        vpn: false
+        ip_filtered: true
+        readonly: false
+        usage: business
+        data_assets_sent: [taxpayer-queries]
+        data_assets_received: [taxpayer-queries]
 
   qdrant-vectordb:
     id: qdrant-vectordb
     description: Qdrant vector database hosting dense embeddings for URA documents.
     type: datastore
     usage: business
-    in_scope: true
-    technology: database
+    used_as_client_by_human: false
+    out_of_scope: false
+    technology: search-index
+    custom_developed_parts: false
+    size: service
     tags: [qdrant, vector-db]
-    confidentiality: high
-    integrity: critical
-    availability: high
+    internet: false
+    machine: container
+    encryption: transparent
+    multi_tenant: false
+    redundant: false
+    owner: data-team
+    confidentiality: internal
+    integrity: mission-critical
+    availability: important
+    justification_cia_rating: Vector store containing all indexed statutory laws.
+    data_assets_processed: [tax-law-corpus]
+    data_assets_stored: [tax-law-corpus]
+    data_formats_accepted: [json]
+    communication_links: {}
 
   vllm-inference:
     id: vllm-inference
     description: vLLM / HuggingFace inference runtime serving quantized LLMs.
     type: process
     usage: business
-    in_scope: true
-    technology: application
+    used_as_client_by_human: false
+    out_of_scope: false
+    technology: ai
+    custom_developed_parts: false
+    size: service
     tags: [vllm, huggingface]
-    confidentiality: high
+    internet: false
+    machine: container
+    encryption: transparent
+    multi_tenant: false
+    redundant: false
+    owner: ml-team
+    confidentiality: strictly-confidential
     integrity: critical
-    availability: high
+    availability: important
+    justification_cia_rating: Local model serving engine.
+    data_assets_processed: [taxpayer-queries, tax-law-corpus]
+    data_assets_stored: []
+    data_formats_accepted: [json]
+    communication_links: {}
 
   database-store:
     id: database-store
     description: SQLite / PostgreSQL persistent store for analytics and audit ledger.
     type: datastore
     usage: business
-    in_scope: true
+    used_as_client_by_human: false
+    out_of_scope: false
     technology: database
+    custom_developed_parts: false
+    size: service
     tags: [postgresql, sqlite]
-    confidentiality: critical
-    integrity: critical
-    availability: high
+    internet: false
+    machine: container
+    encryption: transparent
+    multi_tenant: true
+    redundant: false
+    owner: backend-team
+    confidentiality: strictly-confidential
+    integrity: mission-critical
+    availability: important
+    justification_cia_rating: Persistent store for cryptographic Merkle audit records.
+    data_assets_processed: [audit-ledger, user-credentials, taxpayer-queries]
+    data_assets_stored: [audit-ledger, user-credentials, taxpayer-queries]
+    data_formats_accepted: [json, file]
+    communication_links: {}
 
   redis-cache:
     id: redis-cache
     description: Redis in-memory cache for rate-limiting and semantic response caching.
     type: datastore
     usage: business
-    in_scope: true
+    used_as_client_by_human: false
+    out_of_scope: false
     technology: database
+    custom_developed_parts: false
+    size: service
     tags: [redis]
-    confidentiality: medium
-    integrity: high
-    availability: high
+    internet: false
+    machine: container
+    encryption: transparent
+    multi_tenant: false
+    redundant: false
+    owner: backend-team
+    confidentiality: confidential
+    integrity: important
+    availability: important
+    justification_cia_rating: Fast cache for query rate limiting and token bucket state.
+    data_assets_processed: [taxpayer-queries]
+    data_assets_stored: [taxpayer-queries]
+    data_formats_accepted: [json]
+    communication_links: {}
+
+# ---------------------------------------------------------------------------
+# Risk Tracking (overrides for auto-detected risks)
+# ---------------------------------------------------------------------------
+risk_tracking: {}

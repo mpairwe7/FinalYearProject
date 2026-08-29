@@ -167,7 +167,9 @@ jobs:
             -v "${{ env.OUTPUT_DIR }}:/app/output" \
             threagile/threagile:latest \
             -model /app/threagile.yaml \
-            -output /app/output
+            -output /app/output \
+            -generate-risks-excel=false \
+            -generate-tags-excel=false
 
       - name: Parse risk results
         id: risks
@@ -303,15 +305,19 @@ jobs:
     steps:
       - name: Evaluate Threat Model Gate
         run: |
+          RR_STATUS="${{ needs.risk-register.result }}"
+          ANALYZE_STATUS="${{ needs.analyze.result }}"
           OPEN_CRITICAL="${{ needs.risk-register.outputs.open_critical }}"
           THREAGILE_CRITICAL="${{ needs.analyze.outputs.critical_count }}"
 
           echo "## Threat Model Gate Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Risk Register Validation: ${RR_STATUS}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Threagile Analysis: ${ANALYZE_STATUS}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Open Critical Risks in Register: ${OPEN_CRITICAL:-0}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Unmitigated Critical Risks from Threagile: ${THREAGILE_CRITICAL:-0}" >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "${OPEN_CRITICAL:-0}" != "0" ] || [ "${THREAGILE_CRITICAL:-0}" != "0" ]; then
-            echo "❌ **Threat model gate failed: Unmitigated critical risks detected.**" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${RR_STATUS}" != "success" ] || [ "${ANALYZE_STATUS}" != "success" ] || [ "${OPEN_CRITICAL:-0}" != "0" ] || [ "${THREAGILE_CRITICAL:-0}" != "0" ]; then
+            echo "❌ **Threat model gate failed.**" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           echo "✅ **Threat model gate passed.**" >> "$GITHUB_STEP_SUMMARY"
