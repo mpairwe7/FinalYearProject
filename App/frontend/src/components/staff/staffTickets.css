@@ -116,6 +116,13 @@
   width: 100%;
 }
 
+/* Same reason as `.ops-chip + .ops-chip` in ops.css: without capsules, the
+   header's 5px gap ran "HIGH" straight into "NEW". */
+.st-pri + .st-pill,
+.st-pill + .st-pill {
+  margin-left: var(--ops-space-3);
+}
+
 .st-pri-urgent { color: var(--ops-bad-ink); }
 .st-pri-high   { color: var(--ops-warn-ink); }
 .st-pill-warm  { color: var(--ops-series-7); }
@@ -174,11 +181,13 @@
   margin-bottom: var(--ops-space-2);
 }
 
+/* A row of readings, not a row of objects: the vertical gap is what separates
+   it from the wait figure when the header wraps. */
 .st-case-pills {
   display: flex;
-  gap: 5px;
+  gap: 5px var(--ops-space-1);
   flex-wrap: wrap;
-  margin: 0;
+  margin: 0 0 var(--ops-space-1);
 }
 
 .st-case-wait {

@@ -592,6 +592,17 @@ a.ops-stat:hover {
   white-space: nowrap;
 }
 
+/* Space between two readings, now that neither carries a capsule to supply it.
+
+   The pills had 9px of padding a side, so a row of them read as separated even
+   on an 8px gap — 26px of daylight all told. Stripped to text, that same gap
+   ran "49 flags" into "11 on" into "all at default", four different facts as
+   one sentence. The margin rides on the adjacency, so a lone label in a table
+   cell is unaffected. */
+.ops-chip + .ops-chip {
+  margin-left: var(--ops-space-3);
+}
+
 .ops-chip.is-good   { color: var(--ops-good-ink); }
 .ops-chip.is-warn   { color: var(--ops-warn-ink); }
 .ops-chip.is-danger { color: var(--ops-bad-ink); }
