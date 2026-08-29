@@ -84,7 +84,7 @@ python -m ml.pipelines.evaluate_rag_offline --eval-set Data/eval/rag_eval.jsonl
 python -m ml.pipelines.corpus_coverage --languages en --fail-under-floor
 
 # Retrieval ranking gate
-python -m ml.scripts.eval_retrieval --min-hit1 0.85
+python -m ml.scripts.eval_retrieval --min-hit1 0.90
 
 # Combined production quality gate
 python -m ml.pipelines.quality_gates --family production \

@@ -243,7 +243,7 @@ def build_index(
 
         points: list[models.PointStruct] = []
         for j, doc in enumerate(batch):
-            sparse_idx, sparse_val = sparse_encoder.encode(_embedding_text(doc))
+            sparse_idx, sparse_val = sparse_encoder.encode_document(_embedding_text(doc))
             vectors: dict[str, Any] = {}
             if dense_embeddings is not None:
                 vectors["dense"] = dense_embeddings[j].tolist()

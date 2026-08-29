@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import unittest
 
-from app.cache import SemanticCache, exact_cache_key
+from unittest import mock
+
+from app.cache import SemanticCache, exact_cache_key, reset_index_stamp
 
 
 class ExactCacheKeyTests(unittest.TestCase):
@@ -38,8 +40,11 @@ class ExactCacheKeyTests(unittest.TestCase):
         )
 
     def test_empty_and_none_are_handled(self) -> None:
-        self.assertEqual(exact_cache_key(""), "en\x1f")
-        self.assertEqual(exact_cache_key(None), "en\x1f")  # type: ignore[arg-type]
+        # The key gained an index-stamp field in front (see
+        # CacheKeyIndexStampTests), so assert the tail rather than the whole
+        # string — the stamp depends on which corpus the index was built from.
+        self.assertTrue(exact_cache_key("").endswith("en\x1f"))
+        self.assertEqual(exact_cache_key(None), exact_cache_key(""))  # type: ignore[arg-type]
 
 
 class ExactTierWithoutAnEmbedderTests(unittest.TestCase):
@@ -112,3 +117,56 @@ class ExactTierWithoutAnEmbedderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# Two real index corpus hashes, truncated the way the cache key truncates them.
+# They are content digests of a public corpus, not credentials — detect-secrets
+# only sees the entropy.
+_STAMP_OLD = "317bf6d66b1f"  # pragma: allowlist secret
+_STAMP_NEW = "82e84d56eb80"  # pragma: allowlist secret
+
+
+class CacheKeyIndexStampTests(unittest.TestCase):
+    """A cached answer is only valid for the corpus it was retrieved from.
+
+    The key was query + locale, and nothing cleared Redis on a reindex, so every
+    entry written before a corpus fix stayed readable for the rest of its hour.
+    Ship the fix, rebuild the index, and the assistant keeps serving what the old
+    index produced — the corrected passage looks like it never landed.
+    """
+
+    def setUp(self) -> None:
+        reset_index_stamp()
+        self.addCleanup(reset_index_stamp)
+
+    @staticmethod
+    def _key_with_stamp(stamp: str, query: str = "What taxes apply to private schools?") -> str:
+        reset_index_stamp()
+        with mock.patch("app.cache._read_index_stamp", return_value=stamp):
+            return exact_cache_key(query)
+
+    def test_a_reindex_makes_the_previous_entries_unreachable(self) -> None:
+        before = self._key_with_stamp(_STAMP_OLD)
+        after = self._key_with_stamp(_STAMP_NEW)
+        self.assertNotEqual(before, after)
+
+    def test_the_same_corpus_still_reuses_one_entry(self) -> None:
+        """The stamp must not defeat the reuse the exact tier exists for."""
+        reset_index_stamp()
+        with mock.patch("app.cache._read_index_stamp", return_value=_STAMP_NEW):
+            self.assertEqual(
+                exact_cache_key("What taxes apply to private schools?"),
+                exact_cache_key("  WHAT taxes   apply to PRIVATE schools?! "),
+            )
+
+    def test_locale_still_separates_entries(self) -> None:
+        reset_index_stamp()
+        with mock.patch("app.cache._read_index_stamp", return_value=_STAMP_NEW):
+            self.assertNotEqual(exact_cache_key("What is VAT?", "en"), exact_cache_key("What is VAT?", "lg"))
+
+    def test_an_unreadable_snapshot_does_not_break_lookups(self) -> None:
+        """No index stamp is a degraded cache, not a failed request."""
+        reset_index_stamp()
+        with mock.patch("app.cache._read_index_stamp", return_value=""):
+            self.assertTrue(exact_cache_key("What is VAT?").endswith("what is vat"))
+

@@ -1,0 +1,214 @@
+# =============================================================================
+# URA Chatbot — roll the HF Docker Space to a built image
+#
+# The Space runs the same prebuilt image Crane Cloud runs; its Dockerfile is a
+# one-line `FROM landwind/ura-chatbot:sha-<short>` pin. Two things made rolling
+# it a manual chore that was repeatedly forgotten:
+#
+#   1. The Space's git repo (huggingface.co/spaces/landwind22/ura-chatbot) has
+#      no webhook from GitHub. Merging a roll PR updates this repo and nothing
+#      else — confirmed by diffing the Space's raw Dockerfile right after a
+#      merge and finding the PREVIOUS roll's sha. Every roll therefore needed a
+#      hand-run `HfApi.upload_file`, and a missed one looks exactly like "the
+#      fix is on dev but the Space still behaves old".
+#   2. The image bakes its Qdrant collection and BM25 state at build time, so a
+#      corpus change is invisible on the Space until the pin moves. That is the
+#      "data update" half: new data only reaches the demo surface via a roll.
+#
+# So this runs after a green build and does both halves — moves the pin in this
+# repo AND pushes the Dockerfile to the Space — leaving the two in sync.
+#
+# Triggers:
+#   * dispatched by ura-chatbot-build-push.yml on a successful dev build
+#   * workflow_dispatch — roll to any tag by hand
+#
+# Required secrets:
+#   * HF_TOKEN — a landwind22 token with write on the Space. The same secret
+#     hf-space-keepalive.yml already uses. A read-only token (the machine's
+#     cached Mpairwe49 login) can open a PR but cannot commit.
+# =============================================================================
+name: "URA Chatbot — Roll HF Space"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to pin (e.g. sha-abc1234)"
+        type: string
+        required: true
+      skip_commit:
+        description: "Push to the Space only; leave this repo's pin alone"
+        type: boolean
+        default: false
+
+# One roll at a time. Two overlapping rolls would race on both the git push and
+# the Space build, and the loser would silently leave the pin behind.
+concurrency:
+  group: ura-chatbot-roll-hf-space
+  cancel-in-progress: false
+
+permissions:
+  contents: write # commits the moved pin back to the branch
+
+env:
+  SPACE_ID: landwind22/ura-chatbot
+  SPACE_URL: https://landwind22-ura-chatbot.hf.space
+  IMAGE_BASE: landwind/ura-chatbot
+  PIN_FILE: App/deploy/hf-space/Dockerfile
+
+jobs:
+  roll:
+    name: Pin ${{ inputs.image_tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Validate the HF token is configured
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${HF_TOKEN:?HF_TOKEN repo secret is missing — the Space cannot be rolled without it}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The pin is committed back, so check out a real branch rather than
+          # the detached SHA a dispatch would otherwise give us.
+          ref: ${{ github.ref_name }}
+
+      - name: Verify the image is reachable on Docker Hub
+        env:
+          IMAGE: ${{ env.IMAGE_BASE }}:${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          # Pinning the Space to a tag that is not on Docker Hub yet gives the
+          # Space a build error rather than an obvious failure here.
+          REPO="${IMAGE%:*}"; TAG="${IMAGE##*:}"
+          TOKEN=$(curl -sS "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${REPO}:pull" \
+                  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+                 -H "Authorization: Bearer $TOKEN" \
+                 -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                 "https://registry-1.docker.io/v2/${REPO}/manifests/${TAG}")
+          if [[ "$CODE" != "200" ]]; then
+            echo "::error::Docker Hub returned $CODE for ${IMAGE} — build and push it before rolling."
+            exit 1
+          fi
+          echo "✓ ${IMAGE} is reachable."
+
+      - name: Move the pin
+        id: pin
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -oP '^FROM \Klandwind/ura-chatbot:\S+' "$PIN_FILE" | head -1)
+          WANTED="${IMAGE_BASE}:${TAG}"
+          echo "current=$CURRENT"
+          echo "wanted=$WANTED"
+          if [[ "$CURRENT" == "$WANTED" ]]; then
+            # Still worth pushing to the Space: this repo being right says
+            # nothing about what the Space is actually running.
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Pin already at ${WANTED}; syncing the Space anyway."
+            exit 0
+          fi
+          sed -i "s|^FROM ${IMAGE_BASE}:.*|FROM ${WANTED}|" "$PIN_FILE"
+          grep -q "^FROM ${WANTED}$" "$PIN_FILE" || { echo "::error::pin rewrite failed"; exit 1; }
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the pin back
+        if: steps.pin.outputs.changed == 'true' && inputs.skip_commit != true
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$PIN_FILE"
+          # [skip ci] keeps a one-line pin move from re-running the whole matrix.
+          # It cannot hide a real change: this workflow only ever edits this file,
+          # and the image it points at was already built and scanned.
+          git commit -m "chore(hf-space): roll to ${TAG} [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Push the Dockerfile to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          pip install --quiet huggingface_hub
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          # whoami() needs a user-info scope a fine-grained token may not carry,
+          # and it has failed before on a token whose repo write was fine. Never
+          # gate the upload on it — let the upload itself be the check.
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["SPACE_ID"]
+          commit = api.upload_file(
+              path_or_fileobj=os.environ["PIN_FILE"],
+              path_in_repo="Dockerfile",
+              repo_id=space,
+              repo_type="space",
+              commit_message=f"Roll to {os.environ['IMAGE_BASE']}:{os.environ['TAG']}",
+          )
+          url = getattr(commit, "commit_url", commit)
+          print(f"pushed to {space}: {url}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(f"Rolled **{space}** to `{os.environ['TAG']}`\n\n{url}\n")
+          PY
+
+      - name: Wait for the Space to come back
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import sys
+          import time
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["SPACE_ID"]
+          # A pull-and-run of the ~400 MB image, then the readiness gate waits on
+          # the Qdrant sidecar before uvicorn starts. Ten minutes is generous for
+          # that and still bounded by the job timeout.
+          deadline = time.time() + 600
+          last = None
+          while time.time() < deadline:
+              stage = api.get_space_runtime(space).stage
+              if stage != last:
+                  print(f"stage={stage}", flush=True)
+                  last = stage
+              if stage == "RUNNING":
+                  print("Space is running the new pin.")
+                  sys.exit(0)
+              if stage in ("BUILD_ERROR", "RUNTIME_ERROR", "CONFIG_ERROR"):
+                  print(f"::error::Space ended in {stage} after the roll.")
+                  sys.exit(1)
+              time.sleep(15)
+          print(f"::error::Space did not reach RUNNING within 10 min (last stage: {last}).")
+          sys.exit(1)
+          PY
+
+      - name: Confirm the app answers
+        run: |
+          set -uo pipefail
+          # RUNNING is the scheduler's view. The build gate gives a booting image
+          # that serves 499 FAQ rows the same stage as a healthy one, so ask the
+          # app itself before calling the roll good.
+          for attempt in 1 2 3 4 5 6; do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 45 "$SPACE_URL/health" || echo 000)
+            echo "  [$attempt] /health → $CODE"
+            [[ "$CODE" == "200" ]] && { echo "::notice::HF Space healthy on ${{ inputs.image_tag }}"; exit 0; }
+            sleep 20
+          done
+          echo "::error::Space reached RUNNING but /health never returned 200."
+          exit 1
