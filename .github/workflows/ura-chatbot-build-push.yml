@@ -240,3 +240,32 @@ jobs:
               },
             });
             core.notice(`Dispatched ura-chatbot-deploy-cranecloud (tag=${tag})`);
+
+  # ---------------------------------------------------------------------------
+  # The HF Space runs this same image behind a one-line pin, and nothing syncs
+  # that pin from GitHub — every roll used to be a hand-run upload, and a missed
+  # one is indistinguishable from "the fix never landed". A corpus change is
+  # invisible there until the pin moves, because the image bakes its Qdrant
+  # collection at build time. Roll it on the same signal Crane Cloud deploys on:
+  # a green build of dev.
+  # ---------------------------------------------------------------------------
+  dispatch-hf-space-roll:
+    needs: build
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch HF Space roll
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = '${{ needs.build.outputs.tag }}';
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              workflow_id: 'ura-chatbot-roll-hf-space.yml',
+              ref: context.ref,
+              inputs: {
+                image_tag: tag,
+              },
+            });
+            core.notice(`Dispatched ura-chatbot-roll-hf-space (tag=${tag})`);
