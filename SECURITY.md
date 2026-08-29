@@ -172,7 +172,8 @@ This project aligns with:
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
 | Secret Scanning | `secret-scanning.yml` | Push, PR, weekly, manual | 4-layer secret detection |
-| Trivy Security | `security-trivy.yml` | Push, PR, weekly, manual | SCA, IaC, license, container, SBOM |
+| Threat Model | `threat-model.yml` | Push, PR, weekly, manual | Threagile automated analysis & risk register PR reporting |
+| Trivy Security | `security-trivy.yml` | Push, PR, weekly, manual | SCA, IaC, license, container, SBOM, PR vulnerability summary |
 | DevSecOps SAST/DAST | `devsecops-sast-dast.yml` | Push, PR, weekly, manual | Semgrep, Bandit, pip-audit, Checkov, ZAP, Scorecard, threat model |
 | ML Pipeline | `ci-ml-pipeline.yml` | Push, PR, manual | Lint, test, governance, training, RAG eval, Docker |
 | Frontend | `frontend-deploy.yml` | Push, PR, manual | Lint, build, Docker, Trivy |

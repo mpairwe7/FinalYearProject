@@ -1,0 +1,317 @@
+name: Threat Model Analysis
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+      - develop
+    paths:
+      - "App/backend/**"
+      - "App/frontend/**"
+      - "docs/security/threat-model/**"
+      - "scripts/validate-risk-register.py"
+      - "threat-model/**"
+      - ".github/workflows/threat-model.yml"
+  push:
+    branches:
+      - main
+      - dev
+      - develop
+    paths:
+      - "App/backend/**"
+      - "App/frontend/**"
+      - "docs/security/threat-model/**"
+      - "scripts/validate-risk-register.py"
+      - "threat-model/**"
+      - ".github/workflows/threat-model.yml"
+  workflow_dispatch:
+    inputs:
+      fail_on_elevated:
+        description: "Fail on elevated (high) severity risks"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+  schedule:
+    # Weekly Monday 04:00 UTC (07:00 EAT)
+    - cron: "0 4 * * 1"
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: threat-model-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  THREAGILE_MODEL: docs/security/threat-model/threagile.yaml
+  RISK_REGISTER: docs/security/threat-model/risk-register.yaml
+  ACCEPTED_RISKS: docs/security/threat-model/accepted-risks.yaml
+  OUTPUT_DIR: /tmp/threagile-output
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Validate and report on the risk register (runs on every trigger)
+  # ---------------------------------------------------------------------------
+  risk-register:
+    name: Risk Register Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      total: ${{ steps.validate.outputs.total }}
+      open_critical: ${{ steps.validate.outputs.open_critical }}
+      open_high: ${{ steps.validate.outputs.open_high }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Validate risk register
+        id: validate
+        run: python scripts/validate-risk-register.py --register ${{ env.RISK_REGISTER }}
+
+      - name: Gate on critical risks
+        if: steps.validate.outputs.open_critical != '0'
+        run: |
+          echo "::warning::Risk register contains ${{ steps.validate.outputs.open_critical }} open critical risks with mitigation plans."
+          echo "Review docs/security/threat-model.md for roadmap."
+          echo "All critical risks must have owner + mitigation_target in the register."
+
+      - name: Comment risk register on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- threat-model-risk-register -->';
+            const total = '${{ steps.validate.outputs.total }}';
+            const critical = '${{ steps.validate.outputs.open_critical }}';
+            const high = '${{ steps.validate.outputs.open_high }}';
+
+            const body = `${marker}
+            ### Threat Model: Risk Register Status
+            | Metric | Count |
+            |--------|------:|
+            | Total risks | ${total} |
+            | Open Critical | ${critical} |
+            | Open High | ${high} |
+
+            Full register: \`docs/security/threat-model/risk-register.yaml\``;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const existing = comments.find(c => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body,
+              });
+            }
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Threagile automated threat model analysis
+  # ---------------------------------------------------------------------------
+  analyze:
+    name: Threagile Threat Model Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      critical_count: ${{ steps.risks.outputs.critical_count }}
+      elevated_count: ${{ steps.risks.outputs.elevated_count }}
+      total_count: ${{ steps.risks.outputs.total_count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Validate model file exists
+        run: |
+          if [ ! -f "${{ env.THREAGILE_MODEL }}" ]; then
+            echo "::error::Threat model file not found: ${{ env.THREAGILE_MODEL }}"
+            exit 1
+          fi
+          echo "Model file found: ${{ env.THREAGILE_MODEL }}"
+
+      - name: Create output directory
+        run: mkdir -p ${{ env.OUTPUT_DIR }} && chmod 777 ${{ env.OUTPUT_DIR }}
+
+      - name: Run Threagile analysis
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/${{ env.THREAGILE_MODEL }}:/app/threagile.yaml:ro" \
+            -v "${{ env.OUTPUT_DIR }}:/app/output" \
+            threagile/threagile:latest \
+            -model /app/threagile.yaml \
+            -output /app/output
+
+      - name: Parse risk results
+        id: risks
+        run: |
+          RISKS_FILE="${{ env.OUTPUT_DIR }}/risks.json"
+
+          if [ ! -f "$RISKS_FILE" ]; then
+            echo "::error::risks.json not generated -- Threagile analysis failed or produced no output"
+            exit 1
+          fi
+
+          CRITICAL=$(jq '[.[] | select(.severity == "critical" and .risk_status != "accepted" and .risk_status != "mitigated")] | length' "$RISKS_FILE")
+          ELEVATED=$(jq '[.[] | select(.severity == "elevated" and .risk_status != "accepted" and .risk_status != "mitigated")] | length' "$RISKS_FILE")
+          TOTAL=$(jq 'length' "$RISKS_FILE")
+
+          echo "critical_count=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "elevated_count=$ELEVATED" >> "$GITHUB_OUTPUT"
+          echo "total_count=$TOTAL" >> "$GITHUB_OUTPUT"
+
+          echo "### Threat Model Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|------:|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Critical (unmitigated) | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Elevated (unmitigated) | $ELEVATED |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Total risks | $TOTAL |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report Threagile risk summary
+        run: |
+          CRITICAL="${{ steps.risks.outputs.critical_count }}"
+          ELEVATED="${{ steps.risks.outputs.elevated_count }}"
+          TOTAL="${{ steps.risks.outputs.total_count }}"
+          if [ "$CRITICAL" != "0" ]; then
+            echo "::warning::Threagile found $CRITICAL critical + $ELEVATED elevated risks out of $TOTAL total."
+            echo "Review the report artifact and docs/security/threat-model.md for mitigation roadmap."
+          fi
+
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request' && steps.risks.outputs.total_count != '0'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- threat-model-threagile-analysis -->';
+            const critical = parseInt('${{ steps.risks.outputs.critical_count }}');
+            const elevated = parseInt('${{ steps.risks.outputs.elevated_count }}');
+            const total = parseInt('${{ steps.risks.outputs.total_count }}');
+
+            let status = ':white_check_mark:';
+            if (critical > 0) status = ':x:';
+            else if (elevated > 3) status = ':warning:';
+
+            const body = `${marker}
+            ## ${status} Threat Model Analysis (Threagile)
+
+            | Severity | Count |
+            |----------|------:|
+            | Critical (unmitigated) | ${critical} |
+            | Elevated (unmitigated) | ${elevated} |
+            | Total risks | ${total} |
+
+            ${critical > 0 ? ':x: **Critical risks must be resolved or accepted before merge.**' : ''}
+            ${elevated > 3 ? ':warning: **More than 3 elevated risks -- review recommended.**' : ''}
+
+            See the full report in the workflow artifacts.`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const existing = comments.find(c => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body,
+              });
+            }
+
+      - name: Check accepted risks expiry
+        run: |
+          ACCEPTED_RISKS="${{ env.ACCEPTED_RISKS }}"
+          if [ ! -f "$ACCEPTED_RISKS" ]; then
+            echo "No accepted-risks.yaml found -- skipping expiry check"
+            exit 0
+          fi
+
+          TODAY=$(date +%Y-%m-%d)
+          python3 -c "
+          import yaml, sys
+          from datetime import date
+
+          with open('$ACCEPTED_RISKS') as f:
+              risks = yaml.safe_load(f) or []
+
+          today = date.fromisoformat('$TODAY')
+          expired = [r for r in risks if 'review_date' in r and date.fromisoformat(str(r['review_date'])) < today]
+
+          for r in expired:
+              print(f\"::warning::Accepted risk '{r.get('risk_id', 'unknown')}' has expired review date: {r['review_date']}\")
+
+          sys.exit(1 if expired else 0)
+          " 2>/dev/null || echo "::warning::Some accepted risks have expired review dates"
+
+      - name: Upload Threagile report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: threat-model-report-${{ github.sha }}
+          path: ${{ env.OUTPUT_DIR }}/
+          retention-days: 90
+          if-no-files-found: warn
+          # Threagile outputs: risks.json, report.pdf, data-flow-diagram.png,
+          # data-asset-diagram.png, risks.xlsx, stats.json, tags.xlsx
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Summary Gate
+  # ---------------------------------------------------------------------------
+  threat-model-gate:
+    name: Threat Model Gate
+    runs-on: ubuntu-latest
+    needs: [risk-register, analyze]
+    if: always()
+    steps:
+      - name: Evaluate Threat Model Gate
+        run: |
+          OPEN_CRITICAL="${{ needs.risk-register.outputs.open_critical }}"
+          THREAGILE_CRITICAL="${{ needs.analyze.outputs.critical_count }}"
+
+          echo "## Threat Model Gate Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Open Critical Risks in Register: ${OPEN_CRITICAL:-0}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Unmitigated Critical Risks from Threagile: ${THREAGILE_CRITICAL:-0}" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${OPEN_CRITICAL:-0}" != "0" ] || [ "${THREAGILE_CRITICAL:-0}" != "0" ]; then
+            echo "❌ **Threat model gate failed: Unmitigated critical risks detected.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "✅ **Threat model gate passed.**" >> "$GITHUB_STEP_SUMMARY"

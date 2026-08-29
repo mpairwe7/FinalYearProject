@@ -50,6 +50,8 @@ REQUIRED_FILES = [
     ".checkov.yaml",
     ".zap-rules.tsv",
     ".github/workflows/devsecops-sast-dast.yml",
+    ".github/workflows/security-trivy.yml",
+    ".github/workflows/threat-model.yml",
 ]
 
 # Content keywords that MUST appear in specific files.
