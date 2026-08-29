@@ -105,6 +105,52 @@ _EXACT_KEY_STRIP_RE = re.compile(r"[^\w\s]+")
 _EXACT_KEY_WS_RE = re.compile(r"\s+")
 
 
+#: How long a resolved index stamp is trusted before it is read again. The index
+#: is normally baked at build time and the process restarts on deploy, but it can
+#: also be rebuilt in place through the index API, and a minute is short enough
+#: that nobody chases a stale answer for long.
+_INDEX_STAMP_TTL_SECONDS = 60.0
+
+_index_stamp_value: str | None = None
+_index_stamp_read_at: float = 0.0
+_index_stamp_lock = threading.Lock()
+
+
+def _read_index_stamp() -> str:
+    """Short id of the corpus the live index was built from, or "" if unknown."""
+    try:
+        from .freshness import load_status
+
+        status = load_status() or {}
+        stamp = str(status.get("index_corpus_hash") or status.get("corpus_hash") or "")
+        return stamp[:12]
+    except Exception:  # pragma: no cover - a missing snapshot must not break lookups
+        logger.debug("Could not read the index stamp for the cache key", exc_info=True)
+        return ""
+
+
+def index_stamp() -> str:
+    """Cached :func:`_read_index_stamp`, refreshed at most once a minute."""
+    global _index_stamp_value, _index_stamp_read_at
+
+    now = time.time()
+    if _index_stamp_value is not None and (now - _index_stamp_read_at) < _INDEX_STAMP_TTL_SECONDS:
+        return _index_stamp_value
+    with _index_stamp_lock:
+        if _index_stamp_value is None or (time.time() - _index_stamp_read_at) >= _INDEX_STAMP_TTL_SECONDS:
+            _index_stamp_value = _read_index_stamp()
+            _index_stamp_read_at = time.time()
+    return _index_stamp_value or ""
+
+
+def reset_index_stamp() -> None:
+    """Drop the memoised stamp. For tests and for a reindex that wants immediacy."""
+    global _index_stamp_value, _index_stamp_read_at
+    with _index_stamp_lock:
+        _index_stamp_value = None
+        _index_stamp_read_at = 0.0
+
+
 def exact_cache_key(query: str, locale: str = "en") -> str:
     """Return a model-free lookup key: casefolded, punctuation-stripped query.
 
@@ -117,9 +163,15 @@ def exact_cache_key(query: str, locale: str = "en") -> str:
     A repeated question is the common case for an FAQ assistant, and matching one
     needs no model at all. "What is the VAT rate?" and "what is the vat rate"
     collapse to the same key, so the second asker gets the first asker's answer.
+
+    An answer is only valid for the corpus it was retrieved from, so the key
+    carries the index stamp too. Without it a reindex leaves every entry from the
+    previous corpus readable for the rest of its TTL: the fix ships, the index is
+    rebuilt, and the assistant keeps serving the answer the old index produced —
+    which is how a corrected passage can look like it never landed.
     """
     normalised = _EXACT_KEY_WS_RE.sub(" ", _EXACT_KEY_STRIP_RE.sub(" ", (query or "").casefold())).strip()
-    return f"{locale}\x1f{normalised}"
+    return f"{index_stamp()}\x1f{locale}\x1f{normalised}"
 
 
 @dataclass
