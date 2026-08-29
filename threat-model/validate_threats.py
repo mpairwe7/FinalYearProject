@@ -74,6 +74,7 @@ THREAT_REGISTRY: list[dict] = [
             ".github/dependabot.yml",
             ".github/workflows/devsecops-sast-dast.yml",
             ".github/workflows/threat-model.yml",
+            ".github/workflows/dependabot-automerge.yml",
         ],
         "status": "mitigated",
     },
