@@ -104,7 +104,7 @@ jobs:
       # it is cached on the corpus contents: it only re-runs when a PDF actually
       # changes, which is at most monthly after the scheduled crawl.
       - name: Set up Python for corpus export
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
