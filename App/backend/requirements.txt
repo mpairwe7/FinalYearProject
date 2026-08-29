@@ -32,7 +32,7 @@ numpy>=2.4.4,<3
 
 # PDF ingestion & document processing (permissive Apache-2.0 / MIT)
 pypdfium2>=5.13.0
-pdfplumber>=0.11.0
+pdfplumber>=0.11.10
 
 # Document attachment analysis (POST /v1/documents/analyze) — DOCX/XLSX
 # extraction plus multipart form parsing for the upload endpoint. All

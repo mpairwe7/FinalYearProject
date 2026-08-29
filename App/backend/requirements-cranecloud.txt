@@ -39,7 +39,7 @@ httpx>=0.28.1,<0.29
 # to a structural check if absent.
 # PDF document processing (permissive Apache-2.0 / MIT)
 pypdfium2>=5.13.0
-pdfplumber>=0.11.0
+pdfplumber>=0.11.10
 # PDF report generation (pdf_export.py: /v1/export/* and
 # /v1/documents/{id}/report). fpdf2 was never declared, so every PDF-export
 # endpoint 500'd on this image — live-verified on the HF Space 2026-07-18.
