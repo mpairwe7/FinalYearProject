@@ -70,7 +70,7 @@ Pillow>=10.4
 # the checkout + its own requirements.txt (torch/torchaudio/einx/einops/
 # omegaconf/soundfile/soxr) before setting SPARK_TTS_ENABLED=true.
 transformers>=4.46.0
-torch==2.12.1
+torch==2.13.0
 accelerate>=1.2.0
 peft>=0.19.1
 bitsandbytes>=0.45.0
