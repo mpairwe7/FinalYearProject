@@ -67,13 +67,74 @@ class EncoderRoundTripTest(unittest.TestCase):
         restored = BM25SparseEncoder.from_dict(enc.to_dict())
         self.assertEqual(restored.corpus_hash, enc.corpus_hash)
         # Encoding still works after a round-trip.
-        idx, val = restored.encode("vat rate")
+        idx, val = restored.encode_query("vat rate")
         self.assertTrue(idx and all(v > 0 for v in val))
 
     def test_legacy_state_without_hash_loads(self) -> None:
         legacy = {"vocab": {"a": 0}, "idf": {"0": 1.0}, "avg_dl": 1.0, "next_id": 1}
         enc = BM25SparseEncoder.from_dict(legacy)
         self.assertEqual(enc.corpus_hash, "")
+
+
+class AsymmetricEncodingTest(unittest.TestCase):
+    """The document and query halves must not both carry IDF (see the class
+    docstring on ``BM25SparseEncoder``): squaring it cost 8.9pp of Hit@1 on
+    short questions."""
+
+    DOCS = [
+        "the vat rate is eighteen percent on taxable supplies",
+        "paye is computed in bands on employment income",
+    ]
+
+    def test_query_weights_are_idf_alone(self) -> None:
+        enc = BM25SparseEncoder().fit(self.DOCS)
+        for text in ("vat", "vat vat vat"):
+            idx, val = enc.encode_query(text)
+            self.assertEqual(
+                [round(enc._idf[t], 6) for t in idx],
+                val,
+                "query weight must be IDF — no term saturation, no document "
+                f"length normalisation ({text!r})",
+            )
+
+    def test_document_weights_carry_no_idf(self) -> None:
+        enc = BM25SparseEncoder().fit(self.DOCS)
+        idx, val = enc.encode_document(self.DOCS[0])
+        tokens = enc._tokenize(self.DOCS[0])
+        expected = {
+            enc._vocab[tok]: round(enc._saturation(tokens.count(tok), len(tokens)), 6)
+            for tok in set(tokens)
+        }
+        self.assertEqual(dict(zip(idx, val)), expected)
+
+    def test_dot_product_is_the_bm25_score(self) -> None:
+        """What Qdrant computes for a sparse query must equal textbook BM25."""
+        enc = BM25SparseEncoder().fit(self.DOCS)
+        q_idx, q_val = enc.encode_query("vat rate")
+        d_idx, d_val = enc.encode_document(self.DOCS[0])
+        doc = dict(zip(d_idx, d_val))
+        dot = sum(w * doc[t] for t, w in zip(q_idx, q_val) if t in doc)
+
+        tokens = enc._tokenize(self.DOCS[0])
+        expected = sum(
+            enc._idf[enc._vocab[tok]] * enc._saturation(tokens.count(tok), len(tokens))
+            for tok in ("vat", "rate")
+        )
+        self.assertAlmostEqual(dot, expected, places=4)
+
+    def test_version_is_stamped_and_legacy_state_keeps_v1_scoring(self) -> None:
+        enc = BM25SparseEncoder().fit(self.DOCS)
+        self.assertEqual(enc.to_dict()["encoding_version"], BM25SparseEncoder.ENCODING_VERSION)
+
+        legacy = enc.to_dict()
+        legacy.pop("encoding_version")
+        old = BM25SparseEncoder.from_dict(legacy)
+        # A collection built by v1 code stores IDF in its document vectors, so
+        # its query vectors must keep the v1 shape or the two halves disagree.
+        idx, val = old.encode_query("vat")
+        tid = old._vocab["vat"]
+        self.assertNotEqual(val, [round(old._idf[tid], 6)])
+        self.assertAlmostEqual(val[0], round(old._idf[tid] * old._saturation(1, 1), 6), places=5)
 
 
 class _FakePoint:

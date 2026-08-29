@@ -118,7 +118,7 @@ User Query
 | Component | Details |
 |-----------|---------|
 | Dense model | `BAAI/bge-m3` (1024-dim, multilingual, MTEB 63.0). Set via `DENSE_MODEL` + `DENSE_DIM` env vars. |
-| Sparse | BM25 keyword matching with learnt IDF weights |
+| Sparse | BM25, encoded asymmetrically: documents carry term saturation, queries carry IDF, and their Qdrant dot product is the BM25 score. `bm25_state.json` stamps `encoding_version`; a state from an older index is queried its own way so an un-rebuilt collection keeps its ranking. |
 | Fusion | Reciprocal Rank Fusion (RRF) via Qdrant query API |
 | Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0) |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |

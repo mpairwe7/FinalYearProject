@@ -160,7 +160,7 @@ jobs:
           PYTHONPATH: .:${{ github.workspace }}
           LLM_ENABLED: 'false'
           QDRANT_ENABLED: 'false'
-        run: python -m ml.scripts.eval_retrieval --min-hit1 0.85
+        run: python -m ml.scripts.eval_retrieval --min-hit1 0.90
 
       - name: Corpus coverage gate
         # Issue #303. Every gate above scores rows the corpus was BUILT from —
