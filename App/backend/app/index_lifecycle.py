@@ -125,7 +125,7 @@ def validate_candidate_retrieval(
     misses: list[str] = []
     for document in canaries:
         query = str(document.get("embed_text") or document.get("text") or "")
-        indices, values = encoder.encode(query)
+        indices, values = encoder.encode_query(query)
         if not indices:
             misses.append(str(document.get("source") or "unknown-source"))
             continue

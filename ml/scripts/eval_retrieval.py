@@ -26,10 +26,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
-from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,39 +58,45 @@ def _load_entries() -> list[dict]:
 
 
 class BM25:
-    """Standalone BM25 over the same entries, using the committed idf/avg_dl."""
+    """BM25 over the eval entries, scored by the **production** encoder.
 
-    def __init__(self, entries: list[dict], k1: float = 1.5, b: float = 0.75):
-        state_path = ROOT / "Model" / "bm25_state.json"
-        self.k1, self.b = k1, b
-        self.idf: dict[str, float] = {}
-        if state_path.exists():
-            state = json.loads(state_path.read_text())
-            raw = state.get("idf", {})
-            for term, tid in state.get("vocab", {}).items():
-                v = raw.get(str(tid), raw.get(tid))
-                if v is not None:
-                    self.idf[term] = float(v)
-        self.docs = []
-        for e in entries:
-            toks = _tokenize(f"{e['question']} {e['answer']}")
-            self.docs.append((e["id"], Counter(toks), len(toks)))
-        self.avg_dl = sum(d[2] for d in self.docs) / max(len(self.docs), 1)
+    This used to be a separate implementation with its own ``k1`` (1.5 against
+    production's 1.2) reading IDF out of a committed ``Model/bm25_state.json``
+    whose provenance nothing checked.  It was therefore blind to the ranker it
+    was meant to gate: while ``BM25SparseEncoder`` encoded the document and the
+    query the same way — applying IDF twice — this script scored a textbook
+    formula instead and reported a healthy number.
+
+    Fitting the real encoder on the entries and scoring the same sparse dot
+    product Qdrant computes gives the gate teeth.  Measured on the 516-row FAQ
+    corpus: 93.0% verbatim Hit@1 with the corrected asymmetric encoding, 91.1%
+    with the old symmetric one.
+    """
+
+    def __init__(self, entries: list[dict]):
+        from app.retriever import BM25SparseEncoder
+
+        texts = [f"{e['question']} {e['answer']}" for e in entries]
+        self.encoder = BM25SparseEncoder().fit(texts)
+        self.docs = [
+            (e["id"], dict(zip(*self.encoder.encode_document(text))))
+            for e, text in zip(entries, texts)
+        ]
+
+    def term_idf(self, token: str) -> float:
+        """IDF of *token* in the eval corpus, 0.0 when it is unseen."""
+        tid = self.encoder._vocab.get(token)
+        return self.encoder._idf.get(tid, 0.0) if tid is not None else 0.0
 
     def search(self, query: str, top_k: int = 20) -> list[tuple[str, float]]:
-        q = set(_tokenize(query))
+        indices, values = self.encoder.encode_query(query)
         scored = []
-        for doc_id, tf, dl in self.docs:
+        for doc_id, vector in self.docs:
             s = 0.0
-            norm = 1 - self.b + self.b * dl / max(self.avg_dl, 1.0)
-            for term in q:
-                f = tf.get(term)
-                if not f:
-                    continue
-                idf = self.idf.get(term, 0.0)
-                if idf <= 0:
-                    continue
-                s += idf * (f * (self.k1 + 1)) / (f + self.k1 * norm)
+            for tid, weight in zip(indices, values):
+                doc_weight = vector.get(tid)
+                if doc_weight:
+                    s += weight * doc_weight
             if s > 0:
                 scored.append((doc_id, s))
         scored.sort(key=lambda x: -x[1])
@@ -140,7 +144,7 @@ def main() -> int:
         toks = _tokenize(question)
         if len(toks) <= 3:
             return question
-        ranked = sorted(toks, key=lambda t: -bm25.idf.get(t, 0.0))
+        ranked = sorted(toks, key=lambda t: -bm25.term_idf(t))
         drop = set(ranked[: args.drop])
         kept = [t for t in toks if t not in drop]
         return " ".join(kept) if len(kept) >= 2 else question

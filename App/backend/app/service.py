@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import csv
+import functools
 import json
 import logging
 import os
@@ -35,7 +36,7 @@ import threading
 import time
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Generator
+from collections.abc import AsyncIterator, Generator, Iterable
 from pathlib import Path
 from typing import Any, Callable
 
@@ -1774,10 +1775,22 @@ def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dic
             faq_index[tag] = entries
             logger.info("Loaded %d FAQs from %s (tag=%s)", len(entries), csv_path.name, tag)
 
+    # Acronym equivalences are a property of the corpus, so they are learned
+    # where the corpus is read.  Installing them here means every consumer of
+    # the FAQ index — keyword search, the binding gate, priority hits — sees
+    # one spelling of each subject without having to know this exists.
+    acronyms = mine_faq_acronyms(
+        f"{entry['question']} {entry['answer']}"
+        for entries in faq_index.values()
+        for entry in entries
+    )
+    install_faq_acronyms(acronyms)
+
     logger.info(
-        "FAQ index ready – %d tags, %d total entries",
+        "FAQ index ready – %d tags, %d total entries, %d acronym expansions",
         len(faq_index),
         sum(len(v) for v in faq_index.values()),
+        len(acronyms),
     )
     return faq_index, tag_labels
 
@@ -1824,6 +1837,121 @@ _FAQ_TERM_ALIASES = {
     "thresholds": "threshold",
     "vehicles": "vehicle",
 }
+
+#: Closed-class words an acronym's initials may skip.  "Pay As You Earn" is
+#: PAYE, "Free On Board" is FOB.  Restricting skips to function words is what
+#: stops :func:`mine_faq_acronyms` from accepting an arbitrary parenthetical as
+#: an expansion.
+_ACRONYM_SKIP_WORDS = frozenset("of as and the for to in on a an at by".split())
+
+#: The two shapes URA's own copy uses: ``Expansion Words (ACR)`` and
+#: ``ACR (Expansion Words)``.
+_ACRONYM_AFTER_RE = re.compile(
+    r"\b((?:[A-Za-z][\w'-]*\s+){1,7}?[A-Za-z][\w'-]*)\s*\(([A-Z][A-Z0-9]{1,7})\)"
+)
+_ACRONYM_BEFORE_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,7})\s*\(([^)]{2,80})\)")
+
+#: expansion phrase -> acronym, mined from the loaded corpus by
+#: :func:`mine_faq_acronyms` and installed by :func:`install_faq_acronyms`.
+#: Empty until a FAQ index is loaded, which leaves :func:`_faq_subject_terms`
+#: behaving exactly as it did before acronym folding existed.
+_FAQ_ACRONYM_EXPANSIONS: dict[str, str] = {}
+_FAQ_ACRONYM_RE: re.Pattern[str] | None = None
+
+
+def _acronym_matches(acronym: str, phrase: str) -> bool:
+    """True when *phrase*'s word initials spell *acronym*."""
+    words = re.findall(r"[A-Za-z][\w'-]*", phrase)
+    letters = [c for c in acronym.lower() if c.isalpha()]
+    if not words or not letters:
+        return False
+    consumed = 0
+    for word in words:
+        if consumed < len(letters) and word[0].lower() == letters[consumed]:
+            consumed += 1
+        elif word.lower() in _ACRONYM_SKIP_WORDS:
+            continue
+        else:
+            return False
+    return consumed == len(letters)
+
+
+def _trim_leading_function_words(phrase: str) -> str:
+    words = phrase.lower().split()
+    while words and words[0] in _ACRONYM_SKIP_WORDS:
+        words.pop(0)
+    return " ".join(words)
+
+
+def mine_faq_acronyms(texts: Iterable[str]) -> dict[str, str]:
+    """Return ``{expansion phrase: acronym}`` learned from *texts*.
+
+    The corpus writes an acronym and its expansion together — "What is PAYE
+    (Pay As You Earn)?", "the Authorized Economic Operator (AEO) program" —
+    and the binding gate used to read the two spellings as different subjects.
+    That is what made it reject a definition asked by its own acronym: "What is PAYE?" covers its row's question completely
+    (recall 1.0) but matches only one of its four terms (precision 0.25),
+    which reads as "the query is a fragment of a broader question" — the very
+    shape the gate exists to reject.  Every acronym row written this way was
+    unreachable by its acronym: AEO, AEOI, DPC and PAYE all scored 0.0 against
+    their own definitions.
+
+    Mining beats a hand-kept table because the corpus grows weekly and a
+    missing pair fails silently.  The initials check is strict, so a
+    parenthetical that is not an expansion — "(no gain taxed, no loss
+    allowed)" — is left alone.
+    """
+    pairs: dict[str, str] = {}
+
+    def offer(acronym: str, phrase: str) -> None:
+        trimmed = _trim_leading_function_words(phrase)
+        if trimmed and trimmed != acronym.lower():
+            pairs.setdefault(trimmed, acronym.lower())
+
+    for text in texts:
+        for match in _ACRONYM_AFTER_RE.finditer(text):
+            phrase, acronym = match.group(1), match.group(2)
+            words = re.findall(r"[A-Za-z][\w'-]*", phrase)
+            length = len([c for c in acronym if c.isalpha()])
+            # The regex is greedy about how much precedes the bracket, so try
+            # progressively shorter tails: "for the Authorized Economic
+            # Operator (AEO)" should yield the three-word expansion.
+            for candidate in (phrase, " ".join(words[-(length + 3) :]), " ".join(words[-length:])):
+                if _acronym_matches(acronym, candidate):
+                    offer(acronym, candidate)
+                    break
+        for match in _ACRONYM_BEFORE_RE.finditer(text):
+            acronym, phrase = match.group(1), match.group(2)
+            if _acronym_matches(acronym, phrase):
+                offer(acronym, phrase)
+    return pairs
+
+
+def install_faq_acronyms(pairs: dict[str, str]) -> None:
+    """Make *pairs* the acronym equivalences :func:`_faq_subject_terms` folds on."""
+    global _FAQ_ACRONYM_RE
+    _faq_subject_terms.cache_clear()
+    _FAQ_ACRONYM_EXPANSIONS.clear()
+    _FAQ_ACRONYM_EXPANSIONS.update(pairs)
+    if not pairs:
+        _FAQ_ACRONYM_RE = None
+        return
+    # Longest first so "automatic exchange of information" is not consumed by a
+    # shorter overlapping expansion.
+    alternation = "|".join(re.escape(p) for p in sorted(pairs, key=len, reverse=True))
+    _FAQ_ACRONYM_RE = re.compile(rf"\b({alternation})\b", re.IGNORECASE)
+
+
+def _fold_acronyms(text: str) -> str:
+    """Rewrite known expansions to their acronym so both spellings compare equal.
+
+    Applied to the query and to the FAQ row alike, so this cannot introduce an
+    asymmetry: "what is pay as you earn" and "What is PAYE?" reduce to the same
+    single term, and "What is PAYE (Pay As You Earn)?" reduces to it twice.
+    """
+    if _FAQ_ACRONYM_RE is None:
+        return text
+    return _FAQ_ACRONYM_RE.sub(lambda m: _FAQ_ACRONYM_EXPANSIONS[m.group(0).lower()], text)
 # Minimum share of the query an FAQ must cover before it may answer.
 #
 # 0.58 looks high, and the translated-retrieval path makes it look higher still:
@@ -1871,6 +1999,9 @@ def _faq_terms(text: str) -> set[str]:
     remains responsible for ranking, while these terms answer a separate
     question: does this FAQ actually contain the subject and intent the user
     asked about?
+
+    Acronyms are *not* folded here — see :func:`_faq_subject_terms`, which is
+    the narrower view used to decide what a question is about.
     """
     terms: set[str] = set()
     for raw in re.findall(r"[a-z0-9]+", (text or "").lower()):
@@ -1878,6 +2009,30 @@ def _faq_terms(text: str) -> set[str]:
             continue
         terms.add(_FAQ_TERM_ALIASES.get(raw, raw))
     return terms
+
+
+@functools.lru_cache(maxsize=4096)
+def _faq_subject_terms(text: str) -> frozenset[str]:
+    """:func:`_faq_terms` with acronyms and their expansions folded together.
+
+    Two questions are asked of an FAQ row and they want different views of the
+    text.  *Coverage* — "does this row talk about what I asked?" — is served by
+    redundancy: "Authorized Economic Operator (AEO)" offering four ways to
+    match is a feature, and collapsing it makes every unmatched term cost
+    proportionally more (measured: folding coverage too pushed "What is the
+    Authorized Economic Operator programme?" under the floor over the
+    programme/program spelling alone).  *Subject focus* — "is this row about
+    what I asked?" — is the opposite: an acronym spelled twice is one subject,
+    and counting it as four is what made the gate reject a definition asked by
+    its own acronym.  So the folding lives here and nowhere else.
+
+    Cached because ``_faq_match_score`` calls this once per FAQ row per query —
+    516 regex substitutions a turn, which measured at +6 ms on ``_simple_search``
+    uncached.  The corpus questions are a fixed set, so the cache is warm after
+    one turn; :func:`install_faq_acronyms` clears it when the mapping changes.
+    Returns a ``frozenset`` so a caller cannot mutate the cached value.
+    """
+    return frozenset(_faq_terms(_fold_acronyms(text or "")))
 
 
 def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
@@ -1913,9 +2068,16 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
         return 0.0
 
     body_coverage = len(query_terms & body_terms) / len(query_terms)
-    matched = len(query_terms & question_terms)
-    question_recall = matched / len(query_terms)
-    question_precision = matched / len(question_terms) if question_terms else 0.0
+
+    # Focus is judged on subjects, not spellings: "What is PAYE?" against "What
+    # is PAYE (Pay As You Earn)?" is one subject asked once, not one term out
+    # of four.  See :func:`_faq_subject_terms` for why coverage above keeps the
+    # unfolded view.
+    asked_subjects = _faq_subject_terms(query)
+    question_subjects = _faq_subject_terms(str(entry.get("question", "")))
+    matched = len(asked_subjects & question_subjects)
+    question_recall = matched / len(asked_subjects) if asked_subjects else 0.0
+    question_precision = matched / len(question_subjects) if question_subjects else 0.0
 
     # Subject focus is an intent too.  A query wholly contained in a much
     # broader question is topic-adjacent, not answered by it: "What is VAT?"
@@ -2510,13 +2672,14 @@ def faq_question_equivalence(query: str, entry: dict[str, Any]) -> float:
     """F1 over content terms between *query* and an FAQ row's own question.
 
     1.0 means the user asked *this* FAQ's question — same content terms, modulo
-    stopwords and the alias table. Unlike ``_faq_match_score`` this is symmetric,
+    stopwords, the alias table and acronym folding (asking "What is PAYE?" is
+    asking "What is PAYE (Pay As You Earn)?"). Unlike ``_faq_match_score`` this is symmetric,
     so an FAQ whose question carries an extra subject term cannot reach 1.0:
     "What is withholding tax exemption?" scores 0.800 against "What is
     withholding tax?", because "exemption" is a term the query never supplied.
     """
-    asked = _faq_terms(query)
-    faq = _faq_terms(str(entry.get("question") or ""))
+    asked = _faq_subject_terms(query)
+    faq = _faq_subject_terms(str(entry.get("question") or ""))
     if not asked or not faq:
         return 0.0
     overlap = len(asked & faq)

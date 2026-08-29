@@ -541,7 +541,7 @@ class VectorizeQueryTimeFallbackTests(unittest.TestCase):
             r._client = mock.MagicMock()
             r._client.query_points.return_value = mock.MagicMock(points=[])
             r._sparse_encoder = mock.MagicMock()
-            r._sparse_encoder.encode.return_value = ([1, 2, 3], [0.5, 0.4, 0.3])
+            r._sparse_encoder.encode_query.return_value = ([1, 2, 3], [0.5, 0.4, 0.3])
         else:
             r._client = None
         return r
