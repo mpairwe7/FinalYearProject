@@ -84,14 +84,24 @@ async function signedInAs(page: Page, role: string) {
       },
     }),
   );
+  // Mirrors get_authority_status() exactly. It used to fulfil a `sources`
+  // ARRAY, which the endpoint has never returned — the page read
+  // `sources.length` against it and the assertion below passed on a shape that
+  // does not exist, while the real console showed an em-dash on every deploy.
+  // A stub that is not the contract is worse than no stub.
   await page.route("**/api/v1/authority/status", (route) =>
     route.fulfill({
       json: {
+        ok: true,
+        configured: true,
         fresh: true,
         version: "2026-07",
+        generated_at: "2026-07-01T00:00:00Z",
         age_days: 12,
         max_age_days: 120,
-        sources: ["rates.pdf", "vat-act.pdf"],
+        sources_checked: 2,
+        invalid_sources: [],
+        errors: [],
       },
     }),
   );
@@ -100,17 +110,28 @@ async function signedInAs(page: Page, role: string) {
     route.fulfill({ json: ticket() }),
   );
   await page.route("**/api/v1/admin/tickets/stats**", (route) =>
-    route.fulfill({ json: { total: 5, open: 4, assigned: 0, resolved: 1, by_priority: {}, by_team: {} } }),
+    route.fulfill({
+      json: { period_days: 30, total: 5, open: 4, assigned: 0, resolved: 1, wontfix: 0, by_priority: {} },
+    }),
   );
   await page.route("**/api/v1/admin/tickets/sla**", (route) =>
     route.fulfill({
       json: {
+        period_days: 30,
         tickets: 5,
         responded: 2,
         resolved: 1,
         awaiting_first_response: 3,
+        awaiting_next_response: 1,
+        // Deliberately larger than the three rows the queue mock returns: the
+        // Unassigned tile has to read this, not count the page it loaded.
+        unassigned: 42,
         median_response_seconds: 11_820,
         median_resolution_seconds: 7_200,
+        median_next_reply_seconds: 3_600,
+        breaching_first_response: 2,
+        breaching_next_reply: 0,
+        breaching: 2,
       },
     }),
   );
@@ -260,10 +281,12 @@ test.describe("Staff UI on Chromium", () => {
       await expect(metrics.nth(5)).toContainText("2.0h");
       await expect(metrics.nth(0)).toContainText("4");
       await expect(metrics.nth(1)).toContainText("3");
-      // No `breaching` in the SLA stub → 0, and none of the three stub tickets
-      // carries an assignee → 3.
-      await expect(metrics.nth(2)).toContainText("0");
-      await expect(metrics.nth(3)).toContainText("3");
+      // The last two come from the SLA payload's live counts. `unassigned` used
+      // to be counted from the queue rows this page had loaded — three of them,
+      // all unclaimed — so the tile agreed with the stub by accident and was
+      // capped at the page size against a real backend.
+      await expect(metrics.nth(2)).toContainText("2");
+      await expect(metrics.nth(3)).toContainText("42");
     });
 
     test("attention is carried by the figures, not by tinting the tiles", async ({ page }) => {
@@ -278,7 +301,10 @@ test.describe("Staff UI on Chromium", () => {
       await expect(metrics.nth(1)).toContainText("3");
       await expect(metrics.nth(1)).toContainText("nobody has replied yet");
       await expect(metrics.nth(3)).toContainText("Unassigned");
-      await expect(metrics.nth(3)).toContainText("3");
+      // 42 from the SLA payload, not 3 — the number of rows the queue mock
+      // returns. Deriving this from the loaded page capped it at the page
+      // size, so a queue of thousands reported the page length.
+      await expect(metrics.nth(3)).toContainText("42");
       await expect(metrics.nth(3)).toContainText("waiting to be claimed");
 
       // No tile carries a status class, and every tile shares one surface —
@@ -308,7 +334,17 @@ test.describe("Staff UI on Chromium", () => {
       const kv = page.locator(".ov-kv dd");
       await expect(kv.nth(1)).toHaveText("2026-07");
       await expect(kv.nth(2)).toHaveText("12 of 120 days");
-      await expect(kv.nth(3)).toHaveText("2");
+      // sources_checked, the key the endpoint actually emits.
+      await expect(kv.nth(3)).toHaveText("2 checked");
+    });
+
+    test("live tiles link to the population they count", async ({ page }) => {
+      // Awaiting-first-response and past-SLA count open AND in-progress cases,
+      // so a link filtered to open lands on fewer rows than the tile promised.
+      for (const label of ["Awaiting first response", "Past 24-hour SLA", "Unassigned"]) {
+        const tile = page.locator(".ops-stat", { hasText: label });
+        await expect(tile).toHaveAttribute("href", "/admin/tickets?status=any");
+      }
     });
 
     test("two-column at desktop, single column below 900px", async ({ page }) => {
