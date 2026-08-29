@@ -4,7 +4,7 @@ This module is the completeness guarantee for the HTTP/WS API surface. It has
 three jobs:
 
 1. **Drift guard** (``test_route_table_matches_manifest``) — enumerates the live
-   ``app.routes`` table and asserts it equals a hand-declared manifest of all 69
+   ``app.routes`` table and asserts it equals a hand-declared manifest of all 70
    application endpoints. Add or remove a route without updating the manifest and
    this test fails, so the surface can never silently grow untested.
 
@@ -119,6 +119,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/admin/tickets/{ticket_id}/presence"),
     ("GET", "/v1/admin/flags"),
     ("PATCH", "/v1/admin/flags/{name}"),
+    ("DELETE", "/v1/admin/flags/{name}"),
     ("GET", "/v1/admin/overrides"),
     ("PUT", "/v1/admin/overrides"),
     ("DELETE", "/v1/admin/overrides/{override_id}"),
@@ -201,6 +202,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/admin/tickets/{ticket_id}/presence"): "test_api_endpoints.AdminEndpoints.test_presence_heartbeats_the_viewer",
     ("GET", "/v1/admin/flags"): "test_api_endpoints.AdminEndpoints.test_flags_list_includes_protection",
     ("PATCH", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_admin_can_set_an_ephemeral_flag",
+    ("DELETE", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_clearing_an_override_restores_the_default",
     ("GET", "/v1/admin/voice_audit"): "test_api_endpoints.AdminEndpoints",
     ("GET", "/v1/admin/offline_stats"): "test_api_endpoints.AdminEndpoints",
     ("POST", "/v1/index"): "test_api_endpoints.OpsKeyEndpoints",
@@ -364,10 +366,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (65 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (66 HTTP + 4 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 65, f"expected 65 HTTP endpoints, found {len(http)}"
+    assert len(http) == 66, f"expected 66 HTTP endpoints, found {len(http)}"
     assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
 
 

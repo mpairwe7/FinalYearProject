@@ -457,9 +457,22 @@ GET /v1/feedback/summary?days=30
   "thumbs_up": 120,
   "thumbs_down": 30,
   "satisfaction_pct": 80.0,
-  "recent": []
+  "recent": [
+    {
+      "id": "fb-1",
+      "message_id": "msg-9",
+      "rating": "down",
+      "comment": "not what I asked",
+      "user_query": "What is the VAT registration threshold?",
+      "created_at": 1788030892.07
+    }
+  ]
 }
 ```
+
+`recent` carries at most the 20 newest ratings. `user_query` is the
+taxpayer's question as typed, stored PII-redacted at write time — it is
+what `/analytics` renders under "Taxpayer question".
 
 ---
 
@@ -1116,8 +1129,13 @@ GET /v1/admin/tickets/sla?days=30
 Medians (`median_response_seconds`, `median_resolution_seconds`,
 `median_next_reply_seconds`) are period-scoped. `breaching`,
 `breaching_first_response`, `breaching_next_reply`,
-`awaiting_first_response`, and `awaiting_next_response` count every
-`open`/`assigned` ticket, not a queue page.
+`awaiting_first_response`, `awaiting_next_response`, and `unassigned`
+count every `open`/`assigned` ticket, not a queue page.
+
+`unassigned` is the live count of those cases with no assignee. It
+lives here rather than in `/stats` because it describes the queue right
+now, not what was raised in a window — and because deriving it in the
+browser from a page of the queue caps it at that page's size.
 
 ---
 
@@ -1147,8 +1165,9 @@ Staff-only, read-only. Pushes `escalation.created` triage metadata
 #### Feature flags (G31 slice)
 
 ```http
-GET /v1/admin/flags
-PATCH /v1/admin/flags/{name}?enabled=true
+GET    /v1/admin/flags
+PATCH  /v1/admin/flags/{name}?enabled=true
+DELETE /v1/admin/flags/{name}
 ```
 
 `GET` lists the replica registry (`enabled`, `protected`, rollout size)
@@ -1157,6 +1176,14 @@ and `overrides_are_ephemeral: false` / `scope: this_replica`.
 (survives process restart; cluster-wide still needs `FLAG_*`). Safety
 flags (`auth_required`, `multi_tenant`, `audit_ledger`, `voice_consent`)
 return 400.
+
+`DELETE` drops the override so the flag follows `FLAG_*` or its
+registry default again. This is not the same as `PATCH`-ing it back to
+the default value: an in-process override beats the environment variable
+by design, and startup replays every stored row into the registry, so a
+flag toggled once from the console keeps shadowing `FLAG_*` until it is
+deleted. Same `ura_admin` gate and the same 400 on protected flags;
+404 on an unknown flag.
 
 ```http
 GET /v1/admin/overrides

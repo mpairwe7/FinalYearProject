@@ -363,7 +363,11 @@ function Dashboard() {
                           </span>
                         </td>
                         <td>
-                          <span className="ops-cell-clamp">{f.user_query}</span>
+                          {/* Rows written before the question was stored have
+                              none; an em-dash beats a silently empty cell. */}
+                          <span className={f.user_query ? "ops-cell-clamp" : "ops-cell-sub"}>
+                            {f.user_query || "—"}
+                          </span>
                         </td>
                         <td>
                           <span className="ops-cell-clamp ops-cell-sub">{f.comment || "—"}</span>

@@ -334,6 +334,46 @@ class AdminEndpoints(_Base):
             flags.clear("hyde")
             db.clear_flag_override("hyde")
 
+    def test_clearing_an_override_restores_the_default(self):
+        """DELETE drops the override; setting the default value does not.
+
+        An in-process override wins over ``FLAG_*`` and is replayed on
+        boot, so "toggle it back" leaves the flag pinned. Only the
+        delete makes it follow the environment again.
+        """
+        admin = make_dev_token("ops", role="ura_admin")
+        c = _client()
+        default = flags.describe("hyde")["default"]
+        try:
+            c.patch(f"/v1/admin/flags/hyde?enabled={not default}", headers=_bearer(admin))
+            self.assertTrue(flags.describe("hyde")["overridden"])
+
+            # Back to the default value — still overridden.
+            c.patch(f"/v1/admin/flags/hyde?enabled={default}", headers=_bearer(admin))
+            self.assertTrue(flags.describe("hyde")["overridden"])
+            self.assertEqual(db.load_flag_overrides().get("hyde"), default)
+
+            r = c.delete("/v1/admin/flags/hyde", headers=_bearer(admin))
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertFalse(r.json()["overridden"])
+            self.assertFalse(flags.describe("hyde")["overridden"])
+            self.assertNotIn("hyde", db.load_flag_overrides())
+        finally:
+            flags.clear("hyde")
+            db.clear_flag_override("hyde")
+
+    def test_clear_rejects_unknown_and_protected_flags(self):
+        admin = make_dev_token("ops", role="ura_admin")
+        c = _client()
+        self.assertEqual(c.delete("/v1/admin/flags/not_a_flag", headers=_bearer(admin)).status_code, 404)
+        self.assertEqual(c.delete("/v1/admin/flags/auth_required", headers=_bearer(admin)).status_code, 400)
+
+    def test_only_admins_may_clear_a_flag(self):
+        staff = make_dev_token("agent", role="ura_staff")
+        self.assertEqual(
+            _client().delete("/v1/admin/flags/hyde", headers=_bearer(staff)).status_code, 403
+        )
+
 
 # ---------------------------------------------------------------------------
 # Ops-key endpoints

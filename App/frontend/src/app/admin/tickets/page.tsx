@@ -37,10 +37,11 @@ import {
   useUpdateTicket,
 } from "../../../hooks/useAnalyticsDashboard";
 import {
+  ANY_STATUS,
   formatDuration,
   officerHandle,
   PRIORITIES,
-  STATUSES,
+  QUEUE_STATUSES,
   STATUS_LABEL,
   ticketMatchesQuery,
   useQueueHotkeys,
@@ -144,10 +145,13 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
       }
       toolbar={
         <>
-          {/* Status is one choice out of four, so it is a segmented control
-              rather than four pills that look like independent switches. */}
+          {/* Status is one choice, so it is a segmented control rather than
+              pills that look like independent switches. "Any" is first because
+              the overview's live tiles count open and in-progress cases
+              together and link here — without it they landed on a narrower
+              view than the number that sent you. */}
           <div className="ops-segmented" role="group" aria-label="Status">
-            {STATUSES.map((value) => (
+            {QUEUE_STATUSES.map((value) => (
               <button
                 key={value}
                 type="button"
@@ -282,7 +286,9 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
               body={
                 narrowed
                   ? "No case in this status matches the current filters."
-                  : `No case is currently ${STATUS_LABEL[view.status]?.toLowerCase() ?? view.status}.`
+                  : view.status === ANY_STATUS
+                    ? "There are no escalations on file."
+                    : `No case is currently ${STATUS_LABEL[view.status]?.toLowerCase() ?? view.status}.`
               }
               action={
                 narrowed ? (

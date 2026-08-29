@@ -40,7 +40,11 @@ interface AuthorityStatus {
   generated_at?: string;
   age_days?: number;
   max_age_days?: number;
-  sources?: unknown[];
+  /** How many manifest sources were found and hashed. The endpoint returns a
+   *  count, not the list — this used to read `sources.length` against a key
+   *  `get_authority_status()` has never emitted, so the row was always "—". */
+  sources_checked?: number;
+  invalid_sources?: unknown[];
   detail?: string;
 }
 
@@ -51,7 +55,14 @@ function useAuthorityStatus() {
   useEffect(() => {
     let cancelled = false;
     fetch("/api/v1/authority/status", { headers: authHeaders() })
-      .then((r) => r.json())
+      .then((r) => {
+        // A FastAPI error body is valid JSON, so parsing unconditionally
+        // turned an expired token into `{detail: "..."}` — `fresh` undefined,
+        // and the panel announcing "Stale or missing". That is the alarm this
+        // page tells an operator to act on, raised by a sign-in problem.
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        return r.json();
+      })
       .then((d) => !cancelled && setState({ loading: false, data: d }))
       .catch((e) => !cancelled && setState({ loading: false, error: (e as Error).message }));
     return () => {
@@ -62,6 +73,10 @@ function useAuthorityStatus() {
 }
 
 const PRIORITY_ORDER = ["urgent", "high", "normal", "low"] as const;
+
+/** Rows the board loads for its "waiting longest" list. Not a total — every
+ *  count on this page comes from an endpoint that knows the whole queue. */
+const QUEUE_PAGE = 20;
 
 function Overview() {
   const [days, setDays] = useState(30);
@@ -82,10 +97,18 @@ function Overview() {
   const allOpen = queue.data?.tickets ?? [];
   // Ten is a board, not a backlog — the panel header links to the full queue.
   const items = allOpen.slice(0, 10);
-  const urgent = allOpen.filter((t) => t.priority === "urgent").length;
   const awaiting = sla.data?.awaiting_first_response ?? 0;
   const breaching = sla.data?.breaching ?? 0;
-  const unassigned = allOpen.filter((t) => !t.assignee).length;
+  // Server-side, over the live open+assigned population. Derived from
+  // `allOpen` this was capped at the 20 rows this page loads, so a queue of
+  // 2,500 unclaimed cases reported 20 — beside an "Open escalations" tile
+  // that reported the real total.
+  const unassigned = sla.data?.unassigned ?? 0;
+  // The queue page is ordered urgent-first, so every urgent open case is on it
+  // until there are more than a page of them. Past that the count has quietly
+  // stopped counting, and the chip says "20+" rather than a number.
+  const urgent = allOpen.filter((t) => t.priority === "urgent").length;
+  const queueTruncated = allOpen.length >= QUEUE_PAGE;
 
   const raisedDelta = toDelta(
     stats.data?.total,
@@ -142,7 +165,7 @@ function Overview() {
     <OpsPage
       eyebrow="Work"
       title="Operations overview"
-      description={`Escalations, service levels and answer authority across the last ${days} days. Every tile links into the queue it counts.`}
+      description={`Escalations raised in the last ${days} days, plus the service levels and answer authority of the queue as it stands right now. Every tile links into the queue it counts.`}
       actions={
         <>
           <Freshness
@@ -178,23 +201,29 @@ function Overview() {
               href="/admin/tickets?status=open"
               loading={stats.isLoading}
             />
+            {/* The next three are the live queue, not the period. `sla_stats`
+                bounds its medians by the window and deliberately does not bound
+                the breach and awaiting counts — an SLA number that expired with
+                the date range would be useless. The hints say so, and each one
+                links to the population it counts rather than to a narrower
+                status view that shows fewer rows than the tile promised. */}
             <StatCard
               label="Awaiting first response"
               value={String(awaiting)}
-              hint="nobody has replied yet"
-              href="/admin/tickets?status=open"
+              hint="right now, nobody has replied yet"
+              href="/admin/tickets?status=any"
             />
             <StatCard
               label="Past 24-hour SLA"
               value={String(breaching)}
-              hint="open or in progress, first- or next-reply over 24h"
-              href="/admin/tickets?status=open"
+              hint="right now, open or in progress, over 24h"
+              href="/admin/tickets?status=any"
             />
             <StatCard
               label="Unassigned"
               value={String(unassigned)}
-              hint="waiting to be claimed"
-              href="/admin/tickets?status=open"
+              hint="right now, waiting to be claimed"
+              href="/admin/tickets?status=any"
             />
             <StatCard
               label="Median first response"
@@ -298,10 +327,16 @@ function Overview() {
           end={
             <>
               {urgent > 0 ? (
-                <span className="ops-chip is-danger">{urgent} urgent</span>
+                <span className="ops-chip is-danger">
+                  {queueTruncated ? `${urgent}+` : urgent} urgent
+                </span>
               ) : null}
+              {/* Was `All ${allOpen.length} open`, which named the size of the
+                  page this panel had loaded — "All 20 open" on a queue of two
+                  and a half thousand. The real total is one tile away; this is
+                  a link, so it does not need to restate it. */}
               <a className="ops-btn is-ghost is-sm" href="/admin/tickets?status=open">
-                {allOpen.length > items.length ? `All ${allOpen.length} open` : "All open"}
+                All open
               </a>
             </>
           }
@@ -352,7 +387,13 @@ function Overview() {
             bare
             note="Rate answers are refused outright when this manifest is stale, so it is the first thing to check when the assistant starts declining figures."
             end={
-              authority.loading ? null : (
+              // Three states, not two. The body already renders an ErrorState
+              // when the request failed; without the same branch here the
+              // header kept announcing "Stale or missing" — the alarm this
+              // panel exists to raise — for a request that never arrived.
+              authority.loading ? null : authority.error ? (
+                <span className="ops-chip">Unavailable</span>
+              ) : (
                 <span className={`ops-chip ${authority.data?.fresh ? "is-good" : "is-warn"}`}>
                   {authority.data?.fresh ? "Fresh" : "Stale or missing"}
                 </span>
@@ -387,7 +428,14 @@ function Overview() {
                 </div>
                 <div>
                   <dt>Sources</dt>
-                  <dd>{authority.data?.sources?.length ?? "—"}</dd>
+                  <dd>
+                    {authority.data?.sources_checked != null
+                      ? `${authority.data.sources_checked} checked`
+                      : "—"}
+                    {authority.data?.invalid_sources?.length
+                      ? ` · ${authority.data.invalid_sources.length} failed`
+                      : ""}
+                  </dd>
                 </div>
               </dl>
             )}

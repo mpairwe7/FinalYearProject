@@ -150,6 +150,9 @@ export interface TicketSla {
   resolved: number;
   awaiting_first_response: number;
   awaiting_next_response?: number;
+  /** Live open+assigned cases with nobody on them. Server-side, so it is not
+   *  bounded by whatever page of the queue a caller happens to have loaded. */
+  unassigned?: number;
   median_response_seconds: number | null;
   median_resolution_seconds: number | null;
   median_next_reply_seconds?: number | null;
@@ -229,7 +232,10 @@ export const analyticsApi = {
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
   tickets: (status = "open", limit = 8, priority = "", team = "") =>
     fetchJson<TicketQueueResponse>(
-      `/v1/admin/tickets?status=${encodeURIComponent(status)}&limit=${limit}&offset=0` +
+      // "any" is a UI token; the API takes an absent status to mean all
+      // statuses and 400s on anything outside the four real ones.
+      `/v1/admin/tickets?status=${encodeURIComponent(status === "any" ? "" : status)}` +
+        `&limit=${limit}&offset=0` +
         (priority ? `&priority=${encodeURIComponent(priority)}` : "") +
         (team ? `&team=${encodeURIComponent(team)}` : ""),
     ),
@@ -245,6 +251,13 @@ export const analyticsApi = {
     fetchJson<{ name: string; enabled: boolean; ephemeral: boolean }>(
       `/v1/admin/flags/${encodeURIComponent(name)}?enabled=${enabled}`,
       { method: "PATCH" },
+    ),
+  /** Drop the override so the flag follows FLAG_* / its default again.
+   *  Setting it back to the default value does not: it stays overridden. */
+  clearFlag: (name: string) =>
+    fetchJson<{ name: string; enabled: boolean; overridden: boolean }>(
+      `/v1/admin/flags/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
     ),
   overrides: () => fetchJson<{ overrides: AnswerOverride[] }>("/v1/admin/overrides"),
   putOverride: (body: { query: string; reply: string; source_url?: string; enabled?: boolean }) =>
