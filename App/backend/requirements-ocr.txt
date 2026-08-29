@@ -1,6 +1,6 @@
 # Optional local OCR sidecar.  Keep this separate from the API's base and
 # Crane Cloud requirements: EasyOCR/Torch models belong in the OCR process.
-fastapi>=0.136.1,<0.137
+fastapi>=0.141.1,<0.142
 uvicorn[standard]>=0.46.0,<0.47
 httpx>=0.28.1,<0.29
 numpy>=2.4.4,<3
