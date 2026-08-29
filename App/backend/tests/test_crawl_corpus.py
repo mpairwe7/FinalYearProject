@@ -16,6 +16,7 @@ from unittest import mock
 
 from app.crawl_corpus import (
     CRAWL_MANIFEST_NAME,
+    split_qa_digest,
     CRAWL_MIN_PAGE_CHARS,
     export_crawl_pages_to_jsonl,
     ingest_crawl_jsonls,
@@ -233,3 +234,55 @@ class CrawlCorpusExportIngestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QaDigestSplitTests(unittest.TestCase):
+    """The "Ask URA Commissioner General" pages are cut per question.
+
+    Size chunking cannot see a Q&A boundary, so it packed six to nine unrelated
+    taxpayer questions into one chunk. The chunk still retrieved correctly — the
+    answer really was inside it — but the passage read back was whichever Q&A
+    landed at the top, which is why "What taxes apply to private schools?" was
+    answered with guidance about funeral service companies.
+    """
+
+    DIGEST = "\n".join(
+        [
+            "# Ask URA Commissioner General 5",
+            "Why don’t you collect taxes from funeral service companies?",
+            "Dear Reader,",
+            "Any person offering funeral services must account for tax on that income.",
+            "Why does URA collect taxes from private schools?",
+            "Dear Reader,",
+            "Private schools are in business like any other service provider and are",
+            "required to account for tax on the profits earned.",
+        ]
+    )
+
+    def test_each_question_becomes_its_own_unit(self) -> None:
+        units = split_qa_digest(self.DIGEST)
+        self.assertEqual(len(units), 2)
+        self.assertEqual(
+            [question for question, _ in units],
+            [
+                "Why don’t you collect taxes from funeral service companies?",
+                "Why does URA collect taxes from private schools?",
+            ],
+        )
+
+    def test_an_answer_stays_with_its_own_question(self) -> None:
+        """The regression itself: the schools answer must not carry funeral text."""
+        units = dict(split_qa_digest(self.DIGEST))
+        schools = units["Why does URA collect taxes from private schools?"]
+        self.assertIn("Private schools are in business", schools)
+        self.assertNotIn("funeral", schools.lower())
+
+    def test_the_page_heading_is_never_taken_as_a_question(self) -> None:
+        questions = [question for question, _ in split_qa_digest(self.DIGEST)]
+        self.assertNotIn("# Ask URA Commissioner General 5", questions)
+
+    def test_an_ordinary_page_is_left_to_the_size_chunker(self) -> None:
+        """One salutation is not a digest; returning [] keeps the old path."""
+        self.assertEqual(split_qa_digest("# A page\nSome guidance.\nDear Reader,\nHello."), [])
+        self.assertEqual(split_qa_digest("# A page\nNo salutation anywhere in this body."), [])
+

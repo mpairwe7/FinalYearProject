@@ -28,6 +28,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -50,6 +51,16 @@ CRAWL_MIN_PAGE_CHARS = int(os.getenv("CRAWL_MIN_PAGE_CHARS", "400"))
 CRAWL_CHUNK_TARGET_CHARS = int(os.getenv("CRAWL_CHUNK_TARGET_CHARS", "2000"))
 CRAWL_CHUNK_HARD_MAX_CHARS = int(os.getenv("CRAWL_CHUNK_HARD_MAX_CHARS", "4000"))
 CRAWL_CHUNK_MIN_CHARS = int(os.getenv("CRAWL_CHUNK_MIN_CHARS", "200"))
+
+#: Marks the start of an answer on the "Ask URA Commissioner General" pages.
+#: Those pages are digests: one heading, then a run of unrelated taxpayer
+#: questions each answered under this salutation.
+_QA_ANSWER_MARKER = re.compile(r"^\s*Dear\s+Reader\s*[,:]?\s*$", re.IGNORECASE)
+
+#: A digest needs at least this many answers before it is cut question-by-question
+#: rather than by size. Two is enough to prove the shape and is what makes the
+#: cut safe: one salutation could be an ordinary page that happens to use it.
+_QA_MIN_ANSWERS = 2
 
 
 def _clean(value: object) -> str:
@@ -102,6 +113,54 @@ def select_pages(pages_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
     return [(path, page) for _url, (_ts, path, page) in sorted(newest.items())]
 
 
+def split_qa_digest(body: str) -> list[tuple[str, str]]:
+    """Cut an "Ask URA Commissioner General" page into its individual Q&As.
+
+    These pages carry a single markdown heading and then six to nine unrelated
+    taxpayer questions under it, each answered after a "Dear Reader," line. Size
+    chunking cannot see those boundaries, so it packs several unrelated Q&As into
+    one chunk. That chunk then retrieves correctly — the answer really is in it —
+    while the passage that gets read back is whichever Q&A happened to land at the
+    top. "What taxes apply to private schools?" returned an answer about funeral
+    service companies for exactly this reason: both sat in chunk 0, funeral first.
+
+    Mixing topics also inflates lexical scoring, because one chunk accumulates the
+    vocabulary of every question in it and so looks relevant to all of them.
+
+    Returns ``(question, answer)`` pairs, or an empty list when the page is not a
+    digest — the caller then falls back to ordinary size chunking.
+    """
+    lines = body.splitlines()
+    markers = [i for i, line in enumerate(lines) if _QA_ANSWER_MARKER.match(line)]
+    if len(markers) < _QA_MIN_ANSWERS:
+        return []
+
+    units: list[tuple[str, str]] = []
+    for position, marker in enumerate(markers):
+        # The question is the last non-blank line before the salutation. On these
+        # pages it is a single line; the page heading is never one, because the
+        # first salutation always has its question between it and the heading.
+        question_at = next((j for j in range(marker - 1, -1, -1) if lines[j].strip()), None)
+        if question_at is None:
+            continue
+
+        # The answer runs to the question that introduces the next salutation,
+        # not to the salutation itself, or to the end of the page for the last one.
+        answer_end = len(lines)
+        if position + 1 < len(markers):
+            answer_end = next(
+                (j for j in range(markers[position + 1] - 1, marker, -1) if lines[j].strip()),
+                markers[position + 1],
+            )
+
+        question = lines[question_at].strip()
+        answer = "\n".join(lines[marker + 1 : answer_end]).strip()
+        if question and answer:
+            units.append((question, answer))
+
+    return units
+
+
 def _chunk_page_records(page: Path, payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
     """Yield canonical JSONL records for one crawled page."""
     try:
@@ -121,6 +180,38 @@ def _chunk_page_records(page: Path, payload: dict[str, Any]) -> Iterator[dict[st
     body = normalise_extracted_text(_clean(payload.get("text")))
 
     kept = 0
+
+    # A Q&A digest is cut question-by-question so the retrieval unit and the
+    # answer unit are the same thing. Every unit on the 18 digest pages in the
+    # corpus lands between the min and hard-max above, so nothing is dropped and
+    # nothing needs re-splitting; the size chunker below still handles every
+    # other page.
+    for question, answer in split_qa_digest(body):
+        text = normalise_extracted_text(f"{question}\n{answer}")
+        if len(text) < CRAWL_CHUNK_MIN_CHARS:
+            continue
+        heading = normalise_heading(question)
+        trail = [part for part in (title, heading) if part]
+        chunk_index = kept
+        kept += 1
+        yield {
+            "schema_version": CRAWL_JSONL_SCHEMA_VERSION,
+            "record_type": "crawl_chunk",
+            "chunk_id": _stable_id(page.name, chunk_index, text),
+            "text": text,
+            "contextual_prefix": f"[Document: {title or url} — {heading}]" if heading else "",
+            "heading_trail": trail,
+            "source": page.name,
+            "content_hash": content_hash,
+            "url": url,
+            "title": title,
+            "crawled_at": crawled_at,
+            "chunk_index": chunk_index,
+            "char_count": len(text),
+        }
+    if kept:
+        return
+
     for chunk in chunk_markdown(
         body,
         doc_id=title or url,
