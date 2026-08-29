@@ -55,7 +55,7 @@ jsonschema>=4.23
 # PDF report generation (pdf_export.py: /v1/export/* and
 # /v1/documents/{id}/report) + image-attachment decoding. Previously
 # undeclared — PDF export only worked where fpdf2 happened to be installed.
-fpdf2>=2.8
+fpdf2>=2.8.8
 Pillow>=10.4
 
 # LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch). Also
