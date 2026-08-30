@@ -87,7 +87,7 @@ opentelemetry-exporter-otlp-proto-grpc>=1.29.0
 
 # Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
 pydantic-settings>=2.5.0
-boto3>=1.43.80
+boto3>=1.43.81
 # DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
 dnspython>=2.6.0
 
