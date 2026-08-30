@@ -89,7 +89,7 @@ opentelemetry-exporter-otlp-proto-grpc>=1.29.0
 pydantic-settings>=2.5.0
 boto3>=1.43.81
 # DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
-dnspython>=2.6.0
+dnspython>=2.8.0
 
 # Cloud neural TTS fallback (edge-tts) — used when local Piper is unavailable;
 # English voice configurable via SPEECH_EN_EDGE_VOICE (default en-US-AriaNeural)
