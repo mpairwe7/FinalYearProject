@@ -22,7 +22,7 @@ psycopg[binary]>=3.2.0
 psycopg-pool>=3.2.0
 
 # Data loading
-pandas>=2.2
+pandas>=3.0.5
 numpy>=1.26,<3
 
 # Document attachment analysis (POST /v1/documents/analyze) — pure-Python
