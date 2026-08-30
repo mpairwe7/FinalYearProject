@@ -82,7 +82,7 @@ sse-starlette>=3.4.1
 
 # OpenTelemetry GenAI observability (opt-in, aligned with 2025 stable semconv)
 opentelemetry-api>=1.44.0
-opentelemetry-sdk>=1.29.0
+opentelemetry-sdk>=1.44.0
 opentelemetry-exporter-otlp-proto-grpc>=1.29.0
 
 # Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
