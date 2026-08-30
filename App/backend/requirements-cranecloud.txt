@@ -78,7 +78,7 @@ boto3>=1.43.80
 
 # DNS-over-HTTPS resolver (doh_resolver.py) — RENU pods have no working upstream
 # DNS; this resolves external hostnames via 1.1.1.1 over TCP/443 when USE_DOH=true.
-dnspython>=2.6.0
+dnspython>=2.8.0
 
 # Cloud neural TTS — edge-tts (Microsoft neural voices) for English and other
 # non-Luganda speech. Pure-Python + aiohttp (a few MB), so it fits this slim
