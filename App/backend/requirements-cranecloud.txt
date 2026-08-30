@@ -11,7 +11,7 @@
 
 # Core API
 fastapi>=0.141.1,<0.142
-uvicorn[standard]>=0.32.0,<0.35
+uvicorn[standard]>=0.52.4,<0.53
 pydantic>=2.13.4,<2.14
 
 # Rate limiting + cache (Redis optional, falls back to in-process)
