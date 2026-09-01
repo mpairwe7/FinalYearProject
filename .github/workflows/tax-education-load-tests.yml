@@ -150,6 +150,9 @@ jobs:
   full-suite:
     name: Full load suite — tax education
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write   # opens an alert issue when the weekly NFR gate fails
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.phase != 'smoke')
     timeout-minutes: 45
     env:
@@ -219,7 +222,6 @@ jobs:
               sys.exit(1)
           print("All NFR gates passed.")
           EOF
-        continue-on-error: true
 
       - name: Open GitHub issue on NFR failure (weekly)
         if: github.event_name == 'schedule' && failure()

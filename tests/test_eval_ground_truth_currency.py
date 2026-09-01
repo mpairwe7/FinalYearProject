@@ -95,9 +95,58 @@ def _harness_blocks(source: str) -> list[tuple[str, str]]:
     for i, begin in enumerate(markers):
         end = markers[i + 1] if i + 1 < len(markers) else len(source)
         text = source[begin:end]
-        topic = re.search(r'topic="([^"]+)"', text) or re.search(r'"(journey_[a-z_]+)"', text)
+        # Capture the journey's VALUE, not the literal "journey_id" key — a bare
+        # `"(journey_[a-z_]+)"` matches the key first and labels every journey
+        # block "journey_id", which is exactly the blind spot this sweep exists
+        # to close for the multi-turn cases.
+        topic = re.search(r'topic="([^"]+)"', text) or re.search(
+            r'"journey_id"\s*:\s*"([a-z_]+)"', text
+        )
         blocks.append((topic.group(1) if topic else "", text))
     return blocks
+
+
+#: Which harness topics a rate-table key family is asserted under.
+#:
+#: This has to be explicit. Deriving it from the key prefix — "does the topic
+#: contain the first segment of the key?" — quietly matched nothing for six of
+#: the nine families, because the harness names topics after the subject a
+#: taxpayer would recognise rather than after the rate key: ``rental_*`` lives
+#: under ``property`` and ``withholding_*`` under ``withholding``, but
+#: ``capital``, ``corporation``, ``customs``, ``environmental`` and ``nssf``
+#: matched no topic at all. The sweep then reported success for precisely the
+#: families it could not inspect, which is the failure it exists to prevent.
+#:
+#: An empty tuple means "the harness has no ground truth for this family yet" —
+#: a deliberate, visible statement, not an accident.
+_DOMAIN_TOPICS: dict[str, tuple[str, ...]] = {
+    "vat": ("vat", "journey_vat_onboarding"),
+    "paye": ("paye", "journey_employer_paye"),
+    "withholding": ("withholding",),
+    "rental": ("property",),
+    "corporation": (),
+    "capital": (),
+    "customs": (),
+    "environmental": (),
+    "nssf": ("paye", "journey_employer_paye"),
+}
+
+
+def test_every_rate_family_is_mapped_to_a_harness_topic() -> None:
+    """A new rate family must not join the table without a coverage decision.
+
+    Without this, adding one silently widens the blind spot above: the sweep
+    keeps passing and simply never looks at the new family.
+    """
+    newest_name, rates = _current_fiscal_year_table()
+    domains = {key.split("_", 1)[0] for key in rates}
+    unmapped = sorted(domains - set(_DOMAIN_TOPICS))
+    assert not unmapped, (
+        f"{newest_name} introduces rate families with no entry in _DOMAIN_TOPICS: "
+        f"{unmapped}. Add each one, mapping it to the harness topics that assert its "
+        f"figures — or to an empty tuple to record that the harness does not cover it "
+        f"yet."
+    )
 
 
 def test_no_superseded_figure_survives_anywhere_in_the_harness() -> None:
@@ -119,20 +168,29 @@ def test_no_superseded_figure_survives_anywhere_in_the_harness() -> None:
     blocks = _harness_blocks(_eval_source())
 
     stale: list[str] = []
+    unmapped_changes: list[str] = []
     for key, old_value in previous.items():
         if key not in newest or newest[key] == old_value:
             continue
         if not isinstance(old_value, int) or old_value < 1000:
             continue  # rates and small scalars are too collision-prone to match on
         domain = key.split("_", 1)[0]
+        if domain not in _DOMAIN_TOPICS:
+            unmapped_changes.append(f"{key} (domain {domain!r})")
+            continue
+        topics = _DOMAIN_TOPICS[domain]
         needle = _grouped(old_value)
         for topic, text in blocks:
-            if domain not in topic:
+            if topic not in topics:
                 continue
             if re.search(rf"(?<![0-9,]){re.escape(needle)}(?![0-9,])", text):
                 stale.append(f"{key}: {needle} still asserted under topic {topic!r} "
                              f"(superseded by {_grouped(newest[key])})")
 
+    assert not unmapped_changes, (
+        "these rate keys changed but their family is not in _DOMAIN_TOPICS, so the "
+        "sweep could not check them:\n  " + "\n  ".join(unmapped_changes)
+    )
     assert not stale, (
         "the accuracy harness still asserts figures the current rate table has "
         "superseded:\n  " + "\n  ".join(stale)

@@ -91,8 +91,11 @@ NFR_MAX_ERROR_PCT = float(os.environ.get("NFR_MAX_ERROR_PCT", "5.0"))
 # of how many VUs are used (the same finding as the 2026-08-22 run §5).
 #
 # Strategy (default, --no-retry not set):
-#   1. Each VU sleeps _INTER_REQUEST_DELAY_S + U(0, 1)s jitter between
-#      requests so the aggregate RPS stays well under 0.5 RPS (= 30/min).
+#   1. Request STARTS are spaced globally by _INTER_REQUEST_DELAY_S + U(0, 1)s
+#      of jitter, so the aggregate stays well under 0.5 RPS (= 30/min).
+#      The spacing is global rather than per-VU on purpose: every VU shares one
+#      bucket, so per-VU sleeping would still let N concurrent VUs issue N
+#      requests at once and the aggregate claim would not hold.
 #   2. On HTTP 429 the request is retried up to _RETRY_MAX times with
 #      exponential backoff (_RETRY_BACKOFF_BASE ** attempt seconds).
 #   3. After _RETRY_MAX retries the result is recorded as a 429 failure.
@@ -107,6 +110,34 @@ _RETRY_BACKOFF_BASE = float(os.environ.get("RETRY_BACKOFF_BASE", "2.0"))
 # Module-level flags — overridden by --no-retry / --delay CLI args at startup.
 _ENABLE_RETRY: bool = True
 _INTER_REQUEST_DELAY_S: float = _DEFAULT_DELAY_S
+
+# The pacer state behind the strategy note above. `--delay` used to be parsed
+# into _INTER_REQUEST_DELAY_S and then read by nothing at all, so every flat
+# phase ran at full concurrency into the documented 30/min limiter and the
+# reported RPS, error rates and latency percentiles described throttling the
+# suite believed it was avoiding. `--no-retry --delay 0` was likewise identical
+# to the default, so the raw-limiter comparison the docstring offers could not
+# be made.
+_pacer_lock: asyncio.Lock | None = None
+_next_request_at: float = 0.0
+
+
+async def _await_rate_slot() -> None:
+    """Block until this request may start, honouring the global spacing.
+
+    `--delay 0` disables it entirely, which is what makes the documented
+    raw-limiter measurement possible.
+    """
+    global _pacer_lock, _next_request_at
+    if _INTER_REQUEST_DELAY_S <= 0:
+        return
+    if _pacer_lock is None:  # created lazily so it binds to the running loop
+        _pacer_lock = asyncio.Lock()
+    async with _pacer_lock:
+        now = time.monotonic()
+        if now < _next_request_at:
+            await asyncio.sleep(_next_request_at - now)
+        _next_request_at = time.monotonic() + _INTER_REQUEST_DELAY_S + random.uniform(0, 1)
 
 # ---------------------------------------------------------------------------
 # Tax Education Query Banks
@@ -398,6 +429,7 @@ async def _chat_once(
         "conversation_id": conversation_id,
         "locale": locale,
     }
+    await _await_rate_slot()
     t0 = time.perf_counter()
     attempts = 0
     max_attempts = _RETRY_MAX if _ENABLE_RETRY else 0

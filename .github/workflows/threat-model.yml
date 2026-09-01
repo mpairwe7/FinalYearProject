@@ -284,7 +284,14 @@ jobs:
               print(f\"::warning::Accepted risk '{r.get('risk_id', 'unknown')}' has expired review date: {r['review_date']}\")
 
           sys.exit(1 if expired else 0)
-          " 2>/dev/null || echo "::warning::Some accepted risks have expired review dates"
+          " 2>/dev/null || {
+            # The python above already emits a ::warning:: per expired risk and
+            # exits 1. Piping that into `|| echo` replaced the non-zero status
+            # with success, so an expired accepted risk warned and passed the
+            # gate — the one thing this step exists to stop.
+            echo "::error::One or more accepted risks have expired review dates (or the check could not run)."
+            exit 1
+          }
 
       - name: Upload Threagile report
         if: always()

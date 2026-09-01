@@ -149,6 +149,12 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
             <tbody>
               {rows.map((flag) => {
                 const diverged = flag.enabled !== flag.default;
+                // Either mutation blocks both controls. Guarding each on only
+                // its own isPending let a user flip the switch (PATCH) while a
+                // Reset (DELETE) was still in flight for the same flag; the
+                // request that happened to land second won, so a Reset could
+                // leave the override in place.
+                const mutating = toggle.isPending || reset.isPending;
                 return (
                   <tr key={flag.name}>
                     <td>
@@ -161,7 +167,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                       {canToggle && !flag.protected ? (
                         <Switch
                           checked={flag.enabled}
-                          disabled={toggle.isPending}
+                          disabled={mutating}
                           label={`${flag.name} — currently ${flag.enabled ? "on" : "off"}`}
                           onChange={(next) => toggle.mutate({ name: flag.name, enabled: next })}
                         />
@@ -186,7 +192,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                           <button
                             type="button"
                             className="ops-btn is-ghost is-sm"
-                            disabled={reset.isPending}
+                            disabled={mutating}
                             onClick={() => reset.mutate(flag.name)}
                             title="Drop the override so this flag follows FLAG_* or its default again"
                           >

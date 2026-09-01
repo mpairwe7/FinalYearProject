@@ -279,7 +279,7 @@ jobs:
           VIOLATIONS=0
           if [ -f trivy-license.json ]; then
             VIOLATIONS=$(python3 -c "
-          import json, sys
+          import json
           data = json.load(open('trivy-license.json'))
           results = data.get('Results', [])
           blocked = ['AGPL-1.0', 'AGPL-3.0', 'GPL-2.0', 'GPL-3.0', 'SSPL-1.0', 'BSL-1.1']
@@ -289,12 +289,22 @@ jobs:
               if lic.get('Name') in blocked:
                 violations.append(lic.get('Name'))
           print(len(violations))
-          if violations:
-            sys.exit(0)
           " 2>/dev/null || echo "0")
           fi
           echo "violations=${VIOLATIONS}" >> "$GITHUB_OUTPUT"
           echo "- Blocked license violations: ${VIOLATIONS}" >> "$GITHUB_STEP_SUMMARY"
+          # Also to stdout: the count was previously written only to the step
+          # summary, so the number this gate turns on could not be read back
+          # from the job log.
+          echo "Blocked license violations: ${VIOLATIONS}"
+          # The PR comment calls this result blocking, so it has to be able to
+          # fail. It could not: the parser ended in `sys.exit(0)` on the
+          # violations branch, so a blocked licence printed its count and exited
+          # successfully, and security-gate saw a pass.
+          if [ "${VIOLATIONS}" != "0" ]; then
+            echo "::error::Blocked licence(s) detected: ${VIOLATIONS}. Allowed set excludes AGPL-1.0/3.0, GPL-2.0/3.0, SSPL-1.0 and BSL-1.1."
+            exit 1
+          fi
 
       - name: Upload license results
         if: always()

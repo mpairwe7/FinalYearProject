@@ -2468,8 +2468,15 @@ def clear_flag_endpoint(
     # it has no console-set override to drop.
     if is_protected(name):
         raise HTTPException(status_code=400, detail="this flag cannot be toggled from the UI")
-    flag_reg.clear(name)
+    # Durable row first, then this replica. The other order left the replica
+    # cleared while the override survived in the database, so the endpoint
+    # returned an error and the next restart re-applied the override the
+    # operator had just removed. Persisting first fails closed instead: nothing
+    # changes anywhere. (The PATCH path above writes in the opposite order, but
+    # its failure mode is safe — an override that was never persisted is simply
+    # lost on restart rather than resurrected.)
     db.clear_flag_override(name)
+    flag_reg.clear(name)
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),

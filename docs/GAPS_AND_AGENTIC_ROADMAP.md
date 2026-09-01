@@ -682,10 +682,14 @@ full agent chain is locked.
 
 ---
 
-*Document version 2.1 — updated 2026-09-01: added §2.9 (serving-path defects
-found by the load harness), corrected the model stack to Sunflower-14B-FP8 /
-whisper-large-v3-salt / Spark-TTS-SALT, and re-derived the tool, workflow and
-flag counts from the running registries (25 / 14 / 49).*
+*Document version 2.2 — updated 2026-09-02: added §2.11 (promotion
+re-verification on the rebuilt 7,972-document index) with G40 fixed, G42 fixed,
+and G41 and G43 open.*
+*Version 2.1 — 2026-09-01: added §2.9 (serving-path defects found by the load
+harness) and §2.10 (end-to-end evidence on the full GPU stack), corrected the
+model stack to Sunflower-14B-FP8 / whisper-large-v3-salt / Spark-TTS-SALT, and
+re-derived the tool, workflow and flag counts from the running registries
+(25 / 14 / 49).*
 *Version 2.0 — 2026-04-28 after Phases 14-16 shipped.*
 *Previous version (1.0) authored after Phase 1-13.*
 *For questions about a specific gap or phase, open an issue
