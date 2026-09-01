@@ -36,10 +36,10 @@ on:
     # Weekly Monday 04:00 UTC (07:00 EAT)
     - cron: "0 4 * * 1"
 
+# Read-only by default. security-events: write used to be granted here and no
+# job ever uploaded SARIF, so it is dropped rather than pushed down.
 permissions:
   contents: read
-  pull-requests: write
-  security-events: write
 
 concurrency:
   group: threat-model-${{ github.ref }}
@@ -57,6 +57,9 @@ jobs:
   # ---------------------------------------------------------------------------
   risk-register:
     name: Risk Register Validation
+    permissions:
+      contents: read
+      pull-requests: write   # posts the risk/threat summary on the PR
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -135,6 +138,9 @@ jobs:
   # ---------------------------------------------------------------------------
   analyze:
     name: Threagile Threat Model Analysis
+    permissions:
+      contents: read
+      pull-requests: write   # posts the risk/threat summary on the PR
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:

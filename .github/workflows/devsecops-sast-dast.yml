@@ -25,11 +25,10 @@ on:
     - cron: "30 3 * * 1"   # Weekly Monday 03:30 UTC
   workflow_dispatch:
 
+# Read-only by default; each job below asks for exactly what it uses. The SARIF
+# uploaders need security-events + actions, and only pr-comment writes to the PR.
 permissions:
   contents: read
-  pull-requests: write     # Required for PR summary comments
-  security-events: write   # Upload SARIF to GitHub Security tab
-  actions: read            # Required for SARIF upload
 
 concurrency:
   group: devsecops-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -41,6 +40,10 @@ jobs:
   # ============================================
   semgrep:
     name: "SAST: Semgrep"
+    permissions:
+      contents: read
+      security-events: write   # upload SARIF
+      actions: read            # required by upload-sarif
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
@@ -176,6 +179,10 @@ jobs:
   # ============================================
   bandit:
     name: "SAST: Bandit (Python)"
+    permissions:
+      contents: read
+      security-events: write   # upload SARIF
+      actions: read            # required by upload-sarif
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -323,6 +330,10 @@ jobs:
   # ============================================
   checkov:
     name: "IaC: Checkov"
+    permissions:
+      contents: read
+      security-events: write   # upload SARIF
+      actions: read            # required by upload-sarif
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -658,6 +669,9 @@ jobs:
   # ============================================
   pr-comment:
     name: "PR DevSecOps Summary"
+    permissions:
+      contents: read
+      pull-requests: write   # posts the DevSecOps summary comment
     runs-on: ubuntu-latest
     needs:
       - semgrep

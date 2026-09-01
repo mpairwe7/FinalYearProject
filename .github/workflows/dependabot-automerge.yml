@@ -6,13 +6,16 @@ on:
       - dev
       - main
 
+# Read-only by default; the one job that approves and merges elevates itself.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   dependabot-automerge:
     name: "Auto-merge Dependabot PRs"
+    permissions:
+      contents: write        # merge the PR
+      pull-requests: write   # approve it first
     runs-on: ubuntu-latest
     if: github.actor == 'dependabot[bot]'
     steps:
