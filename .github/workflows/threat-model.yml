@@ -25,16 +25,13 @@ on:
       - "scripts/validate-risk-register.py"
       - "threat-model/**"
       - ".github/workflows/threat-model.yml"
+  # No dispatch inputs on purpose. This workflow carried a `fail_on_elevated`
+  # choice that nothing ever read — the risk job computes `elevated_count` and
+  # emits a ::warning:: regardless, so the input advertised a gate that was
+  # never implemented. Removing it also clears Checkov CKV_GHA_7 honestly
+  # rather than suppressing it. Reinstate an input only together with the
+  # step that actually branches on it.
   workflow_dispatch:
-    inputs:
-      fail_on_elevated:
-        description: "Fail on elevated (high) severity risks"
-        required: false
-        default: "true"
-        type: choice
-        options:
-          - "true"
-          - "false"
   schedule:
     # Weekly Monday 04:00 UTC (07:00 EAT)
     - cron: "0 4 * * 1"
