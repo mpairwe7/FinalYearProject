@@ -134,9 +134,31 @@ _DEFINITIONAL_OPENER_RE = re.compile(
     r"\bwhat\s+(?:is|'s|are|does|do)\b",
     re.IGNORECASE,
 )
+# A question about what a published figure IS must never open a calculator that
+# asks the taxpayer for an amount. Measured against a live Sunflower-14B-FP8 +
+# hybrid-Qdrant stack on 2026-09-02 (GAPS §2.11, G42), two phrasings slipped
+# past this and entered guided calculator flows instead of being answered:
+#
+#   "How much monthly income is exempt from PAYE in Uganda?"
+#       -> calc_paye, "What is your gross monthly salary?"
+#   "What will Uganda's VAT rate be in 2031?"
+#       -> calc_vat, "What is the amount in UGX?"
+#
+# The first is a threshold lookup that opens with the calculation verb "how
+# much"; the second is a rate lookup whose verb is "will", which the second
+# branch below did not list. Both have a published answer and no amount to
+# compute on.
 _INFO_ONLY_RE = re.compile(
     r"\bhow\s+(is|are|does)\b.*\b(calculated|computed|charged|determined)\b"
-    r"|\bwhat\s+(is|are|was|were|'s)\b.*\b(rates?|thresholds?|percentages?)\b"
+    # "how much X is exempt / tax-free / taxable / deducted" — a threshold
+    # lookup. Kept narrow: "how much PAYE will I pay on 3,500,000" has no
+    # "is/are + exempt", so it still reaches the calculator.
+    r"|\bhow\s+much\b[^?.!]{0,40}?\b(is|are)\s+"
+    r"(exempt|tax[-\s]?free|taxable|deducted|withheld|charged)\b"
+    # "will/would" belong here with "is/are/was/were": a question about a future
+    # or hypothetical rate is still a question about the rate.
+    r"|\bwhat\s+(is|are|was|were|will|would|'s)\b.*"
+    r"\b(rates?|thresholds?|percentages?|bands?)\b"
     r"|\b(rates?|thresholds?)\s+(of|for)\b",
     re.IGNORECASE,
 )

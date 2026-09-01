@@ -6,7 +6,12 @@ from __future__ import annotations
 import unittest
 import uuid
 
-from app.calculator_router import extract_amounts, parse_ugx_amount, plan_calculation
+from app.calculator_router import (
+    _INFO_ONLY_RE,
+    extract_amounts,
+    parse_ugx_amount,
+    plan_calculation,
+)
 from app.workflows.slots import validate_slot
 
 
@@ -296,3 +301,69 @@ class ReplyReadsTheTableTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FigureLookupIsNotACalculationTests(unittest.TestCase):
+    """A question about what a published figure IS must not open a calculator.
+
+    Measured against a live Sunflower-14B-FP8 + hybrid-Qdrant stack on
+    2026-09-02 (``docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.11, G42). Both of these
+    produced a guided calculator flow asking the taxpayer for an amount instead
+    of stating the figure they asked for:
+
+        "How much monthly income is exempt from PAYE in Uganda?"
+            -> calc_paye, "What is your gross monthly salary?"
+        "What will Uganda's VAT rate be in 2031?"
+            -> calc_vat, "What is the amount in UGX?"
+
+    ``plan_calculation`` is the right gate for this — the guided flow is opened
+    downstream of it by ``_maybe_handle_calculator`` when a plan reports missing
+    params, so a plan that is never formed is a flow that never opens.
+    """
+
+    def test_the_guard_never_matches_the_empty_string(self) -> None:
+        """An empty alternative here would suppress every calculation.
+
+        ``_INFO_ONLY_RE`` is an alternation that gets extended over time, and a
+        stray ``|`` produces a branch matching at position 0 of any string. The
+        symptom is the guard appearing to work perfectly while the calculators
+        go dark.
+        """
+        self.assertIsNone(_INFO_ONLY_RE.search(""))
+        self.assertIsNone(_INFO_ONLY_RE.search("hello"))
+
+    def test_threshold_lookups_do_not_produce_a_plan(self) -> None:
+        for message in (
+            "How much monthly income is exempt from PAYE in Uganda?",
+            "How much is tax-free under PAYE?",
+            "How much of my salary is taxable?",
+        ):
+            with self.subTest(message=message):
+                self.assertIsNone(
+                    plan_calculation(message),
+                    "a threshold lookup has no amount to compute on",
+                )
+
+    def test_rate_lookups_in_any_tense_do_not_produce_a_plan(self) -> None:
+        """"will" and "would" belong with "is/are/was/were" here."""
+        for message in (
+            "What will Uganda's VAT rate be in 2031?",
+            "What would the PAYE rate be for a non-resident?",
+            "What is the standard VAT rate?",
+            "What are the PAYE bands for 2026?",
+        ):
+            with self.subTest(message=message):
+                self.assertIsNone(plan_calculation(message))
+
+    def test_real_computations_still_produce_a_plan(self) -> None:
+        """The guard must not cost the calculators their actual traffic."""
+        for message, tool in (
+            ("Calculate PAYE for a monthly salary of 3,500,000 UGX.", "calculate_paye"),
+            ("How much PAYE will I pay on a monthly salary of 3,500,000 UGX?", "calculate_paye"),
+            ("Compute VAT on 500,000", "calculate_vat"),
+            ("How much VAT on 2,000,000 UGX?", "calculate_vat"),
+        ):
+            with self.subTest(message=message):
+                plan = plan_calculation(message)
+                self.assertIsNotNone(plan, "this is a computation, not a lookup")
+                self.assertEqual(plan.tool, tool)
