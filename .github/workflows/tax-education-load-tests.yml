@@ -1,5 +1,19 @@
 name: Tax Education Load Tests — HF Space
 
+# checkov:skip=CKV_GHA_7:The dispatch inputs only select which load PHASE to
+# run and at what concurrency (smoke/load/volume/spike/stress, VU counts). They
+# are read solely as CLI arguments to tests/load/tax_education_load_suite.py,
+# which sends HTTP requests to an already-deployed target and writes a JSON
+# report. This workflow builds no artifact and publishes nothing, so there is
+# no build-provenance surface a caller-supplied value could influence.
+# Restricted to repo collaborators by the default workflow_dispatch permission
+# model. Same reasoning already accepted in ura-chatbot-cc-redeploy-retry.yml.
+
+# Least privilege: read the checkout, and comment the smoke result on the PR.
+permissions:
+  contents: read
+  pull-requests: write
+
 on:
   # Run on any PR that touches backend, frontend, or test suite
   pull_request:
