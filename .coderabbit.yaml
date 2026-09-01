@@ -1,0 +1,36 @@
+# CodeRabbit configuration.
+#
+# The default branch here is `dev`, and CodeRabbit only auto-reviews PRs whose
+# BASE is the default branch. That silently skipped every `dev` -> `main`
+# promotion PR — the one review that matters most, since a promotion is the
+# only time the full delta reaches production. #428 was skipped with
+# "Auto reviews are disabled on base/target branches other than the default
+# branch" and had to be triggered by hand.
+#
+# Listing both bases fixes that. Reference: CodeRabbit docs, reviews.auto_review.
+language: en-GB
+
+reviews:
+  # CHILL keeps the bot to substantive findings rather than style nits, which
+  # matches how this repo already gates style (ruff + pre-commit).
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - dev
+      - main
+
+  path_filters:
+    # Generated or vendored trees: reviewing them produces noise, not findings.
+    - "!App/Data/**"
+    - "!Data/crawl/pages/**"
+    - "!**/*.lock"
+    - "!**/bun.lock"
+    - "!MobileApp/**"
+
+chat:
+  auto_reply: true
