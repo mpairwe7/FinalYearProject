@@ -93,6 +93,13 @@ services:
       qdrant:
         condition: service_healthy
     restart: "no"
+    # Every other service in the base file pins itself to app-network, so a
+    # service that omits `networks:` silently lands on the project default
+    # network instead and cannot resolve `qdrant` at all — the rebuild dies
+    # with "[Errno -3] Temporary failure in name resolution", which reads like
+    # a DNS/internet problem but is purely a network-membership one.
+    networks:
+      - app-network
 
   # Daily durable snapshot plus a monthly restore drill. The worker downloads
   # each snapshot into qdrant_backups, records a checksum, retains seven copies
@@ -127,6 +134,8 @@ services:
       qdrant:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - app-network
 
 volumes:
   qdrant_index_state:
