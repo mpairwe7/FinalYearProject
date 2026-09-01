@@ -224,6 +224,46 @@ Two findings a government deployment has to weigh:
 
 p95 of 17.0s is a service-design question, not a defect: single A6000, `--max-num-seqs 64`, no batching tier. `docs/runbooks/capacity-slo.md` holds the measured envelope.
 
+### 2.11 Promotion re-verification on the rebuilt index (2026-09-02)
+
+Re-run before promoting `dev` to `main`. Same stack shape as §2.10 — Sunflower-14B-FP8
+on vLLM (GPU 5), hybrid Qdrant + cross-encoder rerank (GPU 6) — against an index
+rebuilt from scratch after the 2026-08-31 `ura.go.ug` crawl: **7,972 documents**
+(509 FAQ, 6 teacher-QA, 6,966 PDF chunks, 491 crawl chunks), alias promoted only
+after the canary gate passed 3/3 at hit-rate 1.0.
+
+| Measure | §2.10 | **This run** |
+|---|---|---|
+| Overall accuracy | 75.4% | **82.0%** |
+| Intent precision | — | **91.7%** |
+| Multi-turn coherence | 83.3% | **83.3%** |
+| English | — | **78.3%** |
+| Luganda | 85.0% | **90.0%** |
+| Kiswahili | 100.0% | **100.0%** |
+| VAT topic | 86.2% | **95.0%** |
+| PAYE topic | — | **78.3%** |
+
+The accuracy gain is **not** a model or retrieval improvement. It is the
+measurement being corrected: see G40. Cold-run latency was p50 0.360s / p95
+11.6s; the re-run's p50 0.053s reflects a warm semantic cache and should not be
+quoted as a latency result.
+
+Grounding held: every substantive answer carried sources (`hybrid`, 3–4 each,
+faithfulness 1.0). The G38 workflow escape was re-confirmed working in all three
+languages against the live stack. Three further findings:
+
+| # | Finding | Status |
+|---|---|---|
+| G40 🟢 | **The accuracy harness scored the service against superseded law.** It required the FY2025-26 VAT registration threshold (UGX 150,000,000) and PAYE nil-band ceiling (UGX 235,000); the 2026 Finance Acts moved these to 300,000,000 and 335,000. The service answered both correctly from the FY2026-27 table it cites and was scored 45.0% and 35.0% for it, dragging the published overall number down ~6 points. VAT journey turn 2 was worse than a stale figure: at a 300m threshold its 180m scenario stops being over the line, so the turn silently began testing the opposite behaviour. | **Fixed.** Figures refreshed, scenario raised to 350m, and `tests/test_eval_ground_truth_currency.py` re-derives them from the newest `FY*.json` so they cannot rot again. |
+| G41 🔴 | **Jurisdiction is ignored on the rate-table path.** "What is the corporate income tax rate in **Kenya** for 2026?" returns "**The corporation tax rate in Uganda is 30%** … from the official URA FY2026-27 rate table". Reproduces for Rwanda. The answer is labelled Uganda, so it is not a false statement — but it silently substitutes a different question and presents the result with full confidence and a citation. For a government service this is the highest-severity finding here: the same failure mode as G35, on the path users trust most. | **Open.** The deterministic rate path needs a jurisdiction guard: a foreign country named in the query should abstain and say URA covers Uganda only. |
+| G42 🔴 | **Calculator flows capture factual questions.** "How much monthly income is exempt from PAYE in Uganda?" enters `calc_paye` and asks for a gross salary; "What will Uganda's VAT rate be in 2031?" enters `calc_vat` and asks for an amount. Both are questions about a figure, not requests to compute one, and neither gets answered. This is G39's entry-side twin and it is **not** local-language-specific — these are plain English. G38's escape only releases a flow on the *next* turn, so the first turn is still lost. It also explains the `journey_employer_paye` turn-1 capture (coverage 0.00) that has persisted across both E2E runs. | **Open.** `WorkflowRegistry.match_trigger` should not fire when the message reads as a question (`_reads_as_question` already encodes that test) unless it also carries an amount to operate on. |
+
+G41 and G42 were found by targeted trust probes rather than the coverage bank,
+because both return fluent, well-formed, confidently-cited replies — exactly
+what a keyword-coverage scorer counts as success. Neither is a regression from
+this promotion; both predate it and are recorded here so the promotion does not
+imply they were cleared.
+
 **Open follow-ups.**
 
 - `Data/eval/coverage_bank.jsonl` (105 taxpayer-voice probes) is entirely
