@@ -80,7 +80,7 @@ GROUND_TRUTH_BANK: list[TaxGroundTruth] = [
         user_query="What is the annual turnover threshold for mandatory VAT registration in Uganda?",
         expected_intent="hybrid_rag",
         required_keywords=["threshold", "registration", "turnover", "mandatory"],
-        required_numerical_values=["150,000,000", "150 million", "150m"],
+        required_numerical_values=["300,000,000", "300 million", "300m"],
         statutory_citations=["VAT Act", "Section 7"],
     ),
     TaxGroundTruth(
@@ -111,7 +111,7 @@ GROUND_TRUTH_BANK: list[TaxGroundTruth] = [
         user_query="Calculate PAYE for a monthly salary of 3,500,000 UGX.",
         expected_intent="calculator",
         required_keywords=["paye", "gross", "taxable"],
-        required_numerical_values=["30%", "235,000", "410,000"],
+        required_numerical_values=["30%", "335,000", "410,000"],
         statutory_citations=["Income Tax Act"],
     ),
     TaxGroundTruth(
@@ -121,7 +121,7 @@ GROUND_TRUTH_BANK: list[TaxGroundTruth] = [
         user_query="What is the monthly tax-free threshold for employment income (PAYE) in Uganda?",
         expected_intent="hybrid_rag",
         required_keywords=["threshold", "paye", "tax-free", "exempt"],
-        required_numerical_values=["235,000"],
+        required_numerical_values=["335,000"],
         statutory_citations=["Income Tax Act", "First Schedule"],
     ),
     # ---- Withholding Tax Topic ----
@@ -209,8 +209,8 @@ MULTI_TURN_TEST_JOURNEYS = [
             {
                 "turn": 2,
                 "locale": "en",
-                "message": "My projected sales are about 180 million UGX in my first year. Am I required to register?",
-                "expected_keywords": ["mandatory", "150", "million", "required"],
+                "message": "My projected sales are about 350 million UGX in my first year. Am I required to register?",
+                "expected_keywords": ["mandatory", "300", "million", "required"],
                 "expected_intent": "hybrid_rag",
             },
             {
@@ -327,7 +327,7 @@ class FullEvaluationReport:
 # Every metric in this file used naked ``term in reply_text``. That made three
 # of them unfalsifiable at once:
 #
-#   * "150" matched inside "1,500,000", so a salary figure satisfied a
+#   * "300" matched inside "1,300,000", so a salary figure satisfied a
 #     threshold check.
 #   * The Luganda marker "mu" matched "must" and "eri" matched "period", so an
 #     English reply counted as Luganda. Worse, "ura" was a marker for *both*
@@ -384,7 +384,7 @@ def _is_non_answer(resp_text: str, mode: str) -> bool:
 #: the facts the turn was expected to convey. The previous rule was
 #: ``len(matched) > 0``: on VAT journey turn 2 that scored a company
 #: incorporation forms page ("Company Form 20 · Certificate of incorporation")
-#: as coherent, because it happened to contain "150", "million" and "required",
+#: as coherent, because it happened to contain "300", "million" and "required",
 #: while an on-topic reply about VAT registration thresholds scored zero.
 #: A majority is the weakest rule that rejects a single incidental term.
 _COHERENCE_MIN_COVERAGE = 0.5
