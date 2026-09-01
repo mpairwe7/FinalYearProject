@@ -385,13 +385,24 @@ def test_health_ready_metrics():
 
 def test_index_freshness():
     """Public, no model/auth needed — load_status() reads a status file the
-    cron writer (app.freshness --write-status) produces; absent in a fresh
-    test environment, which is itself the "not run yet" case being asserted."""
+    cron writer (app.freshness --write-status) produces.
+
+    Both states are asserted, because both are reachable on a developer machine:
+    the file is absent until something writes it, and present the moment anyone
+    follows docs/runbooks/qdrant-staged-rebuild.md, which runs a staged rebuild
+    and a `--write-status` freshness check. Pinning only the empty shape made
+    this fail after the project's own runbook was followed.
+    """
     c = _client(model=False)
     r = c.get("/v1/index/freshness")
     assert r.status_code == 200
     body = r.json()
-    assert body == {"ok": None, "snapshot_missing": True, "checked_at": None}
+    assert {"ok", "snapshot_missing", "checked_at"} <= set(body)
+    if body["snapshot_missing"]:
+        assert body == {"ok": None, "snapshot_missing": True, "checked_at": None}
+    else:
+        assert isinstance(body["ok"], bool)
+        assert isinstance(body["checked_at"], str) and body["checked_at"]
 
 
 # ---------------------------------------------------------------------------

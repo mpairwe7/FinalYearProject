@@ -1,0 +1,67 @@
+{
+  "phases": [
+    {
+      "phase": "load",
+      "profile": "C=4, all-topics, all-locales, 2\u00d7",
+      "total_requests": 154,
+      "successful": 73,
+      "failed": 81,
+      "error_rate_pct": 52.6,
+      "duration_s": 353.15,
+      "rps": 0.44,
+      "p50_s": 0.618,
+      "p95_s": 30.487,
+      "p99_s": 60.414,
+      "max_s": 60.417,
+      "grounded_pct": 94.5,
+      "locale_breakdown": {
+        "en": 52,
+        "lg": 10,
+        "sw": 11
+      },
+      "topic_breakdown": {
+        "vat": {
+          "p95_s": 20.507,
+          "count": 26
+        },
+        "paye": {
+          "p95_s": 0.63,
+          "count": 20
+        },
+        "withholding": {
+          "p95_s": 0.68,
+          "count": 18
+        },
+        "efris": {
+          "p95_s": 0.671,
+          "count": 20
+        },
+        "tin": {
+          "p95_s": 30.487,
+          "count": 18
+        },
+        "returns": {
+          "p95_s": 60.417,
+          "count": 18
+        },
+        "customs": {
+          "p95_s": 22.12,
+          "count": 12
+        },
+        "presumptive": {
+          "p95_s": 60.414,
+          "count": 12
+        },
+        "property": {
+          "p95_s": 60.408,
+          "count": 10
+        }
+      },
+      "nfr_p95_pass": false,
+      "nfr_error_pass": false
+    }
+  ],
+  "nfr_p95_s": 30.0,
+  "nfr_error_pct": 5.0,
+  "base_url": "https://landwind22-ura-chatbot.hf.space"
+}

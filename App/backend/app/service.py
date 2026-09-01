@@ -107,6 +107,7 @@ from .text_signals import (
 from .topics import resolve_topic, topic_retrieval_query
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
 from .workflows.registry import WorkflowRegistry, WorkflowSession, auto_load_flows
+from .workflows.slots import validate_slot
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,19 @@ SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
 _WORKFLOW_CANCEL_WORDS = {"cancel", "stop", "quit", "exit", "nevermind", "never mind"}
 _WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
+#: Slot specs that accept any string, so validation cannot tell a slot answer
+#: from a new question. Mirrors :func:`app.workflows.slots.validate_slot`'s own
+#: free-text branch.
+_WORKFLOW_FREE_TEXT_VALIDATORS = {"", "text"}
+#: A message that reads as a fresh question rather than an answer to the slot
+#: the guided flow is waiting on. Deliberately requires an interrogative
+#: opener, not merely a "?", so a hedged slot answer ("individual?") still
+#: reaches the validator. See :meth:`ChatModel._workflow_input_changes_subject`.
+_WORKFLOW_NEW_QUESTION_RE = re.compile(
+    r"^\s*(?:what|when|where|why|how|which|who|can|could|do|does|did|is|are|"
+    r"should|must|will|would)\b",
+    re.IGNORECASE,
+)
 _INFORMATIONAL_WORKFLOW_QUERY_RE = re.compile(
     r"\b(?:how\s+(?:do|does|can|would|should)\s+(?:i|we|one|my|a|an)"
     r"|what\s+are\s+the\s+steps|what\s+is\s+the\s+process|"
@@ -4342,6 +4356,40 @@ class ChatModel:
             ),
         }
 
+    def _workflow_input_changes_subject(
+        self,
+        session: WorkflowSession,
+        user_input: str,
+    ) -> bool:
+        """Whether a mid-flow message is a new question, not a slot answer.
+
+        A guided flow owns its thread until it completes or is cancelled, so
+        without this every message is fed to the slot validator — and a plain
+        question asked mid-flow is answered with the flow's own prompt instead
+        of from the corpus. In a measured PAYE journey, "What is the penalty if
+        I pay on the 20th instead of the 15th?" came back as "Please give me
+        one…", because the retriever is not reachable while a flow is open.
+
+        Both conditions are required. The message has to read as a question,
+        *and* the pending slot has to be unable to accept it — so a mistyped or
+        unrecognised answer still re-asks the flow's question rather than
+        silently abandoning the flow. The slot is probed with the deterministic
+        validators only (no resolver), keeping this free of an extra model call
+        on every guided turn.
+        """
+        if not _WORKFLOW_NEW_QUESTION_RE.match(user_input):
+            return False
+        step = WorkflowRegistry.pending_step(session)
+        if step is None or not step.slot:
+            return False
+        if step.validator.strip() in _WORKFLOW_FREE_TEXT_VALIDATORS:
+            # A free-text slot accepts anything — it is the most common kind in
+            # the shipped flows — so the validator cannot be the arbiter here
+            # and the interrogative opener is the whole signal.
+            return True
+        is_valid, _, _ = validate_slot(user_input, step.validator, None)
+        return not is_valid
+
     def _maybe_handle_workflow(
         self,
         *,
@@ -4389,6 +4437,12 @@ class ChatModel:
                     "workflow": workflow,
                     "next_actions": ["Ask a new question or restart the guided process later."],
                 }
+
+            # The taxpayer asked something else. Hand the turn back so it is
+            # answered from the corpus; the session stays active, so a later
+            # slot-shaped reply resumes the flow where it left off.
+            if self._workflow_input_changes_subject(session, user_input):
+                return None
 
             turn, tool_messages = self._advance_workflow(session, user_input)
 
@@ -4704,6 +4758,21 @@ class ChatModel:
             # question span when one is extractable. Cache keys, deterministic-
             # template matching, and workflow/calculator routing still use the
             # full `rewritten` text unchanged.
+            #
+            # MEASURED 2026-09-01 — do not widen this to every preamble.
+            # `_faq_match_score` divides coverage by the terms the user supplied,
+            # so "I am opening a hardware store in Jinja. Do I have to charge
+            # VAT?" scores 0.273 against the 0.58 floor while the bare question
+            # scores 0.700. That is real, and it looks like a reason to narrow
+            # every situational preamble — but the FAQ scorer only decides the
+            # answer when retrieval has already fallen back to keyword matching.
+            # Against a full dense index the preamble is *useful* context, and
+            # stripping it loses signal: on a 7,970-document index the VAT
+            # onboarding journey fell from 81.2% to 43.8% fact coverage with the
+            # narrowing ungated (turn 1 1.00 -> 0.25, turn 2 0.75 -> 0.00).
+            # It only looked like a win against a stale 729-document snapshot.
+            # The dilution is real; the fix for it belongs in the scorer, not
+            # here. See docs/GAPS_AND_AGENTIC_ROADMAP.md §2.9.
             retrieval_query = rewritten
             # _simple_search's binding_query keeps FAQ-match authorization
             # bound to the user's own (unexpanded) words rather than
@@ -5963,9 +6032,9 @@ class ChatModel:
         distress = detect_user_distress(message)
         tone_hint = tone_hint_for(distress)
 
-        # See generate()'s matching comment: retrieve on the question span
-        # alone when distress framing is present, so it doesn't dilute
-        # relevance into a false abstention.
+        # See generate()'s matching comment, including the 2026-09-01
+        # measurement showing why this stays gated on distress rather than
+        # firing for every situational preamble.
         retrieval_query = rewritten
         binding_query = message
         if distress:

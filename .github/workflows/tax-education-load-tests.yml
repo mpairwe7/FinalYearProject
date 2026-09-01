@@ -1,0 +1,228 @@
+name: Tax Education Load Tests — HF Space
+
+on:
+  # Run on any PR that touches backend, frontend, or test suite
+  pull_request:
+    paths:
+      - "App/backend/**"
+      - "App/frontend/**"
+      - "tests/load/tax_education_load_suite.py"
+      - ".github/workflows/tax-education-load-tests.yml"
+  # Weekly full suite on Sunday 07:00 UTC (after dependabot at 06:00)
+  schedule:
+    - cron: "0 7 * * 0"
+  # Manual trigger with phase selection
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "Phase(s) to run (smoke, load, volume, spike, stress, all, or topic name)"
+        required: false
+        default: "smoke"
+      vu:
+        description: "Virtual users for load/topic phases"
+        required: false
+        default: "4"
+      sessions:
+        description: "Multi-turn sessions for volume phase"
+        required: false
+        default: "12"
+      spike_peak:
+        description: "Peak VU for spike ramp"
+        required: false
+        default: "12"
+      stress_max:
+        description: "Max VU for stress ramp"
+        required: false
+        default: "16"
+
+concurrency:
+  group: tax-edu-load-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Smoke — always runs on PRs (≈60 s, 9 requests, C=1)
+  # ------------------------------------------------------------------
+  smoke:
+    name: Smoke — tax education (HF Space)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 10
+    env:
+      TAX_BASE: https://landwind22-ura-chatbot.hf.space
+      NFR_P95_S: "30"          # relaxed for HF Space cold-start on PRs
+      NFR_MAX_ERROR_PCT: "5"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install httpx
+
+      - name: Run smoke phase
+        id: smoke
+        run: |
+          mkdir -p results
+          python3 tests/load/tax_education_load_suite.py \
+            --phase smoke \
+            --out results/smoke_${{ github.run_id }}.json \
+            --verbose
+        continue-on-error: true
+
+      - name: Upload smoke report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: smoke-report-${{ github.run_id }}
+          path: results/smoke_*.json
+          retention-days: 14
+
+      - name: Post PR comment (smoke)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const path = `results/smoke_${{ github.run_id }}.json`;
+            let body = '## 🔬 Tax Education Smoke Test\n\n';
+            if (fs.existsSync(path)) {
+              const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+              const phases = data.phases || [];
+              if (phases.length > 0) {
+                const p = phases[0];
+                const nfr = (p.nfr_p95_pass && p.nfr_error_pass) ? '✅' : '❌';
+                body += `| Metric | Value |\n|---|---|\n`;
+                body += `| Requests | ${p.total_requests} (${p.successful} OK, ${p.failed} fail) |\n`;
+                body += `| p50 | ${p.p50_s}s |\n`;
+                body += `| p95 | ${p.p95_s}s |\n`;
+                body += `| p99 | ${p.p99_s}s |\n`;
+                body += `| Error % | ${p.error_rate_pct}% |\n`;
+                body += `| Grounded % | ${p.grounded_pct}% |\n`;
+                body += `| NFR gate | ${nfr} |\n`;
+                body += `\n> Target: \`${data.base_url}\` | NFR p95 ≤ ${data.nfr_p95_s}s`;
+              }
+            } else {
+              body += '⚠️ No results file produced — check workflow logs.';
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const marker = '<!-- tax-edu-smoke -->';
+            const existing = comments.find(c => c.body.includes(marker));
+            const fullBody = body + `\n${marker}`;
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body: fullBody,
+              });
+            }
+
+  # ------------------------------------------------------------------
+  # Full suite — weekly schedule or manual dispatch
+  # ------------------------------------------------------------------
+  full-suite:
+    name: Full load suite — tax education
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.phase != 'smoke')
+    timeout-minutes: 45
+    env:
+      TAX_BASE: https://landwind22-ura-chatbot.hf.space
+      NFR_P95_S: "20"
+      NFR_MAX_ERROR_PCT: "5"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install httpx
+
+      - name: Determine phase inputs
+        id: params
+        run: |
+          PHASE="${{ github.event.inputs.phase || 'all' }}"
+          VU="${{ github.event.inputs.vu || '4' }}"
+          SESSIONS="${{ github.event.inputs.sessions || '12' }}"
+          SPIKE_PEAK="${{ github.event.inputs.spike_peak || '12' }}"
+          STRESS_MAX="${{ github.event.inputs.stress_max || '16' }}"
+          echo "phase=$PHASE" >> $GITHUB_OUTPUT
+          echo "vu=$VU" >> $GITHUB_OUTPUT
+          echo "sessions=$SESSIONS" >> $GITHUB_OUTPUT
+          echo "spike_peak=$SPIKE_PEAK" >> $GITHUB_OUTPUT
+          echo "stress_max=$STRESS_MAX" >> $GITHUB_OUTPUT
+
+      - name: Run full suite
+        id: suite
+        run: |
+          mkdir -p results
+          python3 tests/load/tax_education_load_suite.py \
+            --phase ${{ steps.params.outputs.phase }} \
+            --vu ${{ steps.params.outputs.vu }} \
+            --sessions ${{ steps.params.outputs.sessions }} \
+            --spike-peak ${{ steps.params.outputs.spike_peak }} \
+            --stress-max ${{ steps.params.outputs.stress_max }} \
+            --out results/full_load_${{ github.run_id }}.json \
+            --verbose 2>&1 | tee results/full_load_${{ github.run_id }}.txt
+        continue-on-error: true
+
+      - name: Upload full report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: full-load-report-${{ github.run_id }}
+          path: |
+            results/full_load_*.json
+            results/full_load_*.txt
+          retention-days: 30
+
+      - name: Check NFR gate
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          with open("results/full_load_${{ github.run_id }}.json") as f:
+              data = json.load(f)
+          failed = [p for p in data["phases"] if not (p["nfr_p95_pass"] and p["nfr_error_pass"])]
+          if failed:
+              print(f"NFR FAILURES: {[p['phase'] for p in failed]}")
+              sys.exit(1)
+          print("All NFR gates passed.")
+          EOF
+        continue-on-error: true
+
+      - name: Open GitHub issue on NFR failure (weekly)
+        if: github.event_name == 'schedule' && failure()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            let summary = '';
+            const txtPath = `results/full_load_${{ github.run_id }}.txt`;
+            if (fs.existsSync(txtPath)) {
+              const lines = fs.readFileSync(txtPath, 'utf8').split('\n').slice(-40);
+              summary = '```\n' + lines.join('\n') + '\n```';
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Auto] Tax Education Load Suite NFR failure — ${new Date().toISOString().slice(0,10)}`,
+              labels: ['performance', 'automated'],
+              body: `Weekly tax education load suite detected NFR failures.\n\n${summary}\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }}`,
+            });

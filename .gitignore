@@ -66,6 +66,11 @@ App/Model/
 *.gguf
 
 # Results (regenerated)
+# Lowercase runtime output dir the load harness and its CI job create with
+# `--out results/...`. Committed measurements live in Results/load/ instead —
+# a tracked lowercase `results/` collides with `Results/` on macOS/Windows and
+# trips pre-commit's check-case-conflict.
+/results/
 Results/metrics/*.json
 Results/plots/*.png
 Results/plots/*.pdf
