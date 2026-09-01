@@ -105,6 +105,42 @@ class WorkflowTopicChangeTest(unittest.TestCase):
                     self.model._workflow_input_changes_subject(session, answer)
                 )
 
+    def test_local_language_questions_can_leave_a_flow(self) -> None:
+        """The escape must not be English-only.
+
+        Measured against the live stack: 80 of 186 taxpayer-voice probes came
+        back as workflow slot prompts, all of them Luganda or Kiswahili. None
+        of those questions opens with an English question word, so an
+        English-only detector strands exactly the users this system exists to
+        serve. A trailing "?" is the signal that carries across languages;
+        the repository deliberately refuses to invent local-language trigger
+        vocabulary (see app.agents.patterns), so it must not be required here.
+        """
+        local_questions = [
+            "Kiki kye nnina okukola nga nfunye TIN?",
+            "Omusolo gwa VAT gw'ameka mu Uganda?",
+            "Nifanye nini kama sina namba ya kitambulisho cha taifa?",
+            "Kiwango cha kodi ya VAT nchini Uganda ni asilimia ngapi?",
+        ]
+        for workflow_id in ("tin_registration", "payment_assistance"):
+            session, _ = self._session_awaiting_a_slot(workflow_id)
+            for question in local_questions:
+                with self.subTest(workflow=workflow_id, question=question):
+                    self.assertTrue(
+                        self.model._workflow_input_changes_subject(session, question)
+                    )
+
+    def test_a_hedged_one_word_answer_still_reaches_the_validator(self) -> None:
+        # The word-count floor is what separates "individual?" from a real
+        # question; without it the trailing "?" rule would divert an uncertain
+        # slot answer and abandon the flow.
+        session, _ = self._session_awaiting_a_slot("tin_registration")
+        for answer in ("individual?", "company?", "ngo?"):
+            with self.subTest(answer=answer):
+                self.assertFalse(
+                    self.model._workflow_input_changes_subject(session, answer)
+                )
+
     def test_cancel_words_are_left_to_the_cancel_path(self) -> None:
         # Cancellation is handled before this check and ends the flow with its
         # own reply; diverting them here would skip that.

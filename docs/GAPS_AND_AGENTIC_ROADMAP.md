@@ -194,6 +194,36 @@ FAQ-shaped, one clause — so neither defect was reachable from any gate.
 | G36 🟢 | **An open workflow swallowed every following question.** `_maybe_handle_workflow` returns before retrieval, so while a flow was active the corpus was unreachable and any question was fed to the slot validator. Only exits were completion or six literal cancel words. | Measured PAYE journey: all three turns were non-answers (fact coverage **0.0%**). | **Shipped.** Divert to normal retrieval when the message reads as a question *and* the pending slot cannot accept it, so a mistyped answer still re-asks. PAYE fact coverage 0.0% → **44.4%**. `WorkflowRegistry.pending_step`, `ChatModel._workflow_input_changes_subject`, `tests/test_workflow_topic_change.py`. |
 | G37 🟢 | **The accuracy harness could not measure what it claimed.** Journey "coherence" was `len(matched_kw) > 0` — one expected keyword as a bare substring, anywhere in the reply. Abstentions and workflow slot prompts scored as good answers; language fidelity used `"ura"` as both a Luganda and a Kiswahili marker, so plain English passed every time; `"150"` matched inside `"1,500,000"`. | A company-incorporation forms page outscored a real VAT-threshold answer. | **Fixed in `tests/load/tax_education_accuracy_eval.py`**: token-boundary matching, non-answer detection, majority-coverage rule, graded per-turn `keyword_coverage_pct`, and language markers that do not occur in English. Corrected figures: coherence 70.8% → **41.6%**, lg 71.6% → **56.6%**, sw 73.3% → **58.3%**. |
 
+### 2.10 End-to-end evidence on the full GPU stack (2026-09-01)
+
+Measured against the real serving stack — Sunflower-14B-FP8 on vLLM (one
+A6000), hybrid Qdrant retrieval over the rebuilt 7,970-document index,
+cross-encoder rerank — not the keyword fallback the CI gates use.
+
+| Measure | Keyword fallback | **Sunflower-14B-FP8** |
+|---|---|---|
+| Single-query accuracy | 67.2% | **75.4%** |
+| Multi-turn coherence | 66.7% | **83.3%** |
+| Luganda fidelity | 56.6% | **85.0%** |
+| Kiswahili fidelity | 58.3% | **100.0%** |
+| VAT topic accuracy | 65.4% | **86.2%** |
+| p95 latency | 2.7s | **17.0s** |
+
+`corpus_coverage --mode api` over the 105-probe taxpayer-voice bank in all
+three languages (`Results/load/` + `/tmp/cov_e2e.json`): **zero abstentions
+in 186 probes**, English coverage 90.3%, but **overall 79.25% against an 80%
+floor — the gate fails**, and two domains sit well below theirs: `objections`
+38.5% and `tin` 46.2% (floor 60% each).
+
+Two findings a government deployment has to weigh:
+
+| # | Finding | Status |
+|---|---|---|
+| G38 🟢 | **The workflow escape was English-only.** 80 of 186 probes returned a guided-flow slot prompt instead of an answer, *all* of them Luganda or Kiswahili. None opens with an English question word, so G36's escape could not fire for them — the escape stranded exactly the users this system exists to serve. Now language-neutral: an English interrogative opener **or** a trailing `?` on a message of ≥3 words, which is what carries across locales. The word-count floor keeps a hedged `"individual?"` with the validator. No local-language vocabulary was invented — `app.agents.patterns` deliberately refuses that without native-speaker review. | **Fixed.** `_reads_as_question`, `tests/test_workflow_topic_change.py`. |
+| G39 ⚪ | **The workflow router is too eager in local languages.** The 80 probes above entered a flow on their *first* turn — a question was classified as a task. G38 lets them leave; it does not stop them being captured. Luganda/Kiswahili coverage (63.6% each) is ~27 points below English (90.3%) and this is the largest single cause. | **Open.** Needs locale-aware trigger thresholds in `WorkflowRegistry.match_trigger`, gated on a per-locale golden set. |
+
+p95 of 17.0s is a service-design question, not a defect: single A6000, `--max-num-seqs 64`, no batching tier. `docs/runbooks/capacity-slo.md` holds the measured envelope.
+
 **Open follow-ups.**
 
 - `Data/eval/coverage_bank.jsonl` (105 taxpayer-voice probes) is entirely

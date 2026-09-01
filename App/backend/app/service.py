@@ -155,14 +155,39 @@ _WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
 #: free-text branch.
 _WORKFLOW_FREE_TEXT_VALIDATORS = {"", "text"}
 #: A message that reads as a fresh question rather than an answer to the slot
-#: the guided flow is waiting on. Deliberately requires an interrogative
-#: opener, not merely a "?", so a hedged slot answer ("individual?") still
-#: reaches the validator. See :meth:`ChatModel._workflow_input_changes_subject`.
+#: the guided flow is waiting on. An English interrogative opener is one
+#: signal; a trailing question mark on a message of several words is the
+#: other, and it is the one that carries across languages.
+#:
+#: English-only detection was measured to strand exactly the users this
+#: system exists for. Against the live stack, Luganda and Kiswahili questions
+#: — "Kiki kye nnina okukola nga nfunye TIN?", "Nifanye nini kama sina namba
+#: ya kitambulisho cha taifa?" — could not leave a guided flow at all, because
+#: none of them open with an English question word. Do not narrow this back to
+#: a word list without a corpus-backed interrogative table for every served
+#: locale; the repository deliberately refuses to invent that vocabulary
+#: (see :mod:`app.agents.patterns`).
+#:
+#: The word-count floor is what keeps a hedged slot answer ("individual?")
+#: with the validator rather than diverting it.
 _WORKFLOW_NEW_QUESTION_RE = re.compile(
     r"^\s*(?:what|when|where|why|how|which|who|can|could|do|does|did|is|are|"
     r"should|must|will|would)\b",
     re.IGNORECASE,
 )
+#: Minimum words before a trailing "?" is read as a question rather than an
+#: uncertain one-word slot value.
+_WORKFLOW_QUESTION_MIN_WORDS = 3
+
+
+def _reads_as_question(text: str) -> bool:
+    """Whether *text* asks something, in any of the served languages."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if _WORKFLOW_NEW_QUESTION_RE.match(stripped):
+        return True
+    return stripped.endswith("?") and len(stripped.split()) >= _WORKFLOW_QUESTION_MIN_WORDS
 _INFORMATIONAL_WORKFLOW_QUERY_RE = re.compile(
     r"\b(?:how\s+(?:do|does|can|would|should)\s+(?:i|we|one|my|a|an)"
     r"|what\s+are\s+the\s+steps|what\s+is\s+the\s+process|"
@@ -4377,7 +4402,7 @@ class ChatModel:
         validators only (no resolver), keeping this free of an extra model call
         on every guided turn.
         """
-        if not _WORKFLOW_NEW_QUESTION_RE.match(user_input):
+        if not _reads_as_question(user_input):
             return False
         step = WorkflowRegistry.pending_step(session)
         if step is None or not step.slot:
