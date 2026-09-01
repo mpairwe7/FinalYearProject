@@ -272,6 +272,83 @@ def detect_user_distress(message: str) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Jurisdiction
+#
+# URA administers taxes in Uganda and nowhere else, but the deterministic rate
+# and calculator paths read only the tax word and answered anything. Measured on
+# 2026-09-02 (GAPS §2.11, G41): "What is the corporate income tax rate in Kenya
+# for 2026?" returned "**The corporation tax rate in Uganda is 30%** (FY2026-27)
+# … from the official URA FY2026-27 rate table". Reproduced for Rwanda.
+#
+# The reply is labelled Uganda, so it is not a false statement — which is what
+# makes it dangerous. It silently answers a different question, in the
+# authoritative register, with a citation, on the path users trust most. A
+# taxpayer comparing jurisdictions reads a confident number against the country
+# they asked about.
+# ---------------------------------------------------------------------------
+
+#: Neighbours and the economies taxpayers most often compare Uganda against.
+#: Demonyms are included because "the Kenyan VAT rate" names a jurisdiction just
+#: as plainly as "Kenya". Capitals are deliberately excluded: they add little
+#: recall over the country name and every extra token is a false-positive risk
+#: on a corpus full of place names.
+_FOREIGN_JURISDICTIONS: tuple[tuple[str, str], ...] = (
+    ("Kenya", r"kenyan?"),
+    ("Tanzania", r"tanzanian?"),
+    ("Rwanda", r"rwandan?"),
+    ("Burundi", r"burundian?"),
+    ("South Sudan", r"south\s+sudan(?:ese)?"),
+    ("the Democratic Republic of the Congo", r"\bdrc\b|democratic\s+republic\s+of\s+(?:the\s+)?congo"),
+    ("Ethiopia", r"ethiopian?"),
+    ("Somalia", r"somalian?|somali"),
+    ("Nigeria", r"nigerian?"),
+    ("South Africa", r"south\s+africans?"),
+    ("Ghana", r"ghanaian?|\bghana\b"),
+    ("Egypt", r"egyptian?|\begypt\b"),
+    ("the United Kingdom", r"\buk\b|united\s+kingdom|britain|british"),
+    ("the United States", r"\busa?\b|united\s+states|american?"),
+    ("India", r"\bindian?\b"),
+    ("China", r"chinese|\bchina\b"),
+)
+
+_FOREIGN_JURISDICTION_RES: tuple[tuple[str, "re.Pattern[str]"], ...] = tuple(
+    (name, re.compile(rf"\b(?:{pattern})\b", re.IGNORECASE))
+    for name, pattern in _FOREIGN_JURISDICTIONS
+)
+
+_UGANDA_RE = re.compile(r"\bugandan?\b|\bura\b|\bkampala\b", re.IGNORECASE)
+
+
+def detect_foreign_jurisdiction(message: str) -> str:
+    """Name the non-Ugandan jurisdiction this message is about, or ''.
+
+    Returns '' when the message names Uganda too: "how does Uganda's VAT compare
+    with Kenya's" is a Uganda question with a comparison in it, and refusing it
+    outright would be worse than answering the half URA can speak to. The caller
+    is expected to add the scope caveat in that case rather than stay silent.
+    """
+    text = message or ""
+    if not text.strip() or _UGANDA_RE.search(text):
+        return ""
+    for name, pattern in _FOREIGN_JURISDICTION_RES:
+        if pattern.search(text):
+            return name
+    return ""
+
+
+def out_of_jurisdiction_reply(country: str) -> str:
+    """What to say instead of a Ugandan figure the taxpayer did not ask for."""
+    return (
+        f"I can only help with taxes administered by the Uganda Revenue Authority. "
+        f"I don't hold {country}'s tax rates, and quoting Uganda's figures for "
+        f"{country} would be misleading.\n\n"
+        f"For {country} you'll need that country's own revenue authority. "
+        f"If you meant Uganda, ask again without naming {country} and I'll answer "
+        f"from the official URA rate table."
+    )
+
+
 def empathy_ack(kind: str) -> str:
     """One short, translation-friendly empathetic opener for a distress kind.
 

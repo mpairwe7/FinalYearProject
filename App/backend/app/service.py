@@ -97,8 +97,10 @@ from .text_signals import (
     GREETING_REPLY,
     GROUNDED_REVISION_PREAMBLE,
     NO_HITS_REPLY,
+    detect_foreign_jurisdiction,
     detect_user_distress,
     empathy_ack,
+    out_of_jurisdiction_reply,
     is_courtesy_sentence,
     normalise_citation_markers,
     split_sentences,
@@ -4127,6 +4129,9 @@ class ChatModel:
     ) -> dict[str, Any] | None:
         """Deterministic fast paths, in precedence order (both chat paths):
 
+        0. a question about another country's taxes is declined outright — it
+           must not reach the paths below, which read only the tax word and
+           would answer it from Uganda's table;
         1. TIN-registration asks with an unspecified taxpayer type start a
            one-question clarification (individual vs organisation);
         2. calculations with figures compute instantly, without figures they
@@ -4134,7 +4139,10 @@ class ChatModel:
         3. rate questions answer from the versioned FY rate table.
         """
         return (
-            self._maybe_handle_tin_clarification(
+            self._maybe_decline_out_of_jurisdiction(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+            or self._maybe_handle_tin_clarification(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
             or self._maybe_handle_calculator(
@@ -4144,6 +4152,53 @@ class ChatModel:
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
         )
+
+    def _maybe_decline_out_of_jurisdiction(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Decline a question about a jurisdiction URA does not administer.
+
+        This has to run before the calculator and rate-table paths rather than
+        after them. Those paths match on the tax word alone, so "the corporate
+        income tax rate in Kenya" satisfied the corporation-tax pattern and was
+        answered with Uganda's 30% — correctly labelled Uganda, cited to the URA
+        rate table, and confidently wrong about the question actually asked.
+
+        Only fires when no Ugandan reference is present; a message naming both
+        countries is a Uganda question with a comparison in it and still gets
+        answered, since refusing it would withhold the half URA can speak to.
+        """
+        country = detect_foreign_jurisdiction(message) or detect_foreign_jurisdiction(rewritten)
+        if not country:
+            return None
+        return {
+            "reply": self._finalize_reply(out_of_jurisdiction_reply(country)),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "out_of_jurisdiction",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "tool_specialist",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["outside URA's jurisdiction"],
+                "confidence_band": "high",
+            },
+            "next_actions": [],
+            "ticket_id": "",
+        }
 
     def _maybe_handle_rate_lookup(
         self,
