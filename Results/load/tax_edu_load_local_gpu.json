@@ -1,0 +1,153 @@
+{
+  "phases": [
+    {
+      "phase": "smoke",
+      "profile": "C=1, 1\u00d7topic, English only",
+      "total_requests": 9,
+      "successful": 9,
+      "failed": 0,
+      "error_rate_pct": 0.0,
+      "duration_s": 3.28,
+      "rps": 2.75,
+      "p50_s": 0.168,
+      "p95_s": 1.915,
+      "p99_s": 1.915,
+      "max_s": 1.915,
+      "grounded_pct": 55.6,
+      "locale_breakdown": {
+        "en": 9
+      },
+      "topic_breakdown": {
+        "vat": {
+          "p95_s": 0.019,
+          "count": 1
+        },
+        "paye": {
+          "p95_s": 0.294,
+          "count": 1
+        },
+        "withholding": {
+          "p95_s": 0.02,
+          "count": 1
+        },
+        "efris": {
+          "p95_s": 1.915,
+          "count": 1
+        },
+        "tin": {
+          "p95_s": 0.022,
+          "count": 1
+        },
+        "returns": {
+          "p95_s": 0.194,
+          "count": 1
+        },
+        "customs": {
+          "p95_s": 0.168,
+          "count": 1
+        },
+        "presumptive": {
+          "p95_s": 0.235,
+          "count": 1
+        },
+        "property": {
+          "p95_s": 0.036,
+          "count": 1
+        }
+      },
+      "nfr_p95_pass": true,
+      "nfr_error_pass": true
+    },
+    {
+      "phase": "load",
+      "profile": "C=4, all-topics, all-locales, 2\u00d7",
+      "total_requests": 154,
+      "successful": 154,
+      "failed": 0,
+      "error_rate_pct": 0.0,
+      "duration_s": 185.12,
+      "rps": 0.83,
+      "p50_s": 0.916,
+      "p95_s": 21.454,
+      "p99_s": 38.363,
+      "max_s": 50.84,
+      "grounded_pct": 51.9,
+      "locale_breakdown": {
+        "en": 90,
+        "lg": 32,
+        "sw": 32
+      },
+      "topic_breakdown": {
+        "vat": {
+          "p95_s": 38.363,
+          "count": 26
+        },
+        "paye": {
+          "p95_s": 21.454,
+          "count": 20
+        },
+        "withholding": {
+          "p95_s": 32.919,
+          "count": 18
+        },
+        "efris": {
+          "p95_s": 21.787,
+          "count": 20
+        },
+        "tin": {
+          "p95_s": 4.258,
+          "count": 18
+        },
+        "returns": {
+          "p95_s": 8.897,
+          "count": 18
+        },
+        "customs": {
+          "p95_s": 26.026,
+          "count": 12
+        },
+        "presumptive": {
+          "p95_s": 14.712,
+          "count": 12
+        },
+        "property": {
+          "p95_s": 16.951,
+          "count": 10
+        }
+      },
+      "nfr_p95_pass": false,
+      "nfr_error_pass": true
+    },
+    {
+      "phase": "volume",
+      "profile": "8 multi-turn sessions, C=4",
+      "total_requests": 29,
+      "successful": 29,
+      "failed": 0,
+      "error_rate_pct": 0.0,
+      "duration_s": 20.27,
+      "rps": 1.43,
+      "p50_s": 0.649,
+      "p95_s": 9.209,
+      "p99_s": 9.942,
+      "max_s": 9.942,
+      "grounded_pct": 55.2,
+      "locale_breakdown": {
+        "en": 23,
+        "lg": 3,
+        "sw": 3
+      },
+      "topic_breakdown": {
+        "multi_turn": {
+          "p95_s": 9.209,
+          "count": 29
+        }
+      },
+      "nfr_p95_pass": false,
+      "nfr_error_pass": true
+    }
+  ],
+  "nfr_p95_s": 5.0,
+  "nfr_error_pct": 5.0,
+  "base_url": "http://localhost:8083"
+}

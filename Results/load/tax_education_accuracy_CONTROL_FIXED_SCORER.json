@@ -1,0 +1,475 @@
+{
+  "target_url": "http://localhost:8083",
+  "timestamp": "2026-09-01T10:11:53Z",
+  "concurrency": 4,
+  "total_single_queries": 12,
+  "single_query_accuracy_pct": 67.2,
+  "single_query_intent_precision_pct": 91.7,
+  "mean_latency_s": 1.412,
+  "p50_latency_s": 1.656,
+  "p95_latency_s": 3.991,
+  "p99_latency_s": 3.991,
+  "multilingual_fidelity_pct": {
+    "lg": 56.6,
+    "sw": 58.3,
+    "en": 70.5
+  },
+  "topic_accuracy_pct": {
+    "efris": 62.5,
+    "paye": 60.9,
+    "vat": 65.4,
+    "tin": 66.0,
+    "property": 90.0,
+    "withholding": 86.7,
+    "presumptive": 55.0
+  },
+  "multi_turn_journeys_evaluated": 2,
+  "multi_turn_coherence_pct": 50.0,
+  "query_scores": [
+    {
+      "query_id": "vat_standard_rate_en",
+      "topic": "vat",
+      "locale": "en",
+      "user_query": "What is the standard Value Added Tax rate in Uganda?",
+      "status_code": 200,
+      "latency_s": 0.284,
+      "retrieval_mode": "calculator",
+      "intent_detected": "calculator",
+      "intent_correct": true,
+      "accuracy_score": 1.0,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "value added tax",
+        "vat",
+        "rate"
+      ],
+      "keywords_missing": [],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "**The standard VAT rate in Uganda is 18%** (FY2026-27). Value Added Tax is charged at 18% on taxable supplies of goods a",
+      "error": null
+    },
+    {
+      "query_id": "vat_registration_threshold_en",
+      "topic": "vat",
+      "locale": "en",
+      "user_query": "What is the annual turnover threshold for mandatory VAT registration in Uganda?",
+      "status_code": 200,
+      "latency_s": 0.288,
+      "retrieval_mode": "calculator",
+      "intent_detected": "calculator",
+      "intent_correct": true,
+      "accuracy_score": 0.45,
+      "numerical_correct": false,
+      "keywords_matched": [
+        "registration",
+        "turnover"
+      ],
+      "keywords_missing": [
+        "threshold",
+        "mandatory"
+      ],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "**VAT registration is compulsory once annual taxable turnover reaches UGX 300,000,000** (FY2026-27). Below that, registr",
+      "error": null
+    },
+    {
+      "query_id": "vat_standard_rate_lg",
+      "topic": "vat",
+      "locale": "lg",
+      "user_query": "Omusolo gwa VAT mu Uganda guli ku bitundu bimeka?",
+      "status_code": 200,
+      "latency_s": 2.78,
+      "retrieval_mode": "hybrid",
+      "intent_detected": "hybrid",
+      "intent_correct": true,
+      "accuracy_score": 0.583,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "vat"
+      ],
+      "keywords_missing": [
+        "bitundu",
+        "omusolo"
+      ],
+      "citations_matched": [],
+      "language_match": false,
+      "response_text_snippet": "This is an indirect tax on consumption charged on value added to \u201ctaxable\u201d goods and services, at different stages in th",
+      "error": null
+    },
+    {
+      "query_id": "vat_standard_rate_sw",
+      "topic": "vat",
+      "locale": "sw",
+      "user_query": "Kiwango cha kodi ya VAT nchini Uganda ni asilimia ngapi?",
+      "status_code": 200,
+      "latency_s": 3.489,
+      "retrieval_mode": "hybrid",
+      "intent_detected": "hybrid",
+      "intent_correct": true,
+      "accuracy_score": 0.583,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "vat"
+      ],
+      "keywords_missing": [
+        "kodi",
+        "asilimia"
+      ],
+      "citations_matched": [],
+      "language_match": false,
+      "response_text_snippet": "This is an indirect tax on consumption charged on value added to \u201ctaxable\u201d goods and services, at different stages in th",
+      "error": null
+    },
+    {
+      "query_id": "paye_calculation_en",
+      "topic": "paye",
+      "locale": "en",
+      "user_query": "Calculate PAYE for a monthly salary of 3,500,000 UGX.",
+      "status_code": 200,
+      "latency_s": 0.082,
+      "retrieval_mode": "calculator",
+      "intent_detected": "calculator",
+      "intent_correct": true,
+      "accuracy_score": 0.867,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "paye",
+        "gross"
+      ],
+      "keywords_missing": [
+        "taxable"
+      ],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "**PAYE calculation (FY2026-27)**  - Gross monthly salary: UGX 3,500,000 - PAYE due (26.8% effective): **UGX 938,250** pe",
+      "error": null
+    },
+    {
+      "query_id": "paye_threshold_en",
+      "topic": "paye",
+      "locale": "en",
+      "user_query": "What is the monthly tax-free threshold for employment income (PAYE) in Uganda?",
+      "status_code": 200,
+      "latency_s": 0.031,
+      "retrieval_mode": "calculator",
+      "intent_detected": "calculator",
+      "intent_correct": true,
+      "accuracy_score": 0.35,
+      "numerical_correct": false,
+      "keywords_matched": [
+        "paye"
+      ],
+      "keywords_missing": [
+        "threshold",
+        "tax-free",
+        "exempt"
+      ],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "**PAYE rates for resident employees (FY2026-27, monthly income):**  - UGX 0 \u2013 UGX 335,000: **0%** - UGX 335,000 \u2013 UGX 41",
+      "error": null
+    },
+    {
+      "query_id": "wht_professional_fees_en",
+      "topic": "withholding",
+      "locale": "en",
+      "user_query": "What is the withholding tax rate on management and professional fees in Uganda?",
+      "status_code": 200,
+      "latency_s": 0.05,
+      "retrieval_mode": "calculator",
+      "intent_detected": "calculator",
+      "intent_correct": true,
+      "accuracy_score": 0.867,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "withholding tax",
+        "management"
+      ],
+      "keywords_missing": [
+        "professional"
+      ],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "**Withholding tax (WHT) rates (FY2026-27):**  - Services: **6%** - Goods: **6%** - Management fees: **15%** - Dividends:",
+      "error": null
+    },
+    {
+      "query_id": "efris_definition_en",
+      "topic": "efris",
+      "locale": "en",
+      "user_query": "What is EFRIS and which taxpayers are required to use it?",
+      "status_code": 200,
+      "latency_s": 3.991,
+      "retrieval_mode": "hybrid",
+      "intent_detected": "hybrid",
+      "intent_correct": true,
+      "accuracy_score": 0.7,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "efris"
+      ],
+      "keywords_missing": [
+        "electronic fiscal receipting",
+        "invoicing",
+        "vat registered"
+      ],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "All VAT-registered taxpayers are required to use EFRIS to issue e-invoices to their customers. They are also expected to",
+      "error": null
+    },
+    {
+      "query_id": "efris_definition_lg",
+      "topic": "efris",
+      "locale": "lg",
+      "user_query": "EFRIS kye ki era ani alina okugikozesa?",
+      "status_code": 200,
+      "latency_s": 2.487,
+      "retrieval_mode": "hybrid",
+      "intent_detected": "hybrid",
+      "intent_correct": true,
+      "accuracy_score": 0.55,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "efris"
+      ],
+      "keywords_missing": [
+        "lisiiti",
+        "invooyisi",
+        "bizinensi"
+      ],
+      "citations_matched": [],
+      "language_match": false,
+      "response_text_snippet": "All VAT-registered taxpayers must use EFRIS to issue e-invoices or e-receipts for all business transactions. No tax cred",
+      "error": null
+    },
+    {
+      "query_id": "presumptive_small_business_en",
+      "topic": "presumptive",
+      "locale": "en",
+      "user_query": "What are the presumptive tax rules for a small business with annual gross turnover of 40 million UGX?",
+      "status_code": 200,
+      "latency_s": 1.791,
+      "retrieval_mode": "hybrid",
+      "intent_detected": "hybrid",
+      "intent_correct": true,
+      "accuracy_score": 0.55,
+      "numerical_correct": false,
+      "keywords_matched": [
+        "presumptive",
+        "small business",
+        "turnover"
+      ],
+      "keywords_missing": [
+        "books of accounts"
+      ],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "Resident businesses with annual turnover above UGX 10m and not exceeding UGX 150m (excluding listed professional/utility",
+      "error": null
+    },
+    {
+      "query_id": "rental_tax_rate_individual_en",
+      "topic": "property",
+      "locale": "en",
+      "user_query": "What is the rental income tax rate for individual landlords in Uganda?",
+      "status_code": 200,
+      "latency_s": 0.019,
+      "retrieval_mode": "calculator",
+      "intent_detected": "calculator",
+      "intent_correct": true,
+      "accuracy_score": 0.9,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "rental",
+        "individual",
+        "rate"
+      ],
+      "keywords_missing": [
+        "tax"
+      ],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "**Individual rental income is taxed at 12%** (FY2026-27) on gross rent above the annual threshold of UGX 2,820,000.  Tha",
+      "error": null
+    },
+    {
+      "query_id": "tin_registration_workflow_en",
+      "topic": "tin",
+      "locale": "en",
+      "user_query": "I want to apply for a new individual TIN. What is the process and required documents?",
+      "status_code": 200,
+      "latency_s": 1.656,
+      "retrieval_mode": "faq_priority",
+      "intent_detected": "faq_priority",
+      "intent_correct": false,
+      "accuracy_score": 0.66,
+      "numerical_correct": true,
+      "keywords_matched": [
+        "nin",
+        "tin"
+      ],
+      "keywords_missing": [
+        "national id",
+        "ura portal",
+        "apply"
+      ],
+      "citations_matched": [],
+      "language_match": true,
+      "response_text_snippet": "To register for an **instant TIN** as an individual:  1. Go to ura.go.ug 2. Click **Get a TIN** 3. Choose **Instant TIN*",
+      "error": null
+    }
+  ],
+  "journey_scores": [
+    {
+      "journey_id": "journey_vat_onboarding",
+      "description": "Taxpayer learning VAT requirements from zero to compliance",
+      "total_turns": 4,
+      "successful_turns": 4,
+      "mean_latency_s": 0.502,
+      "intent_accuracy_pct": 100.0,
+      "topic_coherence_pct": 100.0,
+      "keyword_coverage_pct": 81.2,
+      "turn_details": [
+        {
+          "turn": 1,
+          "message": "I am opening a hardware store in Jinja. Do I have to charge VAT?",
+          "status": 200,
+          "latency_s": 0.677,
+          "mode": "hybrid",
+          "coherent": true,
+          "keyword_coverage": 1.0,
+          "keywords_matched": [
+            "vat",
+            "turnover",
+            "threshold",
+            "register"
+          ],
+          "keywords_missing": [],
+          "is_answer": true,
+          "snippet": "VAT is an indirect tax on consumption charged on value added to taxable supplies at differ"
+        },
+        {
+          "turn": 2,
+          "message": "My projected sales are about 180 million UGX in my first year. Am I required to register?",
+          "status": 200,
+          "latency_s": 0.503,
+          "mode": "hybrid",
+          "coherent": true,
+          "keyword_coverage": 0.75,
+          "keywords_matched": [
+            "150",
+            "million",
+            "required"
+          ],
+          "keywords_missing": [
+            "mandatory"
+          ],
+          "is_answer": true,
+          "snippet": "- Company Form 20\n\n- Certificate of incorporation\n\nClick here for details on requirements "
+        },
+        {
+          "turn": 3,
+          "message": "Once registered, by what date must I file my monthly return?",
+          "status": 200,
+          "latency_s": 0.466,
+          "mode": "faq_priority",
+          "coherent": true,
+          "keyword_coverage": 1.0,
+          "keywords_matched": [
+            "15th",
+            "following month",
+            "due date"
+          ],
+          "keywords_missing": [],
+          "is_answer": true,
+          "snippet": "To file your annual tax return:\n\n1. Login ura.go.ug with TIN/password \u2192 e-services \u2192 e-ret"
+        },
+        {
+          "turn": 4,
+          "message": "How does EFRIS integrate with my VAT invoicing?",
+          "status": 200,
+          "latency_s": 0.361,
+          "mode": "hybrid",
+          "coherent": true,
+          "keyword_coverage": 0.5,
+          "keywords_matched": [
+            "e-invoice",
+            "efris"
+          ],
+          "keywords_missing": [
+            "fiscal receipt",
+            "real-time"
+          ],
+          "is_answer": true,
+          "snippet": "All VAT registered taxpayers are obliged to register for EFRIS and issue fiscalised invoic"
+        }
+      ]
+    },
+    {
+      "journey_id": "journey_employer_paye",
+      "description": "Small company director learning employer tax obligations",
+      "total_turns": 3,
+      "successful_turns": 3,
+      "mean_latency_s": 0.024,
+      "intent_accuracy_pct": 100.0,
+      "topic_coherence_pct": 0.0,
+      "keyword_coverage_pct": 0.0,
+      "turn_details": [
+        {
+          "turn": 1,
+          "message": "I hired 3 staff with salaries of 1.5m, 2.5m, and 5.0m UGX. What are my PAYE duties?",
+          "status": 200,
+          "latency_s": 0.043,
+          "mode": "workflow",
+          "coherent": false,
+          "keyword_coverage": 0.0,
+          "keywords_matched": [],
+          "keywords_missing": [
+            "deduct",
+            "remit",
+            "paye",
+            "employer"
+          ],
+          "is_answer": false,
+          "snippet": "I can work that out for you \u2014 I just need a detail or two.\n\n_I'll assume: resident employe"
+        },
+        {
+          "turn": 2,
+          "message": "When is the monthly deadline to pay this deducted PAYE to URA?",
+          "status": 200,
+          "latency_s": 0.017,
+          "mode": "workflow",
+          "coherent": false,
+          "keyword_coverage": 0.0,
+          "keywords_matched": [],
+          "keywords_missing": [
+            "15th",
+            "month"
+          ],
+          "is_answer": false,
+          "snippet": "I know deadlines can be stressful, so here's the quickest way forward.\n\nPlease give me one"
+        },
+        {
+          "turn": 3,
+          "message": "What is the penalty if I pay on the 20th instead of the 15th?",
+          "status": 200,
+          "latency_s": 0.013,
+          "mode": "workflow",
+          "coherent": false,
+          "keyword_coverage": 0.0,
+          "keywords_matched": [],
+          "keywords_missing": [
+            "interest",
+            "penalty",
+            "late"
+          ],
+          "is_answer": false,
+          "snippet": "I know deadlines can be stressful, so here's the quickest way forward.\n\nPlease give me one"
+        }
+      ]
+    }
+  ]
+}

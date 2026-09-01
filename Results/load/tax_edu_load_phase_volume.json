@@ -1,0 +1,35 @@
+{
+  "phases": [
+    {
+      "phase": "volume",
+      "profile": "8 multi-turn sessions, C=4",
+      "total_requests": 29,
+      "successful": 16,
+      "failed": 13,
+      "error_rate_pct": 44.83,
+      "duration_s": 38.55,
+      "rps": 0.75,
+      "p50_s": 0.262,
+      "p95_s": 18.305,
+      "p99_s": 20.126,
+      "max_s": 20.126,
+      "grounded_pct": 81.2,
+      "locale_breakdown": {
+        "en": 13,
+        "lg": 1,
+        "sw": 2
+      },
+      "topic_breakdown": {
+        "multi_turn": {
+          "p95_s": 18.305,
+          "count": 29
+        }
+      },
+      "nfr_p95_pass": true,
+      "nfr_error_pass": false
+    }
+  ],
+  "nfr_p95_s": 30.0,
+  "nfr_error_pct": 5.0,
+  "base_url": "https://landwind22-ura-chatbot.hf.space"
+}

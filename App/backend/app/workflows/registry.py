@@ -110,6 +110,25 @@ class WorkflowRegistry:
         return WorkflowSession(workflow_id=workflow_id)
 
     @classmethod
+    def pending_step(cls, session: WorkflowSession) -> WorkflowStep | None:
+        """The step this session is waiting on, without advancing it.
+
+        Mirrors the condition-skipping :meth:`advance` does when it looks for
+        the current step, but leaves ``session`` untouched, so a caller can ask
+        what the flow expects next before deciding whether to hand it the turn.
+        """
+        wf = cls._workflows.get(session.workflow_id)
+        if not wf or session.completed:
+            return None
+        idx = session.current_step_idx
+        while idx < len(wf.steps):
+            candidate = wf.steps[idx]
+            if _eval_condition(candidate.when, session.slots):
+                return candidate
+            idx += 1
+        return None
+
+    @classmethod
     def advance(
         cls,
         session: WorkflowSession,
