@@ -275,6 +275,21 @@ answers a *neighbouring* question with full confidence instead of declining.
 | G43 🔴 | **A non-existent tax was invented, with figures.** "What is the URA Digital Nomad Levy and how do I pay it?" — a tax that does not exist — returned "a tax of **1% of the monthly gross income** for digital nomads … who operate in Uganda for **90 days or more**", plus a registration and monthly-declaration procedure. In `hybrid` mode, citing 2 sources. The same question **earlier in the same session** correctly refused: "the figures in it disagreed with the URA documents I was reading — so I have not shown it … a URA officer has been asked". So the integrity check that should catch this **fires non-deterministically**, which is worse than not having it: it cannot be relied on and it makes the failure hard to reproduce in review. Highest-severity finding in this document. | **Open.** Needs the answer-integrity gate made deterministic for a false-premise question, and a false-premise probe set in the CI gate — every existing probe asks about something real. |
 | G41 (restated) 🔴 | The temporal case is the same defect as the geographic one. "What will Uganda's VAT rate be in 2031?" now answers "The standard VAT rate in Uganda is **18%** (FY2026-27)" with no caveat that 2031 is not FY2026-27 — an improvement on the calculator hijack, but still scope substitution. Treat jurisdiction and fiscal period as one guard on the deterministic rate path. | **Open.** |
 
+**Deployed-Space verification.** The local GPU stack is not the shipping shape —
+the HF Space runs a Qdrant sidecar over a sparse-only collection with no torch —
+so the FAQ battery was re-run against `https://landwind22-ura-chatbot.hf.space`
+directly. **11 of 12 pass**, including both local-language VAT probes and the
+G42 fix, which is live there. The one failure:
+
+| # | Finding | Status |
+|---|---|---|
+| G44 🟠 | **"What are the PAYE tax bands in Uganda?" does not return the bands on the Space.** It answers in `hybrid` mode from three sources with a passage about agribusiness employers being required to register for PAYE — on topic, but not the question. The bands are in `FY2026-27.json` and the deterministic rate path answers the VAT, corporation, rental and WHT equivalents correctly, so this is one phrasing that fails to reach the rate table and falls through to retrieval. | **Open.** The rate path should recognise a bands/schedule request the way it already recognises a rate request. |
+
+Two probe bugs were found and corrected rather than reported as defects: `invoic`
+and `regist` were asserted as stems against a token-boundary matcher, so
+"Invoicing" and "registered" could never satisfy them. The service was right both
+times. Recorded because the same mistake in the repo harness is what G40 was.
+
 **Open follow-ups.**
 
 - `Data/eval/coverage_bank.jsonl` (105 taxpayer-voice probes) is entirely
@@ -683,8 +698,9 @@ full agent chain is locked.
 ---
 
 *Document version 2.2 — updated 2026-09-02: added §2.11 (promotion
-re-verification on the rebuilt 7,972-document index) with G40 fixed, G42 fixed,
-and G41 and G43 open.*
+re-verification on the rebuilt 7,972-document index, plus FAQ verification
+against the deployed HF Space) with G40 and G42 fixed, and G41, G43 and G44
+open.*
 *Version 2.1 — 2026-09-01: added §2.9 (serving-path defects found by the load
 harness) and §2.10 (end-to-end evidence on the full GPU stack), corrected the
 model stack to Sunflower-14B-FP8 / whisper-large-v3-salt / Spark-TTS-SALT, and
