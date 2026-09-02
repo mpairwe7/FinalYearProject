@@ -124,6 +124,24 @@ GROUND_TRUTH_BANK: list[TaxGroundTruth] = [
         required_numerical_values=["335,000"],
         statutory_citations=["Income Tax Act", "First Schedule"],
     ),
+    # Asked the way a taxpayer asks it, not the way the rate table names it.
+    #
+    # ``paye_threshold_en`` above says both "threshold" and "PAYE", which is
+    # exactly the vocabulary ``plan_rate_lookup`` gates on — so it passed
+    # throughout the period when this phrasing was answered UGX 235,000 from
+    # a superseded handbook (§2.11, G44). A harness that only asks in the
+    # system's own words cannot see a routing gap, which is the G40 lesson
+    # repeating; this case exists to make that specific blindness impossible.
+    TaxGroundTruth(
+        query_id="paye_threshold_plain_language_en",
+        topic="paye",
+        locale="en",
+        user_query="How much of my salary is tax free?",
+        expected_intent="hybrid_rag",
+        required_keywords=["paye"],
+        required_numerical_values=["335,000"],
+        statutory_citations=["rate table"],
+    ),
     # ---- Withholding Tax Topic ----
     TaxGroundTruth(
         query_id="wht_professional_fees_en",

@@ -8,9 +8,11 @@ import uuid
 
 from app.calculator_router import (
     _INFO_ONLY_RE,
+    _PAYE_THRESHOLD_ASK_RE,
     extract_amounts,
     parse_ugx_amount,
     plan_calculation,
+    plan_rate_lookup,
 )
 from app.workflows.slots import validate_slot
 
@@ -367,3 +369,111 @@ class FigureLookupIsNotACalculationTests(unittest.TestCase):
                 plan = plan_calculation(message)
                 self.assertIsNotNone(plan, "this is a computation, not a lookup")
                 self.assertEqual(plan.tool, tool)
+
+
+class SalaryThresholdIsARateLookupTests(unittest.TestCase):
+    """Plain-language PAYE threshold questions must read the rate table.
+
+    Measured against the deployed HF Space on 2026-09-02
+    (``docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.11, G44). ``plan_rate_lookup``
+    required BOTH a "rate"/"threshold" word AND a named tax, so the way
+    taxpayers actually ask missed it and fell through to hybrid retrieval:
+
+        "How much of my salary is tax free?"              -> hybrid, "235,000"
+        "At what monthly salary do I start paying PAYE?"  -> hybrid, "235,000"
+
+    Retrieval answered from superseded handbook editions (FY2024-25,
+    FY2025-26) still carrying the old threshold, while the FY2026-27 rate
+    table says 335,000 — so the taxpayer was told the tax-free line sits
+    100,000 UGX/month lower than it does. The same question phrased as
+    "What are the PAYE rates?" was correct throughout, which is what kept
+    this invisible.
+    """
+
+    def test_plain_language_threshold_questions_reach_the_rate_table(self) -> None:
+        for message in (
+            "How much of my salary is tax free?",
+            "At what monthly salary do I start paying PAYE?",
+            "Is my salary exempt from tax?",
+            "how much of my wage is tax-free",
+            "What part of my earnings is untaxed?",
+        ):
+            with self.subTest(message=message):
+                plan = plan_rate_lookup(message)
+                self.assertIsNotNone(plan, "must not fall through to retrieval")
+                self.assertEqual(plan.summary, "paye")
+
+    def test_procedural_and_other_taxes_are_not_hijacked(self) -> None:
+        """The widened gate must not swallow questions it cannot answer.
+
+        A registration question wants the procedure, not a band table; an
+        allowance question wants the exempt list; and a turnover question is
+        about VAT registration, where quoting the 18% standard rate would be
+        the same class of wrong answer this guard exists to prevent.
+        """
+        for message in (
+            "Which allowances are exempt from PAYE?",
+            "How do I start paying PAYE?",
+            "How do I register for PAYE?",
+            "At what turnover do I start paying VAT?",
+            "When is my PAYE return due?",
+            "What is my salary?",
+        ):
+            with self.subTest(message=message):
+                self.assertIsNone(plan_rate_lookup(message))
+
+    def test_existing_rate_routing_is_unchanged(self) -> None:
+        for message, expected in (
+            ("What are the PAYE rates?", "paye"),
+            ("What is the VAT rate?", "vat_standard"),
+            ("What is the VAT registration threshold?", "vat_registration_threshold_annual"),
+            ("What is the corporation tax rate?", "corporation_tax"),
+            ("What is the rental tax rate for a company?", "rental_tax_company"),
+            ("withholding tax rate on dividends", "withholding_dividend"),
+        ):
+            with self.subTest(message=message):
+                plan = plan_rate_lookup(message)
+                self.assertIsNotNone(plan)
+                self.assertEqual(plan.summary or plan.tax_type, expected)
+
+    def test_a_bands_question_reaches_the_rate_table(self) -> None:
+        """The original G44 phrasing: "bands" is how the schedule is asked for.
+
+        ``_RATE_TYPE_RES`` already carried an ``income tax band`` alternative,
+        so the type gate was ready for this — it was the ask gate, which only
+        knew "rate" and "threshold", that turned the question away. The type
+        pattern was also singular, so the plural nobody actually writes as
+        "band" never matched either.
+        """
+        for message in (
+            "What are the PAYE tax bands in Uganda?",
+            "What are the PAYE bands?",
+            "What are the income tax bands?",
+            "What is the income tax band?",
+        ):
+            with self.subTest(message=message):
+                plan = plan_rate_lookup(message)
+                self.assertIsNotNone(plan, "must not fall through to retrieval")
+                self.assertEqual(plan.summary, "paye")
+
+    def test_bands_alone_is_not_a_rate_question(self) -> None:
+        """"Band" is an ordinary English word; it needs a named tax too."""
+        for message in (
+            "Which tax band am I in?",
+            "The band played at the URA staff party",
+        ):
+            with self.subTest(message=message):
+                self.assertIsNone(plan_rate_lookup(message))
+
+    def test_an_amount_still_routes_to_the_calculator(self) -> None:
+        """``plan_rate_lookup`` yields to ``plan_calculation`` on amounts.
+
+        Without this, "is a salary of 300,000 tax free?" would answer with the
+        band table instead of the figure the taxpayer asked for.
+        """
+        self.assertIsNone(plan_rate_lookup("Is a salary of 300,000 tax free?"))
+
+    def test_the_guard_never_matches_the_empty_string(self) -> None:
+        """A stray ``|`` here would route every message to the PAYE bands."""
+        self.assertIsNone(_PAYE_THRESHOLD_ASK_RE.search(""))
+        self.assertIsNone(_PAYE_THRESHOLD_ASK_RE.search("hello"))

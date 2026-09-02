@@ -283,7 +283,7 @@ G42 fix, which is live there. The one failure:
 
 | # | Finding | Status |
 |---|---|---|
-| G44 🟠 | **"What are the PAYE tax bands in Uganda?" does not return the bands on the Space.** It answers in `hybrid` mode from three sources with a passage about agribusiness employers being required to register for PAYE — on topic, but not the question. The bands are in `FY2026-27.json` and the deterministic rate path answers the VAT, corporation, rental and WHT equivalents correctly, so this is one phrasing that fails to reach the rate table and falls through to retrieval. | **Open.** The rate path should recognise a bands/schedule request the way it already recognises a rate request. |
+| G44 🟢 | **PAYE threshold questions asked in taxpayer language returned the *previous* year's figure.** Originally logged as "the bands question returns a passage instead of the bands". Re-probed on the Space 2026-09-02, the defect is worse than that: it is a wrong number, not a missing one. `plan_rate_lookup` gated on a "rate"/"threshold" word **and** a named tax, so *"How much of my salary is tax free?"* and *"At what monthly salary do I start paying PAYE?"* failed the gate, fell through to `hybrid` retrieval, and were answered **UGX 235,000** from superseded handbooks (`TAXATION-HANDBOOK-FY-2024-25`, `FY-2025-26`, a Pharmaceutical Manufacturers PDF). `FY2026-27.json` says **335,000** — the tax-free line was quoted 100,000 UGX/month too low. *"What are the PAYE rates?"* was correct throughout, which is exactly what hid it. | **Fixed** (`calculator_router.py`). Three changes: (1) `_PAYE_THRESHOLD_ASK_RE` accepts the tax-free/start-paying phrasings, every alternative anchored on employment-income vocabulary so no turnover or rental question can reach the PAYE bands; (2) the ask gate now accepts `bands` alongside `rates`/`thresholds` — the type table already carried an `income tax band` alternative that the ask gate never let through; (3) that alternative was singular, so the plural nobody writes as "band" never matched. Guarded by `SalaryThresholdIsARateLookupTests`, mutation-checked. |
 
 Two probe bugs were found and corrected rather than reported as defects: `invoic`
 and `regist` were asserted as stems against a token-boundary matcher, so
@@ -697,10 +697,15 @@ full agent chain is locked.
 
 ---
 
-*Document version 2.2 — updated 2026-09-02: added §2.11 (promotion
-re-verification on the rebuilt 7,972-document index, plus FAQ verification
-against the deployed HF Space) with G40, G41 and G42 fixed and G43, G44
-and G45 open.*
+*Document version 2.3 — updated 2026-09-02: G44 re-probed on the deployed
+Space and fixed. The re-probe changed what G44 is: not a bands question
+answered with a passage, but plain-language PAYE threshold questions answered
+**UGX 235,000** out of superseded handbooks when the FY2026-27 table says
+**335,000**. Recorded because it is the third finding in §2.11 whose real
+severity only appeared once the question was asked the way a taxpayer asks it.*
+*Version 2.2 — 2026-09-02: added §2.11 (promotion re-verification on the
+rebuilt 7,972-document index, plus FAQ verification against the deployed HF
+Space) with G40, G41 and G42 fixed and G43, G44 and G45 open.*
 *Version 2.1 — 2026-09-01: added §2.9 (serving-path defects found by the load
 harness) and §2.10 (end-to-end evidence on the full GPU stack), corrected the
 model stack to Sunflower-14B-FP8 / whisper-large-v3-salt / Spark-TTS-SALT, and
