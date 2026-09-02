@@ -97,7 +97,10 @@ def _export_onnx(source: Path, out_dir: Path, quantize: bool) -> list[Path]:
         from optimum.exporters.onnx import main_export  # type: ignore
     except ImportError as exc:
         raise RuntimeError(
-            "optimum[onnxruntime] missing — pip install 'optimum[onnxruntime]>=1.24'"
+            "optimum[onnxruntime] missing — it is deliberately not in the runtime "
+            "environment, because it cannot be installed alongside the transformers "
+            "5.x that CVE-2026-9856 requires. Install the export toolchain on its "
+            "own: pip install -r requirements-onnx-export.txt"
         ) from exc
 
     out_dir.mkdir(parents=True, exist_ok=True)

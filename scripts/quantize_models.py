@@ -525,7 +525,12 @@ def export_onnx(
         )
 
     except ImportError:
-        log.warning("optimum[onnxruntime] not installed — skipping ONNX export")
+        log.warning(
+            "optimum[onnxruntime] not installed — skipping ONNX export. It is "
+            "deliberately absent from the runtime environment (incompatible with "
+            "the transformers 5.x that CVE-2026-9856 requires); install it "
+            "separately with requirements-onnx-export.txt to run this path."
+        )
         return QuantResult(
             model=model_id, format="onnx", quant_type="fp16",
             output_path="", size_bytes=0, size_mb=0, sha256="",
