@@ -783,7 +783,10 @@ def get_feedback_summary(days: int = 30) -> dict[str, Any]:
     satisfaction = round(up / total * 100, 1) if total > 0 else 0.0
 
     recent = conn.execute(
-        """SELECT id, message_id, rating, comment, created_at
+        # user_query is what the analytics table shows under "Taxpayer
+        # question". It is stored already redacted (see save_feedback), so
+        # selecting it here adds no new disclosure.
+        """SELECT id, message_id, rating, comment, user_query, created_at
            FROM feedback WHERE created_at >= ? ORDER BY created_at DESC LIMIT 20""",
         (cutoff,),
     ).fetchall()
@@ -1540,6 +1543,24 @@ def compose_sla_stats(
         except (KeyError, TypeError, IndexError):
             return float(row[index] or 0)
 
+    def _get_text(row: Any, key: str, index: int) -> str:
+        """Same lookup as :func:`_get` for a column that is not a number.
+
+        A row that predates the column entirely (a stubbed test row, a
+        short tuple) reads as empty rather than raising — the same
+        fail-soft the numeric accessor gives.
+        """
+        if isinstance(row, dict):
+            return str(row.get(key) or "")
+        try:
+            return str(row[key] or "")
+        except (KeyError, TypeError, IndexError):
+            pass
+        try:
+            return str(row[index] or "")
+        except (KeyError, TypeError, IndexError):
+            return ""
+
     def _median(values: list[float]) -> float | None:
         if not values:
             return None
@@ -1569,10 +1590,17 @@ def compose_sla_stats(
     breaching_first = 0
     breaching_next = 0
     awaiting_next = 0
+    unassigned = 0
     for r in open_rows:
         created = _get(r, "created_at", 0)
         first = _get(r, "first_response_at", 1)
         reply = _get(r, "reply_at", 2)
+        # "Waiting to be claimed" belongs with the other live counts rather
+        # than in ticket_stats: it is a property of the queue right now, not
+        # of what was raised in a window, and the overview reads it beside
+        # the breach counts that share this population.
+        if not _get_text(r, "assignee", 4):
+            unassigned += 1
         if not first:
             if now - created >= SLA_BREACH_SECONDS:
                 breaching_first += 1
@@ -1589,6 +1617,7 @@ def compose_sla_stats(
         "resolved": len(resolution),
         "awaiting_first_response": sum(1 for r in open_rows if not _get(r, "first_response_at", 1)),
         "awaiting_next_response": awaiting_next,
+        "unassigned": unassigned,
         "median_response_seconds": _median(response),
         "median_resolution_seconds": _median(resolution),
         "median_next_reply_seconds": _median(next_replies),
@@ -1609,7 +1638,9 @@ def sla_stats(days: int = 30) -> dict[str, Any]:
         (cutoff,),
     ).fetchall()
     opened = conn.execute(
-        """SELECT created_at, first_response_at, reply_at, status
+        # assignee last: compose_sla_stats reads the first four positionally
+        # for the Postgres tuples, so a new column has to go on the end.
+        """SELECT created_at, first_response_at, reply_at, status, assignee
            FROM tickets WHERE status IN ('open', 'assigned')""",
     ).fetchall()
     return compose_sla_stats(period_rows=period, open_rows=opened, days=days, now=now)

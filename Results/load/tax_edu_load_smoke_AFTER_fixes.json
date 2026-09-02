@@ -1,0 +1,65 @@
+{
+  "phases": [
+    {
+      "phase": "smoke",
+      "profile": "C=1, 1\u00d7topic, English only",
+      "total_requests": 9,
+      "successful": 9,
+      "failed": 0,
+      "error_rate_pct": 0.0,
+      "duration_s": 3.41,
+      "rps": 2.64,
+      "p50_s": 0.221,
+      "p95_s": 1.551,
+      "p99_s": 1.551,
+      "max_s": 1.551,
+      "grounded_pct": 55.6,
+      "locale_breakdown": {
+        "en": 9
+      },
+      "topic_breakdown": {
+        "vat": {
+          "p95_s": 0.08,
+          "count": 1
+        },
+        "paye": {
+          "p95_s": 1.551,
+          "count": 1
+        },
+        "withholding": {
+          "p95_s": 0.021,
+          "count": 1
+        },
+        "efris": {
+          "p95_s": 0.665,
+          "count": 1
+        },
+        "tin": {
+          "p95_s": 0.056,
+          "count": 1
+        },
+        "returns": {
+          "p95_s": 0.221,
+          "count": 1
+        },
+        "customs": {
+          "p95_s": 0.235,
+          "count": 1
+        },
+        "presumptive": {
+          "p95_s": 0.302,
+          "count": 1
+        },
+        "property": {
+          "p95_s": 0.016,
+          "count": 1
+        }
+      },
+      "nfr_p95_pass": true,
+      "nfr_error_pass": true
+    }
+  ],
+  "nfr_p95_s": 20.0,
+  "nfr_error_pct": 5.0,
+  "base_url": "http://localhost:8083"
+}

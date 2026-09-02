@@ -1,65 +1,170 @@
+# Dependabot Configuration for URA AI Taxpayer Chatbot
+# Runs weekly on Sundays, staggered by hour to avoid runner queue starvation
+# Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
 version: 2
 updates:
-  # Python dependencies (backend + ML)
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
-      - "python"
-    commit-message:
-      prefix: "chore(deps):"
-
+  # =============================================================================
+  # BACKEND - Python 3.11 / FastAPI (App/backend) -> Sunday 02:00 UTC
+  # =============================================================================
   - package-ecosystem: "pip"
     directory: "/App/backend"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
+      day: "sunday"
+      time: "02:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+      - "backend"
+      - "python"
+      - "automated"
+    commit-message:
+      prefix: "deps(backend)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      fastapi-stack:
+        patterns:
+          - "fastapi*"
+          - "uvicorn*"
+          - "starlette*"
+          - "pydantic*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # =============================================================================
+  # ROOT TOOLS - Python Root Requirements -> Sunday 03:00 UTC
+  # =============================================================================
+  - package-ecosystem: "pip"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "03:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 2
     labels:
       - "dependencies"
       - "python"
-      - "backend"
+      - "automated"
     commit-message:
-      prefix: "chore(deps-backend):"
+      prefix: "deps(python)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
-  # Frontend (npm/bun)
+  # =============================================================================
+  # FRONTEND - Next.js 16 + React 19 + Bun (App/frontend) -> Sunday 04:00 UTC
+  # =============================================================================
   - package-ecosystem: "npm"
     directory: "/App/frontend"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 10
+      day: "sunday"
+      time: "04:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 2
     labels:
       - "dependencies"
-      - "javascript"
       - "frontend"
+      - "javascript"
+      - "automated"
     commit-message:
-      prefix: "chore(deps-frontend):"
+      prefix: "deps(frontend)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
-  # GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "ci"
-    commit-message:
-      prefix: "chore(deps-actions):"
-
-  # Docker
+  # =============================================================================
+  # DOCKER - Backend & Frontend Base Images -> Sunday 05:00 UTC
+  # =============================================================================
   - package-ecosystem: "docker"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
+      day: "sunday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 1
     labels:
       - "dependencies"
       - "docker"
+      - "automated"
     commit-message:
-      prefix: "chore(deps-docker):"
+      prefix: "deps(docker)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "docker"
+    directory: "/App/frontend"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "05:30"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 1
+    labels:
+      - "dependencies"
+      - "docker"
+      - "frontend"
+      - "automated"
+    commit-message:
+      prefix: "deps(docker-frontend)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # =============================================================================
+  # GITHUB ACTIONS - Workflow Actions -> Sunday 06:00 UTC
+  # =============================================================================
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 1
+    labels:
+      - "dependencies"
+      - "ci"
+      - "automated"
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

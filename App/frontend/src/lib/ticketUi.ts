@@ -12,6 +12,20 @@ import type { TicketQueueItem } from "../services/analyticsApi";
 export const STATUSES = ["open", "assigned", "resolved", "wontfix"] as const;
 export const PRIORITIES = ["urgent", "high", "normal", "low"] as const;
 
+/**
+ * The queue toolbar's choices — the four real statuses plus "any".
+ *
+ * Separate from STATUSES because that list is also the composer's status
+ * stepper, and "any" is not a state a ticket can be moved into. The token is
+ * mapped to an empty `status=` at the API boundary (see analyticsApi.tickets);
+ * the backend rejects anything outside the four, and treats absent as all.
+ *
+ * It exists so the overview's live tiles have somewhere honest to link: they
+ * count open *and* in-progress cases, which no single-status view can show.
+ */
+export const ANY_STATUS = "any";
+export const QUEUE_STATUSES = [ANY_STATUS, ...STATUSES] as const;
+
 export const PRIORITY_RANK: Record<string, number> = {
   urgent: 0,
   high: 1,
@@ -20,6 +34,7 @@ export const PRIORITY_RANK: Record<string, number> = {
 };
 
 export const STATUS_LABEL: Record<string, string> = {
+  [ANY_STATUS]: "Any",
   open: "New",
   assigned: "In progress",
   resolved: "Resolved",

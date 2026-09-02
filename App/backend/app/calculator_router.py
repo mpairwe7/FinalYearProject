@@ -134,9 +134,31 @@ _DEFINITIONAL_OPENER_RE = re.compile(
     r"\bwhat\s+(?:is|'s|are|does|do)\b",
     re.IGNORECASE,
 )
+# A question about what a published figure IS must never open a calculator that
+# asks the taxpayer for an amount. Measured against a live Sunflower-14B-FP8 +
+# hybrid-Qdrant stack on 2026-09-02 (GAPS §2.11, G42), two phrasings slipped
+# past this and entered guided calculator flows instead of being answered:
+#
+#   "How much monthly income is exempt from PAYE in Uganda?"
+#       -> calc_paye, "What is your gross monthly salary?"
+#   "What will Uganda's VAT rate be in 2031?"
+#       -> calc_vat, "What is the amount in UGX?"
+#
+# The first is a threshold lookup that opens with the calculation verb "how
+# much"; the second is a rate lookup whose verb is "will", which the second
+# branch below did not list. Both have a published answer and no amount to
+# compute on.
 _INFO_ONLY_RE = re.compile(
     r"\bhow\s+(is|are|does)\b.*\b(calculated|computed|charged|determined)\b"
-    r"|\bwhat\s+(is|are|was|were|'s)\b.*\b(rates?|thresholds?|percentages?)\b"
+    # "how much X is exempt / tax-free / taxable / deducted" — a threshold
+    # lookup. Kept narrow: "how much PAYE will I pay on 3,500,000" has no
+    # "is/are + exempt", so it still reaches the calculator.
+    r"|\bhow\s+much\b[^?.!]{0,40}?\b(is|are)\s+"
+    r"(exempt|tax[-\s]?free|taxable|deducted|withheld|charged)\b"
+    # "will/would" belong here with "is/are/was/were": a question about a future
+    # or hypothetical rate is still a question about the rate.
+    r"|\bwhat\s+(is|are|was|were|will|would|'s)\b.*"
+    r"\b(rates?|thresholds?|percentages?|bands?)\b"
     r"|\b(rates?|thresholds?)\s+(of|for)\b",
     re.IGNORECASE,
 )
@@ -600,9 +622,33 @@ class RatePlan:
     summary: str = ""  # "paye" | "rental" | "withholding"
 
 
+# "bands" belongs here with "rates" and "thresholds": the type table below
+# already recognises "income tax band", but the ask gate never let a bands
+# question reach it, so "what are the PAYE tax bands?" fell through to
+# retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me)\b[^?]*\b(rates?|thresholds?)\b"
-    r"|\b(rates?|thresholds?)\s+(of|for)\b",
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me)\b[^?]*\b(rates?|thresholds?|bands?)\b"
+    r"|\b(rates?|thresholds?|bands?)\s+(of|for)\b",
+    re.IGNORECASE,
+)
+
+# Taxpayers asking where the tax-free line sits almost never say "rate" or
+# "threshold" — they ask "how much of my salary is tax free?" or "at what
+# salary do I start paying PAYE?". Those are rate-table questions, and without
+# them the message falls through to retrieval, which answers from whichever
+# handbook edition ranks highest — including editions the current rate table
+# has superseded, so the taxpayer is quoted last year's threshold.
+#
+# Every alternative names employment income, because PAYE is the only URA tax
+# charged on a salary; a turnover or rental question cannot reach this path.
+_PAYE_THRESHOLD_ASK_RE = re.compile(
+    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b[^?.!]{0,30}"
+    r"\b(tax[-\s]?free|exempt(?:ed)?|not\s+taxed|untaxed)\b"
+    r"|\b(tax[-\s]?free|exempt(?:ed)?)\b[^?.!]{0,30}"
+    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b"
+    r"|\b(at|above|from|over)\s+what\b[^?.!]{0,40}"
+    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b[^?.!]{0,40}"
+    r"\b(start|begin)\s+(?:to\s+)?pay(?:ing)?\b",
     re.IGNORECASE,
 )
 
@@ -619,7 +665,7 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         ),
     ),
     (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
-    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+band)\b", re.IGNORECASE)),
+    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+bands?)\b", re.IGNORECASE)),
     (RatePlan(tax_type="rental_tax_company"), re.compile(r"\b(compan(?:y|ies)|business)\b.*\brent(?:al)?\b|\brent(?:al)?\b.*\b(compan(?:y|ies)|business)\b", re.IGNORECASE)),
     (RatePlan(summary="rental"), re.compile(r"\brent(?:al)?\b", re.IGNORECASE)),
     (RatePlan(tax_type="capital_gains_corporate"), re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
@@ -653,9 +699,13 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     if not text or extract_amounts(text):
         return None
     short_ask = len(text.split()) <= 8 and re.search(
-        r"\b(rates?|thresholds?)\b", text, re.IGNORECASE
+        r"\b(rates?|thresholds?|bands?)\b", text, re.IGNORECASE
     )
     if not (_RATE_ASK_RE.search(text) or short_ask):
+        # A salary-threshold question names no tax and no "rate"/"threshold",
+        # so it fails the gate above while still being a rate-table question.
+        if _PAYE_THRESHOLD_ASK_RE.search(text):
+            return RatePlan(summary="paye")
         return None
     for plan, pattern in _RATE_TYPE_RES:
         if pattern.search(text):

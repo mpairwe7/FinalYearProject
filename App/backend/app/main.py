@@ -2444,6 +2444,47 @@ def set_flag_endpoint(
     }
 
 
+@app.delete("/v1/admin/flags/{name}", tags=["admin"])
+def clear_flag_endpoint(
+    name: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """Drop the override so the flag follows ``FLAG_*`` / its default again.
+
+    The other half of the PATCH above. An in-process override beats the
+    ``FLAG_*`` env var by design — that is how an operator stops a bad
+    release now — and the row is replayed into the registry on every
+    boot, so without this a flag touched once from the console shadows
+    its environment for good. Setting it back to the default value is
+    not the same thing: it stays overridden and keeps winning.
+    """
+    from .flags import _REGISTRY, flags as flag_reg, is_protected
+
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may toggle flags")
+    if name not in _REGISTRY:
+        raise HTTPException(status_code=404, detail="unknown flag")
+    # Symmetric with PATCH: a safety flag cannot be set from a browser, so
+    # it has no console-set override to drop.
+    if is_protected(name):
+        raise HTTPException(status_code=400, detail="this flag cannot be toggled from the UI")
+    # Durable row first, then this replica. The other order left the replica
+    # cleared while the override survived in the database, so the endpoint
+    # returned an error and the next restart re-applied the override the
+    # operator had just removed. Persisting first fails closed instead: nothing
+    # changes anywhere. (The PATCH path above writes in the opposite order, but
+    # its failure mode is safe — an override that was never persisted is simply
+    # lost on restart rather than resurrected.)
+    db.clear_flag_override(name)
+    flag_reg.clear(name)
+    return {
+        "name": name,
+        "enabled": flag_reg.is_enabled(name),
+        "overridden": False,
+        "scope": "this_replica",
+    }
+
+
 @app.get("/v1/admin/overrides", tags=["admin"])
 def list_overrides_endpoint(
     _ctx: AuthContext = Depends(require_admin_access),

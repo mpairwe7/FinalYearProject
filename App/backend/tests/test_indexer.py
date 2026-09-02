@@ -8,8 +8,12 @@ a vector document is turned into embedding input and a Qdrant payload.
 
 from __future__ import annotations
 
+import sys
+import types
 import unittest
+from unittest import mock
 
+from app import indexer
 from app.indexer import _embedding_text, _vector_payload, annotate_fiscal_year
 
 
@@ -99,3 +103,57 @@ class FiscalYearAnnotationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DenseDeviceSelectionTests(unittest.TestCase):
+    """The bulk index build must honour the same device knob as the query path.
+
+    ``SentenceTransformer`` defaults to ``cuda:0`` whenever any CUDA device is
+    visible. On a shared multi-GPU host that meant a rebuild always seized GPU 0
+    — the busiest card — no matter what ``RETRIEVER_DENSE_DEVICE`` said, and the
+    only way to move it was ``CUDA_VISIBLE_DEVICES``. ``retriever.py`` has always
+    passed the setting through; the indexer had not.
+    """
+
+    def _fake_sentence_transformers(self, calls, unavailable=()):
+        class FakeST:
+            def __init__(self, name, device=None):
+                calls.append(device)
+                if device in unavailable:
+                    raise RuntimeError(f"device {device!r} unavailable")
+                self.device = device
+
+        module = types.ModuleType("sentence_transformers")
+        module.SentenceTransformer = FakeST
+        return module
+
+    def _load(self, configured_device, unavailable=()):
+        """Call the real ``indexer.load_dense_model`` with a stub library."""
+        calls: list[object] = []
+        module = self._fake_sentence_transformers(calls, unavailable)
+        with mock.patch.dict(sys.modules, {"sentence_transformers": module}), \
+                mock.patch.object(indexer, "DENSE_DEVICE", configured_device):
+            model = indexer.load_dense_model()
+        return calls, model
+
+    def test_the_configured_device_reaches_sentence_transformers(self) -> None:
+        calls, model = self._load("cuda:6")
+        self.assertEqual(calls, ["cuda:6"])
+        self.assertEqual(model.device, "cuda:6")
+
+    def test_an_unset_device_preserves_the_library_default(self) -> None:
+        """Deployments that never set the variable must not change behaviour:
+        ``device=None`` is exactly what the call site passed before."""
+        calls, _ = self._load(None)
+        self.assertEqual(calls, [None])
+
+    def test_an_unavailable_accelerator_degrades_to_cpu(self) -> None:
+        calls, model = self._load("cuda:6", unavailable=("cuda:6",))
+        self.assertEqual(calls, ["cuda:6", "cpu"])
+        self.assertEqual(model.device, "cpu")
+
+    def test_an_explicit_cpu_request_that_fails_stays_fatal(self) -> None:
+        """There is no lower rung to fall back to, so masking this would hide a
+        broken environment behind a build that silently produced no vectors."""
+        with self.assertRaises(RuntimeError):
+            self._load("cpu", unavailable=("cpu",))

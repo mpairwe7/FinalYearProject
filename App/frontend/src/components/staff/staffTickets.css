@@ -96,53 +96,38 @@
 .st-row-wait.is-warn   { color: var(--ops-warn); }
 .st-row-wait.is-breach { color: var(--ops-bad); }
 
-/* Priority + status pills -------------------------------------------------- */
+/* Priority + status labels -------------------------------------------------
+   Text, not capsules — see `.ops-chip` in ops.css. Nothing in this group is
+   clickable, so nothing in it should carry a button's border. */
 
 .st-pri,
 .st-pill {
   display: inline-block;
-  padding: 3px 8px;
-  border-radius: var(--ops-radius-pill);
-  border: 1px solid var(--ops-line);
-  background: var(--ops-row-active);
-  color: var(--text-2);
+  padding: 0;
+  color: var(--text-3);
   font-size: var(--ops-text-2xs);
-  font-weight: var(--ops-weight-semi);
   text-transform: uppercase;
-  letter-spacing: var(--ops-tracking-caps);
   white-space: nowrap;
-  text-align: center;
 }
 
-/* Full width only inside a queue row, where it owns a fixed column. In the
-   case header it is one pill among several and sizes to its label. */
+/* Full width only inside a queue row, where it owns a fixed column, and flush
+   left so the column scans as a column. */
 .st-row .st-pri {
   width: 100%;
 }
 
-.st-pri-urgent {
-  background: var(--ops-bad-fill);
-  border-color: var(--ops-bad-line);
-  color: var(--ops-bad-ink);
+/* Same reason as `.ops-chip + .ops-chip` in ops.css: without capsules, the
+   header's 5px gap ran "HIGH" straight into "NEW". */
+.st-pri + .st-pill,
+.st-pill + .st-pill {
+  margin-left: var(--ops-space-3);
 }
 
-.st-pri-high {
-  background: var(--ops-warn-fill);
-  border-color: var(--ops-warn-line);
-  color: var(--ops-warn-ink);
-}
+.st-pri-urgent { color: var(--ops-bad-ink); }
+.st-pri-high   { color: var(--ops-warn-ink); }
+.st-pill-warm  { color: var(--ops-series-7); }
 
-.st-pill-warm {
-  background: color-mix(in srgb, var(--ops-series-7) var(--ops-tint), transparent);
-  border-color: color-mix(in srgb, var(--ops-series-7) 40%, transparent);
-  color: var(--text-1);
-}
-
-.st-pill-sentiment {
-  background: var(--ops-warn-fill);
-  border-color: var(--ops-warn-line);
-  color: var(--ops-warn-ink);
-}
+.st-pill-sentiment { color: var(--ops-warn-ink); }
 
 /* Case --------------------------------------------------------------------- */
 
@@ -196,11 +181,13 @@
   margin-bottom: var(--ops-space-2);
 }
 
+/* A row of readings, not a row of objects: the vertical gap is what separates
+   it from the wait figure when the header wraps. */
 .st-case-pills {
   display: flex;
-  gap: 5px;
+  gap: 5px var(--ops-space-1);
   flex-wrap: wrap;
-  margin: 0;
+  margin: 0 0 var(--ops-space-1);
 }
 
 .st-case-wait {

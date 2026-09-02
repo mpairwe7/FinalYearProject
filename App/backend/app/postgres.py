@@ -452,7 +452,7 @@ def get_feedback_summary(days: int = 30) -> dict[str, Any]:
         down = row[2] or 0
 
         cur.execute(
-            """SELECT id, message_id, rating, comment, created_at
+            """SELECT id, message_id, rating, comment, user_query, created_at
                    FROM feedback WHERE created_at >= %s
                    ORDER BY created_at DESC LIMIT 20""",
             (cutoff,),
@@ -463,7 +463,8 @@ def get_feedback_summary(days: int = 30) -> dict[str, Any]:
                 "message_id": r[1],
                 "rating": r[2],
                 "comment": r[3],
-                "created_at": r[4],
+                "user_query": r[4],
+                "created_at": r[5],
             }
             for r in cur.fetchall()
         ]
@@ -1184,7 +1185,9 @@ def sla_stats(days: int = 30) -> dict[str, Any]:
         )
         period = cur.fetchall()
         cur.execute(
-            "SELECT created_at, first_response_at, reply_at, status "
+            # assignee last — compose_sla_stats reads these tuples
+            # positionally, so a new column has to go on the end.
+            "SELECT created_at, first_response_at, reply_at, status, assignee "
             "FROM tickets WHERE status IN ('open', 'assigned')",
         )
         opened = cur.fetchall()

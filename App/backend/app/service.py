@@ -97,8 +97,12 @@ from .text_signals import (
     GREETING_REPLY,
     GROUNDED_REVISION_PREAMBLE,
     NO_HITS_REPLY,
+    detect_comparison_jurisdiction,
+    detect_foreign_jurisdiction,
     detect_user_distress,
     empathy_ack,
+    jurisdiction_scope_caveat,
+    out_of_jurisdiction_reply,
     is_courtesy_sentence,
     normalise_citation_markers,
     split_sentences,
@@ -107,6 +111,7 @@ from .text_signals import (
 from .topics import resolve_topic, topic_retrieval_query
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
 from .workflows.registry import WorkflowRegistry, WorkflowSession, auto_load_flows
+from .workflows.slots import validate_slot
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +154,44 @@ SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
 _WORKFLOW_CANCEL_WORDS = {"cancel", "stop", "quit", "exit", "nevermind", "never mind"}
 _WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
+#: Slot specs that accept any string, so validation cannot tell a slot answer
+#: from a new question. Mirrors :func:`app.workflows.slots.validate_slot`'s own
+#: free-text branch.
+_WORKFLOW_FREE_TEXT_VALIDATORS = {"", "text"}
+#: A message that reads as a fresh question rather than an answer to the slot
+#: the guided flow is waiting on. An English interrogative opener is one
+#: signal; a trailing question mark on a message of several words is the
+#: other, and it is the one that carries across languages.
+#:
+#: English-only detection was measured to strand exactly the users this
+#: system exists for. Against the live stack, Luganda and Kiswahili questions
+#: — "Kiki kye nnina okukola nga nfunye TIN?", "Nifanye nini kama sina namba
+#: ya kitambulisho cha taifa?" — could not leave a guided flow at all, because
+#: none of them open with an English question word. Do not narrow this back to
+#: a word list without a corpus-backed interrogative table for every served
+#: locale; the repository deliberately refuses to invent that vocabulary
+#: (see :mod:`app.agents.patterns`).
+#:
+#: The word-count floor is what keeps a hedged slot answer ("individual?")
+#: with the validator rather than diverting it.
+_WORKFLOW_NEW_QUESTION_RE = re.compile(
+    r"^\s*(?:what|when|where|why|how|which|who|can|could|do|does|did|is|are|"
+    r"should|must|will|would)\b",
+    re.IGNORECASE,
+)
+#: Minimum words before a trailing "?" is read as a question rather than an
+#: uncertain one-word slot value.
+_WORKFLOW_QUESTION_MIN_WORDS = 3
+
+
+def _reads_as_question(text: str) -> bool:
+    """Whether *text* asks something, in any of the served languages."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if _WORKFLOW_NEW_QUESTION_RE.match(stripped):
+        return True
+    return stripped.endswith("?") and len(stripped.split()) >= _WORKFLOW_QUESTION_MIN_WORDS
 _INFORMATIONAL_WORKFLOW_QUERY_RE = re.compile(
     r"\b(?:how\s+(?:do|does|can|would|should)\s+(?:i|we|one|my|a|an)"
     r"|what\s+are\s+the\s+steps|what\s+is\s+the\s+process|"
@@ -4088,14 +4131,24 @@ class ChatModel:
     ) -> dict[str, Any] | None:
         """Deterministic fast paths, in precedence order (both chat paths):
 
+        0. a question about another country's taxes is declined outright — it
+           must not reach the paths below, which read only the tax word and
+           would answer it from Uganda's table;
         1. TIN-registration asks with an unspecified taxpayer type start a
            one-question clarification (individual vs organisation);
         2. calculations with figures compute instantly, without figures they
            elicit the missing details;
         3. rate questions answer from the versioned FY rate table.
+
+        Whatever answers, a question that named Uganda *and* another country
+        gets a scope caveat appended, so the half URA cannot speak to is never
+        left unmarked.
         """
-        return (
-            self._maybe_handle_tin_clarification(
+        result = (
+            self._maybe_decline_out_of_jurisdiction(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+            or self._maybe_handle_tin_clarification(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
             or self._maybe_handle_calculator(
@@ -4105,6 +4158,81 @@ class ChatModel:
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
         )
+        return self._add_comparison_scope_caveat(result, message=message, rewritten=rewritten)
+
+    @staticmethod
+    def _add_comparison_scope_caveat(
+        result: dict[str, Any] | None, *, message: str, rewritten: str
+    ) -> dict[str, Any] | None:
+        """Say so when a Uganda answer only covers half the question asked.
+
+        ``detect_foreign_jurisdiction`` deliberately returns '' when Uganda is
+        named alongside another country, so "how does Uganda's VAT compare with
+        Kenya's" still gets the half URA can speak to instead of a refusal. That
+        left the other half unmarked: the reply gave Uganda's 18%, cited the URA
+        rate table, and never said Kenya had not been addressed — which reads
+        exactly like an answered comparison.
+
+        Applied at the dispatcher rather than inside each handler so the rate,
+        calculator and TIN paths cannot drift apart on it.
+        """
+        if not result or result.get("retrieval_mode") == "out_of_jurisdiction":
+            return result
+        country = detect_comparison_jurisdiction(message) or detect_comparison_jurisdiction(
+            rewritten
+        )
+        if not country:
+            return result
+        out = dict(result)
+        out["reply"] = f"{str(out.get('reply', '')).rstrip()}\n\n{jurisdiction_scope_caveat(country)}"
+        return out
+
+    def _maybe_decline_out_of_jurisdiction(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Decline a question about a jurisdiction URA does not administer.
+
+        This has to run before the calculator and rate-table paths rather than
+        after them. Those paths match on the tax word alone, so "the corporate
+        income tax rate in Kenya" satisfied the corporation-tax pattern and was
+        answered with Uganda's 30% — correctly labelled Uganda, cited to the URA
+        rate table, and confidently wrong about the question actually asked.
+
+        Only fires when no Ugandan reference is present; a message naming both
+        countries is a Uganda question with a comparison in it and still gets
+        answered, since refusing it would withhold the half URA can speak to.
+        """
+        country = detect_foreign_jurisdiction(message) or detect_foreign_jurisdiction(rewritten)
+        if not country:
+            return None
+        return {
+            "reply": self._finalize_reply(out_of_jurisdiction_reply(country)),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "out_of_jurisdiction",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "tool_specialist",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["outside URA's jurisdiction"],
+                "confidence_band": "high",
+            },
+            "next_actions": [],
+            "ticket_id": "",
+        }
 
     def _maybe_handle_rate_lookup(
         self,
@@ -4342,6 +4470,40 @@ class ChatModel:
             ),
         }
 
+    def _workflow_input_changes_subject(
+        self,
+        session: WorkflowSession,
+        user_input: str,
+    ) -> bool:
+        """Whether a mid-flow message is a new question, not a slot answer.
+
+        A guided flow owns its thread until it completes or is cancelled, so
+        without this every message is fed to the slot validator — and a plain
+        question asked mid-flow is answered with the flow's own prompt instead
+        of from the corpus. In a measured PAYE journey, "What is the penalty if
+        I pay on the 20th instead of the 15th?" came back as "Please give me
+        one…", because the retriever is not reachable while a flow is open.
+
+        Both conditions are required. The message has to read as a question,
+        *and* the pending slot has to be unable to accept it — so a mistyped or
+        unrecognised answer still re-asks the flow's question rather than
+        silently abandoning the flow. The slot is probed with the deterministic
+        validators only (no resolver), keeping this free of an extra model call
+        on every guided turn.
+        """
+        if not _reads_as_question(user_input):
+            return False
+        step = WorkflowRegistry.pending_step(session)
+        if step is None or not step.slot:
+            return False
+        if step.validator.strip() in _WORKFLOW_FREE_TEXT_VALIDATORS:
+            # A free-text slot accepts anything — it is the most common kind in
+            # the shipped flows — so the validator cannot be the arbiter here
+            # and the interrogative opener is the whole signal.
+            return True
+        is_valid, _, _ = validate_slot(user_input, step.validator, None)
+        return not is_valid
+
     def _maybe_handle_workflow(
         self,
         *,
@@ -4389,6 +4551,12 @@ class ChatModel:
                     "workflow": workflow,
                     "next_actions": ["Ask a new question or restart the guided process later."],
                 }
+
+            # The taxpayer asked something else. Hand the turn back so it is
+            # answered from the corpus; the session stays active, so a later
+            # slot-shaped reply resumes the flow where it left off.
+            if self._workflow_input_changes_subject(session, user_input):
+                return None
 
             turn, tool_messages = self._advance_workflow(session, user_input)
 
@@ -4704,6 +4872,21 @@ class ChatModel:
             # question span when one is extractable. Cache keys, deterministic-
             # template matching, and workflow/calculator routing still use the
             # full `rewritten` text unchanged.
+            #
+            # MEASURED 2026-09-01 — do not widen this to every preamble.
+            # `_faq_match_score` divides coverage by the terms the user supplied,
+            # so "I am opening a hardware store in Jinja. Do I have to charge
+            # VAT?" scores 0.273 against the 0.58 floor while the bare question
+            # scores 0.700. That is real, and it looks like a reason to narrow
+            # every situational preamble — but the FAQ scorer only decides the
+            # answer when retrieval has already fallen back to keyword matching.
+            # Against a full dense index the preamble is *useful* context, and
+            # stripping it loses signal: on a 7,970-document index the VAT
+            # onboarding journey fell from 81.2% to 43.8% fact coverage with the
+            # narrowing ungated (turn 1 1.00 -> 0.25, turn 2 0.75 -> 0.00).
+            # It only looked like a win against a stale 729-document snapshot.
+            # The dilution is real; the fix for it belongs in the scorer, not
+            # here. See docs/GAPS_AND_AGENTIC_ROADMAP.md §2.9.
             retrieval_query = rewritten
             # _simple_search's binding_query keeps FAQ-match authorization
             # bound to the user's own (unexpanded) words rather than
@@ -5963,9 +6146,9 @@ class ChatModel:
         distress = detect_user_distress(message)
         tone_hint = tone_hint_for(distress)
 
-        # See generate()'s matching comment: retrieve on the question span
-        # alone when distress framing is present, so it doesn't dilute
-        # relevance into a false abstention.
+        # See generate()'s matching comment, including the 2026-09-01
+        # measurement showing why this stays gated on distress rather than
+        # firing for every situational preamble.
         retrieval_query = rewritten
         binding_query = message
         if distress:

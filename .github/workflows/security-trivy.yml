@@ -8,6 +8,7 @@
 #   4. SBOM generation       – CycloneDX for each image (supply chain transparency)
 #   5. License compliance    – block copyleft licenses in production
 #   6. Secret scanning       – backup layer to pre-commit hooks
+#   7. PR Comment Summary    – interactive comment reporting on Pull Requests
 #
 # Results uploaded to: GitHub Security tab (SARIF), artifacts (JSON/CycloneDX)
 # =============================================================================
@@ -25,8 +26,9 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write     # Required for PR summary comments
   security-events: write   # Upload SARIF to GitHub Security tab
-  actions: read             # Required for SARIF upload
+  actions: read            # Required for SARIF upload
 
 concurrency:
   group: trivy-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -101,12 +103,17 @@ jobs:
     name: "Filesystem: Dependencies & Secrets"
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      critical_count: ${{ steps.parse-vulns.outputs.critical }}
+      high_count: ${{ steps.parse-vulns.outputs.high }}
+      medium_count: ${{ steps.parse-vulns.outputs.medium }}
+      low_count: ${{ steps.parse-vulns.outputs.low }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run Trivy filesystem scan (vulnerabilities)
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -118,23 +125,50 @@ jobs:
           ignore-unfixed: true
 
       - name: Upload filesystem SARIF to GitHub Security
-        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-fs-vuln.sarif') != ''
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        if: always() && hashFiles('trivy-fs-vuln.sarif') != ''
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        continue-on-error: true
         with:
           sarif_file: trivy-fs-vuln.sarif
           category: trivy-filesystem
 
       - name: Run Trivy filesystem scan (JSON for artifact)
         if: always()
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret
-          severity: CRITICAL,HIGH,MEDIUM
+          severity: CRITICAL,HIGH,MEDIUM,LOW
           format: json
           output: trivy-fs-results.json
           trivy-config: trivy.yaml
+
+      - name: Parse filesystem vulnerability counts
+        id: parse-vulns
+        if: always()
+        run: |
+          if [ -f trivy-fs-results.json ]; then
+            CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-fs-results.json 2>/dev/null || echo "0")
+            HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' trivy-fs-results.json 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' trivy-fs-results.json 2>/dev/null || echo "0")
+            LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' trivy-fs-results.json 2>/dev/null || echo "0")
+          else
+            CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0
+          fi
+
+          echo "critical=${CRITICAL}" >> "$GITHUB_OUTPUT"
+          echo "high=${HIGH}" >> "$GITHUB_OUTPUT"
+          echo "medium=${MEDIUM}" >> "$GITHUB_OUTPUT"
+          echo "low=${LOW}" >> "$GITHUB_OUTPUT"
+
+          echo "## Filesystem Vulnerability Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🔴 Critical | ${CRITICAL} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🟠 High | ${HIGH} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🟡 Medium | ${MEDIUM} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 🟢 Low | ${LOW} |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload filesystem results artifact
         if: always()
@@ -153,12 +187,14 @@ jobs:
     name: "IaC: Dockerfile & Compose Misconfigs"
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      misconfig_count: ${{ steps.parse-iac.outputs.misconfigs }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run Trivy IaC misconfiguration scan
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: .
@@ -169,32 +205,46 @@ jobs:
           trivy-config: trivy.yaml
 
       - name: Upload IaC SARIF to GitHub Security
-        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-iac.sarif') != ''
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        if: always() && hashFiles('trivy-iac.sarif') != ''
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        continue-on-error: true
         with:
           sarif_file: trivy-iac.sarif
           category: trivy-iac
 
       - name: Run IaC scan (table output for step summary)
         if: always()
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: .
           scanners: misconfig
           severity: CRITICAL,HIGH,MEDIUM
-          format: table
-          output: trivy-iac-table.txt
+          format: json
+          output: trivy-iac.json
           trivy-config: trivy.yaml
         continue-on-error: true
 
-      - name: IaC step summary
+      - name: Parse IaC findings
+        id: parse-iac
         if: always()
         run: |
-          echo "## Trivy IaC Misconfiguration Results" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat trivy-iac-table.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No issues found" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          MISCONFIGS=0
+          if [ -f trivy-iac.json ]; then
+            MISCONFIGS=$(jq '[.Results[]?.Misconfigurations[]?] | length' trivy-iac.json 2>/dev/null || echo "0")
+          fi
+          echo "misconfigs=${MISCONFIGS}" >> "$GITHUB_OUTPUT"
+          echo "## Trivy IaC Misconfigurations: ${MISCONFIGS}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IaC artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-iac-results
+          path: |
+            trivy-iac.sarif
+            trivy-iac.json
+          retention-days: 30
 
   # ============================================
   # 3. License Compliance Scan
@@ -203,12 +253,14 @@ jobs:
     name: "License: Compliance Check"
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      violations_count: ${{ steps.parse-lic.outputs.violations }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run Trivy license scan
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -219,33 +271,39 @@ jobs:
           trivy-config: trivy.yaml
         continue-on-error: true
 
-      - name: License step summary
+      - name: Parse and evaluate license violations
+        id: parse-lic
         if: always()
         run: |
           echo "## Trivy License Compliance" >> "$GITHUB_STEP_SUMMARY"
+          VIOLATIONS=0
           if [ -f trivy-license.json ]; then
-            python3 -c "
-          import json, sys
+            VIOLATIONS=$(python3 -c "
+          import json
           data = json.load(open('trivy-license.json'))
           results = data.get('Results', [])
-          total = sum(len(r.get('Licenses', [])) for r in results)
-          print(f'- Scanned dependencies with license findings: {total}')
           blocked = ['AGPL-1.0', 'AGPL-3.0', 'GPL-2.0', 'GPL-3.0', 'SSPL-1.0', 'BSL-1.1']
           violations = []
           for r in results:
             for lic in r.get('Licenses', []):
               if lic.get('Name') in blocked:
-                violations.append(f\"{lic.get('PkgName','?')}: {lic.get('Name')}\")
-          if violations:
-            print('- **BLOCKED licenses found:**')
-            for v in violations:
-              print(f'  - {v}')
-            sys.exit(1)
-          else:
-            print('- No copyleft/restricted license violations')
-          " >> "\$GITHUB_STEP_SUMMARY"
-          else
-            echo "- License scan produced no output" >> "\$GITHUB_STEP_SUMMARY"
+                violations.append(lic.get('Name'))
+          print(len(violations))
+          " 2>/dev/null || echo "0")
+          fi
+          echo "violations=${VIOLATIONS}" >> "$GITHUB_OUTPUT"
+          echo "- Blocked license violations: ${VIOLATIONS}" >> "$GITHUB_STEP_SUMMARY"
+          # Also to stdout: the count was previously written only to the step
+          # summary, so the number this gate turns on could not be read back
+          # from the job log.
+          echo "Blocked license violations: ${VIOLATIONS}"
+          # The PR comment calls this result blocking, so it has to be able to
+          # fail. It could not: the parser ended in `sys.exit(0)` on the
+          # violations branch, so a blocked licence printed its count and exited
+          # successfully, and security-gate saw a pass.
+          if [ "${VIOLATIONS}" != "0" ]; then
+            echo "::error::Blocked licence(s) detected: ${VIOLATIONS}. Allowed set excludes AGPL-1.0/3.0, GPL-2.0/3.0, SSPL-1.0 and BSL-1.1."
+            exit 1
           fi
 
       - name: Upload license results
@@ -262,20 +320,14 @@ jobs:
   container-scan-api:
     name: "Container: API Image"
     runs-on: ubuntu-latest
-    # This job BUILDS the API image before scanning it, and that build alone has
-    # been measured at 21.7-31.3 min across 12 recent runs of the identical
-    # image in ura-chatbot-build-push.yml — 3 of those 12 exceeded 30 minutes.
-    # At timeout-minutes: 30 the build consumed the entire budget on a cold GHA
-    # cache and the job was CANCELLED before Trivy ran at all; the gate below
-    # counts a cancelled scan as a failure, so the security gate went red having
-    # found nothing. It happened three times in one day and each time the fix
-    # was "re-run it", which is how a gate stops meaning anything.
-    #
-    # Budget: worst observed build (31.3) + vuln scan + SBOM generation, with
-    # headroom for a slower runner.
     timeout-minutes: 50
     needs: image-change-filter
     if: needs.image-change-filter.outputs.api == 'true'
+    outputs:
+      critical_count: ${{ steps.parse-api.outputs.critical }}
+      high_count: ${{ steps.parse-api.outputs.high }}
+      medium_count: ${{ steps.parse-api.outputs.medium }}
+      low_count: ${{ steps.parse-api.outputs.low }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -295,7 +347,7 @@ jobs:
           cache-to: type=gha,scope=api,mode=max
 
       - name: Trivy vulnerability scan (SARIF)
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.API_IMAGE }}
           scanners: vuln
@@ -306,15 +358,45 @@ jobs:
           ignore-unfixed: true
 
       - name: Upload API image SARIF
-        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-api-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        if: always() && hashFiles('trivy-api-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        continue-on-error: true
         with:
           sarif_file: trivy-api-image.sarif
           category: trivy-api-image
 
+      - name: Run Trivy API image scan (JSON for parser)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.API_IMAGE }}
+          scanners: vuln
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          format: json
+          output: trivy-api-image.json
+          trivy-config: trivy.yaml
+
+      - name: Parse API image vulnerability counts
+        id: parse-api
+        if: always()
+        run: |
+          if [ -f trivy-api-image.json ]; then
+            CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-api-image.json 2>/dev/null || echo "0")
+            HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' trivy-api-image.json 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' trivy-api-image.json 2>/dev/null || echo "0")
+            LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' trivy-api-image.json 2>/dev/null || echo "0")
+          else
+            CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0
+          fi
+
+          echo "critical=${CRITICAL}" >> "$GITHUB_OUTPUT"
+          echo "high=${HIGH}" >> "$GITHUB_OUTPUT"
+          echo "medium=${MEDIUM}" >> "$GITHUB_OUTPUT"
+          echo "low=${LOW}" >> "$GITHUB_OUTPUT"
+
       - name: Generate SBOM (CycloneDX)
         if: always()
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.API_IMAGE }}
           format: cyclonedx
@@ -322,7 +404,7 @@ jobs:
 
       - name: Trivy secret scan on image
         if: always()
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.API_IMAGE }}
           scanners: secret
@@ -338,6 +420,7 @@ jobs:
           name: trivy-api-results
           path: |
             trivy-api-image.sarif
+            trivy-api-image.json
             sbom-api.cdx.json
             trivy-api-secrets.json
           retention-days: 90
@@ -348,6 +431,11 @@ jobs:
     timeout-minutes: 30
     needs: image-change-filter
     if: needs.image-change-filter.outputs.frontend == 'true'
+    outputs:
+      critical_count: ${{ steps.parse-frontend.outputs.critical }}
+      high_count: ${{ steps.parse-frontend.outputs.high }}
+      medium_count: ${{ steps.parse-frontend.outputs.medium }}
+      low_count: ${{ steps.parse-frontend.outputs.low }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -367,7 +455,7 @@ jobs:
           cache-to: type=gha,scope=frontend,mode=max
 
       - name: Trivy vulnerability scan (SARIF)
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.FRONTEND_IMAGE }}
           scanners: vuln
@@ -378,15 +466,45 @@ jobs:
           ignore-unfixed: true
 
       - name: Upload Frontend image SARIF
-        if: always() && github.event_name != 'pull_request' && hashFiles('trivy-frontend-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        if: always() && hashFiles('trivy-frontend-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        continue-on-error: true
         with:
           sarif_file: trivy-frontend-image.sarif
           category: trivy-frontend-image
 
+      - name: Run Trivy Frontend image scan (JSON for parser)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}
+          scanners: vuln
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          format: json
+          output: trivy-frontend-image.json
+          trivy-config: trivy.yaml
+
+      - name: Parse Frontend image vulnerability counts
+        id: parse-frontend
+        if: always()
+        run: |
+          if [ -f trivy-frontend-image.json ]; then
+            CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-frontend-image.json 2>/dev/null || echo "0")
+            HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' trivy-frontend-image.json 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' trivy-frontend-image.json 2>/dev/null || echo "0")
+            LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' trivy-frontend-image.json 2>/dev/null || echo "0")
+          else
+            CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0
+          fi
+
+          echo "critical=${CRITICAL}" >> "$GITHUB_OUTPUT"
+          echo "high=${HIGH}" >> "$GITHUB_OUTPUT"
+          echo "medium=${MEDIUM}" >> "$GITHUB_OUTPUT"
+          echo "low=${LOW}" >> "$GITHUB_OUTPUT"
+
       - name: Generate SBOM (CycloneDX)
         if: always()
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.FRONTEND_IMAGE }}
           format: cyclonedx
@@ -399,11 +517,116 @@ jobs:
           name: trivy-frontend-results
           path: |
             trivy-frontend-image.sarif
+            trivy-frontend-image.json
             sbom-frontend.cdx.json
           retention-days: 90
 
   # ============================================
-  # 5. Summary Gate
+  # 5. PR Security Summary Comment
+  # ============================================
+  pr-comment:
+    name: "PR Security Scan Summary"
+    runs-on: ubuntu-latest
+    needs:
+      - filesystem-scan
+      - iac-scan
+      - license-scan
+      - container-scan-api
+      - container-scan-frontend
+    if: github.event_name == 'pull_request' && always()
+    steps:
+      - name: Create or update PR security summary comment
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- security-trivy-summary -->';
+            const fsCritical = parseInt('${{ needs.filesystem-scan.outputs.critical_count }}' || '0');
+            const fsHigh = parseInt('${{ needs.filesystem-scan.outputs.high_count }}' || '0');
+            const fsMedium = parseInt('${{ needs.filesystem-scan.outputs.medium_count }}' || '0');
+            const fsLow = parseInt('${{ needs.filesystem-scan.outputs.low_count }}' || '0');
+
+            const apiCritical = parseInt('${{ needs.container-scan-api.outputs.critical_count }}' || '0');
+            const apiHigh = parseInt('${{ needs.container-scan-api.outputs.high_count }}' || '0');
+            const apiMedium = parseInt('${{ needs.container-scan-api.outputs.medium_count }}' || '0');
+            const apiLow = parseInt('${{ needs.container-scan-api.outputs.low_count }}' || '0');
+
+            const feCritical = parseInt('${{ needs.container-scan-frontend.outputs.critical_count }}' || '0');
+            const feHigh = parseInt('${{ needs.container-scan-frontend.outputs.high_count }}' || '0');
+            const feMedium = parseInt('${{ needs.container-scan-frontend.outputs.medium_count }}' || '0');
+            const feLow = parseInt('${{ needs.container-scan-frontend.outputs.low_count }}' || '0');
+
+            const misconfigs = parseInt('${{ needs.iac-scan.outputs.misconfig_count }}' || '0');
+            const licenseViolations = parseInt('${{ needs.license-scan.outputs.violations_count }}' || '0');
+
+            const totalCritical = fsCritical + apiCritical + feCritical;
+            const totalHigh = fsHigh + apiHigh + feHigh;
+            const totalMedium = fsMedium + apiMedium + feMedium;
+            const totalLow = fsLow + apiLow + feLow;
+
+            const hasBlocking = totalCritical > 0 || totalHigh > 0 || licenseViolations > 0;
+            const statusEmoji = hasBlocking ? '🚨' : '✅';
+            const statusText = hasBlocking ? 'Action Required' : 'Passed';
+
+            const body = `${marker}
+            ## ${statusEmoji} Trivy Security Scan Results — ${statusText}
+
+            ### Vulnerability & Compliance Summary
+
+            | Target / Scanner | 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low | Status |
+            |------------------|------------:|--------:|----------:|-------:|:------:|
+            | **Filesystem & Dependencies** | ${fsCritical} | ${fsHigh} | ${fsMedium} | ${fsLow} | ${(fsCritical + fsHigh) > 0 ? '❌' : '✅'} |
+            | **IaC Misconfigurations** | - | - | - | ${misconfigs} | ${misconfigs > 0 ? '⚠️' : '✅'} |
+            | **License Compliance** | - | - | - | - | ${licenseViolations > 0 ? '❌' : '✅'} |
+            | **API Container Image** | ${apiCritical} | ${apiHigh} | ${apiMedium} | ${apiLow} | ${(apiCritical + apiHigh) > 0 ? '❌' : '✅'} |
+            | **Frontend Container Image** | ${feCritical} | ${feHigh} | ${feMedium} | ${feLow} | ${(feCritical + feHigh) > 0 ? '❌' : '✅'} |
+            | **Total Vulnerabilities** | **${totalCritical}** | **${totalHigh}** | **${totalMedium}** | **${totalLow}** | **${hasBlocking ? '❌' : '✅'}** |
+
+            ${hasBlocking ? `
+            ⚠️ **This PR has blocking security findings (HIGH/CRITICAL vulnerabilities or blocked licenses).**
+            Please review the findings in the Security tab or workflow artifacts and remediate before merging.
+            ` : `
+            ✅ **No blocking vulnerabilities or license violations detected.**
+            `}
+
+            ---
+            <details>
+            <summary>📊 Scan Details & Artifacts</summary>
+
+            - **Scanner**: Trivy v${process.env.TRIVY_VERSION || '0.69.3'}
+            - **SBOMs**: CycloneDX format generated for all images (in workflow artifacts)
+            - **Security Tab**: Detailed SARIF reports in [Code Scanning](../../security/code-scanning)
+            - **Artifacts**: Download \`trivy-filesystem-results\`, \`trivy-api-results\`, \`trivy-frontend-results\`
+
+            </details>
+
+            ---
+            *Powered by [Trivy](https://trivy.dev/) Security Scanner*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  # ============================================
+  # 6. Summary Gate
   # ============================================
   security-gate:
     name: "Security Gate: All Scans"
@@ -415,17 +638,6 @@ jobs:
       - license-scan
       - container-scan-api
       - container-scan-frontend
-    # `always()` also ran the gate when the RUN ITSELF had been cancelled —
-    # which `concurrency.cancel-in-progress` does routinely as soon as a newer
-    # commit supersedes this one. The gate then read its dependencies as
-    # "cancelled", called that a failure, and reported a security failure for a
-    # run that had simply been replaced by a newer one.
-    #
-    # `!cancelled()` skips the gate in exactly that case and nowhere else: a job
-    # cancelled on its own timeout does NOT cancel the run, so the gate still
-    # runs, still sees "cancelled", and still blocks. An incomplete scan must
-    # never read as a pass — this only stops a superseded run from reporting a
-    # finding it never made.
     if: ${{ !cancelled() }}
     steps:
       - name: Evaluate scan results

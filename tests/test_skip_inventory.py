@@ -53,6 +53,9 @@ KNOWN_SKIPS: dict[str, int] = {
     "tests/agents/test_backend_shim.py": 1,
     "tests/agents/test_identity_consent_parity.py": 1,
     "tests/agents/test_ticket_events.py": 1,
+    # The superseded-figure sweep diffs the two newest FY*.json rate tables, so
+    # it has nothing to compare against in a checkout carrying only one.
+    "tests/test_eval_ground_truth_currency.py": 1,
 }
 
 

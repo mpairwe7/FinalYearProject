@@ -272,6 +272,135 @@ def detect_user_distress(message: str) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Jurisdiction
+#
+# URA administers taxes in Uganda and nowhere else, but the deterministic rate
+# and calculator paths read only the tax word and answered anything. Measured on
+# 2026-09-02 (GAPS §2.11, G41): "What is the corporate income tax rate in Kenya
+# for 2026?" returned "**The corporation tax rate in Uganda is 30%** (FY2026-27)
+# … from the official URA FY2026-27 rate table". Reproduced for Rwanda.
+#
+# The reply is labelled Uganda, so it is not a false statement — which is what
+# makes it dangerous. It silently answers a different question, in the
+# authoritative register, with a citation, on the path users trust most. A
+# taxpayer comparing jurisdictions reads a confident number against the country
+# they asked about.
+# ---------------------------------------------------------------------------
+
+#: Neighbours and the economies taxpayers most often compare Uganda against.
+#: Demonyms are included because "the Kenyan VAT rate" names a jurisdiction just
+#: as plainly as "Kenya". Capitals are deliberately excluded: they add little
+#: recall over the country name and every extra token is a false-positive risk
+#: on a corpus full of place names.
+_FOREIGN_JURISDICTIONS: tuple[tuple[str, str], ...] = (
+    ("Kenya", r"kenyan?"),
+    ("Tanzania", r"tanzanian?"),
+    ("Rwanda", r"rwandan?"),
+    ("Burundi", r"burundian?"),
+    ("South Sudan", r"south\s+sudan(?:ese)?"),
+    ("the Democratic Republic of the Congo", r"\bdrc\b|democratic\s+republic\s+of\s+(?:the\s+)?congo"),
+    ("Ethiopia", r"ethiopian?"),
+    ("Somalia", r"somalian?|somali"),
+    ("Nigeria", r"nigerian?"),
+    ("South Africa", r"south\s+africans?"),
+    ("Ghana", r"ghanaian?|\bghana\b"),
+    ("Egypt", r"egyptian?|\begypt\b"),
+    ("the United Kingdom", r"\buk\b|united\s+kingdom|britain|british"),
+    ("the United States", r"\busa?\b|united\s+states|american?"),
+    ("India", r"\bindian?\b"),
+    ("China", r"chinese|\bchina\b"),
+)
+
+_FOREIGN_JURISDICTION_RES: tuple[tuple[str, "re.Pattern[str]"], ...] = tuple(
+    (name, re.compile(rf"\b(?:{pattern})\b", re.IGNORECASE))
+    for name, pattern in _FOREIGN_JURISDICTIONS
+)
+
+_UGANDA_RE = re.compile(r"\bugandan?\b|\bura\b|\bkampala\b", re.IGNORECASE)
+
+
+def detect_foreign_jurisdiction(message: str) -> str:
+    """Name the non-Ugandan jurisdiction this message is about, or ''.
+
+    Returns '' when the message names Uganda too: "how does Uganda's VAT compare
+    with Kenya's" is a Uganda question with a comparison in it, and refusing it
+    outright would be worse than answering the half URA can speak to. The caller
+    is expected to add the scope caveat in that case rather than stay silent.
+    """
+    text = message or ""
+    if not text.strip() or _UGANDA_RE.search(text):
+        return ""
+    for name, pattern in _FOREIGN_JURISDICTION_RES:
+        if pattern.search(text):
+            return name
+    return ""
+
+
+# Naming another country is not the same as asking about its tax system. Most
+# messages that mention one are ordinary cross-border URA questions — importing
+# from Kenya, paying a Kenyan supplier, declaring foreign rental income — and
+# they are fully answerable. Telling those taxpayers "I can't give you Kenya's
+# side of that comparison" answers a question they did not ask. So the caveat
+# needs a comparison to actually be present, not just a second country.
+#
+# Comparative adjectives only, never bare "more"/"less": "I import more than
+# 100 units from Kenya" is a quantity, not a comparison.
+_COMPARISON_MARKER_RE = re.compile(
+    r"\bcompar(?:e[sd]?|ing|ison|ative)\b"
+    r"|\bversus\b|\bvs\.?\b"
+    r"|\bdifference\s+between\b"
+    r"|\b(higher|lower|cheaper|greater|bigger|smaller|better|worse)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_comparison_jurisdiction(message: str) -> str:
+    """Name the foreign jurisdiction a Uganda question also asks about, or ''.
+
+    The mirror of :func:`detect_foreign_jurisdiction`: that one deliberately
+    stays silent when Uganda is named too, so a comparison still gets the half
+    URA can answer. This is what makes the other half visible — without it the
+    reply hands over Uganda's figure and never mentions that the country the
+    taxpayer wanted to compare against was not addressed at all, which reads
+    as though the comparison had been answered.
+
+    Requires an explicit comparison, not merely a second country. Cross-border
+    trade questions name other countries constantly and are answerable in full;
+    caveating those would answer a question the taxpayer never asked.
+    """
+    text = message or ""
+    if not text.strip() or not _UGANDA_RE.search(text):
+        return ""
+    if not _COMPARISON_MARKER_RE.search(text):
+        return ""
+    for name, pattern in _FOREIGN_JURISDICTION_RES:
+        if pattern.search(text):
+            return name
+    return ""
+
+
+def jurisdiction_scope_caveat(country: str) -> str:
+    """The line to append to a Uganda answer that was asked as a comparison."""
+    return (
+        f"_This covers Uganda only — URA does not administer {country}'s taxes, "
+        f"so I can't give you {country}'s side of that comparison. You'd need "
+        f"{country}'s own revenue authority for it._"
+    )
+
+
+def out_of_jurisdiction_reply(country: str) -> str:
+    """What to say instead of a Ugandan figure the taxpayer did not ask for."""
+    return (
+        f"I can only help with taxes administered by the Uganda Revenue Authority. "
+        f"I don't hold {country}'s tax rates, and quoting Uganda's figures for "
+        f"{country} would be misleading.\n\n"
+        f"For {country} you'll need that country's own revenue authority. "
+        f"If you meant Uganda, ask again without naming {country} and I'll answer "
+        f"from the official URA rate table."
+    )
+
+
 def empathy_ack(kind: str) -> str:
     """One short, translation-friendly empathetic opener for a distress kind.
 

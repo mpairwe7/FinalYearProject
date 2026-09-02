@@ -34,7 +34,7 @@ tool-calling, agentic routing, workflows, memory, audit, and speech.
 The chatbot now ships with:
 
 - **Hybrid retrieval** (Qdrant dense + BM25 RRF + cross-encoder rerank; optional HyDE on the dense leg via `FLAG_HYDE`)
-- **Grounded generation** (Qwen3-8B, spotlight markers,
+- **Grounded generation** (`Sunbird/Sunflower-14B-FP8` via vLLM, spotlight markers,
 token-aware trimming, structured-output option)
 - **OWASP LLM Top 10 (2025) coverage** — prompt-injection guards,
 PII redaction, system-prompt leakage detection, grounding checks
@@ -43,8 +43,13 @@ circuit breakers around Qdrant and LLM, hard deadlines
 - **Continuous evaluation** — Ragas-compatible harness, SLO alert rules
 - **Next.js 16.2.3 + React 19.2 frontend** with glassmorphism UI,
 SSE streaming, optimistic feedback, same-origin `/api` proxy
-- **Full test pyramid** — backend pytest with a current 35% CI coverage
-ratchet, frontend Vitest + Playwright E2E, Flutter mobile CI, k6 load tests
+- **Full test pyramid** — ~2,600 backend/root pytest cases, frontend Vitest +
+Playwright E2E, Flutter mobile CI, k6 load tests. The 35% `--cov-fail-under`
+ratchet is **not** a quality claim: `pyproject.toml`'s omit list excludes
+`main.py`, `llm.py`, `retriever.py` and `speech_service.py`, and the gated
+`pytest tests/` run never executes `App/backend/tests/`, so the figure both
+under- and mis-reports what is exercised. Treat the retrieval ranking gate
+(§2.9) and the corpus coverage gate as the real quality instruments
 - **Production observability** — Prometheus + Grafana + Jaeger (docker-compose
 `--profile monitoring`), 5 SLO alerting rules, pre-built dashboards
 - **Security-as-code** — cosign container signing, SLSA v1.2 provenance,
@@ -53,15 +58,15 @@ OWASP ZAP DAST, AI red teaming (50 NIST AI 600-1 prompts)
 bias audit, carbon tracking, incident response simulation
 - **Auth system** — JWT (HS256/RS256), RBAC with 5 roles, consent
 management (UDPA 2019), user profiles (`auth/` directory)
-- **Tool-calling framework** — 6 tool modules, ToolRegistry,
+- **Tool-calling framework** — 25 registered tools, ToolRegistry,
 generate_with_tools loop (`tools/` directory)
 - **Supervisor routing** — 7 routes with per-specialist tool
 whitelists (`agents/` directory)
-- **Guided workflows** — 5 YAML-declared workflows with slot filling
+- **Guided workflows** — 14 YAML-declared workflows with slot filling
 (`workflows/` directory)
 - **Ticket queue** — CRUD admin endpoints, escalation tool
-- **Speech pipeline** — ASR (Whisper), TTS (Piper), MT, Sunbird AI
-cloud fallback
+- **Speech pipeline** — ASR (`Sunbird/asr-whisper-large-v3-salt`),
+TTS (Spark-TTS-SALT), MT, Sunbird AI cloud fallback
 - **Memory system** — semantic facts, episodic summaries, working
 memory (`memory/` directory)
 - **Audit ledger** — hash-chained, Merkle tree proofs (`audit/`
@@ -114,9 +119,9 @@ surface that would need to change. Effort estimates are rough:
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |
 |---|---|---|---|---|---|---|
-| G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen chat-template tool formatting; `ToolRegistry` dispatches via `.call()`; 11 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
+| G9 🟢 | **No tool use.** ~~The LLM can only generate text from retrieved passages.~~ **SHIPPED Phase 14-B** — `generate_with_tools()` in `llm.py` runs a bounded tool-call loop using Qwen chat-template tool formatting; `ToolRegistry` dispatches via `.call()`; 25 tools auto-registered. Flagged by `FLAG_TOOL_USE`. | — | Done. | Done. | Done (S actual) |
 | G10 🟢 | **No calculators.** ~~PAYE, VAT, CGT, customs, income tax, effective rate.~~ **SHIPPED Phase 14-A** — deterministic calculators (`calculate_vat`, `calculate_paye` with progressive bands, `calculate_corporation_tax`, `calculate_capital_gains`, `calculate_customs_duty`) backed by **effective-dated** rate tables (`FY2025-26`, `FY2026-27`, …). A frozen “current year” default is a documented failure mode — see `App/docs/tax-rate-tables.md`. | — | Done. | `backend/app/tools/calculators.py`, `tax/tables.py` | Done (S actual) |
-| G11 🟢 | **~~No structured form flows.~~** **SHIPPED Phase 15** — `workflows/` directory with 5 YAML-declared workflows loaded at startup via `loader.py`. Slot-filling state machine (`slots.py`), workflow registry (`registry.py`), keyed on `conversation_id`. | — | Done. | `backend/app/workflows/` directory | Done |
+| G11 🟢 | **~~No structured form flows.~~** **SHIPPED Phase 15** — `workflows/` directory with 14 YAML-declared workflows loaded at startup via `loader.py`. Slot-filling state machine (`slots.py`), workflow registry (`registry.py`), keyed on `conversation_id`. | — | Done. | `backend/app/workflows/` directory | Done |
 | G12 🟢 | **~~No URA account actions.~~** **PROTOTYPE 2026-08-18** — development defaults to mock (`live=false`). Settings shows the sandbox TIN. Production rejects mock. | Demo account works. | Mock ready. | Wire live `URA_ACCOUNT_API_*`. | `ura_account_mock.py`, Settings | XL |
 | G13 🟢 | **~~No document ingestion.~~** **PROTOTYPE 2026-08-18** — upload + guards + optional isolated worker. Dedicated parse pool is post-prototype. | User can attach a receipt. | Demo ready. | Parse pool / gVisor later. | `documents.py`, `document_worker.py` | M |
 | G14 🟢 | **~~No scheduled notifications.~~** **PROTOTYPE 2026-08-18** — Settings inbox + staff `/admin/outbox`. Email/SMS mock-queued, not sent. | Taxpayer sees inbox. | Demo ready. | SES / Africa's Talking later. | `notify.py`, `/admin/outbox` | M |
@@ -175,6 +180,135 @@ PYTHONPATH=App/backend python3 -m app.production_readiness --as-production
 stay default **off**. Do not treat a green production start as a live
 URA account or a delivered SMS channel.
 
+### 2.9 Serving-path defects the eval sets could not see (2026-09-01)
+
+Both were found by running `tests/load/tax_education_*` (outputs in `Results/load/`) against a live
+deployment, not by the suite: **77.0%** single-query accuracy and **29.1%**
+multi-turn coherence while all ~2,600 tests passed. The common cause is that
+every eval set in this repo asks questions in the corpus's own voice — short,
+FAQ-shaped, one clause — so neither defect was reachable from any gate.
+
+| # | Defect | Evidence | Outcome |
+|---|---|---|---|
+| G35 ⚪ | **Situational preamble dilutes the FAQ match.** `_faq_match_score` divides coverage by the terms the *user* supplied, so context lowers the score of the row that answers the question. "I am opening a hardware store in Jinja. Do I have to charge VAT?" scores **0.273** against the 0.58 floor; the bare question scores **0.700**. The answer is in `ura_vat_faqs.csv` throughout. | Reproduced against the 516-row FAQ index. | **Open — the obvious fix was tried and reverted.** Ungating `extract_question_span` from `detect_user_distress` fixed it on a stale 729-doc index, then *cost* 37 points of VAT-journey fact coverage (81.2% → 43.8%) once the index was rebuilt to 7,970 docs: the FAQ scorer only decides the answer when retrieval has fallen back to keyword matching, and against a healthy dense index the preamble is useful context. The narrowing stays distress-gated. Fixing the dilution belongs in the scorer. `tests/test_situational_preamble_retrieval.py` pins both the dilution and the deliberate non-narrowing. |
+| G36 🟢 | **An open workflow swallowed every following question.** `_maybe_handle_workflow` returns before retrieval, so while a flow was active the corpus was unreachable and any question was fed to the slot validator. Only exits were completion or six literal cancel words. | Measured PAYE journey: all three turns were non-answers (fact coverage **0.0%**). | **Shipped.** Divert to normal retrieval when the message reads as a question *and* the pending slot cannot accept it, so a mistyped answer still re-asks. PAYE fact coverage 0.0% → **44.4%**. `WorkflowRegistry.pending_step`, `ChatModel._workflow_input_changes_subject`, `tests/test_workflow_topic_change.py`. |
+| G37 🟢 | **The accuracy harness could not measure what it claimed.** Journey "coherence" was `len(matched_kw) > 0` — one expected keyword as a bare substring, anywhere in the reply. Abstentions and workflow slot prompts scored as good answers; language fidelity used `"ura"` as both a Luganda and a Kiswahili marker, so plain English passed every time; `"150"` matched inside `"1,500,000"`. | A company-incorporation forms page outscored a real VAT-threshold answer. | **Fixed in `tests/load/tax_education_accuracy_eval.py`**: token-boundary matching, non-answer detection, majority-coverage rule, graded per-turn `keyword_coverage_pct`, and language markers that do not occur in English. Corrected figures: coherence 70.8% → **41.6%**, lg 71.6% → **56.6%**, sw 73.3% → **58.3%**. |
+
+### 2.10 End-to-end evidence on the full GPU stack (2026-09-01)
+
+Measured against the real serving stack — Sunflower-14B-FP8 on vLLM (one
+A6000), hybrid Qdrant retrieval over the rebuilt 7,970-document index,
+cross-encoder rerank — not the keyword fallback the CI gates use.
+
+| Measure | Keyword fallback | **Sunflower-14B-FP8** |
+|---|---|---|
+| Single-query accuracy | 67.2% | **75.4%** |
+| Multi-turn coherence | 66.7% | **83.3%** |
+| Luganda fidelity | 56.6% | **85.0%** |
+| Kiswahili fidelity | 58.3% | **100.0%** |
+| VAT topic accuracy | 65.4% | **86.2%** |
+| p95 latency | 2.7s | **17.0s** |
+
+`corpus_coverage --mode api` over the 105-probe taxpayer-voice bank in all
+three languages (`Results/load/` + `/tmp/cov_e2e.json`): **zero abstentions
+in 186 probes**, English coverage 90.3%, but **overall 79.25% against an 80%
+floor — the gate fails**, and two domains sit well below theirs: `objections`
+38.5% and `tin` 46.2% (floor 60% each).
+
+Two findings a government deployment has to weigh:
+
+| # | Finding | Status |
+|---|---|---|
+| G38 🟢 | **The workflow escape was English-only.** 80 of 186 probes returned a guided-flow slot prompt instead of an answer, *all* of them Luganda or Kiswahili. None opens with an English question word, so G36's escape could not fire for them — the escape stranded exactly the users this system exists to serve. Now language-neutral: an English interrogative opener **or** a trailing `?` on a message of ≥3 words, which is what carries across locales. The word-count floor keeps a hedged `"individual?"` with the validator. No local-language vocabulary was invented — `app.agents.patterns` deliberately refuses that without native-speaker review. | **Fixed.** `_reads_as_question`, `tests/test_workflow_topic_change.py`. |
+| G39 ⚪ | **The workflow router is too eager in local languages.** The 80 probes above entered a flow on their *first* turn — a question was classified as a task. G38 lets them leave; it does not stop them being captured. Luganda/Kiswahili coverage (63.6% each) is ~27 points below English (90.3%) and this is the largest single cause. | **Open.** Needs locale-aware trigger thresholds in `WorkflowRegistry.match_trigger`, gated on a per-locale golden set. |
+
+p95 of 17.0s is a service-design question, not a defect: single A6000, `--max-num-seqs 64`, no batching tier. `docs/runbooks/capacity-slo.md` holds the measured envelope.
+
+### 2.11 Promotion re-verification on the rebuilt index (2026-09-02)
+
+Re-run before promoting `dev` to `main`. Same stack shape as §2.10 — Sunflower-14B-FP8
+on vLLM (GPU 5), hybrid Qdrant + cross-encoder rerank (GPU 6) — against an index
+rebuilt from scratch after the 2026-08-31 `ura.go.ug` crawl: **7,972 documents**
+(509 FAQ, 6 teacher-QA, 6,966 PDF chunks, 491 crawl chunks), alias promoted only
+after the canary gate passed 3/3 at hit-rate 1.0.
+
+| Measure | §2.10 | **This run** |
+|---|---|---|
+| Overall accuracy | 75.4% | **82.0%** |
+| Intent precision | — | **91.7%** |
+| Multi-turn coherence | 83.3% | **83.3%** |
+| English | — | **78.3%** |
+| Luganda | 85.0% | **90.0%** |
+| Kiswahili | 100.0% | **100.0%** |
+| VAT topic | 86.2% | **95.0%** |
+| PAYE topic | — | **78.3%** |
+
+The accuracy gain is **not** a model or retrieval improvement. It is the
+measurement being corrected: see G40. Cold-run latency was p50 0.360s / p95
+11.6s; the re-run's p50 0.053s reflects a warm semantic cache and should not be
+quoted as a latency result.
+
+Grounding held: every substantive answer carried sources (`hybrid`, 3–4 each,
+faithfulness 1.0). The G38 workflow escape was re-confirmed working in all three
+languages against the live stack. Three further findings:
+
+| # | Finding | Status |
+|---|---|---|
+| G40 🟢 | **The accuracy harness scored the service against superseded law.** It required the FY2025-26 VAT registration threshold (UGX 150,000,000) and PAYE nil-band ceiling (UGX 235,000); the 2026 Finance Acts moved these to 300,000,000 and 335,000. The service answered both correctly from the FY2026-27 table it cites and was scored 45.0% and 35.0% for it, dragging the published overall number down ~6 points. VAT journey turn 2 was worse than a stale figure: at a 300m threshold its 180m scenario stops being over the line, so the turn silently began testing the opposite behaviour. | **Fixed.** Figures refreshed, scenario raised to 350m, and `tests/test_eval_ground_truth_currency.py` re-derives them from the newest `FY*.json` so they cannot rot again. |
+| G41 🟢 | **Jurisdiction was ignored on the rate-table path.** "What is the corporate income tax rate in **Kenya** for 2026?" returned "**The corporation tax rate in Uganda is 30%** … from the official URA FY2026-27 rate table"; reproduced for Rwanda and for the demonym ("the Kenyan VAT rate"). The deterministic paths matched on the tax word alone. The answer was labelled Uganda, so it was never a false statement — which is what made it dangerous: a different question answered in the authoritative register, with a citation, on the path taxpayers most trust. | **Fixed.** `detect_foreign_jurisdiction` / `out_of_jurisdiction_reply` in `text_signals.py`, wired as fast path 0 in `_maybe_handle_fast_paths` — ordering *is* the fix, so the test asserts it and was mutation-checked. A message naming Uganda as well still answers, since refusing a comparison would withhold the half URA can speak to. Verified live: `retrieval_mode: out_of_jurisdiction`, no Ugandan figure quoted, and Uganda questions unaffected. |
+| G42 🟢 | **Calculator flows captured factual questions.** "How much monthly income is exempt from PAYE in Uganda?" entered `calc_paye` and asked for a gross salary; "What will Uganda's VAT rate be in 2031?" entered `calc_vat` and asked for an amount. Both are questions *about* a figure, not requests to compute one, and neither got answered. Not local-language-specific — plain English. The guard belongs in `plan_calculation`, not at the workflow-entry site: the guided flow is opened downstream by `_maybe_handle_calculator` when a plan reports missing params, so a plan that is never formed is a flow that never opens. `_INFO_ONLY_RE` already existed for exactly this and had two gaps — it required `is/are/was/were`, so "what **will** … rate" slipped past, and it had no branch for "how much X **is exempt**". | **Fixed.** `_INFO_ONLY_RE`, `App/backend/tests/test_calculator_router.py::FigureLookupIsNotACalculationTests`. Verified live: both now answer (`hybrid` / rate lookup) while `Calculate PAYE for 3,500,000` and `I want to calculate my VAT` still reach the calculator. |
+
+G41, G42 and G43 surfaced under targeted trust probes rather than the coverage
+bank because all three return fluent, well-formed, confidently-cited replies —
+exactly what a keyword-coverage scorer counts as success. None of them is a
+regression from this promotion; all three predate it and are recorded here so
+the promotion does not imply they were cleared.
+
+**Re-run after fixing G42** — 22 trust probes, 3 failing (was 5 of 14):
+calculator-entry 8/8 including the controls that must still reach the
+calculator, figures 4/4, grounding 3/3, workflow-escape 3/3 in en/lg/sw. The
+three that remain are all abstention, and they share one root: the service
+answers a *neighbouring* question with full confidence instead of declining.
+
+| # | Finding | Status |
+|---|---|---|
+| G43 🔴 | **A non-existent tax was invented, with figures.** "What is the URA Digital Nomad Levy and how do I pay it?" — a tax that does not exist — returned "a tax of **1% of the monthly gross income** for digital nomads … who operate in Uganda for **90 days or more**", plus a registration and monthly-declaration procedure. In `hybrid` mode, citing 2 sources. The same question **earlier in the same session** correctly refused: "the figures in it disagreed with the URA documents I was reading — so I have not shown it … a URA officer has been asked". So the integrity check that should catch this **fires non-deterministically**, which is worse than not having it: it cannot be relied on and it makes the failure hard to reproduce in review. Highest-severity finding in this document. | **Open.** Needs the answer-integrity gate made deterministic for a false-premise question, and a false-premise probe set in the CI gate — every existing probe asks about something real. |
+| G45 🟠 | **The temporal half of G41 is still open.** "What will Uganda's VAT rate be in 2031?" answers "The standard VAT rate in Uganda is **18%** (FY2026-27)" with no caveat that 2031 is not FY2026-27. Same shape as the geographic case — scope substitution — and the jurisdiction guard does not cover it because the country named *is* Uganda. | **Open.** The rate path should treat a fiscal period outside the loaded table the way it now treats a foreign country. |
+
+**Deployed-Space verification.** The local GPU stack is not the shipping shape —
+the HF Space runs a Qdrant sidecar over a sparse-only collection with no torch —
+so the FAQ battery was re-run against `https://landwind22-ura-chatbot.hf.space`
+directly. **11 of 12 pass**, including both local-language VAT probes and the
+G42 fix, which is live there. The one failure:
+
+| # | Finding | Status |
+|---|---|---|
+| G44 🟢 | **PAYE threshold questions asked in taxpayer language returned the *previous* year's figure.** Originally logged as "the bands question returns a passage instead of the bands". Re-probed on the Space 2026-09-02, the defect is worse than that: it is a wrong number, not a missing one. `plan_rate_lookup` gated on a "rate"/"threshold" word **and** a named tax, so *"How much of my salary is tax free?"* and *"At what monthly salary do I start paying PAYE?"* failed the gate, fell through to `hybrid` retrieval, and were answered **UGX 235,000** from superseded handbooks (`TAXATION-HANDBOOK-FY-2024-25`, `FY-2025-26`, a Pharmaceutical Manufacturers PDF). `FY2026-27.json` says **335,000** — the tax-free line was quoted 100,000 UGX/month too low. *"What are the PAYE rates?"* was correct throughout, which is exactly what hid it. | **Fixed** (`calculator_router.py`). Three changes: (1) `_PAYE_THRESHOLD_ASK_RE` accepts the tax-free/start-paying phrasings, every alternative anchored on employment-income vocabulary so no turnover or rental question can reach the PAYE bands; (2) the ask gate now accepts `bands` alongside `rates`/`thresholds` — the type table already carried an `income tax band` alternative that the ask gate never let through; (3) that alternative was singular, so the plural nobody writes as "band" never matched. Guarded by `SalaryThresholdIsARateLookupTests`, mutation-checked. |
+
+| G46 🟢 | **A comparison question was answered half-way, silently.** Raised by CodeRabbit on PR #428 and reproduced: `detect_foreign_jurisdiction` returns `''` when Uganda is named alongside another country, deliberately, so *"What is Uganda's VAT rate compared with Kenya's?"* is answered rather than refused — the half URA can speak to is worth more than a blanket decline. Its docstring said the caller adds a scope caveat in that case, and no caller did. The reply gave Uganda's 18%, cited the URA rate table, and never mentioned Kenya, which reads as an answered comparison. The G41 guard made this possible by making the decline path exist at all; it is the seam between refusing and answering. | **Fixed** (`text_signals.py`, `service.py`). `detect_comparison_jurisdiction` is the exact complement of `detect_foreign_jurisdiction` — one fires or the other, never both — and `_add_comparison_scope_caveat` appends the caveat at the fast-path dispatcher rather than inside each handler, so the rate, calculator and TIN paths cannot drift apart on it. `ComparisonScopeCaveatTests` includes a wiring test that reads the dispatcher source: the other five tests call the helper directly and all stayed green when the dispatcher call was deleted. **The first version over-fired** — keyed on "Uganda AND another country" alone, it caveated *"I import goods from Kenya to Uganda — what customs duty do I pay?"*, a legitimate and fully answerable URA question, with a line about not being able to give Kenya's side of a comparison nobody asked for. Cross-border trade questions name other countries constantly and outnumber real comparisons, so the detector now also requires an explicit comparison marker (comparative adjectives only — "I import **more than** 100 units" is a quantity). |
+
+| G47 🔴 | **A customs question is answered with the contact footer and nothing else.** Found while verifying G46 on the deployed Space (`sha-bc4d715`, 2026-09-02). *"I import goods from Kenya to Uganda — what customs duty do I pay?"* returns, in full: *"If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000."* Mode is `hybrid`, so retrieval ran and produced no usable passage, but the reply is not an abstention — it carries no "I couldn't find" marker, so `_is_non_answer` does not classify it and the accuracy harness would score it as an answer that simply missed its keywords. Predates the G46 work: the caveat was being appended to this same footer before the over-fire was narrowed. | **Open.** Two separable problems: retrieval finding nothing for a common cross-border question (the corpus has customs material), and a footer-only reply being emitted at all instead of an abstention. The second is the more dangerous — a reply with no content and no abstention marker is invisible to every gate that keys on abstention. |
+
+Two probe bugs were found and corrected rather than reported as defects: `invoic`
+and `regist` were asserted as stems against a token-boundary matcher, so
+"Invoicing" and "registered" could never satisfy them. The service was right both
+times. Recorded because the same mistake in the repo harness is what G40 was.
+
+**Open follow-ups.**
+
+- `Data/eval/coverage_bank.jsonl` (105 taxpayer-voice probes) is entirely
+  bare-question, so it cannot detect the G35 class at all. Adding
+  preamble-framed variants needs `lg`/`sw` translations from a native speaker —
+  `test_every_question_exists_in_every_language` requires all three, and
+  inventing them would poison a multilingual gate.
+- G37 makes the harness honest, not sufficient. Keyword coverage still cannot
+  tell a correct answer from one carrying the right vocabulary; on VAT journey
+  turn 2 the incorporation-forms page still clears the majority rule at 0.75
+  while the better answer scores 1.00. Grading correctness needs a model judge.
+- `tax_education_load_suite.py` counts `workflow` in `grounded_pct`, so a slot
+  prompt still inflates that metric the way it used to inflate coherence. Left
+  as-is deliberately: redefining a published number is the operator's call.
+
 ---
 
 ## 3. Is agentic AI applicable here? — **Yes, and here's the shape**
@@ -209,7 +343,7 @@ monolithic "one LLM with tools". Reasons:
 ```
       ┌─────────────────────────────┐
       │      Supervisor Agent       │
-      │    (Qwen3-8B, T=0.1)        │
+      │  (Sunflower-14B-FP8, T=0.1)  │
       │   Classifies + routes       │
       └──┬──────┬──────┬──────┬─────┘
         │      │      │      │
@@ -238,7 +372,7 @@ monolithic "one LLM with tools". Reasons:
 Key design choices:
 
 - **Supervisor is deterministic.** The current deployment uses the
-already-loaded Qwen3-8B runtime at low temperature; a smaller pinned
+already-loaded Sunflower-14B-FP8 runtime at low temperature; a smaller pinned
 router model can replace it later if latency requires it.
 - **Specialists share tools.** Tools are MCP servers, not code
 embedded in any one agent — this keeps them independently testable
@@ -359,13 +493,13 @@ scoped to be independently shippable. Dependencies are explicit.
 
 **Delivered:**
 - ✅ In-process tool registry with schema validation (`backend/app/tools/`):
-6 tool modules — calculators, rates, calendar, KB search, escalation.
+25 registered tools — calculators, rates, calendar, KB search, escalation.
 - ✅ Tool-call loop in `llm.generate_with_tools()` (feature-flagged
 via `FLAG_TOOL_USE`).
 - ✅ Supervisor router (`agents/supervisor.py`) with 7 routes and
 per-specialist tool whitelists.
 - ✅ Ticket queue with CRUD admin endpoints, `escalate_to_human` tool.
-- ✅ 5 YAML-declared workflows via `workflows/` directory (loader,
+- ✅ 14 YAML-declared workflows via `workflows/` directory (loader,
 registry, slot-filling state machine).
 - ✅ Feature flags default OFF — shipping is a no-op on the existing
 request path.
@@ -386,9 +520,10 @@ base `SYSTEM_PROMPT`).
 summaries, working memory with provenance and confidence scores.
 - ✅ Audit ledger (`audit/` directory) — hash-chained, append-only,
 Merkle tree proofs for tamper evidence.
-- ✅ Speech pipeline — ASR (Whisper), TTS (Piper), MT, Sunbird AI
-cloud fallback (`speech_service.py`, `sunbird.py`).
-- ✅ 45 feature flags via `flags.py` (addressable rollout).
+- ✅ Speech pipeline — ASR (`Sunbird/asr-whisper-large-v3-salt`),
+TTS (Spark-TTS-SALT), MT, Sunbird AI cloud fallback
+(`speech_service.py`, `spark_tts_salt.py`, `sunbird.py`).
+- ✅ 49 feature flags via `flags.py` (addressable rollout).
 - ✅ PostgreSQL backend option.
 
 ### Phase 17 — Document ingestion + topic persistence (G6, G13, G25)
@@ -492,7 +627,7 @@ The three foundational layers for personalization are now all delivered:
 1. **Phase 14 — Identity & profile.** 🟢 Shipped. JWT auth, RBAC (5 roles),
 user profiles, consent management.
 2. **Phase 15 — Tool-calling, supervisor, workflows, tickets.** 🟢 Shipped.
-6 tool modules, 7 supervisor routes, 5 YAML workflows, ticket queue.
+25 registered tools, 7 supervisor routes, 14 YAML workflows, ticket queue.
 3. **Phase 16 — Memory, audit, speech.** 🟢 Shipped. Three-tier memory
 (semantic, episodic, working), hash-chained audit ledger, speech pipeline.
 
@@ -566,7 +701,21 @@ full agent chain is locked.
 
 ---
 
-*Document version 2.0 — updated 2026-04-28 after Phases 14-16 shipped.*
+*Document version 2.3 — updated 2026-09-02: G44 re-probed on the deployed
+Space and fixed. The re-probe changed what G44 is: not a bands question
+answered with a passage, but plain-language PAYE threshold questions answered
+**UGX 235,000** out of superseded handbooks when the FY2026-27 table says
+**335,000**. Recorded because it is the third finding in §2.11 whose real
+severity only appeared once the question was asked the way a taxpayer asks it.*
+*Version 2.2 — 2026-09-02: added §2.11 (promotion re-verification on the
+rebuilt 7,972-document index, plus FAQ verification against the deployed HF
+Space) with G40, G41 and G42 fixed and G43, G44 and G45 open.*
+*Version 2.1 — 2026-09-01: added §2.9 (serving-path defects found by the load
+harness) and §2.10 (end-to-end evidence on the full GPU stack), corrected the
+model stack to Sunflower-14B-FP8 / whisper-large-v3-salt / Spark-TTS-SALT, and
+re-derived the tool, workflow and flag counts from the running registries
+(25 / 14 / 49).*
+*Version 2.0 — 2026-04-28 after Phases 14-16 shipped.*
 *Previous version (1.0) authored after Phase 1-13.*
 *For questions about a specific gap or phase, open an issue
 linked to the `roadmap/phase-XX` tag.*

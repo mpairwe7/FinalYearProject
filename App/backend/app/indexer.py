@@ -48,6 +48,13 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ura_knowledge_base")
 # Override DENSE_MODEL / DENSE_DIM when re-indexing legacy collections.
 DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-m3")
 DENSE_DIM = int(os.getenv("DENSE_DIM", "1024"))
+# Same knob the query path uses (retriever.RETRIEVER_DENSE_DEVICE), read here
+# rather than imported to keep the indexer free of the retriever's import cost.
+# Without it a bulk build ignored configuration entirely and took whatever
+# SentenceTransformer auto-selected — always cuda:0 — so on a shared multi-GPU
+# host the rebuild landed on GPU 0 no matter what the deployment asked for, and
+# CUDA_VISIBLE_DEVICES was the only way to move it.
+DENSE_DEVICE = os.getenv("RETRIEVER_DENSE_DEVICE", "") or None
 BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "64"))
 # Build sparse (BM25) vectors only, skipping the dense half. Set this where no
 # torch is available — the collection stays fully queryable there because a BM25
@@ -151,6 +158,30 @@ def _packed_bm25_state(state: dict[str, Any]) -> str:
     return base64.b64encode(zlib.compress(raw, level=9)).decode("ascii")
 
 
+def load_dense_model(device: str | None = None):
+    """Load the dense embedding model on the configured device.
+
+    Split out so the device decision is one testable place rather than a branch
+    buried in the middle of the build. *device* defaults to
+    :data:`DENSE_DEVICE`; an unavailable accelerator degrades to CPU the way
+    ``retriever.py`` does, but an explicit CPU request that fails stays fatal —
+    there is no lower rung, and masking it would produce a build with no
+    vectors instead of an error.
+    """
+    from sentence_transformers import SentenceTransformer
+
+    target = DENSE_DEVICE if device is None else device
+    try:
+        model = SentenceTransformer(DENSE_MODEL_NAME, device=target)
+    except Exception:
+        if target in (None, "cpu"):
+            raise
+        logger.warning("Dense index device %s unavailable; falling back to CPU", target, exc_info=True)
+        model = SentenceTransformer(DENSE_MODEL_NAME, device="cpu")
+    logger.info("Dense index model on device: %s", getattr(model, "device", "unknown"))
+    return model
+
+
 def build_index(
     documents: list[dict[str, Any]],
     recreate: bool = False,
@@ -181,9 +212,7 @@ def build_index(
     if SPARSE_ONLY_INDEX:
         logger.info("SPARSE_ONLY_INDEX=true — building sparse vectors only")
     else:
-        from sentence_transformers import SentenceTransformer
-
-        dense_model = SentenceTransformer(DENSE_MODEL_NAME)
+        dense_model = load_dense_model()
 
     collection = collection_name or QDRANT_COLLECTION
     binding_collection = binding_collection_name or collection

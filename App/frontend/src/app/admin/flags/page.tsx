@@ -38,6 +38,14 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
       analyticsApi.setFlag(name, enabled),
     onSuccess: () => client.invalidateQueries({ queryKey: ["adminFlags"] }),
   });
+  // The way back out. An override beats FLAG_* and is replayed on every boot,
+  // so flipping a flag to its default value is not the same as removing the
+  // override — the flag stays pinned and keeps ignoring the environment. Until
+  // this existed the page could pin a flag and never unpin it.
+  const reset = useMutation({
+    mutationFn: (name: string) => analyticsApi.clearFlag(name),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["adminFlags"] }),
+  });
   const canToggle = who.role === "ura_admin";
 
   const flags = useMemo(() => data?.flags ?? [], [data]);
@@ -105,8 +113,9 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
         <div>
           <p className="ops-note-title">Toggles here change this replica only</p>
           <p className="ops-note-body">
-            A change persists in this pod’s <code>flag_overrides</code> table and is lost when it
-            is replaced. A cluster-wide change means setting <code>FLAG_*</code> on every replica.
+            A change persists in this pod’s <code>flag_overrides</code> table and is replayed when
+            it restarts, so it keeps winning over <code>FLAG_*</code> until you reset it. A
+            cluster-wide change means setting <code>FLAG_*</code> on every replica.
             {data?.overrides_are_ephemeral === false
               ? " This deployment reports overrides as durable."
               : null}
@@ -140,6 +149,12 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
             <tbody>
               {rows.map((flag) => {
                 const diverged = flag.enabled !== flag.default;
+                // Either mutation blocks both controls. Guarding each on only
+                // its own isPending let a user flip the switch (PATCH) while a
+                // Reset (DELETE) was still in flight for the same flag; the
+                // request that happened to land second won, so a Reset could
+                // leave the override in place.
+                const mutating = toggle.isPending || reset.isPending;
                 return (
                   <tr key={flag.name}>
                     <td>
@@ -152,7 +167,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                       {canToggle && !flag.protected ? (
                         <Switch
                           checked={flag.enabled}
-                          disabled={toggle.isPending}
+                          disabled={mutating}
                           label={`${flag.name} — currently ${flag.enabled ? "on" : "off"}`}
                           onChange={(next) => toggle.mutate({ name: flag.name, enabled: next })}
                         />
@@ -173,6 +188,17 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
                         {flag.rollout ? (
                           <span className="ops-chip">{flag.rollout.percent}% rollout</span>
                         ) : null}
+                        {flag.overridden && canToggle && !flag.protected ? (
+                          <button
+                            type="button"
+                            className="ops-btn is-ghost is-sm"
+                            disabled={mutating}
+                            onClick={() => reset.mutate(flag.name)}
+                            title="Drop the override so this flag follows FLAG_* or its default again"
+                          >
+                            Reset
+                          </button>
+                        ) : null}
                       </span>
                     </td>
                   </tr>
@@ -183,9 +209,11 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
         </TableScroll>
       ) : null}
 
-      {toggle.isError ? (
+      {toggle.isError || reset.isError ? (
         <p className="ops-stat-hint" role="alert" style={{ marginTop: "var(--ops-space-3)" }}>
-          That toggle did not save. The registry may be read-only on this deployment.
+          {reset.isError
+            ? "That reset did not save. The flag is still overridden on this replica."
+            : "That toggle did not save. The registry may be read-only on this deployment."}
         </p>
       ) : null}
     </OpsPage>

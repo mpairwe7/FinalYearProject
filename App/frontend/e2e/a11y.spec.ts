@@ -75,18 +75,26 @@ async function prepareStaffSession(page: Page) {
   );
   await page.route("**/api/v1/authority/status", (route) =>
     route.fulfill({
+      // The endpoint returns a count, not a list — `sources` was never a key
+      // it emits. See the same correction in staff-ui.spec.ts.
       json: {
+        ok: true,
+        configured: true,
         fresh: true,
         version: "2026-08",
+        generated_at: "2026-08-01T00:00:00Z",
         age_days: 1,
         max_age_days: 120,
-        sources: ["rates.pdf"],
+        sources_checked: 1,
+        invalid_sources: [],
+        errors: [],
       },
     }),
   );
   await page.route("**/api/v1/admin/tickets/sla**", (route) =>
     route.fulfill({
       json: {
+        period_days: 30,
         tickets: 0,
         responded: 0,
         resolved: 0,
@@ -94,12 +102,15 @@ async function prepareStaffSession(page: Page) {
         median_response_seconds: 0,
         median_resolution_seconds: 0,
         awaiting_next_response: 0,
+        unassigned: 0,
         breaching: 0,
       },
     }),
   );
   await page.route("**/api/v1/admin/tickets/stats**", (route) =>
-    route.fulfill({ json: { total: 0, open: 0, assigned: 0, resolved: 0, by_priority: {}, by_team: {} } }),
+    route.fulfill({
+      json: { period_days: 30, total: 0, open: 0, assigned: 0, resolved: 0, wontfix: 0, by_priority: {} },
+    }),
   );
   await page.route("**/api/v1/admin/tickets?**", (route) =>
     route.fulfill({ json: { tickets: [], teams: [], total: 0 } }),

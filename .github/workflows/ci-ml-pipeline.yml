@@ -826,7 +826,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy vulnerability scan (SARIF → GitHub Security tab)
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.DOCKER_IMAGE }}:ci-${{ github.sha }}
           scanners: vuln,secret
@@ -838,14 +838,14 @@ jobs:
 
       - name: Upload Trivy SARIF to GitHub Security
         if: always() && github.event_name != 'pull_request' && hashFiles('trivy-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: trivy-results.sarif
           category: trivy-ml-pipeline
 
       - name: Generate SBOM (CycloneDX)
         if: always()
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.DOCKER_IMAGE }}:ci-${{ github.sha }}
           format: cyclonedx

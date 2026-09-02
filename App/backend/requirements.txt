@@ -1,7 +1,7 @@
 # Core API backend (2026 production stable)
-fastapi>=0.136.1,<0.137
-uvicorn[standard]>=0.46.0,<0.47
-pydantic>=2.13.3,<2.14
+fastapi>=0.141.1,<0.142
+uvicorn[standard]>=0.52.4,<0.53
+pydantic>=2.13.4,<2.14
 
 # Rate limiting — slowapi's in-process buckets are per-worker; for
 # multi-replica deploys set `SLOWAPI_STORAGE_URI=redis://...` (see
@@ -23,15 +23,15 @@ psycopg-pool>=3.3.1
 # datasets>=3.0.0
 
 # Data loading
-pandas>=2.2
+pandas>=3.0.5
 
 # Hybrid retrieval (dense + sparse + reranking)
-sentence-transformers>=5.4.1,<6
+sentence-transformers>=6.0.0,<7
 qdrant-client>=1.18,<1.19
 numpy>=2.4.4,<3
 
 # PDF ingestion & document processing (permissive Apache-2.0 / MIT)
-pypdfium2>=4.0.0
+pypdfium2>=5.13.0
 pdfplumber>=0.11.0
 
 # Document attachment analysis (POST /v1/documents/analyze) — DOCX/XLSX
@@ -55,7 +55,7 @@ jsonschema>=4.23
 # PDF report generation (pdf_export.py: /v1/export/* and
 # /v1/documents/{id}/report) + image-attachment decoding. Previously
 # undeclared — PDF export only worked where fpdf2 happened to be installed.
-fpdf2>=2.8
+fpdf2>=2.8.8
 Pillow>=10.4
 
 # LLM generation (Qwen/Qwen3-8B local inference or vLLM dispatch). Also
@@ -70,7 +70,7 @@ Pillow>=10.4
 # the checkout + its own requirements.txt (torch/torchaudio/einx/einops/
 # omegaconf/soundfile/soxr) before setting SPARK_TTS_ENABLED=true.
 transformers>=4.46.0
-torch==2.12.1
+torch==2.13.0
 accelerate>=1.2.0
 peft>=0.19.1
 bitsandbytes>=0.45.0
@@ -81,15 +81,15 @@ cryptography>=47.0.0
 sse-starlette>=3.4.1
 
 # OpenTelemetry GenAI observability (opt-in, aligned with 2025 stable semconv)
-opentelemetry-api>=1.29.0
-opentelemetry-sdk>=1.29.0
+opentelemetry-api>=1.44.0
+opentelemetry-sdk>=1.44.0
 opentelemetry-exporter-otlp-proto-grpc>=1.29.0
 
 # Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
 pydantic-settings>=2.5.0
-boto3>=1.34.0
+boto3>=1.43.81
 # DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
-dnspython>=2.6.0
+dnspython>=2.8.0
 
 # Cloud neural TTS fallback (edge-tts) — used when local Piper is unavailable;
 # English voice configurable via SPEECH_EN_EDGE_VOICE (default en-US-AriaNeural)
