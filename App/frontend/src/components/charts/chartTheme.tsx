@@ -105,6 +105,15 @@ export const QUANTILE_TERM = { p50: "p50", p95: "p95", p99: "p99" } as const;
 export const RETRIEVAL_MODE_LABEL: Record<string, string> = {
   hybrid: "Found in URA documents",
   hybrid_corrected: "Found after a second search",
+  // The backend used to report "hybrid" for every search that returned
+  // anything. It now names the leg that actually ran, so these reach the chart
+  // on CPU-only deployments (no reranker) and on a desynced BM25 index.
+  sparse: "Found by BM25 search only",
+  sparse_corrected: "Found by BM25 after a second search",
+  vector: "Found by remote semantic search",
+  vector_corrected: "Found by remote semantic search, second pass",
+  dense: "Found by semantic search only",
+  dense_corrected: "Found by semantic search, second pass",
   keyword: "Found by keyword match only",
   abstained: "Declined — nothing reliable found",
   blocked: "Blocked as unsafe or out of scope",

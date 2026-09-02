@@ -21,9 +21,16 @@ from app.retriever import active_retrieval_mode
 
 
 class _Retriever:
-    def __init__(self, *, sparse_only: bool = False, vectorize: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        sparse_only: bool = False,
+        vectorize: bool = False,
+        sparse_ok: bool = True,
+    ) -> None:
         self._sparse_only = sparse_only
         self._vectorize_mode = vectorize
+        self._sparse_ok = sparse_ok
 
 
 class ActiveRetrievalModeTests(unittest.TestCase):
@@ -41,6 +48,16 @@ class ActiveRetrievalModeTests(unittest.TestCase):
         self.assertEqual(
             active_retrieval_mode(_Retriever(sparse_only=True, vectorize=True), ready=True),
             "vector",
+        )
+
+    def test_a_disabled_sparse_leg_reports_dense_not_hybrid(self) -> None:
+        """`_sparse_ok` goes False when BM25 state desyncs from Qdrant.
+
+        Dense still serves, so this is neither "hybrid" nor "sparse" — and not
+        "vector" either, which means Vectorize against a remote index.
+        """
+        self.assertEqual(
+            active_retrieval_mode(_Retriever(sparse_ok=False), ready=True), "dense"
         )
 
     def test_a_full_retriever_is_still_hybrid(self) -> None:

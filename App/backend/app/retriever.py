@@ -332,6 +332,18 @@ def active_retrieval_mode(retriever: object | None, *, ready: bool) -> str:
         return "vector"
     if getattr(retriever, "_sparse_only", False):
         return "sparse"
+    if not getattr(retriever, "_sparse_ok", True):
+        # BM25 disabled at runtime — an invalid state file, or a corpus-hash
+        # mismatch against Qdrant's sentinel, which would make the sparse leg
+        # return results from a different index run. Dense still serves, so
+        # this is neither "hybrid" nor "sparse".
+        #
+        # Deliberately not folded into "vector": that means Vectorize, which is
+        # dense-only with a client-side lexical re-score against a remote index.
+        # This is local Qdrant dense with the cross-encoder still in play, and
+        # an operator reading the field should be able to tell a desynced BM25
+        # from an egress fallback.
+        return "dense"
     return "hybrid"
 
 

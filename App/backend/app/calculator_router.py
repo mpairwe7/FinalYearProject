@@ -198,11 +198,18 @@ _OBLIGATION_RE = re.compile(
 # Subject-then-copula ordering is what keeps genuine questions out: "Am I
 # required to be registered?" puts the cue before the subject and still
 # routes to the check.
+#
+# The premise must itself mention VAT. "My business is registered, do I have to
+# register for VAT?" states an unrelated registration and then asks the genuine
+# question, so a VAT-less premise must not suppress the check.
+_REGISTERED_FOR_VAT = r"(?:vat[-\s]?registered\b|registered\s+for\s+vat\b)"
 _ALREADY_REGISTERED_RE = re.compile(
-    r"\b(?:i'?m|we'?re)\s+(?:already\s+|now\s+)?(?:vat[-\s]?)?registered\b"
-    r"|\b(?:i|we|my\s+\w+|our\s+\w+)\s+"
+    r"\b(?:i'?m|we'?re)\s+(?:already\s+|now\s+)?" + _REGISTERED_FOR_VAT
+    # Possessive subjects run to several words — "my small business is
+    # registered for VAT" — so allow a bounded run rather than one token.
+    + r"|\b(?:i|we|my(?:\s+\w+){1,3}|our(?:\s+\w+){1,3})\s+"
     r"(?:am|are|is|was|were|have|has|had)\s+"
-    r"(?:already\s+|now\s+)?(?:be(?:en)?\s+)?(?:vat[-\s]?)?registered\b",
+    r"(?:already\s+|now\s+)?(?:be(?:en)?\s+)?" + _REGISTERED_FOR_VAT,
     re.IGNORECASE,
 )
 

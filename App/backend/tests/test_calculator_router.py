@@ -497,6 +497,8 @@ class VatRegistrationScopeTests(unittest.TestCase):
             "i'm vat registered, what is efris",
             "we are already registered for vat, must we issue e-invoices",
             "our company has been registered for vat, do we need a tax agent",
+            # A possessive subject is not always one word.
+            "my small business is registered for vat, do i have to use efris",
         ):
             with self.subTest(message=message):
                 plan = plan_calculation(message)
@@ -512,6 +514,9 @@ class VatRegistrationScopeTests(unittest.TestCase):
             "am i required to be registered for vat",
             "should my company register for vat",
             "when do i need to register for vat",
+            # The premise names a registration that is not the VAT one, and the
+            # real question follows it. Suppressing here answered nothing at all.
+            "my business is registered, do i have to register for vat",
         ):
             with self.subTest(message=message):
                 plan = plan_calculation(message)
