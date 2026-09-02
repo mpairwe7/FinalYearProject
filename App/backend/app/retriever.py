@@ -313,6 +313,29 @@ _LEXICAL_TOKEN_RE = re.compile(r"[a-z0-9]+")
 LEXICAL_RELEVANCE_FLOOR = float(os.getenv("RETRIEVER_LEXICAL_FLOOR", "0.50"))
 
 
+def active_retrieval_mode(retriever: object | None, *, ready: bool) -> str:
+    """The retrieval mode actually in force, not the one that was configured.
+
+    ``/ready`` resolved this correctly while every chat response reported a
+    flat ``"hybrid"`` whenever the search returned anything.  On a CPU-only
+    image — Crane Cloud, the HF Space — ``__init__`` drops the embedder and
+    the reranker and serves BM25 alone, so "hybrid" was the one field a
+    reader would have used to notice, and it said everything was fine.
+
+    Ordering matches ``/ready``: Vectorize is checked before ``_sparse_only``
+    because a Vectorize deployment keeps its sparse-only Qdrant state as a
+    fallback and would otherwise under-report as ``"sparse"``.
+    """
+    if not ready or retriever is None:
+        return "keyword"
+    if getattr(retriever, "_vectorize_mode", False):
+        return "vector"
+    if getattr(retriever, "_sparse_only", False):
+        return "sparse"
+    return "hybrid"
+
+
+
 def _lexical_terms(text: str) -> set[str]:
     return {
         token
