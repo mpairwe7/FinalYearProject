@@ -21,11 +21,16 @@
 # Usage — install into a DEDICATED virtualenv, never the runtime one, or you
 # will downgrade pandas underneath everything else:
 #
-#   python -m venv .venv-tts-train
+#   python3.11 -m venv .venv-tts-train
 #   .venv-tts-train/bin/pip install -r requirements-tts-train.txt
 #   .venv-tts-train/bin/python ml/scripts/tts/train_luganda_vits.py ...
 #
-# Needs Python < 3.12: Coqui TTS 0.22.0 publishes no wheel for 3.12+.
+# Name the 3.11 interpreter explicitly. Every pin below carries a
+# `python_version < "3.12"` marker, so building this venv with a 3.12+
+# interpreter installs NOTHING and still exits 0 — the training script then
+# fails with the same "Coqui TTS not installed" it would have without the venv,
+# which reads as the instructions not working rather than as a wrong
+# interpreter. Coqui TTS 0.22.0 publishes no wheel for 3.12+.
 
 TTS==0.22.0; python_version < '3.12'
 trainer>=0.0.36; python_version < '3.12'
