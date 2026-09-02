@@ -430,6 +430,10 @@ async def _chat_once(
         "locale": locale,
     }
     await _await_rate_slot()
+    # Restarted on every retry below: this measures how long the server took,
+    # and backoff plus a pacer wait is time the client chose to spend. Leaving
+    # it running across retries would fold that into the p95 the NFR gate
+    # reads, so a retried request would look like a slow one.
     t0 = time.perf_counter()
     attempts = 0
     max_attempts = _RETRY_MAX if _ENABLE_RETRY else 0
@@ -445,6 +449,12 @@ async def _chat_once(
                 attempts += 1
                 backoff = (_RETRY_BACKOFF_BASE ** attempts) + random.uniform(0.5, 1.5)
                 await asyncio.sleep(backoff)
+                # A retry is a new request and must take its turn in the global
+                # pacer like any other. Skipping it let a retry overtake the
+                # workers waiting their slot — at exactly the moment the server
+                # had just said it was over its limit.
+                await _await_rate_slot()
+                t0 = time.perf_counter()
                 continue
 
             if resp.status_code not in {200, 201}:
@@ -494,6 +504,8 @@ async def _chat_once(
                 attempts += 1
                 backoff = (_RETRY_BACKOFF_BASE ** attempts) + random.uniform(0.5, 1.5)
                 await asyncio.sleep(backoff)
+                await _await_rate_slot()
+                t0 = time.perf_counter()
                 continue
             return RequestResult(
                 scenario=scenario,
