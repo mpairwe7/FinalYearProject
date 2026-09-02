@@ -188,6 +188,30 @@ _OBLIGATION_RE = re.compile(
     r"\b(do|does|must|should|need|needs|have|has|required|obliged|am|are|when)\b",
     re.IGNORECASE,
 )
+# A statement that the taxpayer is ALREADY VAT-registered is a premise, not
+# the question.  "My business is registered for VAT, do I have to use EFRIS?"
+# asks about EFRIS; the obligation cue belongs to *that* question, and the
+# registration check would answer with a turnover threshold the user neither
+# asked for nor needs — while asking them to supply a figure in order to be
+# told something they have already told us.
+#
+# Subject-then-copula ordering is what keeps genuine questions out: "Am I
+# required to be registered?" puts the cue before the subject and still
+# routes to the check.
+#
+# The premise must itself mention VAT. "My business is registered, do I have to
+# register for VAT?" states an unrelated registration and then asks the genuine
+# question, so a VAT-less premise must not suppress the check.
+_REGISTERED_FOR_VAT = r"(?:vat[-\s]?registered\b|registered\s+for\s+vat\b)"
+_ALREADY_REGISTERED_RE = re.compile(
+    r"\b(?:i'?m|we'?re)\s+(?:already\s+|now\s+)?" + _REGISTERED_FOR_VAT
+    # Possessive subjects run to several words — "my small business is
+    # registered for VAT" — so allow a bounded run rather than one token.
+    + r"|\b(?:i|we|my(?:\s+\w+){1,3}|our(?:\s+\w+){1,3})\s+"
+    r"(?:am|are|is|was|were|have|has|had)\s+"
+    r"(?:already\s+|now\s+)?(?:be(?:en)?\s+)?" + _REGISTERED_FOR_VAT,
+    re.IGNORECASE,
+)
 
 _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     ("withholding", re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
@@ -291,7 +315,11 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     # "Must I register for VAT?" is a threshold test, not a calculation,
     # so it is matched before the calculation-verb gate — the natural
     # phrasing carries no "calculate"/"how much".
-    if _VAT_WORD_RE.search(text) and _REGISTER_WORD_RE.search(text):
+    if (
+        _VAT_WORD_RE.search(text)
+        and _REGISTER_WORD_RE.search(text)
+        and not _ALREADY_REGISTERED_RE.search(text)
+    ):
         turnover_amounts = extract_amounts(text)
         if turnover_amounts or _OBLIGATION_RE.search(text):
             params: dict[str, object] = {}

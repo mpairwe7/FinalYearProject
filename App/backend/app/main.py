@@ -85,6 +85,7 @@ from .models import (
     VoiceVisionChatResponse,
 )
 from .query import gate_locale
+from .retriever import active_retrieval_mode
 from .seed_prototype import seed as _seed_prototype
 from .seed_prototype import should_seed as _should_seed
 from .service import ChatModel, localize_reply
@@ -876,14 +877,9 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     # deliberately not folded into "hybrid": Vectorize is dense-only with a
     # client-side lexical re-score, not Qdrant's reranked dense+BM25 fusion,
     # and operators reading this field should be able to tell them apart.
-    if not model._retriever_ready:
-        retrieval_mode = "keyword"
-    elif getattr(model._retriever, "_vectorize_mode", False):
-        retrieval_mode = "vector"
-    elif getattr(model._retriever, "_sparse_only", False):
-        retrieval_mode = "sparse"
-    else:
-        retrieval_mode = "hybrid"
+    retrieval_mode = active_retrieval_mode(
+        model._retriever, ready=model._retriever_ready
+    )
     qdrant_healthy = model._retriever.is_ready if model._retriever_ready else False
     # Optional capabilities report the backend they actually resolved to. Both
     # of these degrade silently by design — detection drops to a character
@@ -1990,7 +1986,11 @@ def trigger_indexing(
 
     # Re-initialise the retriever so it picks up the new collection
     model._retriever_ready = model._retriever.initialize()
-    stats["retrieval_mode"] = "hybrid" if model._retriever_ready else "keyword"
+    # Same resolver as /ready and the chat path: a reindex that leaves the
+    # retriever sparse-only must not report "hybrid" either.
+    stats["retrieval_mode"] = active_retrieval_mode(
+        model._retriever, ready=model._retriever_ready
+    )
 
     return stats
 

@@ -84,7 +84,7 @@ from .query import (
     rewrite as rewrite_query,
 )
 from .resilience import CircuitBreaker
-from .retriever import HybridRetriever
+from .retriever import HybridRetriever, active_retrieval_mode
 from .text_signals import (
     ABSTENTION_REPLY,
     CLARIFICATION_PROMPT,
@@ -5294,7 +5294,7 @@ class ChatModel:
                     )
                     search_ms = (time.perf_counter() - search_t0) * 1000
                 if hits:
-                    retrieval_mode = "hybrid"
+                    retrieval_mode = active_retrieval_mode(self._retriever, ready=True)
                     record_retrieval_metrics(len(hits), search_ms)
                 # Update readiness if retriever was disconnected during search
                 self._retriever_ready = self._retriever._ready
@@ -5327,7 +5327,9 @@ class ChatModel:
                         subject=user_id or None,
                     )
                     if was_corrected:
-                        retrieval_mode = "hybrid_corrected"
+                        retrieval_mode = (
+                            f"{active_retrieval_mode(self._retriever, ready=True)}_corrected"
+                        )
 
             # 3b2. Language-aware retrieval boosting — when the detected
             #      locale is non-English, boost hits whose metadata
@@ -6392,7 +6394,7 @@ class ChatModel:
                 subject=user_id or None,
             )
             if hits:
-                retrieval_mode = "hybrid"
+                retrieval_mode = active_retrieval_mode(self._retriever, ready=True)
             self._retriever_ready = self._retriever._ready
 
         # Mirror the REST path's keyword fallback — _faq_hits_to_retrieval_hits
@@ -6419,7 +6421,9 @@ class ChatModel:
                 subject=user_id or None,
             )
             if was_corrected:
-                retrieval_mode = "hybrid_corrected"
+                retrieval_mode = (
+                    f"{active_retrieval_mode(self._retriever, ready=True)}_corrected"
+                )
 
         # Language-aware retrieval boosting (streaming path)
         if locale != "en" and hits:
