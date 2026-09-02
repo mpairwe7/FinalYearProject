@@ -197,7 +197,13 @@ def run(
         from TTS.tts.utils.text.tokenizer import TTSTokenizer  # type: ignore
         from TTS.utils.audio import AudioProcessor  # type: ignore
     except ImportError as exc:
-        result.error = f"Coqui TTS not installed: {exc}. pip install TTS trainer"
+        result.error = (
+            f"Coqui TTS not installed: {exc}. It is deliberately absent from the "
+            "runtime environment — it pins pandas<2.0, which cannot coexist with "
+            "the pandas>=3.0.5 the rest of the project requires. Install it in "
+            "its own environment, never this one: python -m venv .venv-tts-train "
+            "&& .venv-tts-train/bin/pip install -r requirements-tts-train.txt"
+        )
         log.error(result.error)
         return result
 
