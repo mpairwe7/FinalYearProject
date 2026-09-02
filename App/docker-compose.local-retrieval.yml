@@ -28,7 +28,12 @@ services:
       LLM_ENABLED: "false"
       SPEECH_ENABLED: "false"
       HF_HUB_OFFLINE: "1"
-      DENSE_FALLBACK_BACKEND: ""
+      # This is the local-Qdrant profile. An empty value means "auto" and
+      # can silently select Cloudflare Vectorize when credentials happen to be
+      # present in .env, bypassing the staged local alias below. Keep the
+      # serving backend deterministic: Qdrant dense + BM25 + reranker, then
+      # keyword-only if that local store is unavailable.
+      DENSE_FALLBACK_BACKEND: "none"
       LLM_FALLBACK_BACKEND: ""
       FLAG_CLOUDFLARE_FALLBACK: "false"
       STT_FALLBACK_BACKEND: ""
