@@ -337,6 +337,34 @@ def detect_foreign_jurisdiction(message: str) -> str:
     return ""
 
 
+def detect_comparison_jurisdiction(message: str) -> str:
+    """Name the foreign jurisdiction a Uganda question also asks about, or ''.
+
+    The mirror of :func:`detect_foreign_jurisdiction`: that one deliberately
+    stays silent when Uganda is named too, so a comparison still gets the half
+    URA can answer. This is what makes the other half visible — without it the
+    reply hands over Uganda's figure and never mentions that the country the
+    taxpayer wanted to compare against was not addressed at all, which reads
+    as though the comparison had been answered.
+    """
+    text = message or ""
+    if not text.strip() or not _UGANDA_RE.search(text):
+        return ""
+    for name, pattern in _FOREIGN_JURISDICTION_RES:
+        if pattern.search(text):
+            return name
+    return ""
+
+
+def jurisdiction_scope_caveat(country: str) -> str:
+    """The line to append to a Uganda answer that was asked as a comparison."""
+    return (
+        f"_This covers Uganda only — URA does not administer {country}'s taxes, "
+        f"so I can't give you {country}'s side of that comparison. You'd need "
+        f"{country}'s own revenue authority for it._"
+    )
+
+
 def out_of_jurisdiction_reply(country: str) -> str:
     """What to say instead of a Ugandan figure the taxpayer did not ask for."""
     return (

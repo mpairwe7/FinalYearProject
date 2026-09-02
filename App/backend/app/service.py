@@ -97,9 +97,11 @@ from .text_signals import (
     GREETING_REPLY,
     GROUNDED_REVISION_PREAMBLE,
     NO_HITS_REPLY,
+    detect_comparison_jurisdiction,
     detect_foreign_jurisdiction,
     detect_user_distress,
     empathy_ack,
+    jurisdiction_scope_caveat,
     out_of_jurisdiction_reply,
     is_courtesy_sentence,
     normalise_citation_markers,
@@ -4137,8 +4139,12 @@ class ChatModel:
         2. calculations with figures compute instantly, without figures they
            elicit the missing details;
         3. rate questions answer from the versioned FY rate table.
+
+        Whatever answers, a question that named Uganda *and* another country
+        gets a scope caveat appended, so the half URA cannot speak to is never
+        left unmarked.
         """
-        return (
+        result = (
             self._maybe_decline_out_of_jurisdiction(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
@@ -4152,6 +4158,34 @@ class ChatModel:
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
         )
+        return self._add_comparison_scope_caveat(result, message=message, rewritten=rewritten)
+
+    @staticmethod
+    def _add_comparison_scope_caveat(
+        result: dict[str, Any] | None, *, message: str, rewritten: str
+    ) -> dict[str, Any] | None:
+        """Say so when a Uganda answer only covers half the question asked.
+
+        ``detect_foreign_jurisdiction`` deliberately returns '' when Uganda is
+        named alongside another country, so "how does Uganda's VAT compare with
+        Kenya's" still gets the half URA can speak to instead of a refusal. That
+        left the other half unmarked: the reply gave Uganda's 18%, cited the URA
+        rate table, and never said Kenya had not been addressed — which reads
+        exactly like an answered comparison.
+
+        Applied at the dispatcher rather than inside each handler so the rate,
+        calculator and TIN paths cannot drift apart on it.
+        """
+        if not result or result.get("retrieval_mode") == "out_of_jurisdiction":
+            return result
+        country = detect_comparison_jurisdiction(message) or detect_comparison_jurisdiction(
+            rewritten
+        )
+        if not country:
+            return result
+        out = dict(result)
+        out["reply"] = f"{str(out.get('reply', '')).rstrip()}\n\n{jurisdiction_scope_caveat(country)}"
+        return out
 
     def _maybe_decline_out_of_jurisdiction(
         self,
