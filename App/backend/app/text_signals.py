@@ -307,7 +307,26 @@ _FOREIGN_JURISDICTIONS: tuple[tuple[str, str], ...] = (
     ("Ghana", r"ghanaian?|\bghana\b"),
     ("Egypt", r"egyptian?|\begypt\b"),
     ("the United Kingdom", r"\buk\b|united\s+kingdom|britain|british"),
-    ("the United States", r"\busa?\b|united\s+states|american?"),
+    # "us" is the first-person plural pronoun far more often than it is the
+    # country, and this list is consulted on fast path 0, before retrieval — so
+    # a bare `\busa?\b` refused "can you help us with VAT registration" as a
+    # United States question, naming a country the taxpayer never mentioned.
+    #
+    # The country reading now needs evidence: an unambiguous spelling, a
+    # determiner ("the US"), or a following noun that the pronoun cannot take.
+    # `federal`/`irs`/`dollar`/`citizen` qualify; `tax` deliberately does not,
+    # because "give us tax advice" is ordinary English.
+    #
+    # That gives up "do i pay us tax". Accepted knowingly: the two failures are
+    # not symmetric. A missed foreign jurisdiction falls through to normal
+    # retrieval and is answered or abstained on; a false positive hard-refuses
+    # a legitimate taxpayer with a confident, specific untruth. Precision wins.
+    (
+        "the United States",
+        r"\busa\b|u\.s\.a\b|united\s+states|american?"
+        r"|the\s+us\b"
+        r"|\bus\s+(?:federal|irs|dollars?|citizens?|residents?|nationals?)\b",
+    ),
     ("India", r"\bindian?\b"),
     ("China", r"chinese|\bchina\b"),
 )

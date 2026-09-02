@@ -225,5 +225,64 @@ class ComparisonScopeCaveatTests(unittest.TestCase):
         )
 
 
+class UsPronounIsNotTheUnitedStatesTests(unittest.TestCase):
+    """The country list is consulted on fast path 0, before retrieval.
+
+    `\busa?\b` matched the first-person plural pronoun, so a taxpayer asking
+    on behalf of their own business was refused with a confident, specific
+    untruth naming a country they never mentioned (issue #434). Measured live
+    on the deployed Space.
+    """
+
+    def test_first_person_plural_is_not_a_jurisdiction(self) -> None:
+        for message in (
+            "is efris compulsory for us",
+            "can you help us with vat registration",
+            "what taxes apply to us as a small business",
+            "tell us about paye rates",
+            "our accountant told us to file monthly, is that right",
+            # "tax" deliberately does not qualify "us" as the country: these
+            # are ordinary English and used to be refused outright.
+            "give us tax advice",
+            "tell us taxes we owe",
+            "show us the vat rate",
+            "can you give us company details",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(detect_foreign_jurisdiction(message), "")
+                self.assertEqual(detect_comparison_jurisdiction(message), "")
+
+    def test_the_country_is_still_detected(self) -> None:
+        for message in (
+            "how does the usa tax capital gains",
+            "what are us federal tax rates",
+            "i live in the us",
+            "united states tax rules",
+            "american tax rates",
+            "do us citizens pay tax",
+            "what is the us dollar rate for customs",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(detect_foreign_jurisdiction(message), "the United States")
+
+    def test_the_fix_reaches_the_comparison_detector_too(self) -> None:
+        """Both detectors share `_FOREIGN_JURISDICTION_RES`, so it must fix both."""
+        self.assertEqual(
+            detect_comparison_jurisdiction("is ugandan vat higher than us federal tax"),
+            "the United States",
+        )
+
+    def test_a_uganda_question_naming_us_citizens_is_neither(self) -> None:
+        """Co-occurrence is not a comparison — the over-fire this guard already learned.
+
+        "Do US citizens pay Ugandan tax?" is a fully answerable URA question:
+        refusing it is wrong, and caveating it answers a comparison nobody asked
+        for.
+        """
+        message = "do us citizens pay ugandan tax"
+        self.assertEqual(detect_foreign_jurisdiction(message), "")
+        self.assertEqual(detect_comparison_jurisdiction(message), "")
+
+
 if __name__ == "__main__":
     unittest.main()
