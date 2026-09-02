@@ -62,7 +62,11 @@ fpdf2>=2.8.7
 beautifulsoup4>=4.12.0
 
 # Text-to-Speech (legacy — kept for notebooks only, not production path)
-TTS==0.22.0; python_version < '3.12'
+# Coqui `TTS` is NOT here: it pins pandas<2.0, which cannot coexist with the
+# pandas>=3.0.5 this file and App/backend/requirements.txt now require. It is
+# imported by exactly one offline training script, which already degrades on
+# ImportError, so it lives in requirements-tts-train.txt instead. See that
+# file before installing it.
 gTTS>=2.5.0; python_version >= '3.12'
 pydub==0.25.1
 
@@ -110,8 +114,14 @@ pandera==0.32.1
 ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
 
 # Fine-tuning evaluation
-rouge-score==0.1.2
-nltk==3.10.3
+# rouge-score / nltk are deliberately absent. Nothing imports either one:
+# fine-tuning/scripts/10_evaluate_lora_qwen.py computes ROUGE-L and BLEU-1
+# itself from the standard library. They were pulling nltk, whose
+# PYSEC-2026-3740 path traversal has no fixed release (3.10.3 is both the
+# newest version and, per the advisory text, affected), so carrying them meant
+# formally accepting an unfixable advisory for code that never runs. Removing
+# the vulnerability is strictly better than accepting it; re-add both here if
+# a real ROUGE/BLEU implementation is ever wired up.
 sacrebleu==2.6.0
 
 # Visualization & reporting
