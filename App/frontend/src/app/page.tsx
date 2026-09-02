@@ -816,12 +816,12 @@ export default function Page() {
       'X-Session-ID': getAnalyticsSessionId(),
     });
 
-    const applySyncReply = async () => {
+    const applySyncReply = async (signal = ac.signal) => {
       const sync = await fetch(`${API_URL}/v1/chat`, {
         method: 'POST',
         headers: requestHeaders,
         body: requestBody,
-        signal: ac.signal,
+        signal,
       });
       if (!sync.ok) throw new Error(`API ${sync.status}`);
       const d = await sync.json();
@@ -842,6 +842,23 @@ export default function Page() {
         addTurns([createTurn('assistant', content, meta)]);
       }
       trackChatReceived(Date.now() - t0, (d.sources?.length ?? 0) > 0);
+    };
+
+    // A browser, proxy, or network can interrupt an otherwise healthy SSE
+    // response. The regular chat endpoint carries the same answer, so retry it
+    // once with a new controller: `ac` may already have timed out or aborted.
+    const recoverFromStreamFailure = async () => {
+      revealQueueRef.current?.stop();
+      revealQueueRef.current = null;
+      const fallbackAbort = new AbortController();
+      streamAbortRef.current = fallbackAbort;
+      const fallbackTimeout = setTimeout(() => fallbackAbort.abort(), 120_000);
+      try {
+        await applySyncReply(fallbackAbort.signal);
+        return true;
+      } finally {
+        clearTimeout(fallbackTimeout);
+      }
     };
 
     try {
@@ -961,20 +978,29 @@ export default function Page() {
       trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
       setChatLiveStatus('URA response ready.');
     } catch {
+      let recovered = false;
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
+      if (!userStoppedRef.current && last?.role === 'assistant' && !last.content.trim()) {
+        try {
+          recovered = await recoverFromStreamFailure();
+        } catch {
+          // The user-facing error below is reserved for failure of both paths.
+        }
+      }
+      const currentLast = useChatStore.getState().chat.at(-1);
       if (userStoppedRef.current) {
-        if (last?.role === 'assistant' && !last.content.trim()) {
+        if (currentLast?.role === 'assistant' && !currentLast.content.trim()) {
           updateLastTurn((t) => ({ ...t, content: 'Stopped.' }));
         }
-      } else if (last?.role === 'assistant' && last?.content === '') {
+      } else if (recovered) {
+        setChatLiveStatus('URA response ready.');
+      } else if (currentLast?.role === 'assistant' && !currentLast.content.trim()) {
         updateLastTurn((t) => ({ ...t, content: 'Sorry, I could not reach the URA knowledge base. Please try again shortly.' }));
-      } else if (!userStoppedRef.current) {
-        addTurns([createTurn('assistant', 'Sorry, I could not reach the URA knowledge base. Please try again shortly.')]);
       }
       if (userStoppedRef.current) {
         setChatLiveStatus('Response stopped.');
-      } else {
+      } else if (!recovered) {
         trackErrorOccurred('chat_fetch_failed');
         setChatLiveStatus('URA response unavailable. Please try again.');
       }
