@@ -115,8 +115,13 @@ class ComparisonScopeCaveatTests(unittest.TestCase):
     reads as an answered comparison (raised on PR #428).
     """
 
-    def test_the_two_detectors_are_complements(self) -> None:
-        """Exactly one of them fires, never both, never neither on these."""
+    def test_the_two_detectors_never_both_fire(self) -> None:
+        """They partition by Uganda-mention, so both firing is impossible.
+
+        Not a full complement: ``detect_comparison_jurisdiction`` additionally
+        requires an actual comparison, so a cross-border trade question is
+        correctly claimed by neither.
+        """
         cases = {
             "What is Uganda's VAT rate compared with Kenya's?": ("", "Kenya"),
             "Is VAT higher in Uganda or Kenya?": ("", "Kenya"),
@@ -127,6 +132,39 @@ class ComparisonScopeCaveatTests(unittest.TestCase):
             with self.subTest(message=message):
                 self.assertEqual(detect_foreign_jurisdiction(message), foreign)
                 self.assertEqual(detect_comparison_jurisdiction(message), comparison)
+
+    def test_naming_a_country_is_not_asking_about_its_tax_system(self) -> None:
+        """Cross-border trade questions must keep their clean answer.
+
+        Caught by probing the first version of this guard, which keyed on
+        "Uganda AND another country" alone. Every one of these is a legitimate,
+        fully answerable URA question that happens to name a second country —
+        and appending "I can't give you Kenya's side of that comparison" to an
+        import-duty answer answers a question the taxpayer never asked. These
+        are far more common than actual comparisons, so a false positive here
+        costs more than the gap it was meant to close.
+        """
+        for message in (
+            "I import goods from Kenya to Uganda — what customs duty do I pay?",
+            "What is the withholding tax in Uganda on a payment to a Kenyan supplier?",
+            "I am a Ugandan resident with rental income from a house in Kenya. Do I declare it?",
+            "I import more than 100 units from Kenya into Uganda, what do I pay?",
+            "My Ugandan company exports coffee to Kenya. Is that zero-rated?",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(detect_comparison_jurisdiction(message), "")
+
+    def test_actual_comparisons_are_still_caught(self) -> None:
+        for message, country in (
+            ("What is Uganda's VAT rate compared with Kenya's?", "Kenya"),
+            ("Is VAT higher in Uganda or Kenya?", "Kenya"),
+            ("Is corporation tax higher in Uganda or Rwanda?", "Rwanda"),
+            ("Uganda vs Kenya VAT", "Kenya"),
+            ("What is the difference between Uganda and Kenya VAT?", "Kenya"),
+            ("Is it cheaper to register a company in Uganda or Rwanda?", "Rwanda"),
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(detect_comparison_jurisdiction(message), country)
 
     def test_a_comparison_answer_gains_the_caveat(self) -> None:
         result = {"reply": "**The standard VAT rate in Uganda is 18%**.", "retrieval_mode": "calculator"}

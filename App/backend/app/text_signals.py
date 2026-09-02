@@ -337,6 +337,24 @@ def detect_foreign_jurisdiction(message: str) -> str:
     return ""
 
 
+# Naming another country is not the same as asking about its tax system. Most
+# messages that mention one are ordinary cross-border URA questions — importing
+# from Kenya, paying a Kenyan supplier, declaring foreign rental income — and
+# they are fully answerable. Telling those taxpayers "I can't give you Kenya's
+# side of that comparison" answers a question they did not ask. So the caveat
+# needs a comparison to actually be present, not just a second country.
+#
+# Comparative adjectives only, never bare "more"/"less": "I import more than
+# 100 units from Kenya" is a quantity, not a comparison.
+_COMPARISON_MARKER_RE = re.compile(
+    r"\bcompar(?:e[sd]?|ing|ison|ative)\b"
+    r"|\bversus\b|\bvs\.?\b"
+    r"|\bdifference\s+between\b"
+    r"|\b(higher|lower|cheaper|greater|bigger|smaller|better|worse)\b",
+    re.IGNORECASE,
+)
+
+
 def detect_comparison_jurisdiction(message: str) -> str:
     """Name the foreign jurisdiction a Uganda question also asks about, or ''.
 
@@ -346,9 +364,15 @@ def detect_comparison_jurisdiction(message: str) -> str:
     reply hands over Uganda's figure and never mentions that the country the
     taxpayer wanted to compare against was not addressed at all, which reads
     as though the comparison had been answered.
+
+    Requires an explicit comparison, not merely a second country. Cross-border
+    trade questions name other countries constantly and are answerable in full;
+    caveating those would answer a question the taxpayer never asked.
     """
     text = message or ""
     if not text.strip() or not _UGANDA_RE.search(text):
+        return ""
+    if not _COMPARISON_MARKER_RE.search(text):
         return ""
     for name, pattern in _FOREIGN_JURISDICTION_RES:
         if pattern.search(text):
