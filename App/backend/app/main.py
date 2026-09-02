@@ -1986,7 +1986,11 @@ def trigger_indexing(
 
     # Re-initialise the retriever so it picks up the new collection
     model._retriever_ready = model._retriever.initialize()
-    stats["retrieval_mode"] = "hybrid" if model._retriever_ready else "keyword"
+    # Same resolver as /ready and the chat path: a reindex that leaves the
+    # retriever sparse-only must not report "hybrid" either.
+    stats["retrieval_mode"] = active_retrieval_mode(
+        model._retriever, ready=model._retriever_ready
+    )
 
     return stats
 
