@@ -12,7 +12,12 @@ from unittest.mock import patch
 from fastapi import HTTPException, Request
 
 from app.auth.dependencies import current_user, optional_user
-from app.main import _validate_production_env
+from app.flags import flags
+from app.main import (
+    _apply_persisted_flag_overrides,
+    _initialize_analytics_database,
+    _validate_production_env,
+)
 
 
 SECURE_PROD_ENV = {
@@ -109,6 +114,35 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_production_validation_accepts_secure_baseline(self) -> None:
         with patch.dict(os.environ, self.secure_env, clear=True):
             _validate_production_env()
+
+    def test_production_rejects_persisted_disabled_safety_flag(self) -> None:
+        """Overrides load after environment validation, so they need their own gate."""
+        with patch.dict(os.environ, self.secure_env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _apply_persisted_flag_overrides({"auth_required": False})
+
+        self.assertIn("Persisted flag override", str(raised.exception))
+        self.assertIn("auth_required", str(raised.exception))
+
+    def test_production_allows_enabled_or_non_safety_persisted_flags(self) -> None:
+        try:
+            with patch.dict(os.environ, self.secure_env, clear=True):
+                _apply_persisted_flag_overrides(
+                    {"auth_required": True, "ticket_queue": True, "hyde": False}
+                )
+        finally:
+            for name in ("auth_required", "ticket_queue", "hyde"):
+                flags.clear(name)
+
+    def test_production_refuses_to_start_without_analytics_database(self) -> None:
+        with (
+            patch.dict(os.environ, self.secure_env, clear=True),
+            patch("app.main.db.init_db", side_effect=RuntimeError("database unavailable")),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            _initialize_analytics_database()
+
+        self.assertIn("analytics database is unavailable", str(raised.exception))
 
     def test_external_qdrant_required_in_prod(self) -> None:
         # P0-4: an in-container / localhost Qdrant is not durable.
