@@ -669,6 +669,16 @@ _RATE_ASK_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A rate table answers for a bounded period. A calendar year in a rate
+# question is therefore meaningful even though it is not, on its own, an
+# unambiguous Ugandan fiscal year. Keep this separate from ``extract_amounts``:
+# a year is never a UGX amount, but the service needs to know when a taxpayer
+# is asking beyond the dates covered by our tables.
+_RATE_CALENDAR_YEAR_RE = re.compile(
+    r"(?<!\d)(?P<start>(?:19|20)\d{2})"
+    r"(?:\s*[-/]\s*(?:(?P<end_century>19|20)?(?P<end>\d{2})))?(?!\d)"
+)
+
 # Taxpayers asking where the tax-free line sits almost never say "rate" or
 # "threshold" — they ask "how much of my salary is tax free?" or "at what
 # salary do I start paying PAYE?". Those are rate-table questions, and without
@@ -754,6 +764,24 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
                 return RatePlan(tax_type="rental_tax_individual")
             return plan
     return None
+
+
+def rate_lookup_calendar_years(message: str) -> tuple[int, ...]:
+    """Calendar years explicitly named in a prospective rate question.
+
+    This helper does not decide which fiscal-year table applies — a bare
+    calendar year can cross two Ugandan fiscal years. It only lets the service
+    refuse to project a rate beyond the latest official table instead of
+    silently substituting today's figure for a future one.
+    """
+    years: list[int] = []
+    for match in _RATE_CALENDAR_YEAR_RE.finditer(message or ""):
+        start = int(match.group("start"))
+        years.append(start)
+        end = match.group("end")
+        if end:
+            years.append(int(f"{match.group('end_century') or str(start)[:2]}{end}"))
+    return tuple(years)
 
 
 def _pct(rate: object) -> str:

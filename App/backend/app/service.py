@@ -64,6 +64,7 @@ from .calculator_router import (
     format_calc_reply,
     format_rate_reply,
     plan_calculation,
+    rate_lookup_calendar_years,
     plan_rate_lookup,
 )
 from .claim_verifier import verify_claims
@@ -4253,13 +4254,68 @@ class ChatModel:
         if rate_plan is None:
             return None
         try:
-            from .tax.tables import get_table  # noqa: PLC0415
+            from .tax.tables import get_table, list_fiscal_years  # noqa: PLC0415
             from .tools.rates import _authority_payload  # noqa: PLC0415
 
             authority_ok, _status = _authority_payload()
             if not authority_ok:
                 logger.info("rate fast path skipped: authority manifest not fresh")
                 return None
+
+            # Do not turn a future-date question into a claim about today.
+            # ``get_table()`` intentionally resolves to the in-force table;
+            # using it unconditionally here made "What will the VAT rate be
+            # in 2031?" answer with the FY2026-27 rate. Calendar years do not
+            # identify one FY precisely, but a year beyond every loaded table
+            # is unambiguously unsupported and must fail closed.
+            all_tables = [get_table(fiscal_year) for fiscal_year in list_fiscal_years()]
+            covered_from = min(table.effective_from.year for table in all_tables)
+            covered_to = max(
+                (table.effective_to or table.effective_from).year for table in all_tables
+            )
+            requested_years = set(rate_lookup_calendar_years(message))
+            requested_years.update(rate_lookup_calendar_years(rewritten))
+            unsupported_years = sorted(
+                year for year in requested_years if year < covered_from or year > covered_to
+            )
+            if unsupported_years:
+                latest = max(
+                    all_tables,
+                    key=lambda table: table.effective_to or table.effective_from,
+                )
+                requested = ", ".join(str(year) for year in unsupported_years)
+                last_covered_day = latest.effective_to or latest.effective_from
+                latest_date = f"{last_covered_day.day} {last_covered_day:%B %Y}"
+                reply_text = (
+                    f"I do not have an official URA rate table for {requested}. "
+                    f"The latest table I can confirm is {latest.fiscal_year}, through {latest_date}. "
+                    "Tax rates can change, so I should not use the current rate as a prediction. "
+                    "Please check the later gazetted law or URA guidance when it is available."
+                )
+                return {
+                    "reply": self._finalize_reply(reply_text),
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "abstained",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "tool_specialist",
+                    "handoff": None,
+                    "response_judge": {
+                        "decision": "approve",
+                        "final_decision": "approve",
+                        "applied_revision": False,
+                        "reasons": ["requested rate period is outside the official rate tables"],
+                        "confidence_band": "high",
+                    },
+                    "next_actions": [],
+                    "ticket_id": "",
+                }
+
             reply_text, next_actions = format_rate_reply(rate_plan, get_table())
         except Exception:
             logger.exception("rate lookup fast path failed")

@@ -9,6 +9,8 @@ import uuid
 from unittest.mock import patch
 
 from app.calculator_router import format_rate_reply, plan_rate_lookup
+from app.guardrails import OutputGuard
+from app.service import ChatModel
 from app.tax.tables import get_table as get_table_in_force
 
 
@@ -53,6 +55,41 @@ class PlanRateLookupTests(unittest.TestCase):
         # A table compiled ahead of the gazetted Act must say so in the
         # reply itself, not only in the tool payload.
         self.assertEqual("provisional" in reply, not current.confirmed)
+
+
+class RateLookupTemporalScopeTests(unittest.TestCase):
+    """A rate table may report what it covers, never what it predicts."""
+
+    def setUp(self) -> None:
+        self.model = ChatModel.__new__(ChatModel)
+        self.model._output_guard = OutputGuard()
+        self.model.name = "test"
+
+    @patch("app.tools.rates._authority_payload", return_value=(True, {}))
+    def test_future_rate_outside_loaded_tables_is_refused(self, _authority: object) -> None:
+        result = self.model._maybe_handle_rate_lookup(
+            message="What will Uganda's VAT rate be in 2031?",
+            rewritten="",
+            thread_id="temporal-rate-test",
+            locale="en",
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["retrieval_mode"], "abstained")
+        self.assertIn("2031", result["reply"])
+        self.assertIn("FY2026-27", result["reply"])
+        self.assertNotIn("18%", result["reply"])
+
+    @patch("app.tools.rates._authority_payload", return_value=(True, {}))
+    def test_current_rate_question_still_answers_from_the_table(self, _authority: object) -> None:
+        result = self.model._maybe_handle_rate_lookup(
+            message="What is the current VAT rate in Uganda?",
+            rewritten="",
+            thread_id="current-rate-test",
+            locale="en",
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["retrieval_mode"], "calculator")
+        self.assertIn("18%", result["reply"])
 
 
 class GroundedRevisionDigitTests(unittest.TestCase):

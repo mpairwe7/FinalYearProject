@@ -13,6 +13,7 @@ from app.calculator_router import (
     extract_amounts,
     parse_ugx_amount,
     plan_calculation,
+    rate_lookup_calendar_years,
     plan_rate_lookup,
 )
 from app.workflows.slots import validate_slot
@@ -370,6 +371,16 @@ class FigureLookupIsNotACalculationTests(unittest.TestCase):
                 plan = plan_calculation(message)
                 self.assertIsNotNone(plan, "this is a computation, not a lookup")
                 self.assertEqual(plan.tool, tool)
+
+
+class RateLookupCalendarYearTests(unittest.TestCase):
+    def test_extracts_explicit_years_without_treating_them_as_amounts(self) -> None:
+        self.assertEqual(rate_lookup_calendar_years("What will Uganda's VAT rate be in 2031?"), (2031,))
+        self.assertEqual(
+            rate_lookup_calendar_years("Compare FY2025-26 with FY2026-27 PAYE rates"),
+            (2025, 2026, 2026, 2027),
+        )
+        self.assertEqual(rate_lookup_calendar_years("What is the VAT rate?"), ())
 
 
 class SalaryThresholdIsARateLookupTests(unittest.TestCase):
