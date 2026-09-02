@@ -202,7 +202,16 @@ _OBLIGATION_RE = re.compile(
 # The premise must itself mention VAT. "My business is registered, do I have to
 # register for VAT?" states an unrelated registration and then asks the genuine
 # question, so a VAT-less premise must not suppress the check.
-_REGISTERED_FOR_VAT = r"(?:vat[-\s]?registered\b|registered\s+for\s+vat\b)"
+# The same two spellings `_VAT_WORD_RE` accepts. `_maybe_handle_calculator`
+# falls back to `plan_calculation(rewritten)`, and the rewriter expands
+# abbreviations — "registered for vat" becomes "registered for Value Added Tax
+# (VAT)". Matching only the short form let the premise guard pass on the raw
+# message and then be bypassed entirely on the rewritten one, which is how this
+# reached production green: every unit test asked with the raw wording.
+_VAT_TOKEN = r"(?:v\.?a\.?t\.?|value\s+added\s+tax)"
+_REGISTERED_FOR_VAT = (
+    rf"(?:{_VAT_TOKEN}[-\s]?registered\b|registered\s+for\s+{_VAT_TOKEN}\b)"
+)
 _ALREADY_REGISTERED_RE = re.compile(
     r"\b(?:i'?m|we'?re)\s+(?:already\s+|now\s+)?" + _REGISTERED_FOR_VAT
     # Possessive subjects run to several words — "my small business is
