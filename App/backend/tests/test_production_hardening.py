@@ -130,9 +130,30 @@ class ProductionHardeningTests(unittest.TestCase):
                 _apply_persisted_flag_overrides(
                     {"auth_required": True, "ticket_queue": True, "hyde": False}
                 )
+                # Surviving the gate is only half the contract: the
+                # overrides still have to reach the registry.
+                self.assertTrue(flags.is_enabled("auth_required"))
+                self.assertTrue(flags.is_enabled("ticket_queue"))
+                self.assertFalse(flags.is_enabled("hyde"))
         finally:
             for name in ("auth_required", "ticket_queue", "hyde"):
                 flags.clear(name)
+
+    def test_production_refuses_to_start_when_overrides_are_unreadable(self) -> None:
+        """An unreadable override table is a persistence failure, not an empty set."""
+        with (
+            patch.dict(os.environ, self.secure_env, clear=True),
+            patch("app.main.db.init_db"),
+            patch("app.main._should_seed", return_value=False),
+            patch(
+                "app.main.db.load_flag_overrides",
+                side_effect=RuntimeError("flag_overrides unreadable"),
+            ),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            _initialize_analytics_database()
+
+        self.assertIn("analytics database is unavailable", str(raised.exception))
 
     def test_production_refuses_to_start_without_analytics_database(self) -> None:
         with (

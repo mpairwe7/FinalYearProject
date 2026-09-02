@@ -1679,11 +1679,17 @@ def list_ticket_viewers(ticket_id: str, max_age: float = PRESENCE_TTL_SECONDS) -
 
 
 def load_flag_overrides() -> dict[str, bool]:
+    """Durable flag overrides, propagating a failure to read them.
+
+    A query error here is a persistence failure, not an empty override
+    set.  Returning ``{}`` made the two indistinguishable, so startup
+    replayed nothing and still reported success — a production replica
+    whose override state was unreadable looked exactly like one that had
+    no overrides.  The Postgres backend already propagates; both must
+    fail closed the same way.
+    """
     conn = _get_connection()
-    try:
-        rows = conn.execute("SELECT name, enabled FROM flag_overrides").fetchall()
-    except Exception:
-        return {}
+    rows = conn.execute("SELECT name, enabled FROM flag_overrides").fetchall()
     out: dict[str, bool] = {}
     for row in rows:
         name = str(row["name"] if not isinstance(row, tuple) else row[0])
