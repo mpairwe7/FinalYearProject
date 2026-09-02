@@ -477,3 +477,43 @@ class SalaryThresholdIsARateLookupTests(unittest.TestCase):
         """A stray ``|`` here would route every message to the PAYE bands."""
         self.assertIsNone(_PAYE_THRESHOLD_ASK_RE.search(""))
         self.assertIsNone(_PAYE_THRESHOLD_ASK_RE.search("hello"))
+
+
+class VatRegistrationScopeTests(unittest.TestCase):
+    """The registration check must own only questions *about* registering.
+
+    Measured against the live Space (issue #430): "my business is registered
+    for vat, do i have to use efris" returned the turnover-elicitation
+    workflow.  "vat" and "registered" co-occurred and an obligation word
+    appeared somewhere in the sentence, which was the whole gate — so a
+    declarative premise plus a question about a different obligation was
+    indistinguishable from "must I register?".
+    """
+
+    def test_an_already_registered_premise_does_not_claim_the_question(self) -> None:
+        for message in (
+            "my business is registered for vat, do i have to use efris",
+            "i am registered for vat, do i need to file monthly returns",
+            "i'm vat registered, what is efris",
+            "we are already registered for vat, must we issue e-invoices",
+            "our company has been registered for vat, do we need a tax agent",
+        ):
+            with self.subTest(message=message):
+                plan = plan_calculation(message)
+                if plan is not None:
+                    self.assertNotEqual(plan.tool, "check_vat_registration")
+
+    def test_genuine_registration_questions_still_route(self) -> None:
+        """The premise guard keys on subject-then-copula, so a question that
+        merely contains "registered" is untouched."""
+        for message in (
+            "do i have to register for vat",
+            "must i register for vat if my turnover is 200m",
+            "am i required to be registered for vat",
+            "should my company register for vat",
+            "when do i need to register for vat",
+        ):
+            with self.subTest(message=message):
+                plan = plan_calculation(message)
+                self.assertIsNotNone(plan, message)
+                self.assertEqual(plan.tool, "check_vat_registration")
