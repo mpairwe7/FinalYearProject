@@ -40,7 +40,7 @@ Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `ap
 ```bash
 source configs/prototype.env   # optional demo defaults
 PYTHONPATH=App/backend python3 -m pytest App/backend/tests tests/agents tests/chaos -q
-cd App/frontend && bun test
+cd App/frontend && bun run test
 python3 -m app.freshness --check
 python3 evals/export_preferences.py
 bash scripts/prototype.sh

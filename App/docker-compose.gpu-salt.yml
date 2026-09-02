@@ -15,7 +15,8 @@
 # docs/runbooks/salt-speech-backends.md.
 #
 #   cd App && GPU_ID=2 docker compose \
-#     -f docker-compose.yml -f docker-compose.local-sunflower.yml \
+#     -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+#     -f docker-compose.local-sunflower.yml \
 #     -f docker-compose.gpu-salt.yml up -d --build
 services:
   api:
@@ -35,6 +36,14 @@ services:
       # ~37s. Cross-encoder reranking is exactly the small-batch GPU work a
       # card this size absorbs for free next to vLLM.
       - RERANKER_DEVICE=${RERANKER_DEVICE:-cuda:0}
+      # Pin this GPU profile to the staged local Qdrant alias. The local
+      # retrieval overlay supplies the indexer and persistent index state;
+      # repeating the serving values here makes an accidental Vectorize
+      # selection impossible even if Cloudflare credentials are in .env.
+      - QDRANT_ENABLED=true
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=ura_knowledge_base_jsonl_active
+      - DENSE_FALLBACK_BACKEND=none
       # Everything this stack can serve from a locally cached model, it does:
       # ASR is Whisper-SALT and non-English TTS is Spark-TTS-SALT (both baked
       # in above, both on the GPU), and retrieval-time translation runs as
@@ -70,7 +79,38 @@ services:
     deploy:
       resources:
         reservations:
-          devices:
+          # The base profile reserves every GPU. Replace—not append to—that
+          # list, otherwise Docker exposes all cards despite
+          # NVIDIA_VISIBLE_DEVICES and a local-GPU run can contend with other
+          # workloads on the host.
+          devices: !override
+            - driver: nvidia
+              device_ids: ["${GPU_ID:-2}"]
+              capabilities: [gpu]
+
+  # The local-retrieval overlay supplies this one-shot staged indexer. Give it
+  # the same CUDA-capable image and one visible card so a first corpus build
+  # does not take the CPU-only path before the GPU API can serve it.
+  qdrant-indexer:
+    build:
+      dockerfile: Dockerfile.gpu
+    image: ${DOCKER_IMAGE_API:-app-api}:gpu
+    environment:
+      - RETRIEVER_DENSE_DEVICE=cuda:0
+      - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
+      # Dockerfile.gpu does not set HF_HOME. Without this, the one-shot
+      # indexer downloads bge-m3 under /root and discards it on exit despite
+      # the mounted cache below.
+      - HF_HOME=/app/hf_cache
+      - HF_HUB_OFFLINE=0
+    volumes:
+      - type: bind
+        source: /mnt/nas1/caches/huggingface_cache
+        target: /app/hf_cache
+    deploy:
+      resources:
+        reservations:
+          devices: !override
             - driver: nvidia
               device_ids: ["${GPU_ID:-2}"]
               capabilities: [gpu]
@@ -81,7 +121,9 @@ services:
     deploy:
       resources:
         reservations:
-          devices:
+          # Replace the Sunflower profile's default GPU reservation as well;
+          # otherwise Compose appends it and vLLM can reserve two cards.
+          devices: !override
             - driver: nvidia
               device_ids: ["${GPU_ID:-2}"]
               capabilities: [gpu]

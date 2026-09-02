@@ -69,7 +69,12 @@ Pillow>=10.4
 # entry. It is off by default; see docs/runbooks/salt-speech-backends.md for
 # the checkout + its own requirements.txt (torch/torchaudio/einx/einops/
 # omegaconf/soundfile/soxr) before setting SPARK_TTS_ENABLED=true.
-transformers>=4.46.0
+# Floor is the CVE-2026-9856 fix (path traversal in `save_pretrained()`), not
+# a feature requirement. It was `>=4.46.0`, which both permitted a vulnerable
+# install and contradicted the `sentence-transformers>=6.0.0,<7` above — that
+# line already requires transformers 5.x, so the old floor could never be the
+# version actually resolved.
+transformers>=5.10.0,<6
 torch==2.13.0
 accelerate>=1.2.0
 peft>=0.19.1

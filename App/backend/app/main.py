@@ -85,6 +85,8 @@ from .models import (
     VoiceVisionChatResponse,
 )
 from .query import gate_locale
+from .seed_prototype import seed as _seed_prototype
+from .seed_prototype import should_seed as _should_seed
 from .service import ChatModel, localize_reply
 from .speech_service import (
     SPEECH_ASR_BACKEND,
@@ -347,6 +349,74 @@ def _validate_production_env() -> None:
     logger.info("Production environment validation passed (%d warnings suppressed)", 0)
 
 
+def _apply_persisted_flag_overrides(overrides: dict[str, bool]) -> None:
+    """Replay durable flag overrides without weakening production controls.
+
+    Startup validates environment flags before the analytics database is
+    available. The durable overrides are read immediately afterwards, and an
+    in-memory override wins over the production-on default. A stale ``false``
+    value for a protected control would therefore undo that validation unless
+    it is rejected here.
+    """
+    from .flags import flags as flag_reg
+    from .flags import is_protected
+
+    if (os.getenv("APP_ENV") or "development").lower() == "production":
+        disabled = sorted(
+            name for name, enabled in overrides.items() if is_protected(name) and not enabled
+        )
+        if disabled:
+            message = (
+                "PRODUCTION SAFETY CHECK FAILED — refusing to start. "
+                "Persisted flag override(s) disable protected control(s): "
+                + ", ".join(disabled)
+                + ". Remove the override(s) or set them true before starting."
+            )
+            logger.critical(message)
+            raise SystemExit(message)
+
+    for name, enabled in overrides.items():
+        try:
+            flag_reg.set(name, enabled)
+        except KeyError:
+            # A row for a removed flag has no effect and must not block an
+            # otherwise safe upgrade.
+            continue
+
+
+def _initialize_analytics_database() -> None:
+    """Initialize persistence, failing closed when production storage is unavailable.
+
+    Conversations, tickets, consent receipts, and the audit ledger are all
+    stored through this database. Continuing after a production connection or
+    schema failure would serve requests without the controls production mode
+    claims to enforce.
+    """
+    try:
+        db.init_db()
+        logger.info("Analytics database ready")
+
+        if _should_seed():
+            try:
+                logger.info("prototype seed: %s", _seed_prototype())
+            except Exception:
+                logger.exception("prototype seed skipped")
+        overrides = db.load_flag_overrides()
+    except Exception as exc:
+        logger.exception("Analytics database initialisation failed")
+        if (os.getenv("APP_ENV") or "development").lower() == "production":
+            message = (
+                "PRODUCTION SAFETY CHECK FAILED — refusing to start because the analytics "
+                "database is unavailable. Audit, tenancy, consent, and ticket controls "
+                "cannot run without it."
+            )
+            logger.critical(message)
+            raise SystemExit(message) from exc
+        return
+
+    _apply_persisted_flag_overrides(overrides)
+
+
 # ---------------------------------------------------------------------------
 # Lifespan – replaces deprecated @app.on_event("startup")
 # ---------------------------------------------------------------------------
@@ -458,26 +528,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
 
-    # Initialise analytics database
-    try:
-        db.init_db()
-        logger.info("Analytics database ready")
-        from .seed_prototype import seed as _seed_prototype, should_seed as _should_seed
-
-        if _should_seed():
-            try:
-                logger.info("prototype seed: %s", _seed_prototype())
-            except Exception:
-                logger.exception("prototype seed skipped")
-        from .flags import flags as _flags
-
-        for _name, _on in db.load_flag_overrides().items():
-            try:
-                _flags.set(_name, _on)
-            except KeyError:
-                continue
-    except Exception:
-        logger.exception("Analytics database initialisation failed")
+    # Initialise analytics database. Development can still offer degraded text
+    # chat, while production must not run without its persistence controls.
+    _initialize_analytics_database()
 
     try:
         app.state.model = ChatModel()

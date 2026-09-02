@@ -1626,7 +1626,8 @@ Spark-TTS-SALT baked in, pinned to a single GPU, ngrok-exposed:**
 ```bash
 # From App/
 GPU_ID=2 docker compose \
-  -f docker-compose.yml -f docker-compose.local-sunflower.yml \
+  -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+  -f docker-compose.local-sunflower.yml \
   -f docker-compose.gpu-salt.yml up -d --build
 ```
 
@@ -1636,29 +1637,27 @@ instead of the base `Dockerfile` so Spark-TTS-SALT's BiCodec checkout
 `vllm`) to `${GPU_ID:-2}` instead of whatever the base files default to.
 Override `GPU_ID` to target a different free card.
 
+The command includes `docker-compose.local-retrieval.yml`: it exposes Qdrant
+only on loopback, builds the corpus into the
+`ura_knowledge_base_jsonl_active` alias before the API starts, and disables
+the Cloudflare Vectorize fallback. The API consequently reports
+`retrieval_mode: hybrid` only when it is serving the local dense + BM25 +
+reranker pipeline. The one-shot indexer uses the selected GPU; Qdrant itself
+is CPU-based and persists its data in the local Docker volume.
+
 Both SALT tiers (`Sunbird/asr-whisper-large-v3-salt`,
-`Sunbird/spark-tts-salt`) are on by default and gated on HF — the project's
-existing `HF_TOKEN` already has access. `Dockerfile.gpu` bakes
-`SPARK_TTS_DEVICE=cuda`/`WHISPER_SALT_DEVICE=cuda`, but
-`docker-compose.gpu-salt.yml` overrides both to `cpu`: on a host whose
-NVIDIA driver predates the CUDA generation `torch==2.12.1`'s wheel bundles
-(driver reporting CUDA 12.2 — confirmed on this project's sandbox), `cuda`
-raises `RuntimeError: driver too old` at load instead of degrading
-gracefully, so both tiers are forced into their documented CPU-fallback
-mode rather than disabled. **CPU fallback is slow** — a real non-English
-`/v1/tts` request measured ~2.5–3 minutes end to end (model load + CPU
-generation); size client timeouts accordingly. Full verified run, including
-the driver-mismatch root cause and the exact request timing:
+`Sunbird/spark-tts-salt`) are on by default and gated on HF. The GPU profile
+uses matched CUDA-12.8 PyTorch wheels, so its SALT tiers run on the selected
+GPU instead of taking the older CUDA-13 wheel's CPU fallback. Full verification
+history, including the original mismatch and request timing:
 [`docs/runbooks/salt-speech-backends.md`](../docs/runbooks/salt-speech-backends.md#full-stack-live-verification--gpu-pinned-ngrok-exposed-2026-08-22),
 [`docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`](../docs/traceability/local-gpu-salt-ngrok-2026-08-22.md).
 
-The `bge-m3` dense-retrieval model and reranker are not always present in
-the shared read-only NAS HF cache the base file mounts
-(`HF_HUB_OFFLINE=1`) — when absent, dense retrieval silently falls back to
-Cloudflare Vectorize instead of local Qdrant. `docker-compose.gpu-salt.yml`
-remounts that same NAS path read-write and sets `HF_HUB_OFFLINE=0` for
-`api` only, so the one-time fetch persists to the shared cache for future
-runs instead of re-downloading every time.
+The `bge-m3` dense-retrieval model and reranker are not always present in the
+shared read-only NAS HF cache the base file mounts (`HF_HUB_OFFLINE=1`). The
+GPU profile remounts that same path read-write, allows the one-time fetch, and
+uses the local Qdrant profile's GPU indexer; subsequent starts reuse the
+cached models and the staged Qdrant collection.
 
 **Option C — manual vLLM inference (Qwen3-8B) with full voice pipeline:**
 
