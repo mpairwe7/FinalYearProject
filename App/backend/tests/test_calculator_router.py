@@ -522,7 +522,12 @@ class VatRegistrationScopeTests(unittest.TestCase):
             "our firm has been registered for vat since 2023, must we issue e-invoices",
             "i'm vat registered, what is efris",
         ):
-            for form in (message, rewrite_query(message, history=None)):
+            rewritten = rewrite_query(message, history=None)
+            # Without this the loop can check the abbreviated spelling twice and
+            # prove nothing — which is the exact shape of the blind spot that
+            # let the original bug ship.
+            self.assertIn("value added tax", rewritten.lower(), rewritten)
+            for form in (message, rewritten):
                 with self.subTest(form=form):
                     plan = plan_calculation(form)
                     if plan is not None:
@@ -534,7 +539,9 @@ class VatRegistrationScopeTests(unittest.TestCase):
             "am i required to be registered for vat",
             "my business is registered, do i have to register for vat",
         ):
-            for form in (message, rewrite_query(message, history=None)):
+            rewritten = rewrite_query(message, history=None)
+            self.assertIn("value added tax", rewritten.lower(), rewritten)
+            for form in (message, rewritten):
                 with self.subTest(form=form):
                     plan = plan_calculation(form)
                     self.assertIsNotNone(plan, form)
