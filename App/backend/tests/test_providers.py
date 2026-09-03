@@ -18,7 +18,7 @@ _KEYS = {
     "CLOUDFLARE_API_TOKEN": "cf-token-secret",
     "CF_AIG_GATEWAY": "ura-gw",
     "CF_AIG_TOKEN": "aig-token-secret",
-    "GEMINI_API_KEY": "AIza-secret",
+    "GEMINI_API_KEY": "AIza-secret",  # pragma: allowlist secret
     "VECTORIZE_INDEX": "ura-kb-bge-m3",
 }
 
@@ -86,7 +86,7 @@ class ConfigTest(unittest.TestCase):
         because these are guard conditions rather than failures.
         """
         _clear_keys()
-        os.environ["GEMINI_API_KEY"] = "gemini-key-only"
+        os.environ["GEMINI_API_KEY"] = "gemini-key-only"  # pragma: allowlist secret
         config.get_cloud_settings.cache_clear()
         self.assertFalse(config.is_cloudflare_configured())
         self.assertTrue(config.is_gemini_configured())
@@ -183,7 +183,7 @@ class RelayClientTest(unittest.TestCase):
 
     def setUp(self):
         os.environ["CF_RELAY_BASE_URL"] = "https://relay.example.internal"
-        os.environ["CF_RELAY_SECRET"] = "relay-secret-xyz"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-xyz"  # pragma: allowlist secret
         config.get_cloud_settings.cache_clear()
 
     def tearDown(self):
@@ -258,7 +258,7 @@ class RelayRoutingTest(unittest.TestCase):
     def setUp(self):
         _with_keys()
         os.environ["CF_RELAY_BASE_URL"] = "https://relay.example.internal"
-        os.environ["CF_RELAY_SECRET"] = "relay-secret-xyz"
+        os.environ["CF_RELAY_SECRET"] = "relay-secret-xyz"  # pragma: allowlist secret
         config.get_cloud_settings.cache_clear()
 
     def tearDown(self):
@@ -387,7 +387,7 @@ class R2Test(unittest.TestCase):
     _R2_KEYS = {
         "R2_ACCOUNT_ID": "r2acct",
         "R2_ACCESS_KEY_ID": "r2-access-key",
-        "R2_SECRET_ACCESS_KEY": "r2-secret-key",
+        "R2_SECRET_ACCESS_KEY": "r2-secret-key",  # pragma: allowlist secret
         "R2_BUCKET": "ura-chatbot-test",
     }
 
@@ -1767,6 +1767,44 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
         self.assertIn("\n2. East African", out)
         # the truncation/page-number artifact "5. 2" must not survive
         self.assertNotIn("5. 2", out)
+
+    def test_grounded_revision_follows_citation_rank_not_rrf(self):
+        # Regression: "What services does URA provide?" returned the fallback
+        # led by an unrelated tax-net-register passage. Both hits tie on query
+        # overlap, and score_rrf — the PRE-rerank fusion score — broke the tie
+        # against the reranked order the citations are numbered in, so the [2]
+        # passage displaced the verbatim [1] FAQ match.
+        from app import service
+
+        hits = [
+            {
+                "source": "ura_about_ura_faqs.csv",
+                "text": (
+                    "Question: What services does URA provide?\nAnswer: URA is the "
+                    "central tax and customs authority. Core services include taxpayer "
+                    "registration, domestic tax administration and customs clearance."
+                ),
+                "score_rrf": 40.0,
+            },
+            {
+                "source": "tax_net.json",
+                "text": (
+                    "What mechanisms does URA have to bring unregistered businesses "
+                    "into the tax net?\nURA collaborates with URSB, KCCA and UIA "
+                    "through the Taxpayer Register Expansion Programme to provide a "
+                    "One Stop Centre supporting business formalization."
+                ),
+                "score_rrf": 95.0,
+            },
+        ]
+        out = service.ChatModel._build_grounded_revision(
+            hits, [{"ref": "[1]"}, {"ref": "[2]"}], "What services does URA provide?"
+        )
+        body = out.split("\n\n", 1)[1]
+        self.assertTrue(body.startswith("URA is the central tax and customs authority"))
+        # An unlabelled scraped FAQ chunk carries its question on the first
+        # line; the fallback must answer the user, not ask them something else.
+        self.assertNotIn("What mechanisms does URA have", out)
 
 
 class LugandaTranslationRoutingTest(unittest.TestCase):

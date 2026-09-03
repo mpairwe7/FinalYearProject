@@ -3095,6 +3095,16 @@ class ChatModel:
         if text.lower().startswith("question:") and "\nanswer:" in text.lower():
             parts = re.split(r"\nanswer:\s*", text, maxsplit=1, flags=re.IGNORECASE)
             text = parts[1] if len(parts) == 2 else text
+        else:
+            # Scraped FAQ chunks carry the same question/answer pair without the
+            # "Question:"/"Answer:" labels — just the question on its own first
+            # line. Unstripped, the fallback opens by asking the user a question
+            # instead of answering theirs. Only drop it when a real answer body
+            # follows, so a passage that merely happens to start with a question
+            # keeps all of its text.
+            head, sep, rest = text.partition("\n")
+            if sep and head.rstrip().endswith("?") and len(rest.strip()) >= 40:
+                text = rest.strip()
         return _clean_passage_text(text)
 
     @staticmethod
@@ -3139,7 +3149,14 @@ class ChatModel:
                 "ura_double_taxation_agreements_faqs.csv",
             }:
                 priority -= 8
-            return (overlap + priority + float(hit.get("score_rrf") or 0.0) / 100.0, -idx)
+            # Ties break on the hit's incoming position, never on score_rrf.
+            # `hits` arrives in reranked order — the same order the citations
+            # are numbered in — whereas score_rrf is the pre-rerank fusion
+            # score. Letting it break ties put a passage the reranker had
+            # placed at [2] ahead of the verbatim FAQ match at [1] on
+            # "What services does URA provide?", so the fallback led with a
+            # question about the tax-net register and buried the actual answer.
+            return (overlap + priority, -idx)
 
         def is_near_duplicate(tokens: set[str], seen: set[str]) -> bool:
             if not tokens or not seen:
@@ -3697,11 +3714,18 @@ class ChatModel:
                 decision = "escalate"
                 reasons.append("claim verification found unsupported factual claims")
             elif claim_decision == "revise" and decision != "escalate":
-                decision = "revise"
-                if claim_report.get("uncited_claims"):
-                    reasons.append("claim verification found uncited factual claims")
                 if claim_report.get("unsupported_claims"):
+                    decision = "revise"
                     reasons.append("claim verification found weakly supported factual claims")
+                elif claim_report.get("uncited_claims"):
+                    # Every claim is carried by the retrieved passages and only
+                    # the [N] markers are missing. Discarding a well-grounded
+                    # answer over punctuation costs the user the answer and
+                    # gains nothing, so this mirrors the marker branch above:
+                    # revise only when the grounding is weak as well.
+                    reasons.append("claim verification found uncited factual claims")
+                    if faithfulness_score is not None and faithfulness_score < 0.5:
+                        decision = "revise"
 
         revised_reply = ""
         if decision == "revise":
