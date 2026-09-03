@@ -1791,8 +1791,8 @@ class DeterministicProcedureReplyFormattingTest(unittest.TestCase):
                 "text": (
                     "What mechanisms does URA have to bring unregistered businesses "
                     "into the tax net?\nURA collaborates with URSB, KCCA and UIA "
-                    "through the Taxpayer Register Expansion Programme to provide a "
-                    "One Stop Centre supporting business formalization."
+                    "through the Taxpayer Register Expansion Programme to provide "
+                    "services at a One Stop Centre supporting business formalization."
                 ),
                 "score_rrf": 95.0,
             },

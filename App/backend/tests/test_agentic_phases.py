@@ -166,10 +166,7 @@ class AgenticPhaseTests(unittest.TestCase):
         model = ChatModel.__new__(ChatModel)
         judgment = model._evaluate_response_judge(
             message="What services does URA provide?",
-            reply=(
-                "URA is the central tax and customs authority. Core services include "
-                "taxpayer registration, domestic tax administration and customs."
-            ),
+            reply="URA is the central tax and customs authority.",
             hits=[{"answer": "URA is the central tax and customs authority."}],
             citations=[{"ref": "[1]"}],
             faithfulness_score=1.0,
