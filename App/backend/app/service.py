@@ -5959,8 +5959,12 @@ class ChatModel:
                 escalation_reason=esc_reason,
                 claim_report=claim_report,
             )
-            if claim_report is not None:
-                response_judge["claim_verification"] = claim_report
+            # The report the judge acted on is the draft's; see the identical
+            # note in _apply_output_guards. This branch is the non-streaming
+            # twin of that function and had the same overwrite.
+            draft_claim_report = claim_report
+            if draft_claim_report is not None:
+                response_judge["claim_verification"] = draft_claim_report
             if response_judge["decision"] == "revise" and response_judge.get("revised_reply"):
                 reply = self._output_guard.sanitize(
                     self._output_guard.redact_pii(response_judge["revised_reply"])
@@ -5974,9 +5978,20 @@ class ChatModel:
                     response_judge["confidence_band"] = (
                         "high" if faithfulness_score >= 0.65 else "medium"
                     )
+                if draft_claim_report:
+                    logger.info(
+                        "draft reply revised: decision=%s score=%s unsupported=%s uncited=%s",
+                        draft_claim_report.get("decision"),
+                        draft_claim_report.get("score"),
+                        [
+                            (c.get("text", "")[:120], c.get("support_score"))
+                            for c in (draft_claim_report.get("unsupported_claims") or [])
+                        ],
+                        len(draft_claim_report.get("uncited_claims") or []),
+                    )
                 if citations:
                     claim_report = verify_claims(reply, citations, hits)
-                    response_judge["claim_verification"] = claim_report
+                    response_judge["post_revision_claim_verification"] = claim_report
                     if claim_report.get("decision") == "escalate":
                         response_judge["final_decision"] = "escalate"
                         response_judge.setdefault("reasons", []).append(
