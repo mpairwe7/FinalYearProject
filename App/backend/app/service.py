@@ -1099,6 +1099,12 @@ def _apply_output_guards(
     )
 
     revised = False
+    # The report that DROVE the decision is the draft's. Re-verification below
+    # overwrites `claim_report` with one describing the replacement text, so
+    # without this the surfaced "claim_verification" explains a reply nobody
+    # was judging — it was read as the reason for a revision and sent an
+    # investigation after the wrong condition entirely.
+    draft_claim_report = claim_report
     if response_judge.get("decision") == "revise" and response_judge.get("revised_reply"):
         reply = output_guard.sanitize(output_guard.redact_pii(response_judge["revised_reply"]))
         faith = HybridRetriever.compute_faithfulness(reply, contexts)
@@ -1106,6 +1112,20 @@ def _apply_output_guards(
         response_judge["applied_revision"] = True
         response_judge["final_decision"] = "escalate" if escalate else "approve"
         revised = True
+        # Which claims failed, and by how much. There are no server logs on the
+        # Space or Crane Cloud, so a discarded answer is otherwise unexplainable
+        # after the fact.
+        if draft_claim_report:
+            logger.info(
+                "draft reply revised: decision=%s score=%s unsupported=%s uncited=%s",
+                draft_claim_report.get("decision"),
+                draft_claim_report.get("score"),
+                [
+                    (c.get("text", "")[:120], c.get("support_score"))
+                    for c in (draft_claim_report.get("unsupported_claims") or [])
+                ],
+                len(draft_claim_report.get("uncited_claims") or []),
+            )
         # Re-verify the substituted text so a revision can't smuggle in
         # unsupported claims.
         if citations:
@@ -1135,8 +1155,13 @@ def _apply_output_guards(
         response_judge["withheld_contradicted"] = True
         faith = None
 
-    if claim_report is not None:
-        response_judge["claim_verification"] = claim_report
+    # "claim_verification" is the draft's — the report the judge acted on.
+    # When a revision was substituted, the re-verification of that replacement
+    # is carried alongside it rather than in its place.
+    if draft_claim_report is not None:
+        response_judge["claim_verification"] = draft_claim_report
+    if revised and claim_report is not None and claim_report is not draft_claim_report:
+        response_judge["post_revision_claim_verification"] = claim_report
     response_judge.pop("revised_reply", None)
 
     handoff = existing_handoff

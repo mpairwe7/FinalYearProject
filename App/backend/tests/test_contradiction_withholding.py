@@ -169,3 +169,98 @@ class AnswerLanguageDirectiveTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DraftClaimReportSurvivesRevisionTest(unittest.TestCase):
+    """The surfaced claim report must describe the DRAFT, not its replacement.
+
+    Re-verification after a substitution overwrote ``claim_report``, so
+    ``response_judge.claim_verification`` described the grounded revision — the
+    text nobody was judging. Read as the reason for the revision it points at
+    the wrong condition entirely: a fallback built from verbatim passages has
+    no ``[N]`` markers, so it reports uncited-but-supported claims no matter
+    what was actually wrong with the draft.
+    """
+
+    def _guard(self, draft_report, post_report):
+        model = mock.MagicMock()
+        model._evaluate_response_judge.return_value = {
+            "decision": "revise",
+            "reasons": ["claim verification found weakly supported factual claims"],
+            "revised_reply": "Here's the most relevant guidance: VAT is charged at 18%.",
+        }
+        model._build_handoff_packet.return_value = {"topic": "vat", "priority": "normal"}
+        model._maybe_create_ticket.return_value = ""
+        output_guard = mock.MagicMock()
+        output_guard.should_escalate.return_value = (False, "")
+        output_guard.sanitize.side_effect = lambda t: t
+        output_guard.redact_pii.side_effect = lambda t: t
+        with mock.patch.object(service, "verify_claims", side_effect=[draft_report, post_report]), \
+             mock.patch.object(service.HybridRetriever, "compute_faithfulness", return_value=0.9):
+            return service._apply_output_guards(
+                model,
+                message="What is the VAT rate?",
+                reply="VAT is charged at 18% and refunds take four months. [1]",
+                hits=[{"text": "VAT is charged at 18%.", "source": "vat.csv"}],
+                citations=[{"ref": "[1]", "source": "vat.csv", "passage": "VAT is charged at 18%."}],
+                conversation_history=[],
+                session_id="s1",
+                conversation_id="c1",
+                output_guard=output_guard,
+            )
+
+    def test_the_reported_verification_is_the_drafts(self):
+        draft = {
+            "decision": "revise",
+            "score": 0.5,
+            "unsupported_claims": [{"text": "refunds take four months", "support_score": 0.1}],
+            "uncited_claims": [],
+            "contradicted_claims": [],
+        }
+        post = {
+            "decision": "revise",
+            "score": 1.0,
+            "unsupported_claims": [],
+            "uncited_claims": [{"text": "VAT is charged at 18%.", "support_score": 1.0}],
+            "contradicted_claims": [],
+        }
+        out = self._guard(draft, post)
+        judge = out["response_judge"]
+
+        self.assertTrue(judge["applied_revision"])
+        # The failing claim is still nameable after the substitution.
+        self.assertEqual(
+            judge["claim_verification"]["unsupported_claims"][0]["text"],
+            "refunds take four months",
+        )
+        # The replacement's own re-check is kept alongside, not in its place.
+        self.assertEqual(judge["post_revision_claim_verification"], post)
+
+    def test_an_unrevised_turn_carries_no_post_revision_report(self):
+        report = {
+            "decision": "approve",
+            "score": 1.0,
+            "unsupported_claims": [],
+            "uncited_claims": [],
+            "contradicted_claims": [],
+        }
+        model = mock.MagicMock()
+        model._evaluate_response_judge.return_value = {"decision": "approve", "reasons": []}
+        output_guard = mock.MagicMock()
+        output_guard.should_escalate.return_value = (False, "")
+        with mock.patch.object(service, "verify_claims", return_value=report), \
+             mock.patch.object(service.HybridRetriever, "compute_faithfulness", return_value=0.9):
+            out = service._apply_output_guards(
+                model,
+                message="What is the VAT rate?",
+                reply="VAT is charged at 18%. [1]",
+                hits=[{"text": "VAT is charged at 18%.", "source": "vat.csv"}],
+                citations=[{"ref": "[1]", "source": "vat.csv", "passage": "VAT is charged at 18%."}],
+                conversation_history=[],
+                session_id="s1",
+                conversation_id="c1",
+                output_guard=output_guard,
+            )
+
+        self.assertEqual(out["response_judge"]["claim_verification"], report)
+        self.assertNotIn("post_revision_claim_verification", out["response_judge"])
