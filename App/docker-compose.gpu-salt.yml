@@ -24,6 +24,19 @@ services:
       dockerfile: Dockerfile.gpu
     image: ${DOCKER_IMAGE_API:-app-api}:gpu
     environment:
+      # docker-compose.local-retrieval.yml is an INDEXING profile: it turns the
+      # LLM and the whole speech pipeline off so a corpus rebuild never loads
+      # them. This overlay sits after it in the chain and is the serving
+      # profile, so it has to turn both back on — otherwise `api` comes up with
+      # LLM_ENABLED=false (every answer retrieval-only, vLLM never called
+      # despite running) and SPEECH_ENABLED=false (startup leaves
+      # app.state.speech as None, so get_speech_model raises 503 and neither
+      # SALT tier is ever constructed — /v1/asr and /v1/tts stop serving
+      # entirely rather than degrading). Same reason
+      # the QDRANT_* values below are restated: a preceding overlay's default
+      # is not a safe default for this one.
+      - LLM_ENABLED=true
+      - SPEECH_ENABLED=true
       # cuda:0 — the container sees exactly one card (device_ids below), so
       # index 0 inside is GPU_ID outside. Same convention the base file's
       # RETRIEVER_DENSE_DEVICE already uses.

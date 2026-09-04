@@ -39,9 +39,10 @@ def node_route(state: AgentGraphState) -> NodeResult:
     """Delegate routing to the existing Phase C supervisor."""
     from ..supervisor import supervisor as _supervisor
 
+    has_history = bool(state.conversation_history)
     decision = _supervisor.classify(
         state.rewritten_query or state.query,
-        has_conversation_history=False,
+        has_conversation_history=has_history,
         locale=state.locale,
     )
 

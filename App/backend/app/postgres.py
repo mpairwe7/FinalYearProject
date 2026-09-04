@@ -668,6 +668,34 @@ def get_recent_turns(
     return [{"user_message": r[0], "bot_reply": r[1]} for r in reversed(rows)]
 
 
+def get_conversation_context(
+    session_id: str | None = None,
+    conversation_id: str | None = None,
+    recent_limit: int = 6,
+    max_history: int = 25,
+) -> dict[str, Any]:
+    """Retrieve multi-turn conversation history and build rolling context & summary."""
+    from .context_manager import RollingContextManager, context_manager
+
+    turns = get_recent_turns(
+        session_id=session_id,
+        conversation_id=conversation_id,
+        limit=max_history,
+    )
+    mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
+    ctx = mgr.build_context(
+        turns,
+        conversation_id=conversation_id or session_id or "",
+    )
+    return {
+        "recent_turns": ctx.recent_turns,
+        "context_summary": ctx.context_summary,
+        "active_entities": ctx.active_entities,
+        "total_turns": ctx.total_turns,
+        "all_turns": ctx.all_turns,
+    }
+
+
 def get_conversation_topic(conversation_id: str) -> dict[str, Any] | None:
     pool = _get_pool()
     if pool is None:

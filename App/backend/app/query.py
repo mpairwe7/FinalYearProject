@@ -189,15 +189,17 @@ def normalize(query: str) -> str:
 
 def rewrite_with_history(
     query: str,
-    history: list[dict[str, str]],
+    history: list[dict[str, Any]],
 ) -> str:
-    """Resolve coreferences and elliptical responses using conversation history.
+    """Resolve coreferences and elliptical responses using multi-turn conversation history.
 
     Handles:
     1. Short follow-up answers to assistant prompts (e.g. "individual", "as an individual",
-       "company", "resident", "yes", "monthly") by anchoring to the active task.
-    2. Explicit coreferences and pronouns ("it", "that", "this", "they", "the same").
-    3. Context prepend fallback when the follow-up asks a dependent question.
+       "company", "resident", "yes", "monthly", "50m") by anchoring to the active task.
+    2. Multi-turn pronoun & coreference resolution ("it", "that", "this", "they", "the same")
+       anchored to domain entities across recent turns (not just history[-1]).
+    3. Contextual expansion for dependent follow-up questions ("what is the deadline?",
+       "how much penalty?") by appending or contextualizing with the active topic.
     """
     if not history:
         return query
@@ -206,63 +208,79 @@ def rewrite_with_history(
     if not q:
         return query
 
-    last_turn = history[-1]
+    from .context_manager import extract_conversation_entities, normalize_history_turns
+
+    normalized_history = normalize_history_turns(history)
+    if not normalized_history:
+        return query
+
+    last_turn = normalized_history[-1]
     last_user = last_turn.get("user_message", "")
     last_bot = last_turn.get("bot_reply", "")
     combined_prev = f"{last_user} {last_bot}".lower()
 
+    # Extract multi-turn context entities across history
+    entities = extract_conversation_entities(normalized_history)
+
     # 1. Elliptical answers to TIN registration clarification questions:
-    if re.search(r"\btin\b", combined_prev, re.IGNORECASE) and re.search(
+    if (re.search(r"\btin\b", combined_prev, re.IGNORECASE) or "TIN Registration" in entities.tax_topics) and re.search(
         r"\b(register|registration|get|obtain|apply|application)\b", combined_prev, re.IGNORECASE
     ):
         if re.search(
-            r"^\s*(?:as|for)?\s*(?:an?|the|my)?\s*(?:individuals?|myself|personal|person|sole\s+(?:proprietor|trader))\b",
+            r"^\s*(?:(?:as|for)\s*)?(?:(?:an?|the|my)\s*)?"
+            r"(?:individuals?|myself|personal|person|sole\s+(?:proprietor|trader))\b",
             q,
             re.IGNORECASE,
         ):
             return "How do I register for a TIN as an individual"
         if re.search(
-            r"^\s*(?:as|for)?\s*(?:an?|the|my)?\s*(?:organisations?|organizations?|compan(?:y|ies)|ngos?|partnerships?|business(?:es)?|institution|trusts?|saccos?)\b",
+            r"^\s*(?:(?:as|for)\s*)?(?:(?:an?|the|my)\s*)?"
+            r"(?:organisations?|organizations?|compan(?:y|ies)|ngos?|partnerships?"
+            r"|business(?:es)?|institution|trusts?|saccos?)\b",
             q,
             re.IGNORECASE,
         ):
             return "How do I register for a TIN as an organisation"
 
     # 2. Elliptical answers to PAYE / Salary questions:
-    if re.search(r"\b(paye|salary|gross|net\s*pay|take[-\s]?home)\b", combined_prev, re.IGNORECASE):
-        if re.search(r"^\s*(?:as\s+(?:a\s+)?)?non[-\s]?residents?\b", q, re.IGNORECASE):
+    if (
+        re.search(r"\b(paye|salary|gross|net\s*pay|take[-\s]?home)\b", combined_prev, re.IGNORECASE)
+        or "PAYE (Pay As You Earn)" in entities.tax_topics
+    ):
+        if re.search(r"^\s*(?:(?:and\s+)?(?:what\s+about\s+)?(?:as|for)\s+)?(?:a\s+)?non[-\s]?residents?\b", q, re.IGNORECASE):
             prev_amounts = re.findall(
                 r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?|\b\d+(?:\.\d+)?\s*(?:m|k|million|thousand)\b",
                 last_user,
                 re.IGNORECASE,
-            )
+            ) or entities.amounts
             if prev_amounts:
                 return f"calculate PAYE for a non-resident on {prev_amounts[-1]} gross salary"
             return "calculate PAYE for a non-resident"
-        if re.search(r"^\s*(?:as\s+(?:a\s+)?)?residents?\b", q, re.IGNORECASE):
+        if re.search(r"^\s*(?:(?:and\s+)?(?:what\s+about\s+)?(?:as|for)\s+)?(?:a\s+)?residents?\b", q, re.IGNORECASE):
             prev_amounts = re.findall(
                 r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?|\b\d+(?:\.\d+)?\s*(?:m|k|million|thousand)\b",
                 last_user,
                 re.IGNORECASE,
-            )
+            ) or entities.amounts
             if prev_amounts:
                 return f"calculate PAYE for a resident on {prev_amounts[-1]} gross salary"
             return "calculate PAYE for a resident"
 
-    # 3. Pronoun / coreference resolution
+    # 3. Multi-turn pronoun / coreference resolution
     pronoun_pattern = re.compile(
         r"\b(it|that|this|they|them|those|its|their|the above|the same)\b",
         re.IGNORECASE,
     )
 
     if pronoun_pattern.search(q):
-        # Prefer a concrete entity from the previous user turn. This keeps
-        # follow-ups like "How do I register for it?" anchored to "TIN"
-        # instead of the whole prior assistant answer.
+        # Scan backward from most recent user turn for a concrete domain entity or acronym
         subject = ""
-        abbreviations = re.findall(r"\b[A-Z]{2,10}\b", last_user)
-        if abbreviations:
-            subject = abbreviations[-1]
+        for turn in reversed(normalized_history):
+            u_msg = turn.get("user_message", "")
+            abbreviations = re.findall(r"\b[A-Z]{2,10}\b", u_msg)
+            if abbreviations:
+                subject = abbreviations[-1]
+                break
 
         if subject:
             subject_phrase = _ABBREVIATIONS.get(subject.lower(), subject)
@@ -275,21 +293,32 @@ def rewrite_with_history(
             logger.debug("Query rewritten with user-turn subject (input_length=%d)", len(q))
             return rewritten
 
-        # Fallback: use the first assistant sentence as a broad context hint.
+        # Fallback to active multi-turn tax domain entity if identified
+        if entities.active_subject:
+            rewritten = pronoun_pattern.sub(entities.active_subject, q)
+            logger.debug("Query rewritten with active domain subject '%s'", entities.active_subject)
+            return rewritten
+
+        # Fallback: use the first assistant sentence as a broad context hint
         first_sentence = re.split(r"(?<=[^A-Z])[.!?]\s", last_bot)[0].strip()
         if first_sentence and len(first_sentence) > 10:
             rewritten = f"Regarding '{first_sentence[:100]}': {q}"
             logger.debug("Query rewritten with assistant context (input_length=%d)", len(q))
             return rewritten
 
-    # 4. Short follow-up without pronouns (<= 5 words) where previous turn asked a question
+    # 4. Short follow-up without pronouns (<= 8 words) where previous turn asked a question or established a topic
     words = q.split()
-    if len(words) <= 5 and not re.search(r"\b(hello|hi|hey|thanks|thank you|bye|goodbye)\b", q, re.IGNORECASE):
+    if len(words) <= 8 and not re.search(r"\b(hello|hi|hey|thanks|thank you|bye|goodbye)\b", q, re.IGNORECASE):
         if "?" in last_bot or "please choose" in last_bot.lower() or "choose one" in last_bot.lower():
             for abbrev in ("TIN", "VAT", "PAYE", "EFRIS", "WHT", "CGT", "CIT"):
                 if re.search(rf"\b{abbrev}\b", combined_prev, re.IGNORECASE):
                     expanded = _ABBREVIATIONS.get(abbrev.lower(), abbrev)
                     return f"{expanded} {q}"
+
+        # Dependent questions like "what is the deadline?", "what is the penalty?", "how do I file?"
+        if re.search(r"\b(deadline|due\s+date|penalt(?:y|ies)|how\s+(?:to|do\s+i)\s+file|rates?|threshold|what\s+about|how\s+about)\b", q, re.IGNORECASE):
+            if entities.active_subject and not re.search(rf"\b{re.escape(entities.active_subject)}\b", q, re.IGNORECASE):
+                return f"{q} for {entities.active_subject}"
 
     return q
 

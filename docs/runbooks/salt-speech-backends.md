@@ -114,6 +114,21 @@ to begin with — the ids work despite it, not because of it).
 
 ### Faster inference in production (2026-08-20)
 
+> **Superseded 2026-09-04 — the driver was never the ceiling.** Everything
+> below is accurate about `torch==2.12.1`, but its conclusion ("the fix is a
+> newer NVIDIA driver on the host … not a build-time flag") is wrong, and the
+> torch downgrade it rejects is what actually shipped. CUDA *minor-version
+> compatibility* means any cu12x wheel runs on any >=525 driver, so pinning a
+> matched `torch`/`torchaudio` **2.11.0+cu128** pair in `Dockerfile.gpu` (GPU
+> image only — `requirements.txt` is untouched) fixes it with no driver
+> change. Measured in the built image on this same host:
+> `torch 2.11.0+cu128`, `cuda_available True`, `NVIDIA RTX A6000`. Both SALT
+> tiers now load on `cuda:0`; see the 2026-09-04 section at the end of this
+> file for end-to-end numbers. The `docker run … torch.cuda.is_available()`
+> check below is still the right thing to run against a new host — only its
+> "if False, upgrade the driver" remedy is superseded.
+
+
 The in-process path (`_transcribe_whisper_salt` in `speech_service.py`) is
 not the bottleneck — it already does the right things (`torch.no_grad()`,
 `float16` on CUDA, correct device placement, now also explicit
@@ -276,7 +291,20 @@ export SPARK_TTS_REPO_DIR=/opt/spark-tts
 normal `huggingface_hub.snapshot_download` at load time — no extra step
 needed for that half.
 
-### The torchaudio/CUDA mismatch, and why `Dockerfile.gpu` deletes a file to fix it
+### HISTORICAL — the torchaudio/CUDA mismatch and its old `.so` fix
+
+> **Superseded 2026-09-04 — `Dockerfile.gpu` no longer deletes that file.**
+> The mismatch analysed below is real, but it only arises when torchaudio is
+> installed *unpinned* next to `torch==2.12.1`. `Dockerfile.gpu` now strips
+> requirements.txt's torch line and installs `torch==2.11.0`/
+> `torchaudio==2.11.0` together from the cu128 index, so both halves come from
+> one source at one CUDA generation and there is nothing to reconcile. The
+> `rm … _torchaudio*.so` line is gone; verified in the current image that the
+> compiled extension is present and `sparktts.models.bicodec` /
+> `BiCodecTokenizer` both import cleanly with it in place. Keep this section
+> for the failure signature — `OSError: libcudart.so.12` or "PyTorch and
+> TorchAudio were compiled with different CUDA versions" means something has
+> reintroduced an unpinned torchaudio.
 
 Only relevant if you install sparktts's dependencies *alongside* this
 project's own pinned `torch==2.12.1` instead of following spark-tts's own
@@ -464,3 +492,57 @@ verified in isolation as in the two runs above. Full record, including the
 new `App/docker-compose.gpu-salt.yml` overlay and a real (not dummy-token)
 Spark-TTS-SALT `/v1/tts` request's timing under CPU fallback:
 `App/docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`.
+
+### Both SALT tiers on GPU, end to end (2026-09-04)
+
+The CPU fallback the 2026-08-22 run accepted is gone. With `Dockerfile.gpu`'s
+matched cu128 torch/torchaudio pin, `docker-compose.gpu-salt.yml` runs
+Whisper-SALT, Spark-TTS-SALT, `bge-m3` and the reranker all on the pinned
+card. Brought up on GPU 7 and exercised over the public tunnel; full record in
+`App/docs/traceability/local-gpu-salt-ngrok-2026-09-04.md`.
+
+Container log at startup — every tier on `cuda:0`, nothing degraded:
+
+```text
+HybridRetriever ready (… dense_device=cuda:0 rerank=True reranker_device=cuda:0)
+ChatModel initialised – hybrid (Qdrant) mode, LLM (Sunbird/Sunflower-14B-FP8) gen
+Loading Whisper-SALT 'Sunbird/asr-whisper-large-v3-salt' (device=cuda:0)
+Loading Spark-TTS-SALT 'Sunbird/spark-tts-salt' (device=cuda:0)
+SpeechModel warm-up: {'en': 'edge_tts', 'lg': 'spark_tts_salt', 'sw': 'spark_tts_salt'}
+```
+
+Measured through ngrok, warm:
+
+| Call | Backend | Latency |
+| --- | --- | --- |
+| `/v1/tts` Luganda, 2.7s of audio | `spark_tts_salt` (GPU) | **4.3s** (was ~150s on CPU) |
+| `/v1/tts` English | `edge_tts` | 0.4s |
+| `/v1/asr` Luganda, 2.7s of audio | `whisper_salt` (GPU) | **0.72s**, RTF 0.27 |
+| `/v1/chat` hybrid-retrieval answer | Sunflower-14B-FP8 | 2.6–3.8s |
+
+**A TTS→ASR round trip closes cleanly**, which is the first evidence in this
+file that Spark-TTS-SALT's Luganda output is intelligible rather than merely
+well-formed — the perceptual gap flagged under "Still not done" is now
+partially closed by machine transcription, though still not by a human
+listener. Synthesized `"Omusolo gwa EFRIS gusasulwa gutya?"`, fed the
+resulting PCM straight back to Whisper-SALT, and got
+`"Omusolo gwa eifalisi kusasulwa gutya?"` with `language: "lg"` — the only
+drift is the acronym EFRIS coming back phonetically, which is what a speaker
+saying it aloud sounds like.
+
+**Calling `/v1/asr` correctly.** It is not a multipart file upload — the
+audio goes in the **request body** and `sample_rate`/`language` are **query
+parameters**. The decoder sniffs magic bytes, so a bare WAV body is fine
+(verified: byte-identical transcripts from `--data-binary @speech.wav` and
+from raw PCM). What breaks is wrapping it — a `-F file=@speech.wav` multipart
+envelope makes the boundary lines and part headers get read as audio, and
+Whisper hallucinates a fluent sentence out of the noise instead of failing:
+
+```bash
+curl -X POST "$BASE/api/v1/asr?language=lg" \
+  -H 'Content-Type: audio/wav' --data-binary @speech.wav
+```
+
+`language` is genuinely optional — auto-detect returned the same transcript.
+Note `/v1/tts` returns **MP3** for English (`edge_tts`, 24 kHz) and **RIFF
+WAV** for the SALT locales (16 kHz); don't assume one container for both.
