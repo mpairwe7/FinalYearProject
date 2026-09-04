@@ -34,6 +34,8 @@ BASE_URL = "http://127.0.0.1:8083"
 
 def http_post(path: str, payload: dict[str, Any], timeout: float = 60.0) -> tuple[int, dict[str, Any], float]:
     url = f"{BASE_URL}{path}"
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"Invalid URL scheme: {url}")
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -43,7 +45,7 @@ def http_post(path: str, payload: dict[str, Any], timeout: float = 60.0) -> tupl
     )
     t0 = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
             return resp.status, data, (time.perf_counter() - t0) * 1000
     except urllib.error.HTTPError as err:
@@ -59,10 +61,12 @@ def http_post(path: str, payload: dict[str, Any], timeout: float = 60.0) -> tupl
 
 def http_get(path: str, timeout: float = 10.0) -> tuple[int, dict[str, Any], float]:
     url = f"{BASE_URL}{path}"
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"Invalid URL scheme: {url}")
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     t0 = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
             return resp.status, data, (time.perf_counter() - t0) * 1000
     except Exception as exc:
@@ -108,12 +112,15 @@ def run_benchmark() -> dict[str, Any]:
         "tool_choice": "required",
     }
     t0_vllm = time.perf_counter()
+    vllm_url = "http://127.0.0.1:8011/v1/chat/completions"
+    if not vllm_url.startswith(("http://", "https://")):
+        raise ValueError(f"Invalid URL scheme: {vllm_url}")
     req_vllm = urllib.request.Request(
-        "http://127.0.0.1:8011/v1/chat/completions",
+        vllm_url,
         data=json.dumps(vllm_payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req_vllm, timeout=30) as resp:
+    with urllib.request.urlopen(req_vllm, timeout=30) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         vllm_data = json.loads(resp.read().decode("utf-8"))
         lat_vllm = (time.perf_counter() - t0_vllm) * 1000
         tc = vllm_data["choices"][0]["message"].get("tool_calls", [])
