@@ -56,3 +56,53 @@ class OutputGuardSanitizerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GroundingWarningLocaleTests(unittest.TestCase):
+    """The low-faithfulness disclaimer is appended to the user's own reply.
+
+    It was English-only, so a Luganda or Kiswahili answer that tripped the
+    grounding threshold got an English paragraph stapled to the end of it.
+    """
+
+    # Deliberately unrelated to the answer so faithfulness is low and the
+    # disclaimer actually fires.
+    CONTEXTS = ["The VAT registration threshold in Uganda is 150 million shillings."]
+    ANSWER = "Omusolo gwa EFRIS gusasulwa buli mwezi."
+
+    def _warned(self, locale: str) -> str:
+        result = OutputGuard.check_grounding(
+            self.ANSWER, self.CONTEXTS, threshold=0.99, locale=locale
+        )
+        self.assertIn("low_faithfulness", result.flags)
+        return result.sanitized_text
+
+    def test_luganda_reply_gets_a_luganda_disclaimer(self) -> None:
+        text = self._warned("lg")
+        self.assertIn("Okulabula", text)
+        self.assertNotIn("may not be fully supported", text)
+
+    def test_kiswahili_reply_gets_a_kiswahili_disclaimer(self) -> None:
+        text = self._warned("sw")
+        self.assertIn("Tahadhari", text)
+        self.assertNotIn("may not be fully supported", text)
+
+    def test_english_and_unknown_locales_keep_the_english_disclaimer(self) -> None:
+        for locale in ("en", "fr", ""):
+            with self.subTest(locale=locale):
+                self.assertIn("may not be fully supported", self._warned(locale))
+
+    def test_every_disclaimer_points_at_the_official_source(self) -> None:
+        for locale in OutputGuard._GROUNDING_WARNINGS:
+            with self.subTest(locale=locale):
+                self.assertIn("https://ura.go.ug", self._warned(locale))
+
+    def test_well_grounded_answer_gets_no_disclaimer_in_any_locale(self) -> None:
+        grounded = self.CONTEXTS[0]
+        for locale in ("en", "lg", "sw"):
+            with self.subTest(locale=locale):
+                result = OutputGuard.check_grounding(
+                    grounded, self.CONTEXTS, threshold=0.3, locale=locale
+                )
+                self.assertEqual(result.sanitized_text, grounded)
+                self.assertEqual(result.flags, [])

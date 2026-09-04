@@ -38,6 +38,8 @@ class AgentGraphState:
     rewritten_query: str = ""
     locale: str = "en"
     top_k: int = 4
+    conversation_history: list[dict[str, Any]] = field(default_factory=list)
+    context_summary: str = ""
 
     # -- Auth --
     tenant_id: str = "default"

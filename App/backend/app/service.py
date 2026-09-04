@@ -668,11 +668,12 @@ def _prefer_cloud_primary(locale: str) -> bool:
 def _call_llm_with_deadline(
     query: str,
     passages: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None,
+    conversation_history: list[dict[str, Any]] | None,
     locale: str,
     personalization_context: str = "",
     deadline_s: float = LLM_DEADLINE_SECONDS,
     tone_hint: str = "",
+    context_summary: str = "",
 ) -> str:
     """Generate a reply, honouring the hybrid cloud/local routing policy.
 
@@ -702,6 +703,7 @@ def _call_llm_with_deadline(
             deadline_s,
             allow_cloud_fallback=False,  # cloud already attempted above
             tone_hint=tone_hint,
+            context_summary=context_summary,
         )
     return _local_llm_then_cloud(
         query,
@@ -712,19 +714,21 @@ def _call_llm_with_deadline(
         deadline_s,
         allow_cloud_fallback=True,
         tone_hint=tone_hint,
+        context_summary=context_summary,
     )
 
 
 def _local_llm_then_cloud(
     query: str,
     passages: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None,
+    conversation_history: list[dict[str, Any]] | None,
     locale: str,
     personalization_context: str = "",
     deadline_s: float = LLM_DEADLINE_SECONDS,
     *,
     allow_cloud_fallback: bool = True,
     tone_hint: str = "",
+    context_summary: str = "",
 ) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
 
@@ -765,6 +769,7 @@ def _local_llm_then_cloud(
         locale=locale,
         personalization_context=personalization_context,
         tone_hint=tone_hint,
+        context_summary=context_summary,
     )
     try:
         reply = future.result(timeout=deadline_s)
@@ -804,11 +809,12 @@ def _local_llm_then_cloud(
 def stream_llm_tokens(
     query: str,
     passages: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None,
+    conversation_history: list[dict[str, Any]] | None,
     locale: str,
     personalization_context: str = "",
     cancel_event: threading.Event | None = None,
     tone_hint: str = "",
+    context_summary: str = "",
 ) -> Generator[str, None, None]:
     """Stream LLM tokens through the shared circuit breaker.
 
@@ -848,6 +854,7 @@ def stream_llm_tokens(
             cancel_event,
             allow_cloud_fallback=False,  # cloud already attempted above
             tone_hint=tone_hint,
+            context_summary=context_summary,
         )
         return
     yield from _stream_local_then_cloud(
@@ -859,19 +866,21 @@ def stream_llm_tokens(
         cancel_event,
         allow_cloud_fallback=True,
         tone_hint=tone_hint,
+        context_summary=context_summary,
     )
 
 
 def _stream_local_then_cloud(
     query: str,
     passages: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None,
+    conversation_history: list[dict[str, Any]] | None,
     locale: str,
     personalization_context: str = "",
     cancel_event: threading.Event | None = None,
     *,
     allow_cloud_fallback: bool = True,
     tone_hint: str = "",
+    context_summary: str = "",
 ) -> Generator[str, None, None]:
     """Stream from the local model; route to the cloud chain on failure.
 
@@ -903,6 +912,7 @@ def _stream_local_then_cloud(
             locale=locale,
             personalization_context=personalization_context,
             tone_hint=tone_hint,
+            context_summary=context_summary,
         ):
             if cancel_event is not None and cancel_event.is_set():
                 logger.info("LLM stream cancelled by caller")
@@ -929,7 +939,7 @@ def _stream_local_then_cloud(
 def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     query: str,
     passages: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None,
+    conversation_history: list[dict[str, Any]] | None,
     locale: str,
     *,
     tool_names: list[str] | None = None,
@@ -943,6 +953,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     deadline_s: float = LLM_DEADLINE_SECONDS * 2,
     event_callback: Callable[[dict[str, Any]], None] | None = None,
     agent_role: str = "",
+    context_summary: str = "",
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -979,6 +990,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         granted_purposes=granted_purposes or [],
         event_callback=event_callback,
         agent_role=agent_role,
+        context_summary=context_summary,
     )
     try:
         result = future.result(timeout=deadline_s)
@@ -1354,6 +1366,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
 
         hits = result.get("_hits", [])
         conversation_history = result.get("_history", [])
+        context_summary = str(result.get("_context_summary") or "")
         rewritten_query = result.get("_rewritten", message)
         personalization_context = result.get("_personalization_context", "")
         tone_hint = str(result.get("_tone_hint") or "")
@@ -1380,6 +1393,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 granted_purposes=granted_purposes or [],
                 cancel_event=cancel_event,
                 _output_guard=_output_guard,
+                context_summary=context_summary,
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
@@ -1463,6 +1477,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                         personalization_context=str(personalization_context or ""),
                         cancel_event=cancel_event,
                         tone_hint=tone_hint,
+                        context_summary=context_summary,
                     ):
                         # Bounded queue: if the consumer is slow, block here
                         # rather than balloon memory.  call_soon_threadsafe
@@ -1676,7 +1691,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     *,
     rewritten_query: str,
     hits: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None,
+    conversation_history: list[dict[str, Any]] | None,
     locale: str,
     personalization_context: str,
     tone_hint: str = "",
@@ -1686,6 +1701,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     granted_purposes: list[str],
     cancel_event: threading.Event,
     _output_guard: Any,
+    context_summary: str = "",
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -1728,6 +1744,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             user_role=user_role,
             granted_purposes=granted_purposes,
             event_callback=_emit,
+            context_summary=context_summary,
         )
 
     agentic_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(_run_in_thread())
@@ -4889,16 +4906,20 @@ class ChatModel:
             trace_ctx["user_id"] = user_id or ""
             trace_ctx["tenant_id"] = tenant_id or "default"
 
-            # 0. Multi-turn memory — fetch recent conversation history (Phase 4)
+            # 0. Multi-turn memory — fetch rolling conversation context
             conversation_history: list[dict[str, str]] = []
+            context_summary = ""
             history_session_id = None if conversation_id else session_id
             if conversation_id or history_session_id:
                 try:
-                    conversation_history = db.get_recent_turns(
+                    conv_ctx = db.get_conversation_context(
                         session_id=history_session_id,
                         conversation_id=conversation_id,
-                        limit=5,
+                        recent_limit=6,
+                        max_history=25,
                     )
+                    conversation_history = conv_ctx["recent_turns"]
+                    context_summary = conv_ctx["context_summary"]
                 except Exception:
                     logger.debug("Failed to fetch conversation history", exc_info=True)
 
@@ -5687,6 +5708,7 @@ class ChatModel:
                                 # specialist this is; give it the
                                 # instructions that go with the label.
                                 agent_role=agent_role,
+                                context_summary=context_summary,
                             )
                         reply = agentic.get("text", "")
                         if agentic.get("tool_calls"):
@@ -5711,6 +5733,7 @@ class ChatModel:
                                         (personalization or {}).get("prompt_context", "")
                                     ),
                                     tone_hint=tone_hint,
+                                    context_summary=context_summary,
                                 )
                     else:
                         with trace_stage("llm_generate", timings=timings):
@@ -5723,6 +5746,7 @@ class ChatModel:
                                     (personalization or {}).get("prompt_context", "")
                                 ),
                                 tone_hint=tone_hint,
+                                context_summary=context_summary,
                             )
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
@@ -5816,7 +5840,7 @@ class ChatModel:
 
                 with trace_stage("grounding", timings=timings):
                     grounding = self._output_guard.check_grounding(
-                        reply, contexts, GROUNDING_THRESHOLD
+                        reply, contexts, GROUNDING_THRESHOLD, locale=locale
                     )
                     reply = grounding.sanitized_text
                     trace_ctx["faithfulness"] = faith
@@ -6229,17 +6253,28 @@ class ChatModel:
 
         # Multi-turn memory (Phase 4 -> overridable in Phase 29)
         conversation_history: list[dict[str, str]] = []
+        context_summary = ""
         if conversation_history_override is not None:
-            conversation_history = list(conversation_history_override)
+            from .context_manager import context_manager
+
+            conv_ctx = context_manager.build_context(
+                conversation_history_override,
+                conversation_id=conversation_id or session_id or "",
+            )
+            conversation_history = conv_ctx.recent_turns
+            context_summary = conv_ctx.context_summary
         else:
             history_session_id = None if conversation_id else session_id
             if conversation_id or history_session_id:
                 try:
-                    conversation_history = db.get_recent_turns(
+                    conv_ctx = db.get_conversation_context(
                         session_id=history_session_id,
                         conversation_id=conversation_id,
-                        limit=5,
+                        recent_limit=6,
+                        max_history=25,
                     )
+                    conversation_history = conv_ctx["recent_turns"]
+                    context_summary = conv_ctx["context_summary"]
                 except Exception:
                     logger.debug("Failed to fetch conversation history", exc_info=True)
 
@@ -6785,6 +6820,7 @@ class ChatModel:
             "ticket_id": ticket_id,
             "_hits": hits,
             "_history": conversation_history,
+            "_context_summary": context_summary,
             "_rewritten": rewritten,
             "_personalization_context": (personalization or {}).get("prompt_context", ""),
             "_tone_hint": tone_hint,

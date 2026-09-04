@@ -21,8 +21,10 @@ langchain-text-splitters==1.1.2
 langchain-qdrant==1.1.0
 qdrant-client>=1.17.1,<2.0.0
 # Deliberately NOT moved with the cluster below. datasets 4.x/5.x all require
-# pyarrow>=21.0.0 and this file pins pyarrow==18.1.0, so bumping it would drag
-# a third unrelated package along. Verified instead that 3.3.2 works against
+# pyarrow>=21.0.0, so bumping it would drag a third unrelated package along.
+# (pyarrow itself has since moved to 23.0.1 for CVE-2026-25087 -- see its own
+# note further down; that direction is safe, this one still is not.)
+# Verified instead that 3.3.2 works against
 # huggingface-hub 1.29.0 — `Dataset.from_list`, the only call the serving path
 # makes (App/backend/app/evaluation.py), round-trips fine.
 datasets==3.3.2
@@ -67,7 +69,16 @@ beautifulsoup4>=4.12.0
 # imported by exactly one offline training script, which already degrades on
 # ImportError, so it lives in requirements-tts-train.txt instead. See that
 # file before installing it.
-gTTS>=2.5.0; python_version >= '3.12'
+#
+# `gTTS` is NOT here either, and unlike Coqui TTS it did not earn its own
+# split-out file: nothing in the tree imports it — the only `gtts` matches are
+# the substring inside `StreamingTTS`. Every published gTTS release through
+# 2.5.4 caps `click<8.2`, while huggingface-hub==1.29.0 (pinned above as part
+# of the transformers 5.x / CVE-2026-9856 cluster) requires `click>=8.4.2`, so
+# no version of the two can coexist. With both present this file did not
+# resolve at all, which is worse than it sounds: a `pip install -r` that never
+# resolves means the CI dependency gates — the test suites and pip-audit —
+# report on an environment that was never built. Removed 2026-09-04.
 pydub==0.25.1
 
 # ----------------------------------------------------------------------------
@@ -109,7 +120,12 @@ lingua-language-detector>=2.0.0
 
 # Data Ingestion & Augmentation
 datasketch==1.10.0
-pyarrow==18.1.0
+# CVE-2026-25087: use-after-free DoS when reading Arrow IPC files, fixed
+# only in 23.0.1. Moving pyarrow alone is safe in this direction --
+# datasets 3.3.2 requires `pyarrow>=15.0.0` with no upper bound, so the
+# constraint noted above (datasets 4.x/5.x *forcing* pyarrow>=21) does not
+# run the other way and datasets stays put.
+pyarrow==23.0.1
 pandera==0.32.1
 ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
 

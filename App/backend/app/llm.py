@@ -37,6 +37,7 @@ Environment variables:
     LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 8192)
     LLM_TEMPERATURE         – generation temperature (default: 0.2)
     LLM_MAX_TOKENS          – max new tokens (default: 512)
+    LLM_REPETITION_PENALTY  – vLLM repetition penalty (default: 1.1)
     LLM_ENABLED             – set to "false" to fall back to FAQ lookup
     LLM_DEVICE              – "auto", "cpu", "cuda" (default: auto)
     LLM_TORCH_DTYPE         – "float16", "bfloat16", "float32" (default: auto)
@@ -72,6 +73,16 @@ LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "
 LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
+# vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,
+# so only the served path was unguarded — and it degenerates in exactly the
+# place a tax assistant can least afford it: Luganda hybrid answers, whose
+# agglutinative genitive chains ("ogw'omusolo ogw'okubonereza …") give the
+# sampler a low-perplexity loop to fall into. Measured 2026-09-04 against
+# Sunflower-14B-FP8: a Luganda penalties question returned 1,330 characters
+# of one repeated n-gram. 1.1 is deliberately mild — enough to break a loop,
+# not enough to push the model off the repeated legal phrasing that correct
+# tax answers legitimately contain.
+LLM_REPETITION_PENALTY = float(os.getenv("LLM_REPETITION_PENALTY", "1.1"))
 LLM_ENABLED = os.getenv("LLM_ENABLED", "true").lower() == "true"
 LLM_DEVICE = os.getenv("LLM_DEVICE", "auto")
 LLM_TORCH_DTYPE = os.getenv("LLM_TORCH_DTYPE", "auto")
@@ -253,12 +264,13 @@ def _trim_to_tokens(tokenizer: Any, text: str, max_tokens: int) -> str:
 def _build_messages(
     query: str,
     passages: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
     locale: str = "en",
     tokenizer: Any = None,
     structured: bool = False,
     personalization_context: str = "",
     tone_hint: str = "",
+    context_summary: str = "",
 ) -> list[dict[str, str]]:
     """Build chat messages in the Qwen chat-template format.
 
@@ -275,17 +287,30 @@ def _build_messages(
             "Do not treat it as live URA account data.\n"
             f"{personalization_context.strip()}"
         )
+    if context_summary:
+        system_content += (
+            "\n\n## Prior conversation context\n"
+            "Earlier discussion summary:\n"
+            f"{context_summary.strip()}"
+        )
     if tone_hint:
         system_content += f"\n\n## This turn\n{tone_hint.strip()}"
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},
     ]
 
-    # Conversation history (multi-turn, sliding window of 5)
+    # Conversation history (multi-turn, sliding window of normalized recent turns)
     if conversation_history:
-        for turn in conversation_history[-5:]:
-            messages.append({"role": "user", "content": turn["user_message"]})
-            messages.append({"role": "assistant", "content": turn["bot_reply"]})
+        from .context_manager import normalize_history_turns
+
+        normalized = normalize_history_turns(conversation_history)
+        for turn in normalized[-6:]:
+            u_msg = turn.get("user_message", "").strip()
+            b_msg = turn.get("bot_reply", "").strip()
+            if u_msg:
+                messages.append({"role": "user", "content": u_msg})
+            if b_msg:
+                messages.append({"role": "assistant", "content": b_msg})
 
     # ------------------------------------------------------------------
     # Token budgeting
@@ -590,6 +615,7 @@ def _vllm_generate(
                 "temperature": LLM_TEMPERATURE if temperature is None else temperature,
                 "top_p": 0.95 if top_p is None else top_p,
                 "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+                "repetition_penalty": LLM_REPETITION_PENALTY,
                 "stream": False,
                 "chat_template_kwargs": {"enable_thinking": False},
             }
@@ -631,6 +657,7 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
                 "temperature": LLM_TEMPERATURE,
                 "top_p": 0.95,
                 "max_tokens": LLM_MAX_TOKENS,
+                "repetition_penalty": LLM_REPETITION_PENALTY,
                 "stream": True,
                 "chat_template_kwargs": {"enable_thinking": False},
             }
@@ -671,11 +698,12 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
 def generate(
     query: str,
     passages: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
     locale: str = "en",
     structured: bool | None = None,
     personalization_context: str = "",
     tone_hint: str = "",
+    context_summary: str = "",
 ) -> str:
     """Generate a grounded answer from retrieved passages.
 
@@ -693,6 +721,7 @@ def generate(
             structured=use_structured,
             personalization_context=personalization_context,
             tone_hint=tone_hint,
+            context_summary=context_summary,
         )
         return _vllm_generate(messages)
 
@@ -709,6 +738,7 @@ def generate(
         structured=use_structured,
         personalization_context=personalization_context,
         tone_hint=tone_hint,
+        context_summary=context_summary,
     )
 
     try:
@@ -987,10 +1017,11 @@ def translate_text(
 def generate_stream(
     query: str,
     passages: list[dict[str, Any]],
-    conversation_history: list[dict[str, str]] | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
     locale: str = "en",
     personalization_context: str = "",
     tone_hint: str = "",
+    context_summary: str = "",
 ) -> Generator[str, None, None]:
     """Yield tokens incrementally for SSE streaming.
 
@@ -1014,6 +1045,7 @@ def generate_stream(
             structured=False,
             personalization_context=personalization_context,
             tone_hint=tone_hint,
+            context_summary=context_summary,
         )
         yield from _vllm_generate_stream(messages)
         return
@@ -1030,6 +1062,7 @@ def generate_stream(
         structured=False,
         personalization_context=personalization_context,
         tone_hint=tone_hint,
+        context_summary=context_summary,
     )
 
     try:
@@ -1249,11 +1282,12 @@ def _strip_tool_calls(text: str) -> str:
 def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     query: str,
     passages: list[dict[str, Any]] | None,
-    conversation_history: list[dict[str, str]] | None,
+    conversation_history: list[dict[str, Any]] | None,
     locale: str,
     personalization_context: str = "",
     tone_hint: str = "",
     agent_role: str = "",
+    context_summary: str = "",
 ) -> list[dict[str, str]]:
     """Build the initial message list for a tool-calling request.
 
@@ -1277,6 +1311,12 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
             "Do not treat it as live URA account data.\n"
             f"{personalization_context.strip()}"
         )
+    if context_summary:
+        system_content += (
+            "\n\n## Prior conversation context\n"
+            "Earlier discussion summary:\n"
+            f"{context_summary.strip()}"
+        )
     if tone_hint:
         system_content += f"\n\n## This turn\n{tone_hint.strip()}"
     messages: list[dict[str, str]] = [
@@ -1284,9 +1324,16 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     ]
 
     if conversation_history:
-        for turn in conversation_history[-5:]:
-            messages.append({"role": "user", "content": turn["user_message"]})
-            messages.append({"role": "assistant", "content": turn["bot_reply"]})
+        from .context_manager import normalize_history_turns
+
+        normalized = normalize_history_turns(conversation_history)
+        for turn in normalized[-6:]:
+            u_msg = turn.get("user_message", "").strip()
+            b_msg = turn.get("bot_reply", "").strip()
+            if u_msg:
+                messages.append({"role": "user", "content": u_msg})
+            if b_msg:
+                messages.append({"role": "assistant", "content": b_msg})
 
     if passages:
         parts: list[str] = [
@@ -1355,7 +1402,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     query: str,
     passages: list[dict[str, Any]] | None = None,
     tool_names: list[str] | None = None,
-    conversation_history: list[dict[str, str]] | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
     locale: str = "en",
     max_iterations: int = 3,
     personalization_context: str = "",
@@ -1366,6 +1413,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     granted_purposes: list[str] | None = None,
     event_callback: "Callable[[dict[str, Any]], None] | None" = None,
     agent_role: str = "",
+    context_summary: str = "",
 ) -> dict[str, Any]:
     """Run a bounded tool-calling loop with the local Qwen3 model.
 
@@ -1413,6 +1461,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 personalization_context=personalization_context,
                 tone_hint=tone_hint,
                 agent_role=agent_role,
+                context_summary=context_summary,
             )
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
@@ -1451,6 +1500,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
             locale,
             personalization_context=personalization_context,
             tone_hint=tone_hint,
+            context_summary=context_summary,
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
 
@@ -1462,6 +1512,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         personalization_context=personalization_context,
         tone_hint=tone_hint,
         agent_role=agent_role,
+        context_summary=context_summary,
     )
     tool_calls_made: list[dict[str, Any]] = []
     last_response = ""

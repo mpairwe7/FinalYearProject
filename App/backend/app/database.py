@@ -1008,6 +1008,34 @@ def get_recent_turns(
     ]
 
 
+def get_conversation_context(
+    session_id: str | None = None,
+    conversation_id: str | None = None,
+    recent_limit: int = 6,
+    max_history: int = 25,
+) -> dict[str, Any]:
+    """Retrieve multi-turn conversation history and build rolling context & summary."""
+    from .context_manager import RollingContextManager, context_manager
+
+    turns = get_recent_turns(
+        session_id=session_id,
+        conversation_id=conversation_id,
+        limit=max_history,
+    )
+    mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
+    ctx = mgr.build_context(
+        turns,
+        conversation_id=conversation_id or session_id or "",
+    )
+    return {
+        "recent_turns": ctx.recent_turns,
+        "context_summary": ctx.context_summary,
+        "active_entities": ctx.active_entities,
+        "total_turns": ctx.total_turns,
+        "all_turns": ctx.all_turns,
+    }
+
+
 def get_conversation_topic(conversation_id: str) -> dict[str, Any] | None:
     """Return the persisted current task for *conversation_id*, or None."""
     cid = (conversation_id or "").strip()
@@ -2695,6 +2723,7 @@ if ANALYTICS_BACKEND == "postgres":
         get_session_stats = _pg.get_session_stats  # type: ignore
         log_conversation = _pg.log_conversation  # type: ignore
         get_recent_turns = _pg.get_recent_turns  # type: ignore
+        get_conversation_context = _pg.get_conversation_context  # type: ignore
         get_conversation_topic = _pg.get_conversation_topic  # type: ignore
         upsert_conversation_topic = _pg.upsert_conversation_topic  # type: ignore
         clear_conversation_topic = _pg.clear_conversation_topic  # type: ignore

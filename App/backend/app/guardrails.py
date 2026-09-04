@@ -392,9 +392,9 @@ class OutputGuard:
     def sanitize(text: str) -> str:
         """Strip potentially dangerous output content (LLM05)."""
         # Remove explicit hidden reasoning blocks first.
-        text = re.sub(r"<think[^>]*>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<think[^>]*>.*?</think\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove script tags
-        text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<script[^>]*>.*?</script\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove HTML tags
         text = re.sub(r"<[^>]+>", "", text)
         # Remove markdown image links to non-URA domains
@@ -443,15 +443,46 @@ class OutputGuard:
             flags=["prompt_leakage"],
         )
 
+    # Appended to the user's own reply, so it has to be in the user's own
+    # language. While this was English-only it put an English paragraph on the
+    # end of every low-faithfulness Luganda and Kiswahili answer — which is
+    # both a UX failure and enough English to flip an automated
+    # reply-language check on an otherwise correct answer (measured
+    # 2026-09-04). Keyed by the same short locale codes the chat API uses;
+    # anything not listed falls back to English.
+    #
+    # NOTE: the lg/sw strings have not been reviewed by a native speaker;
+    # they are a correctness improvement over emitting English, not a
+    # substitute for a translation pass.
+    _GROUNDING_WARNINGS: dict[str, str] = {
+        "en": (
+            "\n\n---\n*Note: This response may not be fully supported by "
+            "the retrieved documents. Please verify with official URA sources "
+            "at https://ura.go.ug.*"
+        ),
+        "lg": (
+            "\n\n---\n*Okulabula: Eky'okuddamu kino kiyinza obutaba nga "
+            "kiwagirwa mu bujjuvu ebiwandiiko ebikozeseddwa. Kakasa n'ensonda "
+            "za URA entongole ku https://ura.go.ug.*"
+        ),
+        "sw": (
+            "\n\n---\n*Tahadhari: Jibu hili huenda halijaungwa mkono "
+            "kikamilifu na nyaraka zilizotumika. Tafadhali thibitisha na "
+            "vyanzo rasmi vya URA kwenye https://ura.go.ug.*"
+        ),
+    }
+
     @staticmethod
     def check_grounding(
         answer: str,
         contexts: list[str],
         threshold: float = 0.3,
+        locale: str = "en",
     ) -> GuardResult:
         """Verify answer is grounded in retrieved contexts (LLM09).
 
-        When faithfulness falls below *threshold*, a disclaimer is appended.
+        When faithfulness falls below *threshold*, a disclaimer is appended
+        in *locale* — the language the answer itself is in.
         """
         if not contexts:
             return GuardResult(allowed=True, sanitized_text=answer)
@@ -460,10 +491,8 @@ class OutputGuard:
 
         score = HybridRetriever.compute_faithfulness(answer, contexts)
         if score < threshold:
-            warning = (
-                "\n\n---\n*Note: This response may not be fully supported by "
-                "the retrieved documents. Please verify with official URA sources "
-                "at https://ura.go.ug.*"
+            warning = OutputGuard._GROUNDING_WARNINGS.get(
+                (locale or "en").lower(), OutputGuard._GROUNDING_WARNINGS["en"]
             )
             return GuardResult(
                 allowed=True,

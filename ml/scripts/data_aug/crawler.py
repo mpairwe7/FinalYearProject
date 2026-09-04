@@ -379,8 +379,16 @@ def _normalise_href(raw: str, base_url: str) -> str | None:
     if not raw or raw.startswith(("javascript:", "mailto:", "tel:", "#")):
         return None
     href = urljoin(base_url, raw).split("#")[0].split("?")[0]
-    if "web.archive.org" in href:
-        m = re.search(r"web\.archive\.org/web/\d+/(https?://.*)", href)
+    # Unwrap Wayback Machine links back to the page they archived. The host has
+    # to come from the parsed URL, not from `"web.archive.org" in href`: that
+    # substring also appears in `https://evil.example/web.archive.org/web/1/...`,
+    # and the rewrite below would then hand the crawler whatever target that
+    # path carried -- a crawled page choosing the next host to fetch. Anchoring
+    # the pattern to the parsed path closes the same hole from the other side.
+    parsed = urlparse(href)
+    host = (parsed.hostname or "").lower()
+    if host == "web.archive.org" or host.endswith(".web.archive.org"):
+        m = re.match(r"/web/\d+/(https?://.*)", parsed.path)
         if m:
             href = m.group(1)
     return href

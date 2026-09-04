@@ -248,7 +248,15 @@ class WsChatSession:
             return False
         if not rows:
             return False
-        self.history = list(rows)
+        hydrated: list[dict[str, str]] = []
+        for r in rows:
+            u = r.get("user_message", "")
+            b = r.get("bot_reply", "")
+            if u:
+                hydrated.append({"role": "user", "content": u})
+            if b:
+                hydrated.append({"role": "assistant", "content": b})
+        self.history = hydrated
         self.last_response_id = previous_response_id
         self.resumed = True
         return True

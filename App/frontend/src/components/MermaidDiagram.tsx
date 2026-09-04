@@ -1,6 +1,7 @@
 "use client";
 
 import React, { memo, useEffect, useId, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 
 /**
  * Client-side Mermaid diagram renderer.
@@ -87,11 +88,20 @@ function MermaidDiagramInner({ content }: { content: string }) {
         const id = `mmd${containerId}${Date.now()}`;
         const { svg } = await mermaid.render(id, content.trim());
         if (!cancelled && ref.current) {
-          // Sanitize SVG: strip <script>, event handlers, and foreign objects
-          const clean = svg
-            .replace(/<script[\s\S]*?<\/script>/gi, "")
-            .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, "")
-            .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, "");
+          // Sanitize the SVG with a real parser before it reaches innerHTML.
+          // The previous three .replace() passes could not do this job: they
+          // missed `</script >` (whitespace is legal before the `>`), missed
+          // unquoted handlers like `onload=alert(1)`, and — being a single
+          // pass — turned `<scr<script>ipt>` back into a live `<script>`
+          // rather than removing it. DOMPurify is already in the tree as a
+          // mermaid dependency; it is now a direct one so this use is
+          // declared rather than borrowed.
+          const clean = DOMPurify.sanitize(svg, {
+            USE_PROFILES: { svg: true, svgFilters: true },
+            // mermaid emits label markup inside <foreignObject>; dropping the
+            // element wholesale (as the old regex did) is preserved here.
+            FORBID_TAGS: ["foreignObject"],
+          });
           ref.current.innerHTML = clean;
           // Make SVG responsive
           const svgEl = ref.current.querySelector("svg");
