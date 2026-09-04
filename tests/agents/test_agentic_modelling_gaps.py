@@ -164,7 +164,7 @@ class TestVLLMToolCalling:
 # ---------------------------------------------------------------------------
 class TestDecoupledToolExecution:
     def test_agentic_tool_use_succeeds_even_with_empty_hits(
-        self, fresh_registry, clean_flags, monkeypatch
+        self, fresh_registry, clean_flags, monkeypatch, tmp_db
     ):
         """When tool use is active and tools succeed, empty hits do not cause abstention."""
         model = ChatModel()
@@ -311,7 +311,7 @@ class TestEpistemicFalsePremiseRejection:
         res = check_false_premise("What is the URA Digital Nomad Levy?", hits=valid_hits)
         assert res.is_false_premise is False
 
-    def test_generate_rejects_false_premise_without_hallucination(self, fresh_registry):
+    def test_generate_rejects_false_premise_without_hallucination(self, fresh_registry, tmp_db):
         model = ChatModel()
         result = model.generate("What is the URA Digital Nomad Levy?")  # nosemgrep: ura-llm01-raw-user-input-to-llm
         assert result["retrieval_mode"] == "false_premise_rejected"
@@ -325,7 +325,7 @@ class TestEpistemicFalsePremiseRejection:
 # ---------------------------------------------------------------------------
 class TestLangGraphFeatureFlag:
     def test_langgraph_flag_routes_through_build_main_graph(
-        self, fresh_registry, clean_flags, monkeypatch
+        self, fresh_registry, clean_flags, monkeypatch, tmp_db
     ):
         model = ChatModel()
         clean_flags.set("langgraph", True)
@@ -334,7 +334,7 @@ class TestLangGraphFeatureFlag:
         assert result["agent_role"] == "graph_agent"
 
     def test_langgraph_routes_specialist_role_in_result(
-        self, fresh_registry, clean_flags, monkeypatch
+        self, fresh_registry, clean_flags, monkeypatch, tmp_db
     ):
         model = ChatModel()
         clean_flags.set("langgraph", True)
@@ -402,7 +402,7 @@ class TestStreamingAgenticParity:
         asyncio.run(_run())
 
     def test_streaming_runs_langgraph_when_flag_enabled(
-        self, fresh_registry, clean_flags, monkeypatch
+        self, fresh_registry, clean_flags, monkeypatch, tmp_db
     ):
         async def _run():
             model = ChatModel()
@@ -437,7 +437,7 @@ class TestStreamingAgenticParity:
 # ---------------------------------------------------------------------------
 class TestWorkflowResumptionNextActions:
     def test_active_workflow_reflected_in_next_actions_on_subject_change(
-        self, fresh_registry, clean_flags, monkeypatch
+        self, fresh_registry, clean_flags, monkeypatch, tmp_db
     ):
         from app import database as db
 
@@ -462,7 +462,7 @@ class TestWorkflowResumptionNextActions:
         assert any("Resume" in a for a in actions)
 
     def test_workflow_resume_keyword_triggers_prompt_recap(
-        self, fresh_registry, clean_flags, monkeypatch
+        self, fresh_registry, clean_flags, monkeypatch, tmp_db
     ):
         from app import database as db
 
