@@ -273,14 +273,23 @@ def rewrite_with_history(
     )
 
     if pronoun_pattern.search(q):
-        # Scan backward from most recent user turn for a concrete domain entity or acronym
+        # Scan backward from most recent turn for a concrete domain topic, entity, or acronym
         subject = ""
         for turn in reversed(normalized_history):
+            turn_entities = extract_conversation_entities([turn])
+            if turn_entities.active_subject:
+                subject = turn_entities.active_subject
+                break
+
             u_msg = turn.get("user_message", "")
-            abbreviations = re.findall(r"\b[A-Z]{2,10}\b", u_msg)
+            b_msg = turn.get("bot_reply", "")
+            abbreviations = re.findall(r"\b[A-Z]{2,10}\b", u_msg) or re.findall(r"\b[A-Z]{2,10}\b", b_msg)
             if abbreviations:
                 subject = abbreviations[-1]
                 break
+
+        if not subject and entities.active_subject:
+            subject = entities.active_subject
 
         if subject:
             subject_phrase = _ABBREVIATIONS.get(subject.lower(), subject)
@@ -290,13 +299,7 @@ def rewrite_with_history(
                 replacement = f"{article} {subject_phrase}"
 
             rewritten = pronoun_pattern.sub(replacement, q)
-            logger.debug("Query rewritten with user-turn subject (input_length=%d)", len(q))
-            return rewritten
-
-        # Fallback to active multi-turn tax domain entity if identified
-        if entities.active_subject:
-            rewritten = pronoun_pattern.sub(entities.active_subject, q)
-            logger.debug("Query rewritten with active domain subject '%s'", entities.active_subject)
+            logger.debug("Query rewritten with context subject '%s' (input_length=%d)", subject, len(q))
             return rewritten
 
         # Fallback: use the first assistant sentence as a broad context hint

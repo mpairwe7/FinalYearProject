@@ -32,10 +32,12 @@ _SESSION_WORKING_MEMORY = WorkingMemory(ttl_seconds=30 * 60)
 _TAX_TOPIC_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"\b(rental\s+(?:income\s+)?tax|rental\s+income|tenants?|landlords?)\b", re.I), "Rental Income Tax", "rental_tax"),
     (re.compile(r"\b(paye|pay\s+as\s+you\s+earn|salary|gross\s+pay|net\s+pay|employment\s+income)\b", re.I), "PAYE (Pay As You Earn)", "paye"),
-    (re.compile(r"\b(value\s+added\s+tax|vat\b|efris|electronic\s+fiscal)\b", re.I), "Value Added Tax (VAT)", "vat"),
+    (re.compile(r"\b(efris|electronic\s+fiscal\s+(?:receipting|invoicing|device|system)?)\b", re.I), "EFRIS", "efris"),
+    (re.compile(r"\b(value\s+added\s+tax|vat\b)\b", re.I), "Value Added Tax (VAT)", "vat"),
     (re.compile(r"\b(withholding\s+tax|wht\b)\b", re.I), "Withholding Tax (WHT)", "wht"),
     (re.compile(r"\b(corporat(?:e|ion)\s+(?:income\s+)?tax|company\s+tax|cit\b)\b", re.I), "Corporation Tax (CIT)", "cit"),
-    (re.compile(r"\b(tin\b|tax\s+identification\s+number|register\s+for\s+tin|get\s+a\s+tin)\b", re.I), "TIN Registration", "tin_registration"),
+    (re.compile(r"\b(register(?:ing|ation)?\s+for\s+(?:a\s+)?tin|get\s+(?:a\s+)?tin|apply\s+for\s+(?:a\s+)?tin|tin\s+registration|obtain\s+(?:a\s+)?tin)\b", re.I), "TIN Registration", "tin_registration"),
+    (re.compile(r"\b(tin\b|tax\s+identification\s+number)\b", re.I), "TIN", "tin"),
     (re.compile(r"\b(customs|import\s+duty|export\s+duty|tariffs?|clearance|asycuda|single\s+customs)\b", re.I), "Customs & Import/Export Duty", "customs"),
     (re.compile(r"\b(stamp\s+duty|land\s+transfer|property\s+transfer)\b", re.I), "Stamp Duty", "stamp_duty"),
     (re.compile(r"\b(local\s+excise\s+duty|excise\s+duty|dts|digital\s+tax\s+stamps?)\b", re.I), "Excise Duty / DTS", "excise_duty"),
@@ -144,13 +146,24 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
         bot_reply = turn.get("bot_reply", "")
         combined = f"{user_msg} {bot_reply}"
 
-        # Tax Topics
+        # Tax Topics: match user message first for active topic
+        user_matched_topic = ""
         for pat, label, key in _TAX_TOPIC_PATTERNS:
-            if pat.search(combined):
+            if pat.search(user_msg):
                 if label not in topics:
                     topics.append(label)
                     topic_keys.append(key)
-                active_subject = label
+                user_matched_topic = label
+
+        if user_matched_topic:
+            active_subject = user_matched_topic
+        else:
+            for pat, label, key in _TAX_TOPIC_PATTERNS:
+                if pat.search(bot_reply):
+                    if label not in topics:
+                        topics.append(label)
+                        topic_keys.append(key)
+                    active_subject = label
 
         # Taxpayer status
         for pat, status_label in _TAXPAYER_STATUS_PATTERNS:
