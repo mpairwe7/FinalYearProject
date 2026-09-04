@@ -202,9 +202,14 @@ class LookupRateTool(Tool):
                 ),
             }
 
+        row = _scalar_row(tax_type, value)
+        name = display_name(tax_type)
+        fy_text = f" for fiscal year {table.fiscal_year}" if table.fiscal_year else ""
+        explanation = f"The official {name} rate{fy_text} is {row['formatted']}."
         return {
             "ok": True,
-            **_scalar_row(tax_type, value),
+            **row,
+            "explanation": explanation,
             "fiscal_year": table.fiscal_year,
             "rate_basis": table.provenance(tax_type),
             "authority": authority,
@@ -255,11 +260,18 @@ class ListAvailableRatesTool(Tool):
             for key, value in sorted(table.rates.items())
             if isinstance(value, int | float) and not isinstance(value, bool)
         ]
+        top_rates_str = "\n".join(f"- **{r['display_name']}**: {r['formatted']}" for r in rows[:8])
+        explanation = (
+            f"Official URA statutory rate schedule for {table.fiscal_year} ({len(rows)} rates recorded):\n\n"
+            f"{top_rates_str}\n\n"
+            f"All rates are verified under current statutory instruments."
+        )
         return {
             "ok": True,
             "fiscal_year": table.fiscal_year,
             "count": len(rows),
             "rates": rows,
+            "explanation": explanation,
             "rate_basis": table.provenance(*(r["tax_type"] for r in rows)),
             "authority": authority,
         }
@@ -334,6 +346,23 @@ class CompareFiscalYearsTool(Tool):
             else:
                 changed.append(entry)
 
+        lines = [f"Comparison of URA statutory rates from {older.fiscal_year} to {newer.fiscal_year}:"]
+        if changed:
+            lines.append(f"\n**Changed rates ({len(changed)}):**")
+            for c in changed:
+                lines.append(f"- **{c['display_name']}**: revised from {c['before']} to {c['after']}")
+        if introduced:
+            lines.append(f"\n**Newly introduced taxes ({len(introduced)}):**")
+            for i in introduced:
+                lines.append(f"- **{i['display_name']}**: {i['after']}")
+        if withdrawn:
+            lines.append(f"\n**Withdrawn taxes ({len(withdrawn)}):**")
+            for w in withdrawn:
+                lines.append(f"- **{w['display_name']}**")
+        if not changed and not introduced and not withdrawn:
+            lines.append("\nNo rate changes recorded between these fiscal years.")
+        explanation = "\n".join(lines)
+
         return {
             "ok": True,
             "from_fiscal_year": older.fiscal_year,
@@ -342,6 +371,7 @@ class CompareFiscalYearsTool(Tool):
             "introduced": introduced,
             "withdrawn": withdrawn,
             "change_count": len(changed) + len(introduced) + len(withdrawn),
+            "explanation": explanation,
             "rate_basis": newer.provenance(*(e["tax_type"] for e in changed + introduced)),
             "authority": authority,
         }

@@ -1386,6 +1386,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         force_tool_whitelist = result.get("_force_tool_whitelist")
         agent_role = str(result.get("agent_role") or "rag_answerer")
         use_agentic = (force_agentic or flags.is_enabled("tool_use")) and llm_module.is_available()
+        agentic_used_tools = False
         if use_agentic:
             async for event in _stream_agentic_turn(
                 rewritten_query=rewritten_query,
@@ -1406,6 +1407,9 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
+                    continue
+                if event[0] == "_used_tools":
+                    agentic_used_tools = bool(event[1])
                     continue
                 yield event
 
@@ -1467,6 +1471,60 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                     },
                 )
                 return
+
+        # Calibrated abstention: if agentic tools were not used to produce a reply,
+        # and passages fail the confidence threshold, abstain (parity with REST path).
+        if not attachments and not (agentic_used_tools and full_reply) and _output_guard.should_abstain(hits):
+            abstained_reply = ABSTENTION_REPLY
+            if distress:
+                abstained_reply = f"{empathy_ack(distress)}\n\n{abstained_reply}"
+            escalate, esc_reason = _output_guard.should_escalate(None, hits)
+            handoff = None
+            response_judge = {
+                "decision": "escalate" if escalate else "approve",
+                "final_decision": "escalate" if escalate else "approve",
+                "applied_revision": False,
+                "reasons": [esc_reason] if esc_reason else [],
+                "confidence_band": "low",
+            }
+            if flags.is_enabled("handoff_summaries") and escalate:
+                handoff = model._build_handoff_packet(
+                    message=message,
+                    reason=esc_reason,
+                    conversation_history=conversation_history or None,
+                    hits=hits,
+                )
+            ticket_id = model._maybe_create_ticket(
+                reason=esc_reason,
+                user_query=message,
+                bot_reply=abstained_reply,
+                session_id=session_id,
+                conversation_id=result.get("conversation_id") or conversation_id or "",
+                priority=(handoff or {}).get("priority", "normal"),
+                handoff=handoff,
+                response_judge=response_judge,
+                user_id=user_id or "",
+            )
+            result["reply"] = abstained_reply
+            result["retrieval_mode"] = "abstained"
+            result["escalation_required"] = escalate
+            result["escalation_reason"] = esc_reason
+            result["handoff"] = handoff
+            result["response_judge"] = response_judge
+            result["ticket_id"] = ticket_id
+            if locale not in ("", "en"):
+                yield ("translation.started", {"locale": locale})
+            full_reply = localize_reply(abstained_reply, locale)
+            if locale not in ("", "en"):
+                yield ("translation.completed", {"locale": locale})
+            result["reply"] = full_reply
+            yield ("token", full_reply)
+            yield ("done", "")
+            yield (
+                "_log",
+                {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+            )
+            return
 
         # The cloud fallback alone keeps token streaming on when no local LLM
         # is configured — stream_llm_tokens routes straight to it in that case.
@@ -1795,6 +1853,8 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     if sanitized:
         yield ("token", sanitized)
         yield ("_full_reply", sanitized)
+        if (agentic or {}).get("tool_calls"):
+            yield ("_used_tools", True)
 
 
 def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) -> dict[str, Any]:
@@ -2998,24 +3058,25 @@ class ChatModel:
                 "Reply with the requested detail to continue the guided process.",
                 "Send 'cancel' if you want to leave this workflow and ask a different question.",
             ]
-        if suspended_workflow:
-            actions = [f"Resume {suspended_workflow} workflow or continue asking general tax questions."]
-            if handoff:
-                actions.append("Prepare the listed reference details before speaking to a URA officer.")
-            return actions
+        base_actions: list[str] = []
         if handoff:
-            return [
+            base_actions = [
                 "Prepare the listed reference details before speaking to a URA officer.",
                 "Use the URA Contact Centre if you need immediate human assistance.",
             ]
-        if agent_role == "clarification_agent":
-            return ["Reply with the missing detail so I can answer more precisely."]
-        if escalation_required:
-            return [
+        elif agent_role == "clarification_agent":
+            base_actions = ["Reply with the missing detail so I can answer more precisely."]
+        elif escalation_required:
+            base_actions = [
                 "Review the cited URA sources before acting on this answer.",
                 "Ask for human support if your case is account-specific or time-sensitive.",
             ]
-        return []
+
+        if suspended_workflow:
+            return [
+                f"Resume {suspended_workflow} workflow or continue asking general tax questions."
+            ] + base_actions
+        return base_actions
 
     def _get_suspended_workflow_name(self, thread_id: str) -> str | None:
         if not flags.is_enabled("workflows"):
@@ -3027,7 +3088,8 @@ class ChatModel:
                 if wf:
                     return wf.name
         except Exception:
-            logger.debug("failed to look up active workflow for thread %s", thread_id, exc_info=True)
+            safe_thread_id = str(thread_id).replace("\r", "").replace("\n", "")
+            logger.debug("failed to look up active workflow for thread %s", safe_thread_id, exc_info=True)
         return None
 
     @staticmethod
@@ -4570,9 +4632,11 @@ class ChatModel:
                     "reasons": ["deterministic tax calculator"],
                     "confidence_band": "high",
                 },
-                "next_actions": [
-                    f"Resume {self._get_suspended_workflow_name(thread_id)} workflow or continue asking general tax questions."
-                ] + NEXT_ACTIONS_BY_TOOL.get(plan.tool, []) if self._get_suspended_workflow_name(thread_id) else NEXT_ACTIONS_BY_TOOL.get(plan.tool, []),
+                "next_actions": (
+                    [f"Resume {suspended} workflow or continue asking general tax questions."]
+                    if (suspended := self._get_suspended_workflow_name(thread_id))
+                    else []
+                ) + NEXT_ACTIONS_BY_TOOL.get(plan.tool, []),
                 "ticket_id": "",
             }
 
@@ -5474,75 +5538,81 @@ class ChatModel:
 
             # Phase 15: LangGraph orchestrator runtime
             if flags.is_enabled("langgraph"):
-                with trace_stage("langgraph_execution", timings=timings):
-                    from .agents.graphs.main_graph import build_main_graph
-                    from .agents.graphs.state import AgentGraphState, GraphOutcome
+                try:
+                    with trace_stage("langgraph_execution", timings=timings):
+                        from .agents.graphs.main_graph import build_main_graph
+                        from .agents.graphs.state import AgentGraphState, GraphOutcome
 
-                    graph = build_main_graph()
-                    graph_state = AgentGraphState(
-                        query=message,
-                        rewritten_query=rewritten,
-                        locale=locale,
-                        top_k=top_k,
-                        conversation_history=conversation_history or [],
-                        context_summary=context_summary,
-                        tenant_id=tenant_id or "default",
-                        user_id=user_id or "",
-                        role=user_role,
-                        granted_purposes=granted_purposes or [],
-                    )
-                    final_state = graph.run(graph_state)
-                    graph_reply = self._finalize_reply(final_state.reply)
-                    escalate = final_state.outcome == GraphOutcome.ESCALATED
-                    esc_reason = final_state.escalation_reason
-                    ticket_id = final_state.ticket_id
-                    if escalate and not ticket_id:
-                        ticket_id = self._maybe_create_ticket(
-                            reason=esc_reason or "graph_escalated",
-                            user_query=message,
-                            bot_reply=graph_reply,
-                            session_id=session_id,
-                            conversation_id=thread_id,
+                        graph = build_main_graph()
+                        graph_state = AgentGraphState(
+                            query=message,
+                            rewritten_query=rewritten,
+                            locale=locale,
+                            top_k=top_k,
+                            conversation_history=conversation_history or [],
+                            context_summary=context_summary,
+                            tenant_id=tenant_id or "default",
                             user_id=user_id or "",
+                            role=user_role,
+                            granted_purposes=granted_purposes or [],
                         )
+                        final_state = graph.run(graph_state)
+                        if final_state.outcome == GraphOutcome.ERRORED or not (final_state.reply or "").strip():
+                            logger.warning("LangGraph execution errored or produced empty reply, falling back to standard retrieval")
+                        else:
+                            graph_reply = self._finalize_reply(final_state.reply)
+                            escalate = final_state.outcome == GraphOutcome.ESCALATED
+                            esc_reason = final_state.escalation_reason
+                            ticket_id = final_state.ticket_id
+                            if escalate and not ticket_id:
+                                ticket_id = self._maybe_create_ticket(
+                                    reason=esc_reason or "graph_escalated",
+                                    user_query=message,
+                                    bot_reply=graph_reply,
+                                    session_id=session_id,
+                                    conversation_id=thread_id,
+                                    user_id=user_id or "",
+                                )
 
-                    role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
-                    graph_result = {
-                        "reply": graph_reply,
-                        "sources": final_state.sources,
-                        "citations": final_state.citations,
-                        "faithfulness_score": final_state.faithfulness,
-                        "retrieval_mode": f"graph_{final_state.retrieval_mode}",
-                        "model": self.name,
-                        "conversation_id": thread_id,
-                        "locale": locale,
-                        "escalation_required": escalate,
-                        "escalation_reason": esc_reason,
-                        "agent_role": role_label,
-                        "handoff": None,
-                        "response_judge": None,
-                        "next_actions": self._default_next_actions(
-                            agent_role=role_label,
-                            escalation_required=escalate,
-                            suspended_workflow=self._get_suspended_workflow_name(thread_id),
-                        ),
-                        "ticket_id": ticket_id,
-                    }
-                    self._persist_personalization_turn(
-                        user_id=user_id,
-                        conversation_id=thread_id,
-                        message=message,
-                        reply=graph_reply,
-                        agent_role=role_label,
-                        personalization=personalization,
-                    )
-                    self._audit_turn(
-                        message=message,
-                        result=graph_result,
-                        session_id=session_id,
-                        trace_ctx=trace_ctx,
-                    )
-                    return graph_result
+                            role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
+                            graph_result = {
+                                "reply": graph_reply,
+                                "sources": final_state.sources,
+                                "citations": final_state.citations,
+                                "faithfulness_score": final_state.faithfulness,
+                                "retrieval_mode": f"graph_{final_state.retrieval_mode}",
+                                "model": self.name,
+                                "conversation_id": thread_id,
+                                "locale": locale,
+                                "escalation_required": escalate,
+                                "escalation_reason": esc_reason,
+                                "agent_role": role_label,
+                                "handoff": None,
+                                "response_judge": None,
+                                "next_actions": self._default_next_actions(
+                                    agent_role=role_label,
+                                    escalation_required=escalate,
+                                    suspended_workflow=self._get_suspended_workflow_name(thread_id),
+                                ),
+                                "ticket_id": ticket_id,
+                            }
+                            self._persist_personalization_turn(
+                                user_id=user_id,
+                                conversation_id=thread_id,
+                                message=message,
+                                reply=graph_reply,
+                                agent_role=role_label,
+                                personalization=personalization,
+                            )
+                            self._audit_turn(
+                                message=message,
+                                result=graph_result,
+                                session_id=session_id,
+                                trace_ctx=trace_ctx,
+                            )
+                            return graph_result
+                except Exception:
+                    logger.warning("LangGraph orchestrator failed, failing over to standard retrieval", exc_info=True)
 
             # 2. Try hybrid retrieval using rewritten query
             hits: list[dict[str, Any]] = []

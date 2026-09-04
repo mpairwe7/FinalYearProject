@@ -158,7 +158,12 @@ _HARDSHIP_RE = re.compile(
     r"|lose (my|the) (business|shop|job|home|land)|losing (my|the) (business|job)"
     r"|shut(ting)? down|closed down|out of business"
     r"|struggling|hardship|desperate|nothing left"
-    r"|sick|ill|hospital|died|passed away|funeral)\b"
+    r"|sick|ill|hospital|died|passed away|funeral"
+    r"|(?:account|bank)\s+(?:is\s+)?frozen|frozen\s+(?:my\s+)?(?:account|bank)"
+    r"|agency\s+notice|distress\s+warrant"
+    r"|sealed\s+(?:my\s+)?(?:shop|premises|business)"
+    r"|seized\s+(?:my\s+)?(?:goods|cargo|vehicle|truck|car)"
+    r"|lost\s+my\s+job|unemployed)\b"
 )
 
 #: Comprehension trouble — the explanation needs rebuilding, not
@@ -331,7 +336,7 @@ _FOREIGN_JURISDICTIONS: tuple[tuple[str, str], ...] = (
     ("China", r"chinese|\bchina\b"),
 )
 
-_FOREIGN_JURISDICTION_RES: tuple[tuple[str, "re.Pattern[str]"], ...] = tuple(
+_FOREIGN_JURISDICTION_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (name, re.compile(rf"\b(?:{pattern})\b", re.IGNORECASE))
     for name, pattern in _FOREIGN_JURISDICTIONS
 )

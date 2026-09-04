@@ -620,9 +620,93 @@ _CONCEPTS: tuple[Concept, ...] = (
         ),
         prerequisites=("fiscal_year",),
     ),
+    Concept(
+        key="efris",
+        title="Electronic Fiscal Receipting and Invoicing Solution (EFRIS)",
+        explanation=(
+            "EFRIS is URA's automated system for recording business sales transactions "
+            "in real time. VAT-registered businesses must issue an e-receipt or e-invoice "
+            "carrying a Fiscal Document Number (FDN) and QR code for each transaction."
+        ),
+        why_it_matters=(
+            "Invoices issued outside EFRIS cannot be claimed for input tax credit by business "
+            "buyers, and failure to use EFRIS attracts severe statutory penalties."
+        ),
+        check=(
+            "Does every small non-VAT registered retail kiosk need an EFRIS machine?",
+            "No. EFRIS is mandatory for VAT-registered taxpayers and designated entities. Small "
+            "businesses below the 150m VAT threshold are not mandated.",
+        ),
+        transfer_question=(
+            "A VAT-registered supplier gives you a manual paper receipt without an EFRIS QR code. "
+            "Can you claim input VAT on that purchase in your VAT return? Why?"
+        ),
+        misconceptions=(
+            "EFRIS is not a new tax — it is an electronic receipting compliance tool.",
+            "EFRIS does not require dedicated expensive hardware; it can be used via the free URA web portal or mobile app.",
+        ),
+        prerequisites=("tin", "vat"),
+        next_concepts=("vat_registration",),
+    ),
+    Concept(
+        key="presumptive_tax",
+        title="Presumptive tax for small businesses",
+        explanation=(
+            "Presumptive tax is a simplified, lump-sum tax for small resident sole proprietors "
+            "whose gross annual business turnover is below UGX 150 million. Instead of keeping "
+            "complex audited accounts, taxpayers pay fixed rates based on turnover bands."
+        ),
+        why_it_matters=(
+            "It eliminates complex accounting requirements and provides predictable tax costs for "
+            "small shops, retail businesses, and local entrepreneurs."
+        ),
+        check=(
+            "Can an incorporated limited company with turnover of UGX 50 million pay presumptive tax?",
+            "No. Presumptive tax is only available to resident individual sole proprietors. Companies "
+            "must file standard corporate income tax returns regardless of turnover.",
+        ),
+        transfer_question=(
+            "A sole trader starts with UGX 80 million turnover and grows to UGX 180 million next year. "
+            "How does their tax filing obligation change?"
+        ),
+        misconceptions=(
+            "Presumptive tax is not available to incorporated companies or partnerships.",
+            "Crossing the UGX 150 million annual turnover line transitions the business into standard income tax.",
+        ),
+        prerequisites=("tin", "fiscal_year"),
+        next_concepts=("corporation_tax",),
+    ),
 )
 
 _BY_KEY: dict[str, Concept] = {c.key: c for c in _CONCEPTS}
+
+_TOPIC_ALIASES: dict[str, str] = {
+    "value_added_tax": "vat",
+    "value_added": "vat",
+    "wht": "withholding_tax",
+    "withholding": "withholding_tax",
+    "cit": "corporation_tax",
+    "corporate_tax": "corporation_tax",
+    "corporate_income_tax": "corporation_tax",
+    "company_tax": "corporation_tax",
+    "cgt": "capital_gains",
+    "capital_gains_tax": "capital_gains",
+    "customs": "customs_duty",
+    "import_duty": "customs_duty",
+    "pay_as_you_earn": "paye",
+    "salary_tax": "paye",
+    "deadlines": "filing_deadlines",
+    "deadline": "filing_deadlines",
+    "due_dates": "filing_deadlines",
+    "brackets": "progressive_taxation",
+    "tax_brackets": "progressive_taxation",
+    "bands": "progressive_taxation",
+    "tax_bands": "progressive_taxation",
+    "efris_invoicing": "efris",
+    "electronic_invoicing": "efris",
+    "presumptive": "presumptive_tax",
+    "small_business_tax": "presumptive_tax",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -778,7 +862,8 @@ def explain(
     as_of: str | None = None,
 ) -> dict[str, Any]:
     """Build a scaffolded lesson for *topic* at *level*."""
-    key = (topic or "").strip().lower().replace(" ", "_").replace("-", "_")
+    raw_key = (topic or "").strip().lower().replace(" ", "_").replace("-", "_")
+    key = _TOPIC_ALIASES.get(raw_key, raw_key)
     concept = _BY_KEY.get(key)
     if concept is None:
         return {

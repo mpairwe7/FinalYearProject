@@ -144,7 +144,6 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
     for turn in turns:
         user_msg = turn.get("user_message", "")
         bot_reply = turn.get("bot_reply", "")
-        combined = f"{user_msg} {bot_reply}"
 
         # Tax Topics: match user message first for active topic
         user_matched_topic = ""
@@ -167,9 +166,8 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
 
         # Taxpayer status
         for pat, status_label in _TAXPAYER_STATUS_PATTERNS:
-            if pat.search(user_msg):
-                if status_label not in taxpayer_types:
-                    taxpayer_types.append(status_label)
+            if pat.search(user_msg) and status_label not in taxpayer_types:
+                taxpayer_types.append(status_label)
 
         # Monetary figures
         found_amounts = amount_re.findall(user_msg)
@@ -220,7 +218,8 @@ def summarize_older_turns(turns: list[dict[str, str]]) -> str:
             key_queries.append(u[:80] + ("..." if len(u) > 80 else ""))
 
     if key_queries:
-        lines.append(f"Previous inquiries: {'; '.join(key_queries[:4])}.")
+        sampled = key_queries if len(key_queries) <= 5 else key_queries[:2] + key_queries[-3:]
+        lines.append(f"Previous inquiries: {'; '.join(sampled)}.")
 
     return " ".join(lines)
 
@@ -276,6 +275,8 @@ class RollingContextManager:
                     active_subject=entities.active_subject,
                     tax_topics=entities.tax_topics,
                     taxpayer_types=entities.taxpayer_types,
+                    amounts=entities.amounts[-3:],
+                    reference_numbers=entities.reference_numbers[-2:],
                     summary=summary,
                     turn_count=total,
                 )

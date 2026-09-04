@@ -269,6 +269,21 @@ class ToolContractTests(unittest.TestCase):
         for spelling in ("VAT", "vat_registration", "VAT Registration", "vat-registration"):
             self.assertTrue(self.tool.execute(topic=spelling)["ok"], spelling)
 
+    def test_topic_aliases_resolve_cleanly(self) -> None:
+        for alias, canonical in [
+            ("Value Added Tax", "vat"),
+            ("WHT", "withholding_tax"),
+            ("CIT", "corporation_tax"),
+            ("CGT", "capital_gains"),
+            ("Customs", "customs_duty"),
+            ("Pay As You Earn", "paye"),
+            ("efris", "efris"),
+            ("presumptive", "presumptive_tax"),
+        ]:
+            res = self.tool.execute(topic=alias)
+            self.assertTrue(res["ok"], f"Failed for {alias}")
+            self.assertEqual(res["topic"], canonical)
+
     def test_a_learning_path_is_offered_for_orientation(self) -> None:
         result = self.tool.execute(topic="capital_gains")
         self.assertEqual(result["learning_path"][-1], "capital_gains")

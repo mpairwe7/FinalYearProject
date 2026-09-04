@@ -148,6 +148,29 @@ class MultiTurnQueryRewritingTests(unittest.TestCase):
         rewritten = rewrite_with_history("And what about for non-residents?", history)
         self.assertTrue("paye" in rewritten.lower() or "non-resident" in rewritten.lower())
 
+    def test_rewrite_preserves_demonstrative_determiners(self) -> None:
+        history = [
+            {"user_message": "Tell me about rental tax", "bot_reply": "Rental tax is charged on rental income."},
+        ]
+        q1 = "How much is it for this year?"
+        rewritten1 = rewrite_with_history(q1, history)
+        self.assertIn("this year", rewritten1)
+        self.assertNotIn("Rental Income Tax year", rewritten1)
+        self.assertIn("Rental", rewritten1)
+
+        q2 = "How do I pay it if this is my first time?"
+        rewritten2 = rewrite_with_history(q2, history)
+        self.assertIn("this is my first time", rewritten2)
+        self.assertNotIn("Rental Income Tax is my first time", rewritten2)
+
+    def test_rewrite_possessive_pronouns(self) -> None:
+        history = [
+            {"user_message": "Tell me about rental tax", "bot_reply": "Rental tax is charged on rental income."},
+        ]
+        rewritten = rewrite_with_history("What is its deadline?", history)
+        self.assertIn("'s", rewritten)
+        self.assertIn("deadline", rewritten)
+
 
 class DatabaseContextRetrievalTests(unittest.TestCase):
     def setUp(self) -> None:

@@ -71,6 +71,38 @@ _TOPICS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         r"\b(?:tax\s+)?refund\b",
         r"\bvat\s+refund\b",
     )),
+    ("rental_tax", "rental income tax", "rental_tax", (
+        r"\brental\s+(?:income\s+)?tax\b",
+        r"\brental\s+income\b",
+        r"\blandlords?\b",
+        r"\brenting\s+out\b",
+    )),
+    ("stamp_duty", "stamp duty", "stamp_duty", (
+        r"\bstamp\s+duty\b",
+        r"\bproperty\s+transfer\b",
+        r"\bland\s+transfer\b",
+    )),
+    ("motor_vehicle", "motor vehicle registration", "motor_vehicle", (
+        r"\bmotor\s*vehicle\b",
+        r"\blogbook\b",
+        r"\bnumber\s*plate\b",
+        r"\bvehicle\s+transfer\b",
+    )),
+    ("excise_duty", "excise duty and DTS", "excise_duty", (
+        r"\bexcise\s+duty\b",
+        r"\bdts\b",
+        r"\bdigital\s+tax\s+stamps?\b",
+    )),
+    ("tcc", "tax clearance certificate (TCC)", "tcc", (
+        r"\btax\s+clearance\s+certificate\b",
+        r"\btcc\b",
+    )),
+    ("objection", "tax dispute and objection", "objection", (
+        r"\btax\s+objection\b",
+        r"\bdispute\s+assessment\b",
+        r"\btax\s+appeals\s+tribunal\b",
+        r"\btat\b",
+    )),
 )
 
 _COMPILED: tuple[tuple[str, str, str, tuple[re.Pattern[str], ...]], ...] = tuple(

@@ -80,9 +80,12 @@ class FactExtractor:
     def extract(self, turns: list[dict[str, str]]) -> list[FactCandidate]:
         candidates: list[FactCandidate] = []
         for i, turn in enumerate(turns):
-            if turn.get("role") not in ("user", "user_message"):
+            if "user_message" in turn:
+                text = str(turn.get("user_message") or "").strip()
+            elif turn.get("role") in ("user", "user_message"):
+                text = str(turn.get("content") or turn.get("message") or "").strip()
+            else:
                 continue
-            text = str(turn.get("content") or turn.get("user_message") or turn.get("message", ""))
             if not text:
                 continue
             candidates.extend(self._scan(text, source_turn=i))

@@ -27,6 +27,27 @@ class ClassifyTopicTests(unittest.TestCase):
         assert topic is not None
         self.assertEqual(topic.topic_id, "tin_registration")
 
+    def test_additional_catalog_topics(self) -> None:
+        t_rental = classify_topic("What is rental income tax rate?")
+        self.assertIsNotNone(t_rental)
+        assert t_rental is not None
+        self.assertEqual(t_rental.topic_id, "rental_tax")
+
+        t_stamp = classify_topic("Tell me about stamp duty on land transfer")
+        self.assertIsNotNone(t_stamp)
+        assert t_stamp is not None
+        self.assertEqual(t_stamp.topic_id, "stamp_duty")
+
+        t_mv = classify_topic("How to transfer motor vehicle logbook")
+        self.assertIsNotNone(t_mv)
+        assert t_mv is not None
+        self.assertEqual(t_mv.topic_id, "motor_vehicle")
+
+        t_excise = classify_topic("What are the rules for digital tax stamps and excise duty?")
+        self.assertIsNotNone(t_excise)
+        assert t_excise is not None
+        self.assertEqual(t_excise.topic_id, "excise_duty")
+
     def test_neutral_question_has_no_topic(self) -> None:
         self.assertIsNone(classify_topic("What is the capital of France?"))
 

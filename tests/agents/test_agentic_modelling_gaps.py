@@ -485,3 +485,57 @@ class TestWorkflowResumptionNextActions:
         assert result["retrieval_mode"] == "workflow"
         assert "Resuming" in result["reply"]
         assert result["workflow"]["status"] == "active"
+
+    def test_interrogative_prefix_stripped_cleanly(self):
+        from app.premise_guard import _extract_candidate_tax_concepts, check_false_premise
+
+        candidates = _extract_candidate_tax_concepts("Is there a plastic bag levy in Uganda?")
+        assert len(candidates) >= 1
+        assert candidates[0][0] == "plastic bag"
+        assert "is there" not in candidates[0][0]
+
+    def test_psf_levy_in_corpus_not_rejected(self):
+        from app.premise_guard import check_false_premise
+
+        hits = [{"text": "The PSF levy is an administrative charge for private sector development."}]
+        res = check_false_premise("What is the PSF levy in Uganda?", hits=hits)
+        assert res.is_false_premise is False
+
+    def test_default_next_actions_prepends_resume_and_keeps_base_actions(self):
+        model = ChatModel()
+        actions_handoff = model._default_next_actions(
+            agent_role="rag_answerer",
+            handoff={"summary": "help"},
+            suspended_workflow="TIN Application",
+        )
+        assert len(actions_handoff) >= 2
+        assert "Resume TIN Application" in actions_handoff[0]
+        assert any("officer" in a for a in actions_handoff[1:])
+
+        actions_clarify = model._default_next_actions(
+            agent_role="clarification_agent",
+            suspended_workflow="PAYE Filing",
+        )
+        assert len(actions_clarify) == 2
+        assert "Resume PAYE Filing" in actions_clarify[0]
+        assert "Reply with the missing detail" in actions_clarify[1]
+
+    def test_langgraph_errored_fails_over_to_standard_retrieval(self, clean_flags, monkeypatch, tmp_db):
+        from unittest.mock import MagicMock
+        from app.agents.graphs.state import AgentGraphState, GraphOutcome
+
+        clean_flags.set("langgraph", True)
+        mock_graph = MagicMock()
+        mock_state = AgentGraphState(query="What is VAT?")
+        mock_state.outcome = GraphOutcome.ERRORED
+        mock_state.reply = ""
+        mock_graph.run.return_value = mock_state
+
+        monkeypatch.setattr("app.agents.graphs.main_graph.build_main_graph", lambda: mock_graph)
+
+        model = ChatModel()
+        # Should gracefully fail over to standard retrieval
+        result = model.generate("What is VAT in Uganda?")  # nosemgrep: ura-llm01-raw-user-input-to-llm
+        assert result["retrieval_mode"] != "graph_error"
+        assert result.get("reply")
+

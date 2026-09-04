@@ -128,6 +128,11 @@ class CurrentDateTool(Tool):
         fy_end = _dt.date(int(fy[2:6]) + 1, 6, 30)
         days_into_fy = (today - fy_start).days
         days_remaining_fy = (fy_end - today).days
+        explanation = (
+            f"Today is {today.strftime('%A')}, {today.isoformat()} (Fiscal Year {fy}).\n\n"
+            f"The current Ugandan fiscal year runs from {fy_start.isoformat()} to {fy_end.isoformat()} "
+            f"({days_into_fy} days elapsed, {days_remaining_fy} days remaining)."
+        )
         return {
             "ok": True,
             "today": today.isoformat(),
@@ -137,6 +142,7 @@ class CurrentDateTool(Tool):
             "fiscal_year_end": fy_end.isoformat(),
             "days_into_fy": days_into_fy,
             "days_remaining_in_fy": days_remaining_fy,
+            "explanation": explanation,
         }
 
 
@@ -200,13 +206,26 @@ class NextDeadlineTool(Tool):
         within_days = max(1, min(int(within_days), 365))
         today = _dt.date.today()
         unique = upcoming_deadlines(within_days=within_days, scope=scope, today=today)
+        kept_deadlines = unique[:limit]
+        if kept_deadlines:
+            lines = [
+                f"- **{d['name']}**: due on {d['date']} ({d['days_until']} days away) — {d['description']}"
+                for d in kept_deadlines
+            ]
+            explanation = (
+                f"Upcoming URA statutory deadlines (next {within_days} days):\n\n"
+                + "\n".join(lines)
+            )
+        else:
+            explanation = f"No statutory deadlines found in the next {within_days} days for scope '{scope}'."
         return {
             "ok": True,
             "today": today.isoformat(),
             "horizon": (today + _dt.timedelta(days=within_days)).isoformat(),
             "scope": scope,
-            "count": len(unique[:limit]),
-            "deadlines": unique[:limit],
+            "count": len(kept_deadlines),
+            "deadlines": kept_deadlines,
+            "explanation": explanation,
         }
 
 
