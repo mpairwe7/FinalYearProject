@@ -65,6 +65,12 @@ def node_route(state: AgentGraphState) -> NodeResult:
         # The supervisor already picked a whitelist — seed the plan
         state.plan = list(decision.suggested_tools)
         state.plan_reason = decision.reason
+        role_map = {
+            AgentRoute.TOOLS: "tool_specialist",
+            AgentRoute.TAX_SPECIALIST: "tax_specialist",
+            AgentRoute.CUSTOMS_SPECIALIST: "customs_specialist",
+        }
+        state.agent_role = role_map.get(decision.route, "graph_agent")
         return NodeResult(next_node="tool_rag_select")
 
     # Default: factual retrieval

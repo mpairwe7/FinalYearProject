@@ -333,90 +333,103 @@ class TestLangGraphFeatureFlag:
         assert result["retrieval_mode"].startswith("graph_")
         assert result["agent_role"] == "graph_agent"
 
+    def test_langgraph_routes_specialist_role_in_result(
+        self, fresh_registry, clean_flags, monkeypatch
+    ):
+        model = ChatModel()
+        clean_flags.set("langgraph", True)
+        result = model.generate("What are the customs clearance requirements for export?")  # nosemgrep: ura-llm01-raw-user-input-to-llm
+        assert result["retrieval_mode"].startswith("graph_")
+        assert result["agent_role"] in ("tool_specialist", "customs_specialist", "tax_specialist")
+
 
 # ---------------------------------------------------------------------------
 # 6. Streaming Parity with force_agentic
 # ---------------------------------------------------------------------------
 class TestStreamingAgenticParity:
-    @pytest.mark.asyncio
-    async def test_streaming_routes_agentic_even_with_empty_hits(
+    def test_streaming_routes_agentic_even_with_empty_hits(
         self, fresh_registry, clean_flags, monkeypatch
     ):
-        model = ChatModel()
-        from app import llm
+        async def _run():
+            model = ChatModel()
+            from app import llm
 
-        monkeypatch.setattr(llm, "is_available", lambda: True)
+            monkeypatch.setattr(llm, "is_available", lambda: True)
 
-        async def fake_stream_agentic(*args, **kwargs):
-            yield ("tool.started", {"tool": "calculate_vat"})
-            yield ("tool.completed", {"tool": "calculate_vat", "ok": True})
-            yield ("_full_reply", "The VAT on UGX 1,000,000 is UGX 180,000.")
+            async def fake_stream_agentic(*args, **kwargs):
+                yield ("tool.started", {"tool": "calculate_vat"})
+                yield ("tool.completed", {"tool": "calculate_vat", "ok": True})
+                yield ("_full_reply", "The VAT on UGX 1,000,000 is UGX 180,000.")
 
-        monkeypatch.setattr("app.service._stream_agentic_turn", fake_stream_agentic)
+            monkeypatch.setattr("app.service._stream_agentic_turn", fake_stream_agentic)
 
-        # generate_retrieval_only returning force_agentic=True with empty hits
-        def fake_retrieval(*args, **kwargs):
-            return {
-                "reply": "",
-                "sources": [],
-                "citations": [],
-                "_hits": [],
-                "_history": [],
-                "_rewritten": "calculate vat on 1000000",
-                "_force_agentic": True,
-                "_force_tool_whitelist": ["calculate_vat"],
-                "agent_role": "tool_specialist",
-                "retrieval_mode": "keyword",
-            }
+            # generate_retrieval_only returning force_agentic=True with empty hits
+            def fake_retrieval(*args, **kwargs):
+                return {
+                    "reply": "",
+                    "sources": [],
+                    "citations": [],
+                    "_hits": [],
+                    "_history": [],
+                    "_rewritten": "calculate vat on 1000000",
+                    "_force_agentic": True,
+                    "_force_tool_whitelist": ["calculate_vat"],
+                    "agent_role": "tool_specialist",
+                    "retrieval_mode": "keyword",
+                }
 
-        monkeypatch.setattr(model, "generate_retrieval_only", fake_retrieval)
+            monkeypatch.setattr(model, "generate_retrieval_only", fake_retrieval)
 
-        events = []
-        async for event in run_chat_turn(
-            model=model,
-            message="calculate vat on 1000000",
-            conversation_id="conv-stream",
-            top_k=4,
-            locale="en",
-            session_id="sess-stream",
-            request_id="req-stream",
-            user_id="u123",
-            tenant_id="default",
-        ):
-            events.append(event)
+            events = []
+            async for event in run_chat_turn(
+                model=model,
+                message="calculate vat on 1000000",
+                conversation_id="conv-stream",
+                top_k=4,
+                locale="en",
+                session_id="sess-stream",
+                request_id="req-stream",
+                user_id="u123",
+                tenant_id="default",
+            ):
+                events.append(event)
 
-        event_types = [e[0] for e in events]
-        assert "tool.started" in event_types
-        assert "tool.completed" in event_types
-        assert "grounding" in event_types
+            event_types = [e[0] for e in events]
+            assert "tool.started" in event_types
+            assert "tool.completed" in event_types
+            assert "grounding" in event_types
 
-    @pytest.mark.asyncio
-    async def test_streaming_runs_langgraph_when_flag_enabled(
+        asyncio.run(_run())
+
+    def test_streaming_runs_langgraph_when_flag_enabled(
         self, fresh_registry, clean_flags, monkeypatch
     ):
-        model = ChatModel()
-        clean_flags.set("langgraph", True)
+        async def _run():
+            model = ChatModel()
+            clean_flags.set("langgraph", True)
 
-        events = []
-        async for event in run_chat_turn(
-            model=model,
-            message="What is the URA Contact Centre phone number?",
-            conversation_id="conv-lg-stream",
-            top_k=4,
-            locale="en",
-            session_id="sess-lg-stream",
-            request_id="req-lg-stream",
-            user_id="u123",
-            tenant_id="default",
-        ):
-            events.append(event)
+            events = []
+            async for event in run_chat_turn(
+                model=model,
+                message="What is the URA Contact Centre phone number?",
+                conversation_id="conv-lg-stream",
+                top_k=4,
+                locale="en",
+                session_id="sess-lg-stream",
+                request_id="req-lg-stream",
+                user_id="u123",
+                tenant_id="default",
+            ):
+                events.append(event)
 
-        event_types = [e[0] for e in events]
-        assert "metadata" in event_types
-        assert "token" in event_types
-        assert "done" in event_types
-        meta = [e[1] for e in events if e[0] == "metadata"][0]
-        assert meta["retrieval_mode"].startswith("graph_")
+            event_types = [e[0] for e in events]
+            assert "metadata" in event_types
+            assert "token" in event_types
+            assert "done" in event_types
+            meta = [e[1] for e in events if e[0] == "metadata"][0]
+            assert meta["retrieval_mode"].startswith("graph_")
+
+        asyncio.run(_run())
 
 
 # ---------------------------------------------------------------------------

@@ -5506,6 +5506,7 @@ class ChatModel:
                             user_id=user_id or "",
                         )
 
+                    role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
                     graph_result = {
                         "reply": graph_reply,
                         "sources": final_state.sources,
@@ -5517,11 +5518,11 @@ class ChatModel:
                         "locale": locale,
                         "escalation_required": escalate,
                         "escalation_reason": esc_reason,
-                        "agent_role": "graph_agent",
+                        "agent_role": role_label,
                         "handoff": None,
                         "response_judge": None,
                         "next_actions": self._default_next_actions(
-                            agent_role="graph_agent",
+                            agent_role=role_label,
                             escalation_required=escalate,
                             suspended_workflow=self._get_suspended_workflow_name(thread_id),
                         ),
@@ -5532,7 +5533,7 @@ class ChatModel:
                         conversation_id=thread_id,
                         message=message,
                         reply=graph_reply,
-                        agent_role="graph_agent",
+                        agent_role=role_label,
                         personalization=personalization,
                     )
                     self._audit_turn(
@@ -6746,6 +6747,7 @@ class ChatModel:
                     user_id=user_id or "",
                 )
 
+            role_label = getattr(final_state, "agent_role", "graph_agent") or "graph_agent"
             graph_result = {
                 "reply": graph_reply,
                 "sources": final_state.sources,
@@ -6757,11 +6759,11 @@ class ChatModel:
                 "locale": locale,
                 "escalation_required": escalate,
                 "escalation_reason": esc_reason,
-                "agent_role": "graph_agent",
+                "agent_role": role_label,
                 "handoff": None,
                 "response_judge": None,
                 "next_actions": self._default_next_actions(
-                    agent_role="graph_agent",
+                    agent_role=role_label,
                     escalation_required=escalate,
                     suspended_workflow=self._get_suspended_workflow_name(thread_id),
                 ),
@@ -6776,7 +6778,7 @@ class ChatModel:
                 conversation_id=thread_id,
                 message=message,
                 reply=graph_reply,
-                agent_role="graph_agent",
+                agent_role=role_label,
                 personalization=personalization,
             )
             return graph_result
