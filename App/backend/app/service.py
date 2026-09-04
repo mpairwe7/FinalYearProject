@@ -155,6 +155,7 @@ SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "tr
 SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
 _WORKFLOW_CANCEL_WORDS = {"cancel", "stop", "quit", "exit", "nevermind", "never mind"}
+_WORKFLOW_RESUME_WORDS = {"resume", "continue", "resume workflow", "continue workflow", "resume process"}
 _WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
 #: Slot specs that accept any string, so validation cannot tell a slot answer
 #: from a new question. Mirrors :func:`app.workflows.slots.validate_slot`'s own
@@ -1311,6 +1312,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             tenant_id=tenant_id,
             conversation_history_override=conversation_history_override,
             attachments=attachments,
+            user_role=user_role,
+            granted_purposes=granted_purposes,
         )
 
         # The *effective* locale, not the one the caller passed. Mirrors the
@@ -4714,6 +4717,34 @@ class ChatModel:
                     "next_actions": ["Ask a new question or restart the guided process later."],
                 }
 
+            if user_input.lower() in _WORKFLOW_RESUME_WORDS:
+                turn, _tool_messages = self._advance_workflow(session, "")
+                prompt = turn.question or ""
+                workflow = self._workflow_view(
+                    session,
+                    name=wf.name,
+                    status="active",
+                    pending_slot=turn.slot_name,
+                )
+                return {
+                    "reply": f"Resuming {wf.name}:\n\n{prompt}",
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "workflow",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "workflow_guide",
+                    "workflow": workflow,
+                    "next_actions": self._default_next_actions(
+                        agent_role="workflow_guide",
+                        workflow=workflow,
+                    ),
+                }
+
             # The taxpayer asked something else. Hand the turn back so it is
             # answered from the corpus; the session stays active, so a later
             # slot-shaped reply resumes the flow where it left off.
@@ -6364,6 +6395,8 @@ class ChatModel:
         tenant_id: str | None = None,
         conversation_history_override: list[dict[str, str]] | None = None,
         attachments: list[documents_module.DocumentRecord] | None = None,
+        user_role: str = "public",
+        granted_purposes: list[str] | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
@@ -6679,6 +6712,74 @@ class ChatModel:
                 force_agentic = True
                 if route_decision.suggested_tools:
                     force_tool_whitelist = list(route_decision.suggested_tools)
+
+        # LangGraph orchestrator runtime (streaming parity)
+        if flags.is_enabled("langgraph"):
+            from .agents.graphs.main_graph import build_main_graph
+            from .agents.graphs.state import AgentGraphState, GraphOutcome
+
+            graph = build_main_graph()
+            graph_state = AgentGraphState(
+                query=message,
+                rewritten_query=rewritten,
+                locale=locale,
+                top_k=top_k,
+                conversation_history=conversation_history or [],
+                context_summary=context_summary,
+                tenant_id=tenant_id or "default",
+                user_id=user_id or "",
+                role=user_role,
+                granted_purposes=granted_purposes or [],
+            )
+            final_state = graph.run(graph_state)
+            graph_reply = self._finalize_reply(final_state.reply)
+            escalate = final_state.outcome == GraphOutcome.ESCALATED
+            esc_reason = final_state.escalation_reason
+            ticket_id = final_state.ticket_id
+            if escalate and not ticket_id:
+                ticket_id = self._maybe_create_ticket(
+                    reason=esc_reason or "graph_escalated",
+                    user_query=message,
+                    bot_reply=graph_reply,
+                    session_id=session_id,
+                    conversation_id=thread_id,
+                    user_id=user_id or "",
+                )
+
+            graph_result = {
+                "reply": graph_reply,
+                "sources": final_state.sources,
+                "citations": final_state.citations,
+                "faithfulness_score": final_state.faithfulness,
+                "retrieval_mode": f"graph_{final_state.retrieval_mode}",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": escalate,
+                "escalation_reason": esc_reason,
+                "agent_role": "graph_agent",
+                "handoff": None,
+                "response_judge": None,
+                "next_actions": self._default_next_actions(
+                    agent_role="graph_agent",
+                    escalation_required=escalate,
+                    suspended_workflow=self._get_suspended_workflow_name(thread_id),
+                ),
+                "ticket_id": ticket_id,
+                "_hits": final_state.hits,
+                "_history": conversation_history,
+                "_rewritten": rewritten,
+                "_short_circuit": True,
+            }
+            self._persist_personalization_turn(
+                user_id=user_id,
+                conversation_id=thread_id,
+                message=message,
+                reply=graph_reply,
+                agent_role="graph_agent",
+                personalization=personalization,
+            )
+            return graph_result
 
         hits: list[dict[str, Any]] = []
         retrieval_mode = "keyword"

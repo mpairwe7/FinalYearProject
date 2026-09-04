@@ -588,6 +588,11 @@ def is_available() -> bool:
     return _load_model()
 
 
+def _vllm_ready() -> bool:
+    """Return True if the vLLM HTTP endpoint backend is ready for requests."""
+    return bool(LLM_ENABLED and VLLM_BASE_URL)
+
+
 # ---------------------------------------------------------------------------
 # vLLM HTTP dispatch (LLM_BACKEND=vllm)
 # ---------------------------------------------------------------------------
@@ -720,6 +725,14 @@ def _vllm_chat_completion(
                 })
 
         return {"content": content, "tool_calls": parsed_calls}
+    except urllib.error.HTTPError as http_err:
+        err_body = ""
+        try:
+            err_body = http_err.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        logger.warning("vLLM HTTP tool completion HTTP %s: %s", http_err.code, err_body)
+        return {"content": "", "tool_calls": []}
     except Exception:
         logger.exception("vLLM HTTP tool completion failed")
         return {"content": "", "tool_calls": []}
@@ -1700,7 +1713,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         assistant_tool_call_entries: list[dict[str, Any]] = []
         tool_result_messages: list[dict[str, Any]] = []
         for idx, pc in enumerate(parsed_calls):
-            call_id = f"call_{iteration}_{idx}"
+            call_id = pc.get("id") or f"call_{iteration}_{idx}"
             _emit(
                 {
                     "type": "tool_call.started",
@@ -1829,11 +1842,11 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 }
             )
 
-        # Append the assistant tool-call message (empty content) + tool results
+        # Append the assistant tool-call message + tool results
         messages.append(
             {
                 "role": "assistant",
-                "content": "",
+                "content": response or None if LLM_BACKEND == "vllm" else "",
                 "tool_calls": assistant_tool_call_entries,
             }
         )

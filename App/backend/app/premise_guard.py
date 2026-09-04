@@ -71,69 +71,81 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "betting",
     "casino",
     "local service",
+    "lst",
     "hotel",
     "local government",
+    "property",
+    "property rates",
+    "land",
+    "land rates",
     "motor vehicle",
+    "vehicle",
     "advance",
+    "advance tax",
     "digital services",
     "dst",
     "over the top",
     "ott",
     "social media",
-})
-
-# Words that indicate generic tax questions rather than a specific named tax instrument
-_GENERIC_WORDS = frozenset({
-    "the",
-    "a",
-    "an",
-    "my",
-    "our",
-    "your",
-    "any",
-    "this",
-    "that",
-    "ura",
-    "uganda",
-    "ugandan",
-    "new",
-    "current",
-    "annual",
-    "monthly",
+    "road",
+    "road user",
+    "toll",
+    "petroleum",
+    "fuel",
+    "mining",
+    "mineral",
     "direct",
     "indirect",
-    "total",
-    "applicable",
-    "payable",
-    "pending",
-    "outstanding",
-    "standard",
-    "general",
-    "statutory",
-    "official",
-    "government",
-    "local",
-    "national",
-    "rates",
-    "rate",
-    "table",
-    "tables",
-    "policy",
-    "act",
-    "law",
-    "laws",
+    "turnover",
+    "dividend",
+    "interest",
+    "royalty",
+    "penalty",
+    "penalties",
+    "fines",
+    "fine",
+    "interest surcharge",
+    "carbon",
+    "commercial",
+    "residential",
+})
+
+# Words that indicate actions, grammar, prepositions, and conversational intent
+# rather than an asserted specific tax modifier.
+_STOP_AND_ACTION_WORDS = frozenset({
+    # Actions & verbs
+    "pay", "paying", "paid", "file", "filing", "filed", "register", "registering", "registered",
+    "declare", "declaring", "declared", "submit", "submitting", "submitted", "calculate",
+    "calculating", "calculated", "compute", "computing", "computed", "deduct", "deducting",
+    "deducted", "charge", "charging", "charged", "apply", "applying", "applied", "collect",
+    "collecting", "collected", "remit", "remitting", "remitted", "avoid", "evade", "evading",
+    "learn", "know", "see", "show", "tell", "check", "verify", "get", "got", "help", "want",
+    "need", "wish", "like", "prefer", "ask", "start", "stop", "resume",
+    # Modals and auxiliaries
+    "can", "could", "would", "should", "may", "might", "must", "shall", "will",
+    "do", "does", "did", "have", "has", "had", "am", "is", "are", "was", "were", "be", "been", "being",
+    # Pronouns
+    "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours",
+    "he", "him", "his", "she", "her", "hers", "it", "its", "they", "them", "their", "theirs",
+    "one", "someone", "anyone", "everyone", "who", "whom", "whose", "what", "which",
+    # Prepositions and adverbs
+    "how", "why", "when", "where", "to", "for", "about", "on", "in", "at", "by", "from", "of",
+    "with", "into", "through", "during", "before", "after", "above", "below", "under", "up",
+    "down", "off", "over", "again", "further", "then", "once", "here", "there", "all", "any",
+    "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only",
+    "own", "same", "so", "than", "too", "very", "s", "t", "just", "don", "now", "as", "per",
+    # Generic context nouns & qualifiers
+    "online", "offline", "portal", "ura", "uganda", "ugandan", "government", "official",
+    "law", "laws", "act", "acts", "policy", "rate", "rates", "table", "tables", "system",
+    "code", "due", "payable", "applicable", "pending", "outstanding", "total", "standard",
+    "general", "statutory", "new", "current", "annual", "monthly", "year", "years", "month",
+    "the", "a", "an", "this", "that", "these", "those",
 })
 
 _CANDIDATE_PATTERNS = (
     re.compile(
-        r"\b(?:what\s+is|how\s+(?:much\s+is|do\s+i\s+pay|to\s+pay)|who\s+pays|rate\s+for|calculate|file)\s+"
-        r"(?:the\s+)?(?:ura\s+)?(?P<modifier>[a-zA-Z0-9\s\-]{3,35}?)\s+"
-        r"(?P<kind>tax|levy|duty|tariff|surcharge|charge)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:ura\s+)?(?P<modifier>[a-zA-Z0-9\s\-]{3,35}?)\s+"
-        r"(?P<kind>tax|levy|duty|tariff|surcharge)\b",
+        r"\b(?P<modifier>[a-zA-Z0-9\s\-]{2,40}?)\s+"
+        r"(?P<kind>tax|taxes|levy|levies|duty|duties|tariff|tariffs|surcharge|surcharges)\b",
         re.IGNORECASE,
     ),
 )
@@ -149,19 +161,33 @@ def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
         for match in pattern.finditer(text):
             raw_mod = match.group("modifier").strip()
             kind = match.group("kind").strip().lower()
-            # Clean modifier words
-            mod_words = [
-                w.lower()
-                for w in re.split(r"[\s\-]+", raw_mod)
-                if w and w.lower() not in _GENERIC_WORDS
-            ]
-            if not mod_words:
+            # Normalize kind to singular for comparison
+            if kind.endswith("ies"):
+                base_kind = kind[:-3] + "y"
+            elif kind.endswith("es") and kind not in ("taxes",):
+                base_kind = kind[:-2]
+            elif kind.endswith("s"):
+                base_kind = kind[:-1]
+            else:
+                base_kind = kind
+
+            words = [w.lower() for w in re.split(r"[\s\-]+", raw_mod) if w]
+            # Scan backwards from the noun to isolate the contiguous modifier words
+            # that qualify the tax name (stopping at action verbs, modals, or pronouns)
+            modifier_words = []
+            for w in reversed(words):
+                if w in _STOP_AND_ACTION_WORDS:
+                    break
+                modifier_words.insert(0, w)
+
+            if not modifier_words:
                 continue
-            cleaned_mod = " ".join(mod_words)
+
+            cleaned_mod = " ".join(modifier_words)
             if cleaned_mod in seen or len(cleaned_mod) < 3:
                 continue
             seen.add(cleaned_mod)
-            candidates.append((raw_mod, kind))
+            candidates.append((cleaned_mod, base_kind))
     return candidates
 
 
@@ -188,37 +214,46 @@ def check_false_premise(
             corpus_parts.append(str(h.get("source") or ""))
         corpus_text = " ".join(corpus_parts).lower()
 
-    for raw_mod, kind in candidates:
-        mod_lower = raw_mod.lower().strip()
-        words = [
-            w for w in re.split(r"[\s\-]+", mod_lower)
-            if w and w not in _GENERIC_WORDS
-        ]
-        if not words:
-            continue
-
-        clean_mod = " ".join(words)
+    for clean_mod, kind in candidates:
         # Check against legitimate taxes
         if clean_mod in _LEGITIMATE_TAX_MODIFIERS:
             continue
-        if any(clean_mod == leg or clean_mod.endswith(f" {leg}") for leg in _LEGITIMATE_TAX_MODIFIERS):
-            continue
 
-        # Check whether any distinctive word from the asserted concept appears
+        # Check whether the exact concept phrase or distinctive phrase appears
         # in the retrieved corpus or official rate tables
-        found_in_corpus = any(w in corpus_text for w in words if len(w) >= 4)
+        found_in_corpus = (
+            clean_mod in corpus_text
+            or f"{clean_mod} {kind}" in corpus_text
+        )
         if found_in_corpus:
             continue
 
         # Concept is not a known Ugandan tax and absent from retrieved passages
-        concept_display = f"{raw_mod.strip()} {kind.capitalize()}"
-        reply = (
-            f"Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, "
-            f"there is no official \"{concept_display}\". The URA does not administer or impose such a tax or levy.\n\n"
-            f"If you are earning income in Uganda (including remote employment, digital freelancing, or foreign-sourced income), "
-            f"standard income tax provisions apply based on your tax residency status. "
-            f"Please consult an official URA office or tax advisor for guidance on your specific obligations."
-        )
+        words_cap = " ".join(w.capitalize() for w in clean_mod.split())
+        concept_display = f"{words_cap} {kind.capitalize()}"
+
+        # Tailor the guidance depending on whether the query asks about remote/digital work
+        is_digital_remote = any(
+            term in clean_mod for term in ("digital nomad", "nomad", "remote", "freelanc")
+        ) or any(term in (query or "").lower() for term in ("digital nomad", "nomad"))
+
+        if is_digital_remote:
+            reply = (
+                f"Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, "
+                f"there is no official \"{concept_display}\". The URA does not administer or impose a specific tax by this name.\n\n"
+                f"If you are earning income in Uganda (including remote employment, digital freelancing, or foreign-sourced income), "
+                f"standard income tax provisions apply based on your tax residency status. "
+                f"Please consult an official URA office or tax advisor for guidance on your specific obligations."
+            )
+        else:
+            reply = (
+                f"Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, "
+                f"there is no official \"{concept_display}\". The URA does not administer or impose such a tax or levy.\n\n"
+                f"Legitimate statutory tax heads administered by the URA include Income Tax (PAYE, Corporate Income Tax, Presumptive Tax), "
+                f"Value Added Tax (VAT), Withholding Tax (WHT), Rental Tax, Stamp Duty, and Customs and Excise Duties. "
+                f"Please consult official URA guidelines or an authorized tax officer for statutory requirements."
+            )
+
         logger.warning(
             "epistemic false-premise guard triggered for query '%s' (concept: %s)",
             query[:120],
