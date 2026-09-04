@@ -126,9 +126,11 @@ def _rsa_public_key_from_jwk(jwk: dict[str, Any]) -> Any:
 def _fetch_jwks(url: str, timeout_s: float) -> dict[str, Any]:
     if not url:
         raise JWTAuthError("OIDC_JWKS_URL is required for RS256 verification")
+    if not (url.startswith("https://") or url.startswith("http://")):
+        raise JWTAuthError("OIDC_JWKS_URL must start with https:// or http://")
 
     try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
+        with urllib.request.urlopen(url, timeout=timeout_s) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as err:
         raise JWTAuthError(f"failed to fetch JWKS: {err}") from err

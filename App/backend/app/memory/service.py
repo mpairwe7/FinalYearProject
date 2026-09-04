@@ -162,9 +162,9 @@ class MemoryService:
         # 2. Write an episodic summary (naive: first user turn truncated)
         first_user = next(
             (
-                str(t.get("content") or t.get("user_message", ""))
+                str(t.get("user_message") or t.get("content") or "").strip()
                 for t in turns
-                if t.get("role") in ("user", "user_message")
+                if "user_message" in t or t.get("role") in ("user", "user_message")
             ),
             "",
         )
@@ -262,6 +262,11 @@ _TOPIC_KEYWORDS = {
     "registration": ["register", "tin", "sign up"],
     "withholding": ["withholding", "wht"],
     "capital_gains": ["capital gains", "cgt", "sold"],
+    "rental": ["rental", "landlord", "tenancy"],
+    "stamp": ["stamp duty", "property transfer", "land transfer"],
+    "motor_vehicle": ["motor vehicle", "logbook", "number plate"],
+    "excise": ["excise", "dts", "digital tax stamp"],
+    "efris": ["efris", "fiscal invoice"],
     "escalation": ["human", "officer", "dispute", "appeal"],
 }
 

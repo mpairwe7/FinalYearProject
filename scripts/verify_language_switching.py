@@ -55,6 +55,8 @@ def post_chat(msg: str, locale: str = "en", session_id: str | None = None) -> tu
     if session_id:
         payload["conversation_id"] = session_id
 
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"Unpermitted URL scheme: {url}")
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -62,7 +64,7 @@ def post_chat(msg: str, locale: str = "en", session_id: str | None = None) -> tu
     )
     t0 = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
+        with urllib.request.urlopen(req, timeout=90) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             elapsed = time.perf_counter() - t0
             return resp.status, json.loads(resp.read().decode("utf-8")), elapsed
     except urllib.error.HTTPError as e:

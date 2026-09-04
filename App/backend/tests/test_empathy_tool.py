@@ -44,6 +44,18 @@ class ClassificationTests(unittest.TestCase):
         result = assess("This is useless, I'm going to lose my business over this")
         self.assertEqual(result["kind"], "hardship")
 
+    def test_enforcement_hardship_triggers_hardship(self) -> None:
+        for phrasing in [
+            "My bank account is frozen by URA",
+            "They issued an agency notice to my bank",
+            "URA seized my goods at the border",
+            "They sealed my shop yesterday",
+            "I lost my job and cannot pay this assessment",
+        ]:
+            res = assess(phrasing)
+            self.assertEqual(res["kind"], "hardship", f"Failed for {phrasing}")
+            self.assertTrue(res["offer_human_handoff"], f"Failed for {phrasing}")
+
 
 class IntensityTests(unittest.TestCase):
     def test_more_cues_raise_intensity(self) -> None:
@@ -66,6 +78,12 @@ class GuidanceTests(unittest.TestCase):
     def test_mild_frustration_does_not_offer_a_human(self) -> None:
         # Offering too early reads as a brush-off.
         self.assertFalse(assess("this is annoying")["offer_human_handoff"])
+
+    def test_high_anxiety_offers_human(self) -> None:
+        loud = assess("I am VERY scared, terrified and worried about this audit")
+        self.assertEqual(loud["kind"], "anxiety")
+        self.assertEqual(loud["intensity"], "high")
+        self.assertTrue(loud["offer_human_handoff"])
 
     def test_neutral_message_gets_no_empathy_opener(self) -> None:
         result = assess("What is the VAT rate?")

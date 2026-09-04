@@ -49,20 +49,21 @@ Environment variables:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
 import threading
 import time
 from contextlib import nullcontext
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from .agents.loop_control import ToolCallBudget
 from .agents.prompts import specialist_prompt
 from .guardrails import scan_retrieved_text
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -625,8 +626,11 @@ def _vllm_generate(
                 "chat_template_kwargs": {"enable_thinking": False},
             }
         ).encode("utf-8")
+        url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"Invalid vLLM URL scheme: {url}")
         req = urllib.request.Request(
-            f"{VLLM_BASE_URL}/chat/completions",
+            url,
             data=body,
             headers={
                 "Content-Type": "application/json",
@@ -634,7 +638,7 @@ def _vllm_generate(
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             payload = _json.loads(resp.read().decode("utf-8"))
         choices = payload.get("choices", [])
         if not choices:
@@ -674,8 +678,11 @@ def _vllm_chat_completion(
             payload["tool_choice"] = tool_choice or "auto"
 
         body = _json.dumps(payload).encode("utf-8")
+        url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"Invalid vLLM URL scheme: {url}")
         req = urllib.request.Request(
-            f"{VLLM_BASE_URL}/chat/completions",
+            url,
             data=body,
             headers={
                 "Content-Type": "application/json",
@@ -683,7 +690,7 @@ def _vllm_chat_completion(
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             data = _json.loads(resp.read().decode("utf-8"))
         choices = data.get("choices", [])
         if not choices:
@@ -727,10 +734,8 @@ def _vllm_chat_completion(
         return {"content": content, "tool_calls": parsed_calls}
     except urllib.error.HTTPError as http_err:
         err_body = ""
-        try:
+        with contextlib.suppress(Exception):
             err_body = http_err.read().decode("utf-8", errors="replace")
-        except Exception:
-            pass
         logger.warning("vLLM HTTP tool completion HTTP %s: %s", http_err.code, err_body)
         return {"content": "", "tool_calls": []}
     except Exception:
@@ -761,8 +766,11 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
                 "chat_template_kwargs": {"enable_thinking": False},
             }
         ).encode("utf-8")
+        url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"Invalid vLLM URL scheme: {url}")
         req = urllib.request.Request(
-            f"{VLLM_BASE_URL}/chat/completions",
+            url,
             data=body,
             headers={
                 "Content-Type": "application/json",
@@ -771,7 +779,7 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             for line_bytes in resp:
                 line = line_bytes.decode("utf-8", errors="ignore").strip()
                 if not line.startswith("data:"):
@@ -1510,7 +1518,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     user_id: str = "",
     user_role: str = "public",
     granted_purposes: list[str] | None = None,
-    event_callback: "Callable[[dict[str, Any]], None] | None" = None,
+    event_callback: Callable[[dict[str, Any]], None] | None = None,
     agent_role: str = "",
     context_summary: str = "",
 ) -> dict[str, Any]:
@@ -1891,12 +1899,12 @@ def _summarise_tool_result(result: Any) -> str:
         if "error" in result:
             return f"error: {str(result['error'])[:120]}"
         # Common URA tool keys, in priority order
-        for key in ("summary", "message", "human_readable", "answer"):
+        for key in ("explanation", "summary", "message", "human_readable", "answer"):
             value = result.get(key)
             if isinstance(value, str) and value:
                 return value[:200]
         return f"ok ({len(result)} fields)"
-    if isinstance(result, (list, tuple)):
+    if isinstance(result, list | tuple):
         return f"list[{len(result)}]"
     text = str(result)
     return text[:200] if text else "<empty>"

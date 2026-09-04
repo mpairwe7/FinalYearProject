@@ -151,43 +151,53 @@ _CANDIDATE_PATTERNS = (
 )
 
 
+_INTERROGATIVE_PREFIX = re.compile(
+    r"^(?:is\s+there(?:\s+an?|\s+any)?|are\s+there(?:\s+any)?|was\s+there|were\s+there|"
+    r"what\s+is(?:\s+an?|\s+the)?|what\s+are(?:\s+the)?|tell\s+me\s+about(?:\s+the)?)\s+",
+    re.IGNORECASE,
+)
+
+
 def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
     """Extract candidate (modifier, kind) pairs from *query*."""
     text = (query or "").strip()
+    # Consume recognized interrogative prefixes so they never bleed into modifiers
+    normalized_text = _INTERROGATIVE_PREFIX.sub("", text)
     candidates: list[tuple[str, str]] = []
     seen: set[str] = set()
 
-    for pattern in _CANDIDATE_PATTERNS:
-        for match in pattern.finditer(text):
-            raw_mod = match.group("modifier").strip()
-            kind = match.group("kind").strip().lower()
-            # Normalize kind to singular for comparison
-            if kind.endswith("ies"):
-                base_kind = kind[:-3] + "y"
-            elif kind.endswith("es") and kind not in ("taxes",):
-                base_kind = kind[:-2]
-            elif kind.endswith("s"):
-                base_kind = kind[:-1]
-            else:
-                base_kind = kind
+    for target in (normalized_text, text):
+        for pattern in _CANDIDATE_PATTERNS:
+            for match in pattern.finditer(target):
+                raw_mod = match.group("modifier").strip()
+                kind = match.group("kind").strip().lower()
+                # Normalize kind to singular for comparison
+                if kind.endswith("ies"):
+                    base_kind = kind[:-3] + "y"
+                elif kind.endswith("es") and kind not in ("taxes",):
+                    base_kind = kind[:-2]
+                elif kind.endswith("s"):
+                    base_kind = kind[:-1]
+                else:
+                    base_kind = kind
 
-            words = [w.lower() for w in re.split(r"[\s\-]+", raw_mod) if w]
-            # Scan backwards from the noun to isolate the contiguous modifier words
-            # that qualify the tax name (stopping at action verbs, modals, or pronouns)
-            modifier_words = []
-            for w in reversed(words):
-                if w in _STOP_AND_ACTION_WORDS:
-                    break
-                modifier_words.insert(0, w)
+                words = [w.lower() for w in re.split(r"[\s\-]+", raw_mod) if w]
+                # Scan backwards from the noun to isolate the contiguous modifier words
+                # that qualify the tax name (stopping at action verbs, modals, or pronouns)
+                modifier_words = []
+                for w in reversed(words):
+                    if w in _STOP_AND_ACTION_WORDS:
+                        break
+                    modifier_words.insert(0, w)
 
-            if not modifier_words:
-                continue
+                if not modifier_words:
+                    continue
 
-            cleaned_mod = " ".join(modifier_words)
-            if cleaned_mod in seen or len(cleaned_mod) < 3:
-                continue
-            seen.add(cleaned_mod)
-            candidates.append((cleaned_mod, base_kind))
+                cleaned_mod = " ".join(modifier_words)
+                if cleaned_mod in seen or len(cleaned_mod) < 2:
+                    continue
+                seen.add(cleaned_mod)
+                candidates.append((cleaned_mod, base_kind))
     return candidates
 
 
@@ -219,7 +229,7 @@ def check_false_premise(
         if clean_mod in _LEGITIMATE_TAX_MODIFIERS:
             continue
 
-        # Check whether the exact concept phrase or distinctive phrase appears
+        # Check whether the exact concept phrase appears
         # in the retrieved corpus or official rate tables
         found_in_corpus = (
             clean_mod in corpus_text
@@ -254,10 +264,12 @@ def check_false_premise(
                 f"Please consult official URA guidelines or an authorized tax officer for statutory requirements."
             )
 
+        safe_query = query[:120].replace("\r", " ").replace("\n", " ").strip()
+        safe_concept = concept_display.replace("\r", " ").replace("\n", " ").strip()
         logger.warning(
             "epistemic false-premise guard triggered for query '%s' (concept: %s)",
-            query[:120],
-            concept_display,
+            safe_query,
+            safe_concept,
         )
         return FalsePremiseResult(
             is_false_premise=True,

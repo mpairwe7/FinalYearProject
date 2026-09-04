@@ -32,9 +32,11 @@ def log(msg: str) -> None:
 
 def http_get(path: str) -> tuple[int, Any]:
     url = f"{BASE_URL}{path}"
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"Unpermitted URL scheme: {url}")
     req = urllib.request.Request(url, headers=HEADERS)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             data = resp.read()
             try:
                 return resp.status, json.loads(data.decode("utf-8"))
@@ -50,10 +52,12 @@ def http_get(path: str) -> tuple[int, Any]:
 
 def http_post(path: str, payload: dict[str, Any], timeout: int = 90) -> tuple[int, dict[str, Any]]:
     url = f"{BASE_URL}{path}"
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"Unpermitted URL scheme: {url}")
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=HEADERS)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             return resp.status, json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")

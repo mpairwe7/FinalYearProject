@@ -267,8 +267,13 @@ def rewrite_with_history(
             return "calculate PAYE for a resident"
 
     # 3. Multi-turn pronoun / coreference resolution
+    # Negative lookahead ensures demonstrative determiners before nouns ("this year",
+    # "this month", "that period", "if this is my first time") are not treated as referent pronouns.
+    determiner_lookahead = (
+        r"(?!\s+(?:year|month|week|day|time|period|date|case|turnover|income|figure|number|amount|slip|form|stage|step|office|branch|category|is\s+(?:my|our|the)\s+first))"
+    )
     pronoun_pattern = re.compile(
-        r"\b(it|that|this|they|them|those|its|their|the above|the same)\b",
+        rf"\b(it|they|them|the above|the same|(?:this|that|those|these){determiner_lookahead}|its|their)\b",
         re.IGNORECASE,
     )
 
@@ -293,12 +298,17 @@ def rewrite_with_history(
 
         if subject:
             subject_phrase = _ABBREVIATIONS.get(subject.lower(), subject)
-            replacement = subject_phrase
-            if re.search(r"\bregister(?:ing)?\s+for\s+(it|that|this|the same)\b", q, re.IGNORECASE):
-                article = "an" if subject_phrase[:1].lower() in "aeiou" else "a"
-                replacement = f"{article} {subject_phrase}"
 
-            rewritten = pronoun_pattern.sub(replacement, q)
+            def _replace_pronoun(match: re.Match[str]) -> str:
+                pr = match.group(1).lower()
+                if pr in ("its", "their"):
+                    return f"{subject_phrase}'s"
+                if re.search(r"\bregister(?:ing)?\s+for\s+$", q[: match.start()], re.IGNORECASE):
+                    article = "an" if subject_phrase[:1].lower() in "aeiou" else "a"
+                    return f"{article} {subject_phrase}"
+                return subject_phrase
+
+            rewritten = pronoun_pattern.sub(_replace_pronoun, q, count=1)
             logger.debug("Query rewritten with context subject '%s' (input_length=%d)", subject, len(q))
             return rewritten
 
@@ -319,9 +329,13 @@ def rewrite_with_history(
                     return f"{expanded} {q}"
 
         # Dependent questions like "what is the deadline?", "what is the penalty?", "how do I file?"
-        if re.search(r"\b(deadline|due\s+date|penalt(?:y|ies)|how\s+(?:to|do\s+i)\s+file|rates?|threshold|what\s+about|how\s+about)\b", q, re.IGNORECASE):
-            if entities.active_subject and not re.search(rf"\b{re.escape(entities.active_subject)}\b", q, re.IGNORECASE):
-                return f"{q} for {entities.active_subject}"
+        if (
+            re.search(r"\b(deadline|due\s+date|penalt(?:y|ies)|how\s+(?:to|do\s+i)\s+file|rates?|threshold|what\s+about|how\s+about)\b", q, re.IGNORECASE)
+            and entities.active_subject
+            and not re.search(rf"\b{re.escape(entities.active_subject)}\b", q, re.IGNORECASE)
+        ):
+            base_q = q.rstrip("?.! ")
+            return f"{base_q} for {entities.active_subject}?"
 
     return q
 

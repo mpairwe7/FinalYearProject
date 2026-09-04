@@ -95,10 +95,9 @@ def assess(message: str) -> dict[str, Any]:
     tone_hint = tone_hint_for(kind)
     guidance = _GUIDANCE.get(kind, _GUIDANCE[""])
 
-    # A human is offered for hardship, and for anything else only when the
-    # user is clearly at the end of their patience — offering too early
-    # reads as a brush-off.
-    offer_human = kind == "hardship" or (kind == "frustration" and intensity == "high")
+    # A human is offered for hardship or high-intensity anxiety/frustration —
+    # offering too early on mild queries reads as a brush-off.
+    offer_human = kind == "hardship" or ((kind in ("frustration", "anxiety")) and intensity == "high")
 
     return {
         "kind": kind,

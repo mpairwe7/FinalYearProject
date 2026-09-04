@@ -116,7 +116,9 @@ class TaskCreateTool(Tool):
             }
         from ..database import create_task
 
-        return {"ok": True, **create_task(kind, args or {}, idempotency_key=idempotency_key)}
+        task_data = create_task(kind, args or {}, idempotency_key=idempotency_key)
+        explanation = f"Created background task '{kind}' (ID: {task_data.get('task_id', '')}) with status '{task_data.get('status', 'pending')}'."
+        return {"ok": True, **task_data, "explanation": explanation}
 
 
 class TaskGetTool(Tool):
@@ -159,7 +161,10 @@ class TaskGetTool(Tool):
             # distinguishing them would confirm a task id exists on
             # another tenant.
             return {"ok": False, "error": "no such task"}
-        return {"ok": True, **task}
+        progress_pct = int(float(task.get("progress", 0.0)) * 100)
+        status = str(task.get("status", ""))
+        explanation = f"Task '{task.get('kind', '')}' (ID: {task_id}) is currently {status} with {progress_pct}% progress."
+        return {"ok": True, **task, "explanation": explanation}
 
 
 class TaskCancelTool(Tool):
@@ -200,10 +205,13 @@ class TaskCancelTool(Tool):
         if before is None:
             return {"ok": False, "error": "no such task"}
         after = cancel_task(task_id) or before
+        is_cancelled = after["status"] == "cancelled" and before["status"] != after["status"]
+        explanation = f"Task '{task_id}' was cancelled." if is_cancelled else f"Task '{task_id}' status is '{after['status']}'."
         return {
             "ok": True,
             **after,
-            "cancelled": after["status"] == "cancelled" and before["status"] != after["status"],
+            "cancelled": is_cancelled,
+            "explanation": explanation,
         }
 
 
