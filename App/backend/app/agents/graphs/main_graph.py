@@ -177,13 +177,12 @@ _QUERY_ARG_NAMES = frozenset({"query", "question", "text", "message"})
 def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] | None:
     """Fill a tool's required arguments from graph state, or ``None``.
 
-    Driven by the tool's own JSON Schema rather than a hardcoded name
-    list, so a new tool needs no change here.  Only two bindings are
-    honest at this layer: a tool with no required parameters can be
-    called as-is, and a required free-text parameter is the user's
-    query.  Anything else — ``amount``, ``tax_type`` — is a value the
-    graph would have to invent, so it returns ``None`` and the caller
-    skips the tool.
+    Driven by structured parameter extraction and the tool's JSON Schema.
+    A tool with no required parameters is called as-is (e.g. get_current_date).
+    A tool with free-text parameter (e.g. search_ura_knowledge_base) takes the query.
+    Calculation and rate tools extract parameters via deterministic parsing.
+    If required arguments cannot be extracted from the query, returns None to
+    skip unfillable tools.
     """
     from ...tools import ToolRegistry
 
@@ -194,13 +193,35 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
     if not required:
         return {}
     query = state.rewritten_query or state.query
-    bound: dict[str, object] = {}
-    for param in required:
-        if param in _QUERY_ARG_NAMES and query:
-            bound[param] = query
-        else:
-            return None
-    return bound
+
+    # 1. Free-text query parameter binding (e.g. search_ura_knowledge_base)
+    if all(param in _QUERY_ARG_NAMES for param in required) and query:
+        return {param: query for param in required}
+
+    # 2. Structured calculation parameter extraction
+    try:
+        from ...calculator_router import plan_calculation
+
+        calc_plan = plan_calculation(query)
+        if calc_plan and calc_plan.tool == tool_name:
+            if not calc_plan.missing and all(param in calc_plan.params for param in required):
+                return dict(calc_plan.params)
+    except Exception:
+        logger.debug("graph: plan_calculation binding failed for %s", tool_name, exc_info=True)
+
+    # 3. Structured rate lookup parameter extraction
+    if tool_name == "lookup_rate":
+        try:
+            from ...calculator_router import plan_rate_lookup
+
+            rate_plan = plan_rate_lookup(query)
+            if rate_plan and rate_plan.tax_type:
+                return {"tax_type": rate_plan.tax_type}
+        except Exception:
+            logger.debug("graph: plan_rate_lookup binding failed", exc_info=True)
+
+    return None
+
 
 
 def node_act(state: AgentGraphState) -> NodeResult:

@@ -640,6 +640,92 @@ def _vllm_generate(
         return ""
 
 
+def _vllm_chat_completion(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
+    *,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Call vLLM OpenAI-compatible /chat/completions endpoint with tool calling support."""
+    try:
+        import json as _json
+        import urllib.request
+
+        payload: dict[str, Any] = {
+            "model": LLM_MODEL,
+            "messages": messages,
+            "temperature": LLM_TEMPERATURE if temperature is None else temperature,
+            "top_p": 0.95 if top_p is None else top_p,
+            "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+            "repetition_penalty": LLM_REPETITION_PENALTY,
+            "stream": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice or "auto"
+
+        body = _json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"{VLLM_BASE_URL}/chat/completions",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {VLLM_API_KEY}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        choices = data.get("choices", [])
+        if not choices:
+            return {"content": "", "tool_calls": []}
+        msg = choices[0].get("message", {})
+        content = str(msg.get("content") or "").strip()
+
+        parsed_calls: list[dict[str, Any]] = []
+        raw_tool_calls = msg.get("tool_calls")
+        if raw_tool_calls and isinstance(raw_tool_calls, list):
+            for tc in raw_tool_calls:
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                args_raw = func.get("arguments", {})
+                if isinstance(args_raw, str):
+                    try:
+                        args = _json.loads(args_raw)
+                    except Exception:
+                        args = {}
+                elif isinstance(args_raw, dict):
+                    args = args_raw
+                else:
+                    args = {}
+                if name:
+                    parsed_calls.append({
+                        "id": tc.get("id") or f"call_{len(parsed_calls)}",
+                        "name": name,
+                        "arguments": args,
+                    })
+
+        # Also support models outputting <tool_call> tags in content
+        if not parsed_calls and content:
+            xml_calls = _parse_tool_calls(content)
+            for idx, xc in enumerate(xml_calls):
+                parsed_calls.append({
+                    "id": f"call_xml_{idx}",
+                    "name": xc["name"],
+                    "arguments": xc.get("arguments", {}),
+                })
+
+        return {"content": content, "tool_calls": parsed_calls}
+    except Exception:
+        logger.exception("vLLM HTTP tool completion failed")
+        return {"content": "", "tool_calls": []}
+
+
+
 def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None, None]:
     """Stream tokens from vLLM /chat/completions with ``stream=true``.
 
@@ -1448,26 +1534,14 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                           model stopped emitting tool calls
     """
     if LLM_BACKEND == "vllm":
-        # vLLM HTTP path: tool-calling requires the OpenAI API's
-        # `tools` + `tool_choice` parameters.  Out of scope for this
-        # commit — fall back to a regular generate call and return
-        # just the text.
-        text = _vllm_generate(
-            _build_tool_messages(
-                query,
-                passages,
-                conversation_history,
-                locale,
-                personalization_context=personalization_context,
-                tone_hint=tone_hint,
-                agent_role=agent_role,
-                context_summary=context_summary,
-            )
-        )
-        return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
-
-    if not _load_model() or _tokenizer is None or _model is None:
+        if not _vllm_ready():
+            return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+    elif LLM_BACKEND == "local":
+        if not _load_model() or _tokenizer is None or _model is None:
+            return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+    else:
         return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+
 
     # Import here to avoid a circular import (tools -> retriever -> ...)
     from .mcp import get_client  # noqa: PLC0415
@@ -1531,65 +1605,71 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         except Exception:
             logger.debug("event_callback raised; suppressing", exc_info=True)
 
-    try:
-        import torch
-    except ImportError:
-        return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
-
     for iteration in range(max_iterations):
         _emit({"type": "iteration.started", "iteration": iteration})
-        try:
-            text = _tokenizer.apply_chat_template(
-                messages,
-                tools=tool_specs,
-                tokenize=False,
-                add_generation_prompt=True,
-                enable_thinking=False,  # Qwen3: disable chain-of-thought
-            )
-        except Exception:
-            logger.exception(
-                "apply_chat_template(tools=...) failed — maybe Qwen template doesn't support tools?"
-            )
-            # Fall back to plain generate() so the request isn't wasted
-            text = generate(
-                query,
-                passages or [],
-                conversation_history,
-                locale,
-                personalization_context=personalization_context,
-            )
-            return {
-                "text": text,
-                "tool_calls": tool_calls_made,
-                "iterations": iteration + 1,
-                "truncated": False,
-                "tool_budget": budget.stats(),
-            }
+        if LLM_BACKEND == "vllm":
+            turn_res = _vllm_chat_completion(messages, tools=tool_specs)
+            response = turn_res.get("content", "")
+            parsed_calls = turn_res.get("tool_calls", [])
+        else:
+            try:
+                import torch
+            except ImportError:
+                return {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+            try:
+                text = _tokenizer.apply_chat_template(
+                    messages,
+                    tools=tool_specs,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=False,  # Qwen3: disable chain-of-thought
+                )
+            except Exception:
+                logger.exception(
+                    "apply_chat_template(tools=...) failed — maybe Qwen template doesn't support tools?"
+                )
+                # Fall back to plain generate() so the request isn't wasted
+                text = generate(
+                    query,
+                    passages or [],
+                    conversation_history,
+                    locale,
+                    personalization_context=personalization_context,
+                )
+                return {
+                    "text": text,
+                    "tool_calls": tool_calls_made,
+                    "iterations": iteration + 1,
+                    "truncated": False,
+                    "tool_budget": budget.stats(),
+                }
 
-        try:
-            with _local_generation_context():
-                _select_adapter(locale)
-                inputs = _tokenizer([text], return_tensors="pt").to(_model.device)
-                with torch.no_grad():
-                    # Same boundary as generate(): service.ChatModel guards the message before
-                    # this is reached, and tool arguments are validated by the MCP client.
-                    # nosemgrep: ura-llm01-raw-user-input-to-llm
-                    output_ids = _model.generate(
-                        **inputs,
-                        max_new_tokens=LLM_MAX_TOKENS,
-                        temperature=max(LLM_TEMPERATURE, 0.01),
-                        top_p=0.95,
-                        do_sample=LLM_TEMPERATURE > 0,
-                        pad_token_id=_tokenizer.eos_token_id,
-                    )
-            gen_ids = output_ids[0][inputs["input_ids"].shape[1] :]
-            response = _tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
-        except Exception:
-            logger.exception("generate_with_tools: iteration %d generation failed", iteration)
-            break
+            try:
+                with _local_generation_context():
+                    _select_adapter(locale)
+                    inputs = _tokenizer([text], return_tensors="pt").to(_model.device)
+                    with torch.no_grad():
+                        # Same boundary as generate(): service.ChatModel guards the message before
+                        # this is reached, and tool arguments are validated by the MCP client.
+                        # nosemgrep: ura-llm01-raw-user-input-to-llm
+                        output_ids = _model.generate(
+                            **inputs,
+                            max_new_tokens=LLM_MAX_TOKENS,
+                            temperature=max(LLM_TEMPERATURE, 0.01),
+                            top_p=0.95,
+                            do_sample=LLM_TEMPERATURE > 0,
+                            pad_token_id=_tokenizer.eos_token_id,
+                        )
+                gen_ids = output_ids[0][inputs["input_ids"].shape[1] :]
+                response = _tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
+            except Exception:
+                logger.exception("generate_with_tools: iteration %d generation failed", iteration)
+                break
+
+            parsed_calls = _parse_tool_calls(response)
 
         last_response = response
-        parsed_calls = _parse_tool_calls(response)
+
         logger.info(
             "tool-loop iter=%d parsed_calls=%d response_len=%d",
             iteration,

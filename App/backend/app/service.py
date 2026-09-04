@@ -72,6 +72,7 @@ from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
 from .guardrails import STORE_RAW_PROMPTS, InputGuard, OutputGuard, redact_pii_text
 from .memory import get_memory_service
+from .premise_guard import check_false_premise
 from .query import (
     SUPPORTED_LOCALES,
     canonicalize_tax_terms,
@@ -1088,8 +1089,8 @@ def _apply_output_guards(
     ``revised`` is True the caller should emit a ``("revision", reply)`` event.
     """
     contexts = [h.get("text") or h.get("answer", "") for h in hits]
-    faith = HybridRetriever.compute_faithfulness(reply, contexts)
-    escalate, esc_reason = output_guard.should_escalate(faith, hits)
+    faith = HybridRetriever.compute_faithfulness(reply, contexts) if contexts else None
+    escalate, esc_reason = output_guard.should_escalate(faith, hits) if hits else (False, "")
 
     claim_report: dict[str, Any] | None = None
     if reply and hits and citations:
@@ -1344,6 +1345,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             "clarification",
             "workflow",
             "escalated",
+            "false_premise_rejected",
         ) or result.get("_short_circuit"):
             yield ("metadata", _metadata_payload(result, include_short_circuit=True))
             # These branches emit the whole reply as one frame, so it can be
@@ -1373,13 +1375,15 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         distress = str(result.get("_distress") or "")
 
         # ── Phase 2: optional agentic branch ─────────────────────────
-        # When tool_use is enabled, run the bounded tool-calling loop
-        # and surface every tool event as part of the same stream.  The
-        # final answer text is yielded as a single token frame because
-        # the agentic path produces a complete reply (no per-token
-        # streaming for tool calls — that's a tradeoff documented in
-        # docs/ws_chat_protocol.md).
-        if llm_module.is_available() and hits and flags.is_enabled("tool_use"):
+        # When tool_use is enabled or forced by routing, run the bounded
+        # tool-calling loop and surface every tool event as part of the
+        # same stream. The final answer text is yielded as a single token
+        # frame because the agentic path produces a complete reply.
+        force_agentic = bool(result.get("_force_agentic"))
+        force_tool_whitelist = result.get("_force_tool_whitelist")
+        agent_role = str(result.get("agent_role") or "rag_answerer")
+        use_agentic = (force_agentic or flags.is_enabled("tool_use")) and llm_module.is_available()
+        if use_agentic:
             async for event in _stream_agentic_turn(
                 rewritten_query=rewritten_query,
                 hits=hits,
@@ -1394,6 +1398,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 cancel_event=cancel_event,
                 _output_guard=_output_guard,
                 context_summary=context_summary,
+                tool_names=force_tool_whitelist,
+                agent_role=agent_role,
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
@@ -1702,6 +1708,8 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     cancel_event: threading.Event,
     _output_guard: Any,
     context_summary: str = "",
+    tool_names: list[str] | None = None,
+    agent_role: str = "",
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -1737,6 +1745,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             passages=hits,
             conversation_history=conversation_history,
             locale=locale,
+            tool_names=tool_names,
             personalization_context=personalization_context,
             tone_hint=tone_hint,
             tenant_id=tenant_id,
@@ -1744,8 +1753,10 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             user_role=user_role,
             granted_purposes=granted_purposes,
             event_callback=_emit,
+            agent_role=agent_role,
             context_summary=context_summary,
         )
+
 
     agentic_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(_run_in_thread())
 
@@ -2977,12 +2988,18 @@ class ChatModel:
         workflow: dict[str, Any] | None = None,
         handoff: dict[str, Any] | None = None,
         escalation_required: bool = False,
+        suspended_workflow: str | None = None,
     ) -> list[str]:
         if workflow and workflow.get("status") == "active":
             return [
                 "Reply with the requested detail to continue the guided process.",
                 "Send 'cancel' if you want to leave this workflow and ask a different question.",
             ]
+        if suspended_workflow:
+            actions = [f"Resume {suspended_workflow} workflow or continue asking general tax questions."]
+            if handoff:
+                actions.append("Prepare the listed reference details before speaking to a URA officer.")
+            return actions
         if handoff:
             return [
                 "Prepare the listed reference details before speaking to a URA officer.",
@@ -2996,6 +3013,19 @@ class ChatModel:
                 "Ask for human support if your case is account-specific or time-sensitive.",
             ]
         return []
+
+    def _get_suspended_workflow_name(self, thread_id: str) -> str | None:
+        if not flags.is_enabled("workflows"):
+            return None
+        try:
+            persisted = db.get_workflow_session(thread_id)
+            if persisted and persisted.get("status") == "active":
+                wf = WorkflowRegistry.get(persisted.get("workflow_id", ""))
+                if wf:
+                    return wf.name
+        except Exception:
+            logger.debug("failed to look up active workflow for thread %s", thread_id, exc_info=True)
+        return None
 
     @staticmethod
     def _has_inline_citations(reply: str) -> bool:
@@ -3703,7 +3733,10 @@ class ChatModel:
                 "reasons": ["curated deterministic template"] if curated else [],
                 "confidence_band": "high" if faith >= 0.65 else "medium",
             },
-            "next_actions": self._default_next_actions(agent_role=agent_role),
+            "next_actions": self._default_next_actions(
+                agent_role=agent_role,
+                suspended_workflow=self._get_suspended_workflow_name(thread_id),
+            ),
             "ticket_id": "",
         }
 
@@ -4388,6 +4421,11 @@ class ChatModel:
             return None
         if not reply_text:
             return None
+
+        actions = list(next_actions)
+        suspended = self._get_suspended_workflow_name(thread_id)
+        if suspended:
+            actions.insert(0, f"Resume {suspended} workflow or continue asking general tax questions.")
         return {
             "reply": self._finalize_reply(reply_text),
             "sources": [],
@@ -4408,7 +4446,7 @@ class ChatModel:
                 "reasons": ["official rate table"],
                 "confidence_band": "high",
             },
-            "next_actions": next_actions,
+            "next_actions": actions,
             "ticket_id": "",
         }
 
@@ -4529,7 +4567,9 @@ class ChatModel:
                     "reasons": ["deterministic tax calculator"],
                     "confidence_band": "high",
                 },
-                "next_actions": NEXT_ACTIONS_BY_TOOL.get(plan.tool, []),
+                "next_actions": [
+                    f"Resume {self._get_suspended_workflow_name(thread_id)} workflow or continue asking general tax questions."
+                ] + NEXT_ACTIONS_BY_TOOL.get(plan.tool, []) if self._get_suspended_workflow_name(thread_id) else NEXT_ACTIONS_BY_TOOL.get(plan.tool, []),
                 "ticket_id": "",
             }
 
@@ -5401,6 +5441,77 @@ class ChatModel:
                         force_tool_whitelist = list(route_decision.suggested_tools)
                     trace_ctx["specialist"] = route_decision.route.value
 
+            # Phase 15: LangGraph orchestrator runtime
+            if flags.is_enabled("langgraph"):
+                with trace_stage("langgraph_execution", timings=timings):
+                    from .agents.graphs.main_graph import build_main_graph
+                    from .agents.graphs.state import AgentGraphState, GraphOutcome
+
+                    graph = build_main_graph()
+                    graph_state = AgentGraphState(
+                        query=message,
+                        rewritten_query=rewritten,
+                        locale=locale,
+                        top_k=top_k,
+                        conversation_history=conversation_history or [],
+                        context_summary=context_summary,
+                        tenant_id=tenant_id or "default",
+                        user_id=user_id or "",
+                        role=user_role,
+                        granted_purposes=granted_purposes or [],
+                    )
+                    final_state = graph.run(graph_state)
+                    graph_reply = self._finalize_reply(final_state.reply)
+                    escalate = final_state.outcome == GraphOutcome.ESCALATED
+                    esc_reason = final_state.escalation_reason
+                    ticket_id = final_state.ticket_id
+                    if escalate and not ticket_id:
+                        ticket_id = self._maybe_create_ticket(
+                            reason=esc_reason or "graph_escalated",
+                            user_query=message,
+                            bot_reply=graph_reply,
+                            session_id=session_id,
+                            conversation_id=thread_id,
+                            user_id=user_id or "",
+                        )
+
+                    graph_result = {
+                        "reply": graph_reply,
+                        "sources": final_state.sources,
+                        "citations": final_state.citations,
+                        "faithfulness_score": final_state.faithfulness,
+                        "retrieval_mode": f"graph_{final_state.retrieval_mode}",
+                        "model": self.name,
+                        "conversation_id": thread_id,
+                        "locale": locale,
+                        "escalation_required": escalate,
+                        "escalation_reason": esc_reason,
+                        "agent_role": "graph_agent",
+                        "handoff": None,
+                        "response_judge": None,
+                        "next_actions": self._default_next_actions(
+                            agent_role="graph_agent",
+                            escalation_required=escalate,
+                            suspended_workflow=self._get_suspended_workflow_name(thread_id),
+                        ),
+                        "ticket_id": ticket_id,
+                    }
+                    self._persist_personalization_turn(
+                        user_id=user_id,
+                        conversation_id=thread_id,
+                        message=message,
+                        reply=graph_reply,
+                        agent_role="graph_agent",
+                        personalization=personalization,
+                    )
+                    self._audit_turn(
+                        message=message,
+                        result=graph_result,
+                        session_id=session_id,
+                        trace_ctx=trace_ctx,
+                    )
+                    return graph_result
+
             # 2. Try hybrid retrieval using rewritten query
             hits: list[dict[str, Any]] = []
             retrieval_mode = "keyword"
@@ -5605,10 +5716,86 @@ class ChatModel:
                 )
                 return result
 
-            # 4. Calibrated abstention — refuse to answer when confidence too low
+            # 3e. Epistemic false-premise guard (G43) — reject non-existent statutory instruments
+            premise_res = check_false_premise(rewritten, hits)
+            if premise_res.is_false_premise:
+                premise_reply = self._finalize_reply(premise_res.reply)
+                premise_result = {
+                    "reply": premise_reply,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": 1.0,
+                    "retrieval_mode": "false_premise_rejected",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "epistemic_guard",
+                    "next_actions": self._default_next_actions(
+                        agent_role="epistemic_guard",
+                        suspended_workflow=self._get_suspended_workflow_name(thread_id),
+                    ),
+                }
+                self._persist_personalization_turn(
+                    user_id=user_id,
+                    conversation_id=thread_id,
+                    message=message,
+                    reply=premise_reply,
+                    agent_role="epistemic_guard",
+                    personalization=personalization,
+                )
+                self._audit_turn(
+                    message=message,
+                    result=premise_result,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return premise_result
+
+            # 4. Optional agentic tool-calling path (P0: decoupled from hits and evaluated before abstention)
+            use_agentic = (
+                force_agentic or flags.is_enabled("tool_use")
+            ) and self._llm_available
+
+            agentic_used_tools = False
+            agentic_reply = ""
+            if use_agentic:
+                with trace_stage("llm_agentic", timings=timings):
+                    agentic = _call_llm_agentic(
+                        query=rewritten,
+                        passages=hits,
+                        conversation_history=conversation_history or None,
+                        locale=locale,
+                        tool_names=force_tool_whitelist,
+                        personalization_context=(
+                            (personalization or {}).get("prompt_context", "")
+                        ),
+                        tone_hint=tone_hint,
+                        tenant_id=tenant_id or "default",
+                        user_id=user_id or "",
+                        user_role=user_role,
+                        granted_purposes=granted_purposes or [],
+                        agent_role=agent_role,
+                        context_summary=context_summary,
+                    )
+                agentic_reply = agentic.get("text", "")
+                if agentic.get("tool_calls"):
+                    agentic_used_tools = True
+                    retrieval_mode = "agentic"
+                    trace_ctx["tool_calls"] = [
+                        tc.get("name") for tc in agentic["tool_calls"]
+                    ]
+                    trace_ctx["tool_iterations"] = agentic.get("iterations", 0)
+
+            # 4b. Calibrated abstention — refuse to answer when confidence too low
             with trace_stage("abstention_check", timings=timings):
-                # Attached documents are always usable grounding — never abstain.
-                should_abstain = not attachments and self._output_guard.should_abstain(hits)
+                # Attached documents and successful agentic tool executions are usable grounding — never abstain.
+                should_abstain = (
+                    not attachments
+                    and not (agentic_used_tools and agentic_reply)
+                    and self._output_guard.should_abstain(hits)
+                )
             if should_abstain:
                 reply = ABSTENTION_REPLY
                 if distress:
@@ -5658,6 +5845,7 @@ class ChatModel:
                         agent_role=agent_role,
                         handoff=handoff,
                         escalation_required=escalate,
+                        suspended_workflow=self._get_suspended_workflow_name(thread_id),
                     ),
                     "ticket_id": ticket_id,
                 }
@@ -5668,93 +5856,36 @@ class ChatModel:
 
             # 5. Build response with citations
             extractive_fallback = False
-            if hits:
-                sources = ordered_sources(hits)
-                citations = HybridRetriever.build_citations(hits)
-                contexts = [h.get("text") or h.get("answer", "") for h in hits]
+            sources = ordered_sources(hits) if hits else []
+            citations = HybridRetriever.build_citations(hits) if hits else []
+            contexts = [h.get("text") or h.get("answer", "") for h in hits] if hits else []
 
+            if agentic_reply:
+                reply = agentic_reply
+            elif hits:
                 # Phase 2: LLM synthesis from top-k passages (true RAG).
                 # The cloud fallback alone is enough to keep generation on
                 # when no local LLM is configured (_call_llm_with_deadline
                 # routes there via the breaker/empty-reply handling).
                 if self._llm_available or _cloud_llm_ready():
-                    # Phase 14-B/C: agentic path is active when either
-                    # FLAG_TOOL_USE is on (tool calling for everyone), or
-                    # the supervisor routed this specific request to it
-                    # (force_agentic).  The supervisor can also narrow
-                    # the tool whitelist (force_tool_whitelist).  Tool
-                    # calling runs on the local model only, so the agentic
-                    # branch additionally requires local availability.
-                    use_agentic = (
-                        force_agentic or flags.is_enabled("tool_use")
-                    ) and self._llm_available
-                    if use_agentic:
-                        with trace_stage("llm_agentic", timings=timings):
-                            agentic = _call_llm_agentic(
-                                query=rewritten,
-                                passages=hits,
-                                conversation_history=conversation_history or None,
-                                locale=locale,
-                                tool_names=force_tool_whitelist,
-                                personalization_context=(
-                                    (personalization or {}).get("prompt_context", "")
-                                ),
-                                tone_hint=tone_hint,
-                                tenant_id=tenant_id or "default",
-                                user_id=user_id or "",
-                                user_role=user_role,
-                                granted_purposes=granted_purposes or [],
-                                # The supervisor already decided which
-                                # specialist this is; give it the
-                                # instructions that go with the label.
-                                agent_role=agent_role,
-                                context_summary=context_summary,
-                            )
-                        reply = agentic.get("text", "")
-                        if agentic.get("tool_calls"):
-                            trace_ctx["tool_calls"] = [
-                                tc.get("name") for tc in agentic["tool_calls"]
-                            ]
-                            trace_ctx["tool_iterations"] = agentic.get("iterations", 0)
-                        if not reply:
-                            # Agentic produced no text (breaker OPEN, deadline,
-                            # or empty completion).  Run the plain RAG chain —
-                            # _call_llm_with_deadline carries the cloud
-                            # fallback — before dropping to the extractive
-                            # best-hit answer, mirroring stream_chat_turn's
-                            # fall-through to stream_llm_tokens.
-                            with trace_stage("llm_generate", timings=timings):
-                                reply = _call_llm_with_deadline(
-                                    query=rewritten,
-                                    passages=hits,
-                                    conversation_history=conversation_history or None,
-                                    locale=locale,
-                                    personalization_context=(
-                                        (personalization or {}).get("prompt_context", "")
-                                    ),
-                                    tone_hint=tone_hint,
-                                    context_summary=context_summary,
-                                )
-                    else:
-                        with trace_stage("llm_generate", timings=timings):
-                            reply = _call_llm_with_deadline(
-                                query=rewritten,
-                                passages=hits,
-                                conversation_history=conversation_history or None,
-                                locale=locale,
-                                personalization_context=(
-                                    (personalization or {}).get("prompt_context", "")
-                                ),
-                                tone_hint=tone_hint,
-                                context_summary=context_summary,
-                            )
+                    with trace_stage("llm_generate", timings=timings):
+                        reply = _call_llm_with_deadline(
+                            query=rewritten,
+                            passages=hits,
+                            conversation_history=conversation_history or None,
+                            locale=locale,
+                            personalization_context=(
+                                (personalization or {}).get("prompt_context", "")
+                            ),
+                            tone_hint=tone_hint,
+                            context_summary=context_summary,
+                        )
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
                         valid_refs = [str(i) for i in range(1, len(hits) + 1)]
                         parsed = llm_module.parse_structured_reply(reply, valid_refs)
                         if parsed["structured"]:
                             reply = parsed["answer"]
-                            # Filter citations to refs the model actually cited
                             cited_refs = set(parsed["citations"])
                             if cited_refs:
                                 citations = [
@@ -5782,9 +5913,6 @@ class ChatModel:
                 reply = NO_HITS_REPLY
                 if distress:
                     reply = f"{empathy_ack(distress)}\n\n{reply}"
-                sources = []
-                citations = []
-                contexts = []
 
             # 6. Output guardrails (OWASP LLM02 + LLM05 + LLM07)
             with trace_stage("output_guard", timings=timings):
@@ -5953,7 +6081,10 @@ class ChatModel:
                         }
 
             # 8. Escalation check
-            escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
+            if agentic_used_tools and not hits:
+                escalate, esc_reason = False, ""
+            else:
+                escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
             if flags.is_enabled("evaluator_optimizer") and not escalate:
                 escalate, esc_reason = self._escalate_on_numeric_mismatch(
                     trace_ctx.get("numeric_verification"), escalate, esc_reason
@@ -6118,6 +6249,7 @@ class ChatModel:
                 agent_role=agent_role,
                 handoff=handoff,
                 escalation_required=escalate,
+                suspended_workflow=self._get_suspended_workflow_name(thread_id),
             ),
             "ticket_id": ticket_id,
         }
@@ -6450,6 +6582,8 @@ class ChatModel:
                 })
 
         route_decision = None
+        force_agentic = False
+        force_tool_whitelist: list[str] | None = None
         if flags.is_enabled("agentic_mode"):
             route_decision = supervisor.classify(
                 rewritten,
@@ -6472,6 +6606,7 @@ class ChatModel:
                     "agent_role": "clarification_agent",
                     "next_actions": self._default_next_actions(
                         agent_role="clarification_agent",
+                        suspended_workflow=self._get_suspended_workflow_name(thread_id),
                     ),
                     "_hits": [],
                     "_history": [],
@@ -6522,6 +6657,7 @@ class ChatModel:
                         agent_role="escalation_triage",
                         handoff=handoff,
                         escalation_required=True,
+                        suspended_workflow=self._get_suspended_workflow_name(thread_id),
                     ),
                     "ticket_id": ticket_id,
                     "_hits": [],
@@ -6530,10 +6666,19 @@ class ChatModel:
                 }
             if route_decision.route == AgentRoute.TOOLS:
                 agent_role = "tool_specialist"
+                force_agentic = True
+                if route_decision.suggested_tools:
+                    force_tool_whitelist = list(route_decision.suggested_tools)
             elif route_decision.route == AgentRoute.TAX_SPECIALIST:
                 agent_role = "tax_specialist"
+                force_agentic = True
+                if route_decision.suggested_tools:
+                    force_tool_whitelist = list(route_decision.suggested_tools)
             elif route_decision.route == AgentRoute.CUSTOMS_SPECIALIST:
                 agent_role = "customs_specialist"
+                force_agentic = True
+                if route_decision.suggested_tools:
+                    force_tool_whitelist = list(route_decision.suggested_tools)
 
         hits: list[dict[str, Any]] = []
         retrieval_mode = "keyword"
@@ -6693,7 +6838,33 @@ class ChatModel:
                     "_short_circuit": True,
                 }
 
-        if not attachments and self._output_guard.should_abstain(hits):
+        # Epistemic false-premise guard (G43)
+        premise_res = check_false_premise(rewritten, hits)
+        if premise_res.is_false_premise:
+            reply = self._finalize_reply(premise_res.reply)
+            return {
+                "reply": reply,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "false_premise_rejected",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "epistemic_guard",
+                "next_actions": self._default_next_actions(
+                    agent_role="epistemic_guard",
+                    suspended_workflow=self._get_suspended_workflow_name(thread_id),
+                ),
+                "_hits": [],
+                "_history": [],
+                "_rewritten": rewritten,
+                "_short_circuit": True,
+            }
+
+        if not attachments and not (force_agentic or flags.is_enabled("tool_use")) and self._output_guard.should_abstain(hits):
             reply = ABSTENTION_REPLY
             if distress:
                 reply = f"{empathy_ack(distress)}\n\n{reply}"
@@ -6742,6 +6913,7 @@ class ChatModel:
                     agent_role=agent_role,
                     handoff=handoff,
                     escalation_required=escalate,
+                    suspended_workflow=self._get_suspended_workflow_name(thread_id),
                 ),
                 "ticket_id": ticket_id,
                 "_hits": [],
@@ -6753,6 +6925,8 @@ class ChatModel:
         citations = HybridRetriever.build_citations(hits)
         best = hits[0] if hits else {}
         reply = best.get("answer") or best.get("text", "")
+        if not reply:
+            reply = NO_HITS_REPLY
         if citations and not re.search(r"\[\d{1,3}\]", reply):
             reply = f"{reply.rstrip()} [1]"
 
@@ -6816,6 +6990,7 @@ class ChatModel:
                 agent_role=agent_role,
                 handoff=handoff,
                 escalation_required=escalate,
+                suspended_workflow=self._get_suspended_workflow_name(thread_id),
             ),
             "ticket_id": ticket_id,
             "_hits": hits,
@@ -6825,6 +7000,8 @@ class ChatModel:
             "_personalization_context": (personalization or {}).get("prompt_context", ""),
             "_tone_hint": tone_hint,
             "_distress": distress,
+            "_force_agentic": force_agentic,
+            "_force_tool_whitelist": force_tool_whitelist,
             "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
         }
 

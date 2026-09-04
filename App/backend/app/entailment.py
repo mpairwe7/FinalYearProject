@@ -115,7 +115,10 @@ def numeric_contradiction(claim: str, context: str) -> bool:
         return False
     ca = canonical_amounts(claim)
     xa = canonical_amounts(context)
-    return bool(ca and xa and ca.isdisjoint(xa))
+    if ca and xa and ca.isdisjoint(xa):
+        return True
+    return False
+
 
 
 def _load_model() -> Any:
