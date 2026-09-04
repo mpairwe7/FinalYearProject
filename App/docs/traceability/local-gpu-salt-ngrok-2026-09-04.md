@@ -47,9 +47,11 @@ that had been live for the previous 39 hours — was serving with:
 
 - `LLM_ENABLED=false` — vLLM was running, healthy, holding ~28 GB of the card,
   and never being called. Answers came from the retrieval/workflow path only.
-- `SPEECH_ENABLED=false` — `SpeechService` short-circuits to
-  `backend="disabled"` before constructing anything, so neither SALT tier was
-  ever loaded and `/v1/tts` + `/v1/asr` answered without touching a model.
+- `SPEECH_ENABLED=false` — startup leaves `app.state.speech` as `None`, so
+  `get_speech_model` raises **503** and neither SALT tier was ever
+  constructed. `/v1/asr` and `/v1/tts` stopped serving outright rather than
+  degrading (`speech_service`'s own `backend="disabled"` result is
+  unreachable in this configuration — the startup gate fires first).
 
 Nothing failed loudly; both containers reported healthy throughout. Fixed by
 restating both flags in `docker-compose.gpu-salt.yml` — the serving profile,
@@ -60,7 +62,7 @@ a preceding overlay's default is not a safe default for this one.
 
 `app-api:gpu`, run directly against GPU 7:
 
-```
+```text
 torch 2.11.0+cu128   torchaudio 2.11.0+cu128
 cuda_available True  NVIDIA RTX A6000
 sparktts + BiCodecTokenizer import OK
@@ -69,7 +71,7 @@ _torchaudio .so present: True
 
 Container startup — every tier on `cuda:0`, nothing degraded:
 
-```
+```text
 HybridRetriever ready (url=http://qdrant:6333
   collection=ura_knowledge_base_jsonl_active
   dense_device=cuda:0 rerank=True reranker_device=cuda:0)
@@ -113,7 +115,7 @@ Hybrid sources returned for "What is EFRIS?", all from the local Qdrant alias:
 Synthesized `"Omusolo gwa EFRIS gusasulwa gutya?"` with Spark-TTS-SALT and fed
 the resulting PCM straight back to Whisper-SALT:
 
-```
+```text
 "Omusolo gwa eifalisi kusasulwa gutya?"   language: "lg"
 ```
 
@@ -124,13 +126,22 @@ well-formed; the human listening pass the runbook asks for is still open.
 
 ### Two API shapes that are easy to get wrong
 
-- **`/v1/asr` is not a multipart upload.** Body is raw PCM (int16 LE or
-  float32, mono); `sample_rate` and `language` are query parameters. Posting a
-  `.wav` makes the RIFF header and multipart boundaries get read as audio, and
-  Whisper hallucinates a fluent sentence out of the noise rather than
-  erroring — during this run a `-F file=@…` call returned the confident
-  transcript `"*Eldad is getting mad at his mom*"`. Strip the header first.
-  `language` is genuinely optional; auto-detect returned the same transcript.
+- **`/v1/asr` takes the audio as the request body, not as a multipart file.**
+  `sample_rate` and `language` are query parameters. The decoder sniffs magic
+  bytes, so a bare **WAV body works fine** — verified byte-identical
+  transcripts from `--data-binary @speech.wav` and from raw PCM. What breaks
+  is wrapping it: a `-F file=@speech.wav` multipart envelope makes the
+  boundary lines and part headers get read as audio, and Whisper hallucinates
+  a fluent sentence out of the noise rather than erroring — during this run
+  such a call returned the confident transcript
+  `"*Eldad is getting mad at his mom*"`. `language` is genuinely optional;
+  auto-detect returned the same transcript.
+
+  ```bash
+  curl -X POST "$BASE/api/v1/asr?language=lg" \
+    -H 'Content-Type: audio/wav' --data-binary @speech.wav
+  ```
+
 - **`/v1/tts` containers differ by locale.** English (`edge_tts`) returns
   **MP3** at 24 kHz; the SALT locales return **RIFF WAV** at 16 kHz.
 

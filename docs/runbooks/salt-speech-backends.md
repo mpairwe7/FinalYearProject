@@ -291,7 +291,7 @@ export SPARK_TTS_REPO_DIR=/opt/spark-tts
 normal `huggingface_hub.snapshot_download` at load time — no extra step
 needed for that half.
 
-### The torchaudio/CUDA mismatch, and why `Dockerfile.gpu` deletes a file to fix it
+### HISTORICAL — the torchaudio/CUDA mismatch and its old `.so` fix
 
 > **Superseded 2026-09-04 — `Dockerfile.gpu` no longer deletes that file.**
 > The mismatch analysed below is real, but it only arises when torchaudio is
@@ -305,7 +305,6 @@ needed for that half.
 > for the failure signature — `OSError: libcudart.so.12` or "PyTorch and
 > TorchAudio were compiled with different CUDA versions" means something has
 > reintroduced an unpinned torchaudio.
-
 
 Only relevant if you install sparktts's dependencies *alongside* this
 project's own pinned `torch==2.12.1` instead of following spark-tts's own
@@ -504,7 +503,7 @@ card. Brought up on GPU 7 and exercised over the public tunnel; full record in
 
 Container log at startup — every tier on `cuda:0`, nothing degraded:
 
-```
+```text
 HybridRetriever ready (… dense_device=cuda:0 rerank=True reranker_device=cuda:0)
 ChatModel initialised – hybrid (Qdrant) mode, LLM (Sunbird/Sunflower-14B-FP8) gen
 Loading Whisper-SALT 'Sunbird/asr-whisper-large-v3-salt' (device=cuda:0)
@@ -515,7 +514,7 @@ SpeechModel warm-up: {'en': 'edge_tts', 'lg': 'spark_tts_salt', 'sw': 'spark_tts
 Measured through ngrok, warm:
 
 | Call | Backend | Latency |
-|---|---|---|
+| --- | --- | --- |
 | `/v1/tts` Luganda, 2.7s of audio | `spark_tts_salt` (GPU) | **4.3s** (was ~150s on CPU) |
 | `/v1/tts` English | `edge_tts` | 0.4s |
 | `/v1/asr` Luganda, 2.7s of audio | `whisper_salt` (GPU) | **0.72s**, RTF 0.27 |
@@ -531,16 +530,17 @@ resulting PCM straight back to Whisper-SALT, and got
 drift is the acronym EFRIS coming back phonetically, which is what a speaker
 saying it aloud sounds like.
 
-**Calling `/v1/asr` correctly.** It is not a multipart file upload. The body
-is **raw PCM** (int16 LE or float32, mono) and `sample_rate`/`language` are
-**query parameters** — posting a `.wav` (or any multipart envelope) makes the
-container bytes get read as audio, and Whisper duly hallucinates a sentence
-out of the noise instead of failing. Strip the RIFF header first:
+**Calling `/v1/asr` correctly.** It is not a multipart file upload — the
+audio goes in the **request body** and `sample_rate`/`language` are **query
+parameters**. The decoder sniffs magic bytes, so a bare WAV body is fine
+(verified: byte-identical transcripts from `--data-binary @speech.wav` and
+from raw PCM). What breaks is wrapping it — a `-F file=@speech.wav` multipart
+envelope makes the boundary lines and part headers get read as audio, and
+Whisper hallucinates a fluent sentence out of the noise instead of failing:
 
 ```bash
-python3 -c "import wave;w=wave.open('speech.wav');open('speech.pcm','wb').write(w.readframes(w.getnframes()))"
-curl -X POST "$BASE/api/v1/asr?sample_rate=16000&language=lg" \
-  -H 'Content-Type: application/octet-stream' --data-binary @speech.pcm
+curl -X POST "$BASE/api/v1/asr?language=lg" \
+  -H 'Content-Type: audio/wav' --data-binary @speech.wav
 ```
 
 `language` is genuinely optional — auto-detect returned the same transcript.

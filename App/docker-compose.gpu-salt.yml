@@ -29,9 +29,10 @@ services:
       # them. This overlay sits after it in the chain and is the serving
       # profile, so it has to turn both back on — otherwise `api` comes up with
       # LLM_ENABLED=false (every answer retrieval-only, vLLM never called
-      # despite running) and SPEECH_ENABLED=false (SpeechService short-circuits
-      # to backend="disabled", so neither SALT tier is ever constructed and
-      # /v1/tts + /v1/transcribe answer without touching a model). Same reason
+      # despite running) and SPEECH_ENABLED=false (startup leaves
+      # app.state.speech as None, so get_speech_model raises 503 and neither
+      # SALT tier is ever constructed — /v1/asr and /v1/tts stop serving
+      # entirely rather than degrading). Same reason
       # the QDRANT_* values below are restated: a preceding overlay's default
       # is not a safe default for this one.
       - LLM_ENABLED=true
