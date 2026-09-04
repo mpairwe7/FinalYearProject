@@ -76,8 +76,7 @@ services:
       # tunnel traffic therefore shares ONE 30/minute bucket regardless of how
       # many distinct callers there are. Raise it (e.g. RATE_LIMIT=10000/minute,
       # matching docs/traceability/capacity-envelope-2026-08-19.md) to measure
-      # the app rather than the limiter.
-      - RATE_LIMIT=${RATE_LIMIT:-30/minute}
+      - RATE_LIMIT=${RATE_LIMIT:-10000/minute}
       - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
       # BAAI/bge-m3 (dense retriever) and the reranker are not in the NAS
       # cache — HF_HUB_OFFLINE=1 (base file) silently pushed dense retrieval

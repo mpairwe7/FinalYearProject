@@ -79,6 +79,7 @@ Results/reports/*.csv
 # Corpus-coverage run reports (#303) — measurements, not artefacts to review;
 # the gate reads floors from Data/eval/coverage_domains.yaml, not from these.
 Results/eval/*.json
+Results/load/*volume*.json
 
 # Node.js
 node_modules/
