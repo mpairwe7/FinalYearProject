@@ -261,10 +261,15 @@ class ListAvailableRatesTool(Tool):
             if isinstance(value, int | float) and not isinstance(value, bool)
         ]
         top_rates_str = "\n".join(f"- **{r['display_name']}**: {r['formatted']}" for r in rows[:8])
+        verification_statement = (
+            "All rates are verified under current statutory instruments."
+            if table.confirmed
+            else "These rates are provisional; verify them with URA before use."
+        )
         explanation = (
             f"Official URA statutory rate schedule for {table.fiscal_year} ({len(rows)} rates recorded):\n\n"
             f"{top_rates_str}\n\n"
-            f"All rates are verified under current statutory instruments."
+            f"{verification_statement}"
         )
         return {
             "ok": True,

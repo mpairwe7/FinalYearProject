@@ -117,7 +117,8 @@ class TaskCreateTool(Tool):
         from ..database import create_task
 
         task_data = create_task(kind, args or {}, idempotency_key=idempotency_key)
-        explanation = f"Created background task '{kind}' (ID: {task_data.get('task_id', '')}) with status '{task_data.get('status', 'pending')}'."
+        action = "Replayed existing background task" if task_data.get("replayed") else "Created background task"
+        explanation = f"{action} '{kind}' (ID: {task_data.get('task_id', '')}) with status '{task_data.get('status', 'pending')}'."
         return {"ok": True, **task_data, "explanation": explanation}
 
 

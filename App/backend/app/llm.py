@@ -594,6 +594,38 @@ def _vllm_ready() -> bool:
     return bool(LLM_ENABLED and VLLM_BASE_URL)
 
 
+def _vllm_build_request(url: str, body: bytes, accept_stream: bool = False) -> Any:
+    import urllib.parse
+    import urllib.request
+
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"Invalid vLLM URL scheme: {url}")
+
+    parsed = urllib.parse.urlparse(url)
+    is_loopback = (
+        parsed.hostname in ("localhost", "127.0.0.1", "::1", "vllm", None)
+        or (
+            parsed.hostname is not None
+            and (
+                parsed.hostname.endswith((".local", ".internal", "-mock"))
+                or "mock" in parsed.hostname
+            )
+        )
+    )
+    headers = {"Content-Type": "application/json"}
+    if accept_stream:
+        headers["Accept"] = "text/event-stream"
+
+    if VLLM_API_KEY:
+        if parsed.scheme != "https" and not is_loopback:
+            raise ValueError(
+                f"Insecure vLLM connection: credentialed requests with VLLM_API_KEY require an https:// endpoint (got {parsed.scheme}://)"
+            )
+        headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
+
+    return urllib.request.Request(url, data=body, headers=headers, method="POST")
+
+
 # ---------------------------------------------------------------------------
 # vLLM HTTP dispatch (LLM_BACKEND=vllm)
 # ---------------------------------------------------------------------------
@@ -627,17 +659,7 @@ def _vllm_generate(
             }
         ).encode("utf-8")
         url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
-        if not url.startswith(("http://", "https://")):
-            raise ValueError(f"Invalid vLLM URL scheme: {url}")
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {VLLM_API_KEY}",
-            },
-            method="POST",
-        )
+        req = _vllm_build_request(url, body, accept_stream=False)
         with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             payload = _json.loads(resp.read().decode("utf-8"))
         choices = payload.get("choices", [])
@@ -679,17 +701,7 @@ def _vllm_chat_completion(
 
         body = _json.dumps(payload).encode("utf-8")
         url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
-        if not url.startswith(("http://", "https://")):
-            raise ValueError(f"Invalid vLLM URL scheme: {url}")
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {VLLM_API_KEY}",
-            },
-            method="POST",
-        )
+        req = _vllm_build_request(url, body, accept_stream=False)
         with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             data = _json.loads(resp.read().decode("utf-8"))
         choices = data.get("choices", [])
@@ -767,18 +779,7 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
             }
         ).encode("utf-8")
         url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
-        if not url.startswith(("http://", "https://")):
-            raise ValueError(f"Invalid vLLM URL scheme: {url}")
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {VLLM_API_KEY}",
-                "Accept": "text/event-stream",
-            },
-            method="POST",
-        )
+        req = _vllm_build_request(url, body, accept_stream=True)
         with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             for line_bytes in resp:
                 line = line_bytes.decode("utf-8", errors="ignore").strip()

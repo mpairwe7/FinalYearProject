@@ -151,7 +151,7 @@ def reset_index_stamp() -> None:
         _index_stamp_read_at = 0.0
 
 
-def exact_cache_key(query: str, locale: str = "en") -> str:
+def exact_cache_key(query: str, locale: str = "en", tenant_id: str | None = None) -> str:
     """Return a model-free lookup key: casefolded, punctuation-stripped query.
 
     The similarity tiers below need an embedding, so they return ``None`` the
@@ -171,7 +171,8 @@ def exact_cache_key(query: str, locale: str = "en") -> str:
     which is how a corrected passage can look like it never landed.
     """
     normalised = _EXACT_KEY_WS_RE.sub(" ", _EXACT_KEY_STRIP_RE.sub(" ", (query or "").casefold())).strip()
-    return f"{index_stamp()}\x1f{locale}\x1f{normalised}"
+    prefix = tenant_id or "default"
+    return f"{prefix}\x1f{index_stamp()}\x1f{locale}\x1f{normalised}"
 
 
 @dataclass
@@ -181,6 +182,7 @@ class CacheEntry:
     response: dict[str, Any]
     created_at: float = field(default_factory=time.time)
     hits: int = 0
+    tenant_id: str = "default"
 
 
 class SemanticCache:
@@ -223,7 +225,7 @@ class SemanticCache:
         if evicted:
             self._stats["evictions"] += evicted
 
-    def get(self, query: str, locale: str = "en") -> dict[str, Any] | None:
+    def get(self, query: str, locale: str = "en", tenant_id: str | None = None) -> dict[str, Any] | None:
         """Look up a semantically similar cached response.
 
         Tries an exact (normalised) key first, then semantic similarity. The
@@ -234,7 +236,8 @@ class SemanticCache:
         if not CACHE_ENABLED:
             return None
 
-        key = exact_cache_key(query, locale)
+        t_id = tenant_id or "default"
+        key = exact_cache_key(query, locale, tenant_id=t_id)
         with self._lock:
             self._evict_expired()
             exact = self._exact.get(key)
@@ -261,8 +264,10 @@ class SemanticCache:
             best_entry: CacheEntry | None = None
 
             for entry in self._entries:
-                # Must match locale
+                # Must match locale and tenant
                 if entry.response.get("locale") != locale:
+                    continue
+                if getattr(entry, "tenant_id", "default") != t_id:
                     continue
                 if not _cache_queries_compatible(query, entry.query):
                     continue
@@ -285,21 +290,22 @@ class SemanticCache:
             self._stats["misses"] += 1
             return None
 
-    def put(self, query: str, response: dict[str, Any]) -> None:
+    def put(self, query: str, response: dict[str, Any], tenant_id: str | None = None) -> None:
         """Store a query-response pair in the cache."""
         if not CACHE_ENABLED:
             return
 
+        t_id = tenant_id or response.get("tenant_id") or "default"
         # The exact tier is always written, so a deployment with no embedder
         # still accumulates a usable cache.
-        key = exact_cache_key(query, response.get("locale") or "en")
+        key = exact_cache_key(query, response.get("locale") or "en", tenant_id=t_id)
         with self._lock:
             if len(self._exact) >= CACHE_MAX_SIZE:
                 oldest = sorted(self._exact.items(), key=lambda kv: kv[1].created_at)
                 for stale_key, _entry in oldest[: len(self._exact) - CACHE_MAX_SIZE + 1]:
                     del self._exact[stale_key]
                     self._stats["evictions"] += 1
-            self._exact[key] = CacheEntry(query=query, embedding=_EMPTY_EMBEDDING, response=response)
+            self._exact[key] = CacheEntry(query=query, embedding=_EMPTY_EMBEDDING, response=response, tenant_id=t_id)
 
         if not self._dense_model:
             return
@@ -320,6 +326,7 @@ class SemanticCache:
                     query=query,
                     embedding=embedding,
                     response=response,
+                    tenant_id=t_id,
                 )
             )
 
@@ -379,18 +386,19 @@ class RedisSemanticCache:
     #: Exact-tier keys live under their own namespace so the similarity scan
     #: below never walks them (it matches CACHE_REDIS_PREFIX*).
     @staticmethod
-    def _exact_redis_key(query: str, locale: str) -> str:
-        digest = hashlib.sha256(exact_cache_key(query, locale).encode("utf-8")).hexdigest()[:32]
-        return f"{CACHE_REDIS_PREFIX}exact:{digest}"
+    def _exact_redis_key(query: str, locale: str, tenant_id: str = "default") -> str:
+        digest = hashlib.sha256(exact_cache_key(query, locale, tenant_id=tenant_id).encode("utf-8")).hexdigest()[:32]
+        return f"{CACHE_REDIS_PREFIX}{tenant_id}:exact:{digest}"
 
-    def get(self, query: str, locale: str = "en") -> dict[str, Any] | None:
+    def get(self, query: str, locale: str = "en", tenant_id: str | None = None) -> dict[str, Any] | None:
         if not CACHE_ENABLED or self._client is None:
             return None
 
+        t_id = tenant_id or "default"
         # Exact tier: a single GET, and the only tier that works without an
         # embedder — which is every deployment shipping without torch.
         try:
-            raw = self._client.get(self._exact_redis_key(query, locale))
+            raw = self._client.get(self._exact_redis_key(query, locale, tenant_id=t_id))
             if raw:
                 self._stats["hits"] += 1
                 logger.debug("Redis cache HIT (exact, query_length=%d)", len(query))
@@ -417,6 +425,9 @@ class RedisSemanticCache:
             for key in keys:
                 data = self._client.hgetall(key)
                 if not data:
+                    continue
+                entry_tenant = data.get(b"tenant_id", b"default").decode("utf-8", "ignore")
+                if entry_tenant != t_id:
                     continue
                 entry_locale = data.get(b"locale", b"en").decode("utf-8", "ignore")
                 if entry_locale != locale:
@@ -449,14 +460,15 @@ class RedisSemanticCache:
             logger.debug("Redis cache get failed", exc_info=True)
             return None
 
-    def put(self, query: str, response: dict[str, Any]) -> None:
+    def put(self, query: str, response: dict[str, Any], tenant_id: str | None = None) -> None:
         if not CACHE_ENABLED or self._client is None:
             return
 
+        t_id = tenant_id or response.get("tenant_id") or "default"
         locale = response.get("locale") or "en"
         try:
             self._client.set(
-                self._exact_redis_key(query, locale),
+                self._exact_redis_key(query, locale, tenant_id=t_id),
                 _json.dumps(response).encode("utf-8"),
                 ex=CACHE_TTL_SECONDS,
             )
@@ -478,6 +490,7 @@ class RedisSemanticCache:
                 mapping={
                     "query": query.encode("utf-8"),
                     "locale": locale.encode("utf-8"),
+                    "tenant_id": t_id.encode("utf-8"),
                     "embedding": self._encode_emb(embedding),
                     "response": _json.dumps(response).encode("utf-8"),
                 },

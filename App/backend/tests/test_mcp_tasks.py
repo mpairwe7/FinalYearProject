@@ -155,6 +155,8 @@ class TaskToolTests(unittest.TestCase):
         second = self.registry.call("task_create", args)
         self.assertEqual(first["task_id"], second["task_id"])
         self.assertTrue(second["replayed"])
+        self.assertIn("Created background task", first.get("explanation", ""))
+        self.assertIn("Replayed existing background task", second.get("explanation", ""))
 
     def test_cancelling_reports_whether_it_changed_anything(self) -> None:
         created = self.registry.call("task_create", {"kind": "document_ocr"})

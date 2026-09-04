@@ -289,6 +289,17 @@ class ToolContractTests(unittest.TestCase):
         self.assertEqual(result["learning_path"][-1], "capital_gains")
         self.assertIn("corporation_tax", result["learning_path"])
 
+    def test_efris_and_presumptive_tax_accuracy(self) -> None:
+        efris_res = self.tool.execute(topic="efris", level="beginner", reveal_answer=True)
+        self.assertTrue(efris_res["ok"])
+        self.assertIn("designated sector", efris_res["check_answer"])
+
+        presumptive_res = self.tool.execute(topic="presumptive_tax", level="beginner", reveal_answer=True)
+        self.assertTrue(presumptive_res["ok"])
+        self.assertIn("eligible resident small businesses", presumptive_res["explanation"])
+        self.assertIn("eligible incorporated company", presumptive_res["check_question"])
+        self.assertIn("resident taxpayer", presumptive_res["check_answer"])
+
 
 if __name__ == "__main__":
     unittest.main()

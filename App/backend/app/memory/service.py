@@ -162,9 +162,10 @@ class MemoryService:
         # 2. Write an episodic summary (naive: first user turn truncated)
         first_user = next(
             (
-                str(t.get("user_message") or t.get("content") or "").strip()
+                msg
                 for t in turns
-                if "user_message" in t or t.get("role") in ("user", "user_message")
+                if ("user_message" in t or t.get("role") in ("user", "user_message"))
+                and (msg := str(t.get("user_message") or t.get("content") or "").strip())
             ),
             "",
         )

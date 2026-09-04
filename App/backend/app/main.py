@@ -8,6 +8,7 @@ and Prometheus-compatible metrics (2026 observability standards).
 import asyncio
 import contextlib
 import datetime
+import hmac
 import json
 import logging
 import os
@@ -1892,7 +1893,7 @@ def _has_valid_ops_key(request: Request) -> bool:
     if not _INDEX_API_KEY:
         return False
     auth = request.headers.get("Authorization", "")
-    return auth == f"Bearer {_INDEX_API_KEY}"
+    return hmac.compare_digest(auth, f"Bearer {_INDEX_API_KEY}")
 
 
 def _require_ops_key(request: Request) -> None:
@@ -1920,7 +1921,7 @@ def _require_relay_key(request: Request) -> None:
     if not secret:
         raise HTTPException(status_code=503, detail="CF_RELAY_SECRET not configured")
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {secret}":
+    if not hmac.compare_digest(auth, f"Bearer {secret}"):
         raise HTTPException(status_code=403, detail="Invalid or missing relay credentials")
 
 

@@ -126,7 +126,10 @@ def _rsa_public_key_from_jwk(jwk: dict[str, Any]) -> Any:
 def _fetch_jwks(url: str, timeout_s: float) -> dict[str, Any]:
     if not url:
         raise JWTAuthError("OIDC_JWKS_URL is required for RS256 verification")
-    if not (url.startswith("https://") or url.startswith("http://")):
+    if APP_ENV == "production":
+        if not url.startswith("https://"):
+            raise JWTAuthError("OIDC_JWKS_URL must start with https:// in production")
+    elif not (url.startswith("https://") or url.startswith("http://")):
         raise JWTAuthError("OIDC_JWKS_URL must start with https:// or http://")
 
     try:
@@ -176,6 +179,7 @@ class JWTVerifier:
         )
         self._jwks_by_kid: dict[str, dict[str, Any]] = {}
         self._jwks_fetched_at = 0.0
+        self._last_forced_refresh_at = 0.0
         if self.alg not in ("HS256", "RS256"):
             raise JWTAuthError(f"unsupported alg {self.alg}")
 
@@ -189,6 +193,9 @@ class JWTVerifier:
             and (now - self._jwks_fetched_at) < self.jwks_cache_ttl_s
         ):
             return
+        if force and (now - self._last_forced_refresh_at) < 10.0 and self._jwks_by_kid:
+            # Rate-limit forced refreshes to prevent JWKS cache stampede / outbound DoS
+            return
 
         jwks = _fetch_jwks(self.jwks_url, self.jwks_timeout_s)
         self._jwks_by_kid = {
@@ -197,6 +204,8 @@ class JWTVerifier:
             if isinstance(key, dict) and key.get("kid")
         }
         self._jwks_fetched_at = now
+        if force:
+            self._last_forced_refresh_at = now
 
     def _get_jwk(self, kid: str) -> dict[str, Any]:
         self._refresh_jwks()

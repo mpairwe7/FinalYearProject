@@ -172,13 +172,17 @@ def _resolve_ws_principal(
             raise JWTAuthError("authentication required")
         return "", "default", "public", []
 
-    claims = JWTVerifier().verify(token)
+    verifier = JWTVerifier()
+    claims = verifier.verify(token)
+    from .auth.dependencies import resolve_role
+
+    role = resolve_role(claims, verifier.audience)
     granted = claims.get("granted_purposes", [])
     purposes = [str(p) for p in granted] if isinstance(granted, list) else []
     return (
         str(claims.get("sub", "")),
         str(claims.get("tenant_id", "default")),
-        str(claims.get("role", "public")),
+        role,
         purposes,
     )
 
@@ -687,6 +691,13 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         user_id, tenant_id, user_role, granted_purposes = _resolve_ws_principal(websocket)
     except JWTAuthError as exc:
         await websocket.close(code=1008, reason=f"authentication failed: {exc}")
+        return
+
+    from .ws_concurrency import is_ws_origin_allowed
+
+    origin = websocket.headers.get("origin")
+    if not is_ws_origin_allowed(origin):
+        await websocket.close(code=1008, reason="forbidden origin")
         return
 
     socket_user_key = user_id or f"anon::{websocket.client.host if websocket.client else 'unknown'}"

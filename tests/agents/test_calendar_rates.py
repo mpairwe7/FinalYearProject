@@ -144,3 +144,8 @@ class TestListAvailableRates:
         assert "vat_standard" in types
         assert "corporation_tax" in types
         assert "withholding_services" in types
+
+    def test_provisional_vs_confirmed_explanation(self, fresh_registry):
+        r = fresh_registry.call("list_available_rates", {"fiscal_year": "FY2025-26"})
+        assert r["ok"] is True
+        assert "All rates are verified under current statutory instruments." in r["explanation"]

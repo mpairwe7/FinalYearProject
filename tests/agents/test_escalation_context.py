@@ -239,3 +239,17 @@ class TestBackendParity:
             response_time_ms=1.0,
             user_id="sub-1",
         )
+
+
+class TestConversationContextUserIsolation:
+    def test_get_recent_turns_isolates_by_user_id(self, seeded):
+        turns = seeded.get_recent_turns(conversation_id="conv-abc", user_id="oidc-sub-123")
+        assert len(turns) > 0
+        other_turns = seeded.get_recent_turns(conversation_id="conv-abc", user_id="intruder-456")
+        assert len(other_turns) == 0
+
+    def test_get_conversation_context_isolates_by_user_id(self, seeded):
+        ctx = seeded.get_conversation_context(conversation_id="conv-abc", user_id="oidc-sub-123")
+        assert len(ctx["recent_turns"]) > 0
+        other_ctx = seeded.get_conversation_context(conversation_id="conv-abc", user_id="intruder-456")
+        assert len(other_ctx["recent_turns"]) == 0

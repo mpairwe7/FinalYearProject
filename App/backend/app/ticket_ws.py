@@ -77,6 +77,13 @@ async def ticket_stream_ws(websocket: WebSocket) -> None:
         await websocket.close(code=4403, reason="staff access required")
         return
 
+    from .ws_concurrency import is_ws_origin_allowed
+
+    origin = websocket.headers.get("origin")
+    if not is_ws_origin_allowed(origin):
+        await websocket.close(code=4403, reason="forbidden origin")
+        return
+
     team = websocket.query_params.get("team", "").strip()
 
     await websocket.accept()
