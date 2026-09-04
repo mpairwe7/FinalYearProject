@@ -494,6 +494,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `evaluator_optimizer` | off | Deterministic recomputation of money answers |
 | `tax_graph` | off | Load the statutory knowledge graph + `tax_graph` namespace |
 | `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
+| `langgraph` | off | Route agentic requests through the graph orchestrator |
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds

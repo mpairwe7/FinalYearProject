@@ -87,6 +87,7 @@ class AgentGraphState:
     clarification_question: str = ""
     escalation_reason: str = ""
     ticket_id: str = ""
+    agent_role: str = "graph_agent"
 
     # -- Telemetry --
     trace: list[dict[str, Any]] = field(default_factory=list)  # (node, duration_ms)

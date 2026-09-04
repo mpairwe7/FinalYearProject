@@ -16,6 +16,7 @@ from the audit ledger trivial.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
@@ -64,6 +65,12 @@ def node_route(state: AgentGraphState) -> NodeResult:
         # The supervisor already picked a whitelist — seed the plan
         state.plan = list(decision.suggested_tools)
         state.plan_reason = decision.reason
+        role_map = {
+            AgentRoute.TOOLS: "tool_specialist",
+            AgentRoute.TAX_SPECIALIST: "tax_specialist",
+            AgentRoute.CUSTOMS_SPECIALIST: "customs_specialist",
+        }
+        state.agent_role = role_map.get(decision.route, "graph_agent")
         return NodeResult(next_node="tool_rag_select")
 
     # Default: factual retrieval
@@ -177,13 +184,12 @@ _QUERY_ARG_NAMES = frozenset({"query", "question", "text", "message"})
 def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] | None:
     """Fill a tool's required arguments from graph state, or ``None``.
 
-    Driven by the tool's own JSON Schema rather than a hardcoded name
-    list, so a new tool needs no change here.  Only two bindings are
-    honest at this layer: a tool with no required parameters can be
-    called as-is, and a required free-text parameter is the user's
-    query.  Anything else — ``amount``, ``tax_type`` — is a value the
-    graph would have to invent, so it returns ``None`` and the caller
-    skips the tool.
+    Driven by structured parameter extraction and the tool's JSON Schema.
+    A tool with no required parameters is called as-is (e.g. get_current_date).
+    A tool with free-text parameter (e.g. search_ura_knowledge_base) takes the query.
+    Calculation and rate tools extract parameters via deterministic parsing.
+    If required arguments cannot be extracted from the query, returns None to
+    skip unfillable tools.
     """
     from ...tools import ToolRegistry
 
@@ -194,13 +200,47 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
     if not required:
         return {}
     query = state.rewritten_query or state.query
-    bound: dict[str, object] = {}
-    for param in required:
-        if param in _QUERY_ARG_NAMES and query:
-            bound[param] = query
-        else:
-            return None
-    return bound
+
+    # 1. Free-text query parameter binding (e.g. search_ura_knowledge_base)
+    if all(param in _QUERY_ARG_NAMES for param in required) and query:
+        return {param: query for param in required}
+
+    # 2. Structured calculation parameter extraction
+    try:
+        from ...calculator_router import plan_calculation
+
+        calc_plan = plan_calculation(query)
+        if (calc_plan is None or calc_plan.missing) and state.query and state.query != query:
+            raw_plan = plan_calculation(state.query)
+            if raw_plan and not raw_plan.missing:
+                calc_plan = raw_plan
+        if calc_plan and calc_plan.tool == tool_name:
+            if not calc_plan.missing and all(param in calc_plan.params for param in required):
+                return dict(calc_plan.params)
+    except Exception:
+        logger.debug("graph: plan_calculation binding failed for %s", tool_name, exc_info=True)
+
+    # 3. Structured rate lookup parameter extraction
+    if tool_name == "lookup_rate":
+        try:
+            from ...calculator_router import plan_rate_lookup
+
+            rate_plan = plan_rate_lookup(query)
+            if (rate_plan is None or not rate_plan.tax_type) and state.query and state.query != query:
+                raw_rate = plan_rate_lookup(state.query)
+                if raw_rate and raw_rate.tax_type:
+                    rate_plan = raw_rate
+            if rate_plan and rate_plan.tax_type:
+                return {"tax_type": rate_plan.tax_type}
+        except Exception:
+            logger.debug("graph: plan_rate_lookup binding failed", exc_info=True)
+
+    # 4. Authenticated taxpayer account parameter binding
+    if set(required) == {"taxpayer_id"} and state.user_id:
+        return {"taxpayer_id": state.user_id}
+
+    return None
+
 
 
 def node_act(state: AgentGraphState) -> NodeResult:
@@ -280,18 +320,38 @@ def node_observe(state: AgentGraphState) -> NodeResult:
     return NodeResult(next_node="synthesize")
 
 
-def node_synthesize(state: AgentGraphState) -> NodeResult:
-    """Produce the reply text.
+def _format_observation_prose(obs: dict[str, Any]) -> str:
+    """Format a tool observation dict into human-readable prose."""
+    for key in ("explanation", "summary", "message", "human_readable", "answer"):
+        val = obs.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
 
-    Phase 15 Lite: falls through to the existing service.py LLM
-    call path (non-agentic) or the tool-calling loop when
-    FLAG_TOOL_USE is on.  The graph here is a *control-flow
-    scaffold* — the actual LLM call still lives in service.py
-    for now.
-    """
-    # A failed tool call is not evidence.  Synthesising over the whole
-    # observation list would put "amount: required property is missing"
-    # in front of the user as if it were an answer.
+    # Rate lookup tool: {"tax_type": ..., "display_name": ..., "formatted": ..., "fiscal_year": ...}
+    if "tax_type" in obs and "formatted" in obs:
+        name = obs.get("display_name") or obs.get("tax_type")
+        fy = f" for {obs['fiscal_year']}" if obs.get("fiscal_year") else ""
+        return f"The official {name} rate{fy} is {obs['formatted']}."
+
+    # Calendar date tool: {"today": ..., "day_of_week": ..., "fiscal_year": ...}
+    if "today" in obs and "day_of_week" in obs:
+        fy = f" ({obs['fiscal_year']})" if obs.get("fiscal_year") else ""
+        return f"Today is {obs['day_of_week']}, {obs['today']}{fy}."
+
+    # Deadlines tool: {"deadlines": [...]}
+    if "deadlines" in obs and isinstance(obs["deadlines"], list):
+        items = [
+            f"- {d.get('name', 'Deadline')}: {d.get('date', '')} ({d.get('description', '')})"
+            for d in obs["deadlines"][:3]
+        ]
+        if items:
+            return "Upcoming statutory deadlines:\n" + "\n".join(items)
+
+    return ""
+
+
+def node_synthesize(state: AgentGraphState) -> NodeResult:
+    """Produce the reply text from retrieved passages or tool observations."""
     usable = [obs for obs in state.observations if isinstance(obs, dict) and obs.get("ok", True)]
 
     if not state.hits and not usable:
@@ -299,23 +359,30 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
         state.outcome = GraphOutcome.ABSTAINED
         return NodeResult(next_node="respond", outcome=GraphOutcome.ABSTAINED)
 
-    # Very lightweight synthesis — Phase 15 full replaces this with
-    # the actual LLM call + structured output.
     if state.hits:
-        best = state.hits[0]
-        state.reply = best.get("answer") or best.get("text", "")
+        from ... import llm as _llm_module
+        if _llm_module.is_available():
+            try:
+                llm_reply = _llm_module.generate(
+                    query=state.rewritten_query or state.query,
+                    passages=state.hits,
+                    conversation_history=state.conversation_history or None,
+                    locale=state.locale,
+                )
+                if llm_reply and llm_reply.strip():
+                    state.reply = llm_reply.strip()
+            except Exception:
+                logger.debug("graph: LLM synthesis failed, using best hit", exc_info=True)
+        if not state.reply:
+            best = state.hits[0]
+            state.reply = best.get("answer") or best.get("text", "")
     elif usable:
-        # Stitch tool observations into a brief summary — placeholder.
-        # Only prose keys are used: a raw dict repr is not an answer, and
-        # showing one is worse than abstaining.
         parts = []
         for obs in usable[:3]:
-            for key in ("explanation", "summary", "message", "human_readable", "answer"):
-                value = obs.get(key)
-                if isinstance(value, str) and value.strip():
-                    parts.append(value)
-                    break
-        state.reply = "\n".join(parts)
+            prose = _format_observation_prose(obs)
+            if prose:
+                parts.append(prose)
+        state.reply = "\n\n".join(parts)
 
     if not state.reply:
         state.reply = ABSTENTION_REPLY
