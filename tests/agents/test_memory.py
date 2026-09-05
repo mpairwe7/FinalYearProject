@@ -397,6 +397,9 @@ class TestMemoryService:
         )
         facts = mem.read_facts(u["id"])
         assert len(facts) >= 2
+        episodic = mem.read_episodic(u["id"])
+        assert len(episodic) >= 1
+        assert "I'm a sole trader in retail" in episodic[0]["summary"]
 
     def test_consent_withdrawal_hides_future_reads(self, tmp_db):
         reset_memory_service()
