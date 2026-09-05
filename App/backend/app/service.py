@@ -1360,6 +1360,20 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
             yield ("token", full_reply)
+            if result.get("retrieval_mode") == "abstained":
+                yield (
+                    "grounding",
+                    {
+                        "faithfulness_score": None,
+                        "escalation_required": bool(result.get("escalation_required")),
+                        "escalation_reason": result.get("escalation_reason"),
+                        "agent_role": result.get("agent_role", "rag_answerer"),
+                        "handoff": result.get("handoff"),
+                        "response_judge": result.get("response_judge"),
+                        "next_actions": result.get("next_actions", []),
+                        "ticket_id": result.get("ticket_id"),
+                    },
+                )
             yield ("done", "")
             yield (
                 "_log",

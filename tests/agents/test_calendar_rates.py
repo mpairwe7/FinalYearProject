@@ -145,7 +145,16 @@ class TestListAvailableRates:
         assert "corporation_tax" in types
         assert "withholding_services" in types
 
-    def test_provisional_vs_confirmed_explanation(self, fresh_registry):
+    def test_provisional_vs_confirmed_explanation(self, fresh_registry, monkeypatch):
         r = fresh_registry.call("list_available_rates", {"fiscal_year": "FY2025-26"})
         assert r["ok"] is True
         assert "All rates are verified under current statutory instruments." in r["explanation"]
+
+        import dataclasses
+        from app.tax import tables
+        real_table = tables.get_table("FY2025-26")
+        provisional_table = dataclasses.replace(real_table, status="provisional")
+        monkeypatch.setattr("app.tools.rates._resolve", lambda *args, **kwargs: provisional_table)
+        r_prov = fresh_registry.call("list_available_rates", {"fiscal_year": "FY2025-26"})
+        assert r_prov["ok"] is True
+        assert "These rates are provisional; verify them with URA before use." in r_prov["explanation"]
