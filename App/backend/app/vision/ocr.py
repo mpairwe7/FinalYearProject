@@ -377,9 +377,10 @@ def extract_efris_invoice_numbers(text: str) -> list[str]:
 
 def extract_ugx_amounts(text: str) -> list[str]:
     """Extract UGX and currency amounts from dense financial tables."""
-    amounts = re.findall(r"(?:UGX|Shs?\.?|USD)\s*[\d,]+(?:\.\d{1,2})?", text, re.I)
+    amounts = re.findall(r"(?:UGX|Shs?\.?|USD|UShs?\.?)\s*[\d,]+(?:\.\d{1,2})?", text, re.I)
     if not amounts:
-        amounts = re.findall(r"\b[\d,]{4,}(?:\.\d{1,2})?\b", text)
+        candidates = re.findall(r"\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b", text)
+        amounts = [c for c in candidates if not re.fullmatch(r"(?:19|20)\d{2}", c)]
     return amounts
 
 
@@ -389,8 +390,10 @@ def extract_dates(text: str) -> list[str]:
 
 
 def extract_reference_numbers(text: str) -> list[str]:
-    """Extract URA assessment, case, and transaction reference numbers."""
-    return list(set(re.findall(r"\b[A-Z]{2,6}(?:[-/][0-9A-Z]+)+\b|\b[A-Z]{2,6}[-/]?[0-9]{4,14}\b", text)))
+    """Extract URA assessment, case, and transaction reference numbers containing digits."""
+    raw_matches = re.findall(r"\b[A-Z]{2,6}(?:[-/][0-9A-Z]+)+\b|\b[A-Z]{2,6}[-/]?[0-9]{4,14}\b", text)
+    # Filter out plain English hyphenated words (e.g. ANTI-AVOIDANCE, NON-RESIDENTS) - require digits
+    return list(set(m for m in raw_matches if re.search(r"\d", m)))
 
 
 def clean_ocr_text(raw_text: str) -> str:

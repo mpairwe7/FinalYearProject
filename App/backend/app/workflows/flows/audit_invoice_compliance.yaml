@@ -1,0 +1,71 @@
+id: audit_invoice_compliance
+name: Tax Invoice & EFRIS Compliance Audit
+version: "1"
+description: >
+  Guided routine for URA officers and taxpayers to audit tax invoices, EFRIS fiscal receipts,
+  line-item computations, and input tax credit eligibility.
+requires_auth: false
+
+trigger_phrases:
+  - "audit an invoice"
+  - "verify my invoice"
+  - "invoice compliance check"
+  - "efris invoice verification"
+  - "check vat on invoice"
+  - "verify input tax"
+  - "is this invoice valid"
+
+steps:
+  - id: collect_doc_category
+    question: >
+      What type of document are you auditing: an **efris invoice**, a **standard tax invoice**,
+      a **fiscal receipt**, or a **withholding certificate**?
+    slot: doc_category
+    validator: "enum[efris invoice,standard tax invoice,fiscal receipt,withholding certificate]"
+
+  - id: collect_supplier_tin
+    question: >
+      What is the supplier or issuer's 10-digit Taxpayer Identification Number (TIN)?
+    slot: supplier_tin
+    validator: text
+
+  - id: collect_buyer_tin
+    question: >
+      What is the purchaser or buyer's 10-digit TIN?
+    slot: buyer_tin
+    validator: text
+
+  - id: collect_net_amount
+    question: >
+      What is the net chargeable amount (excluding VAT) in UGX?
+    slot: net_amount
+    validator: "number[min=0]"
+
+  - id: collect_vat_amount
+    question: >
+      What is the VAT amount shown on the invoice in UGX? (Enter 0 if zero-rated or exempt)
+    slot: vat_amount
+    validator: "number[min=0]"
+
+  - id: collect_efris_serial
+    question: >
+      Does the invoice show an official URA EFRIS verification code, QR code, or Fiscal Device (FD) serial number? (yes/no)
+    slot: has_efris_code
+    validator: boolean
+
+  - id: efris_warning
+    question: >
+      Notice: Under the Tax Procedures Code Act 2014, VAT-registered taxpayers must issue e-invoices
+      through EFRIS. Input tax credit cannot be claimed on non-fiscalized invoices from VAT-registered suppliers.
+    when: "has_efris_code == False"
+    slot: ""
+    validator: text
+
+  - id: summary
+    question: >
+      Audit outcome: Verification details recorded. For a standard VAT invoice, the tax charged must equal exactly
+      18% of the net amount. To claim input tax credit, ensure the supplier's TIN is active, both parties' TINs appear,
+      and the invoice carries an authentic EFRIS fiscal signature. You can attach the document in chat to generate
+      a verified PDF compliance report.
+    slot: ""
+    validator: text

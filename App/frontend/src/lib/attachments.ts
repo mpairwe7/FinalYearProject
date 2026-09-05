@@ -33,6 +33,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   customs_declaration: 'Customs',
   filing_form: 'Filing form',
   invoice: 'Invoice',
+  statutory_act: 'Tax Law / Act',
   generic: 'Document',
 };
 

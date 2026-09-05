@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "bun run next dev",
-    "build": "bun run next build",
+    "build": "bun run next build && ln -sfn ../../static .next/standalone/.next/static && ln -sfn ../public .next/standalone/public",
     "start": "bun run next start",
     "preflight:deploy": "bash ../scripts/deploy_preflight.sh",
     "smoke:live": "bash ../scripts/live_smoke.sh",

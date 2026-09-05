@@ -140,6 +140,7 @@ _DOC_TYPE_LABELS: dict[str, str] = {
     "customs_declaration": "Customs declaration",
     "filing_form": "Tax return / filing form",
     "invoice": "Invoice",
+    "statutory_act": "Tax Law Compendium / Act",
     "generic": "General document",
 }
 
@@ -150,6 +151,7 @@ _DOC_TYPE_HINTS: dict[str, str] = {
     "customs_declaration": "You can ask the assistant about duty calculations, HS codes, or clearance steps.",
     "filing_form": "You can ask the assistant to explain fields on this return or the filing deadlines.",
     "invoice": "You can ask the assistant about VAT treatment, EFRIS invoicing rules, or the amounts shown.",
+    "statutory_act": "You can ask the assistant to summarize tax laws, find specific sections, or explain rates and legal compliance rules.",
     "generic": "You can ask the assistant questions about the content extracted from this document.",
 }
 

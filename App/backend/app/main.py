@@ -8,6 +8,7 @@ and Prometheus-compatible metrics (2026 observability standards).
 import asyncio
 import contextlib
 import datetime
+import hashlib
 import hmac
 import json
 import logging
@@ -1451,17 +1452,34 @@ def document_report(
     if record is None:
         raise HTTPException(status_code=404, detail="Document not found or expired")
 
-    # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
-    # on a runtime without fpdf2.
-    from .pdf_export import generate_document_report_pdf
+    etag = f'W/"{document_id}-{hashlib.sha256(str(record.meta.get("source_sha256", "")).encode()).hexdigest()[:12]}"'
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match and if_none_match.strip() == etag:
+        return Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": "private, no-transform, max-age=300",
+            },
+        )
 
-    started = time.perf_counter()
-    pdf_bytes = generate_document_report_pdf(record.to_report_payload())
-    metrics.inc("pdf_exports_total", labels={"kind": "document_report"})
-    metrics.observe("pdf_export_bytes", len(pdf_bytes), labels={"kind": "document_report"})
-    metrics.observe(
-        "pdf_export_duration_ms", (time.perf_counter() - started) * 1000, labels={"kind": "document_report"}
-    )
+    cached_bytes = record.meta.get("_cached_report_pdf")
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        pdf_bytes = cached_bytes
+    else:
+        # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
+        # on a runtime without fpdf2.
+        from .pdf_export import generate_document_report_pdf
+
+        started = time.perf_counter()
+        pdf_bytes = generate_document_report_pdf(record.to_report_payload())
+        record.meta["_cached_report_pdf"] = pdf_bytes
+        metrics.inc("pdf_exports_total", labels={"kind": "document_report"})
+        metrics.observe("pdf_export_bytes", len(pdf_bytes), labels={"kind": "document_report"})
+        metrics.observe(
+            "pdf_export_duration_ms", (time.perf_counter() - started) * 1000, labels={"kind": "document_report"}
+        )
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -1469,8 +1487,42 @@ def document_report(
             "Content-Disposition": (
                 f'attachment; filename="ura_document_report_{document_id[:8]}.pdf"'
             ),
+            "ETag": etag,
+            "Cache-Control": "private, no-transform, max-age=300",
         },
     )
+
+
+@app.get("/v1/documents/{document_id}/status", tags=["documents"])
+@limiter.limit(_DOCUMENT_RATE_LIMIT)
+def document_status(
+    request: Request,
+    document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
+    _ctx: AuthContext = Depends(optional_user),
+) -> dict[str, Any]:
+    """Inspect processing status and metadata of an analysed document."""
+    record = documents.get_document(
+        document_id,
+        session_id=request.headers.get("X-Session-ID", ""),
+        user_id=_ctx.user_id,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found or expired")
+
+    now = time.time()
+    ttl_left = max(0, int(record.created_at + documents.DOCUMENT_TTL_SECONDS - now))
+    return {
+        "document_id": record.doc_id,
+        "filename": record.filename,
+        "kind": record.kind,
+        "doc_type": record.doc_type,
+        "status": "ready",
+        "size_bytes": record.size_bytes,
+        "tables_count": len(record.tables),
+        "fields_count": sum(len(v) for v in record.fields.values()),
+        "has_cached_report": bool(record.meta.get("_cached_report_pdf")),
+        "expires_in_seconds": ttl_left,
+    }
 
 
 @app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])

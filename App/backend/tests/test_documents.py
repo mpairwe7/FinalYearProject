@@ -633,9 +633,39 @@ class DocumentEndpointsTest(_RegistryIsolation):
         self.assertEqual(ok.headers["content-type"], "application/pdf")
         self.assertIn("ura_document_report_", ok.headers["content-disposition"])
         self.assertTrue(ok.content.startswith(b"%PDF"))
+        self.assertIn("etag", ok.headers)
+
+        # 304 Not Modified with matching ETag
+        etag = ok.headers["etag"]
+        cached = client.get(
+            f"/v1/documents/{doc_id}/report",
+            headers={"X-Session-ID": "sess-a", "If-None-Match": etag},
+        )
+        self.assertEqual(cached.status_code, 304)
 
         stranger = client.get(
             f"/v1/documents/{doc_id}/report", headers={"X-Session-ID": "sess-b"}
+        )
+        self.assertEqual(stranger.status_code, 404)
+
+    def test_document_status_endpoint(self):
+        client = _client()
+        up = self._upload(client, headers={"X-Session-ID": "sess-status"})
+        doc_id = up.json()["document_id"]
+
+        st = client.get(
+            f"/v1/documents/{doc_id}/status", headers={"X-Session-ID": "sess-status"}
+        )
+        self.assertEqual(st.status_code, 200)
+        body = st.json()
+        self.assertEqual(body["document_id"], doc_id)
+        self.assertEqual(body["status"], "ready")
+        self.assertEqual(body["doc_type"], "receipt")
+        self.assertGreater(body["expires_in_seconds"], 0)
+
+        # Stranger session gets 404
+        stranger = client.get(
+            f"/v1/documents/{doc_id}/status", headers={"X-Session-ID": "sess-stranger"}
         )
         self.assertEqual(stranger.status_code, 404)
 

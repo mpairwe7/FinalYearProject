@@ -142,6 +142,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Document attachments ---
     ("POST", "/v1/documents/analyze"),
     ("GET", "/v1/documents/{document_id}/report"),
+    ("GET", "/v1/documents/{document_id}/status"),
     # --- Identity / consent (/v1/me) ---
     ("GET", "/v1/me"),
     ("DELETE", "/v1/me"),
@@ -216,6 +217,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/export/tax-summary"): "this:test_export_tax_summary_pdf",
     ("POST", "/v1/documents/analyze"): "test_documents.DocumentEndpointsTest",
     ("GET", "/v1/documents/{document_id}/report"): "test_documents.DocumentEndpointsTest",
+    ("GET", "/v1/documents/{document_id}/status"): "test_documents.DocumentEndpointsTest",
     ("GET", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("DELETE", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("GET", "/v1/me/reminders"): "tests.agents.test_reminders",
@@ -366,10 +368,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (66 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (67 HTTP + 4 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 66, f"expected 66 HTTP endpoints, found {len(http)}"
+    assert len(http) == 67, f"expected 67 HTTP endpoints, found {len(http)}"
     assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
 
 

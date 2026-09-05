@@ -1,4 +1,4 @@
-import React, { memo, useLayoutEffect, useRef } from 'react';
+import React, { memo, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from '../lib/i18n';
 import {
   MicIcon,
@@ -10,6 +10,7 @@ import {
   LoadingDots,
   VoiceWaveIcon,
   StopIcon,
+  DownloadIcon,
 } from './Icons';
 import {
   ATTACHMENT_ACCEPT,
@@ -86,6 +87,8 @@ function ChatInputInner({
   onStop,
 }: ChatInputProps) {
   const t = useTranslation();
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
@@ -94,6 +97,40 @@ function ChatInputInner({
   // stray space does not present a send button that refuses to send.
   const hasText = message.trim().length > 0;
   const canSend = hasText && !isLoading && !isUploading;
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      setIsDragging(false);
+      dragCounterRef.current = 0;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onAttachFiles?.(e.dataTransfer.files);
+    }
+  };
 
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -155,33 +192,56 @@ function ChatInputInner({
   const showAttachments = Boolean(onAttachFiles);
   return (
     <>
-      {showAttachments && attachments && attachments.length > 0 && (
-        <div className="composer-attachments" aria-label="Attached documents">
-          {attachments.map((a) => (
-            <div
-              key={a.clientId}
-              className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
-            >
-              <FileIcon />
-              <span className="attachment-name" title={a.name}>{a.name}</span>
-              <span className="attachment-meta">
-                {a.status === 'uploading' && <LoadingDots />}
-                {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
-                {a.status === 'error' && (a.error || 'Failed')}
-              </span>
-              <button
-                type="button"
-                className="attachment-remove"
-                onClick={() => onRemoveAttachment?.(a.clientId)}
-                aria-label={`Remove ${a.name}`}
+      <div
+        className={`composer cmpv2 ${isDragging ? 'composer-drag-active' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {isDragging && (
+          <div className="composer-drop-overlay" aria-hidden="true">
+            <span>Drop documents here to analyze and attach (PDF, Word, Excel, CSV, or Image)</span>
+          </div>
+        )}
+        {showAttachments && attachments && attachments.length > 0 && (
+          <div className="composer-attachments" aria-label="Attached documents">
+            {attachments.map((a) => (
+              <div
+                key={a.clientId}
+                className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
               >
-                <CloseIcon />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="composer cmpv2">
+                <FileIcon />
+                <span className="attachment-name" title={a.name}>{a.name}</span>
+                <span className="attachment-meta">
+                  {a.status === 'uploading' && <LoadingDots />}
+                  {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
+                  {a.status === 'error' && (a.error || 'Failed')}
+                </span>
+                {a.status === 'ready' && a.documentId && (
+                  <a
+                    href={`/api/v1/documents/${a.documentId}/report`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="attachment-report-link"
+                    title="Download analysis report"
+                    aria-label={`Download analysis report for ${a.name}`}
+                  >
+                    <DownloadIcon />
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="attachment-remove"
+                  onClick={() => onRemoveAttachment?.(a.clientId)}
+                  aria-label={`Remove ${a.name}`}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={inputRef}
           className="input"

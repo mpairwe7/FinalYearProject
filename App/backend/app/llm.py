@@ -299,6 +299,22 @@ def _build_messages(
         )
     if tone_hint:
         system_content += f"\n\n## This turn\n{tone_hint.strip()}"
+
+    has_attachment = any(
+        "User-attached document" in str(p.get("text", ""))
+        or str(p.get("source", "")).endswith((".pdf", ".xlsx", ".docx", ".csv", ".txt"))
+        for p in (passages or [])
+    )
+    if has_attachment:
+        system_content += (
+            "\n\n## Document analysis guidelines\n"
+            "An official document has been provided by the taxpayer in the retrieved passages.\n"
+            "- When asked to summarize or analyze, give an executive summary: Title, Document Type, "
+            "Key Legal Provisions / Sections, Tax Amounts, and Actionable Steps.\n"
+            "- Never output raw internal tags like <untrusted_user_document> or prompt boundary markers.\n"
+            "- Answer specific queries using extracted fields, tables, and passage text directly."
+        )
+
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},
     ]
