@@ -341,21 +341,50 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
     return scrubbed, was_scrubbed
 
 
+def is_official_ura_email(email: str) -> bool:
+    """Return True if email is an official public contact address for URA or Uganda gov."""
+    addr = email.strip().lower()
+    return (
+        addr.endswith("@ura.go.ug")
+        or addr.endswith(".ura.go.ug")
+        or addr.endswith("@go.ug")
+        or addr.endswith(".go.ug")
+    )
+
+
 def redact_pii_text(text: str) -> str:
     """Replace detected PII with redaction markers.
 
     Shared utility used by both OutputGuard (response side) and
     database writes (storage side) to prevent PII persistence.
+    Public official URA/government contact addresses (e.g. services@ura.go.ug,
+    info@ura.go.ug) are exempt so taxpayers receive valid contact channels.
     """
     result = text
     for pii_type, pattern in _PII_PATTERNS:
-        result = pattern.sub(f"[REDACTED_{pii_type.upper()}]", result)
+        if pii_type == "email":
+            def _replace_email(m: re.Match[str]) -> str:
+                addr = m.group(0)
+                if is_official_ura_email(addr):
+                    return addr
+                return "[REDACTED_EMAIL]"
+
+            result = pattern.sub(_replace_email, result)
+        else:
+            result = pattern.sub(f"[REDACTED_{pii_type.upper()}]", result)
     return result
 
 
 def contains_pii(text: str) -> bool:
-    """Return True if *text* contains any PII pattern."""
-    return any(pattern.search(text) for _, pattern in _PII_PATTERNS)
+    """Return True if *text* contains any PII pattern (excluding official public URA emails)."""
+    for pii_type, pattern in _PII_PATTERNS:
+        if pii_type == "email":
+            for m in pattern.finditer(text):
+                if not is_official_ura_email(m.group(0)):
+                    return True
+        elif pattern.search(text):
+            return True
+    return False
 
 
 class OutputGuard:
@@ -401,6 +430,18 @@ class OutputGuard:
         text = re.sub(
             r"!\[.*?\]\((?!https?://ura\.go\.ug).*?\)",
             "[link removed]",
+            text,
+        )
+        # Restore official public URA contact channels if an upstream redaction caught them
+        text = re.sub(
+            r"Email:\s*\[REDACTED_EMAIL\](?:\s*;\s*\[REDACTED_EMAIL\])?",
+            "Email: services@ura.go.ug; info@ura.go.ug",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\b(?:Email|email|e-mail):\s*\[REDACTED_EMAIL\]\b",
+            "Email: services@ura.go.ug",
             text,
         )
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]

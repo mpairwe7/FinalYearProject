@@ -127,6 +127,10 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "collecting", "collected", "remit", "remitting", "remitted", "avoid", "evade", "evading",
     "learn", "know", "see", "show", "tell", "check", "verify", "get", "got", "help", "want",
     "need", "wish", "like", "prefer", "ask", "start", "stop", "resume",
+    "use", "using", "used", "utilize", "utilizing", "utilized", "require", "required", "requiring",
+    "mandate", "mandated", "mandating", "adopt", "adopting", "adopted", "enforce", "enforcing",
+    "enforced", "operate", "operating", "operated", "impose", "imposing", "imposed", "exempt",
+    "exempting", "exempted", "issue", "issuing", "issued",
     # Modals and auxiliaries
     "can", "could", "would", "should", "may", "might", "must", "shall", "will",
     "do", "does", "did", "have", "has", "had", "am", "is", "are", "was", "were", "be", "been", "being",

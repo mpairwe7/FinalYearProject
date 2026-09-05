@@ -199,7 +199,7 @@ _ESCALATE = (
     ),
     (
         re.compile(
-            r"\b(dispute|objection|audit|assessment\s+is\s+wrong|appeal|court|lawyer|fraud)\b",
+            r"\b(?:(?:want|like|need)\s+to\s+(?:dispute|appeal)|can\s+i\s+appeal|customs\s+dispute|dispute\s+my|appeal\s+my|assessment\s+is\s+wrong|lawyer\s+i\s+can\s+speak\s+to|speak\s+to\s+(?:a\s+)?lawyer|court\s+action|report\s+fraud)\b",
             re.IGNORECASE,
         ),
         "Legal / dispute context needs human handling",

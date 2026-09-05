@@ -86,6 +86,17 @@ _NON_CLAIM_HINTS = (
     "is not covered in the provided",
     "not specified in the provided",
     "no information about",
+    "this response may not be fully supported",
+    "verify with official ura sources",
+    "verify with official ura",
+    "verify with ura",
+    "official ura sources at https://ura",
+    "these services are crucial",
+    "essential to the country",
+    "here is the official guidance",
+    "here is what you need to know",
+    "services@ura.go.ug",
+    "info@ura.go.ug",
 )
 
 
@@ -128,6 +139,8 @@ def _split_claims(reply: str) -> list[str]:
             continue
         if is_courtesy_sentence(sentence):
             continue
+        if re.search(r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|services@ura\.go\.ug|info@ura\.go\.ug|ura\.go\.ug", lowered):
+            continue
         if len(_tokens(sentence)) < 3:
             continue
         claims.append(sentence)
@@ -160,6 +173,7 @@ def verify_claims(
     hits: list[dict[str, Any]] | None,
     *,
     min_support: float | None = None,
+    query: str = "",
 ) -> dict[str, Any]:
     """Return a claim-verification report for a draft answer."""
     threshold = _MIN_SUPPORT if min_support is None else min_support
@@ -198,13 +212,15 @@ def verify_claims(
 
         claim_numbers = _numbers(clean_claim)
         context_numbers = _numbers(context_text)
-        if claim_numbers and not claim_numbers <= context_numbers:
+        query_numbers = _numbers(query) if query else set()
+        model_introduced_numbers = claim_numbers - query_numbers
+        if model_introduced_numbers and not model_introduced_numbers <= context_numbers:
             overlap = min(overlap, 0.25)
 
         # P1-8: a claim whose percentage conflicts with the cited context is a
         # hard contradiction (e.g. answer "20%" vs source "18%") — force it
         # unsupported so the response judge escalates rather than disclaiming.
-        contradicted = is_contradicted(clean_claim, contexts)
+        contradicted = is_contradicted(clean_claim, contexts, user_query=query)
         if contradicted:
             overlap = 0.0
 

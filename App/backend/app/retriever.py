@@ -391,13 +391,29 @@ def lexical_relevance(
     if not present:
         return 0.0
     if encoder is None:
-        return len(terms & present) / len(terms)
+        score = len(terms & present) / len(terms)
+    else:
+        weights = {term: encoder.term_idf(term) for term in terms}
+        total = sum(weights.values())
+        if total <= 0:
+            score = 0.0
+        else:
+            score = sum(w for term, w in weights.items() if term in present) / total
 
-    weights = {term: encoder.term_idf(term) for term in terms}
-    total = sum(weights.values())
-    if total <= 0:
-        return 0.0
-    return sum(w for term, w in weights.items() if term in present) / total
+    # Check question span if query contains a conditional or situational preamble
+    from .query import extract_question_span
+    q_span = extract_question_span(query)
+    if q_span and q_span != query:
+        span_terms = _lexical_terms(q_span)
+        if span_terms:
+            span_score = len(span_terms & present) / len(span_terms)
+            score = max(score, span_score)
+
+    matched_count = len(terms & present)
+    if matched_count >= 3 and score < LEXICAL_RELEVANCE_FLOOR:
+        score = max(score, LEXICAL_RELEVANCE_FLOOR)
+
+    return score
 
 
 def apply_preference_boost(
@@ -1121,25 +1137,34 @@ class HybridRetriever:
             rrf[i] += 1.0 / (k + lex_rank)
 
         order = sorted(range(len(hits)), key=lambda i: rrf[i], reverse=True)
-        candidates = [
-            {
-                "id": str(hits[i].get("id", "")),
-                "text": hits[i].get("text", ""),
-                "question": "",
-                "answer": "",
-                "source": hits[i].get("source", ""),
-                "chunk_id": str(hits[i].get("id", "")),
-                "page": hits[i].get("page", ""),
-                "section": hits[i].get("section", ""),
-                "doc_type": hits[i].get("doc_type", ""),
-                "fiscal_year": hits[i].get("fiscal_year", ""),
-                "tax_type": hits[i].get("tax_type", ""),
-                "tag": hits[i].get("tag", ""),
-                **_provenance_fields(hits[i]),
-                "score_rrf": float(rrf[i]),
-            }
-            for i in order
-        ]
+        candidates = []
+        for i in order:
+            hit = hits[i]
+            text = hit.get("text", "")
+            q = hit.get("question", "")
+            a = hit.get("answer", "")
+            if (not q or not a) and text.startswith("Question: ") and "\nAnswer: " in text:
+                parts = text[len("Question: ") :].split("\nAnswer: ", 1)
+                q = q or parts[0].strip()
+                a = a or parts[1].strip()
+            candidates.append(
+                {
+                    "id": str(hit.get("id", "")),
+                    "text": text,
+                    "question": q,
+                    "answer": a,
+                    "source": hit.get("source", ""),
+                    "chunk_id": str(hit.get("id", "")),
+                    "page": hit.get("page", ""),
+                    "section": hit.get("section", ""),
+                    "doc_type": hit.get("doc_type", ""),
+                    "fiscal_year": hit.get("fiscal_year", ""),
+                    "tax_type": hit.get("tax_type", ""),
+                    "tag": hit.get("tag", ""),
+                    **_provenance_fields(hit),
+                    "score_rrf": float(rrf[i]),
+                }
+            )
         # Same near-duplicate collapse the Qdrant path applies: this fallback
         # serves the same multi-edition corpus, so without it one passage can
         # occupy most of top_k and a superseded edition can outrank the current
@@ -1472,12 +1497,19 @@ class HybridRetriever:
                 p = pt.payload or {}
                 if p.get("_meta") == "bm25_binding":
                     continue  # internal corpus-hash sentinel, not a document
+                text = p.get("text", "")
+                q = p.get("question", "")
+                a = p.get("answer", "")
+                if (not q or not a) and text.startswith("Question: ") and "\nAnswer: " in text:
+                    parts = text[len("Question: ") :].split("\nAnswer: ", 1)
+                    q = q or parts[0].strip()
+                    a = a or parts[1].strip()
                 candidates.append(
                     {
                         "id": str(pt.id),
-                        "text": p.get("text", ""),
-                        "question": p.get("question", ""),
-                        "answer": p.get("answer", ""),
+                        "text": text,
+                        "question": q,
+                        "answer": a,
                         "source": p.get("source", ""),
                         "chunk_id": p.get("chunk_id", ""),
                         "page": p.get("page", ""),

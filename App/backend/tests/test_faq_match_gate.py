@@ -102,6 +102,31 @@ class TestOffDomainQuestionsAreRefused(unittest.TestCase):
         self.assertTrue(hits)
         self.assertIn("VAT", hits[0]["question"])
 
+    def test_text_embedded_faq_hit_survives_filter_and_is_promoted(self):
+        """An FAQ hit whose question and answer are embedded in `text` (Vectorize / Qdrant)
+        must extract question/answer, pass _filter_unbound_faq_hits, and be promoted."""
+        query = "What services does URA provide?"
+        hit = {
+            "text": (
+                "Question: What services does URA provide?\n"
+                "Answer: URA (Uganda Revenue Authority) is the country's central tax and customs "
+                "authority. Core services include: taxpayer registration (instant TIN); domestic "
+                "tax administration -- VAT, PAYE and employment income."
+            ),
+            "source": "ura_about_ura_faqs.csv",
+            "doc_type": "faq_jsonl",
+            "score_rrf": 0.5,
+        }
+        score = service._faq_match_score(query, hit)
+        self.assertGreaterEqual(score, 0.9, f"Expected high score, got {score}")
+        self.assertEqual(hit.get("question"), "What services does URA provide?")
+
+        filtered = service._filter_unbound_faq_hits(query, [hit])
+        self.assertEqual(len(filtered), 1)
+
+        promoted = service._promote_equivalent_faq_hits(query, filtered)
+        self.assertEqual(promoted[0]["source"], "ura_about_ura_faqs.csv")
+
 
 if __name__ == "__main__":
     unittest.main()

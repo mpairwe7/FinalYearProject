@@ -171,7 +171,7 @@ retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registrat
 ### PII Patterns (Uganda-specific)
 | Pattern | Example | Redaction |
 |---------|---------|-----------|
-| Email | `user@ura.go.ug` | `[REDACTED_EMAIL]` |
+| Email | `user@example.com` (official `services@ura.go.ug` preserved) | `[REDACTED_EMAIL]` |
 | UG Phone | `+256701234567` | `[REDACTED_UG_PHONE]` |
 | UG TIN | `1234567890` | `[REDACTED_UG_TIN]` |
 | UG National ID | `CM95ABCDE12345A` | `[REDACTED_UG_NID]` |

@@ -89,7 +89,7 @@ def canonical_amounts(text: str) -> set[float]:
     return amounts
 
 
-def numeric_contradiction(claim: str, context: str) -> bool:
+def numeric_contradiction(claim: str, context: str, user_query: str = "") -> bool:
     """True when a claim's figures conflict with the cited context's.
 
     Two high-precision rules:
@@ -108,14 +108,18 @@ def numeric_contradiction(claim: str, context: str) -> bool:
     """
     cp = percentages(claim)
     xp = percentages(context)
-    if cp and xp and cp.isdisjoint(xp):
+    qp = percentages(user_query) if user_query else set()
+    model_pct = cp - qp
+    if model_pct and xp and model_pct.isdisjoint(xp):
         return True
 
     if not _RULE_CUE_RE.search(claim):
         return False
     ca = canonical_amounts(claim)
     xa = canonical_amounts(context)
-    if ca and xa and ca.isdisjoint(xa):
+    qa = canonical_amounts(user_query) if user_query else set()
+    model_amounts = ca - qa
+    if model_amounts and xa and model_amounts.isdisjoint(xa):
         return True
     return False
 
@@ -159,11 +163,11 @@ def _model_says_contradicted(claim: str, context: str) -> bool:
         return False
 
 
-def is_contradicted(claim: str, contexts: list[str]) -> bool:
+def is_contradicted(claim: str, contexts: list[str], user_query: str = "") -> bool:
     """Return True if *claim* contradicts the cited *contexts* (P1-8)."""
     context = " ".join(c for c in contexts if c)
     if not claim.strip() or not context.strip():
         return False
-    if numeric_contradiction(claim, context):
+    if numeric_contradiction(claim, context, user_query=user_query):
         return True
     return _model_says_contradicted(claim, context)

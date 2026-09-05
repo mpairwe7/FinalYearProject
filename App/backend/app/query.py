@@ -147,6 +147,35 @@ _CORRECTIONS: dict[str, str] = {
     "receipting": "receipting",
     "receiping": "receipting",
     "invoiceing": "invoicing",
+    "docuemnts": "documents",
+    "docuemnt": "document",
+    "documnts": "documents",
+    "documnt": "document",
+    "requirments": "requirements",
+    "requirment": "requirement",
+    "crago": "cargo",
+    "assesed": "assessed",
+    "assesesd": "assessed",
+    "pucrhase": "purchase",
+    "abt": "about",
+    "dat": "that",
+    "wat": "what",
+    "wen": "when",
+    "disput": "dispute",
+    "dispuet": "dispute",
+    "hihger": "higher",
+    "residetn": "resident",
+    "aprove": "approve",
+    "aplication": "application",
+    "aply": "apply",
+    "threshhold": "threshold",
+    "treshold": "threshold",
+    "compulsary": "compulsory",
+    "compuslory": "compulsory",
+    "voluntery": "voluntary",
+    "individul": "individual",
+    "organisaton": "organisation",
+    "organizaton": "organization",
 }
 
 
@@ -165,8 +194,19 @@ def expand_abbreviations(query: str) -> str:
     return " ".join(expanded)
 
 
+_TAX_DOMAIN_VOCAB: frozenset[str] = frozenset({
+    "register", "registration", "taxpayer", "individual", "organisation", "organization",
+    "withholding", "customs", "clearance", "assessment", "assessed", "dispute", "objection",
+    "appeal", "appeals", "invoicing", "receipting", "document", "documents", "application",
+    "apply", "threshold", "compulsory", "voluntary", "higher", "lower", "purchase", "invoice",
+    "resident", "residence", "salary", "employment", "turnover", "penalty", "penalties",
+    "provisional", "corporation", "corporate", "exemption", "exempt", "deadline", "declaration",
+    "electronic", "online", "statement", "payment", "business", "commercial", "import", "export",
+})
+
+
 def correct_spelling(query: str) -> str:
-    """Fix common domain-specific misspellings.
+    """Fix common domain-specific misspellings and typographical slips.
 
     Substitutions are anchored to word boundaries. Without ``\\b`` a key that is a
     prefix of its own replacement corrupts the correctly-spelled word:
@@ -278,23 +318,28 @@ def rewrite_with_history(
     )
 
     if pronoun_pattern.search(q):
-        # Scan backward from most recent turn for a concrete domain topic, entity, or acronym
-        subject = ""
-        for turn in reversed(normalized_history):
-            turn_entities = extract_conversation_entities([turn])
-            if turn_entities.active_subject:
-                subject = turn_entities.active_subject
-                break
+        # Check if the query itself introduces a concrete domain topic, entity, or acronym
+        q_entities = extract_conversation_entities([{"user_message": q, "bot_reply": ""}])
+        if q_entities.active_subject:
+            subject = q_entities.active_subject
+        else:
+            # Scan backward from most recent turn for a concrete domain topic, entity, or acronym
+            subject = ""
+            for turn in reversed(normalized_history):
+                turn_entities = extract_conversation_entities([turn])
+                if turn_entities.active_subject:
+                    subject = turn_entities.active_subject
+                    break
 
-            u_msg = turn.get("user_message", "")
-            b_msg = turn.get("bot_reply", "")
-            abbreviations = re.findall(r"\b[A-Z]{2,10}\b", u_msg) or re.findall(r"\b[A-Z]{2,10}\b", b_msg)
-            if abbreviations:
-                subject = abbreviations[-1]
-                break
+                u_msg = turn.get("user_message", "")
+                b_msg = turn.get("bot_reply", "")
+                abbreviations = re.findall(r"\b[A-Z]{2,10}\b", u_msg) or re.findall(r"\b[A-Z]{2,10}\b", b_msg)
+                if abbreviations:
+                    subject = abbreviations[-1]
+                    break
 
-        if not subject and entities.active_subject:
-            subject = entities.active_subject
+            if not subject and entities.active_subject:
+                subject = entities.active_subject
 
         if subject:
             subject_phrase = _ABBREVIATIONS.get(subject.lower(), subject)
@@ -330,7 +375,14 @@ def rewrite_with_history(
 
         # Dependent questions like "what is the deadline?", "what is the penalty?", "how do I file?"
         if (
-            re.search(r"\b(deadline|due\s+date|penalt(?:y|ies)|how\s+(?:to|do\s+i)\s+file|rates?|threshold|what\s+about|how\s+about)\b", q, re.IGNORECASE)
+            re.search(
+                r"\b(deadline|due\s+date|penalt(?:y|ies)|how\s+(?:to|do\s+i)\s+file|rates?|threshold"
+                r"|what\s+about|how\s+about|what\s+abt|how\s+abt|documents?|requirements?|needed"
+                r"|cost|fee|charge|free|how\s+long|duration|processing\s+time|non[-\s]?resident"
+                r"|where\s+do\s+i|how\s+can\s+i)\b",
+                q,
+                re.IGNORECASE,
+            )
             and entities.active_subject
             and not re.search(rf"\b{re.escape(entities.active_subject)}\b", q, re.IGNORECASE)
         ):

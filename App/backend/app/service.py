@@ -179,7 +179,7 @@ _WORKFLOW_FREE_TEXT_VALIDATORS = {"", "text"}
 #: with the validator rather than diverting it.
 _WORKFLOW_NEW_QUESTION_RE = re.compile(
     r"^\s*(?:what|when|where|why|how|which|who|can|could|do|does|did|is|are|"
-    r"should|must|will|would)\b",
+    r"should|must|will|would|give|tell|explain|show|provide|list|i\s+(?:need|want|wish)|help\s+with)\b",
     re.IGNORECASE,
 )
 #: Minimum words before a trailing "?" is read as a question rather than an
@@ -286,7 +286,8 @@ _PIC_MARK_RE = re.compile(
     re.IGNORECASE,
 )
 _PDF_FOOTER_RE = re.compile(
-    r"\*+\s*A Guide to Taxation in Uganda\s*\|\s*[A-Za-z]+\s+Edition[\s\d]*", re.IGNORECASE
+    r"(?:\*+\s*)?A Guide to Taxation in Uganda(?:\s*\|\s*[A-Za-z]+\s+Edition[\s\d]*)?",
+    re.IGNORECASE,
 )
 _PDF_EDITION_RE = re.compile(
     r"\|\s*(?:First|Second|Third|Fourth|Fifth|Sixth|Seventh|Eighth|Ninth|Tenth)\s+Edition[\s\d]*",
@@ -334,6 +335,7 @@ def _clean_passage_text(text: str) -> str:
     t = re.sub(rf"^(?:{re.escape(_PARA_SENTINEL)}[ ]*)+", "", t)  # trim leading break
     t = re.sub(rf"(?:{re.escape(_PARA_SENTINEL)}[ ]*)+$", "", t)  # trim trailing break
     t = t.replace(_PARA_SENTINEL, "\n\n")
+    t = re.sub(r"(?m)^\s*\d{1,3}\s*$", "", t)  # standalone orphan page numbers
     t = re.sub(r"[\s;]+\d{1,3}\s*$", "", t)  # trailing orphan page number
     t = re.sub(r"[\s;]+\d{1,2}\.\s*$", "", t)  # trailing orphan list marker
     return t.strip()
@@ -355,6 +357,20 @@ def _structure_excerpt(text: str) -> str:
     renders as a Markdown list instead of a run-on."""
     t = re.sub(r":\s+(?=\d{1,2}\.\s)", ":\n\n", text, count=1)  # blank line before the list
     t = re.sub(r"\s*;\s+(?=\d{1,2}\.\s)", "\n", t)
+    # Format inline semicolon-separated lists after 'include:' or 'includes:' into clean bullets
+    m = re.search(r"(?:include|includes):\s*([^;]+(?:;\s*[^;]+){2,})", t, re.IGNORECASE)
+    if m:
+        prefix = t[: m.start()] + m.group(0).split(":")[0] + ":"
+        items_str = m.group(1)
+        suffix = t[m.end() :]
+        raw_items = [
+            re.sub(r"^(?:and\s+|or\s+)", "", item.strip()).strip(" .;")
+            for item in items_str.split(";")
+        ]
+        items = [item for item in raw_items if item]
+        if len(items) >= 2:
+            bullets = "\n".join(f"- {item[:1].upper() + item[1:]}" for item in items)
+            t = f"{prefix}\n\n{bullets}{suffix}"
     return t
 
 # Shared executor for LLM calls — bounded so one slow generation cannot
@@ -1096,7 +1112,7 @@ def _apply_output_guards(
     claim_report: dict[str, Any] | None = None
     if reply and hits and citations:
         try:
-            claim_report = verify_claims(reply, citations, hits)
+            claim_report = verify_claims(reply, citations, hits, query=message)
         except Exception:
             logger.debug("claim verification failed", exc_info=True)
             claim_report = None
@@ -1144,7 +1160,7 @@ def _apply_output_guards(
         # unsupported claims.
         if citations:
             try:
-                claim_report = verify_claims(reply, citations, hits)
+                claim_report = verify_claims(reply, citations, hits, query=message)
                 if claim_report.get("decision") == "escalate":
                     response_judge["final_decision"] = "escalate"
             except Exception:
@@ -1360,20 +1376,19 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
             yield ("token", full_reply)
-            if result.get("retrieval_mode") == "abstained":
-                yield (
-                    "grounding",
-                    {
-                        "faithfulness_score": None,
-                        "escalation_required": bool(result.get("escalation_required")),
-                        "escalation_reason": result.get("escalation_reason"),
-                        "agent_role": result.get("agent_role", "rag_answerer"),
-                        "handoff": result.get("handoff"),
-                        "response_judge": result.get("response_judge"),
-                        "next_actions": result.get("next_actions", []),
-                        "ticket_id": result.get("ticket_id"),
-                    },
-                )
+            yield (
+                "grounding",
+                {
+                    "faithfulness_score": result.get("faithfulness_score"),
+                    "escalation_required": bool(result.get("escalation_required")),
+                    "escalation_reason": result.get("escalation_reason", "") if result.get("escalation_required") else "",
+                    "agent_role": result.get("agent_role", "rag_answerer"),
+                    "handoff": result.get("handoff"),
+                    "response_judge": result.get("response_judge"),
+                    "next_actions": result.get("next_actions", []),
+                    "ticket_id": result.get("ticket_id", ""),
+                },
+            )
             yield ("done", "")
             yield (
                 "_log",
@@ -2244,8 +2259,20 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     if not query_terms:
         return 0.0
 
-    question_terms = _faq_terms(str(entry.get("question", "")))
-    answer_terms = _faq_terms(str(entry.get("answer", "")))
+    q_raw = str(entry.get("question") or "")
+    a_raw = str(entry.get("answer") or "")
+    text_raw = str(entry.get("text") or "")
+    if (not q_raw or not a_raw) and text_raw.startswith("Question: ") and "\nAnswer: " in text_raw:
+        parts = text_raw[len("Question: ") :].split("\nAnswer: ", 1)
+        if not q_raw:
+            q_raw = parts[0].strip()
+            entry["question"] = q_raw
+        if not a_raw:
+            a_raw = parts[1].strip()
+            entry["answer"] = a_raw
+
+    question_terms = _faq_terms(q_raw)
+    answer_terms = _faq_terms(a_raw)
     body_terms = question_terms | answer_terms
 
     # Timing is an intent, not merely a topic.  Do not answer a deadline/due
@@ -2262,7 +2289,7 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     # of four.  See :func:`_faq_subject_terms` for why coverage above keeps the
     # unfolded view.
     asked_subjects = _faq_subject_terms(query)
-    question_subjects = _faq_subject_terms(str(entry.get("question", "")))
+    question_subjects = _faq_subject_terms(q_raw)
     matched = len(asked_subjects & question_subjects)
     question_recall = matched / len(asked_subjects) if asked_subjects else 0.0
     question_precision = matched / len(question_subjects) if question_subjects else 0.0
@@ -2913,9 +2940,17 @@ def _promote_equivalent_faq_hits(query: str, hits: list[dict[str, Any]]) -> list
     promoted: list[dict[str, Any]] = []
     rest: list[dict[str, Any]] = []
     for hit in hits:
+        q_raw = str(hit.get("question") or "").strip()
+        text_raw = str(hit.get("text") or "")
+        if not q_raw and text_raw.startswith("Question: ") and "\nAnswer: " in text_raw:
+            parts = text_raw[len("Question: ") :].split("\nAnswer: ", 1)
+            q_raw = parts[0].strip()
+            hit["question"] = q_raw
+            if not hit.get("answer"):
+                hit["answer"] = parts[1].strip()
         is_faq = (
             str(hit.get("doc_type", "")).lower() in _FAQ_DOC_TYPES
-            and str(hit.get("question") or "").strip() != ""
+            and q_raw != ""
         )
         if is_faq and faq_question_equivalence(query, hit) >= 1.0:
             promoted.append(hit)
@@ -2971,6 +3006,15 @@ def _filter_unbound_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dic
     for idx, hit in enumerate(hits):
         if hit not in faq_rows:
             continue
+        q_raw = str(hit.get("question") or "").strip()
+        a_raw = str(hit.get("answer") or "").strip()
+        text_raw = str(hit.get("text") or "")
+        if (not q_raw or not a_raw) and text_raw.startswith("Question: ") and "\nAnswer: " in text_raw:
+            parts = text_raw[len("Question: ") :].split("\nAnswer: ", 1)
+            if not q_raw:
+                hit["question"] = parts[0].strip()
+            if not a_raw:
+                hit["answer"] = parts[1].strip()
         # Rows injected by _priority_faq_hits are exempt. They are reached only
         # when an intent regex matches the question, so they are already bound
         # to it more precisely than this gate can measure — and this gate scores
@@ -3348,6 +3392,11 @@ class ChatModel:
             text = cls._extract_grounded_answer_text(hit)  # PDF-artifact-cleaned
             if len(text) < 40:  # skip empty / artifact-only chunks
                 continue
+            is_faq = str(hit.get("doc_type", "")).lower() in _FAQ_DOC_TYPES or bool(hit.get("answer"))
+            # Skip pure address/directory chunks without substantive content unless query explicitly asks for contact
+            if not any(w in query.lower() for w in ("contact", "phone", "email", "address", "call", "helpline", "reach")):
+                if "p.o. box" in text.lower() and "telephone:" in text.lower() and len(text) < 400:
+                    continue
             excerpt = _structure_excerpt(_trim_excerpt(text, 700))
             # Trimming can leave a PDF footnote number dangling at the new
             # end of the excerpt ("...remit to URA. 1") — strip it. Numbers
@@ -3366,10 +3415,16 @@ class ChatModel:
             # matching the deterministic-reply convention.
             excerpts.append(excerpt)
             excerpt_tokens.append(tokens)
+            # A curated FAQ row already comprehensively answers the question — do not dilute with a second chunk
+            if is_faq and len(excerpt) >= 120:
+                break
         if not excerpts:
             return ""
         body = "\n\n".join(excerpts)
-        return f"{GROUNDED_REVISION_PREAMBLE}\n\n{body}"
+        revision = f"{GROUNDED_REVISION_PREAMBLE}\n\n{body}"
+        if not any(w in body.lower() for w in ("0800 117 000", "0800 217 000", "ura.go.ug")):
+            revision = f"{revision}\n\n{CONTACT_FOOTER}"
+        return revision
 
     # Modes that already speak in their own voice. A workflow is mid-dialogue,
     # a clarification is a question back, an abstention is an apology, a
@@ -3912,12 +3967,14 @@ class ChatModel:
         if not reply.strip():
             reasons.append("reply was empty")
 
+        is_contact_ask = bool(re.search(r"\b(contact|phone|email|toll[- ]?free|helpline|call|reach)\b", message, re.IGNORECASE))
         if decision != "escalate" and hits and citations and not self._has_inline_citations(reply):
-            reasons.append("reply did not expose visible citation markers")
-            # Only revise if faithfulness is also below threshold — a well-grounded
-            # answer without explicit [N] markers is acceptable.
-            if faithfulness_score is not None and faithfulness_score < 0.5:
-                decision = "revise"
+            if not is_contact_ask:
+                reasons.append("reply did not expose visible citation markers")
+                # Only revise if faithfulness is also below threshold — a well-grounded
+                # answer without explicit [N] markers is acceptable.
+                if faithfulness_score is not None and faithfulness_score < 0.5:
+                    decision = "revise"
 
         if faithfulness_score is not None:
             if faithfulness_score < 0.2:
@@ -4613,6 +4670,8 @@ class ChatModel:
             return None
         if _TIN_ORG_QUERY_RE.search(combined) or _TIN_INDIVIDUAL_QUERY_RE.search(combined):
             return None
+        if re.search(r"\b(whatsapp|phone|call|sms|ussd|mobile\s+app|portal|how\s+long|cost|fee|free|status|requirements?|documents?)\b", combined, re.IGNORECASE):
+            return None
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
             return None
         wf = WorkflowRegistry.get("tin_procedure_help")
@@ -4799,10 +4858,16 @@ class ChatModel:
         validators only (no resolver), keeping this free of an extra model call
         on every guided turn.
         """
-        if not _reads_as_question(user_input):
-            return False
         step = WorkflowRegistry.pending_step(session)
         if step is None or not step.slot:
+            return False
+        if not _reads_as_question(user_input):
+            # If the pending slot is an enum or strict type, and the input is a multi-word sentence (>= 4 words)
+            # that completely fails the validator, it is a statement or off-topic command, not a slot answer.
+            if step.validator and step.validator.startswith("enum[") and len(user_input.split()) >= 4:
+                is_valid, _, _ = validate_slot(user_input, step.validator, None)
+                if not is_valid:
+                    return True
             return False
         if step.validator.strip() in _WORKFLOW_FREE_TEXT_VALIDATORS:
             # A free-text slot accepts anything — it is the most common kind in
@@ -5789,7 +5854,13 @@ class ChatModel:
                     retrieval_mode = "faq_priority"
                 for h in kw_hits:
                     faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
-                    if faq_text[:80] not in seen_texts:
+                    existing = next((x for x in hits if x.get("text", "")[:80] == faq_text[:80]), None)
+                    if existing is not None:
+                        if not existing.get("question"):
+                            existing["question"] = h["question"]
+                        if not existing.get("answer"):
+                            existing["answer"] = h["answer"]
+                    elif faq_text[:80] not in seen_texts:
                         hits.append({
                             "text": faq_text,
                             "answer": h["answer"],
@@ -6284,7 +6355,7 @@ class ChatModel:
             # It already carries [1] and is scored against the source passage.
             if hits and citations and reply and not extractive_fallback:
                 with trace_stage("claim_verification", timings=timings):
-                    claim_report = verify_claims(reply, citations, hits)
+                    claim_report = verify_claims(reply, citations, hits, query=message)
                     trace_ctx["claim_verification"] = {
                         "decision": claim_report.get("decision"),
                         "score": claim_report.get("score"),
@@ -6333,7 +6404,7 @@ class ChatModel:
                         len(draft_claim_report.get("uncited_claims") or []),
                     )
                 if citations:
-                    claim_report = verify_claims(reply, citations, hits)
+                    claim_report = verify_claims(reply, citations, hits, query=message)
                     response_judge["post_revision_claim_verification"] = claim_report
                     if claim_report.get("decision") == "escalate":
                         response_judge["final_decision"] = "escalate"
@@ -6770,6 +6841,9 @@ class ChatModel:
                     **cached,
                     "conversation_id": thread_id,
                     "locale": locale,
+                    "_short_circuit": True,
+                    "_hits": [],
+                    "_history": conversation_history,
                 })
 
         route_decision = None
@@ -7021,7 +7095,13 @@ class ChatModel:
             retrieval_mode = "faq_priority"
         for h in kw_hits:
             faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
-            if faq_text[:80] not in seen_texts:
+            existing = next((x for x in hits if x.get("text", "")[:80] == faq_text[:80]), None)
+            if existing is not None:
+                if not existing.get("question"):
+                    existing["question"] = h["question"]
+                if not existing.get("answer"):
+                    existing["answer"] = h["answer"]
+            elif faq_text[:80] not in seen_texts:
                 hits.append({
                     "text": faq_text, "answer": h["answer"],
                     "question": h["question"], "source": h["source"],
