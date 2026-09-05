@@ -1,11 +1,11 @@
 {
   "summary": {
     "total_faqs": 10,
-    "avg_correctness_pct": 26.6,
-    "avg_conversational_pct": 97.5,
-    "avg_eq_pct": 84.5,
-    "avg_overall_pct": 65.2,
-    "avg_latency_s": 6.66
+    "avg_correctness_pct": 23.3,
+    "avg_conversational_pct": 98.0,
+    "avg_eq_pct": 86.5,
+    "avg_overall_pct": 64.6,
+    "avg_latency_s": 2.8
   },
   "evaluations": [
     {
@@ -13,66 +13,67 @@
       "topic": "Customs Valuation Basis (Sea/Road vs Air)",
       "user_emotion": "Neutral / Factual Inquiry",
       "query": "What is the basis for declaring imported goods for customs valuation in Uganda? Is freight included for both air and sea cargo?",
-      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
-      "sources": [],
+      "reply": "The basis for declaring imported goods for customs valuation in Uganda is the **transaction value method**, which is the price actually paid or payable for the goods when sold for export to the country of importation. This method includes costs such as freight, insurance, and other expenses. However, freight is **not included** for goods transported by air, as the air freight charges are typically part of the total value declared.\n\nYou might also want to know: What are the Customs valuation methods under ACV?",
+      "sources": [
+        "56543e3cbf511d6c.json",
+        "808977692-Taxation-Handbook-FY-2024-25-1.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "abstained",
-      "correctness_score": 0.0,
-      "conversational_score": 1.0,
+      "retrieval_mode": "vector",
+      "correctness_score": 1.0,
+      "conversational_score": 0.8,
       "eq_score": 0.9,
-      "overall_score": 0.57,
-      "latency_s": 29.3
+      "overall_score": 0.91,
+      "latency_s": 7.88
     },
     {
       "id": "CUST-02",
       "topic": "Challenging Customs Valuation / Appeal",
       "user_emotion": "Frustrated / Disputing Valuation",
       "query": "Customs rejected my invoice price at the border and valued my goods way higher! I am so frustrated. Can I challenge this customs valuation or am I forced to pay?",
-      "reply": "Here's the most relevant guidance I found in official URA sources:\n\nYes. ACV allows administrative and judicial appeal without penalty.",
-      "sources": [
-        "ura_customs_valuation_faqs.csv"
-      ],
+      "reply": "I'm sorry for the trouble — let's get this sorted out together.\n\nI'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+      "sources": [],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "hybrid",
-      "correctness_score": 0.33,
-      "conversational_score": 0.75,
+      "retrieval_mode": "abstained",
+      "correctness_score": 0.0,
+      "conversational_score": 1.0,
       "eq_score": 0.8,
-      "overall_score": 0.6,
-      "latency_s": 3.05
+      "overall_score": 0.54,
+      "latency_s": 1.47
     },
     {
       "id": "CUST-03",
       "topic": "Valuation Methods under ACV",
       "user_emotion": "Confused Trader",
       "query": "I am completely confused about how URA determines customs value when transaction value cannot be used. What are the sequential methods under ACV?",
-      "reply": "Here's the most relevant guidance I found in official URA sources:\n\nSix methods applied sequentially (methods 4 and 5 can swap on importer request): transaction value; transaction value of identical goods; transaction value of similar goods; deductive value; computed value; fallback method.\n\nYou might also want to know: How do I know if I am tax resident in another jurisdiction?",
+      "reply": "Here's the most relevant guidance I found in official URA sources:\n\n- i. Section 122 of the EACCMA provides that where goods are liable to import duty ad valorem, the value of goods shall be determined in accordance with the Fourth Schedule and import duty has to be paid on that value.\n\n66\n\n_East African Community Tax Law Reports [ 2023] 1 EACTLR_\n\n- ii. Paragraph 2(1) of the Fourth Schedule provides that customs value of import goods shall be the transaction value, which is, the price actually paid or payable for goods when sold for export to a partner state.\n\n- iii. The customs value of imported goods is primarily the Transaction Value Method.\n\n- iv.\n\nThat Section 122 of the EACCMA provides that when goods are liable to import duty ad valorem, their value shall be determined in accordance with the Fourth Schedule of the EACCMA. Section 122 (6) of the EACCMA also prescribes that, in applying or interpreting its provisions and the Fourth Schedule, due regard should be taken of decisions, rulings, opinions, guidelines and interpretations given by the Directorate, World Trade Organization or the Customs Cooperation Council (now the World Customs Organization).",
       "sources": [
-        "ura_customs_valuation_faqs.csv"
+        "East_Africa_Community_Customs_Management_Act_Revised.pdf",
+        "EAC-TAX-CASES-COMPENDIUM-FOURTH-EDITION-.pdf"
       ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "hybrid",
+      "retrieval_mode": "vector",
       "correctness_score": 1.0,
       "conversational_score": 1.0,
-      "eq_score": 0.6,
-      "overall_score": 0.88,
-      "latency_s": 10.11
+      "eq_score": 0.95,
+      "overall_score": 0.98,
+      "latency_s": 10.26
     },
     {
       "id": "CUST-04",
       "topic": "Required Documents at Point of Entry",
       "user_emotion": "Urgent Importer",
       "query": "Urgent help needed! My container just arrived at the border point of entry. Exactly what documents must I present to customs to clear the goods?",
-      "reply": "Here's the most relevant guidance I found in official URA sources:\n\n(1) Lodge the export SAD in ASYCUDA; (2) pay any applicable fees or levies; (3) present goods and documents for customs verification/scanning if required; (4) obtain release and exit note; (5) the carrier exits with sealed cargo.\n\nYou might also want to know: What are the key steps to clear goods for export at the border?",
-      "sources": [
-        "ura_export_process_faqs.csv"
-      ],
+      "reply": "I know deadlines can be stressful, so here's the quickest way forward.\n\nI'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
+      "sources": [],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "hybrid",
+      "retrieval_mode": "abstained",
       "correctness_score": 0.0,
       "conversational_score": 1.0,
-      "eq_score": 0.95,
-      "overall_score": 0.58,
-      "latency_s": 5.23
+      "eq_score": 0.8,
+      "overall_score": 0.54,
+      "latency_s": 1.36
     },
     {
       "id": "CUST-05",
@@ -87,7 +88,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.8,
       "overall_score": 0.54,
-      "latency_s": 0.75
+      "latency_s": 1.39
     },
     {
       "id": "CUST-06",
@@ -102,7 +103,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.8,
       "overall_score": 0.67,
-      "latency_s": 13.16
+      "latency_s": 1.32
     },
     {
       "id": "CUST-07",
@@ -117,30 +118,13 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "overall_score": 0.57,
-      "latency_s": 0.54
+      "latency_s": 0.5
     },
     {
       "id": "CUST-08",
       "topic": "International Traveler Entry Requirements",
       "user_emotion": "Traveler Preparation",
       "query": "What health and immigration documents must international travelers present when entering Uganda through Entebbe airport?",
-      "reply": "Here's the most relevant guidance I found in official URA sources:\n\nPassport valid ≥6 months; appropriate visa (e-visa/embassy/visa-free or on-arrival where eligible); yellow fever vaccination certificate (over 1 year old travelers); COVID-19 PCR within 72 hours if required by current health rules; proof of onward/return ticket.\n\nYou might also want to know: What documents are needed for a foreign company to register and operate in Uganda?",
-      "sources": [
-        "ura_documents_point_of_entry_faqs.csv"
-      ],
-      "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "hybrid",
-      "correctness_score": 1.0,
-      "conversational_score": 1.0,
-      "eq_score": 0.9,
-      "overall_score": 0.97,
-      "latency_s": 2.99
-    },
-    {
-      "id": "CUST-09",
-      "topic": "Export Procedures and Documentation",
-      "user_emotion": "First-time Small Exporter",
-      "query": "I am a first-time local farmer trying to export dried fruits to Kenya. The customs process feels so intimidating. What basic export procedures must I follow?",
       "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
       "sources": [],
       "model": "Sunbird/Sunflower-14B-FP8",
@@ -149,7 +133,22 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "overall_score": 0.57,
-      "latency_s": 0.68
+      "latency_s": 1.27
+    },
+    {
+      "id": "CUST-09",
+      "topic": "Export Procedures and Documentation",
+      "user_emotion": "First-time Small Exporter",
+      "query": "I am a first-time local farmer trying to export dried fruits to Kenya. The customs process feels so intimidating. What basic export procedures must I follow?",
+      "reply": "I can only help with taxes administered by the Uganda Revenue Authority. I don't hold Kenya's tax rates, and quoting Uganda's figures for Kenya would be misleading.\n\nFor Kenya you'll need that country's own revenue authority. If you meant Uganda, ask again without naming Kenya and I'll answer from the official URA rate table.",
+      "sources": [],
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "retrieval_mode": "out_of_jurisdiction",
+      "correctness_score": 0.0,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "overall_score": 0.57,
+      "latency_s": 0.5
     },
     {
       "id": "CUST-10",
@@ -164,7 +163,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "overall_score": 0.57,
-      "latency_s": 0.77
+      "latency_s": 2.06
     }
   ]
 }

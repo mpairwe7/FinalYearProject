@@ -1,0 +1,91 @@
+{
+  "analysis_tests": {
+    "invoice_pdf": {
+      "status": 200,
+      "latency_sec": 0.7178116515278816,
+      "document_id": "30efc81bfeb04267a288da5cbcff1f19",
+      "doc_type": "receipt",
+      "tins": [
+        "1009182341",
+        "1004829104"
+      ],
+      "amounts_count": 5
+    },
+    "paye_xlsx": {
+      "status": 200,
+      "latency_sec": 0.6106532216072083,
+      "document_id": "d4080398cce84865a3460191730aa2c9",
+      "tables_count": 1
+    },
+    "wht_docx": {
+      "status": 200,
+      "latency_sec": 0.9342560693621635,
+      "document_id": "ecdcd80055ce4db89daa7880aa4aee7f",
+      "tins": [
+        "1006655443",
+        "1007788990"
+      ]
+    },
+    "customs_csv": {
+      "status": 200,
+      "latency_sec": 0.5265641212463379,
+      "document_id": "fddc9239b32945e8aa57299ddaa62211",
+      "tables_count": 1
+    }
+  },
+  "report_tests": {
+    "invoice_report": {
+      "status": 200,
+      "latency_sec": 1.339879885315895,
+      "size_bytes": 43360,
+      "content_type": "application/pdf",
+      "disposition": "attachment; filename=\"ura_document_report_30efc81b.pdf\""
+    }
+  },
+  "chat_attachment_tests": {
+    "invoice_chat": {
+      "status": 200,
+      "latency_sec": 8.028560400009155,
+      "tin_grounded": true,
+      "amount_grounded": true,
+      "sources_count": 5,
+      "retrieval_mode": "vector"
+    }
+  },
+  "security_tests": {
+    "idor_defense": {
+      "status_code": 404,
+      "defended": true
+    },
+    "prompt_injection_defense": {
+      "jailbroken": false,
+      "status": true
+    }
+  },
+  "flaw_diagnosis": [
+    {
+      "category": "UX & Client Integration",
+      "standard": "NIST AI RMF / WCAG 2.2 / Modern Chat UX",
+      "severity": "High (UX Barrier)",
+      "flaw": "Frontend UI lacks dedicated document upload/attachment drag-and-drop affordance in taxpayer chat view",
+      "impact": "Users cannot visually discover or attach invoices/receipts directly in the browser without developer API calls",
+      "remedy": "Expose an attachment button (paperclip icon) in the ChatV2 composer with progress indicator, chip preview, and instant report download link."
+    },
+    {
+      "category": "Performance & Scalability",
+      "standard": "OWASP API4:2023 / Slowloris & Timeout Mitigation",
+      "severity": "Medium",
+      "flaw": "Synchronous OCR processing blocks HTTP worker thread for multi-page scanned documents",
+      "impact": "Scanned PDFs taking >30s can hit cloud gateway / ngrok tunnel timeouts (e.g. 504 Gateway Timeout)",
+      "remedy": "Return 202 Accepted with polling job status (GET /v1/documents/{id}/status) for files requiring multi-page OCR."
+    },
+    {
+      "category": "Data Protection & Transport",
+      "standard": "RFC 6266 / OWASP Secure Headers",
+      "severity": "Low",
+      "flaw": "Document analysis reports are generated synchronously on each GET request without client-side ETag / Cache-Control",
+      "impact": "Repeated downloads re-render the PDF from scratch, consuming CPU cycles on report generation",
+      "remedy": "Attach ETag header derived from DocumentRecord hash and Cache-Control: private, no-transform, max-age=300."
+    }
+  ]
+}

@@ -1,0 +1,317 @@
+{
+  "timestamp": "2026-09-05T12:23:28Z",
+  "target_url": "https://struttingly-nongeological-briella.ngrok-free.dev",
+  "gpu": "NVIDIA RTX A6000 (GPU 6)",
+  "model": "Sunbird/Sunflower-14B-FP8 (vLLM local)",
+  "vector_db": "Qdrant (7,972 points indexed)",
+  "cache": "Redis (port 6379)",
+  "accuracy_suite": {
+    "items": [
+      {
+        "id": "EN-01",
+        "lang": "en",
+        "topic": "VAT Rate",
+        "status": 200,
+        "latency": 0.6083526015281677,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "18%"
+        ],
+        "expected_facts": [
+          "18%"
+        ],
+        "retrieval_mode": "calculator",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "EN-02",
+        "lang": "en",
+        "topic": "EFRIS Invoicing",
+        "status": 200,
+        "latency": 0.5193218067288399,
+        "accuracy": 0.75,
+        "matched_facts": [
+          "efris",
+          "invoice",
+          "vat"
+        ],
+        "expected_facts": [
+          "efris",
+          "electronic",
+          "invoice",
+          "vat"
+        ],
+        "retrieval_mode": "vector",
+        "sources_count": 2,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "EN-03",
+        "lang": "en",
+        "topic": "Rental Income Tax",
+        "status": 200,
+        "latency": 0.5180382207036018,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "12%",
+          "2,820,000"
+        ],
+        "expected_facts": [
+          "12%",
+          "2,820,000"
+        ],
+        "retrieval_mode": "calculator",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "EN-04",
+        "lang": "en",
+        "topic": "TIN Registration",
+        "status": 200,
+        "latency": 0.4998677521944046,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "register",
+          "individual"
+        ],
+        "expected_facts": [
+          "register",
+          "individual"
+        ],
+        "retrieval_mode": "workflow",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "EN-05",
+        "lang": "en",
+        "topic": "Withholding Tax",
+        "status": 200,
+        "latency": 0.5121068134903908,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "6%"
+        ],
+        "expected_facts": [
+          "6%"
+        ],
+        "retrieval_mode": "calculator",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "LG-01",
+        "lang": "lg",
+        "topic": "VAT Rate (Luganda)",
+        "status": 200,
+        "latency": 0.49640101194381714,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "18%"
+        ],
+        "expected_facts": [
+          "18%"
+        ],
+        "retrieval_mode": "calculator",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "LG-02",
+        "lang": "lg",
+        "topic": "EFRIS Invoicing (Luganda)",
+        "status": 200,
+        "latency": 2.8898176327347755,
+        "accuracy": 0.0,
+        "matched_facts": [],
+        "expected_facts": [
+          "efris"
+        ],
+        "retrieval_mode": "abstained",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "LG-03",
+        "lang": "lg",
+        "topic": "Rental Tax (Luganda)",
+        "status": 200,
+        "latency": 0.49543073773384094,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "12%"
+        ],
+        "expected_facts": [
+          "12%"
+        ],
+        "retrieval_mode": "vector",
+        "sources_count": 3,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "LG-04",
+        "lang": "lg",
+        "topic": "TIN Registration (Luganda)",
+        "status": 200,
+        "latency": 0.5058948323130608,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "wandiisa"
+        ],
+        "expected_facts": [
+          "wandiisa"
+        ],
+        "retrieval_mode": "workflow",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "LG-05",
+        "lang": "lg",
+        "topic": "PAYE (Luganda)",
+        "status": 200,
+        "latency": 2.0168251246213913,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "ura"
+        ],
+        "expected_facts": [
+          "ura"
+        ],
+        "retrieval_mode": "abstained",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "SW-01",
+        "lang": "sw",
+        "topic": "VAT Rate (Swahili)",
+        "status": 200,
+        "latency": 0.49354393035173416,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "18",
+          "asilimia"
+        ],
+        "expected_facts": [
+          "18",
+          "asilimia"
+        ],
+        "retrieval_mode": "calculator",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "SW-02",
+        "lang": "sw",
+        "topic": "EFRIS Invoicing (Swahili)",
+        "status": 200,
+        "latency": 2.12402356415987,
+        "accuracy": 0.5,
+        "matched_facts": [
+          "ura"
+        ],
+        "expected_facts": [
+          "efris",
+          "ura"
+        ],
+        "retrieval_mode": "abstained",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "SW-03",
+        "lang": "sw",
+        "topic": "Rental Tax (Swahili)",
+        "status": 200,
+        "latency": 2.534584052860737,
+        "accuracy": 0.5,
+        "matched_facts": [
+          "2,820,000"
+        ],
+        "expected_facts": [
+          "12%",
+          "2,820,000"
+        ],
+        "retrieval_mode": "vector",
+        "sources_count": 6,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "SW-04",
+        "lang": "sw",
+        "topic": "TIN Registration (Swahili)",
+        "status": 200,
+        "latency": 0.5025899931788445,
+        "accuracy": 0.5,
+        "matched_facts": [
+          "ura"
+        ],
+        "expected_facts": [
+          "tin",
+          "ura"
+        ],
+        "retrieval_mode": "workflow",
+        "sources_count": 0,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      },
+      {
+        "id": "SW-05",
+        "lang": "sw",
+        "topic": "Withholding Tax (Swahili)",
+        "status": 200,
+        "latency": 0.5426059737801552,
+        "accuracy": 1.0,
+        "matched_facts": [
+          "6%"
+        ],
+        "expected_facts": [
+          "6%"
+        ],
+        "retrieval_mode": "vector",
+        "sources_count": 6,
+        "model": "Sunbird/Sunflower-14B-FP8"
+      }
+    ],
+    "overall_accuracy": 0.8166666666666667,
+    "en_accuracy": 0.95,
+    "lg_accuracy": 0.8,
+    "sw_accuracy": 0.7,
+    "avg_latency": 1.0172936032215754
+  },
+  "load_suite_c10": {
+    "concurrency": 10,
+    "total_requests": 30,
+    "throughput_req_sec": 6.952176253265801,
+    "p50_latency_sec": 0.6072642542421818,
+    "p95_latency_sec": 2.5974767081439496,
+    "p99_latency_sec": 2.605562746524811,
+    "error_rate_pct": 0.0
+  },
+  "load_suite_c20": {
+    "concurrency": 20,
+    "total_requests": 40,
+    "throughput_req_sec": 10.953325750136434,
+    "p50_latency_sec": 0.7916706874966621,
+    "p95_latency_sec": 2.6799879290163515,
+    "p99_latency_sec": 2.855691596865654,
+    "error_rate_pct": 0.0
+  },
+  "spike_suite": {
+    "spike_concurrency": 30,
+    "burst_duration_sec": 2.845302551984787,
+    "p50_latency_sec": 0.7409886866807938,
+    "p95_latency_sec": 2.691023726388812,
+    "error_rate_pct": 0.0
+  },
+  "volume_soak": {
+    "volume_requests": 120,
+    "total_time_sec": 5.417796976864338,
+    "throughput_req_sec": 22.149224216491863,
+    "p50_latency_sec": 0.08374210074543953,
+    "p95_latency_sec": 2.197233386337757,
+    "error_rate_pct": 0.0
+  }
+}
