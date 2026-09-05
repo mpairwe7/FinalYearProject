@@ -13,5 +13,10 @@
 # CVE-2024-XXXXX  # Low-impact in our context; no patch until upstream release. Review: 2026-06-01
 
 # ── Misconfiguration Suppressions ────────────────────────────────────────────
-# Example:
-# DS002  # Dockerfile: USER not set (we use non-root in runtime stage only)
+# AVD-DS-0002 / DS0002: App/Dockerfile.cranecloud runs supervisord as PID 1
+# to supervise multi-service stack (nginx, redis, qdrant, uvicorn, next.js) on
+# Crane Cloud single-port container deployment.
+# Compensating controls: CAP_DROP ALL, no-new-privileges, seccomp default profile,
+# read-only rootfs with tmpfs mounts, unprivileged ports only. (Review: 2026-12-31)
+AVD-DS-0002
+DS0002

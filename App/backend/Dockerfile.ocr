@@ -8,10 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /service
 
+RUN groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser
+
 COPY backend/requirements-ocr.txt /tmp/requirements-ocr.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-ocr.txt
 
 COPY backend/app /service/app
+RUN mkdir -p /models && chown -R appuser:appuser /service /models
+
+USER appuser
 
 EXPOSE 8100
 

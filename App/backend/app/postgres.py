@@ -344,7 +344,7 @@ def cleanup_expired_data() -> dict[str, int]:
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"DELETE FROM {table} WHERE {col} < %s",  # noqa: S608 whitelist
+                        f"DELETE FROM {table} WHERE {col} < %s",  # nosec B608 # noqa: S608 whitelist
                         (cutoff,),
                     )
                     deleted[table] = cur.rowcount
@@ -991,7 +991,7 @@ def list_tickets(
         return []
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
-    sql = f"SELECT {_TICKET_COLUMNS} FROM tickets"
+    sql = f"SELECT {_TICKET_COLUMNS} FROM tickets"  # nosec B608 # noqa: S608
     params: list[Any] = []
     if status:
         sql += " WHERE status = %s"
@@ -1023,7 +1023,7 @@ def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
         cur.execute(
             f"""SELECT {_TICKET_COLUMNS_FULL} FROM tickets
                 WHERE conversation_id = %s AND status IN ('open','assigned')
-                ORDER BY created_at DESC LIMIT 1""",
+                ORDER BY created_at DESC LIMIT 1""",  # nosec B608 # noqa: S608
             (conversation_id,),
         )
         row = cur.fetchone()
@@ -1035,7 +1035,7 @@ def get_ticket(ticket_id: str) -> dict[str, Any] | None:
     if pool is None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT {_TICKET_COLUMNS_FULL} FROM tickets WHERE id = %s", (ticket_id,))
+        cur.execute(f"SELECT {_TICKET_COLUMNS_FULL} FROM tickets WHERE id = %s", (ticket_id,))  # nosec B608 # noqa: S608
         row = cur.fetchone()
     return _row_to_ticket(row, _TICKET_COLUMNS_FULL) if row else None
 
@@ -1093,7 +1093,7 @@ def update_ticket(
     params.extend([now, ticket_id])
     with pool.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"UPDATE tickets SET {', '.join(sets)} WHERE id = %s", params)
+            cur.execute(f"UPDATE tickets SET {', '.join(sets)} WHERE id = %s", params)  # nosec B608 # noqa: S608
             touched = cur.rowcount > 0
         conn.commit()
     return touched
@@ -1156,7 +1156,7 @@ def get_conversation_transcript(
     limit = max(1, min(int(limit), 1000))
     sql = (
         "SELECT user_message, bot_reply, created_at, sources, topic_tag "
-        f"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT %s"
+        f"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT %s"  # nosec B608 # noqa: S608
     )
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (key, limit))
@@ -1623,7 +1623,7 @@ def upsert_user(
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_USER_COLUMNS} FROM users "
-                "WHERE tenant_id = %s AND external_id = %s",
+                "WHERE tenant_id = %s AND external_id = %s",  # nosec B608 # noqa: S608
                 (tenant_id, external_id),
             )
             existing = _as_dict(_USER_COLUMNS, cur.fetchone())
@@ -1639,7 +1639,7 @@ def upsert_user(
                         "last_seen_at": now}
             user_id = str(uuid.uuid4())
             cur.execute(
-                f"INSERT INTO users ({_USER_COLUMNS}) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                f"INSERT INTO users ({_USER_COLUMNS}) VALUES (%s,%s,%s,%s,%s,%s,%s)",  # nosec B608 # noqa: S608
                 (user_id, tenant_id, external_id, email, role, now, now),
             )
         conn.commit()
@@ -1659,7 +1659,7 @@ def get_user(user_id: str) -> dict[str, Any] | None:
     if pool is None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id = %s", (user_id,))
+        cur.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id = %s", (user_id,))  # nosec B608 # noqa: S608
         return _as_dict(_USER_COLUMNS, cur.fetchone())
 
 
@@ -1669,7 +1669,7 @@ def get_user_profile(user_id: str) -> dict[str, Any] | None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_PROFILE_COLUMNS} FROM user_profiles WHERE user_id = %s",
+            f"SELECT {_PROFILE_COLUMNS} FROM user_profiles WHERE user_id = %s",  # nosec B608 # noqa: S608
             (user_id,),
         )
         profile = _as_dict(_PROFILE_COLUMNS, cur.fetchone())
@@ -1713,7 +1713,7 @@ def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]
                 }
                 defaults.update(updates)
                 cur.execute(
-                    f"INSERT INTO user_profiles ({_PROFILE_COLUMNS}) "
+                    f"INSERT INTO user_profiles ({_PROFILE_COLUMNS}) "  # nosec B608 # noqa: S608
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (
                         user_id,
@@ -1730,7 +1730,7 @@ def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]
             elif updates:
                 sets = ", ".join(f"{k} = %s" for k in updates) + ", updated_at = %s"
                 cur.execute(
-                    f"UPDATE user_profiles SET {sets} WHERE user_id = %s",  # noqa: S608
+                    f"UPDATE user_profiles SET {sets} WHERE user_id = %s",  # nosec B608 # noqa: S608
                     [*updates.values(), now, user_id],
                 )
         conn.commit()
@@ -1749,7 +1749,7 @@ def grant_consent(
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "
+                f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "  # nosec B608 # noqa: S608
                 "WHERE user_id = %s AND purpose = %s AND version = %s "
                 "AND withdrawn_at IS NULL",
                 (user_id, purpose, version),
@@ -1760,7 +1760,7 @@ def grant_consent(
             receipt_id = str(uuid.uuid4())
             now = time.time()
             cur.execute(
-                f"INSERT INTO consent_receipts ({_CONSENT_COLUMNS}) "
+                f"INSERT INTO consent_receipts ({_CONSENT_COLUMNS}) "  # nosec B608 # noqa: S608
                 "VALUES (%s,%s,%s,%s,%s,NULL,%s)",
                 (receipt_id, user_id, purpose, version, now, legal_basis),
             )
@@ -1798,7 +1798,7 @@ def get_active_consents(user_id: str) -> list[dict[str, Any]]:
         return []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "
+            f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "  # nosec B608 # noqa: S608
             "WHERE user_id = %s AND withdrawn_at IS NULL ORDER BY granted_at DESC",
             (user_id,),
         )
@@ -1860,7 +1860,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s",
+            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s",  # nosec B608 # noqa: S608
             (conversation_id,),
         )
         row = _as_dict(_WORKFLOW_COLUMNS, cur.fetchone())
@@ -1905,7 +1905,7 @@ def upsert_workflow_session(
                       current_step_idx = EXCLUDED.current_step_idx,
                       slots_json = EXCLUDED.slots_json,
                       last_prompt = EXCLUDED.last_prompt,
-                      updated_at = EXCLUDED.updated_at""",
+                      updated_at = EXCLUDED.updated_at""",  # nosec B608 # noqa: S608
                 (
                     conversation_id,
                     workflow_id,

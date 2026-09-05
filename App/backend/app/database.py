@@ -688,7 +688,7 @@ def cleanup_expired_data() -> dict[str, int]:
                 )
             else:
                 cursor = conn.execute(
-                    f"DELETE FROM {table} WHERE {col} < ?",  # noqa: S608 — table/col are hardcoded above
+                    f"DELETE FROM {table} WHERE {col} < ?",  # nosec B608 # noqa: S608 — table/col are hardcoded above
                     (cutoff,),
                 )
             conn.commit()
@@ -907,7 +907,7 @@ def delete_user_analytics(user_id: str) -> dict[str, int]:
     for table in ("analytics_events", "sessions", "feedback"):
         try:
             counts[table] = execute(
-                f"DELETE FROM {table} WHERE user_id = ?",  # noqa: S608 — fixed table names
+                f"DELETE FROM {table} WHERE user_id = ?",  # nosec B608 # noqa: S608 — fixed table names
                 (user_id,),
             )
         except Exception:
@@ -1135,7 +1135,7 @@ def get_conversation_transcript(
     rows = conn.execute(
         f"""SELECT user_message, bot_reply, created_at, sources, topic_tag
             FROM conversations WHERE {where}
-            ORDER BY created_at DESC LIMIT ?""",  # noqa: S608 - `where` is a fixed literal
+            ORDER BY created_at DESC LIMIT ?""",  # nosec B608 # noqa: S608 - `where` is a fixed literal
         (key, limit),
     ).fetchall()
     return [
@@ -2266,7 +2266,7 @@ def update_ticket(
     params.append(ticket_id)
     try:
         cursor = conn.execute(
-            f"UPDATE tickets SET {', '.join(sets)} WHERE id = ?",  # noqa: S608
+            f"UPDATE tickets SET {', '.join(sets)} WHERE id = ?",  # nosec B608 # noqa: S608
             params,
         )
         conn.commit()
@@ -2436,7 +2436,7 @@ def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]
         params = list(updates.values()) + [now, user_id]
         try:
             conn.execute(
-                f"UPDATE user_profiles SET {sets} WHERE user_id = ?",  # noqa: S608
+                f"UPDATE user_profiles SET {sets} WHERE user_id = ?",  # nosec B608 # noqa: S608
                 params,
             )
             conn.commit()
@@ -2587,7 +2587,7 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
         if conv_ids:
             ph = ",".join("?" * len(conv_ids))
             tickets = query_all(
-                f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608 — ?-placeholders
                 tuple(conv_ids),
             )
         analytics_events = query_all(
@@ -2649,7 +2649,7 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
             if conv_ids:
                 ph = ",".join("?" * len(conv_ids))
                 deleted += execute(
-                    f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                    f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608 — ?-placeholders
                     tuple(conv_ids),
                 )
             counts["tickets"] = deleted
@@ -2660,7 +2660,7 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
             if conv_ids:
                 ph = ",".join("?" * len(conv_ids))
                 execute(
-                    f"DELETE FROM conversation_topics WHERE conversation_id IN ({ph})",  # noqa: S608
+                    f"DELETE FROM conversation_topics WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608
                     tuple(conv_ids),
                 )
         except Exception:
@@ -2677,7 +2677,7 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
     for table, col in (("consent_receipts", "user_id"), ("user_profiles", "user_id"), ("users", "id")):
         try:
             counts[table] = execute(
-                f"DELETE FROM {table} WHERE {col} = ?",  # noqa: S608 — hardcoded list
+                f"DELETE FROM {table} WHERE {col} = ?",  # nosec B608 # noqa: S608 — hardcoded list
                 (user_id,),
             )
         except Exception:

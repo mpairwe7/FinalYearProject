@@ -135,7 +135,7 @@ class UraActionProposalTool(Tool):
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=8) as resp:  # noqa: S310 - configured URL only
+            with urllib.request.urlopen(req, timeout=8) as resp:  # nosec B310 # noqa: S310 - configured URL only
                 result = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             return {

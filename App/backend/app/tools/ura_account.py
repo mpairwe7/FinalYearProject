@@ -88,7 +88,7 @@ class UraAccountProfileTool(Tool):
         url = f"{base_url}/taxpayers/{urllib.parse.quote(taxpayer_id)}/profile"
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 - configured URL only
+            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310 # noqa: S310 - configured URL only
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             return {"ok": False, "configured": True, "status": exc.code, "error": "URA API error"}

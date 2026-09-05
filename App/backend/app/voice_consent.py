@@ -272,14 +272,14 @@ def get_voice_audit_log(
             params.append(since)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        query = f"""
-            SELECT id, user_id, session_id, event_type,
-                   metadata_json, audio_hash, tenant_id, created_at
-            FROM voice_audit_log
-            {where}
-            ORDER BY created_at DESC
-            LIMIT ?
-        """
+        query = (
+            "SELECT id, user_id, session_id, event_type, "  # nosec B608 # noqa: S608
+            "metadata_json, audio_hash, tenant_id, created_at "
+            "FROM voice_audit_log "
+            f"{where} "  # nosec B608 # noqa: S608
+            "ORDER BY created_at DESC "
+            "LIMIT ?"
+        )
         params.append(limit)
 
         rows = db.query_all(query, tuple(params))

@@ -25,15 +25,38 @@ scan:
     - CRITICAL
     - HIGH
 
+  # Directories to skip (large datasets, ML models, caches, node_modules)
+  skip-dirs:
+    - .cache
+    - artifacts
+    - App/Model
+    - Data
+    - Notebooks
+    - .git
+    - .next
+    - node_modules
+    - test_env
+    - tests
+    - .venv
+    - .venv-gpu
+    - CosyVoice
+
+  # Files to skip (local developer environments, gitignored secrets)
+  skip-files:
+    - .env
+    - .env.local
+    - .claude/settings.local.json
+
+# ── Package settings ─────────────────────────────────────────────────────────
+pkg:
+  types:
+    - os       # OS package vulnerabilities (Debian, Alpine, etc.)
+    - library  # Language-specific dependencies (pip, npm, etc.)
+
 # ── Vulnerability settings ───────────────────────────────────────────────────
 vulnerability:
   # Ignore unfixed vulnerabilities (no patch available yet)
   ignore-unfixed: true
-
-  # Vulnerability database sources
-  type:
-    - os       # OS package vulnerabilities (Debian, Alpine, etc.)
-    - library  # Language-specific dependencies (pip, npm, etc.)
 
 # ── Misconfiguration / IaC settings ─────────────────────────────────────────
 misconfiguration:

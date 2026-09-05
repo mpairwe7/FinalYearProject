@@ -420,7 +420,7 @@ def notify_drift(report: FreshnessReport, *, webhook: str | None = None) -> bool
         method="POST",
     )
     try:
-        with urlopen(req, timeout=5) as resp:  # noqa: S310 — https-only above
+        with urlopen(req, timeout=5) as resp:  # nosec B310 # noqa: S310 — https-only above
             return 200 <= getattr(resp, "status", 200) < 300
     except (URLError, TimeoutError, OSError):
         logger.warning("Freshness Slack notify failed (webhook not logged)")

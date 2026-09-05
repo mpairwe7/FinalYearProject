@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from .config import is_r2_configured
-from .interfaces import StorageProvider
 from .r2 import get_object, object_exists, put_object
+
+if TYPE_CHECKING:
+    from .interfaces import StorageProvider
 
 logger = logging.getLogger("ura.providers.storage")
 
@@ -54,7 +57,7 @@ class LocalStorageProvider:
 
     def __init__(self, base_dir: Path | str | None = None) -> None:
         if base_dir is None:
-            raw = os.getenv("STORAGE_LOCAL_DIR", "/tmp/ura_storage")
+            raw = os.getenv("STORAGE_LOCAL_DIR") or str(Path(tempfile.gettempdir()) / "ura_storage")
             self.base_dir = Path(raw).resolve()
         else:
             self.base_dir = Path(base_dir).resolve()
