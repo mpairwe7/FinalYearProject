@@ -45,13 +45,14 @@ _FIGURE_RE = re.compile(r"\d|%|\bpercent\b|\bugx\b|\bshs\b|\bshillings?\b")
 _MD_MARKUP_RE = re.compile(r"[*_`#]+")
 _CHANNEL_TOKEN_RE = re.compile(
     r"ura\.go\.ug|0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000"
-    r"|whatsapp|contact cent(re|er)|toll[- ]?free"
+    r"|whatsapp|contact cent(re|er)|toll[- ]?free|services@ura|info@ura|\bemail\b"
 )
 # Sentence splitting breaks URLs ("ura.go.ug") apart, leaving contact-footer
 # fragments without their courtesy lead; strip channel vocabulary to see
 # whether anything contentful remains.
 _CHANNEL_STRIP_RE = re.compile(
     r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|https?://\S+|www\.\S+"
+    r"|[a-z0-9._%+-]+@ura(?:\.go)?(?:\.ug)?|\bemail\b|\bservices\b|\binfo\b"
     r"|ura\.go\.ug|\bura\b|\bgo\b|\bug\b|whatsapp|toll[- ]?free"
     r"|contact cent(?:re|er)|\bcall\b|\bvisit\b|\bportal\b|\bweb\b"
 )
@@ -111,6 +112,8 @@ _COURTESY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         # -- meta preambles / graceful fallbacks ---------------------------
         r"^based on the ura guidance i retrieved\b",
         r"^here('s| is) the most relevant guidance i found\b",
+        r"^here('s| is) (the )?official guidance\b",
+        r"^as the ura (intelligent |digital )?assistant\b",
         r"^i could(n't| not) find\b",
         r"^i (don't|do not) have enough (information|details)\b",
         r"^i('d| would) rather connect you\b",
@@ -495,7 +498,7 @@ ESCALATION_REPLY_FOOTER = (
 
 CONTACT_FOOTER = (
     "If you get stuck at any step, URA is happy to help: visit "
-    "https://ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or "
+    "https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or "
     "WhatsApp 0772 140 000."
 )
 

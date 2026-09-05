@@ -53,6 +53,20 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         self.assertIn("18%", sanitized)
         self.assertNotIn("Okay, the user", sanitized)
 
+    def test_official_ura_emails_are_not_redacted(self) -> None:
+        raw = "You can contact URA via services@ura.go.ug or info@ura.go.ug. Do not email user@gmail.com."
+        redacted = OutputGuard.redact_pii(raw)
+        self.assertIn("services@ura.go.ug", redacted)
+        self.assertIn("info@ura.go.ug", redacted)
+        self.assertNotIn("user@gmail.com", redacted)
+        self.assertIn("[REDACTED_EMAIL]", redacted)
+
+    def test_sanitize_restores_legacy_redacted_ura_email(self) -> None:
+        raw = "Email:[REDACTED_EMAIL]; [REDACTED_EMAIL] | https://ura.go.ug"
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertIn("services@ura.go.ug", sanitized)
+        self.assertNotIn("[REDACTED_EMAIL]", sanitized)
+
 
 if __name__ == "__main__":
     unittest.main()
