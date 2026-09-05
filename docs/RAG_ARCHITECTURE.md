@@ -231,7 +231,7 @@ questions in English while `ChatModel.generate()` handled them correctly.
 | Control | Implementation | Module |
 |---------|---------------|--------|
 | LLM01 Prompt Injection | 11 regex patterns + max length + system prompt isolation | `guardrails.py` → `InputGuard` |
-| LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport) | `guardrails.py` → `OutputGuard.redact_pii()` |
+| LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport; official @ura.go.ug emails preserved) | `guardrails.py` → `OutputGuard.redact_pii()` |
 | LLM03 Supply Chain | Pinned deps, Trivy scanning, SBOM, SHA-256 integrity | `requirements.txt`, CI/CD |
 | LLM04 Data Poisoning | Provenance tracking, quality gates, local inference | `governance/`, `ml/pipelines/` |
 | LLM05 Improper Output | XSS strip, HTML sanitize, suspicious link removal | `guardrails.py` → `OutputGuard.sanitize()` |
