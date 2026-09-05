@@ -172,13 +172,17 @@ def _resolve_ws_principal(
             raise JWTAuthError("authentication required")
         return "", "default", "public", []
 
-    claims = JWTVerifier().verify(token)
+    from .auth.dependencies import _get_verifier, resolve_role
+
+    verifier = _get_verifier()
+    claims = verifier.verify(token)
+    role = resolve_role(claims, verifier.audience)
     granted = claims.get("granted_purposes", [])
     purposes = [str(p) for p in granted] if isinstance(granted, list) else []
     return (
         str(claims.get("sub", "")),
         str(claims.get("tenant_id", "default")),
-        str(claims.get("role", "public")),
+        role,
         purposes,
     )
 
@@ -237,11 +241,16 @@ class WsChatSession:
         self.resume_attempted = True
         if not previous_response_id or not self.conversation_id:
             return False
+        # Reject resume for anonymous / unauthenticated sessions
+        if not self.user_id:
+            logger.debug("resume: rejected for unauthenticated session")
+            return False
         try:
             rows = db.get_recent_turns(
                 session_id=None,
                 conversation_id=self.conversation_id,
                 limit=10,
+                user_id=self.user_id,
             )
         except Exception:
             logger.debug("resume: get_recent_turns failed", exc_info=True)
@@ -687,6 +696,13 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         user_id, tenant_id, user_role, granted_purposes = _resolve_ws_principal(websocket)
     except JWTAuthError as exc:
         await websocket.close(code=1008, reason=f"authentication failed: {exc}")
+        return
+
+    from .ws_concurrency import is_ws_origin_allowed
+
+    origin = websocket.headers.get("origin")
+    if not is_ws_origin_allowed(origin):
+        await websocket.close(code=1008, reason="forbidden origin")
         return
 
     socket_user_key = user_id or f"anon::{websocket.client.host if websocket.client else 'unknown'}"

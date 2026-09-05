@@ -239,3 +239,72 @@ class TestBackendParity:
             response_time_ms=1.0,
             user_id="sub-1",
         )
+
+
+class TestConversationContextUserIsolation:
+    def test_get_recent_turns_isolates_by_user_id(self, seeded):
+        turns = seeded.get_recent_turns(conversation_id="conv-abc", user_id="oidc-sub-123")
+        assert len(turns) > 0
+        other_turns = seeded.get_recent_turns(conversation_id="conv-abc", user_id="intruder-456")
+        assert len(other_turns) == 0
+
+    def test_get_conversation_context_isolates_by_user_id(self, seeded):
+        ctx = seeded.get_conversation_context(conversation_id="conv-abc", user_id="oidc-sub-123")
+        assert len(ctx["recent_turns"]) > 0
+        other_ctx = seeded.get_conversation_context(conversation_id="conv-abc", user_id="intruder-456")
+        assert len(other_ctx["recent_turns"]) == 0
+
+    def test_null_owned_row_not_accessible_by_authenticated_user(self, seeded):
+        seeded.log_conversation(
+            session_id="sess-anon",
+            conversation_id="conv-anon",
+            user_message="anonymous question",
+            bot_reply="anonymous answer",
+            user_id=None,
+        )
+        # Authenticated user should NOT be able to read unowned/anonymous rows
+        auth_turns = seeded.get_recent_turns(conversation_id="conv-anon", user_id="oidc-sub-123")
+        assert len(auth_turns) == 0
+
+    def test_ws_chat_session_anonymous_resume_rejected(self, seeded):
+        from app.chat_ws_v2 import WsChatSession
+
+        session = WsChatSession(
+            session_id="ws-anon",
+            conversation_id="conv-abc",
+            user_id="",
+            tenant_id="default",
+            locale="en",
+        )
+        assert session.try_resume("resp-999") is False
+        assert session.history == []
+
+    def test_ws_chat_session_owner_resume_accepted(self, seeded, monkeypatch):
+        from app.chat_ws_v2 import WsChatSession
+        import app.chat_ws_v2 as chat_ws_mod
+
+        monkeypatch.setattr(chat_ws_mod, "db", seeded)
+        session = WsChatSession(
+            session_id="ws-owner",
+            conversation_id="conv-abc",
+            user_id="oidc-sub-123",
+            tenant_id="default",
+            locale="en",
+        )
+        assert session.try_resume("resp-999") is True
+        assert len(session.history) > 0
+
+    def test_ws_chat_session_non_owner_resume_rejected(self, seeded, monkeypatch):
+        from app.chat_ws_v2 import WsChatSession
+        import app.chat_ws_v2 as chat_ws_mod
+
+        monkeypatch.setattr(chat_ws_mod, "db", seeded)
+        session = WsChatSession(
+            session_id="ws-intruder",
+            conversation_id="conv-abc",
+            user_id="intruder-999",
+            tenant_id="default",
+            locale="en",
+        )
+        assert session.try_resume("resp-999") is False
+        assert session.history == []

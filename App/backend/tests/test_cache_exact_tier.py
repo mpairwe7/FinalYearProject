@@ -114,6 +114,15 @@ class ExactTierWithoutAnEmbedderTests(unittest.TestCase):
         finally:
             cache_module.CACHE_MAX_SIZE = original
 
+    def test_tenant_isolation_in_exact_cache(self) -> None:
+        self.cache.put("What is the VAT rate?", {"reply": "Tenant A reply", "locale": "en"}, tenant_id="tenant_a")
+        self.assertEqual(
+            self.cache.get("What is the VAT rate?", "en", tenant_id="tenant_a"),
+            {"reply": "Tenant A reply", "locale": "en"},
+        )
+        self.assertIsNone(self.cache.get("What is the VAT rate?", "en", tenant_id="tenant_b"))
+        self.assertIsNone(self.cache.get("What is the VAT rate?", "en"))
+
 
 if __name__ == "__main__":
     unittest.main()

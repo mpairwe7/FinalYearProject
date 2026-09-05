@@ -981,6 +981,7 @@ def get_recent_turns(
     session_id: str | None = None,
     conversation_id: str | None = None,
     limit: int = 5,
+    user_id: str | None = None,
 ) -> list[dict[str, str]]:
     """Retrieve the most recent conversation turns for a session (multi-turn memory).
 
@@ -988,15 +989,27 @@ def get_recent_turns(
     ordered oldest-first (chronological) for prompt injection.
     """
     if conversation_id:
-        sql = """SELECT user_message, bot_reply FROM conversations
-                 WHERE conversation_id = ?
-                 ORDER BY created_at DESC LIMIT ?"""
-        args: tuple[str, int] = (conversation_id, limit)
+        if user_id:
+            sql = """SELECT user_message, bot_reply FROM conversations
+                     WHERE conversation_id = ? AND user_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            args: tuple[Any, ...] = (conversation_id, user_id, limit)
+        else:
+            sql = """SELECT user_message, bot_reply FROM conversations
+                     WHERE conversation_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            args = (conversation_id, limit)
     elif session_id:
-        sql = """SELECT user_message, bot_reply FROM conversations
-                 WHERE session_id = ?
-                 ORDER BY created_at DESC LIMIT ?"""
-        args = (session_id, limit)
+        if user_id:
+            sql = """SELECT user_message, bot_reply FROM conversations
+                     WHERE session_id = ? AND user_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            args = (session_id, user_id, limit)
+        else:
+            sql = """SELECT user_message, bot_reply FROM conversations
+                     WHERE session_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            args = (session_id, limit)
     else:
         return []
 
@@ -1013,6 +1026,7 @@ def get_conversation_context(
     conversation_id: str | None = None,
     recent_limit: int = 6,
     max_history: int = 25,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve multi-turn conversation history and build rolling context & summary."""
     from .context_manager import RollingContextManager, context_manager
@@ -1021,6 +1035,7 @@ def get_conversation_context(
         session_id=session_id,
         conversation_id=conversation_id,
         limit=max_history,
+        user_id=user_id,
     )
     mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
     ctx = mgr.build_context(

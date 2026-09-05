@@ -378,6 +378,26 @@ class TestMemoryService:
         facts = mem.read_facts(u["id"])
         assert len(facts) >= 2
 
+    def test_absorb_conversation_handles_empty_user_messages_before_content(self, tmp_db):
+        reset_memory_service()
+        u = tmp_db.upsert_user(external_id="bob", tenant_id="t1")
+        tmp_db.grant_consent(u["id"], "personalization", "2026-04")
+
+        from app.memory import get_memory_service
+        mem = get_memory_service()
+        mem.absorb_conversation(
+            user_id=u["id"],
+            conversation_id="c_empty_first",
+            turns=[
+                {"role": "user", "content": "   "},
+                {"role": "assistant", "content": "Hello!"},
+                {"role": "user", "content": "I'm a sole trader in retail"},
+                {"role": "assistant", "content": "Got it."},
+            ],
+        )
+        facts = mem.read_facts(u["id"])
+        assert len(facts) >= 2
+
     def test_consent_withdrawal_hides_future_reads(self, tmp_db):
         reset_memory_service()
         u = tmp_db.upsert_user(external_id="alice", tenant_id="t1")

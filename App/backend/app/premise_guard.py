@@ -38,7 +38,9 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "value-added",
     "corporation",
     "corporate",
+    "corporate income",
     "company",
+    "company income",
     "cit",
     "rental",
     "rental income",
@@ -47,6 +49,7 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "withholding",
     "wht",
     "withholding vat",
+    "withholding tax",
     "customs",
     "customs duty",
     "import",
@@ -58,6 +61,7 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "excise",
     "excise duty",
     "local excise",
+    "local excise duty",
     "stamp",
     "stamp duty",
     "environmental",
@@ -65,6 +69,7 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "infrastructure",
     "infrastructure levy",
     "presumptive",
+    "presumptive tax",
     "small business",
     "gaming",
     "lottery",
@@ -97,6 +102,7 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "direct",
     "indirect",
     "turnover",
+    "turnover tax",
     "dividend",
     "interest",
     "royalty",
@@ -140,6 +146,11 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "code", "due", "payable", "applicable", "pending", "outstanding", "total", "standard",
     "general", "statutory", "new", "current", "annual", "monthly", "year", "years", "month",
     "the", "a", "an", "this", "that", "these", "those",
+    # Luganda & Swahili question/functional particles
+    "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
+    "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
+    "wa", "ya", "za", "ni", "asilimia", "ngapi", "kulipa", "kujisajili", "katika",
+    "nchini", "jinsi", "mu",
 })
 
 _CANDIDATE_PATTERNS = (

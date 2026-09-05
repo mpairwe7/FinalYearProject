@@ -634,8 +634,9 @@ _CONCEPTS: tuple[Concept, ...] = (
         ),
         check=(
             "Does every small non-VAT registered retail kiosk need an EFRIS machine?",
-            "No. EFRIS is mandatory for VAT-registered taxpayers and designated entities. Small "
-            "businesses below the 150m VAT threshold are not mandated.",
+            "No. EFRIS is mandatory for VAT-registered taxpayers and businesses in a designated sector with "
+            "gross turnover above UGX 10 million. Other non-VAT small businesses below the 150m VAT "
+            "threshold are not mandated to use EFRIS, though they may opt to use it voluntarily.",
         ),
         transfer_question=(
             "A VAT-registered supplier gives you a manual paper receipt without an EFRIS QR code. "
@@ -652,26 +653,27 @@ _CONCEPTS: tuple[Concept, ...] = (
         key="presumptive_tax",
         title="Presumptive tax for small businesses",
         explanation=(
-            "Presumptive tax is a simplified, lump-sum tax for small resident sole proprietors "
-            "whose gross annual business turnover is below UGX 150 million. Instead of keeping "
-            "complex audited accounts, taxpayers pay fixed rates based on turnover bands."
+            "Presumptive tax is a simplified, lump-sum income tax for eligible resident small businesses "
+            "whose gross annual turnover is more than UGX 10 million and does not exceed UGX 150 million "
+            "(turnover up to UGX 10 million has a nil rate). Instead of keeping complex audited accounts, "
+            "taxpayers pay fixed rates based on turnover bands."
         ),
         why_it_matters=(
             "It eliminates complex accounting requirements and provides predictable tax costs for "
             "small shops, retail businesses, and local entrepreneurs."
         ),
         check=(
-            "Can an incorporated limited company with turnover of UGX 50 million pay presumptive tax?",
-            "No. Presumptive tax is only available to resident individual sole proprietors. Companies "
-            "must file standard corporate income tax returns regardless of turnover.",
+            "Can an eligible incorporated company with turnover of UGX 50 million pay presumptive tax?",
+            "Yes, provided it is a resident taxpayer with gross annual turnover exceeding UGX 10 million "
+            "and not exceeding UGX 150 million, and does not fall under statutory exclusions (such as professional services).",
         ),
         transfer_question=(
             "A sole trader starts with UGX 80 million turnover and grows to UGX 180 million next year. "
             "How does their tax filing obligation change?"
         ),
         misconceptions=(
-            "Presumptive tax is not available to incorporated companies or partnerships.",
-            "Crossing the UGX 150 million annual turnover line transitions the business into standard income tax.",
+            "Presumptive tax does not apply to professional service providers or businesses exceeding UGX 150 million turnover.",
+            "Crossing the UGX 150 million annual turnover line transitions the business into standard income tax filing.",
         ),
         prerequisites=("tin", "fiscal_year"),
         next_concepts=("corporation_tax",),

@@ -1519,6 +1519,19 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
             yield ("token", full_reply)
+            yield (
+                "grounding",
+                {
+                    "faithfulness_score": None,
+                    "escalation_required": escalate,
+                    "escalation_reason": esc_reason,
+                    "agent_role": result.get("agent_role", "rag_answerer"),
+                    "handoff": handoff,
+                    "response_judge": response_judge,
+                    "next_actions": result.get("next_actions", []),
+                    "ticket_id": ticket_id,
+                },
+            )
             yield ("done", "")
             yield (
                 "_log",
@@ -1722,6 +1735,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                         "next_actions": result.get("next_actions", []),
                         "ticket_id": ticket_id,
                     },
+                    tenant_id=tenant_id or "default",
                 )
             except Exception:
                 logger.debug("Stream cache store failed", exc_info=True)
@@ -5052,6 +5066,7 @@ class ChatModel:
                         conversation_id=conversation_id,
                         recent_limit=6,
                         max_history=25,
+                        user_id=user_id,
                     )
                     conversation_history = conv_ctx["recent_turns"]
                     context_summary = conv_ctx["context_summary"]
@@ -5349,7 +5364,7 @@ class ChatModel:
             # 1b. Semantic cache check AFTER guardrails (Phase 5)
             if cache_allowed and flags.is_enabled("semantic_cache"):
                 with trace_stage("cache_lookup", timings=timings):
-                    cached = self._cache.get(rewritten, locale=locale)
+                    cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
                 if cached:
                     logger.info("generate: cache HIT (query_length=%d)", len(message))
                     return self._finalize_result({
@@ -5798,7 +5813,7 @@ class ChatModel:
                 if cache_allowed and flags.is_enabled("semantic_cache"):
                     # Cache the neutral copy — a calm user hitting this entry
                     # later must not receive someone else's empathy opener.
-                    self._cache.put(rewritten, dict(result))
+                    self._cache.put(rewritten, dict(result), tenant_id=tenant_id or "default")
                 if distress:
                     reply = f"{empathy_ack(distress)}\n\n{reply}"
                     result["reply"] = reply
@@ -6365,7 +6380,7 @@ class ChatModel:
             and flags.is_enabled("semantic_cache")
             and retrieval_mode not in ("blocked", "abstained")
         ):
-            self._cache.put(rewritten, dict(result))
+            self._cache.put(rewritten, dict(result), tenant_id=tenant_id or "default")
 
         # EI parity for the extractive fallback: with every LLM tier down the
         # tone_hint never reached a model, so carry the acknowledgment here —
@@ -6508,6 +6523,7 @@ class ChatModel:
                         conversation_id=conversation_id,
                         recent_limit=6,
                         max_history=25,
+                        user_id=user_id,
                     )
                     conversation_history = conv_ctx["recent_turns"]
                     context_summary = conv_ctx["context_summary"]
@@ -6677,7 +6693,7 @@ class ChatModel:
 
         # Semantic cache check (Phase 5)
         if cache_allowed and flags.is_enabled("semantic_cache"):
-            cached = self._cache.get(rewritten, locale=locale)
+            cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
             if cached:
                 return self._finalize_result({
                     **cached,
@@ -7000,7 +7016,7 @@ class ChatModel:
                     agent_role=agent_role,
                 )
                 if cache_allowed and flags.is_enabled("semantic_cache"):
-                    self._cache.put(rewritten, dict(result))
+                    self._cache.put(rewritten, dict(result), tenant_id=tenant_id or "default")
                 if distress:
                     result["reply"] = f"{empathy_ack(distress)}\n\n{result['reply']}"
                 return {

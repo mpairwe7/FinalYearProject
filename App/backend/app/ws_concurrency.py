@@ -91,3 +91,24 @@ def reset() -> None:
     with _lock:
         _per_user.clear()
         _global.clear()
+
+
+def is_ws_origin_allowed(origin: str | None) -> bool:
+    """Validate WebSocket Origin header against configured allowed CORS origins (CSWSH mitigation)."""
+    if not origin:
+        return True
+    allowed_raw = os.getenv("CORS_ORIGINS", "http://localhost:3300")
+    allowed = {o.strip().rstrip("/") for o in allowed_raw.split(",") if o.strip()}
+    clean_origin = origin.strip().rstrip("/")
+    if clean_origin in allowed:
+        return True
+    if os.getenv("APP_ENV", "development").lower() != "production":
+        if clean_origin in (
+            "http://localhost",
+            "http://127.0.0.1",
+            "http://localhost:3000",
+            "http://localhost:3300",
+            "http://localhost:8080",
+        ):
+            return True
+    return False

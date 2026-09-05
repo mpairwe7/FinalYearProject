@@ -141,6 +141,17 @@ class DistressDetectorTests(unittest.TestCase):
         )
         self.assertEqual(detect_user_distress("I cannot afford to pay"), "hardship")
 
+    def test_neutral_medical_queries_are_not_hardship(self) -> None:
+        self.assertEqual(detect_user_distress("Are hospital expenses deductible?"), "")
+        self.assertEqual(detect_user_distress("What is the tax treatment of sick leave pay?"), "")
+        self.assertEqual(detect_user_distress("Tax exemptions for medical equipment supplies"), "")
+
+    def test_genuine_medical_hardship_detected(self) -> None:
+        self.assertEqual(detect_user_distress("I am sick and cannot afford my taxes"), "hardship")
+        self.assertEqual(detect_user_distress("My child is sick and I have no money to pay"), "hardship")
+        self.assertEqual(detect_user_distress("My child is sick"), "hardship")
+        self.assertEqual(detect_user_distress("My mother has died"), "hardship")
+
     def test_comprehension_trouble_is_confusion_not_anxiety(self) -> None:
         self.assertEqual(
             detect_user_distress("I don't understand what chargeable income means"),
