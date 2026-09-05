@@ -217,6 +217,8 @@ def correct_spelling(query: str) -> str:
     live corpus, where a direct query ranks the Withholding-Tax PDF first.
     """
     result = query
+    # Disambiguate "wht is/are/does" (typo for "what is...") vs "WHT" (Withholding Tax)
+    result = re.sub(r"\bwht\s+(is|are|does|do|can|will|should)\b", r"what \1", result, flags=re.IGNORECASE)
     for wrong, right in _CORRECTIONS.items():
         result = re.sub(rf"\b{re.escape(wrong)}\b", right, result, flags=re.IGNORECASE)
     return result
