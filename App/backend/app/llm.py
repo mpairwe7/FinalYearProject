@@ -123,6 +123,7 @@ VLLM_HTTP_TIMEOUT = float(os.getenv("VLLM_HTTP_TIMEOUT", "60"))
 
 _model: Any = None
 _tokenizer: Any = None
+_model_load_failed: bool = False
 _init_lock = threading.Lock()
 _generation_lock = threading.RLock()
 
@@ -394,11 +395,13 @@ def _build_messages(
 # ---------------------------------------------------------------------------
 def _load_model() -> bool:
     """Load the configured LLM model and tokenizer. Thread-safe."""
-    global _model, _tokenizer
+    global _model, _tokenizer, _model_load_failed
 
     with _init_lock:
         if _model is not None:
             return True
+        if _model_load_failed:
+            return False
 
         try:
             import torch
@@ -533,10 +536,21 @@ def _load_model() -> bool:
                 "transformers/torch not installed; LLM generation disabled. "
                 "Install with: uv pip install transformers torch"
             )
+            _model_load_failed = True
             return False
         except Exception:
             logger.exception("Failed to load %s", LLM_MODEL)
+            _model_load_failed = True
             return False
+
+
+def reset_model_state() -> None:
+    """Reset the loaded model and failed load flag (primarily for testing)."""
+    global _model, _tokenizer, _model_load_failed
+    with _init_lock:
+        _model = None
+        _tokenizer = None
+        _model_load_failed = False
 
 
 def can_generate_in_locale(locale: str) -> bool:

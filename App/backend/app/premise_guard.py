@@ -140,6 +140,11 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "code", "due", "payable", "applicable", "pending", "outstanding", "total", "standard",
     "general", "statutory", "new", "current", "annual", "monthly", "year", "years", "month",
     "the", "a", "an", "this", "that", "these", "those",
+    # Luganda & Swahili question/functional particles
+    "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
+    "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
+    "wa", "ya", "za", "ni", "asilimia", "ngapi", "kulipa", "kujisajili", "katika",
+    "nchini", "jinsi", "mu",
 })
 
 _CANDIDATE_PATTERNS = (
@@ -226,7 +231,13 @@ def check_false_premise(
 
     for clean_mod, kind in candidates:
         # Check against legitimate taxes
-        if clean_mod in _LEGITIMATE_TAX_MODIFIERS:
+        if (
+            clean_mod in _LEGITIMATE_TAX_MODIFIERS
+            or any(
+                leg == clean_mod or clean_mod.endswith(" " + leg) or f" {leg} " in f" {clean_mod} "
+                for leg in _LEGITIMATE_TAX_MODIFIERS
+            )
+        ):
             continue
 
         # Check whether the exact concept phrase appears

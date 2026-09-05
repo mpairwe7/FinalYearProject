@@ -24,51 +24,38 @@ from __future__ import annotations
 import json
 import statistics
 import time
-import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
+
+import requests
 
 BASE_URL = "http://127.0.0.1:8083"
 
 
 def http_post(path: str, payload: dict[str, Any], timeout: float = 60.0) -> tuple[int, dict[str, Any], float]:
     url = f"{BASE_URL}{path}"
-    if not url.startswith(("http://", "https://")):
-        raise ValueError(f"Invalid URL scheme: {url}")
-    body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
     t0 = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-            return resp.status, data, (time.perf_counter() - t0) * 1000
-    except urllib.error.HTTPError as err:
-        err_body = err.read().decode("utf-8", errors="replace")
+        resp = requests.post(url, json=payload, timeout=timeout)
         try:
-            data = json.loads(err_body)
+            data = resp.json()
         except Exception:
-            data = {"raw_error": err_body}
-        return err.code, data, (time.perf_counter() - t0) * 1000
+            data = {"raw_error": resp.text}
+        return resp.status_code, data, (time.perf_counter() - t0) * 1000
     except Exception as exc:
         return 500, {"error": str(exc)}, (time.perf_counter() - t0) * 1000
 
 
 def http_get(path: str, timeout: float = 10.0) -> tuple[int, dict[str, Any], float]:
     url = f"{BASE_URL}{path}"
-    if not url.startswith(("http://", "https://")):
-        raise ValueError(f"Invalid URL scheme: {url}")
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
     t0 = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-            return resp.status, data, (time.perf_counter() - t0) * 1000
+        resp = requests.get(url, headers={"Accept": "application/json"}, timeout=timeout)
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"raw_error": resp.text}
+        return resp.status_code, data, (time.perf_counter() - t0) * 1000
     except Exception as exc:
         return 500, {"error": str(exc)}, (time.perf_counter() - t0) * 1000
 
@@ -113,16 +100,9 @@ def run_benchmark() -> dict[str, Any]:
     }
     t0_vllm = time.perf_counter()
     vllm_url = "http://127.0.0.1:8011/v1/chat/completions"
-    if not vllm_url.startswith(("http://", "https://")):
-        raise ValueError(f"Invalid URL scheme: {vllm_url}")
-    req_vllm = urllib.request.Request(
-        vllm_url,
-        data=json.dumps(vllm_payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req_vllm, timeout=30) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-        vllm_data = json.loads(resp.read().decode("utf-8"))
-        lat_vllm = (time.perf_counter() - t0_vllm) * 1000
+    resp_vllm = requests.post(vllm_url, json=vllm_payload, timeout=30.0)
+    vllm_data = resp_vllm.json()
+    lat_vllm = (time.perf_counter() - t0_vllm) * 1000
         tc = vllm_data["choices"][0]["message"].get("tool_calls", [])
         assert len(tc) >= 1 and tc[0]["function"]["name"] == "calculate_vat"
         print(f"  Live vLLM Sunflower-14B Function-Calling: OK (tool={tc[0]['function']['name']}, args={tc[0]['function']['arguments']}) [{lat_vllm:.1f}ms]")
