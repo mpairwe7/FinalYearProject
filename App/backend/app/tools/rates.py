@@ -261,9 +261,10 @@ class ListAvailableRatesTool(Tool):
             if isinstance(value, int | float) and not isinstance(value, bool)
         ]
         top_rates_str = "\n".join(f"- **{r['display_name']}**: {r['formatted']}" for r in rows[:8])
+        is_confirmed = table.confirmed() if callable(table.confirmed) else bool(table.confirmed)
         verification_statement = (
             "All rates are verified under current statutory instruments."
-            if table.confirmed
+            if is_confirmed
             else "These rates are provisional; verify them with URA before use."
         )
         explanation = (

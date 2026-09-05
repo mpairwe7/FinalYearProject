@@ -38,7 +38,9 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "value-added",
     "corporation",
     "corporate",
+    "corporate income",
     "company",
+    "company income",
     "cit",
     "rental",
     "rental income",
@@ -47,6 +49,7 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "withholding",
     "wht",
     "withholding vat",
+    "withholding tax",
     "customs",
     "customs duty",
     "import",
@@ -58,6 +61,7 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "excise",
     "excise duty",
     "local excise",
+    "local excise duty",
     "stamp",
     "stamp duty",
     "environmental",
@@ -65,6 +69,7 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "infrastructure",
     "infrastructure levy",
     "presumptive",
+    "presumptive tax",
     "small business",
     "gaming",
     "lottery",
@@ -97,6 +102,7 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "direct",
     "indirect",
     "turnover",
+    "turnover tax",
     "dividend",
     "interest",
     "royalty",
@@ -231,13 +237,7 @@ def check_false_premise(
 
     for clean_mod, kind in candidates:
         # Check against legitimate taxes
-        if (
-            clean_mod in _LEGITIMATE_TAX_MODIFIERS
-            or any(
-                leg == clean_mod or clean_mod.endswith(" " + leg) or f" {leg} " in f" {clean_mod} "
-                for leg in _LEGITIMATE_TAX_MODIFIERS
-            )
-        ):
+        if clean_mod in _LEGITIMATE_TAX_MODIFIERS:
             continue
 
         # Check whether the exact concept phrase appears

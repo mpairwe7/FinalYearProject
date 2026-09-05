@@ -991,7 +991,7 @@ def get_recent_turns(
     if conversation_id:
         if user_id:
             sql = """SELECT user_message, bot_reply FROM conversations
-                     WHERE conversation_id = ? AND (user_id = ? OR user_id IS NULL)
+                     WHERE conversation_id = ? AND user_id = ?
                      ORDER BY created_at DESC LIMIT ?"""
             args: tuple[Any, ...] = (conversation_id, user_id, limit)
         else:
@@ -1002,7 +1002,7 @@ def get_recent_turns(
     elif session_id:
         if user_id:
             sql = """SELECT user_message, bot_reply FROM conversations
-                     WHERE session_id = ? AND (user_id = ? OR user_id IS NULL)
+                     WHERE session_id = ? AND user_id = ?
                      ORDER BY created_at DESC LIMIT ?"""
             args = (session_id, user_id, limit)
         else:

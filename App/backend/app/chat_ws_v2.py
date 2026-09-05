@@ -172,10 +172,10 @@ def _resolve_ws_principal(
             raise JWTAuthError("authentication required")
         return "", "default", "public", []
 
-    verifier = JWTVerifier()
-    claims = verifier.verify(token)
-    from .auth.dependencies import resolve_role
+    from .auth.dependencies import _get_verifier, resolve_role
 
+    verifier = _get_verifier()
+    claims = verifier.verify(token)
     role = resolve_role(claims, verifier.audience)
     granted = claims.get("granted_purposes", [])
     purposes = [str(p) for p in granted] if isinstance(granted, list) else []
@@ -241,11 +241,16 @@ class WsChatSession:
         self.resume_attempted = True
         if not previous_response_id or not self.conversation_id:
             return False
+        # Reject resume for anonymous / unauthenticated sessions
+        if not self.user_id:
+            logger.debug("resume: rejected for unauthenticated session")
+            return False
         try:
             rows = db.get_recent_turns(
                 session_id=None,
                 conversation_id=self.conversation_id,
                 limit=10,
+                user_id=self.user_id,
             )
         except Exception:
             logger.debug("resume: get_recent_turns failed", exc_info=True)

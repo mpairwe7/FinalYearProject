@@ -55,6 +55,8 @@ import logging
 import os
 import threading
 import time
+import urllib.parse
+import urllib.request
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
@@ -630,14 +632,16 @@ def _vllm_build_request(url: str, body: bytes, accept_stream: bool = False) -> A
     if accept_stream:
         headers["Accept"] = "text/event-stream"
 
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     if VLLM_API_KEY:
         if parsed.scheme != "https" and not is_loopback:
             raise ValueError(
                 f"Insecure vLLM connection: credentialed requests with VLLM_API_KEY require an https:// endpoint (got {parsed.scheme}://)"
             )
-        headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
+        # Use add_unredirected_header to ensure Authorization is never leaked on redirects (CWE-319)
+        req.add_unredirected_header("Authorization", f"Bearer {VLLM_API_KEY}")
 
-    return urllib.request.Request(url, data=body, headers=headers, method="POST")
+    return req
 
 
 # ---------------------------------------------------------------------------

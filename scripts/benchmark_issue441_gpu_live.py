@@ -27,7 +27,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-import requests
+import httpx
 
 BASE_URL = "http://127.0.0.1:8083"
 
@@ -36,7 +36,7 @@ def http_post(path: str, payload: dict[str, Any], timeout: float = 60.0) -> tupl
     url = f"{BASE_URL}{path}"
     t0 = time.perf_counter()
     try:
-        resp = requests.post(url, json=payload, timeout=timeout)
+        resp = httpx.post(url, json=payload, timeout=timeout)
         try:
             data = resp.json()
         except Exception:
@@ -50,7 +50,7 @@ def http_get(path: str, timeout: float = 10.0) -> tuple[int, dict[str, Any], flo
     url = f"{BASE_URL}{path}"
     t0 = time.perf_counter()
     try:
-        resp = requests.get(url, headers={"Accept": "application/json"}, timeout=timeout)
+        resp = httpx.get(url, headers={"Accept": "application/json"}, timeout=timeout)
         try:
             data = resp.json()
         except Exception:
@@ -100,17 +100,17 @@ def run_benchmark() -> dict[str, Any]:
     }
     t0_vllm = time.perf_counter()
     vllm_url = "http://127.0.0.1:8011/v1/chat/completions"
-    resp_vllm = requests.post(vllm_url, json=vllm_payload, timeout=30.0)
+    resp_vllm = httpx.post(vllm_url, json=vllm_payload, timeout=30.0)
     vllm_data = resp_vllm.json()
     lat_vllm = (time.perf_counter() - t0_vllm) * 1000
-        tc = vllm_data["choices"][0]["message"].get("tool_calls", [])
-        assert len(tc) >= 1 and tc[0]["function"]["name"] == "calculate_vat"
-        print(f"  Live vLLM Sunflower-14B Function-Calling: OK (tool={tc[0]['function']['name']}, args={tc[0]['function']['arguments']}) [{lat_vllm:.1f}ms]")
-        results["regression"]["vllm_sunflower_tool_calling"] = {
-            "status": "pass",
-            "latency_ms": round(lat_vllm, 1),
-            "tool_call": tc[0],
-        }
+    tc = vllm_data["choices"][0]["message"].get("tool_calls", [])
+    assert len(tc) >= 1 and tc[0]["function"]["name"] == "calculate_vat"
+    print(f"  Live vLLM Sunflower-14B Function-Calling: OK (tool={tc[0]['function']['name']}, args={tc[0]['function']['arguments']}) [{lat_vllm:.1f}ms]")
+    results["regression"]["vllm_sunflower_tool_calling"] = {
+        "status": "pass",
+        "latency_ms": round(lat_vllm, 1),
+        "tool_call": tc[0],
+    }
 
     # 2. Regression: Epistemic False Premise (G43)
     print("\n[Phase 2] Epistemic False Premise Tests (G43)...")
@@ -133,6 +133,7 @@ def run_benchmark() -> dict[str, Any]:
         if passed:
             fp_passes += 1
         print(f"  Query: '{q[:40]:<40}' -> Rejected: {rejected} (expected {should_reject}) [{l_ms:.1f}ms] - {'PASS' if passed else 'FAIL'}")
+    assert fp_passes == len(fp_cases), f"False premise phase failed: {fp_passes}/{len(fp_cases)} passed"
     results["regression"]["false_premise"] = {"passed": fp_passes, "total": len(fp_cases)}
 
     # 3. Regression: Deterministic Tax Calculators & Decoupled Execution
@@ -150,6 +151,7 @@ def run_benchmark() -> dict[str, Any]:
         if passed:
             calc_passes += 1
         print(f"  Query: '{q[:40]:<40}' -> Contains '{expected_sub}': {passed} [{l_ms:.1f}ms]")
+    assert calc_passes == len(calc_cases), f"Calculators phase failed: {calc_passes}/{len(calc_cases)} passed"
     results["regression"]["calculators"] = {"passed": calc_passes, "total": len(calc_cases)}
 
     # 4. Regression: MCP Tool Presentation & Paragraphing
@@ -167,6 +169,7 @@ def run_benchmark() -> dict[str, Any]:
         if passed:
             pres_passes += 1
         print(f"  Query: '{q[:40]:<40}' -> Presentation formatted: {passed} [{l_ms:.1f}ms]")
+    assert pres_passes == len(pres_queries), f"Presentations phase failed: {pres_passes}/{len(pres_queries)} passed"
     results["regression"]["presentations"] = {"passed": pres_passes, "total": len(pres_queries)}
 
     # 5. Fuzzy Intent & Coreference Tests
@@ -198,10 +201,11 @@ def run_benchmark() -> dict[str, Any]:
         if passed:
             fuzzy_passes += 1
         print(f"  Fuzzy Query: '{q[:35]:<35}' -> Passed: {passed} [{l_ms:.1f}ms]")
+    assert fuzzy_passes == len(fuzzy_cases), f"Fuzzy phase failed: {fuzzy_passes}/{len(fuzzy_cases)} passed"
     results["fuzzy"]["tests"] = {"passed": fuzzy_passes, "total": len(fuzzy_cases)}
 
     # 6. Load & Concurrency Benchmark
-    print("\n[Phase 6] Concurrency Load Benchmark (c=10, 50 requests)...")
+    print("\n[Phase 6] Concurrency Load Benchmark (c=10 and c=20, 50 requests each)...")
     load_queries = [
         "What is the VAT rate in Uganda?",
         "How do I register for a TIN as an individual?",
@@ -210,46 +214,48 @@ def run_benchmark() -> dict[str, Any]:
         "Calculate VAT on 5,000,000 UGX",
     ]
     total_load_reqs = 50
-    concurrency = 10
-    latencies: list[float] = []
-    errors = 0
+    results["load"] = {}
+    for concurrency in [10, 20]:
+        latencies: list[float] = []
+        errors = 0
 
-    t_start = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [
-            executor.submit(http_post, "/v1/chat", {"message": load_queries[i % len(load_queries)], "locale": "en"}, 30.0)
-            for i in range(total_load_reqs)
-        ]
-        for fut in as_completed(futures):
-            status, _, elapsed = fut.result()
-            latencies.append(elapsed)
-            if status != 200:
-                errors += 1
-    total_duration = time.perf_counter() - t_start
-    throughput = total_load_reqs / total_duration
+        t_start = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = [
+                executor.submit(http_post, "/v1/chat", {"message": load_queries[i % len(load_queries)], "locale": "en"}, 30.0)
+                for i in range(total_load_reqs)
+            ]
+            for fut in as_completed(futures):
+                status, _, elapsed = fut.result()
+                latencies.append(elapsed)
+                if status != 200:
+                    errors += 1
+        total_duration = time.perf_counter() - t_start
+        throughput = total_load_reqs / total_duration
 
-    latencies.sort()
-    p50 = statistics.median(latencies)
-    p90 = latencies[int(len(latencies) * 0.90)]
-    p95 = latencies[int(len(latencies) * 0.95)]
-    p99 = latencies[int(len(latencies) * 0.99)]
-    mean_lat = statistics.mean(latencies)
+        latencies.sort()
+        p50 = statistics.median(latencies)
+        p90 = latencies[int(len(latencies) * 0.90)]
+        p95 = latencies[int(len(latencies) * 0.95)]
+        p99 = latencies[int(len(latencies) * 0.99)]
+        mean_lat = statistics.mean(latencies)
 
-    print(f"  Completed {total_load_reqs} requests @ concurrency={concurrency}")
-    print(f"  Throughput: {throughput:.2f} req/s, Errors: {errors} ({(errors/total_load_reqs)*100:.1f}%)")
-    print(f"  Latency - Mean: {mean_lat:.1f}ms, p50: {p50:.1f}ms, p90: {p90:.1f}ms, p95: {p95:.1f}ms, p99: {p99:.1f}ms")
+        print(f"  Completed {total_load_reqs} requests @ concurrency={concurrency}")
+        print(f"  Throughput: {throughput:.2f} req/s, Errors: {errors} ({(errors/total_load_reqs)*100:.1f}%)")
+        print(f"  Latency - Mean: {mean_lat:.1f}ms, p50: {p50:.1f}ms, p90: {p90:.1f}ms, p95: {p95:.1f}ms, p99: {p99:.1f}ms")
+        assert errors == 0, f"Load benchmark @ c={concurrency} encountered {errors} errors"
 
-    results["load"] = {
-        "concurrency": concurrency,
-        "total_requests": total_load_reqs,
-        "throughput_rps": round(throughput, 2),
-        "error_rate_pct": round((errors / total_load_reqs) * 100, 2),
-        "latency_p50_ms": round(p50, 1),
-        "latency_p90_ms": round(p90, 1),
-        "latency_p95_ms": round(p95, 1),
-        "latency_p99_ms": round(p99, 1),
-        "latency_mean_ms": round(mean_lat, 1),
-    }
+        results["load"][f"c{concurrency}"] = {
+            "concurrency": concurrency,
+            "total_requests": total_load_reqs,
+            "throughput_rps": round(throughput, 2),
+            "error_rate_pct": round((errors / total_load_reqs) * 100, 2),
+            "latency_p50_ms": round(p50, 1),
+            "latency_p90_ms": round(p90, 1),
+            "latency_p95_ms": round(p95, 1),
+            "latency_p99_ms": round(p99, 1),
+            "latency_mean_ms": round(mean_lat, 1),
+        }
 
     # 7. Volume Soak Benchmark
     print("\n[Phase 7] Volume Soak Benchmark (100 sequential requests across endpoints)...")
@@ -271,6 +277,7 @@ def run_benchmark() -> dict[str, Any]:
 
     print(f"  Volume Soak: 100 requests in {vol_duration:.2f}s ({vol_rps:.2f} req/s)")
     print(f"  Errors: {vol_errors}, p50: {statistics.median(vol_latencies):.1f}ms, p95: {vol_latencies[94]:.1f}ms")
+    assert vol_errors == 0, f"Volume soak benchmark encountered {vol_errors} errors"
 
     results["volume"] = {
         "total_requests": 100,
