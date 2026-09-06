@@ -15,7 +15,7 @@ uvicorn[standard]>=0.52.4,<0.53
 pydantic>=2.13.4,<2.14
 
 # Rate limiting + cache (Redis optional, falls back to in-process)
-slowapi>=0.1.9
+slowapi>=0.1.10
 limits[redis]>=3.13
 redis>=5.0.0
 psycopg[binary]>=3.2.0
