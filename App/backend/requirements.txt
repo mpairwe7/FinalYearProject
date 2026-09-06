@@ -76,7 +76,7 @@ Pillow>=10.4
 # version actually resolved.
 transformers>=5.10.0,<6
 torch==2.13.0
-accelerate>=1.2.0
+accelerate>=1.14.0
 peft>=0.19.1
 bitsandbytes>=0.45.0
 lingua-language-detector>=2.0.0
