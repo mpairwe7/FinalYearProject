@@ -5,13 +5,13 @@
 # =============================================================================
 
 # Stage 1: Install dependencies
-FROM oven/bun:1.4.0-slim AS deps
+FROM oven/bun:1.4.2-slim AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 # Stage 2: Build the Next.js application
-FROM oven/bun:1.4.0-slim AS builder
+FROM oven/bun:1.4.2-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
