@@ -8,7 +8,7 @@ pydantic>=2.13.4,<2.14
 # App/README.md).  slowapi[redis] pins an ancient redis<4, so we install
 # the bare slowapi package plus `limits[redis]` (slowapi's storage layer)
 # directly — that pulls a modern redis compatible with our cache client.
-slowapi>=0.1.9
+slowapi>=0.1.10
 limits[redis]>=3.13
 
 # Distributed semantic cache + analytics backends (opt-in)
