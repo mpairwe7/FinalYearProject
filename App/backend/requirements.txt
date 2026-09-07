@@ -8,7 +8,7 @@ pydantic>=2.13.4,<2.14
 # App/README.md).  slowapi[redis] pins an ancient redis<4, so we install
 # the bare slowapi package plus `limits[redis]` (slowapi's storage layer)
 # directly — that pulls a modern redis compatible with our cache client.
-slowapi>=0.1.9
+slowapi>=0.1.10
 limits[redis]>=3.13
 
 # Distributed semantic cache + analytics backends (opt-in)
@@ -75,7 +75,7 @@ Pillow>=10.4
 # line already requires transformers 5.x, so the old floor could never be the
 # version actually resolved.
 transformers>=5.10.0,<6
-torch==2.13.0
+torch==2.14.0
 accelerate>=1.2.0
 peft>=0.19.1
 bitsandbytes>=0.45.0
@@ -91,7 +91,7 @@ opentelemetry-sdk>=1.44.0
 opentelemetry-exporter-otlp-proto-grpc>=1.29.0
 
 # Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
-pydantic-settings>=2.5.0
+pydantic-settings>=2.15.0
 boto3>=1.43.81
 # DNS-over-HTTPS resolver (doh_resolver.py) for DNS-broken pods (USE_DOH=true)
 dnspython>=2.8.0
