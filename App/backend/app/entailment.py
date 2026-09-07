@@ -24,8 +24,28 @@ logger = logging.getLogger(__name__)
 ENTAILMENT_MODEL = os.getenv("ENTAILMENT_MODEL", "")
 _CONTRADICTION_PROB_MIN = float(os.getenv("ENTAILMENT_CONTRADICTION_MIN", "0.6"))
 
-# A percentage written as "18%" or "18 percent" / "18 per cent" / "18 percentage".
-_PCT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|per\s?cent(?:age)?)")
+# A percentage written in English ("18%", "18 percent"), Swahili ("asilimia 18", "18 kwa mia"),
+# or Luganda ("ebitundu 18 ku buli kikumi").
+_PCT_RE = re.compile(
+    r"(?:"
+    r"\b(?:asilimia|ebitundu)\s*(\d+(?:\.\d+)?)\b"
+    r"|"
+    r"(\d+(?:\.\d+)?)\s*(?:%|per\s?cent(?:age)?|\b(?:kwa\s+mia|ku\s+buli\s+kikumi|ku\s+100)\b)"
+    r")",
+    re.IGNORECASE,
+)
+
+_SWAHILI_PCT_WORDS = [
+    ("kumi na mbili", "12"),
+    ("kumi na tano", "15"),
+    ("kumi na nane", "18"),
+    ("kumi", "10"),
+    ("sifuri", "0"),
+    ("sita", "6"),
+    ("ishirini", "20"),
+    ("thelathini", "30"),
+    ("arobaini", "40"),
+]
 
 # A money amount: comma- or space-grouped ("1,500,000"), plain ("335000"), or
 # suffixed ("1.5m", "300 million").  Percentages are excluded by the caller.
@@ -85,8 +105,23 @@ _model_loaded = False
 
 
 def percentages(text: str) -> set[str]:
-    """Numeric values stated as percentages, e.g. {"18"} from "18%"/"18 percent"."""
-    return set(_PCT_RE.findall(text.lower()))
+    """Numeric values stated as percentages, e.g. {"18"} from "18%" / "asilimia 18"."""
+    results: set[str] = set()
+    lowered = (text or "").lower()
+    for m in _PCT_RE.finditer(lowered):
+        val = m.group(1) or m.group(2)
+        if val:
+            results.add(val)
+
+    # Detect Swahili spoken percentage phrases, e.g. "asilimia kumi na nane" -> "18"
+    check_text = lowered
+    for word_phrase, num_str in _SWAHILI_PCT_WORDS:
+        pattern = r"\basilimia\s+" + re.escape(word_phrase) + r"\b"
+        if re.search(pattern, check_text):
+            results.add(num_str)
+            check_text = re.sub(pattern, " ", check_text)
+
+    return results
 
 
 def canonical_amounts(text: str) -> set[float]:

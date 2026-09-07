@@ -99,6 +99,58 @@ URA_STATUTORY_GLOSSARY: Final[dict[str, dict[str, str]]] = {
         "lg": "Omusolo oguteeberezebwa ku busuubuzi obutono",
         "sw": "Kodi ya makadirio ya biashara ndogo",
     },
+    "duty-free allowance": {
+        "lg": "Eby'amaguzi ebitasasulwako musolo ku baggage",
+        "sw": "Kiwango cha mizigo isiyotozwa ushuru",
+    },
+    "tax assessment": {
+        "lg": "Okubalirira omusolo (Tax Assessment)",
+        "sw": "Tathmini ya kodi (Tax Assessment)",
+    },
+    "assessment": {
+        "lg": "Okubalirira omusolo",
+        "sw": "Tathmini ya kodi",
+    },
+    "penal tax": {
+        "lg": "Omusolo gw'ekibonerezo (Penal Tax)",
+        "sw": "Adhabu ya kodi (Penal Tax)",
+    },
+    "penalty": {
+        "lg": "Ekibonerezo",
+        "sw": "Faini au adhabu",
+    },
+    "tax appeals tribunal": {
+        "lg": "Kkooti Ewulira Okwemulugunya ku Misolo (TAT)",
+        "sw": "Mahakama ya Rufaa ya Kodi (TAT)",
+    },
+    "tat": {
+        "lg": "TAT",
+        "sw": "TAT",
+    },
+    "capital gains tax": {
+        "lg": "Omusolo ku magoba g'ebintu ebitundiddwa (Capital Gains Tax)",
+        "sw": "Kodi ya faida ya mtaji (Capital Gains Tax)",
+    },
+    "stamp duty": {
+        "lg": "Omusolo gwa sitaampu ku biwandiiko (Stamp Duty)",
+        "sw": "Ushuru wa stempu (Stamp Duty)",
+    },
+    "eaccma": {
+        "lg": "EACCMA",
+        "sw": "EACCMA",
+    },
+    "prn": {
+        "lg": "PRN",
+        "sw": "PRN",
+    },
+    "payment registration number": {
+        "lg": "Namba y'okusasulirako omusolo (PRN)",
+        "sw": "Nambari ya Usajili wa Malipo (PRN)",
+    },
+    "turnover": {
+        "lg": "Ennyingiza y'eby'obusuubuzi (Turnover)",
+        "sw": "Mauzo ya biashara (Turnover)",
+    },
 }
 
 _GLOSSARY_PATTERNS: list[tuple[re.Pattern[str], str]] = [

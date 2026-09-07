@@ -53,6 +53,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -379,36 +380,22 @@ def _build_messages(
         parts.append(f'<passage id="{marker}">{trimmed}</passage>')
         parts.append("")
 
+    parts.append(f"## User question\n{query}")
+    parts.append("")
+
     # The answer language, stated every time rather than only when it is not
     # English.
-    #
-    # Rule 10 used to say "if the user writes in Luganda, Swahili, Runyankole
-    # or Acholi, respond in the same language" — unconditionally, in the system
-    # prompt, where nothing could see whether this deployment can do that. It
-    # cannot: the CPU deployments and the vLLM backend load no locale adapter
-    # (can_generate_in_locale), and the base model asked for Luganda anyway
-    # produced a degenerate loop — "kozesa kozesa kozesa…" — rather than
-    # sentences. So the prompt was instructing the model to do the one thing
-    # this architecture exists to avoid, while the block below quietly declined
-    # to reinforce it. Two instructions, opposite directions, and the question
-    # itself arrives in Luganda to break the tie.
-    #
-    # Now the prompt names the language and the decision is made here, where
-    # can_generate_in_locale is in scope. Saying WHY English is wanted matters:
-    # a model told only "answer in English" against a Luganda question tends to
-    # add a translation of its own, which is a second, ungrounded answer.
     if locale != "en" and can_generate_in_locale(locale):
         parts.append(f"## Answer language\nWrite the answer in {locale}.")
     else:
         parts.append(
             "## Answer language\n"
-            "Write the answer in English, even if the question is in another "
-            "language. A translator renders it into the reader's language "
-            "afterwards, so do not translate it yourself and do not add a "
-            "second copy in another language."
+            "Write the answer strictly in English, even if the user question is in another "
+            "language. A separate translation module renders it into the reader's language "
+            "afterwards, so do not answer in Swahili or Luganda, do not translate it yourself, "
+            "and do not add a second copy in another language."
         )
 
-    parts.append(f"## User question\n{query}")
     messages.append({"role": "user", "content": "\n".join(parts)})
 
     return messages
@@ -1015,6 +1002,17 @@ _MT_ONESHOT: dict[str, tuple[str, str]] = {
     "sw": ("Kitabu hiki ni cha nani?", "Whose book is this?"),
 }
 
+_MT_ONESHOT_EN_TO_TARGET: dict[str, tuple[str, str]] = {
+    "lg": (
+        "What are the requirements for VAT registration?",
+        "Biki ebyetaagisa okwewandiisa ku musolo gwa VAT?",
+    ),
+    "sw": (
+        "What is the standard VAT rate in Uganda?",
+        "Kiwango cha kawaida cha VAT nchini Uganda ni asilimia ngapi?",
+    ),
+}
+
 
 def translate_text(
     text: str,
@@ -1086,7 +1084,13 @@ def translate_text(
     # instruction, which is where every pair was before this.
     from .glossary import get_translation_glossary_hints
 
-    oneshot = _MT_ONESHOT.get(source_lang) if target_lang == "en" else None
+    if target_lang == "en":
+        oneshot = _MT_ONESHOT.get(source_lang)
+    elif source_lang == "en":
+        oneshot = _MT_ONESHOT_EN_TO_TARGET.get(target_lang)
+    else:
+        oneshot = None
+
     example = ""
     if oneshot:
         example = f"\n\n{src_name}: {oneshot[0]}\n{lang_name}: {oneshot[1]}"
@@ -1095,6 +1099,8 @@ def translate_text(
         "Write all numbers, percentages (e.g. 18%), dates (15th), and monetary amounts (e.g. UGX 150,000,000) "
         "using exact Arabic numerals and standard currency notation — do NOT write numbers or amounts out as words."
     )
+    if target_lang == "sw":
+        constraint_note += " For percentages, write either '18%' or 'asilimia 18'."
     glossary_hints = get_translation_glossary_hints(text, target_lang)
     user_prompt = (
         f"Translate the following {src_name} text into {lang_name}. "
@@ -1123,9 +1129,14 @@ def translate_text(
             # the failure mode the prompt above is guarding against. The
             # card's suggested 0.5/0.9 is for open-ended chat; top_p and the
             # 500-token cap follow it.
-            return (_vllm_generate(
+            raw = (_vllm_generate(
                 messages, temperature=0.0, top_p=0.9, max_tokens=500,
             ) or "").strip()
+            # Clean stray digit bracket glitches and rogue language tags
+            raw = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", raw)
+            raw = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", raw, flags=re.IGNORECASE)
+            raw = re.sub(r"\[+([a-zA-Z_]+)\]+", "", raw)
+            return raw.strip()
         except Exception:  # noqa: BLE001 — MT is best-effort; caller falls through
             logger.debug("Prompted MT via vLLM failed", exc_info=True)
             return ""

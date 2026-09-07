@@ -67,6 +67,18 @@ class LocalizeReplyTest(unittest.TestCase):
             self.assertEqual(service.localize_reply("", "lg"), "")
             translate.assert_not_called()
 
+    def test_swahili_translation_with_prefix_percentage_survives(self) -> None:
+        """'asilimia 18' in Swahili must survive figures_survived check against '18%'."""
+        swahili = "Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni asilimia 18 kwa bidhaa."
+        with mock.patch("app.sunbird.translate_from_english", return_value=swahili):
+            self.assertEqual(service.localize_reply(self.ENGLISH, "sw"), swahili)
+
+    def test_swahili_word_percentage_survives(self) -> None:
+        """'asilimia kumi na nane' in Swahili must survive figures_survived check against '18%'."""
+        swahili = "Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni asilimia kumi na nane kwa bidhaa."
+        with mock.patch("app.sunbird.translate_from_english", return_value=swahili):
+            self.assertEqual(service.localize_reply(self.ENGLISH, "sw"), swahili)
+
 
 class GenerationLanguageTest(unittest.TestCase):
     """The model is only asked for a language it can actually produce."""

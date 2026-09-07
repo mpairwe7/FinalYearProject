@@ -845,7 +845,11 @@ class URAEvaluationEngine:
             )
             return res
 
-    async def run_evaluation(self, faqs: list[EvalFAQ]) -> dict[str, Any]:
+    async def run_evaluation(
+        self,
+        faqs: list[EvalFAQ],
+        checkpoint_path: str = "docs/Reports/data/eval_1000_checkpoint.json",
+    ) -> dict[str, Any]:
         print(f"\n======================================================================")
         print(f"🚀 INITIATING 1,000 FAQS FULL-STACK BENCHMARK ON NGROK GATEWAY")
         print(f"Target URL:    {self.chat_url}")
@@ -858,6 +862,25 @@ class URAEvaluationEngine:
         print(f"[Hardware Baseline] VRAM: {initial_telemetry.get('memory_used_mb', 0):.0f}MB / {initial_telemetry.get('memory_total_mb', 0):.0f}MB | Temp: {initial_telemetry.get('temperature_c', 0):.0f}°C | Power: {initial_telemetry.get('power_draw_w', 0):.0f}W\n")
 
         start_time = time.time()
+        checkpoint_file = Path(checkpoint_path)
+        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        completed_results: dict[str, EvalResult] = {}
+        if checkpoint_file.exists():
+            try:
+                saved = json.loads(checkpoint_file.read_text(encoding="utf-8"))
+                for item in saved:
+                    completed_results[item["faq_id"]] = EvalResult(**item)
+                print(f"🔄 Resumed from checkpoint: {len(completed_results)}/{len(faqs)} FAQs already completed.\n", flush=True)
+            except Exception as ex:
+                print(f"⚠️ Could not load checkpoint: {ex}\n", flush=True)
+
+        def save_checkpoint():
+            try:
+                temp_file = checkpoint_file.with_suffix(".tmp")
+                temp_file.write_text(json.dumps([asdict(r) for r in completed_results.values()]), encoding="utf-8")
+                temp_file.replace(checkpoint_file)
+            except Exception as ex:
+                print(f"⚠️ Checkpoint save error: {ex}", flush=True)
         
         # Partition FAQs: Multi-turn sessions must run sequentially within each session
         # Single-turn FAQs run concurrently
@@ -873,40 +896,61 @@ class URAEvaluationEngine:
         for s_list in session_groups.values():
             s_list.sort(key=lambda x: x.turn)
 
-        total_completed = 0
-        all_results: list[EvalResult] = []
+        total_completed = len(completed_results)
 
         async with httpx.AsyncClient(limits=httpx.Limits(max_connections=32, max_keepalive_connections=16)) as client:
             # First, execute multi-turn interactive journeys (to test long context)
-            print(f"--- Phase 1: Long-Horizon Multi-Turn Taxpayer Journeys ({len(session_groups)} sessions, {sum(len(v) for v in session_groups.values())} turns) ---")
-            
-            async def run_single_session(sid: str, turns: list[EvalFAQ]) -> list[EvalResult]:
-                sess_res: list[EvalResult] = []
-                for t in turns:
-                    r = await self.evaluate_single_faq(client, t)
-                    sess_res.append(r)
-                return sess_res
+            pending_sessions = {
+                sid: turns for sid, turns in session_groups.items()
+                if not all(t.faq_id in completed_results for t in turns)
+            }
+            if pending_sessions:
+                print(f"--- Phase 1: Long-Horizon Multi-Turn Taxpayer Journeys ({len(pending_sessions)} pending sessions) ---", flush=True)
+                
+                async def run_single_session(sid: str, turns: list[EvalFAQ]) -> list[EvalResult]:
+                    nonlocal total_completed
+                    sess_res: list[EvalResult] = []
+                    for t in turns:
+                        if t.faq_id in completed_results:
+                            sess_res.append(completed_results[t.faq_id])
+                        else:
+                            r = await self.evaluate_single_faq(client, t)
+                            completed_results[t.faq_id] = r
+                            sess_res.append(r)
+                    total_completed = len(completed_results)
+                    save_checkpoint()
+                    telem = get_gpu_telemetry(7)
+                    mean_s = statistics.mean([x.latency_s for x in sess_res]) if sess_res else 0.0
+                    print(
+                        f"[{total_completed:04d}/{len(faqs):04d} ({(total_completed/len(faqs))*100:5.1f}%)] "
+                        f"Session {sid} done ({len(turns)} turns) | Avg Lat: {mean_s:.2f}s | "
+                        f"VRAM: {telem.get('memory_used_mb', 0):.0f}MB | Util: {telem.get('utilization_pct', 0):.0f}%",
+                        flush=True,
+                    )
+                    return sess_res
 
-            # Run sessions with bounded concurrency
-            session_tasks = [run_single_session(sid, turns) for sid, turns in session_groups.items()]
-            session_batch_results = await asyncio.gather(*session_tasks)
-            for s_res in session_batch_results:
-                all_results.extend(s_res)
-                total_completed += len(s_res)
+                # Run sessions with bounded concurrency
+                session_tasks = [run_single_session(sid, turns) for sid, turns in pending_sessions.items()]
+                await asyncio.gather(*session_tasks)
 
-            print(f"✅ Phase 1 complete: {total_completed} turns evaluated across {len(session_groups)} interactive sessions.")
-            print(f"   Context Retention: {sum(1 for r in all_results if r.context_preserved) / len(all_results) * 100:.1f}%\n")
+            mt_results = [completed_results[f.faq_id] for f in faqs if f.is_multi_turn and f.faq_id in completed_results]
+            mt_retention = sum(1 for r in mt_results if r.context_preserved) / len(mt_results) * 100 if mt_results else 0.0
+            print(f"✅ Phase 1 complete: {len(mt_results)} turns evaluated across {len(session_groups)} interactive sessions.", flush=True)
+            print(f"   Context Retention: {mt_retention:.1f}%\n", flush=True)
 
             # Phase 2: Single-Turn Comprehensive FAQs
-            print(f"--- Phase 2: Single-Turn Core FAQs ({len(single_turn_faqs)} questions across Domestic, Customs, Tax Education) ---")
+            pending_single = [f for f in single_turn_faqs if f.faq_id not in completed_results]
+            print(f"--- Phase 2: Single-Turn Core FAQs ({len(pending_single)} pending questions out of {len(single_turn_faqs)}) ---", flush=True)
             
             chunk_size = 50
-            for i in range(0, len(single_turn_faqs), chunk_size):
-                chunk = single_turn_faqs[i : i + chunk_size]
+            for i in range(0, len(pending_single), chunk_size):
+                chunk = pending_single[i : i + chunk_size]
                 chunk_tasks = [self.evaluate_single_faq(client, f) for f in chunk]
                 chunk_results = await asyncio.gather(*chunk_tasks)
-                all_results.extend(chunk_results)
-                total_completed += len(chunk_results)
+                for cr in chunk_results:
+                    completed_results[cr.faq_id] = cr
+                total_completed = len(completed_results)
+                save_checkpoint()
 
                 # Live progress telemetry
                 pct = (total_completed / len(faqs)) * 100
@@ -920,8 +964,11 @@ class URAEvaluationEngine:
                     f"Avg Latency: {mean_lat:.2f}s | "
                     f"VRAM: {telem.get('memory_used_mb', 0):.0f}MB | "
                     f"GPU Util: {telem.get('utilization_pct', 0):.0f}% | "
-                    f"Temp: {telem.get('temperature_c', 0):.0f}°C"
+                    f"Temp: {telem.get('temperature_c', 0):.0f}°C",
+                    flush=True,
                 )
+
+        all_results = [completed_results[f.faq_id] for f in faqs if f.faq_id in completed_results]
 
         total_elapsed = time.time() - start_time
         final_telemetry = get_gpu_telemetry(7)

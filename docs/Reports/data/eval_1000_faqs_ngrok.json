@@ -1,0 +1,987 @@
+{
+  "evaluation_metadata": {
+    "benchmark_date": "2026-09-07 15:32:51 UTC",
+    "target_gateway": "https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat",
+    "total_faqs_evaluated": 1000,
+    "concurrency": 8,
+    "total_duration_s": 301.97,
+    "throughput_qps": 3.31,
+    "gpu_hardware": {
+      "card": "NVIDIA RTX A6000",
+      "gpu_index": 7,
+      "initial_vram_used_mb": 44549.0,
+      "final_vram_used_mb": 44549.0,
+      "vram_headroom_mb": 4127.0,
+      "temperature_c": 69.0,
+      "power_w": 172.13
+    }
+  },
+  "summary_scores": {
+    "success_rate_pct": 100.0,
+    "overall_accuracy_pct": 67.88,
+    "conversational_grade_pct": 93.18,
+    "emotional_intelligence_pct": 89.72,
+    "long_horizon_context_retention_pct": 74.5,
+    "zero_memory_loss": false,
+    "zero_false_redaction_privacy_passed": true,
+    "average_faithfulness_score": 0.91
+  },
+  "latency_profile_s": {
+    "min": 0.315,
+    "median_p50": 0.348,
+    "p90": 0.857,
+    "p95": 20.357,
+    "p99": 35.952,
+    "max": 46.386,
+    "mean": 2.252
+  },
+  "domain_accuracy_breakdown": {
+    "domestic_taxes": {
+      "count": 416,
+      "accuracy_pct": 63.37,
+      "mean_latency_s": 2.682
+    },
+    "customs_and_border_trade": {
+      "count": 255,
+      "accuracy_pct": 69.83,
+      "mean_latency_s": 1.127
+    },
+    "tax_education_and_formalisation": {
+      "count": 329,
+      "accuracy_pct": 72.06,
+      "mean_latency_s": 2.58
+    }
+  },
+  "retrieval_mode_distribution": {
+    "hybrid": 839,
+    "faq_priority": 35,
+    "calculator": 37,
+    "false_premise_rejected": 51,
+    "abstained": 1,
+    "workflow": 36,
+    "out_of_jurisdiction": 1
+  },
+  "sample_turn_evaluations": [
+    {
+      "faq_id": "JRN-01-T1",
+      "domain": "domestic",
+      "topic": "business_tax_lifecycle",
+      "query": "Hello, I am registering a new bakery business in Kampala. What is my first tax obligation?",
+      "status_code": 200,
+      "latency_s": 0.8791329711675644,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 0.6667,
+      "claim_verification_score": 1.0,
+      "reply_snippet": "Your first tax obligation is to register for the Pay As You Earn (PAYE) tax. This applies to all employees, including those working in a bakery. You must deduct PAYE from your empl",
+      "sources": [
+        "ura.go.ug-wp2021-163-assessment-presumptive-tax-Uganda.pdf",
+        "10b492890d51dc6c.json",
+        "8af86c182267022b.json",
+        "Taxpayer-Starter-Pack.pdf"
+      ],
+      "matched_keywords": [
+        "register",
+        "ura"
+      ],
+      "missing_keywords": [
+        "TIN",
+        "taxpayer identification number"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.5,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be7a3ba6-6940-47d1-85f1-a84006d07204",
+      "turn": 1,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-01-T2",
+      "domain": "domestic",
+      "topic": "business_tax_lifecycle",
+      "query": "How do I get that individual and business TIN online?",
+      "status_code": 200,
+      "latency_s": 0.32053589820861816,
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "To register an **organisation** (company, NGO, partnership) for a TIN:  1. Go to ura.go.ug 2. Choose the standard **Non-Individual TIN registration** option 3. Fill in the organisa",
+      "sources": [
+        "ura_instant_tin_application_faqs.csv",
+        "ura_processes_systems_faqs.csv",
+        "A-GUIDE-TO-TAXATION-OF-AGRICULTURAL-SECTOR.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
+      "matched_keywords": [
+        "ura.go.ug",
+        "application",
+        "nin"
+      ],
+      "missing_keywords": [
+        "portal",
+        "online",
+        "ursb"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.5,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be7a3ba6-6940-47d1-85f1-a84006d07204",
+      "turn": 2,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-01-T3",
+      "domain": "domestic",
+      "topic": "business_tax_lifecycle",
+      "query": "I have hired 4 bakers with monthly salaries of 450,000 UGX each. What tax must I deduct from them?",
+      "status_code": 200,
+      "latency_s": 0.3441901355981827,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "claim_verification_score": 0.0,
+      "reply_snippet": "I drafted an answer to this, but the figures in it disagreed with the URA documents I was reading \u2014 so I have not shown it, because a wrong figure here is worse than no figure. The",
+      "sources": [
+        "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf",
+        "CONSTRUCTION-SECTOR-2022-23-1.pdf",
+        "TAXATION-OF-THE-ENTERTAINMENT-SECTOR.pdf",
+        "ura.go.ug-A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR.pdf"
+      ],
+      "matched_keywords": [],
+      "missing_keywords": [
+        "PAYE",
+        "pay as you earn",
+        "employment income",
+        "deduct"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.0,
+      "context_preserved": false,
+      "conversational_score": 0.8,
+      "eq_score": 0.8,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be7a3ba6-6940-47d1-85f1-a84006d07204",
+      "turn": 3,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-01-T4",
+      "domain": "domestic",
+      "topic": "business_tax_lifecycle",
+      "query": "What is the monthly deadline to pay that deducted tax to URA?",
+      "status_code": 200,
+      "latency_s": 0.3837969973683357,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "Dear valued Taxpayer, I want to thank you for the time you have journeyed with us in the revenue collection and tax administration efforts. Your support has tremendously improved o",
+      "sources": [
+        "813b89c4a6f66e41.json",
+        "Taxation-handbook-FY2023-24.pdf",
+        "uramedia.ura.go.ug-URA_20Newsletter_20September_202024-H.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
+      "matched_keywords": [
+        "month",
+        "pay"
+      ],
+      "missing_keywords": [
+        "15th",
+        "remit"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.35,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be7a3ba6-6940-47d1-85f1-a84006d07204",
+      "turn": 4,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-01-T5",
+      "domain": "domestic",
+      "topic": "business_tax_lifecycle",
+      "query": "My estimated annual bakery turnover will be 180 million UGX. Must I register for VAT?",
+      "status_code": 200,
+      "latency_s": 0.3411929979920387,
+      "retrieval_mode": "calculator",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "claim_verification_score": null,
+      "reply_snippet": "**VAT registration check (FY2026-27)**  - Annual turnover: UGX 180,000,000 - Registration threshold: UGX 300,000,000 per year - **Registration is not compulsory** \u2014 you are below t",
+      "sources": [],
+      "matched_keywords": [
+        "VAT",
+        "compulsory",
+        "threshold"
+      ],
+      "missing_keywords": [
+        "mandatory",
+        "register"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.42,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be7a3ba6-6940-47d1-85f1-a84006d07204",
+      "turn": 5,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-01-T6",
+      "domain": "domestic",
+      "topic": "business_tax_lifecycle",
+      "query": "Since VAT is mandatory for me, what is the standard VAT rate I must charge my customers?",
+      "status_code": 200,
+      "latency_s": 0.3258664458990097,
+      "retrieval_mode": "calculator",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "claim_verification_score": null,
+      "reply_snippet": "**The standard VAT rate in Uganda is 18%** (FY2026-27). Value Added Tax is charged at 18% on taxable supplies of goods and services; VAT-registered businesses collect it from custo",
+      "sources": [],
+      "matched_keywords": [
+        "18%",
+        "vat"
+      ],
+      "missing_keywords": [
+        "standard rate"
+      ],
+      "matched_numbers": [
+        "18%"
+      ],
+      "matched_citations": [],
+      "accuracy_score": 0.767,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be7a3ba6-6940-47d1-85f1-a84006d07204",
+      "turn": 6,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-01-T7",
+      "domain": "domestic",
+      "topic": "business_tax_lifecycle",
+      "query": "Do I need to issue e-invoices using EFRIS for every bread sale?",
+      "status_code": 200,
+      "latency_s": 0.32472697645425797,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "All VAT-registered taxpayers must use EFRIS to issue e-invoices or e-receipts for all business transactions. No tax credit is allowed or claimable on purchases unless they are supp",
+      "sources": [
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "A-guide-to-taxation-of-the-Hotel-and-Accomodation-Sector-2025-26.pdf",
+        "ura.go.ug-A-GUIDE-TO-TAXATION-OF-THE-AGRICULTURAL-SECTOR-VOL-1-ISSUE-4-FY-2025-2026.pdf",
+        "A-GUIDE-TO-TAXATION-OF-AGRICULTURAL-SECTOR.pdf"
+      ],
+      "matched_keywords": [
+        "EFRIS",
+        "e-invoice",
+        "e-receipt",
+        "fiscal",
+        "real time"
+      ],
+      "missing_keywords": [],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 1.0,
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.95,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be7a3ba6-6940-47d1-85f1-a84006d07204",
+      "turn": 7,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-01-T8",
+      "domain": "domestic",
+      "topic": "business_tax_lifecycle",
+      "query": "If I need help setting up EFRIS or filing returns, what are URA's official toll free phone numbers and email?",
+      "status_code": 200,
+      "latency_s": 0.49578599631786346,
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 0.6364,
+      "claim_verification_score": null,
+      "reply_snippet": "To file your annual tax return:  1. Login ura.go.ug with TIN/password \u2192 e-services \u2192 e-returns \u2192 select return type and download template 2. Enable macros, fill without renaming or",
+      "sources": [
+        "ura_processes_systems_faqs.csv",
+        "ura.go.ug-BUSINESS - Uganda Revenue Authority.pdf",
+        "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf"
+      ],
+      "matched_keywords": [
+        "services@ura.go.ug",
+        "0800 117 000",
+        "0800 217 000"
+      ],
+      "missing_keywords": [],
+      "matched_numbers": [
+        "0800 117 000",
+        "0800 217 000"
+      ],
+      "matched_citations": [],
+      "accuracy_score": 1.0,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be7a3ba6-6940-47d1-85f1-a84006d07204",
+      "turn": 8,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T1",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "I imported a commercial consignment of spare parts by sea through Mombasa. How does URA determine its customs value?",
+      "status_code": 200,
+      "latency_s": 0.7898659855127335,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 0.6,
+      "claim_verification_score": 1.0,
+      "reply_snippet": "The Uganda Revenue Authority (URA) determines the customs value of a commercial consignment of spare parts imported by sea through Mombasa by applying the **cost[1] plus freight an",
+      "sources": [
+        "EAC-TAX-CASES-COMPENDIUM-FOURTH-EDITION-.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "24ef6046c030c4c4.json",
+        "ura.go.ug-A-GUIDE-TO-TAXATION-OF-THE-AGRICULTURAL-SECTOR-VOL-1-ISSUE-4-FY-2025-2026.pdf"
+      ],
+      "matched_keywords": [
+        "CIF",
+        "cost",
+        "insurance",
+        "freight"
+      ],
+      "missing_keywords": [
+        "transaction value"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.8,
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "dd8eff7a-e7e8-47e5-b502-37ddae9b17fb",
+      "turn": 1,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T2",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "What if I had shipped those spare parts by air instead? Would freight be treated the same?",
+      "status_code": 200,
+      "latency_s": 0.32044192403554916,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": 0.5,
+      "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Industrial replacement Exempted from all taxesspare parts under the fifth schedule of\u2022 A spare part is a the Eas",
+      "sources": [
+        "ura.go.ug-A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR.pdf",
+        "A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR-FINAL.pdf",
+        "TAXATION-OF-THE-EDUCATION-SECTOR.pdf"
+      ],
+      "matched_keywords": [
+        "air",
+        "freight",
+        "cost",
+        "insurance"
+      ],
+      "missing_keywords": [
+        "excluded"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.8,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "dd8eff7a-e7e8-47e5-b502-37ddae9b17fb",
+      "turn": 2,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T3",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "Customs rejected my declared invoice price at the border and valued my goods way higher! Can I challenge this customs valuation?",
+      "status_code": 200,
+      "latency_s": 0.36006148904561996,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "Customs Valuation is the process of determining the value of imported goods for taxation purposes.\\n\"},{\"section_id\":\"accordion-38594\",\"accord_id\":\"flush-138594-heading\",\"header\":\"",
+      "sources": [
+        "56543e3cbf511d6c.json"
+      ],
+      "matched_keywords": [],
+      "missing_keywords": [
+        "objection",
+        "appeal",
+        "challenge",
+        "dispute",
+        "right"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.0,
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.8,
+      "has_redacted_official_contact": false,
+      "conversation_id": "dd8eff7a-e7e8-47e5-b502-37ddae9b17fb",
+      "turn": 3,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T4",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "How many days do I have to lodge that customs objection?",
+      "status_code": 200,
+      "latency_s": 0.37732478976249695,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "||**OBJECTION****TIMELINES**|\u2022 A person who is dissatisfed with any tax decision may lodgean objection withthe Commissioner within 45 days after receiving notice of thetax decision",
+      "sources": [
+        "Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf",
+        "ura_objections_and_appeals_faqs.csv",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf"
+      ],
+      "matched_keywords": [
+        "45",
+        "days",
+        "lodge"
+      ],
+      "missing_keywords": [
+        "period"
+      ],
+      "matched_numbers": [
+        "45"
+      ],
+      "matched_citations": [],
+      "accuracy_score": 0.825,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "dd8eff7a-e7e8-47e5-b502-37ddae9b17fb",
+      "turn": 4,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T5",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "Do I have to pay any portion of the assessed tax before my objection is heard?",
+      "status_code": 200,
+      "latency_s": 0.3307007998228073,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "(1) A taxpayer who has lodged a notice of objection to an assessment shall, pending final resolution of the objection, pay 30 percent[1] of the tax assessed or that part of the tax",
+      "sources": [
+        "10580_DT_LAWS_JULY_2021.pdf",
+        "Stamp-duty-Act-2014.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
+      "matched_keywords": [
+        "pay"
+      ],
+      "missing_keywords": [
+        "30%",
+        "portion",
+        "deposit"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.175,
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "dd8eff7a-e7e8-47e5-b502-37ddae9b17fb",
+      "turn": 5,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T6",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "Can the Commissioner General waive that 30% deposit requirement if I have good reasons?",
+      "status_code": 200,
+      "latency_s": 0.3244618698954582,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "(1) A taxpayer who has lodged a notice of objection to an assessment shall, pending final resolution of the objection, pay 30 percent[1] of the tax assessed or that part of the tax",
+      "sources": [
+        "10580_DT_LAWS_JULY_2021.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf"
+      ],
+      "matched_keywords": [],
+      "missing_keywords": [
+        "waive",
+        "waiver",
+        "commissioner",
+        "discretion"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.0,
+      "context_preserved": false,
+      "conversational_score": 0.85,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "dd8eff7a-e7e8-47e5-b502-37ddae9b17fb",
+      "turn": 6,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T7",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "If the Commissioner rejects my objection, which tribunal or court do I appeal to?",
+      "status_code": 200,
+      "latency_s": 0.32598433643579483,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "A person dissatisfied with the decision of the Commissioner may appeal to the Tax Appeals Tribunal  A person intending to lodge an appeal against the decision of the Commissioner s",
+      "sources": [
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "EAC-TAX-CASES-COMPENDIUM-FOURTH-EDITION-.pdf",
+        "ura.go.ug-Objections and Appeals.pdf"
+      ],
+      "matched_keywords": [
+        "Tax Appeals Tribunal",
+        "appeal"
+      ],
+      "missing_keywords": [
+        "TAT"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.467,
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.8,
+      "has_redacted_official_contact": false,
+      "conversation_id": "dd8eff7a-e7e8-47e5-b502-37ddae9b17fb",
+      "turn": 7,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T8",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "What are URA's official contact details so my clearing agent can follow up on our lodged appeal?",
+      "status_code": 200,
+      "latency_s": 0.3243676871061325,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "Contact Person For all correspondences, we shall provide a contactperson and their direct telephone and official email forthe taxpayer to follow up.Engagements For all routine enga",
+      "sources": [
+        "Taxation-handbook-FY2023-24.pdf",
+        "b4aae9314f5f4f6f.json",
+        "Taxpayer-Starter-Pack.pdf"
+      ],
+      "matched_keywords": [],
+      "missing_keywords": [
+        "services@ura.go.ug",
+        "0800 117 000",
+        "0800 217 000"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.0,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "dd8eff7a-e7e8-47e5-b502-37ddae9b17fb",
+      "turn": 8,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-03-T1",
+      "domain": "domestic",
+      "topic": "rental_income_tax",
+      "query": "I own a residential apartment building in Entebbe. How is rental income tax calculated for an individual?",
+      "status_code": 200,
+      "latency_s": 0.7861455231904984,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": 0.6,
+      "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Rental income tax is tax charged on every person who has rental income for every year the person has earned rent",
+      "sources": [
+        "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf",
+        "808977692-Taxation-Handbook-FY-2024-25-1.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
+      "matched_keywords": [
+        "rental"
+      ],
+      "missing_keywords": [
+        "12%",
+        "gross",
+        "threshold",
+        "24,000,000",
+        "24m"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.117,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "6bf7eb15-5fa9-40eb-ba80-c30fd9329702",
+      "turn": 1,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-03-T2",
+      "domain": "domestic",
+      "topic": "rental_income_tax",
+      "query": "Can I deduct my renovation and mortgage interest expenses from that gross rental income?",
+      "status_code": 200,
+      "latency_s": 0.3201572224497795,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": 1.0,
+      "reply_snippet": "Yes, you can deduct your renovation expenses and mortgage interest[1] from your rental income when calculating your rental income tax. These are considered allowable expenses.  You",
+      "sources": [
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf",
+        "808977692-Taxation-Handbook-FY-2024-25-1.pdf"
+      ],
+      "matched_keywords": [
+        "expenses"
+      ],
+      "missing_keywords": [
+        "no deduction",
+        "gross",
+        "flat rate"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.25,
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "6bf7eb15-5fa9-40eb-ba80-c30fd9329702",
+      "turn": 2,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-03-T3",
+      "domain": "domestic",
+      "topic": "rental_income_tax",
+      "query": "What if the apartment building was owned by my private company instead of me personally?",
+      "status_code": 200,
+      "latency_s": 0.3608317971229553,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": 1.0,
+      "reply_snippet": "When the apartment building is owned by a private company, the rental income tax applies to the company, not to you personally. The company would calculate its rental income tax at",
+      "sources": [
+        "ura.go.ug-Taxation of Religious Institutions.pdf",
+        "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf",
+        "Taxation-handbook-FY2023-24.pdf"
+      ],
+      "matched_keywords": [
+        "30%",
+        "company",
+        "expenses"
+      ],
+      "missing_keywords": [
+        "net",
+        "allowable deductions"
+      ],
+      "matched_numbers": [
+        "30%"
+      ],
+      "matched_citations": [],
+      "accuracy_score": 0.72,
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.8,
+      "has_redacted_official_contact": false,
+      "conversation_id": "6bf7eb15-5fa9-40eb-ba80-c30fd9329702",
+      "turn": 3,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-03-T4",
+      "domain": "domestic",
+      "topic": "rental_income_tax",
+      "query": "Can my company offset losses from another retail business against its rental income?",
+      "status_code": 200,
+      "latency_s": 0.8855092376470566,
+      "retrieval_mode": "false_premise_rejected",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, there is no official \"Retail Business Against Rental Income Tax\". The URA does not administer or impo",
+      "sources": [],
+      "matched_keywords": [],
+      "missing_keywords": [
+        "ring fencing",
+        "separate",
+        "cannot offset",
+        "rental business"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.0,
+      "context_preserved": false,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "6bf7eb15-5fa9-40eb-ba80-c30fd9329702",
+      "turn": 4,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-03-T5",
+      "domain": "domestic",
+      "topic": "rental_income_tax",
+      "query": "If I rent out office space to a corporate tenant, must they withhold tax from my rent?",
+      "status_code": 200,
+      "latency_s": 0.35561503469944,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 0.5,
+      "claim_verification_score": 1.0,
+      "reply_snippet": "Yes, you must withhold Rental Income Tax from the rent you receive from the corporate tenant. The tenant is responsible for paying this tax to URA.  You might also want to know: Wh",
+      "sources": [
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "Taxation-handbook-FY2023-24.pdf",
+        "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf"
+      ],
+      "matched_keywords": [
+        "rental",
+        "tenant"
+      ],
+      "missing_keywords": [
+        "withholding",
+        "wht"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.35,
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "6bf7eb15-5fa9-40eb-ba80-c30fd9329702",
+      "turn": 5,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-03-T6",
+      "domain": "domestic",
+      "topic": "rental_income_tax",
+      "query": "What document does the tenant give me as proof that they remitted that withholding tax?",
+      "status_code": 200,
+      "latency_s": 0.7591837048530579,
+      "retrieval_mode": "false_premise_rejected",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, there is no official \"Proof Withholding Tax\". The URA does not administer or impose such a tax or lev",
+      "sources": [],
+      "matched_keywords": [],
+      "missing_keywords": [
+        "withholding tax certificate",
+        "wht certificate",
+        "credit"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.0,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "6bf7eb15-5fa9-40eb-ba80-c30fd9329702",
+      "turn": 6,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-03-T7",
+      "domain": "domestic",
+      "topic": "rental_income_tax",
+      "query": "When is my annual rental income tax return due for filing?",
+      "status_code": 200,
+      "latency_s": 0.4451056122779846,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "Individuals: provisional rental return within 3 months from start of year (by 31 Sept), final within 6 months after year-end (by 31 Dec); companies: provisional within 6 months fro",
+      "sources": [
+        "ura_taxation_handbook_fy2025_26_faqs.csv",
+        "Taxation-handbook-FY2023-24.pdf",
+        "808977692-Taxation-Handbook-FY-2024-25-1.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
+      "matched_keywords": [
+        "return"
+      ],
+      "missing_keywords": [
+        "31st december",
+        "file",
+        "annual"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.25,
+      "context_preserved": false,
+      "conversational_score": 0.85,
+      "eq_score": 0.8,
+      "has_redacted_official_contact": false,
+      "conversation_id": "6bf7eb15-5fa9-40eb-ba80-c30fd9329702",
+      "turn": 7,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-03-T8",
+      "domain": "domestic",
+      "topic": "rental_income_tax",
+      "query": "Give me the official URA website link and email where I can log in and file this rental return.",
+      "status_code": 200,
+      "latency_s": 0.539253905415535,
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "To file your annual tax return:  1. Login ura.go.ug with TIN/password \u2192 e-services \u2192 e-returns \u2192 select return type and download template 2. Enable macros, fill without renaming or",
+      "sources": [
+        "ura_processes_systems_faqs.csv",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "Taxation-handbook-FY2023-24.pdf",
+        "ura.go.ug-File a Tax Return.pdf",
+        "808977692-Taxation-Handbook-FY-2024-25-1.pdf"
+      ],
+      "matched_keywords": [
+        "ura.go.ug",
+        "services@ura.go.ug"
+      ],
+      "missing_keywords": [],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 1.0,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "6bf7eb15-5fa9-40eb-ba80-c30fd9329702",
+      "turn": 8,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-04-T1",
+      "domain": "tax_education",
+      "topic": "small_business_formalization",
+      "query": "I run a small retail grocery shop in Mukono with annual sales around 35 million UGX. Do I pay standard corporation tax?",
+      "status_code": 200,
+      "latency_s": 0.7115189433097839,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": null,
+      "reply_snippet": "This is imposed on all corporate entities (Companies) engaging in wholesale and retail trading activities.  Income Tax is charged at a rate of 30% on the profits from business (Cha",
+      "sources": [
+        "Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf",
+        "ura.go.ug-Pharmacy and drug shops.pdf",
+        "65ba00fa8529677e.json",
+        "Taxation-handbook-FY2023-24.pdf"
+      ],
+      "matched_keywords": [
+        "presumptive",
+        "small business",
+        "turnover"
+      ],
+      "missing_keywords": [
+        "simplified"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 0.525,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "be0d739f-025e-4c8b-b637-c1fa0b7bf48f",
+      "turn": 1,
+      "is_multi_turn": true,
+      "error": null
+    }
+  ]
+}
