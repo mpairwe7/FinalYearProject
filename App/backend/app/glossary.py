@@ -151,6 +151,18 @@ URA_STATUTORY_GLOSSARY: Final[dict[str, dict[str, str]]] = {
         "lg": "Ennyingiza y'eby'obusuubuzi (Turnover)",
         "sw": "Mauzo ya biashara (Turnover)",
     },
+    "threshold": {
+        "lg": "Ekkomo ery'omusolo (Threshold)",
+        "sw": "Kiwango cha chini cha kodi (Threshold)",
+    },
+    "registration": {
+        "lg": "Okuwandiisa (Registration)",
+        "sw": "Usajili wa kodi (Registration)",
+    },
+    "withholding": {
+        "lg": "Okukendeeza ku musaala (Withholding)",
+        "sw": "Kodi ya zuio (Withholding)",
+    },
 }
 
 _GLOSSARY_PATTERNS: list[tuple[re.Pattern[str], str]] = [

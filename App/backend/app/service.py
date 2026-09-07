@@ -2529,6 +2529,7 @@ def _is_already_in_locale(text: str, target_locale: str) -> bool:
         markers = (
             "omusolo", "buli", "okufuna", "ebitundu", "ssente", "alipoota", "abakozi",
             "waggulu", "basasula", "bwe", "era", "kye", "bye", "kampuni", "emisolo",
+            "okwewandiisa", "musanyufu", "ebisaanyizo", "enkola", "omusaala", "abakozesa", "ekitongole",
         )
         return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
     return False

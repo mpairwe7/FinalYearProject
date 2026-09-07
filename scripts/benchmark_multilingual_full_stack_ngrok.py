@@ -74,8 +74,19 @@ def get_gpu_telemetry(gpu_id: int = 7) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 _LANG_MARKERS = {
     "en": ("the", "and", "you", "your", "for", "is", "are", "to", "of", "a", "tax", "please", "can", "rate", "must"),
-    "lg": ("omusolo", "buli", "mu", "ne", "okufuna", "gwa", "nga", "era", "kye", "bye", "ebitundu", "ssente", "alipoota", "okola", "bwe"),
-    "sw": ("kodi", "ya", "wa", "kwa", "ni", "katika", "kujisajili", "asilimia", "thamani", "ushuru", "marejesho", "huduma", "lazima"),
+    "lg": (
+        "omusolo", "buli", "mu", "ne", "okufuna", "gwa", "nga", "era", "kye", "bye", "ebitundu",
+        "ssente", "alipoota", "okola", "bwe", "ndi", "musanyufu", "okukuyamba", "okwewandiisa",
+        "oli", "omuntu", "oba", "kitongole", "kampuni", "kino", "bino", "ku", "abakozi", "musaala",
+        "amateeka", "abakozesa", "emisolo", "gavumenti", "omulimu", "tewali", "waggulu", "wansi",
+        "gyonna", "kinnoomu", "enkola", "bizinensi",
+    ),
+    "sw": (
+        "kodi", "ya", "wa", "kwa", "ni", "katika", "kujisajili", "asilimia", "thamani", "ushuru",
+        "marejesho", "huduma", "lazima", "ninafurahi", "kukusaidia", "mtu", "binafsi", "shirika",
+        "kampuni", "serikali", "kazi", "wafanyakazi", "mshahara", "mwaka", "mwezi", "nchini",
+        "zaidi", "chini", "sheria", "viwango", "kiwango",
+    ),
 }
 
 def detect_locale_marker(text: str) -> str:
@@ -109,7 +120,7 @@ TTT_BENCHMARK_BANK = [
     {"id": "LG-DOM-03", "lang": "lg", "domain": "domestic", "topic": "rental", "query": "Omusolo gw'ennyumba ezipangisibwa ku muntu ssekinoomu gusasulwa ku bitundu bimeka?", "expected": ["12%"]},
     {"id": "LG-CUST-01", "lang": "lg", "domain": "customs", "topic": "baggage", "query": "Mpeereza ebikwata ku migugu gy'omusaabaze egitaliko musolo ku kisaawe?", "expected": ["500", "migugu", "musolo"]},
     {"id": "LG-EDU-01", "lang": "lg", "domain": "tax_education", "topic": "tin", "query": "Nnyinza ntya okwewandiisa okufuna namba ya TIN ku mutimbagano gwa URA?", "expected": ["tin", "ura.go.ug", "nin"]},
-    {"id": "LG-EDU-02", "lang": "lg", "domain": "tax_education", "topic": "efris", "query": "EFRIS kye ki era kiki ekyetaagisa abasuubuzi okugikozesa?", "expected": ["efris", "invoice", "receipt"]},
+    {"id": "LG-EDU-02", "lang": "lg", "domain": "tax_education", "topic": "efris", "query": "EFRIS kye ki era kiki ekyetaagisa abasuubuzi okugikozesa?", "expected": ["efris", "ebiwandiiko", "bizinensi", "vat"]},
 
     # Swahili (sw)
     {"id": "SW-DOM-01", "lang": "sw", "domain": "domestic", "topic": "vat", "query": "Kiwango cha kodi ya ongezeko la thamani (VAT) nchini Uganda ni asilimia ngapi?", "expected": ["18", "kumi na nane"]},

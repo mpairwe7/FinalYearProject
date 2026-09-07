@@ -150,6 +150,9 @@ def canonical_amounts(text: str) -> set[float]:
         return " "
 
     remainder = _AMOUNT_PREFIX_RE.sub(_sub_prefix, without_pct)
+    # Normalize English ordinal dates (e.g. "15th", "1st", "30th") to cardinal digits
+    # so statutory filing deadlines survive translation into Swahili and Luganda
+    remainder = re.sub(r"\b(\d{1,2})(?:st|nd|rd|th)\b", r"\1", remainder, flags=re.IGNORECASE)
 
     # 2. Standard suffixes (e.g. "150m", "150 million", "UGX 150,000,000") and plain numbers
     for match in _AMOUNT_RE.finditer(remainder):
