@@ -56,6 +56,7 @@ repos:
         exclude: >
           (?x)^(
             .*\.lock$|
+            .*pnpm-lock\.ya?ml$|
             package-lock\.json$|
             bun\.lockb$|
             .*\.ipynb$|
