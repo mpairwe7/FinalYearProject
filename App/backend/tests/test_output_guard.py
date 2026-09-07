@@ -67,6 +67,30 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         self.assertIn("services@ura.go.ug", sanitized)
         self.assertNotIn("[REDACTED_EMAIL]", sanitized)
 
+    def test_normalize_structure_replaces_customary_services_and_formats_smashed_lists(self) -> None:
+        raw = (
+            "The URA provides services, including:1.**Tax Administration**: collects taxes."
+            "2.**Customary Services**: clears goods.3.**Digital Solutions**: EFRIS."
+        )
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertIn("Customs Services", sanitized)
+        self.assertNotIn("Customary Services", sanitized)
+        self.assertIn("including:\n\n1. **Tax Administration**", sanitized)
+        self.assertIn("taxes.\n\n2. **Customs Services**", sanitized)
+        self.assertIn("goods.\n\n3. **Digital Solutions**", sanitized)
+
+    def test_normalize_structure_preserves_decimal_numbers_and_rates(self) -> None:
+        raw = "The rate is 1.5% for stamp duty and 2.5% for withholding tax under Section 122.1(a)."
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertEqual(sanitized, raw)
+
+    def test_normalize_structure_renumbers_repeated_ones_sequentially(self) -> None:
+        raw = "Key services:\n\n1. Registration\n\n1. Filing\n\n1. Payments"
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertIn("1. Registration", sanitized)
+        self.assertIn("2. Filing", sanitized)
+        self.assertIn("3. Payments", sanitized)
+
 
 if __name__ == "__main__":
     unittest.main()

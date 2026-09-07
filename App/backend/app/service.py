@@ -3574,7 +3574,7 @@ class ChatModel:
         )
         cleaned = re.sub(r"\[User-attached document:[^\]]+\]", "", cleaned)
         leakage = self._output_guard.check_prompt_leakage(cleaned)
-        return leakage.sanitized_text.strip()
+        return self._output_guard.normalize_structure(leakage.sanitized_text).strip()
 
     @staticmethod
     def _format_attachment_fallback_reply(

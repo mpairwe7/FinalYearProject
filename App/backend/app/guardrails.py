@@ -461,7 +461,73 @@ class OutputGuard:
                 return ""
             text = text[split.end() :].lstrip()
 
-        return OutputGuard._strip_reasoning_preamble(text)
+        text = OutputGuard._strip_reasoning_preamble(text)
+        return OutputGuard.normalize_structure(text)
+
+    @staticmethod
+    def normalize_structure(text: str) -> str:
+        """Format lists, enumerations, and paragraph breaks into clean Markdown.
+
+        Normalizes smashed list numbering (e.g. 'including:1.Foo' -> 'including:\\n\\n1. Foo',
+        'laws.2.Bar' -> 'laws.\\n\\n2. Bar'), inline numbered procedures, and tokenization
+        drift such as 'Customary Services' -> 'Customs Services'.
+        """
+        if not text:
+            return text
+        # Correct tokenization / completion drift in URA domain terminology
+        text = re.sub(r"\bCustomary Services\b", "Customs Services", text)
+
+        # Separate lead-in from first numbered item if smashed (e.g. 'including:1.' or 'services:1.**')
+        text = re.sub(
+            r"([;:])\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
+            r"\1\n\n\2. \3",
+            text,
+        )
+        # Separate subsequent inline numbered items: 'laws.2.Bar' or 'trade. 3. Digital'
+        text = re.sub(
+            r"([a-z0-9\)])\.\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
+            r"\1.\n\n\2. \3",
+            text,
+        )
+        # Separate smashed bullet items (e.g. 'including:* Item' or 'laws.- Item')
+        text = re.sub(
+            r"([;:])\s*([*\-•])(?!\*)\s*([A-Za-z])",
+            r"\1\n\n\2 \3",
+            text,
+        )
+        text = re.sub(
+            r"([a-z0-9\)])\.\s*([*\-•])(?!\*)\s*([A-Za-z])",
+            r"\1.\n\n\2 \3",
+            text,
+        )
+        # Ensure blank line before and after markdown headings
+        text = re.sub(r"([^\n])\n(#{1,4}\s+)", r"\1\n\n\2", text)
+        text = re.sub(r"(#{1,4}\s+[^\n]+)\n([^\n#])", r"\1\n\n\2", text)
+        # Normalize excessive blank lines
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        # Ensure ordered list items increment sequentially (fixes repeated 1. or non-ascending numbers)
+        lines = text.split("\n")
+        in_list = False
+        cur_num = 0
+        new_lines: list[str] = []
+        for line in lines:
+            m = re.match(r"^(\s*)(\d{1,2})([.)])(\s+.*)$", line)
+            if m:
+                indent, num, delim, rest = m.groups()
+                if not in_list:
+                    in_list = True
+                    cur_num = 1
+                else:
+                    cur_num += 1
+                new_lines.append(f"{indent}{cur_num}{delim}{rest}")
+            else:
+                if line.strip() == "":
+                    new_lines.append(line)
+                else:
+                    in_list = False
+                    cur_num = 0
+                    new_lines.append(line)
+        return "\n".join(new_lines).strip()
 
     @staticmethod
     def check_prompt_leakage(text: str) -> GuardResult:
