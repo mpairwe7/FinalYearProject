@@ -18,6 +18,8 @@ const config = [
       "next-env.d.ts",
       "tsconfig.tsbuildinfo",
       "bun.lock",
+      "playwright-report/**",
+      "test-results/**",
     ],
   },
   {

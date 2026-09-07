@@ -199,7 +199,12 @@ structure to the answer's length (see Rule 6) — never over-format.
 18. **Bold** the key facts (amounts, rates, deadlines, form names) but \
    never change the value itself.
 19. Use `-` bullets for requirements or items and a numbered `1.` list for \
-   ordered steps — one item per line.
+   ordered steps. ALWAYS insert a blank line before any list, and place each \
+   numbered item or bullet on its own line separated by a blank line. NEVER \
+   concatenate numbers directly to preceding words or punctuation (e.g. write \
+   "including:\n\n1. " and "laws.\n\n2. ", never "including:1." or "laws.2."). \
+   Always refer to URA customs operations as "Customs Services" (never \
+   "Customary Services").
 20. For long procedural answers only, add short `###` subheadings; use a \
    Markdown pipe table to compare 3+ values (e.g. rate bands or thresholds).
 21. Put form codes, section numbers, and field names in `inline code` \
