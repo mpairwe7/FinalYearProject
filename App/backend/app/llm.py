@@ -1002,17 +1002,6 @@ _MT_ONESHOT: dict[str, tuple[str, str]] = {
     "sw": ("Kitabu hiki ni cha nani?", "Whose book is this?"),
 }
 
-_MT_ONESHOT_EN_TO_TARGET: dict[str, tuple[str, str]] = {
-    "lg": (
-        "What are the requirements for VAT registration?",
-        "Biki ebyetaagisa okwewandiisa ku musolo gwa VAT?",
-    ),
-    "sw": (
-        "What is the standard VAT rate in Uganda?",
-        "Kiwango cha kawaida cha VAT nchini Uganda ni asilimia ngapi?",
-    ),
-}
-
 
 def translate_text(
     text: str,
@@ -1084,13 +1073,7 @@ def translate_text(
     # instruction, which is where every pair was before this.
     from .glossary import get_translation_glossary_hints
 
-    if target_lang == "en":
-        oneshot = _MT_ONESHOT.get(source_lang)
-    elif source_lang == "en":
-        oneshot = _MT_ONESHOT_EN_TO_TARGET.get(target_lang)
-    else:
-        oneshot = None
-
+    oneshot = _MT_ONESHOT.get(source_lang) if target_lang == "en" else None
     example = ""
     if oneshot:
         example = f"\n\n{src_name}: {oneshot[0]}\n{lang_name}: {oneshot[1]}"
