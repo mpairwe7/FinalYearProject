@@ -71,7 +71,7 @@ jobs:
           : "${HF_TOKEN:?HF_TOKEN repo secret is missing — the Space cannot be rolled without it}"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # The pin is committed back, so check out a real branch rather than
           # the detached SHA a dispatch would otherwise give us.
