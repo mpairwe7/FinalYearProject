@@ -1091,6 +1091,7 @@ def _apply_output_guards(
     existing_handoff: dict[str, Any] | None = None,
     existing_ticket_id: str = "",
     user_id: str = "",
+    locale: str = "en",
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -1112,7 +1113,7 @@ def _apply_output_guards(
     claim_report: dict[str, Any] | None = None
     if reply and hits and citations:
         try:
-            claim_report = verify_claims(reply, citations, hits, query=message)
+            claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
         except Exception:
             logger.debug("claim verification failed", exc_info=True)
             claim_report = None
@@ -1126,6 +1127,7 @@ def _apply_output_guards(
         escalation_required=escalate,
         escalation_reason=esc_reason,
         claim_report=claim_report,
+        locale=locale,
     )
 
     revised = False
@@ -1160,7 +1162,7 @@ def _apply_output_guards(
         # unsupported claims.
         if citations:
             try:
-                claim_report = verify_claims(reply, citations, hits, query=message)
+                claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
                 if claim_report.get("decision") == "escalate":
                     response_judge["final_decision"] = "escalate"
             except Exception:
@@ -1460,6 +1462,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                     existing_handoff=result.get("handoff"),
                     existing_ticket_id=result.get("ticket_id", ""),
                     user_id=user_id or "",
+                    locale=locale,
                 )
                 full_reply = guard["reply"]
                 if guard["revised"]:
@@ -1697,6 +1700,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 existing_handoff=result.get("handoff"),
                 existing_ticket_id=result.get("ticket_id", ""),
                 user_id=user_id or "",
+                locale=locale,
             )
             full_reply = guard["reply"]
             faith = guard["faithfulness"]
@@ -2509,6 +2513,27 @@ def withhold_if_contradicted(
     return CONTRADICTED_CLAIM_REPLY, True
 
 
+def _is_already_in_locale(text: str, target_locale: str) -> bool:
+    """Return True if *text* is already largely written in *target_locale*."""
+    if not text or target_locale in ("", "en"):
+        return False
+    lowered = " " + text.lower() + " "
+    if target_locale == "sw":
+        markers = (
+            "kodi", "kwa", "katika", "kujisajili", "asilimia", "thamani", "ushuru",
+            "marejesho", "huduma", "wafanyakazi", "mapato", "nchini", "binafsi",
+            "kazi", "mwaka", "mwezi", "kutoa", "kulipa", "zaidi", "kiwango", "viwango",
+        )
+        return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
+    if target_locale == "lg":
+        markers = (
+            "omusolo", "buli", "okufuna", "ebitundu", "ssente", "alipoota", "abakozi",
+            "waggulu", "basasula", "bwe", "era", "kye", "bye", "kampuni", "emisolo",
+        )
+        return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
+    return False
+
+
 def localize_reply(reply: str, locale: str) -> str:
     """Render *reply* in *locale*, or return the English unchanged.
 
@@ -2536,6 +2561,12 @@ def localize_reply(reply: str, locale: str) -> str:
     """
     text = str(reply or "").strip()
     if not text or locale in ("", "en"):
+        return reply
+
+    # If the reply was already generated natively in the target locale (e.g. by
+    # Sunflower-14B), do not re-translate it under source_lang="en", which would
+    # corrupt the text.
+    if _is_already_in_locale(text, locale):
         return reply
     # Cached (``mt.cache``), read here and written at the bottom so the memo
     # only ever holds a translation that passed every guard below.
@@ -3950,6 +3981,7 @@ class ChatModel:
         escalation_required: bool,
         escalation_reason: str,
         claim_report: dict[str, Any] | None = None,
+        locale: str = "en",
     ) -> dict[str, Any]:
         """Classify the draft reply as approve / revise / escalate."""
         reasons: list[str] = []
@@ -4006,6 +4038,8 @@ class ChatModel:
         revised_reply = ""
         if decision == "revise":
             revised_reply = self._build_grounded_revision(hits, citations, message)
+            if revised_reply and locale not in ("", "en"):
+                revised_reply = localize_reply(revised_reply, locale)
             if not revised_reply:
                 decision = "escalate"
                 reasons.append("no deterministic grounded fallback was available")
@@ -6355,7 +6389,7 @@ class ChatModel:
             # It already carries [1] and is scored against the source passage.
             if hits and citations and reply and not extractive_fallback:
                 with trace_stage("claim_verification", timings=timings):
-                    claim_report = verify_claims(reply, citations, hits, query=message)
+                    claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
                     trace_ctx["claim_verification"] = {
                         "decision": claim_report.get("decision"),
                         "score": claim_report.get("score"),
@@ -6372,6 +6406,7 @@ class ChatModel:
                 escalation_required=escalate,
                 escalation_reason=esc_reason,
                 claim_report=claim_report,
+                locale=locale,
             )
             # The report the judge acted on is the draft's; see the identical
             # note in _apply_output_guards. This branch is the non-streaming
@@ -6404,7 +6439,7 @@ class ChatModel:
                         len(draft_claim_report.get("uncited_claims") or []),
                     )
                 if citations:
-                    claim_report = verify_claims(reply, citations, hits, query=message)
+                    claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
                     response_judge["post_revision_claim_verification"] = claim_report
                     if claim_report.get("decision") == "escalate":
                         response_judge["final_decision"] = "escalate"

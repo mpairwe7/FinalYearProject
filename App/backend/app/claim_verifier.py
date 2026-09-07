@@ -174,6 +174,7 @@ def verify_claims(
     *,
     min_support: float | None = None,
     query: str = "",
+    locale: str = "en",
 ) -> dict[str, Any]:
     """Return a claim-verification report for a draft answer."""
     threshold = _MIN_SUPPORT if min_support is None else min_support
@@ -209,6 +210,26 @@ def verify_claims(
         context_text = " ".join(contexts)
         context_tokens = _tokens(context_text)
         overlap = len(claim_tokens & context_tokens) / max(1, len(claim_tokens))
+
+        # Cross-lingual claim support: when the reply is generated in a local
+        # language (e.g. Swahili or Luganda) against English retrieved context passages,
+        # lexical token overlap is naturally suppressed across languages.
+        # Translate the claim to English for lexical verification.
+        if overlap < threshold and locale not in ("", "en"):
+            try:
+                from . import mt, llm  # noqa: PLC0415
+                translated_claim = mt.translate_cached(
+                    clean_claim,
+                    locale,
+                    "en",
+                    lambda: llm.translate_text(clean_claim, source_lang=locale, target_lang="en"),
+                )
+                if translated_claim:
+                    tr_tokens = _tokens(translated_claim)
+                    tr_overlap = len(tr_tokens & context_tokens) / max(1, len(tr_tokens))
+                    overlap = max(overlap, tr_overlap)
+            except Exception:
+                pass
 
         claim_numbers = _numbers(clean_claim)
         context_numbers = _numbers(context_text)

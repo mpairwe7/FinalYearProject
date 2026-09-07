@@ -1,11 +1,11 @@
 {
   "summary": {
     "total_faqs": 10,
-    "avg_correctness_pct": 23.3,
-    "avg_conversational_pct": 98.0,
-    "avg_eq_pct": 86.5,
-    "avg_overall_pct": 64.6,
-    "avg_latency_s": 2.8
+    "avg_correctness_pct": 71.7,
+    "avg_conversational_pct": 96.0,
+    "avg_eq_pct": 91.0,
+    "avg_overall_pct": 84.6,
+    "avg_latency_s": 8.47
   },
   "evaluations": [
     {
@@ -13,97 +13,111 @@
       "topic": "Customs Valuation Basis (Sea/Road vs Air)",
       "user_emotion": "Neutral / Factual Inquiry",
       "query": "What is the basis for declaring imported goods for customs valuation in Uganda? Is freight included for both air and sea cargo?",
-      "reply": "The basis for declaring imported goods for customs valuation in Uganda is the **transaction value method**, which is the price actually paid or payable for the goods when sold for export to the country of importation. This method includes costs such as freight, insurance, and other expenses. However, freight is **not included** for goods transported by air, as the air freight charges are typically part of the total value declared.\n\nYou might also want to know: What are the Customs valuation methods under ACV?",
+      "reply": "The basis for declaring imported goods for customs valuation in Uganda is the **customs value**, which is determined based on the **price of the goods, cost of insurance, and freight** (for goods entering via road, rail, or marine transport). This[1] is used as the basis for calculating customs duties.\n\nFreight is **included for goods transported by road, rail, or marine transport** but **excluded for goods transported by air**.\n\nYou might also want to know: What are the Customs valuation methods under ACV?",
       "sources": [
-        "56543e3cbf511d6c.json",
-        "808977692-Taxation-Handbook-FY-2024-25-1.pdf",
-        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "A-guide-to-taxation-of-the-Hotel-and-Accomodation-Sector-2025-26.pdf"
       ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "vector",
+      "retrieval_mode": "hybrid",
       "correctness_score": 1.0,
       "conversational_score": 0.8,
       "eq_score": 0.9,
       "overall_score": 0.91,
-      "latency_s": 7.88
+      "latency_s": 7.85
     },
     {
       "id": "CUST-02",
       "topic": "Challenging Customs Valuation / Appeal",
       "user_emotion": "Frustrated / Disputing Valuation",
       "query": "Customs rejected my invoice price at the border and valued my goods way higher! I am so frustrated. Can I challenge this customs valuation or am I forced to pay?",
-      "reply": "I'm sorry for the trouble — let's get this sorted out together.\n\nI'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
-      "sources": [],
+      "reply": "You can challenge the customs valuation through an administrative review process or by appealing to the Tax Appeals Tribunal (TAT).\n\nYou might also want to know: I am only tax resident in Uganda. Will my information be reported abroad?",
+      "sources": [
+        "ura_customs_valuation_faqs.csv",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "abstained",
-      "correctness_score": 0.0,
+      "retrieval_mode": "hybrid",
+      "correctness_score": 0.67,
       "conversational_score": 1.0,
       "eq_score": 0.8,
-      "overall_score": 0.54,
-      "latency_s": 1.47
+      "overall_score": 0.81,
+      "latency_s": 3.78
     },
     {
       "id": "CUST-03",
       "topic": "Valuation Methods under ACV",
       "user_emotion": "Confused Trader",
       "query": "I am completely confused about how URA determines customs value when transaction value cannot be used. What are the sequential methods under ACV?",
-      "reply": "Here's the most relevant guidance I found in official URA sources:\n\n- i. Section 122 of the EACCMA provides that where goods are liable to import duty ad valorem, the value of goods shall be determined in accordance with the Fourth Schedule and import duty has to be paid on that value.\n\n66\n\n_East African Community Tax Law Reports [ 2023] 1 EACTLR_\n\n- ii. Paragraph 2(1) of the Fourth Schedule provides that customs value of import goods shall be the transaction value, which is, the price actually paid or payable for goods when sold for export to a partner state.\n\n- iii. The customs value of imported goods is primarily the Transaction Value Method.\n\n- iv.\n\nThat Section 122 of the EACCMA provides that when goods are liable to import duty ad valorem, their value shall be determined in accordance with the Fourth Schedule of the EACCMA. Section 122 (6) of the EACCMA also prescribes that, in applying or interpreting its provisions and the Fourth Schedule, due regard should be taken of decisions, rulings, opinions, guidelines and interpretations given by the Directorate, World Trade Organization or the Customs Cooperation Council (now the World Customs Organization).",
+      "reply": "Under the Customs Act (ACV), the sequential methods for determining customs value when transaction value is not applicable are:\n\n1. **Deductive Value Method**: Start by subtracting costs of freight, insurance, and other[1](#001_Chapter01.xhtml#page_19) expenses from the CIF value (cost, insurance, freight) to determine the net value. This method is often used for goods where the transaction value is not available or reliable.\n\n2. **Computed Value Method**: If deductive value is not feasible, use[2](#001_Chapter01.xhtml#page_20) the computed value method, applying formulas based on the cost of materials, labor, and overhead. This method is typically used for manufactured goods.\n\n3. **Fallback Method**: As a last resort, the fallback method uses a fixed percentage of the CIF value to estimate customs duty. While less precise, it ensures that transactions proceed without delay.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
       "sources": [
+        "ura_customs_valuation_faqs.csv",
         "East_Africa_Community_Customs_Management_Act_Revised.pdf",
-        "EAC-TAX-CASES-COMPENDIUM-FOURTH-EDITION-.pdf"
+        "EAC-CET-2022-VERSION-25TH-JUNE.pdf"
       ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "vector",
+      "retrieval_mode": "hybrid",
       "correctness_score": 1.0,
       "conversational_score": 1.0,
       "eq_score": 0.95,
       "overall_score": 0.98,
-      "latency_s": 10.26
+      "latency_s": 14.99
     },
     {
       "id": "CUST-04",
       "topic": "Required Documents at Point of Entry",
       "user_emotion": "Urgent Importer",
       "query": "Urgent help needed! My container just arrived at the border point of entry. Exactly what documents must I present to customs to clear the goods?",
-      "reply": "I know deadlines can be stressful, so here's the quickest way forward.\n\nI'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
-      "sources": [],
+      "reply": "To clear your goods at the border, you must present the following documents:\n\n1. **Export Commercial Invoice**: This document provides a detailed breakdown of the transaction, including the quantities, values, and descriptions of the goods. It should align with the information on the corresponding export declaration.\n\n2. **Export Declaration**: A formal statement indicating the nature of the goods being exported, their value, and other relevant details. This is often submitted alongside the commercial invoice.\n\n3. **Export Customs Bond**: This bond guarantees that the goods will be re-exported if they fail to meet the destination market standards. It’s typically issued by a bank or insurance company.\n\n4. **Export License**: Required for certain products, especially those subject to export quotas or restrictions. Ensure you have this license to avoid delays.\n\n5. **Export Verification Document (EVD)**: This document confirms that the goods were indeed produced within Uganda. It’s essential for verifying the origin of the goods.\n\n6. **Importer’s Declaration**: This is a statement from the importer confirming receipt of the goods and providing additional details about the transaction.\n\n7. **Importers’ Power of Attorney (POA)**: If the importer is unable to handle the goods themselves, this document authorizes another party to act on their behalf.\n\n8. **Importers’ Declaration of Value (IDV)**: This document declares the value of the goods being imported, which is crucial for determining applicable duties and taxes.\n\n9. **Importers’ Declaration of Origin (IDO)**: Used to confirm the country of origin of the goods, particularly important for goods subject to preferential treatment or tariffs.\n\n10. **Importers’ Declaration of Conformity (IDC)**: This is required for goods that must meet specific quality or safety standards in the importing country.\n\n11. **Importers’ Declaration of Conformity to Standards (IDCS)**: This document confirms that the goods conform to local standards, often required for non-tariff barriers.\n\n12. **Importers’ Declaration of Conformity to Health and Safety Standards (IDCHSS)**: Required for goods that pose health and safety risks, such as chemicals or hazardous materials.\n\n13. **Importers’ Declaration of Conformity to Environmental Standards (IDCES)**: This is necessary for goods that impact the environment, such as used clothing or electronics.\n\n14. **Importers’ Declaration of Conformity to Quality Standards (IDCQS)**: Used to confirm that the goods meet quality standards, often\n\n---\n*Note: This response may not be fully supported by the retrieved documents. Please verify with official URA sources at https://ura.go.ug.\n\n* If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "sources": [
+        "Taxation-handbook-FY2023-24.pdf",
+        "808977692-Taxation-Handbook-FY-2024-25-1.pdf",
+        "ura_export_process_faqs.csv",
+        "9a14823f4ef03bc4.json"
+      ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "abstained",
+      "retrieval_mode": "hybrid",
       "correctness_score": 0.0,
       "conversational_score": 1.0,
-      "eq_score": 0.8,
-      "overall_score": 0.54,
-      "latency_s": 1.36
+      "eq_score": 0.95,
+      "overall_score": 0.58,
+      "latency_s": 18.32
     },
     {
       "id": "CUST-05",
       "topic": "Passenger Baggage Duty-Free Allowance",
       "user_emotion": "Anxious Traveler",
       "query": "I am flying into Entebbe airport tonight with personal gifts for my family and I am terrified of getting stopped and penalized. What passenger baggage items are duty-free?",
-      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
-      "sources": [],
+      "reply": "When flying into Entebbe Airport, you can bring most personal items without paying duties, including clothing, cosmetics, electronics, and foodstuff. However, you must avoid alcoholic beverages, tobacco products, and luxury goods like watches and jewelry. If you're unsure about something, it’s best to ask a Customs Officer at the airport for clarification.\n\n---\n*Note: This response may not be fully supported by the retrieved documents. Please verify with official URA sources at https://ura.go.ug.\n\n* You might also want to know: Which goods are NOT exempt as passenger baggage/personal effects?",
+      "sources": [
+        "Passenger-baggage-personal-effects-2024-25.pdf",
+        "808977692-Taxation-Handbook-FY-2024-25-1.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "abstained",
-      "correctness_score": 0.0,
+      "retrieval_mode": "hybrid",
+      "correctness_score": 0.5,
       "conversational_score": 1.0,
-      "eq_score": 0.8,
-      "overall_score": 0.54,
-      "latency_s": 1.39
+      "eq_score": 0.95,
+      "overall_score": 0.78,
+      "latency_s": 3.67
     },
     {
       "id": "CUST-06",
       "topic": "Customs Offences and Seizure of Goods",
       "user_emotion": "Distressed Importer / Potential Penalty",
       "query": "Please help, I am panicking! Customs detained my shipment claiming undeclared surplus goods. Is surplus cargo considered a customs offence and could my goods be forfeited?",
-      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
-      "sources": [],
+      "reply": "Here's the most relevant guidance I found in official URA sources:\n\n(8) A master or agent who contravenes any undertaking given under subsection (4), or who refuses to return any certificate of clearance when required to do so under subsection (7), commits an offence.\n\n64 _East African Community Customs Management_ [Rev. 2009\n\nClearance certificate 90. (1) An officer may board any aircraft or vessel in a to be produced. Partner State after clearance and require the master thereof to produce such certificate of clearance and to answer any questions relating to such aircraft or vessel, its cargo, stores, baggage, crew, and passengers. (2) The master of any aircraft or vessel who fails to produce such certificate of clearance on demand commits an offence.\n\n(2) Where, on conviction for an offence under this Act, a person becomes liable to a fine not exceeding a specified amount, the court may impose a fine not exceeding three times the value of any goods in respect of which the offence was committed or the specified amount, whichever is the greater; and for the purpose of determining the value of those goods, the Commissioner shall cause the goods to be appraised by the proper officer who shall appraise the goods according to section 122, and no regard shall be had to any damage or injury sustained by such goods.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "sources": [
+        "East_Africa_Community_Customs_Management_Act_Revised.pdf"
+      ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "abstained",
-      "correctness_score": 0.33,
+      "retrieval_mode": "hybrid",
+      "correctness_score": 1.0,
       "conversational_score": 1.0,
-      "eq_score": 0.8,
-      "overall_score": 0.67,
-      "latency_s": 1.32
+      "eq_score": 0.95,
+      "overall_score": 0.98,
+      "latency_s": 4.19
     },
     {
       "id": "CUST-07",
@@ -125,45 +139,56 @@
       "topic": "International Traveler Entry Requirements",
       "user_emotion": "Traveler Preparation",
       "query": "What health and immigration documents must international travelers present when entering Uganda through Entebbe airport?",
-      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
-      "sources": [],
+      "reply": "International travelers must present the following documents when entering Uganda through Entebbe airport:\n\n* A valid passport with at least 6 months' validity\n* An appropriate visa (e-visa/embassy/visa-free or on-arrival where applicable)\n* A yellow fever vaccination certificate (for travelers over 1 year old)\n* Proof of onward/return ticket\n\nThese documents are required for all travelers, including citizens of EAC member states.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "sources": [
+        "ura_documents_point_of_entry_faqs.csv",
+        "Passenger-baggage-personal-effects-2024-25.pdf",
+        "ura.go.ug-Get a TIN.pdf",
+        "e0f570984a4480fd.json"
+      ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "abstained",
-      "correctness_score": 0.0,
+      "retrieval_mode": "hybrid",
+      "correctness_score": 1.0,
       "conversational_score": 1.0,
       "eq_score": 0.9,
-      "overall_score": 0.57,
-      "latency_s": 1.27
+      "overall_score": 0.97,
+      "latency_s": 8.45
     },
     {
       "id": "CUST-09",
       "topic": "Export Procedures and Documentation",
       "user_emotion": "First-time Small Exporter",
       "query": "I am a first-time local farmer trying to export dried fruits to Kenya. The customs process feels so intimidating. What basic export procedures must I follow?",
-      "reply": "I can only help with taxes administered by the Uganda Revenue Authority. I don't hold Kenya's tax rates, and quoting Uganda's figures for Kenya would be misleading.\n\nFor Kenya you'll need that country's own revenue authority. If you meant Uganda, ask again without naming Kenya and I'll answer from the official URA rate table.",
-      "sources": [],
+      "reply": "Here's the most relevant guidance I found in official URA sources:\n\nVital export documentation comprises a commercial invoice, packing list, certificate of origin, and an export permit if required. For a smooth exporting process, it is recommended to involve a certified customs clearing agent. Such agents possess indepth knowledge of the correct procedures for making export declarations with the Uganda Revenue Authority, ensuring compliance and efficiency in the exportation process.\n\nExport procedures involve customs declarations and clearance, inspection of goods, and compliance with international trade regulations. It’s crucial to work closely with a certified clearing agent to navigate these processes smoothly.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "sources": [
+        "ura.go.ug-Frequently Asked Questions regarding Exports in Uganda.pdf",
+        "Taxation-handbook-FY2023-24.pdf",
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "out_of_jurisdiction",
-      "correctness_score": 0.0,
+      "retrieval_mode": "hybrid",
+      "correctness_score": 1.0,
       "conversational_score": 1.0,
       "eq_score": 0.9,
-      "overall_score": 0.57,
-      "latency_s": 0.5
+      "overall_score": 0.97,
+      "latency_s": 17.53
     },
     {
       "id": "CUST-10",
       "topic": "Authorised Economic Operator (AEO) Benefits",
       "user_emotion": "Growing Business Owner",
       "query": "My logistics company is handling high trade volumes and customs delays are costing us money. What is the Authorised Economic Operator (AEO) scheme and what benefits does URA offer?",
-      "reply": "I'm sorry — I couldn't find a reliable answer to this in the URA knowledge base, and I'd rather connect you with the right people than guess. Please contact URA at https://ura.go.ug or call the toll-free Contact Centre on 0800 117 000 / 0800 217 000.",
-      "sources": [],
+      "reply": "The AEO scheme is a trade facilitation initiative by URA that builds partnerships with compliant businesses to simplify customs procedures and reduce delays. Firms that qualify as AEOs benefit from expedited processing, simplified procedures, and enhanced security measures, making trade more efficient and cost-effective.\n\nYou might also want to know: What is the Authorized Economic Operator (AEO) program?",
+      "sources": [
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf"
+      ],
       "model": "Sunbird/Sunflower-14B-FP8",
-      "retrieval_mode": "abstained",
-      "correctness_score": 0.0,
-      "conversational_score": 1.0,
+      "retrieval_mode": "hybrid",
+      "correctness_score": 1.0,
+      "conversational_score": 0.8,
       "eq_score": 0.9,
-      "overall_score": 0.57,
-      "latency_s": 2.06
+      "overall_score": 0.91,
+      "latency_s": 5.38
     }
   ]
 }
