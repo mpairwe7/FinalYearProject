@@ -45,7 +45,9 @@ scan:
   skip-files:
     - .env
     - .env.local
+    - App/frontend/.env.local
     - .claude/settings.local.json
+    - App/.claude/settings.local.json
 
 # ── Package settings ─────────────────────────────────────────────────────────
 pkg:
