@@ -20,3 +20,9 @@
 # read-only rootfs with tmpfs mounts, unprivileged ports only. (Review: 2026-12-31)
 AVD-DS-0002
 DS0002
+
+# ── License Suppressions ─────────────────────────────────────────────────────
+# @img/sharp-libvips dynamically linked by sharp for Next.js blog image optimization.
+# LGPL-3.0-or-later allows dynamic linking without copyleft viral effect on application code.
+@img/sharp-libvips-linux-x64
+@img/sharp-libvips-linuxmusl-x64

@@ -390,7 +390,7 @@ def _build_messages(
     else:
         parts.append(
             "## Answer language\n"
-            "Write the answer strictly in English, even if the user question is in another "
+            "Write the answer in English, even if the user question is in another "
             "language. A separate translation module renders it into the reader's language "
             "afterwards, so do not answer in Swahili or Luganda, do not translate it yourself, "
             "and do not add a second copy in another language."
