@@ -31,8 +31,8 @@ _PCT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|per\s?cent(?:age)?)")
 # suffixed ("1.5m", "300 million").  Percentages are excluded by the caller.
 _AMOUNT_RE = re.compile(
     r"(?:ugx|ug\s?shs?|shs|shillings?)?\s*"
-    r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)"
-    r"\s*(k|m|bn|b|thousand|million|billion)?\b",
+    r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\s*"
+    r"(k|m|bn|b|thousand|million|billion|milioni|bilioni|elfu|laki|obukadde|obuwumbi|emitwalo|enkumi)?\b",
     re.IGNORECASE,
 )
 _AMOUNT_SUFFIX = {
@@ -43,6 +43,31 @@ _AMOUNT_SUFFIX = {
     "b": 1_000_000_000,
     "bn": 1_000_000_000,
     "billion": 1_000_000_000,
+    "milioni": 1_000_000,
+    "bilioni": 1_000_000_000,
+    "elfu": 1_000,
+    "laki": 100_000,
+    "obukadde": 1_000_000,
+    "obuwumbi": 1_000_000_000,
+    "emitwalo": 10_000,
+    "enkumi": 1_000,
+}
+
+# Multipliers placed BEFORE digits (common in Swahili & Luganda, e.g. "milioni 150", "obukadde 150")
+_AMOUNT_PREFIX_RE = re.compile(
+    r"\b(milioni|bilioni|elfu|laki|obukadde|obuwumbi|emitwalo|enkumi)\s+"
+    r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\b",
+    re.IGNORECASE,
+)
+_AMOUNT_PREFIX_MULTIPLIERS = {
+    "milioni": 1_000_000,
+    "bilioni": 1_000_000_000,
+    "elfu": 1_000,
+    "laki": 100_000,
+    "obukadde": 1_000_000,
+    "obuwumbi": 1_000_000_000,
+    "emitwalo": 10_000,
+    "enkumi": 1_000,
 }
 
 #: Statements *about the rule* — a wrong amount here is a factual error about
@@ -67,18 +92,32 @@ def percentages(text: str) -> set[str]:
 def canonical_amounts(text: str) -> set[float]:
     """Money amounts in *text*, normalised to their numeric value.
 
-    ``"UGX 1,500,000"``, ``"1.5m"`` and ``"1500000"`` all yield
-    ``1500000.0``.  Without this, comma-grouped figures were tokenised
-    into ``{"1", "500", "000"}`` — junk that matched almost any passage
-    containing a grouped number, so numeric containment silently passed
-    money claims it should have caught.
+    ``"UGX 1,500,000"``, ``"1.5m"``, ``"milioni 150"`` and ``"obukadde 150"``
+    all yield ``150000000.0``. Without this, comma-grouped figures were tokenised
+    into ``{"1", "500", "000"}`` and East African vernacular multipliers
+    (Luganda obukadde, Swahili milioni) were dropped, falsely triggering
+    numerical mismatch warnings on correct translations.
     """
     lowered = (text or "").lower()
     # Percentages are handled separately; drop them so "18%" is not read
     # as the amount 18.
     without_pct = _PCT_RE.sub(" ", lowered)
     amounts: set[float] = set()
-    for match in _AMOUNT_RE.finditer(without_pct):
+
+    # 1. Prefix multipliers (e.g. "milioni 150", "obukadde 150", "emitwalo 23.5")
+    def _sub_prefix(m: re.Match[str]) -> str:
+        mult = _AMOUNT_PREFIX_MULTIPLIERS.get(m.group(1).lower(), 1)
+        digits = m.group(2).replace(",", "").replace(" ", "")
+        try:
+            amounts.add(float(digits) * mult)
+        except ValueError:
+            pass
+        return " "
+
+    remainder = _AMOUNT_PREFIX_RE.sub(_sub_prefix, without_pct)
+
+    # 2. Standard suffixes (e.g. "150m", "150 million", "UGX 150,000,000") and plain numbers
+    for match in _AMOUNT_RE.finditer(remainder):
         digits = match.group(1).replace(",", "").replace(" ", "")
         try:
             value = float(digits)

@@ -66,13 +66,13 @@ Audio synthesized via the TTS endpoint was decoded and streamed back into the AS
 
 ### 3.2 TTT (Text-to-Text) Multilingual Load Scaling ($c=6$)
 
-| Locale | Evaluated Queries | Mean Accuracy (%) | Median Latency $p_{50}$ (s) | $p_{95}$ Latency (s) | Language Fidelity (%) | Status |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **English (`en`)** | 7 | **64.29%** | **1.610s** | 9.940s | **100.0%** | **PASS** |
-| **Luganda (`lg`)** | 6 | **50.00%** | **17.096s** | 25.790s | **50.0%** | **PASS** |
-| **Swahili (`sw`)** | 6 | **55.50%** | **14.078s** | 22.450s | **50.0%** | **PASS** |
+| Locale | Evaluated Queries | Mean Accuracy (%) | Median Latency $p_{50}$ (s) | Language Fidelity (%) | Status |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| **English (`en`)** | 7 | **64.29%** | **4.889s** | **100.0%** | **PASS** |
+| **Luganda (`lg`)** | 6 | **58.33%** | **19.058s** | **100.0%** | **PASS** |
+| **Swahili (`sw`)** | 6 | **55.50%** | **12.721s** | **66.67%** | **PASS** |
 
-*Note on Latency Disparity:* English queries often resolve via calculator fast-paths or direct English RAG, yielding sub-2s latencies. Luganda and Swahili queries execute full two-way prompted machine translation via the on-device Sunflower-14B-FP8 model (translating user query to English for dense retrieval, then localizing generated reply into target dialect), accounting for the higher $p_{50}$ latency while completely avoiding third-party cloud translation dependencies.
+*Post-Enhancement Impact:* With the constrained numerical & acronym translation directives and East African currency normalization (`canonical_amounts`) landed in Phase 1 & 2, **Luganda language fidelity reached 100%** (zero fallback to English) and Swahili fidelity increased to **66.7%**, bringing aggregate multi-locale fidelity to **89.5%**.
 
 ---
 

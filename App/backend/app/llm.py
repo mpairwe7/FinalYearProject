@@ -1084,14 +1084,22 @@ def translate_text(
     # exemplars in a language this file cannot verify would be worse than
     # having none. Pairs without an exemplar simply fall back to the
     # instruction, which is where every pair was before this.
+    from .glossary import get_translation_glossary_hints
+
     oneshot = _MT_ONESHOT.get(source_lang) if target_lang == "en" else None
     example = ""
     if oneshot:
         example = f"\n\n{src_name}: {oneshot[0]}\n{lang_name}: {oneshot[1]}"
+    constraint_note = (
+        " Keep all statutory tax acronyms (such as VAT, TIN, EFRIS, DTS, PAYE, WHT, URA, TCC, EACCMA) verbatim. "
+        "Write all numbers, percentages (e.g. 18%), dates (15th), and monetary amounts (e.g. UGX 150,000,000) "
+        "using exact Arabic numerals and standard currency notation — do NOT write numbers or amounts out as words."
+    )
+    glossary_hints = get_translation_glossary_hints(text, target_lang)
     user_prompt = (
         f"Translate the following {src_name} text into {lang_name}. "
-        "It may be a question — translate the question itself, do not answer "
-        f"it.{example}\n\n{src_name}: {text}\n{lang_name}:"
+        f"It may be a question — translate the question itself, do not answer it."
+        f"{constraint_note}{glossary_hints}{example}\n\n{src_name}: {text}\n{lang_name}:"
     )
     messages = [
         {"role": "system", "content": system_prompt},
