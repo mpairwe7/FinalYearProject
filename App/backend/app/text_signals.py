@@ -349,6 +349,16 @@ _FOREIGN_JURISDICTION_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 _UGANDA_RE = re.compile(r"\bugandan?\b|\bura\b|\bkampala\b", re.IGNORECASE)
 
 
+_EXPORT_TO_FOREIGN_RE = re.compile(
+    r"\b(?:export(?:s|ing|ed)?|import(?:s|ing|ed)?)\b.*?\b(?:to|from)\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|china|japan|uae|dubai|india|uk|usa|us)\b",
+    re.IGNORECASE,
+)
+_PURE_FOREIGN_TAX_RE = re.compile(
+    r"\b(in\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|uk|usa|us|united\s+states)|kenyan\s+(?:vat|tax|revenue|kra)|rwandan\s+(?:vat|tax|revenue|rra))\b",
+    re.IGNORECASE,
+)
+
+
 def detect_foreign_jurisdiction(message: str) -> str:
     """Name the non-Ugandan jurisdiction this message is about, or ''.
 
@@ -359,6 +369,10 @@ def detect_foreign_jurisdiction(message: str) -> str:
     """
     text = message or ""
     if not text.strip() or _UGANDA_RE.search(text):
+        return ""
+    # Cross-border export/import trade operations (e.g. "When we export goods to Kenya, what VAT applies?")
+    # are governed by URA's export/customs tax rules (zero-rated export) rather than foreign domestic tax law.
+    if _EXPORT_TO_FOREIGN_RE.search(text) and not _PURE_FOREIGN_TAX_RE.search(text):
         return ""
     for name, pattern in _FOREIGN_JURISDICTION_RES:
         if pattern.search(text):
