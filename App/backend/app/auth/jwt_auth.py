@@ -299,14 +299,16 @@ class JWTVerifier:
         header, _, _, _ = _decode_unverified(token)
         token_alg = (header.get("alg") or "").upper()
 
-        if token_alg == "RS256" or (self.alg == "RS256" and token_alg != "HS256"):
+        if self.alg == "RS256":
+            if token_alg != "RS256":
+                raise JWTAuthError(f"unexpected alg: {token_alg}")
             claims = self._rs256_verify(token)
-        elif token_alg == "HS256" or self.alg == "HS256":
-            if self.alg == "RS256" and APP_ENV == "production":
-                raise JWTAuthError("HS256 token rejected under production RS256 policy")
+        elif token_alg == "RS256":
+            claims = self._rs256_verify(token)
+        elif token_alg == "HS256":
             claims = _hs256_verify(token, self.dev_secret)
         else:
-            raise JWTAuthError(f"unsupported token alg {token_alg}")
+            raise JWTAuthError(f"unexpected alg: {token_alg}")
 
         # Temporal claims
         now = time.time()
