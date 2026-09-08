@@ -79,6 +79,10 @@ const nextConfig = {
   async rewrites() {
     return [
       {
+        source: "/api/speech/:path*",
+        destination: `${INTERNAL_API_URL}/v1/speech/:path*`,
+      },
+      {
         source: "/api/:path*",
         destination: `${INTERNAL_API_URL}/:path*`,
       },
