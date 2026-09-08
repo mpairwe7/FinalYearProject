@@ -21,8 +21,16 @@
 
 import { discoverOidc, END_SESSION_ENDPOINT_KEY, TOKEN_ENDPOINT_KEY } from "./oidc";
 
-export const OIDC_ISSUER = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
-export const OIDC_CLIENT_ID = (process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "").trim();
+export const OIDC_ISSUER = (
+  process.env.NEXT_PUBLIC_OIDC_ISSUER !== undefined
+    ? process.env.NEXT_PUBLIC_OIDC_ISSUER
+    : "https://dev-s16d7m00eyrksjy2.us.auth0.com/"
+).trim();
+export const OIDC_CLIENT_ID = (
+  process.env.NEXT_PUBLIC_OIDC_CLIENT_ID !== undefined
+    ? process.env.NEXT_PUBLIC_OIDC_CLIENT_ID
+    : "jjOlcY4Td9AmmaQZIPkxEY6dLO60YagX"
+).trim();
 const OIDC_SCOPE = (process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email").trim();
 /**
  * Optional `audience`. Some providers only issue a verifiable JWT access token
@@ -30,7 +38,11 @@ const OIDC_SCOPE = (process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email"
  * without it, which the backend cannot verify and rejects as malformed.
  * Keycloak needs nothing here (its audience mapper handles it).
  */
-const OIDC_AUDIENCE = (process.env.NEXT_PUBLIC_OIDC_AUDIENCE || "").trim();
+const OIDC_AUDIENCE = (
+  process.env.NEXT_PUBLIC_OIDC_AUDIENCE !== undefined
+    ? process.env.NEXT_PUBLIC_OIDC_AUDIENCE
+    : "https://ura-chatbot/api"
+).trim();
 
 /** Both entry points return through this one route. */
 export const OIDC_REDIRECT_PATH = "/signin/callback";
