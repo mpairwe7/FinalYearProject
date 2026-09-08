@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 
 AUTH_ALG = os.getenv("AUTH_ALG", "HS256").upper()  # HS256 | RS256
 AUTH_DEV_SECRET = os.getenv("AUTH_DEV_SECRET", "dev-insecure-change-me")
-OIDC_ISSUER = os.getenv("OIDC_ISSUER", "")
-OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "ura-chatbot")
-OIDC_JWKS_URL = os.getenv("OIDC_JWKS_URL", "")
+OIDC_ISSUER = os.getenv("OIDC_ISSUER", "https://dev-s16d7m00eyrksjy2.us.auth0.com/")
+OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "https://ura-chatbot/api")
+OIDC_JWKS_URL = os.getenv("OIDC_JWKS_URL", "https://dev-s16d7m00eyrksjy2.us.auth0.com/.well-known/jwks.json")
 OIDC_JWKS_CACHE_TTL_S = int(os.getenv("OIDC_JWKS_CACHE_TTL_S", "3600"))
 OIDC_JWKS_TIMEOUT_S = float(os.getenv("OIDC_JWKS_TIMEOUT_S", "5"))
 APP_ENV = os.getenv("APP_ENV", "development").lower()
@@ -216,7 +216,7 @@ class JWTVerifier:
             raise JWTAuthError(f"unsupported alg {self.alg}")
 
     def _refresh_jwks(self, *, force: bool = False) -> None:
-        if self.alg != "RS256":
+        if not self.jwks_url:
             return
         cache_key = self.jwks_url or ""
         with self._shared_lock:
@@ -296,12 +296,19 @@ class JWTVerifier:
         if not token:
             raise JWTAuthError("empty token")
 
-        if self.alg == "HS256":
-            claims = _hs256_verify(token, self.dev_secret)
-        elif self.alg == "RS256":
+        header, _, _, _ = _decode_unverified(token)
+        token_alg = (header.get("alg") or "").upper()
+
+        if self.alg == "RS256":
+            if token_alg != "RS256":
+                raise JWTAuthError(f"unexpected alg: {token_alg}")
             claims = self._rs256_verify(token)
+        elif token_alg == "RS256":
+            claims = self._rs256_verify(token)
+        elif token_alg == "HS256":
+            claims = _hs256_verify(token, self.dev_secret)
         else:
-            raise JWTAuthError(f"unsupported alg {self.alg}")
+            raise JWTAuthError(f"unexpected alg: {token_alg}")
 
         # Temporal claims
         now = time.time()
@@ -313,14 +320,20 @@ class JWTVerifier:
             raise JWTAuthError("token not yet valid")
 
         # Issuer / audience (only checked if configured — empty = skip)
-        if self.issuer and claims.get("iss") != self.issuer:
-            raise JWTAuthError(f"issuer mismatch: expected {self.issuer}")
+        if self.issuer:
+            token_iss = str(claims.get("iss", "")).rstrip("/")
+            expected_iss = self.issuer.rstrip("/")
+            if token_iss != expected_iss:
+                raise JWTAuthError(f"issuer mismatch: expected {self.issuer}, got {claims.get('iss')}")
+
         if self.audience:
             aud = claims.get("aud", [])
             if isinstance(aud, str):
                 aud = [aud]
-            if self.audience not in aud:
-                raise JWTAuthError(f"audience mismatch: expected {self.audience}")
+            # Match audience against configured audience, API audience, or Auth0 SPA client ID
+            valid_auds = {self.audience, "https://ura-chatbot/api", "ura-chatbot", "jjOlcY4Td9AmmaQZIPkxEY6dLO60YagX"}
+            if not any(a in valid_auds for a in aud):
+                raise JWTAuthError(f"audience mismatch: expected {self.audience}, got {aud}")
 
         return claims
 
