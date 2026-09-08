@@ -18,9 +18,9 @@ COPY . .
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:8087
 ARG INTERNAL_API_URL=http://127.0.0.1:8887
-ARG NEXT_PUBLIC_OIDC_ISSUER=""
-ARG NEXT_PUBLIC_OIDC_CLIENT_ID=""
-ARG NEXT_PUBLIC_OIDC_AUDIENCE=""
+ARG NEXT_PUBLIC_OIDC_ISSUER="https://dev-s16d7m00eyrksjy2.us.auth0.com/"
+ARG NEXT_PUBLIC_OIDC_CLIENT_ID="jjOlcY4Td9AmmaQZIPkxEY6dLO60YagX"
+ARG NEXT_PUBLIC_OIDC_AUDIENCE="https://ura-chatbot/api"
 ARG NEXT_PUBLIC_OIDC_SCOPE=""
 # Must match a value registered at the provider (Auth0 "Allowed Logout URLs").
 # Those are matched exactly: our HF Space is registered with /signin, the ngrok

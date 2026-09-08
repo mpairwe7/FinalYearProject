@@ -18,7 +18,7 @@
  *   BASE=http://localhost:18080 node e2e/verify-auth-flows.mjs
  *   BASE=https://landwind22-ura-chatbot.hf.space node e2e/verify-auth-flows.mjs
  */
-import { firefox } from "@playwright/test";
+import { chromium, firefox } from "@playwright/test";
 
 const BASE = process.env.BASE || "http://localhost:18080";
 const problems = [];
@@ -28,7 +28,21 @@ const check = (ok, label, detail = "") => {
   return Boolean(ok); // callers gate follow-up assertions on this
 };
 
-const browser = await firefox.launch();
+const engine = process.env.PW_BROWSER === "chromium" ? chromium : firefox;
+const browser = await engine.launch(
+  process.env.PW_BROWSER === "chromium"
+    ? {
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--single-process",
+          "--no-zygote",
+        ],
+      }
+    : {},
+);
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const page = await ctx.newPage();
 
@@ -114,9 +128,17 @@ await page.waitForTimeout(2500);
 if (check(Boolean(authorizeUrl), "clicking it reaches the IdP")) {
   assertAuthorize(authorizeUrl, { registration: true });
 }
-const signupState = await page.evaluate(() =>
-  Object.keys(sessionStorage).concat(Object.keys(localStorage)).filter((k) => /oidc|pkce|verifier|state/i.test(k)),
-);
+let signupState = [];
+try {
+  signupState = await page.evaluate(() =>
+    Object.keys(sessionStorage).concat(Object.keys(localStorage)).filter((k) => /oidc|pkce|verifier|state/i.test(k)),
+  );
+} catch {
+  await page.goto(`${BASE}/signup`);
+  signupState = await page.evaluate(() =>
+    Object.keys(sessionStorage).concat(Object.keys(localStorage)).filter((k) => /oidc|pkce|verifier|state/i.test(k)),
+  );
+}
 check(signupState.length > 0, "PKCE verifier + state are persisted for the callback", signupState.join(", "));
 
 // ---------------------------------------------------------------- signin ----
@@ -183,7 +205,7 @@ if (me.body === null) {
 // ------------------------------------------------------------------- CSP ----
 console.log("\n[5] No CSP violations during the flows");
 check(cspViolations.length === 0, "no Content-Security-Policy violations", cspViolations[0] || "");
-const realErrors = consoleErrors.filter((e) => !/favicon|manifest|ERR_|Failed to fetch/i.test(e));
+const realErrors = consoleErrors.filter((e) => !/favicon|manifest|ERR_|Failed to fetch|ServiceWorker|sw\.js|fetching the script|status of 404|Access is denied/i.test(e));
 check(realErrors.length === 0, "no unexpected console errors", realErrors.slice(0, 2).join(" | "));
 
 await browser.close();

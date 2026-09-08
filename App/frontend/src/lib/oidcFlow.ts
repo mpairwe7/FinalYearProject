@@ -21,8 +21,16 @@
 
 import { discoverOidc, END_SESSION_ENDPOINT_KEY, TOKEN_ENDPOINT_KEY } from "./oidc";
 
-export const OIDC_ISSUER = (process.env.NEXT_PUBLIC_OIDC_ISSUER || "").trim();
-export const OIDC_CLIENT_ID = (process.env.NEXT_PUBLIC_OIDC_CLIENT_ID || "").trim();
+export const OIDC_ISSUER = (
+  process.env.NEXT_PUBLIC_OIDC_ISSUER !== undefined
+    ? process.env.NEXT_PUBLIC_OIDC_ISSUER
+    : "https://dev-s16d7m00eyrksjy2.us.auth0.com/"
+).trim();
+export const OIDC_CLIENT_ID = (
+  process.env.NEXT_PUBLIC_OIDC_CLIENT_ID !== undefined
+    ? process.env.NEXT_PUBLIC_OIDC_CLIENT_ID
+    : "jjOlcY4Td9AmmaQZIPkxEY6dLO60YagX"
+).trim();
 const OIDC_SCOPE = (process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email").trim();
 /**
  * Optional `audience`. Some providers only issue a verifiable JWT access token
@@ -30,7 +38,11 @@ const OIDC_SCOPE = (process.env.NEXT_PUBLIC_OIDC_SCOPE || "openid profile email"
  * without it, which the backend cannot verify and rejects as malformed.
  * Keycloak needs nothing here (its audience mapper handles it).
  */
-const OIDC_AUDIENCE = (process.env.NEXT_PUBLIC_OIDC_AUDIENCE || "").trim();
+const OIDC_AUDIENCE = (
+  process.env.NEXT_PUBLIC_OIDC_AUDIENCE !== undefined
+    ? process.env.NEXT_PUBLIC_OIDC_AUDIENCE
+    : "https://ura-chatbot/api"
+).trim();
 
 /** Both entry points return through this one route. */
 export const OIDC_REDIRECT_PATH = "/signin/callback";
@@ -279,10 +291,15 @@ export function endOidcSession(): boolean {
   }
 
   url.searchParams.set("client_id", OIDC_CLIENT_ID);
-  url.searchParams.set(
-    "post_logout_redirect_uri",
-    `${window.location.origin}${OIDC_POST_LOGOUT_PATH}`,
-  );
+  const origin = window.location.origin;
+  const host = (window.location.hostname || new URL(origin).hostname || "").toLowerCase();
+  // Auth0 allowed logout URLs: ngrok uses bare origin; HF Space and CraneCloud use /signin
+  const isNgrok =
+    host === "struttingly-nongeological-briella.ngrok-free.dev" ||
+    host.endsWith(".ngrok-free.dev") ||
+    host.endsWith(".ngrok.io");
+  const postLogoutUri = isNgrok ? origin : `${origin}${OIDC_POST_LOGOUT_PATH}`;
+  url.searchParams.set("post_logout_redirect_uri", postLogoutUri);
   url.searchParams.set("state", randomHex(8));
   window.location.assign(url.toString());
   return true;

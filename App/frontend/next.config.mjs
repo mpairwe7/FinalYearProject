@@ -40,8 +40,16 @@ const nextConfig = {
   // Pin the Turbopack workspace root to this directory so Next.js 16
   // doesn't walk up the filesystem and mis-detect an unrelated lockfile
   // (e.g. ~/package-lock.json) as the workspace root.
-  // Allow dev access from 127.0.0.1 / IP (VS Code port-forward, SSH tunnel)
-  allowedDevOrigins: ["127.0.0.1", "localhost", "192.168.3.51"],
+  // Allow dev access from 127.0.0.1 / IP, ngrok, local ports, and Auth0 allowed web origins
+  allowedDevOrigins: [
+    "127.0.0.1",
+    "localhost",
+    "192.168.3.51",
+    "localhost:3100",
+    "struttingly-nongeological-briella.ngrok-free.dev",
+    "landwind22-ura-chatbot.hf.space",
+    "ura-chatbot-6318a1b5.renu-01.cranecloud.io",
+  ],
   turbopack: {
     root: __dirname,
   },

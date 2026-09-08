@@ -102,7 +102,7 @@ async function verifyCredential(pwd: string, saltHex: string, expectedHashHex: s
 
 export default function SignInPage() {
   const router = useRouter();
-  const [portalTab, setPortalTab] = useState<"taxpayer" | "staff">("taxpayer");
+  const [portalTab, setPortalTab] = useState<"staff" | "taxpayer">("staff");
   const [role, setRole] = useState<string>("ura_staff");
   const [taxpayerEmail, setTaxpayerEmail] = useState("");
   const [taxpayerPassword, setTaxpayerPassword] = useState("");
@@ -128,11 +128,16 @@ export default function SignInPage() {
     const roleParam = params.get("role");
 
     queueMicrotask(() => {
-      if (wasRegistered) {
-        setStatus({
-          kind: "ok",
-          message: "Taxpayer account created successfully! Sign in below to enter the tax assistant.",
-        });
+      if (wasRegistered || roleParam === "public" || params.get("portal") === "taxpayer") {
+        setPortalTab("taxpayer");
+        if (wasRegistered) {
+          setStatus({
+            kind: "ok",
+            message: "Taxpayer account created successfully! Sign in below to enter the tax assistant.",
+          });
+        }
+      } else if ((roleParam && roleParam.startsWith("ura_")) || params.get("portal") === "staff") {
+        setPortalTab("staff");
       }
       if (emailParam) {
         setTaxpayerEmail(emailParam);
@@ -140,12 +145,6 @@ export default function SignInPage() {
       }
       if (roleParam) {
         setRole(roleParam);
-        if (roleParam.startsWith("ura_")) {
-          setPortalTab("staff");
-        }
-      }
-      if (params.get("portal") === "staff") {
-        setPortalTab("staff");
       }
     });
   }, []);
@@ -395,250 +394,128 @@ export default function SignInPage() {
           </p>
         </header>
 
-        <section className="signin-block" aria-labelledby="oidc-h">
-          <h2 id="oidc-h">Sign in with your URA account</h2>
-          <p className="signin-note">
-            Accounts, passwords and recovery are managed by the identity
-            provider — not by this application.
-          </p>
+        {/* Accessible Portal Switcher */}
+        <div role="tablist" aria-label="Sign-in portal selection" className="signin-tablist" style={{ marginTop: "12px" }}>
           <button
             type="button"
-            className="signin-primary"
-            onClick={() => void startOidc()}
-            disabled={!OIDC_CONFIGURED}
+            id="tab-staff"
+            role="tab"
+            tabIndex={portalTab === "staff" ? 0 : -1}
+            aria-selected={portalTab === "staff"}
+            aria-controls="panel-staff"
+            className={portalTab === "staff" ? "signin-tab active" : "signin-tab"}
+            onClick={() => setPortalTab("staff")}
+            onKeyDown={handlePortalTabKeyDown}
           >
-            {OIDC_CONFIGURED ? "Continue with URA identity provider" : "Identity provider not configured"}
+            🏛️ URA Staff & Admin
           </button>
-          {/* The escape hatch from "it signed me in as the wrong person".
-              Signing out now ends the provider session too, so this should
-              rarely be needed — but a provider that publishes no
-              end_session_endpoint cannot be logged out remotely at all, and on
-              a shared machine there is always a session somebody forgot to
-              end. `prompt=login` makes the provider ask, whatever it
-              remembers. */}
-          {OIDC_CONFIGURED && (
-            <button
-              type="button"
-              className="signin-link signin-switch-account"
-              onClick={() => void startOidc("login")}
-              data-testid="signin-different-account"
-            >
-              Sign in as a different user
-            </button>
-          )}
-          {!OIDC_CONFIGURED && (
-            <p className="signin-hint">
-              Set <code>NEXT_PUBLIC_OIDC_ISSUER</code> and{" "}
-              <code>NEXT_PUBLIC_OIDC_CLIENT_ID</code> to enable this.
-            </p>
-          )}
-        </section>
+          <button
+            type="button"
+            id="tab-taxpayer"
+            role="tab"
+            tabIndex={portalTab === "taxpayer" ? 0 : -1}
+            aria-selected={portalTab === "taxpayer"}
+            aria-controls="panel-taxpayer"
+            className={portalTab === "taxpayer" ? "signin-tab active" : "signin-tab"}
+            onClick={() => setPortalTab("taxpayer")}
+            onKeyDown={handlePortalTabKeyDown}
+          >
+            👤 Taxpayer Portal
+          </button>
+        </div>
 
-        {DEV_SIGNIN_ENABLED && (
-          <section className="signin-block signin-dev" aria-labelledby="dev-h">
-            <div className="signin-dev-flag" role="note" id="dev-h">
-              Prototype & Development Access
-            </div>
-
-            {/* Accessible Portal Switcher */}
-            <div role="tablist" aria-label="Sign-in portal selection" className="signin-tablist">
+        {portalTab === "staff" && (
+          <div id="panel-staff" role="tabpanel" aria-labelledby="tab-staff">
+            <section className="signin-block" aria-labelledby="oidc-h">
+              <h2 id="oidc-h">Sign in with your URA account</h2>
+              <p className="signin-note">
+                URA Tax Agent (Staff) and Administrator credentials are pre-assigned enterprise accounts verified through URA&apos;s configured Auth0 identity provider.
+                Universal Login authenticates official personnel and automatically routes officers to /agent and administrators to /admin:
+              </p>
               <button
                 type="button"
-                id="tab-taxpayer"
-                role="tab"
-                tabIndex={portalTab === "taxpayer" ? 0 : -1}
-                aria-selected={portalTab === "taxpayer"}
-                aria-controls="panel-taxpayer"
-                className={portalTab === "taxpayer" ? "signin-tab active" : "signin-tab"}
-                onClick={() => setPortalTab("taxpayer")}
-                onKeyDown={handlePortalTabKeyDown}
+                className="signin-primary"
+                onClick={() => void startOidc()}
+                disabled={!OIDC_CONFIGURED}
               >
-                👤 Taxpayer Portal
+                {OIDC_CONFIGURED ? "Continue with URA identity provider" : "Identity provider not configured"}
               </button>
-              <button
-                type="button"
-                id="tab-staff"
-                role="tab"
-                tabIndex={portalTab === "staff" ? 0 : -1}
-                aria-selected={portalTab === "staff"}
-                aria-controls="panel-staff"
-                className={portalTab === "staff" ? "signin-tab active" : "signin-tab"}
-                onClick={() => setPortalTab("staff")}
-                onKeyDown={handlePortalTabKeyDown}
-              >
-                🏛️ URA Staff & Admin
-              </button>
-            </div>
-
-            {portalTab === "taxpayer" && (
-              <div id="panel-taxpayer" role="tabpanel" aria-labelledby="taxpayer-signin-h">
-                <h2 id="taxpayer-signin-h">Taxpayer Sign In</h2>
-                <p className="signin-note">
-                  Sign in with your personal email (e.g. Gmail, Yahoo Mail, Outlook). Note: This prototype sign-in verifies local credentials and mints session tokens:
-                </p>
-
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    const mail = taxpayerEmail.trim();
-                    if (!mail) {
-                      setStatus({ kind: "error", message: "Please enter your email address." });
-                      return;
-                    }
-                    if (!taxpayerPassword) {
-                      setStatus({ kind: "error", message: "Please enter your password." });
-                      return;
-                    }
-
-                    // Verify saved credential hash if created locally (CWE-287 fail-closed PBKDF2 verification)
-                    if (typeof window !== "undefined") {
-                      try {
-                        const raw = localStorage.getItem(`taxpayer_cred_${mail.toLowerCase()}`);
-                        if (raw) {
-                          const cred = JSON.parse(raw);
-                          if (!cred.hashHex || !cred.saltHex) {
-                            setStatus({ kind: "error", message: "Saved credentials lack cryptographic salt/hash. Please re-register." });
-                            return;
-                          }
-                          const valid = await verifyCredential(taxpayerPassword, cred.saltHex, cred.hashHex);
-                          if (!valid) {
-                            setStatus({ kind: "error", message: "Incorrect password. Please verify your credentials." });
-                            return;
-                          }
-                        }
-                      } catch (err) {
-                        setStatus({ kind: "error", message: `Authentication check failed: ${(err as Error).message}` });
-                        return;
-                      }
-                    }
-
-                    void requestDevToken("public", mail, mail.split("@")[0]);
-                  }}
-                  style={{ display: "grid", gap: "12px", marginBottom: "16px" }}
+              {/* The escape hatch from "it signed me in as the wrong person". */}
+              {OIDC_CONFIGURED && (
+                <button
+                  type="button"
+                  className="signin-link signin-switch-account"
+                  onClick={() => void startOidc("login")}
+                  data-testid="signin-different-account"
                 >
-                  <div className="signin-field">
-                    <label htmlFor="signin-taxpayer-email">
-                      <span>Personal Email Address</span>
-                    </label>
-                    <input
-                      id="signin-taxpayer-email"
-                      type="email"
-                      className="signin-input"
-                      value={taxpayerEmail}
-                      onChange={(e) => setTaxpayerEmail(e.target.value)}
-                      placeholder="e.g. yourname@gmail.com, yourname@yahoo.com"
-                      required
-                      aria-required="true"
-                      autoComplete="email"
-                      inputMode="email"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                    />
-                  </div>
-
-                  <div className="signin-field">
-                    <label htmlFor="signin-taxpayer-password">
-                      <span>Password</span>
-                    </label>
-                    <div className="signin-input-wrap">
-                      <input
-                        id="signin-taxpayer-password"
-                        type={showTaxpayerPassword ? "text" : "password"}
-                        className="signin-input"
-                        value={taxpayerPassword}
-                        onChange={(e) => setTaxpayerPassword(e.target.value)}
-                        placeholder="Enter your password"
-                        required
-                        aria-required="true"
-                        autoComplete="current-password"
-                      />
-                      <button
-                        type="button"
-                        className="signin-pw-toggle"
-                        onClick={() => setShowTaxpayerPassword((prev) => !prev)}
-                        aria-label={showTaxpayerPassword ? "Hide password" : "Show password"}
-                        aria-pressed={showTaxpayerPassword}
-                      >
-                        {showTaxpayerPassword ? "🙈" : "👁️"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="signin-primary"
-                    disabled={loading}
-                    style={{ marginTop: "4px" }}
-                  >
-                    {loading ? "Signing in..." : "Sign In as Taxpayer"}
-                  </button>
-                </form>
-
-                <p style={{ margin: "10px 0 0", fontSize: "12.5px", color: "var(--text-2)" }}>
-                  Need a taxpayer account?{" "}
-                  <Link href="/signup" style={{ fontWeight: 600, color: "var(--ura-blue-bright)" }}>
-                    Register with personal email →
-                  </Link>
+                  Sign in as a different user
+                </button>
+              )}
+              {!OIDC_CONFIGURED && (
+                <p className="signin-hint">
+                  Set <code>NEXT_PUBLIC_OIDC_ISSUER</code> and{" "}
+                  <code>NEXT_PUBLIC_OIDC_CLIENT_ID</code> to enable Auth0 verification.
                 </p>
-              </div>
-            )}
+              )}
+            </section>
 
-            {portalTab === "staff" && (
-              <div id="panel-staff" role="tabpanel" aria-labelledby="staff-signin-h">
-                <h2 id="staff-signin-h" style={{ fontSize: "15px", fontWeight: 650, color: "var(--text-1)", marginBottom: "4px" }}>
-                  🏛️ Predefined URA Staff Credentials
-                </h2>
-                <p className="signin-note" style={{ marginBottom: "12px" }}>
-                  Staff, Administrator, and Auditor credentials are administrative and pre-assigned by URA Administration.
-                  The auth system internally detects your assigned role and automatically redirects you to your workspace:
-                </p>
-
-                <div className="signin-quick-grid">
-                  <button
-                    type="button"
-                    className="signin-quick-btn"
-                    disabled={loading}
-                    aria-label="Sign in as Tax Agent Sarah, opens officer workbench"
-                    onClick={() => void requestDevToken("ura_staff", "agent.sarah@ura.go.ug", "agent-sarah")}
-                  >
-                    <span className="btn-role">
-                      <span>👮 Tax Agent (Staff)</span>
-                      <span className="signin-dest-pill">→ /agent</span>
-                    </span>
-                    <span className="btn-desc">agent.sarah@ura.go.ug · Work escalation queue &amp; user queries</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="signin-quick-btn"
-                    disabled={loading}
-                    aria-label="Sign in as System Administrator, opens operations console"
-                    onClick={() => void requestDevToken("ura_admin", "admin@ura.go.ug", "admin-user")}
-                  >
-                    <span className="btn-role">
-                      <span>⚡ System Administrator</span>
-                      <span className="signin-dest-pill">→ /admin</span>
-                    </span>
-                    <span className="btn-desc">admin@ura.go.ug · Operations console, flags &amp; system metrics</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="signin-quick-btn"
-                    disabled={loading}
-                    aria-label="Sign in as Compliance Auditor, opens auditor oversight"
-                    onClick={() => void requestDevToken("ura_auditor", "auditor@ura.go.ug", "auditor-user")}
-                  >
-                    <span className="btn-role">
-                      <span>📋 Compliance Auditor</span>
-                      <span className="signin-dest-pill">→ /analytics</span>
-                    </span>
-                    <span className="btn-desc">auditor@ura.go.ug · Read-only audit oversight &amp; evaluation view</span>
-                  </button>
+            {DEV_SIGNIN_ENABLED && (
+              <section className="signin-block signin-dev" aria-labelledby="dev-h" style={{ marginTop: "12px" }}>
+                <div className="signin-dev-flag" role="note" id="dev-h">
+                  Prototype & Development Access
                 </div>
-
                 <details className="signin-manual-toggle">
-                  <summary>Custom URA staff email or paste an existing token</summary>
+                  <summary style={{ fontWeight: 600, color: "var(--text-1)" }}>
+                    Offline evaluation bypass (predefined dev tokens)
+                  </summary>
+                  <p className="signin-note" style={{ margin: "8px 0 12px", fontSize: "12px" }}>
+                    For offline test runners where Auth0 is unreachable. In production, official personnel must authenticate via Auth0.
+                  </p>
+
+                  <div className="signin-quick-grid">
+                    <button
+                      type="button"
+                      className="signin-quick-btn"
+                      disabled={loading}
+                      aria-label="Sign in as Tax Agent Sarah, opens officer workbench"
+                      onClick={() => void requestDevToken("ura_staff", "agent.sarah@ura.go.ug", "agent-sarah")}
+                    >
+                      <span className="btn-role">
+                        <span>👮 Tax Agent (Staff)</span>
+                        <span className="signin-dest-pill">→ /agent</span>
+                      </span>
+                      <span className="btn-desc">agent.sarah@ura.go.ug · Work escalation queue &amp; user queries</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="signin-quick-btn"
+                      disabled={loading}
+                      aria-label="Sign in as System Administrator, opens operations console"
+                      onClick={() => void requestDevToken("ura_admin", "admin@ura.go.ug", "admin-user")}
+                    >
+                      <span className="btn-role">
+                        <span>⚡ System Administrator</span>
+                        <span className="signin-dest-pill">→ /admin</span>
+                      </span>
+                      <span className="btn-desc">admin@ura.go.ug · Operations console, flags &amp; system metrics</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="signin-quick-btn"
+                      disabled={loading}
+                      aria-label="Sign in as Compliance Auditor, opens auditor oversight"
+                      onClick={() => void requestDevToken("ura_auditor", "auditor@ura.go.ug", "auditor-user")}
+                    >
+                      <span className="btn-role">
+                        <span>📋 Compliance Auditor</span>
+                        <span className="signin-dest-pill">→ /analytics</span>
+                      </span>
+                      <span className="btn-desc">auditor@ura.go.ug · Read-only audit oversight &amp; evaluation view</span>
+                    </button>
+                  </div>
+
                   <div style={{ marginTop: "12px" }}>
                     <label className="signin-field" htmlFor="signin-custom-email">
                       <span>Assigned URA Email</span>
@@ -697,9 +574,124 @@ export default function SignInPage() {
                     </div>
                   </div>
                 </details>
-              </div>
+              </section>
             )}
-          </section>
+          </div>
+        )}
+
+        {portalTab === "taxpayer" && (
+          <div id="panel-taxpayer" role="tabpanel" aria-labelledby="tab-taxpayer">
+            <section className="signin-block" aria-labelledby="taxpayer-signin-h">
+              <h2 id="taxpayer-signin-h">Taxpayer Sign In</h2>
+              <p className="signin-note">
+                Sign in with your personal email (e.g. Gmail, Yahoo Mail, Outlook). Note: This prototype sign-in verifies local credentials and mints session tokens:
+              </p>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const mail = taxpayerEmail.trim();
+                  if (!mail) {
+                    setStatus({ kind: "error", message: "Please enter your email address." });
+                    return;
+                  }
+                  if (!taxpayerPassword) {
+                    setStatus({ kind: "error", message: "Please enter your password." });
+                    return;
+                  }
+
+                  // Verify saved credential hash if created locally (CWE-287 fail-closed PBKDF2 verification)
+                  if (typeof window !== "undefined") {
+                    try {
+                      const raw = localStorage.getItem(`taxpayer_cred_${mail.toLowerCase()}`);
+                      if (raw) {
+                        const cred = JSON.parse(raw);
+                        if (!cred.hashHex || !cred.saltHex) {
+                          setStatus({ kind: "error", message: "Saved credentials lack cryptographic salt/hash. Please re-register." });
+                          return;
+                        }
+                        const valid = await verifyCredential(taxpayerPassword, cred.saltHex, cred.hashHex);
+                        if (!valid) {
+                          setStatus({ kind: "error", message: "Incorrect password. Please verify your credentials." });
+                          return;
+                        }
+                      }
+                    } catch (err) {
+                      setStatus({ kind: "error", message: `Authentication check failed: ${(err as Error).message}` });
+                      return;
+                    }
+                  }
+
+                  void requestDevToken("public", mail, mail.split("@")[0]);
+                }}
+                style={{ display: "grid", gap: "12px", marginBottom: "16px" }}
+              >
+                <div className="signin-field">
+                  <label htmlFor="signin-taxpayer-email">
+                    <span>Personal Email Address</span>
+                  </label>
+                  <input
+                    id="signin-taxpayer-email"
+                    type="email"
+                    className="signin-input"
+                    value={taxpayerEmail}
+                    onChange={(e) => setTaxpayerEmail(e.target.value)}
+                    placeholder="e.g. yourname@gmail.com, yourname@yahoo.com"
+                    required
+                    aria-required="true"
+                    autoComplete="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                </div>
+
+                <div className="signin-field">
+                  <label htmlFor="signin-taxpayer-password">
+                    <span>Password</span>
+                  </label>
+                  <div className="signin-input-wrap">
+                    <input
+                      id="signin-taxpayer-password"
+                      type={showTaxpayerPassword ? "text" : "password"}
+                      className="signin-input"
+                      value={taxpayerPassword}
+                      onChange={(e) => setTaxpayerPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      required
+                      aria-required="true"
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      className="signin-pw-toggle"
+                      onClick={() => setShowTaxpayerPassword((prev) => !prev)}
+                      aria-label={showTaxpayerPassword ? "Hide password" : "Show password"}
+                      aria-pressed={showTaxpayerPassword}
+                    >
+                      {showTaxpayerPassword ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="signin-primary"
+                  disabled={loading}
+                  style={{ marginTop: "4px" }}
+                >
+                  {loading ? "Signing in..." : "Sign In as Taxpayer"}
+                </button>
+              </form>
+
+              <p style={{ margin: "10px 0 0", fontSize: "12.5px", color: "var(--text-2)" }}>
+                Need a taxpayer account?{" "}
+                <Link href="/signup" style={{ fontWeight: 600, color: "var(--ura-blue-bright)" }}>
+                  Register with personal email →
+                </Link>
+              </p>
+            </section>
+          </div>
         )}
 
         {status.message && (
