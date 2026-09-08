@@ -2727,8 +2727,8 @@ def voice_audit_endpoint(
 def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevTokenRequest)) -> DevTokenResponse:
     """Mint a development/prototype token for staff or taxpayer access.
 
-    Disabled under APP_ENV=production. Enables 1-click access for URA officers,
-    tax agents, and evaluators without requiring terminal Python commands.
+    Disabled under APP_ENV=production. Automatically detects URA staff, admin,
+    and auditor credentials and determines internal redirection destinations.
     """
     if os.getenv("APP_ENV", "development").lower() == "production":
         raise HTTPException(
@@ -2737,27 +2737,51 @@ def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevToken
         )
     from .auth.jwt_auth import make_dev_token
 
-    requested_role = (req.role or "ura_staff").strip()
+    requested_role = (req.role or "").strip().lower()
+    email = (req.email or "").strip().lower()
     user_id = (req.user_id or "").strip()
-    if not user_id:
-        user_id = "staff-officer" if "staff" in requested_role or "admin" in requested_role else "dev-user"
 
-    email = (req.email or "").strip()
+    # Automatically detect role and internal destination
+    if "admin" in email or requested_role == "ura_admin":
+        resolved_role = "ura_admin"
+        redirect_url = "/admin"
+    elif "auditor" in email or requested_role == "ura_auditor":
+        resolved_role = "ura_auditor"
+        redirect_url = "/analytics"
+    elif (
+        "agent" in email
+        or "officer" in email
+        or requested_role == "ura_staff"
+        or (email.endswith("@ura.go.ug") and requested_role != "public")
+    ):
+        resolved_role = "ura_staff"
+        redirect_url = "/agent"
+    elif requested_role in ("public", "verified_taxpayer") or ("@" in email and not email.endswith("@ura.go.ug")):
+        resolved_role = requested_role if requested_role in ("public", "verified_taxpayer") else "public"
+        redirect_url = "/"
+    else:
+        resolved_role = "ura_staff"
+        redirect_url = "/agent"
+
+    if not user_id:
+        user_id = email.split("@")[0] if email else (resolved_role.replace("ura_", "") or "user")
+
     if not email:
-        email = f"{user_id}@ura.go.ug" if "staff" in requested_role or "admin" in requested_role else f"{user_id}@taxpayer.go.ug"
+        email = f"{user_id}@ura.go.ug" if resolved_role.startswith("ura_") else f"{user_id}@taxpayer.go.ug"
 
     token = make_dev_token(
         user_id=user_id,
         tenant_id=req.tenant_id or "default",
         email=email,
-        role=requested_role,
+        role=resolved_role,
     )
     return DevTokenResponse(
         token=token,
-        role=requested_role,
+        role=resolved_role,
         email=email,
         user_id=user_id,
         authenticated=True,
+        redirect_url=redirect_url,
     )
 
 

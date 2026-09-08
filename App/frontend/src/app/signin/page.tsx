@@ -47,7 +47,7 @@ import {
   isEmbedded,
   OIDC_CONFIGURED,
 } from "../../lib/oidcFlow";
-import { isStaffRole } from "../../lib/roles";
+import { isStaffRole, landingPathForRole, roleLabel } from "../../lib/roles";
 import "./signin.css";
 
 /** Roles the dev-token panel can request — labels are specific to this panel. */
@@ -64,6 +64,8 @@ const DEV_SIGNIN_ENABLED =
 export default function SignInPage() {
   const router = useRouter();
   const [role, setRole] = useState<string>("ura_staff");
+  const [taxpayerEmail, setTaxpayerEmail] = useState("");
+  const [taxpayerPassword, setTaxpayerPassword] = useState("");
   const [customEmail, setCustomEmail] = useState("");
   const [devToken, setDevToken] = useState("");
   const [loading, setLoading] = useState(false);
@@ -88,10 +90,11 @@ export default function SignInPage() {
       if (wasRegistered) {
         setStatus({
           kind: "ok",
-          message: "Account created successfully! Sign in below to enter your workspace.",
+          message: "Taxpayer account created successfully! Sign in below to enter the tax assistant.",
         });
       }
       if (emailParam) {
+        setTaxpayerEmail(emailParam);
         setCustomEmail(emailParam);
       }
       if (roleParam) {
@@ -102,28 +105,29 @@ export default function SignInPage() {
 
   /**
    * Determine the internal destination based on the user's role and any requested returnTo parameter.
-   * URA Staff -> /agent (My Queue & User Query Flows)
-   * URA Admin -> /admin (Operations Console)
-   * URA Auditor -> /analytics (Auditor View)
-   * Taxpayer -> / (Assistant Chat)
+   * Internally detects:
+   * - URA Staff -> /agent (My Queue & User Query Flows)
+   * - URA Admin -> /admin (Operations Console)
+   * - URA Auditor -> /analytics (Auditor View)
+   * - Normal Taxpayer -> / (Assistant Chat)
    */
-  const resolveRoleDestination = useCallback((targetRole: string) => {
-    if (typeof window === "undefined") return "/";
+  const resolveRoleDestination = useCallback((targetRole: string, backendRedirect?: string) => {
+    if (backendRedirect && backendRedirect.startsWith("/")) {
+      return backendRedirect;
+    }
+    if (typeof window === "undefined") return landingPathForRole(targetRole);
     const params = new URLSearchParams(window.location.search);
     const returnTo = params.get("returnTo");
     const staff = isStaffRole(targetRole);
 
     if (returnTo && returnTo.startsWith("/")) {
-      if (!staff && (returnTo.startsWith("/admin") || returnTo.startsWith("/agent"))) {
+      if (!staff && (returnTo.startsWith("/admin") || returnTo.startsWith("/agent") || returnTo.startsWith("/analytics"))) {
         return "/";
       }
       return returnTo;
     }
 
-    if (targetRole === "ura_staff") return "/agent";
-    if (targetRole === "ura_admin") return "/admin";
-    if (targetRole === "ura_auditor") return "/analytics";
-    return "/";
+    return landingPathForRole(targetRole);
   }, []);
 
   /**
@@ -224,16 +228,16 @@ export default function SignInPage() {
         setAuthToken(data.token, "dev");
         setLoading(false);
         const staff = isStaffRole(data.role);
-        const dest = resolveRoleDestination(data.role);
+        const dest = resolveRoleDestination(data.role, data.redirect_url);
         setStatus({
           kind: "ok",
           message: staff
-            ? `Signed in as ${data.email || data.user_id} (${data.role})! Redirecting to workspace...`
-            : `Signed in as ${data.email || data.user_id} (${data.role})! Redirecting to assistant...`,
+            ? `Signed in as ${data.email || data.user_id} (${roleLabel(data.role)})! Redirecting to workspace...`
+            : `Signed in as ${data.email || data.user_id}! Redirecting to tax assistant...`,
         });
         setTimeout(() => {
           router.push(dest);
-        }, 500);
+        }, 400);
       } catch (err) {
         setLoading(false);
         setStatus({
@@ -365,114 +369,181 @@ export default function SignInPage() {
         {DEV_SIGNIN_ENABLED && (
           <section className="signin-block signin-dev" aria-labelledby="dev-h">
             <div className="signin-dev-flag" role="note">
-              Prototype & Operations Access
+              Authentication Portal
             </div>
-            <h2 id="dev-h">Instant One-Click Sign In</h2>
+            <h2 id="dev-h">Taxpayer Sign In</h2>
             <p className="signin-note">
-              Designed for non-IT staff, tax officers, and evaluators. Select your role to sign in immediately without terminal commands or scripts:
+              Sign in with your personal email (e.g. Gmail, Yahoo Mail, Outlook). The system preserves your conversation history and tax profile preferences:
             </p>
 
-            <div className="signin-quick-grid">
-              <button
-                type="button"
-                className="signin-quick-btn"
-                disabled={loading}
-                onClick={() => void requestDevToken("ura_staff", "agent.sarah@ura.go.ug", "agent-sarah")}
-              >
-                <span className="btn-role">👮 Tax Agent (Staff)</span>
-                <span className="btn-desc">Handle escalations & monitor user queries in real-time</span>
-              </button>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const mail = taxpayerEmail.trim();
+                if (!mail) {
+                  setStatus({ kind: "error", message: "Please enter your email address." });
+                  return;
+                }
+                if (!taxpayerPassword) {
+                  setStatus({ kind: "error", message: "Please enter your password." });
+                  return;
+                }
+
+                // Verify saved password if created locally
+                if (typeof window !== "undefined") {
+                  try {
+                    const raw = localStorage.getItem(`taxpayer_cred_${mail.toLowerCase()}`);
+                    if (raw) {
+                      const cred = JSON.parse(raw);
+                      if (cred.password && cred.password !== taxpayerPassword) {
+                        setStatus({ kind: "error", message: "Incorrect password. Please verify your credentials." });
+                        return;
+                      }
+                    }
+                  } catch {
+                    // pass through
+                  }
+                }
+
+                void requestDevToken("public", mail, mail.split("@")[0]);
+              }}
+              style={{ display: "grid", gap: "8px", marginBottom: "18px" }}
+            >
+              <label className="signin-field">
+                <span>Personal Email Address</span>
+                <input
+                  type="email"
+                  className="signin-input"
+                  value={taxpayerEmail}
+                  onChange={(e) => setTaxpayerEmail(e.target.value)}
+                  placeholder="e.g. yourname@gmail.com, yourname@yahoo.com"
+                  required
+                />
+              </label>
+
+              <label className="signin-field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  className="signin-input"
+                  value={taxpayerPassword}
+                  onChange={(e) => setTaxpayerPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  required
+                />
+              </label>
 
               <button
-                type="button"
-                className="signin-quick-btn"
+                type="submit"
+                className="signin-primary"
                 disabled={loading}
-                onClick={() => void requestDevToken("ura_admin", "admin@ura.go.ug", "admin-user")}
+                style={{ marginTop: "4px" }}
               >
-                <span className="btn-role">⚡ Administrator</span>
-                <span className="btn-desc">Full access to operations console, flags & system metrics</span>
+                {loading ? "Signing in..." : "Sign In as Taxpayer"}
               </button>
+            </form>
 
-              <button
-                type="button"
-                className="signin-quick-btn"
-                disabled={loading}
-                onClick={() => void requestDevToken("ura_auditor", "auditor@ura.go.ug", "auditor-user")}
-              >
-                <span className="btn-role">📋 Auditor</span>
-                <span className="btn-desc">Read-only oversight & conversational compliance view</span>
-              </button>
+            <div style={{ borderTop: "1px solid var(--border-0)", paddingTop: "16px", marginTop: "14px" }}>
+              <h2 style={{ fontSize: "15px", fontWeight: 650, color: "var(--text-1)", marginBottom: "4px" }}>
+                🏛️ Predefined URA Staff Credentials
+              </h2>
+              <p className="signin-note" style={{ marginBottom: "12px" }}>
+                Staff, Administrator, and Auditor credentials are administrative and pre-assigned by URA Administration.
+                The auth system internally detects your assigned role and automatically redirects you to your workspace:
+              </p>
 
-              <button
-                type="button"
-                className="signin-quick-btn"
-                disabled={loading}
-                onClick={() => void requestDevToken("public", "taxpayer@example.com", "citizen-user")}
-              >
-                <span className="btn-role">👤 Taxpayer</span>
-                <span className="btn-desc">Citizen profile with saved multi-turn conversations</span>
-              </button>
-            </div>
-
-            <details className="signin-manual-toggle">
-              <summary>Customize email / role or paste an existing token</summary>
-              <div style={{ marginTop: "12px" }}>
-                <label className="signin-field">
-                  <span>Custom Email / Identifier</span>
-                  <input
-                    type="text"
-                    className="signin-input"
-                    value={customEmail}
-                    onChange={(e) => setCustomEmail(e.target.value)}
-                    placeholder="e.g. officer.grace@ura.go.ug"
-                  />
-                </label>
-
-                <fieldset className="signin-roles" style={{ marginTop: "10px" }}>
-                  <legend>Role</legend>
-                  {DEV_ROLE_OPTIONS.map((r) => (
-                    <label key={r.role} className={role === r.role ? "role-opt active" : "role-opt"}>
-                      <input
-                        type="radio"
-                        name="role"
-                        value={r.role}
-                        checked={role === r.role}
-                        onChange={() => setRole(r.role)}
-                      />
-                      <span className="role-name">{r.label}</span>
-                      <span className="role-hint">{r.hint}</span>
-                    </label>
-                  ))}
-                </fieldset>
+              <div className="signin-quick-grid">
+                <button
+                  type="button"
+                  className="signin-quick-btn"
+                  disabled={loading}
+                  onClick={() => void requestDevToken("ura_staff", "agent.sarah@ura.go.ug", "agent-sarah")}
+                >
+                  <span className="btn-role">👮 Tax Agent (Staff)</span>
+                  <span className="btn-desc">agent.sarah@ura.go.ug · Redirects to /agent</span>
+                </button>
 
                 <button
                   type="button"
-                  className="signin-secondary"
-                  style={{ marginTop: "6px", width: "100%" }}
+                  className="signin-quick-btn"
                   disabled={loading}
-                  onClick={() => void requestDevToken(role, customEmail)}
+                  onClick={() => void requestDevToken("ura_admin", "admin@ura.go.ug", "admin-user")}
                 >
-                  {loading ? "Signing in..." : "Sign in with selected role"}
+                  <span className="btn-role">⚡ Administrator</span>
+                  <span className="btn-desc">admin@ura.go.ug · Redirects to /admin</span>
                 </button>
 
-                <div style={{ marginTop: "14px", borderTop: "1px solid var(--border-0)", paddingTop: "12px" }}>
+                <button
+                  type="button"
+                  className="signin-quick-btn"
+                  disabled={loading}
+                  onClick={() => void requestDevToken("ura_auditor", "auditor@ura.go.ug", "auditor-user")}
+                >
+                  <span className="btn-role">📋 Compliance Auditor</span>
+                  <span className="btn-desc">auditor@ura.go.ug · Redirects to /analytics</span>
+                </button>
+              </div>
+
+              <details className="signin-manual-toggle">
+                <summary>Custom URA staff email or paste an existing token</summary>
+                <div style={{ marginTop: "12px" }}>
                   <label className="signin-field">
-                    <span>Or paste an existing JWT token</span>
-                    <textarea
-                      value={devToken}
-                      onChange={(e) => setDevToken(e.target.value)}
-                      placeholder="eyJhbGciOiJIUzI1NiIs..."
-                      rows={3}
-                      spellCheck={false}
-                      autoComplete="off"
+                    <span>Assigned URA Email</span>
+                    <input
+                      type="text"
+                      className="signin-input"
+                      value={customEmail}
+                      onChange={(e) => setCustomEmail(e.target.value)}
+                      placeholder="e.g. officer.grace@ura.go.ug"
                     />
                   </label>
-                  <button type="button" className="signin-secondary" onClick={useDevToken}>
-                    Verify and continue
+
+                  <fieldset className="signin-roles" style={{ marginTop: "10px" }}>
+                    <legend>Role</legend>
+                    {DEV_ROLE_OPTIONS.map((r) => (
+                      <label key={r.role} className={role === r.role ? "role-opt active" : "role-opt"}>
+                        <input
+                          type="radio"
+                          name="role"
+                          value={r.role}
+                          checked={role === r.role}
+                          onChange={() => setRole(r.role)}
+                        />
+                        <span className="role-name">{r.label}</span>
+                        <span className="role-hint">{r.hint}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+
+                  <button
+                    type="button"
+                    className="signin-secondary"
+                    style={{ marginTop: "6px", width: "100%" }}
+                    disabled={loading}
+                    onClick={() => void requestDevToken(role, customEmail)}
+                  >
+                    {loading ? "Signing in..." : "Sign in with selected role"}
                   </button>
+
+                  <div style={{ marginTop: "14px", borderTop: "1px solid var(--border-0)", paddingTop: "12px" }}>
+                    <label className="signin-field">
+                      <span>Or paste an existing JWT token</span>
+                      <textarea
+                        value={devToken}
+                        onChange={(e) => setDevToken(e.target.value)}
+                        placeholder="eyJhbGciOiJIUzI1NiIs..."
+                        rows={3}
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    </label>
+                    <button type="button" className="signin-secondary" onClick={useDevToken}>
+                      Verify and continue
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </details>
+              </details>
+            </div>
           </section>
         )}
 
