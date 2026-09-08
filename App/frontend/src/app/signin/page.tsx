@@ -150,6 +150,27 @@ export default function SignInPage() {
     });
   }, []);
 
+  const handlePortalTabKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const next = portalTab === "taxpayer" ? "staff" : "taxpayer";
+        setPortalTab(next);
+        const el = document.getElementById(next === "taxpayer" ? "tab-taxpayer" : "tab-staff");
+        el?.focus();
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setPortalTab("taxpayer");
+        document.getElementById("tab-taxpayer")?.focus();
+      } else if (e.key === "End") {
+        e.preventDefault();
+        setPortalTab("staff");
+        document.getElementById("tab-staff")?.focus();
+      }
+    },
+    [portalTab],
+  );
+
   /**
    * Determine the internal destination based on the user's role and any requested returnTo parameter.
    * Internally detects:
@@ -415,7 +436,7 @@ export default function SignInPage() {
 
         {DEV_SIGNIN_ENABLED && (
           <section className="signin-block signin-dev" aria-labelledby="dev-h">
-            <div className="signin-dev-flag" role="note">
+            <div className="signin-dev-flag" role="note" id="dev-h">
               Prototype & Development Access
             </div>
 
@@ -425,10 +446,12 @@ export default function SignInPage() {
                 type="button"
                 id="tab-taxpayer"
                 role="tab"
+                tabIndex={portalTab === "taxpayer" ? 0 : -1}
                 aria-selected={portalTab === "taxpayer"}
                 aria-controls="panel-taxpayer"
                 className={portalTab === "taxpayer" ? "signin-tab active" : "signin-tab"}
                 onClick={() => setPortalTab("taxpayer")}
+                onKeyDown={handlePortalTabKeyDown}
               >
                 👤 Taxpayer Portal
               </button>
@@ -436,18 +459,20 @@ export default function SignInPage() {
                 type="button"
                 id="tab-staff"
                 role="tab"
+                tabIndex={portalTab === "staff" ? 0 : -1}
                 aria-selected={portalTab === "staff"}
                 aria-controls="panel-staff"
                 className={portalTab === "staff" ? "signin-tab active" : "signin-tab"}
                 onClick={() => setPortalTab("staff")}
+                onKeyDown={handlePortalTabKeyDown}
               >
                 🏛️ URA Staff & Admin
               </button>
             </div>
 
             {portalTab === "taxpayer" && (
-              <div id="panel-taxpayer" role="tabpanel" aria-labelledby="tab-taxpayer">
-                <h2 id="dev-h">Taxpayer Sign In</h2>
+              <div id="panel-taxpayer" role="tabpanel" aria-labelledby="taxpayer-signin-h">
+                <h2 id="taxpayer-signin-h">Taxpayer Sign In</h2>
                 <p className="signin-note">
                   Sign in with your personal email (e.g. Gmail, Yahoo Mail, Outlook). Note: This prototype sign-in verifies local credentials and mints session tokens:
                 </p>
@@ -559,8 +584,8 @@ export default function SignInPage() {
             )}
 
             {portalTab === "staff" && (
-              <div id="panel-staff" role="tabpanel" aria-labelledby="tab-staff">
-                <h2 style={{ fontSize: "15px", fontWeight: 650, color: "var(--text-1)", marginBottom: "4px" }}>
+              <div id="panel-staff" role="tabpanel" aria-labelledby="staff-signin-h">
+                <h2 id="staff-signin-h" style={{ fontSize: "15px", fontWeight: 650, color: "var(--text-1)", marginBottom: "4px" }}>
                   🏛️ Predefined URA Staff Credentials
                 </h2>
                 <p className="signin-note" style={{ marginBottom: "12px" }}>
