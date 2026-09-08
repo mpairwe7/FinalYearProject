@@ -714,8 +714,21 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     ),
     (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht|zuio)\b", re.IGNORECASE)),
     (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+bands?|abakozi|wafanyakazi)\b", re.IGNORECASE)),
-    (RatePlan(tax_type="rental_tax_company"), re.compile(r"\b(compan(?:y|ies)|business|kkampuni|kampuni)\b.*(rent(?:al)?|upangishaji|bupangisa)|(rent(?:al)?|upangishaji|bupangisa).*\b(compan(?:y|ies)|business|kkampuni|kampuni)\b", re.IGNORECASE)),
-    (RatePlan(summary="rental"), re.compile(r"(rent(?:al)?|upangishaji|bupangisa|amayumba|nyumba)", re.IGNORECASE)),
+    (
+        RatePlan(tax_type="rental_tax_company"),
+        re.compile(
+            r"\b(compan(?:y|ies)|business|kkampuni|kampuni)\b.*\b(?:rent(?:al)?|upangishaji|(?:gw['’])?o?bupangisa)\b"
+            r"|\b(?:rent(?:al)?|upangishaji|(?:gw['’])?o?bupangisa)\b.*\b(compan(?:y|ies)|business|kkampuni|kampuni)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(summary="rental"),
+        re.compile(
+            r"\b(?:rent(?:al)?|upangishaji|(?:gw['’])?o?bupangisa|amayumba|nyumba)\b",
+            re.IGNORECASE,
+        ),
+    ),
     (RatePlan(tax_type="capital_gains_corporate"), re.compile(r"\b(capital\s+gains?|cgt|magoba\s+ku\s+byamaguzi)\b", re.IGNORECASE)),
     (RatePlan(tax_type="corporation_tax"), re.compile(r"\b(corporation|corporate|company)\s+(income\s+)?tax\b", re.IGNORECASE)),
     (RatePlan(tax_type="customs_duty_common"), re.compile(r"\b(customs|import\s+dut(?:y|ies)|ushuru\s+wa\s+forodha|omusolo\s+gw'okuyingiza)\b", re.IGNORECASE)),
