@@ -47,12 +47,29 @@ _SWAHILI_PCT_WORDS = [
     ("arobaini", "40"),
 ]
 
+_LUGANDA_PCT_WORDS = [
+    ("kumi na bbiri", "12"),
+    ("kumi na biri", "12"),
+    ("kumi na bitaano", "15"),
+    ("kumi na tano", "15"),
+    ("kumi na munaana", "18"),
+    ("kumi na munaanana", "18"),
+    ("kumi", "10"),
+    ("mukaaga", "6"),
+    ("abiri", "20"),
+    ("amakumi abiri", "20"),
+    ("asatu", "30"),
+    ("amakumi asatu", "30"),
+    ("ana", "40"),
+    ("amakumi ana", "40"),
+]
+
 # A money amount: comma- or space-grouped ("1,500,000"), plain ("335000"), or
 # suffixed ("1.5m", "300 million").  Percentages are excluded by the caller.
 _AMOUNT_RE = re.compile(
-    r"(?:ugx|ug\s?shs?|shs|shillings?)?\s*"
+    r"(?:ugx|ug\s?shs?|shs|shillings?|ssente|ensimbi|shilingi)?\s*"
     r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\s*"
-    r"(k|m|bn|b|thousand|million|billion|milioni|bilioni|elfu|laki|obukadde|obuwumbi|emitwalo|enkumi)?\b",
+    r"(k|m|bn|b|thousand|million|billion|milioni|bilioni|elfu|laki|obukadde|akakadde|obuwumbi|akawumbi|emitwalo|omutwalo|enkumi|olukumi)?\b",
     re.IGNORECASE,
 )
 _AMOUNT_SUFFIX = {
@@ -68,14 +85,18 @@ _AMOUNT_SUFFIX = {
     "elfu": 1_000,
     "laki": 100_000,
     "obukadde": 1_000_000,
+    "akakadde": 1_000_000,
     "obuwumbi": 1_000_000_000,
+    "akawumbi": 1_000_000_000,
     "emitwalo": 10_000,
+    "omutwalo": 10_000,
     "enkumi": 1_000,
+    "olukumi": 1_000,
 }
 
 # Multipliers placed BEFORE digits (common in Swahili & Luganda, e.g. "milioni 150", "obukadde 150")
 _AMOUNT_PREFIX_RE = re.compile(
-    r"\b(milioni|bilioni|elfu|laki|obukadde|obuwumbi|emitwalo|enkumi)\s+"
+    r"\b(milioni|bilioni|elfu|laki|obukadde|akakadde|obuwumbi|akawumbi|emitwalo|omutwalo|enkumi|olukumi)\s+"
     r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\b",
     re.IGNORECASE,
 )
@@ -85,9 +106,13 @@ _AMOUNT_PREFIX_MULTIPLIERS = {
     "elfu": 1_000,
     "laki": 100_000,
     "obukadde": 1_000_000,
+    "akakadde": 1_000_000,
     "obuwumbi": 1_000_000_000,
+    "akawumbi": 1_000_000_000,
     "emitwalo": 10_000,
+    "omutwalo": 10_000,
     "enkumi": 1_000,
+    "olukumi": 1_000,
 }
 
 #: Statements *about the rule* — a wrong amount here is a factual error about
@@ -117,6 +142,13 @@ def percentages(text: str) -> set[str]:
     check_text = lowered
     for word_phrase, num_str in _SWAHILI_PCT_WORDS:
         pattern = r"\basilimia\s+" + re.escape(word_phrase) + r"\b"
+        if re.search(pattern, check_text):
+            results.add(num_str)
+            check_text = re.sub(pattern, " ", check_text)
+
+    # Detect Luganda spoken percentage phrases, e.g. "ebitundu kumi na munaana" -> "18"
+    for word_phrase, num_str in _LUGANDA_PCT_WORDS:
+        pattern = r"\bebitundu\s+" + re.escape(word_phrase) + r"\b"
         if re.search(pattern, check_text):
             results.add(num_str)
             check_text = re.sub(pattern, " ", check_text)
