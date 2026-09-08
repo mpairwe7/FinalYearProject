@@ -46,7 +46,7 @@ import httpx
 # ---------------------------------------------------------------------------
 # Telemetry Helper
 # ---------------------------------------------------------------------------
-def get_gpu_telemetry(gpu_id: int = 7) -> dict[str, Any]:
+def get_gpu_telemetry(gpu_id: int = 4) -> dict[str, Any]:
     try:
         cmd = [
             "nvidia-smi",
@@ -66,7 +66,7 @@ def get_gpu_telemetry(gpu_id: int = 7) -> dict[str, Any]:
                 "temperature_c": float(out[6]),
                 "power_draw_w": float(out[7]),
             }
-    except Exception as ex:
+    except Exception:
         pass
     return {"gpu_index": gpu_id, "error": "telemetry_unavailable"}
 
@@ -81,6 +81,7 @@ class EvalFAQ:
     topic: str
     query: str
     expected_keywords: list[str]
+    locale: str = "en"
     expected_numbers: list[str] = field(default_factory=list)
     statutory_citations: list[str] = field(default_factory=list)
     session_id: str | None = None
@@ -98,6 +99,7 @@ class EvalResult:
     domain: str
     topic: str
     query: str
+    locale: str
     status_code: int
     latency_s: float
     retrieval_mode: str
@@ -499,8 +501,9 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
     # Create 25 sessions (200 turns)
     session_counter = 1
     # First 5 hand-crafted sessions
-    for j in journeys:
+    for j_idx, j in enumerate(journeys, 1):
         sid = f"SESSION-{session_counter:03d}"
+        sess_loc = "lg" if j_idx in (3, 4) else ("sw" if j_idx == 5 else "en")
         for turn_idx, t in enumerate(j["turns"], 1):
             faqs.append(
                 EvalFAQ(
@@ -508,6 +511,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                     domain=j["domain"],
                     topic=j["topic"],
                     query=t["query"],
+                    locale=sess_loc,
                     expected_keywords=t["kw"],
                     expected_numbers=t.get("nums", []),
                     statutory_citations=t.get("cits", []),
@@ -527,6 +531,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
         tmpl_name, tmpl_domain, tmpl_turns = journey_templates[(session_counter - 6) % len(journey_templates)]
         sid = f"SESSION-{session_counter:03d}"
         j_id = f"JRN-{session_counter:02d}"
+        sess_loc = "lg" if session_counter in (14, 15, 16, 17, 18, 19) else ("sw" if session_counter in (20, 21, 22, 23, 24, 25) else "en")
         for turn_idx, (q_text, kws) in enumerate(tmpl_turns, 1):
             faqs.append(
                 EvalFAQ(
@@ -534,6 +539,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                     domain=tmpl_domain,
                     topic=tmpl_name.lower().replace(" ", "_")[:30],
                     query=q_text,
+                    locale=sess_loc,
                     expected_keywords=kws,
                     expected_numbers=[],
                     statutory_citations=[],
@@ -609,12 +615,19 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
         if not kws:
             kws = ["tax", "ura"]
 
+        loc = "lg" if (single_turn_id % 4 == 0) else ("sw" if (single_turn_id % 4 == 1) else "en")
+        if loc == "lg":
+            kws = kws + ["omusolo", "ura"]
+        elif loc == "sw":
+            kws = kws + ["kodi", "ura"]
+
         faqs.append(
             EvalFAQ(
                 faq_id=f"FAQ-{single_turn_id:04d}",
                 domain=domain,
                 topic=src.replace("ura_", "").replace("_faqs.jsonl", "")[:30],
                 query=q_clean,
+                locale=loc,
                 expected_keywords=kws,
                 expected_numbers=[],
                 statutory_citations=[],
@@ -683,12 +696,18 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 if len(faqs) >= 1000:
                     break
                 kws = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", q_text) if w.lower() not in {"what", "when", "where", "does", "from", "with"}][:3]
+                loc = "lg" if (single_turn_id % 4 == 0) else ("sw" if (single_turn_id % 4 == 1) else "en")
+                if loc == "lg":
+                    kws = (kws or ["tax", "ura"]) + ["omusolo", "ura"]
+                elif loc == "sw":
+                    kws = (kws or ["tax", "ura"]) + ["kodi", "ura"]
                 faqs.append(
                     EvalFAQ(
                         faq_id=f"FAQ-{single_turn_id:04d}",
                         domain=dom,
                         topic=top,
                         query=q_text,
+                        locale=loc,
                         expected_keywords=kws or ["tax", "ura"],
                         expected_numbers=[],
                         statutory_citations=[],
@@ -728,7 +747,10 @@ class URAEvaluationEngine:
             if faq.session_id:
                 conv_id = self.session_contexts.get(faq.session_id)
 
-            payload: dict[str, Any] = {"message": faq.query}
+            payload: dict[str, Any] = {
+                "message": faq.query,
+                "locale": getattr(faq, "locale", "en"),
+            }
             if conv_id:
                 payload["conversation_id"] = conv_id
 
@@ -739,7 +761,12 @@ class URAEvaluationEngine:
             latency = 0.0
 
             try:
-                resp = await client.post(self.chat_url, json=payload, timeout=60.0)
+                resp = await client.post(
+                    self.chat_url,
+                    json=payload,
+                    headers={"ngrok-skip-browser-warning": "true"},
+                    timeout=60.0,
+                )
                 latency = time.perf_counter() - t0
                 status_code = resp.status_code
                 if resp.status_code == 200:
@@ -821,6 +848,7 @@ class URAEvaluationEngine:
                 domain=faq.domain,
                 topic=faq.topic,
                 query=faq.query,
+                locale=getattr(faq, "locale", "en"),
                 status_code=status_code,
                 latency_s=latency,
                 retrieval_mode=retrieval_mode,
@@ -919,7 +947,7 @@ class URAEvaluationEngine:
                             sess_res.append(r)
                     total_completed = len(completed_results)
                     save_checkpoint()
-                    telem = get_gpu_telemetry(7)
+                    telem = get_gpu_telemetry(4)
                     mean_s = statistics.mean([x.latency_s for x in sess_res]) if sess_res else 0.0
                     print(
                         f"[{total_completed:04d}/{len(faqs):04d} ({(total_completed/len(faqs))*100:5.1f}%)] "
@@ -957,7 +985,7 @@ class URAEvaluationEngine:
                 recent_latencies = [r.latency_s for r in chunk_results]
                 mean_lat = statistics.mean(recent_latencies) if recent_latencies else 0.0
                 pass_count = sum(1 for r in chunk_results if r.status_code == 200)
-                telem = get_gpu_telemetry(7)
+                telem = get_gpu_telemetry(4)
                 print(
                     f"[{total_completed:04d}/{len(faqs):04d} ({pct:5.1f}%)] "
                     f"Batch Success: {pass_count}/{len(chunk_results)} | "
@@ -971,7 +999,7 @@ class URAEvaluationEngine:
         all_results = [completed_results[f.faq_id] for f in faqs if f.faq_id in completed_results]
 
         total_elapsed = time.time() - start_time
-        final_telemetry = get_gpu_telemetry(7)
+        final_telemetry = get_gpu_telemetry(4)
 
         # -------------------------------------------------------------------
         # Metrics Compilation & Statistical Aggregation
@@ -1001,6 +1029,40 @@ class URAEvaluationEngine:
         cust_acc = statistics.mean([r.accuracy_score for r in cust_results]) * 100 if cust_results else 0.0
         edu_acc = statistics.mean([r.accuracy_score for r in edu_results]) * 100 if edu_results else 0.0
 
+        # Multilingual breakdown
+        en_results = [r for r in successful if r.locale == "en"]
+        lg_results = [r for r in successful if r.locale == "lg"]
+        sw_results = [r for r in successful if r.locale == "sw"]
+
+        en_acc = statistics.mean([r.accuracy_score for r in en_results]) * 100 if en_results else 0.0
+        lg_acc = statistics.mean([r.accuracy_score for r in lg_results]) * 100 if lg_results else 0.0
+        sw_acc = statistics.mean([r.accuracy_score for r in sw_results]) * 100 if sw_results else 0.0
+
+        en_lats = [r.latency_s for r in en_results]
+        lg_lats = [r.latency_s for r in lg_results]
+        sw_lats = [r.latency_s for r in sw_results]
+
+        multilingual_breakdown = {
+            "english": {
+                "count": len(en_results),
+                "accuracy_pct": round(en_acc, 2),
+                "p50_latency_s": round(statistics.median(en_lats), 3) if en_lats else 0,
+                "mean_latency_s": round(statistics.mean(en_lats), 3) if en_lats else 0,
+            },
+            "luganda": {
+                "count": len(lg_results),
+                "accuracy_pct": round(lg_acc, 2),
+                "p50_latency_s": round(statistics.median(lg_lats), 3) if lg_lats else 0,
+                "mean_latency_s": round(statistics.mean(lg_lats), 3) if lg_lats else 0,
+            },
+            "swahili": {
+                "count": len(sw_results),
+                "accuracy_pct": round(sw_acc, 2),
+                "p50_latency_s": round(statistics.median(sw_lats), 3) if sw_lats else 0,
+                "mean_latency_s": round(statistics.mean(sw_lats), 3) if sw_lats else 0,
+            },
+        }
+
         # Multi-turn long-horizon context retention
         mt_results = [r for r in successful if r.is_multi_turn]
         context_retention_pct = (sum(1 for r in mt_results if r.context_preserved) / len(mt_results)) * 100 if mt_results else 100.0
@@ -1026,8 +1088,8 @@ class URAEvaluationEngine:
                 "total_duration_s": round(total_elapsed, 2),
                 "throughput_qps": round(throughput, 2),
                 "gpu_hardware": {
-                    "card": "NVIDIA RTX A6000",
-                    "gpu_index": 7,
+                    "card": "NVIDIA RTX A6000 (GPU 4 API/Speech + GPU 2 vLLM)",
+                    "gpu_index": 4,
                     "initial_vram_used_mb": initial_telemetry.get("memory_used_mb"),
                     "final_vram_used_mb": final_telemetry.get("memory_used_mb"),
                     "vram_headroom_mb": final_telemetry.get("memory_free_mb"),
@@ -1045,6 +1107,7 @@ class URAEvaluationEngine:
                 "zero_false_redaction_privacy_passed": (redacted_official_count == 0),
                 "average_faithfulness_score": round(avg_faithfulness, 3),
             },
+            "multilingual_breakdown": multilingual_breakdown,
             "latency_profile_s": {
                 "min": round(min(latencies), 3) if latencies else 0,
                 "median_p50": round(p50, 3),
@@ -1150,6 +1213,11 @@ def main():
     print(f"Total Duration:               {m['total_duration_s']}s ({m['throughput_qps']} req/sec)")
     print(f"Success Rate:                 {s['success_rate_pct']}%")
     print(f"Overall Accuracy:             {s['overall_accuracy_pct']}%")
+    if "multilingual_breakdown" in report:
+        mb = report["multilingual_breakdown"]
+        print(f"  - English (en) Accuracy:    {mb.get('english', {}).get('accuracy_pct')}% (p50: {mb.get('english', {}).get('p50_latency_s')}s, n={mb.get('english', {}).get('count')})")
+        print(f"  - Luganda (lg) Accuracy:    {mb.get('luganda', {}).get('accuracy_pct')}% (p50: {mb.get('luganda', {}).get('p50_latency_s')}s, n={mb.get('luganda', {}).get('count')})")
+        print(f"  - Swahili (sw) Accuracy:    {mb.get('swahili', {}).get('accuracy_pct')}% (p50: {mb.get('swahili', {}).get('p50_latency_s')}s, n={mb.get('swahili', {}).get('count')})")
     print(f"Domestic Taxes Accuracy:      {report['domain_accuracy_breakdown']['domestic_taxes']['accuracy_pct']}%")
     print(f"Customs & Trade Accuracy:     {report['domain_accuracy_breakdown']['customs_and_border_trade']['accuracy_pct']}%")
     print(f"Tax Education Accuracy:       {report['domain_accuracy_breakdown']['tax_education_and_formalisation']['accuracy_pct']}%")
