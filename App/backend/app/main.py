@@ -1531,7 +1531,6 @@ def document_status(
     }
 
 
-@app.get("/speech/health", response_model=SpeechHealthResponse, tags=["speech"], include_in_schema=False)
 @app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])
 def speech_health(
     request: Request,
