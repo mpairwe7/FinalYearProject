@@ -145,7 +145,7 @@ class ConsentWithdrawRequest(BaseModel):
 class DevTokenRequest(BaseModel):
     """Request payload for POST /v1/auth/dev-token."""
 
-    role: str = Field(default="ura_staff", description="Requested role: ura_staff, ura_admin, ura_auditor, or public")
+    role: str = Field(default="", description="Requested role: ura_staff, ura_admin, ura_auditor, or public")
     email: str = Field(default="", description="User email address")
     user_id: str = Field(default="", description="User identifier")
     tenant_id: str = Field(default="default", description="Tenant identifier")
@@ -159,4 +159,5 @@ class DevTokenResponse(BaseModel):
     email: str
     user_id: str
     authenticated: bool = True
+    redirect_url: str = Field(default="/", description="Canonical internal destination URL based on resolved role")
 

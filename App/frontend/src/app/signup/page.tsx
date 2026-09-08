@@ -40,10 +40,45 @@ const BENEFITS = [
     body: "Your profile — taxpayer type, industry, preferred detail level — shapes the answers, and conversations follow you between devices.",
   },
   {
-    title: "URA employees",
-    body: "Staff roles are granted by the identity provider, not requested here. Register first, then an administrator assigns the role.",
+    title: "URA employees & staff",
+    body: "Staff, admin, and auditor roles are predefined and assigned by URA Administration. Staff accounts are not registered here — sign in directly with your official credentials.",
   },
 ] as const;
+
+interface DerivedCredential {
+  saltHex: string;
+  hashHex: string;
+}
+
+async function deriveCredential(pwd: string, saltBytes?: Uint8Array): Promise<DerivedCredential> {
+  if (typeof window === "undefined" || !window.crypto?.subtle) {
+    throw new Error("Web Crypto API is required for secure authentication.");
+  }
+  const salt = saltBytes || window.crypto.getRandomValues(new Uint8Array(16));
+  const enc = new TextEncoder();
+  const keyMaterial = await window.crypto.subtle.importKey(
+    "raw",
+    enc.encode(pwd),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+  const derived = await window.crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: salt as unknown as BufferSource,
+      iterations: 100_000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256,
+  );
+  const toHex = (buf: Uint8Array) => Array.from(buf).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return {
+    saltHex: toHex(salt),
+    hashHex: toHex(new Uint8Array(derived)),
+  };
+}
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -54,7 +89,8 @@ export default function SignUpPage() {
   const [starting, setStarting] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [selectedRole, setSelectedRole] = useState("ura_staff");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [createdRole, setCreatedRole] = useState<string | null>(null);
 
@@ -65,20 +101,28 @@ export default function SignUpPage() {
   const handleLocalSignUp = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!email && !fullName) {
-        setStatus({ kind: "error", message: "Please provide an email or name." });
+      const userEmail = email.trim();
+      const userName = fullName.trim() || (userEmail ? userEmail.split("@")[0] : "taxpayer");
+      if (!userEmail) {
+        setStatus({ kind: "error", message: "Please enter your email address." });
+        return;
+      }
+      if (!password || password.length < 6) {
+        setStatus({ kind: "error", message: "Password must be at least 6 characters long." });
+        return;
+      }
+      if (confirmPassword && password !== confirmPassword) {
+        setStatus({ kind: "error", message: "Passwords do not match." });
         return;
       }
       setSubmitting(true);
       setStatus({ kind: "idle", message: "" });
       try {
-        const userEmail = email.trim() || (selectedRole === "public" ? "taxpayer@ura.go.ug" : `${selectedRole.replace("ura_", "")}@ura.go.ug`);
-        const userName = fullName.trim() || userEmail.split("@")[0];
         const res = await fetch("/api/v1/auth/dev-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            role: selectedRole,
+            role: "public",
             email: userEmail,
             user_id: userName,
           }),
@@ -95,18 +139,40 @@ export default function SignUpPage() {
           setSubmitting(false);
           return;
         }
+
+        // Derive salted PBKDF2 credential hash (CWE-287 / CWE-312: random salt, work-factor KDF, fail-closed)
+        if (typeof window !== "undefined") {
+          try {
+            const derived = await deriveCredential(password);
+            localStorage.setItem(
+              `taxpayer_cred_${userEmail.toLowerCase()}`,
+              JSON.stringify({
+                fullName: userName,
+                email: userEmail,
+                saltHex: derived.saltHex,
+                hashHex: derived.hashHex,
+                role: "public",
+              }),
+            );
+          } catch (cryptoErr) {
+            setStatus({ kind: "error", message: (cryptoErr as Error).message });
+            setSubmitting(false);
+            return;
+          }
+        }
+
         setAuthToken(data.token, "dev");
         setCreatedRole(data.role);
         setSubmitting(false);
         setStatus({
           kind: "info",
-          message: `Account created for ${data.email || data.user_id}! Redirecting to sign in...`,
+          message: `Taxpayer account created for ${data.email || data.user_id}! Redirecting to sign in...`,
         });
-        // Redirect user to sign-in screen with pre-filled credentials for a polished onboarding UX
+        // Redirect user to sign-in screen with pre-filled credentials for a seamless onboarding UX
         const params = new URLSearchParams();
         params.set("registered", "true");
         params.set("email", userEmail);
-        params.set("role", selectedRole);
+        params.set("role", "public");
         setTimeout(() => {
           router.push(`/signin?${params.toString()}`);
         }, 800);
@@ -115,7 +181,7 @@ export default function SignUpPage() {
         setStatus({ kind: "error", message: `Could not complete registration: ${(err as Error).message}` });
       }
     },
-    [email, fullName, selectedRole, router],
+    [email, fullName, password, confirmPassword, router],
   );
 
   const startSignUp = useCallback(async () => {
@@ -211,23 +277,22 @@ export default function SignUpPage() {
         {!OIDC_CONFIGURED && (
           <section className="signin-block signin-dev" aria-labelledby="signup-local-h">
             <div className="signin-dev-flag" role="note">
-              Quick Account Creation
+              Taxpayer Account Creation
             </div>
-            <h2 id="signup-local-h">Staff & User Registration</h2>
+            <h2 id="signup-local-h">Register Taxpayer Account</h2>
             <p className="signin-note">
-              Non-IT staff, officers, and taxpayers can create an account below to explore user queries, escalations, and system flows:
+              Create your account with your personal email (e.g. Gmail, Yahoo Mail, Outlook) to save tax conversations and customize your taxpayer profile:
             </p>
 
             <form onSubmit={handleLocalSignUp} style={{ display: "grid", gap: "10px" }}>
               <label className="signin-field">
-                <span>Full Name or Officer Name</span>
+                <span>Full Name</span>
                 <input
                   type="text"
                   className="signin-input"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Officer Grace"
-                  required
+                  placeholder="e.g. Ronald Kigozi"
                 />
               </label>
 
@@ -238,47 +303,36 @@ export default function SignUpPage() {
                   className="signin-input"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. grace.o@ura.go.ug"
+                  placeholder="e.g. yourname@gmail.com, yourname@yahoo.com"
                   required
                 />
               </label>
 
-              <fieldset className="signin-roles" style={{ marginTop: "6px" }}>
-                <legend>Role / Access Level</legend>
-                <label className={selectedRole === "ura_staff" ? "role-opt active" : "role-opt"}>
-                  <input
-                    type="radio"
-                    name="role"
-                    value="ura_staff"
-                    checked={selectedRole === "ura_staff"}
-                    onChange={() => setSelectedRole("ura_staff")}
-                  />
-                  <span className="role-name">URA Tax Agent (Staff)</span>
-                  <span className="role-hint">Work the escalation queue and inspect user query flows</span>
-                </label>
-                <label className={selectedRole === "ura_admin" ? "role-opt active" : "role-opt"}>
-                  <input
-                    type="radio"
-                    name="role"
-                    value="ura_admin"
-                    checked={selectedRole === "ura_admin"}
-                    onChange={() => setSelectedRole("ura_admin")}
-                  />
-                  <span className="role-name">URA Administrator</span>
-                  <span className="role-hint">Full operations and analytics console</span>
-                </label>
-                <label className={selectedRole === "public" ? "role-opt active" : "role-opt"}>
-                  <input
-                    type="radio"
-                    name="role"
-                    value="public"
-                    checked={selectedRole === "public"}
-                    onChange={() => setSelectedRole("public")}
-                  />
-                  <span className="role-name">Taxpayer (Citizen)</span>
-                  <span className="role-hint">Ask tax questions with saved multi-turn conversations</span>
-                </label>
-              </fieldset>
+              <label className="signin-field">
+                <span>Create Password</span>
+                <input
+                  type="password"
+                  className="signin-input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  required
+                  minLength={6}
+                />
+              </label>
+
+              <label className="signin-field">
+                <span>Confirm Password</span>
+                <input
+                  type="password"
+                  className="signin-input"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-type your password"
+                  required
+                  minLength={6}
+                />
+              </label>
 
               <button
                 type="submit"
@@ -286,9 +340,24 @@ export default function SignUpPage() {
                 style={{ marginTop: "6px" }}
                 disabled={submitting}
               >
-                {submitting ? "Creating Account…" : "Create Account & Sign In"}
+                {submitting ? "Creating Account…" : "Create Taxpayer Account"}
               </button>
             </form>
+
+            <div className="signin-staff-notice" style={{ marginTop: "16px", padding: "12px", background: "var(--surface-2)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-0)" }}>
+              <div style={{ fontWeight: 600, fontSize: "12.5px", color: "var(--text-1)", marginBottom: "4px" }}>
+                🏛️ URA Staff, Administrators & Auditors
+              </div>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-2)", lineHeight: 1.45 }}>
+                Staff roles and access privileges are pre-assigned by URA Administration and do not register here.
+                Official personnel should go directly to the sign-in portal.
+              </p>
+              <div style={{ marginTop: "8px" }}>
+                <Link href="/signin" style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ura-blue-bright)" }}>
+                  Sign in with predefined staff credentials →
+                </Link>
+              </div>
+            </div>
           </section>
         )}
 

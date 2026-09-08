@@ -65,9 +65,19 @@ export function roleLabel(role: string | undefined | null): string {
   return ROLE_LABEL[role] ?? role;
 }
 
-/** What a staff sign-in should land on: agents work the queue, the rest oversee. */
+/** What a staff sign-in should land on: agents work the queue, auditors inspect analytics, admins oversee ops. */
 export function staffLandingPath(role: string | undefined | null): string {
-  return role === "ura_staff" ? "/agent" : "/admin";
+  if (role === "ura_staff") return "/agent";
+  if (role === "ura_auditor") return "/analytics";
+  return "/admin";
+}
+
+/** Determine the internal destination based on detected role: staff/admin/auditor to their resources, normal users to chat. */
+export function landingPathForRole(role: string | undefined | null): string {
+  if (role === "ura_staff") return "/agent";
+  if (role === "ura_admin") return "/admin";
+  if (role === "ura_auditor") return "/analytics";
+  return "/";
 }
 
 /**
