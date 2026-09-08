@@ -124,32 +124,38 @@ def run_qa_suite() -> dict[str, Any]:
     print("SECTION 1: Non-IT 1-Click Login & Staff Token Flow (Eliminating Python CLI)")
     print("-" * 70)
     auth_tests = [
-        {"role": "ura_staff", "email": "officer.grace@ura.go.ug", "user_id": "grace-officer"},
-        {"role": "ura_admin", "email": "admin@ura.go.ug", "user_id": "admin-user"},
-        {"role": "ura_auditor", "email": "auditor@ura.go.ug", "user_id": "auditor-user"},
-        {"role": "public", "email": "taxpayer@example.com", "user_id": "citizen-user"},
+        {"role": "ura_staff", "email": "agent.sarah@ura.go.ug", "user_id": "agent-sarah", "expected_dest": "/agent"},
+        {"role": "ura_admin", "email": "admin@ura.go.ug", "user_id": "admin-user", "expected_dest": "/admin"},
+        {"role": "ura_auditor", "email": "auditor@ura.go.ug", "user_id": "auditor-user", "expected_dest": "/analytics"},
+        {"role": "public", "email": "taxpayer@gmail.com", "user_id": "citizen-user", "expected_dest": "/"},
+        {"role": "ura_admin", "email": "admin@gmail.com", "user_id": "spoof-user", "expected_dest": "/", "expected_role": "public"},
     ]
     auth_results = []
     for test in auth_tests:
         code, body, el = http_request("/v1/auth/dev-token", method="POST", payload=test)
         token = body.get("token", "")
         token_valid = code == 200 and len(token.split(".")) == 3
+        expected_role = test.get("expected_role", test["role"])
+        dest_matches = body.get("redirect_url") == test["expected_dest"]
         
         # Test /v1/me whoami verification using the token
         me_code, me_body, me_el = http_request("/v1/me", headers={"Authorization": f"Bearer {token}"})
-        role_matches = me_body.get("role") == test["role"]
+        role_matches = me_body.get("role") == expected_role
+        test_passed = token_valid and role_matches and dest_matches
         
         auth_results.append({
             "requested_role": test["role"],
+            "resolved_role": body.get("role"),
+            "redirect_url": body.get("redirect_url"),
             "status_code": code,
             "token_minted": token_valid,
             "me_status_code": me_code,
             "me_role": me_body.get("role"),
             "latency_ms": round(el, 2),
-            "pass": token_valid and role_matches,
+            "pass": test_passed,
         })
-        status_sym = "PASS" if (token_valid and role_matches) else "FAIL"
-        print(f"  [{status_sym}] Mint & Verify '{test['role']}' -> HTTP {code} in {el:.1f}ms | /v1/me Role: {me_body.get('role')}")
+        status_sym = "PASS" if test_passed else "FAIL"
+        print(f"  [{status_sym}] Mint & Verify '{test['role']}' -> HTTP {code} in {el:.1f}ms | Role: {me_body.get('role')} | Dest: {body.get('redirect_url')}")
 
     report["sections"]["non_it_auth"] = auth_results
 

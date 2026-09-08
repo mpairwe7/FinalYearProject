@@ -210,8 +210,46 @@ def test_speech_endpoints() -> bool:
     return True
 
 
+def test_role_auth_routing() -> bool:
+    log("=== 5. Role Authentication & Internal Destination Routing ===")
+    auth_cases = [
+        {"role": "public", "email": "taxpayer@gmail.com", "expected_dest": "/", "expected_role": "public"},
+        {"role": "ura_staff", "email": "agent.sarah@ura.go.ug", "expected_dest": "/agent", "expected_role": "ura_staff"},
+        {"role": "ura_admin", "email": "admin@ura.go.ug", "expected_dest": "/admin", "expected_role": "ura_admin"},
+        {"role": "ura_auditor", "email": "auditor@ura.go.ug", "expected_dest": "/analytics", "expected_role": "ura_auditor"},
+        {"role": "ura_admin", "email": "admin@gmail.com", "expected_dest": "/", "expected_role": "public"},
+    ]
+
+    for c in auth_cases:
+        t0 = time.perf_counter()
+        status, resp = http_post("/api/v1/auth/dev-token", {
+            "email": c["email"],
+            "role": c["role"],
+        })
+        el = (time.perf_counter() - t0) * 1000
+        assert status == 200, f"Failed dev-token for {c['email']}: {status} {resp}"
+        role = resp.get("role")
+        dest = resp.get("redirect_url")
+        token = resp.get("token")
+        assert role == c["expected_role"], f"Expected role {c['expected_role']}, got {role} for {c['email']}"
+        assert dest == c["expected_dest"], f"Expected dest {c['expected_dest']}, got {dest} for {c['email']}"
+        assert token and len(token.split(".")) == 3, f"Invalid token issued for {c['email']}"
+
+        # Verify token against /api/v1/me
+        url = f"{BASE_URL}/api/v1/me"
+        req = urllib.request.Request(url, headers={**HEADERS, "Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=15) as me_resp:
+            me_body = json.loads(me_resp.read().decode("utf-8"))
+            assert me_body.get("role") == c["expected_role"], f"Whoami role mismatch: {me_body}"
+
+        log(f"  [PASS] Auth '{c['email']}' -> Role: {role}, Dest: {dest} in {el:.1f}ms (Verified via /v1/me)")
+
+    log(" Role Authentication & Routing PASSED\n")
+    return True
+
+
 def test_security_boundaries() -> bool:
-    log("=== 5. Security & Boundary Checks ===")
+    log("=== 6. Security & Boundary Checks ===")
     # Unauthenticated admin access should be rejected
     status, body = http_get("/api/v1/admin/tickets/stats")
     log(f"GET /api/v1/admin/tickets/stats without auth -> HTTP {status}")
@@ -226,6 +264,7 @@ def main() -> int:
     
     tests = [
         ("Health Checks", test_health),
+        ("Role Auth & Internal Routing", test_role_auth_routing),
         ("Single Turn Hybrid RAG", test_single_turn_hybrid),
         ("Multi-Turn Rolling Context & Session Memory", test_multi_turn_rolling_context),
         ("Speech TTS Endpoints", test_speech_endpoints),
