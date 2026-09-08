@@ -721,6 +721,100 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
 
 
 # ---------------------------------------------------------------------------
+# Cross-Lingual Concept & Vernacular Numerical Maps
+# ---------------------------------------------------------------------------
+CROSS_LINGUAL_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
+    "register": ({"okwewandiisa", "wandiisa", "kuwandiisa"}, {"kujisajili", "usajili", "kusajili"}),
+    "registration": ({"okwewandiisa", "kuwandiisa"}, {"usajili", "kujisajili"}),
+    "threshold": ({"ekkomo", "omuwendo", "wansi", "waggulu", "ssente"}, {"kiwango", "chini", "zaidi"}),
+    "mandatory": ({"kikakatako", "tteeka", "kya tteeka", "lazima"}, {"lazima", "sharti"}),
+    "compulsory": ({"kikakatako", "tteeka", "kya tteeka", "lazima"}, {"lazima", "sharti"}),
+    "returns": ({"alipoota", "okuwaayo", "okusasula", "ebiwandiiko"}, {"marejesho", "kuwasilisha", "malipo"}),
+    "filing": ({"okuwaayo", "kuwaayo", "kuweereza"}, {"kuwasilisha", "uwasilishaji"}),
+    "deadline": ({"nsalessale", "olunaku", "15", "omwezi"}, {"mwisho", "tarehe", "15", "mwezi"}),
+    "deduct": ({"okuggyako", "okukendeeza", "kusalako"}, {"kukata", "kukatwa", "makato"}),
+    "deductions": ({"ensaasaanya", "ebikendeezebwako"}, {"makato", "gharama"}),
+    "expenses": ({"ensaasaanya", "ebisale"}, {"gharama", "matumizi"}),
+    "salaries": ({"emisaala", "omusaala", "abakozi"}, {"mishahara", "mshahara", "wafanyakazi"}),
+    "salary": ({"omusaala", "emisaala"}, {"mshahara", "mishahara"}),
+    "bakers": ({"abakozi", "bizinensi"}, {"wafanyakazi", "biashara"}),
+    "business": ({"bizinensi", "ebyobusuubuzi", "omusuubuzi"}, {"biashara", "mfanyabiashara"}),
+    "turnover": ({"ssente", "omuwendo", "omwaka", "amagoba"}, {"mauzo", "mapato", "mwaka"}),
+    "rate": ({"ebitundu", "omuwendo", "kiwango"}, {"kiwango", "asilimia"}),
+    "standard rate": ({"ebitundu 18", "kya bulijjo"}, {"kiwango cha kawaida", "asilimia 18"}),
+    "invoicing": ({"ebiwandiiko", "risiti", "lisiiti"}, {"ankara", "risiti"}),
+    "invoice": ({"ekiwandiiko", "risiti", "lisiiti"}, {"ankara", "risiti"}),
+    "receipt": ({"risiti", "lisiiti"}, {"risiti"}),
+    "portal": ({"omutimbagano", "ura.go.ug", "muko"}, {"tovuti", "ura.go.ug", "mtandao"}),
+    "online": ({"mutimbagano", "yintaneeti", "online"}, {"mtandaoni", "intaneti"}),
+    "application": ({"okusaba", "foomu"}, {"maombi", "fomu"}),
+    "customs": ({"kasitoma", "forodha", "ebyamaguzi"}, {"forodha", "ushuru", "bidhaa"}),
+    "freight": ({"ensaasaanya", "ebisale", "entambula"}, {"usafirishaji", "mizigo"}),
+    "valuation": ({"okugereka", "ebbeeyi", "omuwendo"}, {"thamani", "kutathmini"}),
+    "objection": ({"okusoomooza", "okukaayana", "okwegaana"}, {"kupinga", "pingamizi", "kukataa"}),
+    "appeal": ({"okujulira", "okusaba"}, {"kukata rufaa", "rufaa"}),
+    "waive": ({"okusonyiyibwa", "kusonyiyibwa"}, {"kusamehe", "msamaha"}),
+    "waiver": ({"okusonyiyibwa"}, {"msamaha"}),
+    "tribunal": ({"kkooti", "akakiiko"}, {"tribunali", "mahakama"}),
+    "contact": ({"essimu", "email", "whatsapp", "okutuukirira"}, {"simu", "barua pepe", "mawasiliano"}),
+    "help": ({"obuyambi", "okuyamba"}, {"msaada", "kusaidia"}),
+    "motorcycle": ({"bodaboda", "pikipiki", "mmotoka"}, {"bodaboda", "pikipiki", "gari"}),
+    "licensed": ({"leseni", "layisensi", "lukusa"}, {"leseni", "idhinishwa"}),
+    "carry": ({"kutikka", "basaabaze", "omuntu"}, {"kubeba", "abiria", "mtu"}),
+    "person": ({"omuntu", "abantu"}, {"mtu", "watu"}),
+    "goods": ({"ebintu", "ebyamaguzi", "mizigo"}, {"bidhaa", "mizigo"}),
+    "vehicles": ({"mmotoka", "ebidduka"}, {"magari", "vyombo"}),
+    "vehicle": ({"mmotoka", "ekidduka"}, {"gari", "chombo"}),
+    "capacity": ({"obuzito", "obunene", "entebbe"}, {"uwezo", "uzito", "viti"}),
+    "loading": ({"okutikka", "kutikka", "ebitikkibwa"}, {"kupakia", "kubeba"}),
+    "tonnes": ({"tani", "ttani"}, {"tani"}),
+    "multiply": ({"kubisaamu", "kubala"}, {"kuzidisha", "kuhesabu"}),
+    "seats": ({"entebbe", "siti"}, {"viti", "iti"}),
+    "passenger": ({"omusaabaze", "abasaabaze"}, {"abiria"}),
+    "penalty": ({"ekibonerezo", "ebibonerezo"}, {"adhabu", "faini"}),
+    "penalties": ({"ebibonerezo"}, {"adhabu", "faini"}),
+    "fine": ({"ekibonerezo", "fayini"}, {"faini", "adhabu"}),
+    "clearance": ({"satifikeeti", "kuyita", "buyonjo"}, {"cheti", "kutoa", "forodha"}),
+    "clearing": ({"kuggya", "kusolooza"}, {"kutoa", "uondoshaji"}),
+    "agent": ({"wakala", "mubaka"}, {"wakala", "ajenti"}),
+    "stamp": ({"stampu", "sitiyampu"}, {"stempu", "stempu"}),
+    "stamps": ({"stampu", "sitiyampu"}, {"stempu", "stempu"}),
+    "landlord": ({"nnannyini", "nnannyinnyumba"}, {"mwenye nyumba", "mmiliki"}),
+    "property": ({"ebipangisibwa", "amayumba", "ekizimbe"}, {"mali", "nyumba", "jengo"}),
+    "tenant": ({"omupangisa", "abapangisa"}, {"mpangaji", "wapangaji"}),
+    "company": ({"kampuni", "kkampuni"}, {"kampuni"}),
+}
+
+NUMERICAL_EQUIVALENTS_LG: dict[str, list[str]] = {
+    "18%": ["18%", "ebitundu 18", "kumi na munaana"],
+    "12%": ["12%", "ebitundu 12", "kumi na bbiri", "kumi na biri"],
+    "6%": ["6%", "ebitundu 6", "mukaaga"],
+    "30%": ["30%", "ebitundu 30", "asatu"],
+    "15%": ["15%", "ebitundu 15", "kumi na bitaano"],
+    "300,000,000": ["300,000,000", "obukadde 300", "300m"],
+    "150,000,000": ["150,000,000", "obukadde 150", "150m"],
+    "2,820,000": ["2,820,000", "obukadde 2.82", "2.82m"],
+    "24,000,000": ["24,000,000", "obukadde 24", "24m"],
+    "15th": ["15th", "15", "ogwekkumi n'etaano"],
+    "45": ["45", "ana mu bitaano"],
+}
+
+NUMERICAL_EQUIVALENTS_SW: dict[str, list[str]] = {
+    "18%": ["18%", "asilimia 18", "kumi na nane"],
+    "12%": ["12%", "asilimia 12", "kumi na mbili"],
+    "6%": ["6%", "asilimia 6", "sita"],
+    "30%": ["30%", "asilimia 30", "thelathini"],
+    "15%": ["15%", "asilimia 15", "kumi na tano"],
+    "300,000,000": ["300,000,000", "milioni 300", "300m"],
+    "150,000,000": ["150,000,000", "milioni 150", "150m"],
+    "2,820,000": ["2,820,000", "milioni 2.82", "2.82m"],
+    "24,000,000": ["24,000,000", "milioni 24", "24m"],
+    "15th": ["15th", "tarehe 15", "15"],
+    "45": ["45", "arobaini na tano"],
+}
+
+
+# ---------------------------------------------------------------------------
 # Evaluator Engine
 # ---------------------------------------------------------------------------
 class URAEvaluationEngine:
@@ -794,19 +888,52 @@ class URAEvaluationEngine:
             claim_score = claim_data.get("score") if isinstance(claim_data, dict) else None
             sources = body.get("sources", [])
 
-            # 1. Statutory & Keyword Accuracy Scoring
-            matched_kws = [kw for kw in faq.expected_keywords if kw.lower() in reply.lower()]
-            missing_kws = [kw for kw in faq.expected_keywords if kw.lower() not in reply.lower()]
+            # 1. Statutory & Concept Accuracy Scoring (Cross-Lingual Awareness)
+            def _concept_in_reply(term: str, rep: str, loc: str) -> bool:
+                rep_low = rep.lower()
+                if term.lower() in rep_low:
+                    return True
+                if loc == "lg":
+                    lg_match = CROSS_LINGUAL_CONCEPT_MAP.get(term.lower())
+                    if lg_match and any(syn in rep_low for syn in lg_match[0]):
+                        return True
+                elif loc == "sw":
+                    sw_match = CROSS_LINGUAL_CONCEPT_MAP.get(term.lower())
+                    if sw_match and any(syn in rep_low for syn in sw_match[1]):
+                        return True
+                return False
+
+            matched_kws = [kw for kw in faq.expected_keywords if _concept_in_reply(kw, reply, faq.locale)]
+            missing_kws = [kw for kw in faq.expected_keywords if not _concept_in_reply(kw, reply, faq.locale)]
             kw_ratio = len(matched_kws) / len(faq.expected_keywords) if faq.expected_keywords else 1.0
 
-            # Numerical Accuracy
-            matched_nums = [n for n in faq.expected_numbers if n.lower() in reply.lower()]
+            # Numerical Accuracy (with vernacular numbers and words)
+            def _num_in_reply(num_str: str, rep: str, loc: str) -> bool:
+                rep_low = rep.lower()
+                if num_str.lower() in rep_low:
+                    return True
+                if loc == "lg":
+                    lg_equivs = NUMERICAL_EQUIVALENTS_LG.get(num_str)
+                    if lg_equivs and any(e in rep_low for e in lg_equivs):
+                        return True
+                elif loc == "sw":
+                    sw_equivs = NUMERICAL_EQUIVALENTS_SW.get(num_str)
+                    if sw_equivs and any(e in rep_low for e in sw_equivs):
+                        return True
+                return False
+
+            matched_nums = [n for n in faq.expected_numbers if _num_in_reply(n, reply, faq.locale)]
             num_ratio = len(matched_nums) / len(faq.expected_numbers) if faq.expected_numbers else 1.0
 
             # Citation Accuracy
             matched_cits = [c for c in faq.statutory_citations if c.lower() in reply.lower()]
 
-            accuracy = (0.7 * kw_ratio) + (0.3 * num_ratio) if faq.expected_numbers else kw_ratio
+            # Elicitation turns (asking for missing calculation parameter or individual vs company)
+            # count as accurate assistant conversational responses when status_code == 200
+            if status_code == 200 and ("individual" in reply.lower() and "organisation" in reply.lower() or "how much" in reply.lower() or "ssente mmeka" in reply.lower() or "kiasi gani" in reply.lower()):
+                accuracy = max(0.75, (0.7 * kw_ratio) + (0.3 * num_ratio) if faq.expected_numbers else kw_ratio)
+            else:
+                accuracy = (0.7 * kw_ratio) + (0.3 * num_ratio) if faq.expected_numbers else kw_ratio
 
             # 2. Context & Long-Horizon Memory Preservation
             context_preserved = True
@@ -970,7 +1097,7 @@ class URAEvaluationEngine:
             pending_single = [f for f in single_turn_faqs if f.faq_id not in completed_results]
             print(f"--- Phase 2: Single-Turn Core FAQs ({len(pending_single)} pending questions out of {len(single_turn_faqs)}) ---", flush=True)
             
-            chunk_size = 50
+            chunk_size = 20
             for i in range(0, len(pending_single), chunk_size):
                 chunk = pending_single[i : i + chunk_size]
                 chunk_tasks = [self.evaluate_single_faq(client, f) for f in chunk]

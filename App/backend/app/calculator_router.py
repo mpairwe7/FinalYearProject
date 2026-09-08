@@ -664,8 +664,9 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me)\b[^?]*\b(rates?|thresholds?|bands?)\b"
-    r"|\b(rates?|thresholds?|bands?)\s+(of|for)\b",
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me|kiwango|omuwendo|bitundu|asilimia)\b[^?]*\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo|bitundu|asilimia)\b"
+    r"|\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo)\s+(of|for|kya|cha|ku|kwa|kye|gwa)\b"
+    r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente)\b",
     re.IGNORECASE,
 )
 
@@ -689,12 +690,12 @@ _RATE_CALENDAR_YEAR_RE = re.compile(
 # Every alternative names employment income, because PAYE is the only URA tax
 # charged on a salary; a turnover or rental question cannot reach this path.
 _PAYE_THRESHOLD_ASK_RE = re.compile(
-    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b[^?.!]{0,30}"
-    r"\b(tax[-\s]?free|exempt(?:ed)?|not\s+taxed|untaxed)\b"
-    r"|\b(tax[-\s]?free|exempt(?:ed)?)\b[^?.!]{0,30}"
-    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b"
+    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|mishahara|emisaala|omusaala)\b[^?.!]{0,30}"
+    r"\b(tax[-\s]?free|exempt(?:ed)?|not\s+taxed|untaxed|bure|bwereere|kutoswa)\b"
+    r"|\b(tax[-\s]?free|exempt(?:ed)?|bure|bwereere)\b[^?.!]{0,30}"
+    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|mishahara|emisaala|omusaala)\b"
     r"|\b(at|above|from|over)\s+what\b[^?.!]{0,40}"
-    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b[^?.!]{0,40}"
+    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|emisaala)\b[^?.!]{0,40}"
     r"\b(start|begin)\s+(?:to\s+)?pay(?:ing)?\b",
     re.IGNORECASE,
 )
@@ -706,19 +707,19 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="vat_registration_threshold_annual"),
         re.compile(
-            r"\bv\.?a\.?t\.?\b[^?]{0,40}\b(registration|register|threshold)\b"
-            r"|\b(registration|register|threshold)\b[^?]{0,40}\bv\.?a\.?t\.?\b",
+            r"\bv\.?a\.?t\.?\b[^?]{0,40}\b(registration|register|threshold|okwewandiisa|usajili|ekkomo|kiwango)\b"
+            r"|\b(registration|register|threshold|okwewandiisa|usajili|ekkomo|kiwango)\b[^?]{0,40}\bv\.?a\.?t\.?\b",
             re.IGNORECASE,
         ),
     ),
-    (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
-    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+bands?)\b", re.IGNORECASE)),
-    (RatePlan(tax_type="rental_tax_company"), re.compile(r"\b(compan(?:y|ies)|business)\b.*\brent(?:al)?\b|\brent(?:al)?\b.*\b(compan(?:y|ies)|business)\b", re.IGNORECASE)),
-    (RatePlan(summary="rental"), re.compile(r"\brent(?:al)?\b", re.IGNORECASE)),
-    (RatePlan(tax_type="capital_gains_corporate"), re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
+    (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht|zuio)\b", re.IGNORECASE)),
+    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+bands?|abakozi|wafanyakazi)\b", re.IGNORECASE)),
+    (RatePlan(tax_type="rental_tax_company"), re.compile(r"\b(compan(?:y|ies)|business|kkampuni|kampuni)\b.*(rent(?:al)?|upangishaji|bupangisa)|(rent(?:al)?|upangishaji|bupangisa).*\b(compan(?:y|ies)|business|kkampuni|kampuni)\b", re.IGNORECASE)),
+    (RatePlan(summary="rental"), re.compile(r"(rent(?:al)?|upangishaji|bupangisa|amayumba|nyumba)", re.IGNORECASE)),
+    (RatePlan(tax_type="capital_gains_corporate"), re.compile(r"\b(capital\s+gains?|cgt|magoba\s+ku\s+byamaguzi)\b", re.IGNORECASE)),
     (RatePlan(tax_type="corporation_tax"), re.compile(r"\b(corporation|corporate|company)\s+(income\s+)?tax\b", re.IGNORECASE)),
-    (RatePlan(tax_type="customs_duty_common"), re.compile(r"\b(customs|import\s+dut(?:y|ies))\b", re.IGNORECASE)),
-    (RatePlan(tax_type="vat_standard"), re.compile(r"\b(v\.?a\.?t\.?|value\s+added)\b", re.IGNORECASE)),
+    (RatePlan(tax_type="customs_duty_common"), re.compile(r"\b(customs|import\s+dut(?:y|ies)|ushuru\s+wa\s+forodha|omusolo\s+gw'okuyingiza)\b", re.IGNORECASE)),
+    (RatePlan(tax_type="vat_standard"), re.compile(r"\b(v\.?a\.?t\.?|value\s+added|ongezeko\s+la\s+thamani|okwongerako\s+omutindo)\b", re.IGNORECASE)),
 ]
 
 _WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
