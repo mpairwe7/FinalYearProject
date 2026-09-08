@@ -864,7 +864,10 @@ export default function Page() {
     try {
       const res = await fetch(`${API_URL}/v1/chat/stream`, {
         method: 'POST',
-        headers: requestHeaders,
+        headers: {
+          ...requestHeaders,
+          Accept: 'text/event-stream',
+        },
         body: requestBody,
         signal: ac.signal,
       });
@@ -891,7 +894,8 @@ export default function Page() {
           const { done, value } = await reader.read();
           if (done) break;
           buf += dec.decode(value, { stream: true });
-          const lines = buf.split('\n');
+          const normalized = buf.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          const lines = normalized.split('\n');
           buf = lines.pop() || '';
           for (const ln of lines) {
             if (ln.startsWith('event: ')) { evt = ln.slice(7).trim(); continue; }
@@ -971,7 +975,7 @@ export default function Page() {
         await reveal.finish();
       } finally { reader.releaseLock(); }
       if (!useChatStore.getState().chat.at(-1)?.content.trim()) {
-        await applySyncReply();
+        await recoverFromStreamFailure();
         setChatLiveStatus('URA response ready.');
         return;
       }

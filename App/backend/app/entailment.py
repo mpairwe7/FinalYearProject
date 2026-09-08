@@ -137,6 +137,9 @@ def canonical_amounts(text: str) -> set[float]:
     # Percentages are handled separately; drop them so "18%" is not read
     # as the amount 18.
     without_pct = _PCT_RE.sub(" ", lowered)
+    # Strip Ugandan toll-free and mobile phone numbers (e.g. 0800 117 000, 0772 140 000)
+    # so contact lines are not falsely parsed as tax amounts
+    without_pct = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", without_pct)
     amounts: set[float] = set()
 
     # 1. Prefix multipliers (e.g. "milioni 150", "obukadde 150", "emitwalo 23.5")

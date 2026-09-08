@@ -1113,10 +1113,12 @@ def translate_text(
             # Greedy: translation should be reproducible, and the same input
             # producing a different invented answer on each call is exactly
             # the failure mode the prompt above is guarding against.
-            # Bound tokens and timeout for translation to ensure sub-5s response.
-            token_budget = min(256, max(48, len(text.split()) * 2))
+            # Bound tokens for translation to ensure concise response.
+            # Bantu languages (Luganda, Swahili, etc.) have rich agglutinative morphology
+            # requiring ~3-4 subword tokens per English word.
+            token_budget = min(512, max(128, int(len(text.split()) * 3.5)))
             raw = (_vllm_generate(
-                messages, temperature=0.0, top_p=0.9, max_tokens=token_budget, timeout=12.0,
+                messages, temperature=0.0, top_p=0.9, max_tokens=token_budget, timeout=VLLM_HTTP_TIMEOUT,
             ) or "").strip()
             # Clean stray digit bracket glitches and rogue language tags
             raw = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", raw)
@@ -1156,7 +1158,7 @@ def translate_text(
                 # nosemgrep: ura-llm01-raw-user-input-to-llm
                 output_ids = _model.generate(
                     **inputs,
-                    max_new_tokens=min(len(text.split()) * 3 + 20, 256),
+                    max_new_tokens=min(512, max(128, int(len(text.split()) * 3.5))),
                     temperature=0.3,
                     top_p=0.9,
                     do_sample=True,

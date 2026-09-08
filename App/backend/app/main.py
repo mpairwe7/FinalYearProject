@@ -1115,7 +1115,13 @@ async def chat_stream(
         if agent_trace:
             yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(
+        event_generator(),
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 async def _sse_not_disconnected(request: Request) -> bool:
