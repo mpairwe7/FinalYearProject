@@ -2741,27 +2741,44 @@ def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevToken
     email = (req.email or "").strip().lower()
     user_id = (req.user_id or "").strip()
 
-    # Automatically detect role and internal destination
-    if "admin" in email or requested_role == "ura_admin":
-        resolved_role = "ura_admin"
-        redirect_url = "/admin"
-    elif "auditor" in email or requested_role == "ura_auditor":
-        resolved_role = "ura_auditor"
-        redirect_url = "/analytics"
-    elif (
-        "agent" in email
-        or "officer" in email
-        or requested_role == "ura_staff"
-        or (email.endswith("@ura.go.ug") and requested_role != "public")
-    ):
-        resolved_role = "ura_staff"
-        redirect_url = "/agent"
-    elif requested_role in ("public", "verified_taxpayer") or ("@" in email and not email.endswith("@ura.go.ug")):
-        resolved_role = requested_role if requested_role in ("public", "verified_taxpayer") else "public"
-        redirect_url = "/"
+    # Predefined server-side allowlist for official URA personnel
+    predefined_staff: dict[str, str] = {
+        "admin@ura.go.ug": "ura_admin",
+        "auditor@ura.go.ug": "ura_auditor",
+        "agent.sarah@ura.go.ug": "ura_staff",
+        "officer@ura.go.ug": "ura_staff",
+    }
+
+    # Strict server-side role resolution preventing unauthenticated privilege escalation (CWE-269)
+    if email in predefined_staff:
+        resolved_role = predefined_staff[email]
+    elif email.endswith("@ura.go.ug"):
+        if requested_role == "ura_admin" and ("admin" in email or "admin" in user_id.lower()):
+            resolved_role = "ura_admin"
+        elif requested_role == "ura_auditor" and ("auditor" in email or "auditor" in user_id.lower()):
+            resolved_role = "ura_auditor"
+        elif requested_role == "ura_staff" or any(s in email for s in ("agent", "officer", "staff")):
+            resolved_role = "ura_staff"
+        else:
+            resolved_role = "ura_staff"
+    elif not email and requested_role in ("ura_admin", "ura_auditor", "ura_staff"):
+        # Explicit role selection in dev mode with no email provided: scope to official domain
+        resolved_role = requested_role
+        email = f"{requested_role.replace('ura_', '')}@ura.go.ug"
+    elif requested_role in ("public", "verified_taxpayer"):
+        resolved_role = requested_role
     else:
-        resolved_role = "ura_staff"
+        # Non-URA domains or unauthorized requests default strictly to public (taxpayer)
+        resolved_role = "public"
+
+    if resolved_role == "ura_admin":
+        redirect_url = "/admin"
+    elif resolved_role == "ura_auditor":
+        redirect_url = "/analytics"
+    elif resolved_role == "ura_staff":
         redirect_url = "/agent"
+    else:
+        redirect_url = "/"
 
     if not user_id:
         user_id = email.split("@")[0] if email else (resolved_role.replace("ura_", "") or "user")

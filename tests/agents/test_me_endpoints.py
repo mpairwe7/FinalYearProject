@@ -444,6 +444,12 @@ class TestDevToken:
         assert r_citizen.json()["role"] == "public"
         assert r_citizen.json()["redirect_url"] == "/"
 
+        # Privilege escalation attempt with external email is blocked to public (CWE-269)
+        r_spoof = client.post("/v1/auth/dev-token", json={"email": "admin@gmail.com", "role": "ura_admin"})
+        assert r_spoof.status_code == 200
+        assert r_spoof.json()["role"] == "public"
+        assert r_spoof.json()["redirect_url"] == "/"
+
     def test_mint_disabled_in_production(self, monkeypatch, client):
         monkeypatch.setenv("APP_ENV", "production")
         r = client.post("/v1/auth/dev-token", json={"role": "ura_staff"})

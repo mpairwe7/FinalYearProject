@@ -61,16 +61,43 @@ const DEV_ROLE_OPTIONS = [
 const DEV_SIGNIN_ENABLED =
   process.env.NEXT_PUBLIC_DEV_SIGNIN === "true" || !OIDC_CONFIGURED;
 
-async function hashCredential(pwd: string, email: string): Promise<string> {
-  if (typeof window === "undefined" || !window.crypto?.subtle) {
-    return "";
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
   }
+  return bytes;
+}
+
+async function verifyCredential(pwd: string, saltHex: string, expectedHashHex: string): Promise<boolean> {
+  if (typeof window === "undefined" || !window.crypto?.subtle) {
+    throw new Error("Web Crypto API is required for secure authentication.");
+  }
+  if (!saltHex || !expectedHashHex) {
+    throw new Error("Credential store missing cryptographic hash or salt.");
+  }
+  const salt = hexToBytes(saltHex);
   const enc = new TextEncoder();
-  const data = enc.encode(`ura-taxpayer:${email.toLowerCase()}:${pwd}`);
-  const buffer = await window.crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  const keyMaterial = await window.crypto.subtle.importKey(
+    "raw",
+    enc.encode(pwd),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+  const derived = await window.crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: salt as unknown as BufferSource,
+      iterations: 100_000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256,
+  );
+  const toHex = (buf: Uint8Array) => Array.from(buf).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const derivedHex = toHex(new Uint8Array(derived));
+  return derivedHex === expectedHashHex;
 }
 
 export default function SignInPage() {
@@ -381,11 +408,11 @@ export default function SignInPage() {
         {DEV_SIGNIN_ENABLED && (
           <section className="signin-block signin-dev" aria-labelledby="dev-h">
             <div className="signin-dev-flag" role="note">
-              Authentication Portal
+              Prototype & Development Access
             </div>
             <h2 id="dev-h">Taxpayer Sign In</h2>
             <p className="signin-note">
-              Sign in with your personal email (e.g. Gmail, Yahoo Mail, Outlook). The system preserves your conversation history and tax profile preferences:
+              Sign in with your registered personal email. Note: This development sign-in verifies local credentials and mints session tokens for evaluation:
             </p>
 
             <form
@@ -401,20 +428,25 @@ export default function SignInPage() {
                   return;
                 }
 
-                // Verify saved credential hash if created locally (CWE-312: no plaintext)
+                // Verify saved credential hash if created locally (CWE-287 fail-closed PBKDF2 verification)
                 if (typeof window !== "undefined") {
                   try {
                     const raw = localStorage.getItem(`taxpayer_cred_${mail.toLowerCase()}`);
                     if (raw) {
                       const cred = JSON.parse(raw);
-                      const inputHash = await hashCredential(taxpayerPassword, mail);
-                      if (cred.pwdHash && cred.pwdHash !== inputHash) {
+                      if (!cred.hashHex || !cred.saltHex) {
+                        setStatus({ kind: "error", message: "Saved credentials lack cryptographic salt/hash. Please re-register." });
+                        return;
+                      }
+                      const valid = await verifyCredential(taxpayerPassword, cred.saltHex, cred.hashHex);
+                      if (!valid) {
                         setStatus({ kind: "error", message: "Incorrect password. Please verify your credentials." });
                         return;
                       }
                     }
-                  } catch {
-                    // pass through
+                  } catch (err) {
+                    setStatus({ kind: "error", message: `Authentication check failed: ${(err as Error).message}` });
+                    return;
                   }
                 }
 

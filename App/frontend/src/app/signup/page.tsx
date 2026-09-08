@@ -45,16 +45,39 @@ const BENEFITS = [
   },
 ] as const;
 
-async function hashCredential(pwd: string, email: string): Promise<string> {
+interface DerivedCredential {
+  saltHex: string;
+  hashHex: string;
+}
+
+async function deriveCredential(pwd: string, saltBytes?: Uint8Array): Promise<DerivedCredential> {
   if (typeof window === "undefined" || !window.crypto?.subtle) {
-    return "";
+    throw new Error("Web Crypto API is required for secure authentication.");
   }
+  const salt = saltBytes || window.crypto.getRandomValues(new Uint8Array(16));
   const enc = new TextEncoder();
-  const data = enc.encode(`ura-taxpayer:${email.toLowerCase()}:${pwd}`);
-  const buffer = await window.crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  const keyMaterial = await window.crypto.subtle.importKey(
+    "raw",
+    enc.encode(pwd),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+  const derived = await window.crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: salt as unknown as BufferSource,
+      iterations: 100_000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256,
+  );
+  const toHex = (buf: Uint8Array) => Array.from(buf).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return {
+    saltHex: toHex(salt),
+    hashHex: toHex(new Uint8Array(derived)),
+  };
 }
 
 export default function SignUpPage() {
@@ -117,16 +140,24 @@ export default function SignUpPage() {
           return;
         }
 
-        // Store salted credential hash locally for prototype login verification (CWE-312: no plaintext)
+        // Derive salted PBKDF2 credential hash (CWE-287 / CWE-312: random salt, work-factor KDF, fail-closed)
         if (typeof window !== "undefined") {
           try {
-            const pwdHash = await hashCredential(password, userEmail);
+            const derived = await deriveCredential(password);
             localStorage.setItem(
               `taxpayer_cred_${userEmail.toLowerCase()}`,
-              JSON.stringify({ fullName: userName, email: userEmail, pwdHash, role: "public" }),
+              JSON.stringify({
+                fullName: userName,
+                email: userEmail,
+                saltHex: derived.saltHex,
+                hashHex: derived.hashHex,
+                role: "public",
+              }),
             );
-          } catch {
-            // storage quota fallback
+          } catch (cryptoErr) {
+            setStatus({ kind: "error", message: (cryptoErr as Error).message });
+            setSubmitting(false);
+            return;
           }
         }
 
