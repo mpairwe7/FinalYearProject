@@ -1,6 +1,10 @@
 {
   "_comment": "Advisory IDs known to CI. The build fails on IDs absent from this file. Removing an entry is free; adding one should be a reviewed decision with an owner. Regenerate with --update.",
   "advisories": {
+    "CVE-2026-69112": {
+      "package": "accelerate",
+      "version": "1.14.0"
+    },
     "PYSEC-2025-194": {
       "package": "torch",
       "version": "2.12.1"

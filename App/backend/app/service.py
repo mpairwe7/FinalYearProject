@@ -2531,13 +2531,30 @@ def _is_already_in_locale(text: str, target_locale: str) -> bool:
     """Return True if *text* is already largely written in *target_locale*."""
     if not text or target_locale in ("", "en"):
         return False
-    lowered = " " + text.lower() + " "
+    # Strip any standard disclaimers before checking body language
+    body = re.sub(r"\*(?:Okulabula|Tahadhari|Note):.*$", "", text, flags=re.DOTALL).strip()
+    if not body:
+        return False
+
+    # Check if English words dominate the body
+    english_words = {
+        "the", "and", "is", "are", "to", "in", "of", "for", "that", "this",
+        "with", "from", "you", "your", "will", "have", "can", "be", "tax", "on"
+    }
+    words = [w.lower() for w in re.findall(r"\b[a-zA-Z']+\b", body)]
+    if words:
+        en_count = sum(1 for w in words if w in english_words)
+        if en_count >= 3 and (en_count / len(words)) > 0.08:
+            return False
+
+    lowered = " " + body.lower() + " "
     if target_locale == "sw":
         markers = (
             "kodi", "kwa", "katika", "kujisajili", "asilimia", "thamani", "ushuru",
             "marejesho", "huduma", "wafanyakazi", "mapato", "nchini", "binafsi",
             "kazi", "mwaka", "mwezi", "kutoa", "kulipa", "zaidi", "kiwango", "viwango",
             "habari", "jambo", "karibu", "asante", "shukrani", "ndiyo", "hapana",
+            "usajili", "ankara", "malipo", "namba", "forodha", "fomu", "lazima", "hiari", "mauzo",
         )
         return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
     if target_locale == "lg":
@@ -5313,9 +5330,9 @@ class ChatModel:
                     router_rewritten = normalize_query(english_form)
 
             personalization = self._load_personalization_state(user_id)
-            # Attachment turns are never cache-served or cache-stored: the answer
-            # is specific to the attached document, not the query text alone.
-            cache_allowed = personalization is None and not attachments
+            # Attachment turns and ongoing multi-turn conversations are never cache-served
+            # or cache-stored: context is specific to attachments or prior dialogue turns.
+            cache_allowed = personalization is None and not attachments and not conversation_history
 
             # Emotional-intelligence signal for this turn: adapts the LLM
             # opening line (tone_hint) and prefixes deterministic replies
@@ -6740,9 +6757,9 @@ class ChatModel:
                 logger.info("Auto-detected locale: %s (streaming)", locale)
 
         personalization = self._load_personalization_state(user_id)
-        # Attachment turns are never cache-served or cache-stored: the answer
-        # is specific to the attached document, not the query text alone.
-        cache_allowed = personalization is None and not attachments
+        # Attachment turns and ongoing multi-turn conversations are never cache-served
+        # or cache-stored: context is specific to attachments or prior dialogue turns.
+        cache_allowed = personalization is None and not attachments and not conversation_history
 
         # Emotional-intelligence signal (parity with generate()): tone hint
         # for the LLM stream, empathy prefix for deterministic short-circuits.

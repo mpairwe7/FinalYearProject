@@ -36,6 +36,7 @@ const OIDC_ORIGIN = (() => {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  compress: false,
   reactStrictMode: true,
   // Pin the Turbopack workspace root to this directory so Next.js 16
   // doesn't walk up the filesystem and mis-detect an unrelated lockfile
