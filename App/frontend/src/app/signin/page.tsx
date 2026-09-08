@@ -51,17 +51,20 @@ import "./signin.css";
 
 /** Roles the dev-token panel can request — labels are specific to this panel. */
 const DEV_ROLE_OPTIONS = [
-  { role: "ura_staff", label: "Tax agent", hint: "Works the escalation queue" },
+  { role: "ura_staff", label: "Tax agent", hint: "Works the escalation queue & user queries" },
   { role: "ura_admin", label: "Administrator", hint: "Full operations view" },
   { role: "ura_auditor", label: "Auditor", hint: "Read-only oversight" },
 ] as const;
 
-/** Dev sign-in is opt-in and must never be enabled on a production deployment. */
-const DEV_SIGNIN_ENABLED = process.env.NEXT_PUBLIC_DEV_SIGNIN === "true";
+/** Dev sign-in is enabled when no IdP is configured or explicitly opted into. */
+const DEV_SIGNIN_ENABLED =
+  process.env.NEXT_PUBLIC_DEV_SIGNIN === "true" || !OIDC_CONFIGURED;
 
 export default function SignInPage() {
   const [role, setRole] = useState<string>("ura_staff");
+  const [customEmail, setCustomEmail] = useState("");
   const [devToken, setDevToken] = useState("");
+  const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ kind: "idle" | "error" | "ok"; message: string }>({
     kind: "idle",
     message: "",
@@ -126,6 +129,65 @@ export default function SignInPage() {
     // Once only: the parameter is stripped so a reload does not redirect again.
     window.history.replaceState({}, "", window.location.pathname);
   }, [startOidc]);
+
+  const requestDevToken = useCallback(
+    async (targetRole: string, targetEmail?: string, targetUserId?: string) => {
+      setLoading(true);
+      setStatus({ kind: "idle", message: "" });
+      const emailToUse =
+        targetEmail ||
+        (targetRole === "public"
+          ? "taxpayer@ura.go.ug"
+          : `${targetRole.replace("ura_", "")}@ura.go.ug`);
+      const userToUse = targetUserId || targetRole.replace("ura_", "");
+
+      try {
+        const res = await fetch("/api/v1/auth/dev-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role: targetRole,
+            email: emailToUse,
+            user_id: userToUse,
+          }),
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setStatus({
+            kind: "error",
+            message: body?.detail || `Sign-in failed with status ${res.status}.`,
+          });
+          setLoading(false);
+          return;
+        }
+
+        const data = await res.json();
+        if (!data?.token) {
+          setStatus({ kind: "error", message: "Backend did not return a valid authentication token." });
+          setLoading(false);
+          return;
+        }
+
+        setAuthToken(data.token, "dev");
+        setLoading(false);
+        const staff = isStaffRole(data.role);
+        setStatus({
+          kind: "ok",
+          message: staff
+            ? `Signed in as ${data.email || data.user_id} (${data.role}). Use "My Queue & User Queries" below to view escalations and query flows.`
+            : `Signed in as ${data.email || data.user_id} (${data.role}).`,
+        });
+      } catch (err) {
+        setLoading(false);
+        setStatus({
+          kind: "error",
+          message: `Could not reach backend: ${(err as Error).message}`,
+        });
+      }
+    },
+    [],
+  );
 
   const useDevToken = useCallback(async () => {
     // Not `.trim()`: a token pasted from a terminal or a chat client can carry a
@@ -243,55 +305,114 @@ export default function SignInPage() {
         {DEV_SIGNIN_ENABLED && (
           <section className="signin-block signin-dev" aria-labelledby="dev-h">
             <div className="signin-dev-flag" role="note">
-              Development access — not authentication
+              Prototype & Operations Access
             </div>
-            <h2 id="dev-h">Use a development token</h2>
+            <h2 id="dev-h">Instant One-Click Sign In</h2>
             <p className="signin-note">
-              For exploring the dashboards where no identity provider is
-              configured. Anyone with the shared secret can mint one, so it
-              proves nothing about who you are. The backend refuses to mint
-              these when <code>APP_ENV=production</code>.
+              Designed for non-IT staff, tax officers, and evaluators. Select your role to sign in immediately without terminal commands or scripts:
             </p>
 
-            <fieldset className="signin-roles">
-              <legend>Role to request</legend>
-              {DEV_ROLE_OPTIONS.map((r) => (
-                <label key={r.role} className={role === r.role ? "role-opt active" : "role-opt"}>
+            <div className="signin-quick-grid">
+              <button
+                type="button"
+                className="signin-quick-btn"
+                disabled={loading}
+                onClick={() => void requestDevToken("ura_staff", "agent.sarah@ura.go.ug", "agent-sarah")}
+              >
+                <span className="btn-role">👮 Tax Agent (Staff)</span>
+                <span className="btn-desc">Handle escalations & monitor user queries in real-time</span>
+              </button>
+
+              <button
+                type="button"
+                className="signin-quick-btn"
+                disabled={loading}
+                onClick={() => void requestDevToken("ura_admin", "admin@ura.go.ug", "admin-user")}
+              >
+                <span className="btn-role">⚡ Administrator</span>
+                <span className="btn-desc">Full access to operations console, flags & system metrics</span>
+              </button>
+
+              <button
+                type="button"
+                className="signin-quick-btn"
+                disabled={loading}
+                onClick={() => void requestDevToken("ura_auditor", "auditor@ura.go.ug", "auditor-user")}
+              >
+                <span className="btn-role">📋 Auditor</span>
+                <span className="btn-desc">Read-only oversight & conversational compliance view</span>
+              </button>
+
+              <button
+                type="button"
+                className="signin-quick-btn"
+                disabled={loading}
+                onClick={() => void requestDevToken("public", "taxpayer@example.com", "citizen-user")}
+              >
+                <span className="btn-role">👤 Taxpayer</span>
+                <span className="btn-desc">Citizen profile with saved multi-turn conversations</span>
+              </button>
+            </div>
+
+            <details className="signin-manual-toggle">
+              <summary>Customize email / role or paste an existing token</summary>
+              <div style={{ marginTop: "12px" }}>
+                <label className="signin-field">
+                  <span>Custom Email / Identifier</span>
                   <input
-                    type="radio"
-                    name="role"
-                    value={r.role}
-                    checked={role === r.role}
-                    onChange={() => setRole(r.role)}
+                    type="text"
+                    className="signin-input"
+                    value={customEmail}
+                    onChange={(e) => setCustomEmail(e.target.value)}
+                    placeholder="e.g. officer.grace@ura.go.ug"
                   />
-                  <span className="role-name">{r.label}</span>
-                  <span className="role-hint">{r.hint}</span>
                 </label>
-              ))}
-            </fieldset>
 
-            <p className="signin-hint">
-              Mint one on the backend host, then paste it below:
-              <code className="signin-cmd">
-                python -c &quot;from app.auth.jwt_auth import make_dev_token;
-                print(make_dev_token(&apos;dev-user&apos;, role=&apos;{role}&apos;))&quot;
-              </code>
-            </p>
+                <fieldset className="signin-roles" style={{ marginTop: "10px" }}>
+                  <legend>Role</legend>
+                  {DEV_ROLE_OPTIONS.map((r) => (
+                    <label key={r.role} className={role === r.role ? "role-opt active" : "role-opt"}>
+                      <input
+                        type="radio"
+                        name="role"
+                        value={r.role}
+                        checked={role === r.role}
+                        onChange={() => setRole(r.role)}
+                      />
+                      <span className="role-name">{r.label}</span>
+                      <span className="role-hint">{r.hint}</span>
+                    </label>
+                  ))}
+                </fieldset>
 
-            <label className="signin-field">
-              <span>Token</span>
-              <textarea
-                value={devToken}
-                onChange={(e) => setDevToken(e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIs..."
-                rows={3}
-                spellCheck={false}
-                autoComplete="off"
-              />
-            </label>
-            <button type="button" className="signin-secondary" onClick={useDevToken}>
-              Verify and continue
-            </button>
+                <button
+                  type="button"
+                  className="signin-secondary"
+                  style={{ marginTop: "6px", width: "100%" }}
+                  disabled={loading}
+                  onClick={() => void requestDevToken(role, customEmail)}
+                >
+                  {loading ? "Signing in..." : "Sign in with selected role"}
+                </button>
+
+                <div style={{ marginTop: "14px", borderTop: "1px solid var(--border-0)", paddingTop: "12px" }}>
+                  <label className="signin-field">
+                    <span>Or paste an existing JWT token</span>
+                    <textarea
+                      value={devToken}
+                      onChange={(e) => setDevToken(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIs..."
+                      rows={3}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <button type="button" className="signin-secondary" onClick={useDevToken}>
+                    Verify and continue
+                  </button>
+                </div>
+              </div>
+            </details>
           </section>
         )}
 
@@ -306,9 +427,11 @@ export default function SignInPage() {
 
         {signedIn && (
           <nav className="signin-onward" aria-label="Continue to">
-            <a href="/admin">Operations overview</a>
-            <a href="/agent">My queue</a>
-            <a href="/analytics">Analytics</a>
+            <a href="/agent" style={{ fontWeight: 700 }}>
+              👉 Escalation Queue & User Queries (/agent)
+            </a>
+            <a href="/admin">Operations overview (/admin)</a>
+            <a href="/analytics">Analytics (/analytics)</a>
             <button type="button" className="signin-link" onClick={signOut}>
               Sign out
             </button>

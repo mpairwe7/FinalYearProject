@@ -140,3 +140,23 @@ class ConsentGrantRequest(BaseModel):
 
 class ConsentWithdrawRequest(BaseModel):
     purposes: list[str] = Field(..., min_length=1)
+
+
+class DevTokenRequest(BaseModel):
+    """Request payload for POST /v1/auth/dev-token."""
+
+    role: str = Field(default="ura_staff", description="Requested role: ura_staff, ura_admin, ura_auditor, or public")
+    email: str = Field(default="", description="User email address")
+    user_id: str = Field(default="", description="User identifier")
+    tenant_id: str = Field(default="default", description="Tenant identifier")
+
+
+class DevTokenResponse(BaseModel):
+    """Response payload for POST /v1/auth/dev-token."""
+
+    token: str
+    role: str
+    email: str
+    user_id: str
+    authenticated: bool = True
+

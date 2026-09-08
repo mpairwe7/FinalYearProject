@@ -34,6 +34,8 @@ SUNBIRD_API_TOKEN = os.getenv("SUNBIRD_API_TOKEN", "")
 # primary one fails.
 SUNBIRD_FALLBACK_API_TOKEN = os.getenv("SUNBIRD_FALLBACK_API_TOKEN", "")
 SUNBIRD_TIMEOUT = int(os.getenv("SUNBIRD_TIMEOUT", "30"))
+# Tighter timeout for interactive chat translation to eliminate multi-minute latency
+SUNBIRD_TRANSLATE_TIMEOUT = float(os.getenv("SUNBIRD_TRANSLATE_TIMEOUT", "12.0"))
 # Attempts per account before failing over (1 = no retry). Retries apply to
 # timeouts, transport errors, 429 and 5xx — never to auth failures.
 SUNBIRD_RETRIES = max(1, int(os.getenv("SUNBIRD_RETRIES", "2")))
@@ -321,11 +323,15 @@ def translate(text: str, source_lang: str, target_lang: str) -> str | None:
         logger.warning("Translation not supported: %s → %s", source_lang, target_lang)
         return None
     try:
-        resp = _post("/tasks/translate", json={
-            "source_language": source_lang,
-            "target_language": target_lang,
-            "text": text,
-        })
+        resp = _post(
+            "/tasks/translate",
+            json={
+                "source_language": source_lang,
+                "target_language": target_lang,
+                "text": text,
+            },
+            timeout=SUNBIRD_TRANSLATE_TIMEOUT,
+        )
         data = resp.json()
         result = data.get("output", {}).get("translated_text") or data.get("translated_text")
         if result:

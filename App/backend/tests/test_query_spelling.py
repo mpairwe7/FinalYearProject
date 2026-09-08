@@ -59,6 +59,45 @@ class SpellingCorrectionBoundaryTests(unittest.TestCase):
             padded = f"xx{wrong}xx"
             self.assertEqual(correct_spelling(padded), padded, wrong)
 
+    def test_user_syntax_errors_and_slips_are_understood(self) -> None:
+        """Users make syntax errors, typos, and SMS-style chat slips."""
+        cases = [
+            ("hw do i regstr for a tin?", "how do i register for a tin?"),
+            ("wat is the vat rat?", "what is the vat rate?"),
+            ("penlaty for late fillling of vat retun", "penalty for late filing of vat return"),
+            ("incometax for comapny", "income tax for company"),
+            ("can u claryfy efris invoyce requrments?", "can you clarify efris invoice requirements?"),
+            ("statment and clearnce for tcc", "statement and clearance for tcc"),
+            ("what is the dedline for filing?", "what is the deadline for filing?"),
+            ("is vat compulsary or voluntery?", "is vat compulsory or voluntary?"),
+        ]
+        for noisy, expected in cases:
+            with self.subTest(noisy=noisy):
+                self.assertEqual(correct_spelling(noisy).lower(), expected.lower())
+
+    def test_fuzzy_distance_one_correction_works(self) -> None:
+        """Unseen minor typos (edit distance 1) against domain terms are automatically resolved."""
+        self.assertEqual(correct_spelling("doucment").lower(), "document")
+        self.assertEqual(correct_spelling("individuls").lower(), "individuals")
+        self.assertEqual(correct_spelling("penaltys").lower(), "penalties")
+
+    def test_general_english_syntax_and_misspellings(self) -> None:
+        """Handles normal English syntax errors, glued words, inverted questions, and everyday misspellings."""
+        cases = [
+            ("how i can get my tin number?", "how can i get my tin number?"),
+            ("where i pay my tax?", "where do i pay my tax?"),
+            ("i want know whatis vat", "i want to know what is vat"),
+            ("howmuch is the servise fee?", "how much is the service fee?"),
+            ("am having a problm with my calender", "i am having a problem with my calendar"),
+            ("pleaaase helpme to recieve infomation from goverment offise", "please help me to receive information from government office"),
+            ("is it posible to procede with diffrent adress?", "is it possible to proceed with different address?"),
+            ("pls tel me wich document is neccessary", "please tell me which document is necessary"),
+            ("did not filed my tax return", "did not file my tax return"),
+        ]
+        for noisy, expected in cases:
+            with self.subTest(noisy=noisy):
+                self.assertEqual(correct_spelling(noisy).lower(), expected.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

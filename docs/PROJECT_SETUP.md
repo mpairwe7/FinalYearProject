@@ -384,10 +384,11 @@ AUTH_ALG=HS256                # backend
 AUTH_DEV_SECRET=<shared secret>
 ```
 
-```bash
-cd App/backend && python -c \
-  "from app.auth.jwt_auth import make_dev_token; print(make_dev_token('dev-user', role='ura_admin'))"
-```
+Non-IT staff, tax officers, and evaluators can simply click the 1-Click Role buttons on `/signin` (or register on `/signup`), which automatically fetches a token via `POST /v1/auth/dev-token`:
+- **Tax Agent / Staff**: Work the escalation queue & view query flows
+- **Administrator**: Full operations overview
+- **Auditor**: Read-only oversight
+- **Taxpayer**: Citizen profile with multi-turn memory
 
 ## Settings
 
