@@ -144,6 +144,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/documents/{document_id}/report"),
     ("GET", "/v1/documents/{document_id}/status"),
     # --- Identity / consent (/v1/me) ---
+    ("POST", "/v1/auth/dev-token"),
     ("GET", "/v1/me"),
     ("DELETE", "/v1/me"),
     ("GET", "/v1/me/reminders"),
@@ -218,6 +219,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/documents/analyze"): "test_documents.DocumentEndpointsTest",
     ("GET", "/v1/documents/{document_id}/report"): "test_documents.DocumentEndpointsTest",
     ("GET", "/v1/documents/{document_id}/status"): "test_documents.DocumentEndpointsTest",
+    ("POST", "/v1/auth/dev-token"): "this:test_auth_dev_token",
     ("GET", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("DELETE", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("GET", "/v1/me/reminders"): "tests.agents.test_reminders",
@@ -368,10 +370,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (67 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (68 HTTP + 4 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 67, f"expected 67 HTTP endpoints, found {len(http)}"
+    assert len(http) == 68, f"expected 68 HTTP endpoints, found {len(http)}"
     assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
 
 
@@ -636,6 +638,17 @@ def test_export_tax_summary_pdf():
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
     assert r.content.startswith(b"%PDF")
+
+
+def test_auth_dev_token():
+    """POST /v1/auth/dev-token mints a valid JWT for non-production access without python CLI."""
+    r = _client().post("/v1/auth/dev-token", json={"role": "ura_staff", "email": "officer@ura.go.ug"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["authenticated"] is True
+    assert body["role"] == "ura_staff"
+    assert body["email"] == "officer@ura.go.ug"
+    assert "token" in body and body["token"].startswith("eyJ")
 
 
 if __name__ == "__main__":

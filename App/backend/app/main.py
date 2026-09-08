@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -44,7 +44,13 @@ from . import database as db
 from . import documents
 from .analytics import AnalyticsMiddleware, metrics
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
-from .auth.models import ConsentGrantRequest, ConsentWithdrawRequest, ProfileUpdateRequest
+from .auth.models import (
+    ConsentGrantRequest,
+    ConsentWithdrawRequest,
+    DevTokenRequest,
+    DevTokenResponse,
+    ProfileUpdateRequest,
+)
 from .authority import authority_required, get_authority_status
 from .escalation_notify import known_teams
 from .models import (
@@ -2715,6 +2721,44 @@ def voice_audit_endpoint(
     )
     stats = voice_audit_stats(days=days)
     return {"entries": entries, "stats": stats}
+
+
+@app.post("/v1/auth/dev-token", tags=["auth"], response_model=DevTokenResponse)
+def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevTokenRequest)) -> DevTokenResponse:
+    """Mint a development/prototype token for staff or taxpayer access.
+
+    Disabled under APP_ENV=production. Enables 1-click access for URA officers,
+    tax agents, and evaluators without requiring terminal Python commands.
+    """
+    if os.getenv("APP_ENV", "development").lower() == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Dev token generation is disabled under APP_ENV=production. Use a real OIDC provider.",
+        )
+    from .auth.jwt_auth import make_dev_token
+
+    requested_role = (req.role or "ura_staff").strip()
+    user_id = (req.user_id or "").strip()
+    if not user_id:
+        user_id = "staff-officer" if "staff" in requested_role or "admin" in requested_role else "dev-user"
+
+    email = (req.email or "").strip()
+    if not email:
+        email = f"{user_id}@ura.go.ug" if "staff" in requested_role or "admin" in requested_role else f"{user_id}@taxpayer.go.ug"
+
+    token = make_dev_token(
+        user_id=user_id,
+        tenant_id=req.tenant_id or "default",
+        email=email,
+        role=requested_role,
+    )
+    return DevTokenResponse(
+        token=token,
+        role=requested_role,
+        email=email,
+        user_id=user_id,
+        authenticated=True,
+    )
 
 
 @app.get("/v1/me", tags=["me"])

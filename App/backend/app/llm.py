@@ -629,6 +629,7 @@ def _vllm_build_request(url: str, body: bytes, accept_stream: bool = False) -> A
     parsed = urllib.parse.urlparse(url)
     is_loopback = (
         parsed.hostname in ("localhost", "127.0.0.1", "::1", "vllm", None)
+        or "vllm" in (parsed.hostname or "")
         or (
             parsed.hostname is not None
             and (
@@ -642,7 +643,7 @@ def _vllm_build_request(url: str, body: bytes, accept_stream: bool = False) -> A
         headers["Accept"] = "text/event-stream"
 
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    if VLLM_API_KEY:
+    if VLLM_API_KEY and VLLM_API_KEY.lower() not in ("not-needed", "none", ""):
         if parsed.scheme != "https" and not is_loopback:
             raise ValueError(
                 f"Insecure vLLM connection: credentialed requests with VLLM_API_KEY require an https:// endpoint (got {parsed.scheme}://)"
@@ -662,6 +663,7 @@ def _vllm_generate(
     temperature: float | None = None,
     top_p: float | None = None,
     max_tokens: int | None = None,
+    timeout: float | None = None,
 ) -> str:
     """Call a vLLM OpenAI-compatible /chat/completions endpoint.
 
@@ -687,7 +689,8 @@ def _vllm_generate(
         ).encode("utf-8")
         url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
         req = _vllm_build_request(url, body, accept_stream=False)
-        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+        effective_timeout = timeout if timeout is not None else VLLM_HTTP_TIMEOUT
+        with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             payload = _json.loads(resp.read().decode("utf-8"))
         choices = payload.get("choices", [])
         if not choices:
@@ -1109,11 +1112,11 @@ def translate_text(
         try:
             # Greedy: translation should be reproducible, and the same input
             # producing a different invented answer on each call is exactly
-            # the failure mode the prompt above is guarding against. The
-            # card's suggested 0.5/0.9 is for open-ended chat; top_p and the
-            # 500-token cap follow it.
+            # the failure mode the prompt above is guarding against.
+            # Bound tokens and timeout for translation to ensure sub-5s response.
+            token_budget = min(256, max(48, len(text.split()) * 2))
             raw = (_vllm_generate(
-                messages, temperature=0.0, top_p=0.9, max_tokens=500,
+                messages, temperature=0.0, top_p=0.9, max_tokens=token_budget, timeout=12.0,
             ) or "").strip()
             # Clean stray digit bracket glitches and rogue language tags
             raw = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", raw)
@@ -1125,6 +1128,14 @@ def translate_text(
             return ""
 
     if not _load_model() or _tokenizer is None or _model is None:
+        return ""
+
+    # Check if local model is loaded on CPU. Running autoregressive generation
+    # for large models on CPU causes multi-minute hangs (reported as >3 min latency).
+    # Skip CPU generation so request falls through to fast cloud translation tiers.
+    device = getattr(_model, "device", None)
+    if device is not None and getattr(device, "type", "") == "cpu":
+        logger.info("Local model is on CPU; skipping local prompted MT to prevent multi-minute latency")
         return ""
 
     try:

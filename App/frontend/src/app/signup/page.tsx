@@ -22,9 +22,11 @@ import React, { useCallback, useEffect, useState, useSyncExternalStore } from "r
 import {
   getAuthToken,
   getServerAuthToken,
+  setAuthToken,
   subscribeAuthToken,
 } from "../../lib/authSession";
 import { beginOidcFlow, isEmbedded, OIDC_CONFIGURED } from "../../lib/oidcFlow";
+import { isStaffRole } from "../../lib/roles";
 import "../signin/signin.css";
 
 const BENEFITS = [
@@ -48,9 +50,63 @@ export default function SignUpPage() {
     message: "",
   });
   const [starting, setStarting] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [selectedRole, setSelectedRole] = useState("ura_staff");
+  const [submitting, setSubmitting] = useState(false);
+  const [createdRole, setCreatedRole] = useState<string | null>(null);
+
   // Someone who already has a token does not need this page; say so instead of
   // starting a second flow that would just replace a working session.
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
+
+  const handleLocalSignUp = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!email && !fullName) {
+        setStatus({ kind: "error", message: "Please provide an email or name." });
+        return;
+      }
+      setSubmitting(true);
+      setStatus({ kind: "idle", message: "" });
+      try {
+        const userEmail = email.trim() || (selectedRole === "public" ? "taxpayer@ura.go.ug" : `${selectedRole.replace("ura_", "")}@ura.go.ug`);
+        const userName = fullName.trim() || userEmail.split("@")[0];
+        const res = await fetch("/api/v1/auth/dev-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role: selectedRole,
+            email: userEmail,
+            user_id: userName,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setStatus({ kind: "error", message: body?.detail || `Signup failed with status ${res.status}.` });
+          setSubmitting(false);
+          return;
+        }
+        const data = await res.json();
+        if (!data?.token) {
+          setStatus({ kind: "error", message: "Failed to mint session token." });
+          setSubmitting(false);
+          return;
+        }
+        setAuthToken(data.token, "dev");
+        setCreatedRole(data.role);
+        setSubmitting(false);
+        setStatus({
+          kind: "info",
+          message: `Account created for ${data.email || data.user_id} (${data.role})! You are now signed in.`,
+        });
+      } catch (err) {
+        setSubmitting(false);
+        setStatus({ kind: "error", message: `Could not complete registration: ${(err as Error).message}` });
+      }
+    },
+    [email, fullName, selectedRole],
+  );
 
   const startSignUp = useCallback(async () => {
     if (!OIDC_CONFIGURED) return;
@@ -142,6 +198,90 @@ export default function SignUpPage() {
           )}
         </section>
 
+        {!OIDC_CONFIGURED && (
+          <section className="signin-block signin-dev" aria-labelledby="signup-local-h">
+            <div className="signin-dev-flag" role="note">
+              Quick Account Creation
+            </div>
+            <h2 id="signup-local-h">Staff & User Registration</h2>
+            <p className="signin-note">
+              Non-IT staff, officers, and taxpayers can create an account below to explore user queries, escalations, and system flows:
+            </p>
+
+            <form onSubmit={handleLocalSignUp} style={{ display: "grid", gap: "10px" }}>
+              <label className="signin-field">
+                <span>Full Name or Officer Name</span>
+                <input
+                  type="text"
+                  className="signin-input"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="e.g. Officer Grace"
+                  required
+                />
+              </label>
+
+              <label className="signin-field">
+                <span>Email Address</span>
+                <input
+                  type="email"
+                  className="signin-input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="e.g. grace.o@ura.go.ug"
+                  required
+                />
+              </label>
+
+              <fieldset className="signin-roles" style={{ marginTop: "6px" }}>
+                <legend>Role / Access Level</legend>
+                <label className={selectedRole === "ura_staff" ? "role-opt active" : "role-opt"}>
+                  <input
+                    type="radio"
+                    name="role"
+                    value="ura_staff"
+                    checked={selectedRole === "ura_staff"}
+                    onChange={() => setSelectedRole("ura_staff")}
+                  />
+                  <span className="role-name">URA Tax Agent (Staff)</span>
+                  <span className="role-hint">Work the escalation queue and inspect user query flows</span>
+                </label>
+                <label className={selectedRole === "ura_admin" ? "role-opt active" : "role-opt"}>
+                  <input
+                    type="radio"
+                    name="role"
+                    value="ura_admin"
+                    checked={selectedRole === "ura_admin"}
+                    onChange={() => setSelectedRole("ura_admin")}
+                  />
+                  <span className="role-name">URA Administrator</span>
+                  <span className="role-hint">Full operations and analytics console</span>
+                </label>
+                <label className={selectedRole === "public" ? "role-opt active" : "role-opt"}>
+                  <input
+                    type="radio"
+                    name="role"
+                    value="public"
+                    checked={selectedRole === "public"}
+                    onChange={() => setSelectedRole("public")}
+                  />
+                  <span className="role-name">Taxpayer (Citizen)</span>
+                  <span className="role-hint">Ask tax questions with saved multi-turn conversations</span>
+                </label>
+              </fieldset>
+
+              <button
+                type="submit"
+                className="signin-primary"
+                style={{ marginTop: "6px" }}
+                disabled={submitting}
+              >
+                {submitting ? "Creating Account…" : "Create Account & Sign In"}
+              </button>
+            </form>
+          </section>
+        )}
+
         <section className="signin-block" aria-labelledby="signup-what">
           <h2 id="signup-what">What an account changes</h2>
           <ul className="signin-benefits">
@@ -156,21 +296,32 @@ export default function SignUpPage() {
 
         {token && (
           <p className="signin-status ok" role="status">
-            You are already signed in on this browser. Registering again will
-            replace that session.
+            You are signed in on this browser.
           </p>
         )}
 
         {status.message && (
-          // Kind-driven, not hardcoded: this slot now also carries the "opened
-          // in a new tab" notice, and styling that as an error — announced with
-          // role=alert — would report a working redirect as a failure.
           <p
             className={`signin-status ${status.kind === "error" ? "error" : "ok"}`}
             role={status.kind === "error" ? "alert" : "status"}
           >
             {status.message}
           </p>
+        )}
+
+        {createdRole && (
+          <nav className="signin-onward" aria-label="Continue to">
+            {isStaffRole(createdRole) ? (
+              <a href="/agent" style={{ fontWeight: 700 }}>
+                👉 Proceed to My Queue & User Queries (/agent)
+              </a>
+            ) : (
+              <Link href="/" style={{ fontWeight: 700 }}>
+                👉 Proceed to Assistant Chat (/)
+              </Link>
+            )}
+            <a href="/admin">Operations overview</a>
+          </nav>
         )}
 
         <footer className="signin-switch">

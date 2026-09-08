@@ -444,3 +444,125 @@
   margin: 0.6rem auto 0;
   font-size: 0.82rem;
 }
+
+/* Quick access buttons & non-IT staff friendly forms -------------------- */
+
+.signin-quick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+
+@media (max-width: 480px) {
+  .signin-quick-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.signin-quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.signin-quick-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.signin-quick-btn .btn-role {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--text-0);
+  margin-bottom: 2px;
+}
+
+.signin-quick-btn .btn-desc {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.35;
+}
+
+.signin-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  background: var(--surface-2);
+  color: var(--text-0);
+  font-size: 13.5px;
+  margin-top: 4px;
+}
+
+.signin-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.signin-manual-toggle {
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.signin-manual-toggle summary {
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.signin-manual-toggle summary:hover {
+  color: var(--text-1);
+}
+
+.signin-account-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+
+.signin-account-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--grad-primary);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.signin-account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.signin-account-email {
+  font-weight: 650;
+  font-size: 14px;
+  color: var(--text-0);
+}
+
+.signin-account-role {
+  font-size: 12px;
+  color: var(--text-2);
+}
+

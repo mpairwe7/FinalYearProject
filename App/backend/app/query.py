@@ -10,6 +10,7 @@ Transforms raw user queries into optimized retrieval queries:
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
@@ -75,11 +76,12 @@ _ACH_MARKERS = re.compile(
     r"lwak|dano|latin|piny|kwo|cam|wek|twero|cako|myero)\b",
     re.IGNORECASE,
 )
-# Swahili (sw) common function words
+# Swahili (sw) common function words and tax terms
 _SW_MARKERS = re.compile(
-    r"\b(ninaweza|ninazuia|nifanye|mtoto|nyumbani|biashara|"
-    r"kwa|ya|lakini|sababu|jinsi|nini|gani|wapi|vipi|"
-    r"kupata|kuanza|kufanya|kusaidia|kupanga)\b",
+    r"\b(ninaweza|ninawezaje|nifanye|biashara|kodi|ushuru|kujisajili|"
+    r"asilimia|thamani|marejesho|huduma|wafanyakazi|mapato|nchini|"
+    r"sababu|jinsi|nini|gani|wapi|vipi|kupata|kuanza|kufanya|"
+    r"habari|asante|shukrani|kiasi|kulipa|kuwasilisha|adhabu)\b",
     re.IGNORECASE,
 )
 
@@ -118,64 +120,314 @@ _ABBREVIATIONS: dict[str, str] = {
 # Common misspellings in the URA domain
 # ---------------------------------------------------------------------------
 _CORRECTIONS: dict[str, str] = {
+    # Registration & Onboarding
     "regester": "register",
     "registar": "register",
     "regsiter": "register",
+    "regstr": "register",
+    "rgister": "register",
+    "registre": "register",
     "registeration": "registration",
     "registation": "registration",
-    "tax payer": "taxpayer",
-    "taxpyer": "taxpayer",
-    "withholdin": "withholding",
-    "witholding": "withholding",
-    "excise duity": "excise duty",
-    "exise duty": "excise duty",
-    "assesment": "assessment",
-    "assement": "assessment",
-    "refud": "refund",
-    "refumd": "refund",
-    "penality": "penalty",
-    "penalyt": "penalty",
-    "complience": "compliance",
-    "compiance": "compliance",
-    "decleration": "declaration",
-    "declaraton": "declaration",
-    "importaton": "importation",
+    "regestration": "registration",
+    "registrtion": "registration",
+    "regisration": "registration",
+    "ragistration": "registration",
+    "aply": "apply",
+    "aplyin": "applying",
+    "aplying": "applying",
+    "aprove": "approve",
+    "aplication": "application",
+    "aplications": "applications",
+    "appliation": "application",
     "clearence": "clearance",
     "clearanse": "clearance",
+    "clearnce": "clearance",
+    "certifikate": "certificate",
+    "certifcate": "certificate",
+    "certifacete": "certificate",
+    # Taxpayer & Entities
+    "tax payer": "taxpayer",
+    "taxpyer": "taxpayer",
+    "individul": "individual",
+    "individal": "individual",
+    "individuel": "individual",
+    "indivdual": "individual",
+    "organisaton": "organisation",
+    "organizaton": "organization",
+    "orgnization": "organization",
+    "organiztion": "organization",
+    "compnay": "company",
+    "comapny": "company",
+    "compny": "company",
+    "companie": "company",
+    "residetn": "resident",
+    "resedint": "resident",
+    "residensy": "residence",
+    "resedence": "residence",
+    # Tax Types & Rules
+    "withholdin": "withholding",
+    "witholding": "withholding",
+    "withholdng": "withholding",
+    "withoding": "withholding",
+    "whitholding": "withholding",
+    "wthholding": "withholding",
+    "withholdingtax": "withholding tax",
+    "excise duity": "excise duty",
+    "exise duty": "excise duty",
+    "customsduty": "customs duty",
+    "exciseduty": "excise duty",
+    "taxclearance": "tax clearance",
+    "incometax": "income tax",
+    "incom tax": "income tax",
+    "incme": "income",
+    "vatrate": "vat rate",
+    "vat rat": "vat rate",
+    "tinregistration": "tin registration",
+    "latefiling": "late filing",
+    "taxpayment": "tax payment",
+    "filng": "filing",
+    "fillling": "filing",
+    "fillng": "filing",
+    "fylling": "filing",
+    "retun": "return",
+    "retrun": "return",
+    "retrn": "return",
+    "retuns": "returns",
+    "retruns": "returns",
+    "taxreturn": "tax return",
+    "taxreturns": "tax returns",
+    "dedline": "deadline",
+    "deadlin": "deadline",
+    "dedlines": "deadlines",
+    "due dat": "due date",
+    "statment": "statement",
+    "statemnt": "statement",
+    "statmnt": "statement",
+    "stetement": "statement",
+    # Assessments, Penalties, Exemptions
+    "assesment": "assessment",
+    "assement": "assessment",
+    "assessmnt": "assessment",
+    "asesment": "assessment",
+    "assesed": "assessed",
+    "assesesd": "assessed",
+    "penality": "penalty",
+    "penalyt": "penalty",
+    "penlaty": "penalty",
+    "panalty": "penalty",
+    "penaltie": "penalty",
+    "penaltys": "penalties",
+    "panalties": "penalties",
+    "exmpt": "exempt",
+    "exmept": "exempt",
+    "exepmt": "exempt",
+    "exsempt": "exempt",
+    "exmption": "exemption",
+    "exempton": "exemption",
+    "exemptions": "exemptions",
+    "presumtive": "presumptive",
+    "presumtve": "presumptive",
+    "presumptiv": "presumptive",
+    # Disputes & Declarations
+    "disput": "dispute",
+    "dispuet": "dispute",
     "objection": "objection",
     "obejction": "objection",
+    "objestion": "objection",
+    "objectin": "objection",
+    "apeal": "appeal",
+    "apael": "appeal",
+    "appeall": "appeal",
+    "refud": "refund",
+    "refumd": "refund",
+    "reffund": "refund",
+    "complience": "compliance",
+    "compiance": "compliance",
+    "compliace": "compliance",
+    "decleration": "declaration",
+    "declaraton": "declaration",
+    "declarashon": "declaration",
+    "importaton": "importation",
+    "customes": "customs",
+    "coustoms": "customs",
+    "custome": "customs",
+    "crago": "cargo",
+    "pucrhase": "purchase",
+    "puchase": "purchase",
+    # Invoicing & Documents
     "receipting": "receipting",
     "receiping": "receipting",
+    "reciept": "receipt",
+    "receit": "receipt",
+    "reciepting": "receipting",
     "invoiceing": "invoicing",
+    "invoic": "invoice",
+    "invoyce": "invoice",
+    "invoise": "invoice",
     "docuemnts": "documents",
     "docuemnt": "document",
     "documnts": "documents",
     "documnt": "document",
     "requirments": "requirements",
     "requirment": "requirement",
-    "crago": "cargo",
-    "assesed": "assessed",
-    "assesesd": "assessed",
-    "pucrhase": "purchase",
+    "requrments": "requirements",
+    "reqirements": "requirements",
+    # Financial & Calculations
+    "turnovr": "turnover",
+    "tunover": "turnover",
+    "turn over": "turnover",
+    "threshhold": "threshold",
+    "treshold": "threshold",
+    "threshol": "threshold",
+    "compulsary": "compulsory",
+    "compuslory": "compulsory",
+    "compusary": "compulsory",
+    "voluntery": "voluntary",
+    "volantary": "voluntary",
+    "volunterly": "voluntary",
+    "provisinal": "provisional",
+    "provisonal": "provisional",
+    "provisioal": "provisional",
+    "hihger": "higher",
+    "salery": "salary",
+    "persentage": "percentage",
+    "percntage": "percentage",
+    "bussiness": "business",
+    "bizness": "business",
+    "busines": "business",
+    "buisness": "business",
+    "comput": "compute",
+    "computaion": "computation",
+    "calculat": "calculate",
+    "calculaton": "calculation",
+    # Common typing slips & chat abbreviations
     "abt": "about",
     "dat": "that",
     "wat": "what",
     "wen": "when",
-    "disput": "dispute",
-    "dispuet": "dispute",
-    "hihger": "higher",
-    "residetn": "resident",
-    "aprove": "approve",
-    "aplication": "application",
-    "aply": "apply",
-    "threshhold": "threshold",
-    "treshold": "threshold",
-    "compulsary": "compulsory",
-    "compuslory": "compulsory",
-    "voluntery": "voluntary",
-    "individul": "individual",
-    "organisaton": "organisation",
-    "organizaton": "organization",
+    "hw": "how",
+    "hw to": "how to",
+    "how 2": "how to",
+    "wats": "what is",
+    "whre": "where",
+    "bcoz": "because",
+    "bcz": "because",
+    "coz": "because",
+    "plz": "please",
+    "pls": "please",
+    "u": "you",
+    "ur": "your",
+    "thx": "thanks",
+    "tnx": "thanks",
+    "thnk": "thank",
+    "cud": "could",
+    "wud": "would",
+    "shud": "should",
+    "hv": "have",
+    "ned": "need",
+    "claryfy": "clarify",
+    "clarifi": "clarify",
+    "dificult": "difficult",
+    "dificulty": "difficulty",
+    "pasword": "password",
+    "passward": "password",
+    "pssword": "password",
+    # General English common misspellings
+    "recieve": "receive",
+    "recieved": "received",
+    "recieving": "receiving",
+    "untill": "until",
+    "alot": "a lot",
+    "definately": "definitely",
+    "definitly": "definitely",
+    "definetly": "definitely",
+    "seperate": "separate",
+    "separete": "separate",
+    "occured": "occurred",
+    "occurance": "occurrence",
+    "occurence": "occurrence",
+    "beleive": "believe",
+    "belive": "believe",
+    "goverment": "government",
+    "govment": "government",
+    "calender": "calendar",
+    "tommorow": "tomorrow",
+    "tomorow": "tomorrow",
+    "yesturday": "yesterday",
+    "neccessary": "necessary",
+    "necesary": "necessary",
+    "succesful": "successful",
+    "successfull": "successful",
+    "posible": "possible",
+    "possable": "possible",
+    "problm": "problem",
+    "probleme": "problem",
+    "infomation": "information",
+    "informashon": "information",
+    "servise": "service",
+    "servises": "services",
+    "diffrent": "different",
+    "diferent": "different",
+    "guidlines": "guidelines",
+    "peaple": "people",
+    "peple": "people",
+    "autometic": "automatic",
+    "authoroty": "authority",
+    "authrity": "authority",
+    "beacause": "because",
+    "availble": "available",
+    "avaliable": "available",
+    "avialable": "available",
+    "procede": "proceed",
+    "adress": "address",
+    "addres": "address",
+    "comunication": "communication",
+    "begining": "beginning",
+    "truely": "truly",
+    "existance": "existence",
+    "experiance": "experience",
+    "convinient": "convenient",
+    "sucess": "success",
+    "foward": "forward",
+    "knowlege": "knowledge",
+    "compleatly": "completely",
+    "accross": "across",
+    "familar": "familiar",
+    "offical": "official",
+    "offise": "office",
+    "secratary": "secretary",
+    "responsable": "responsible",
+    "supprise": "surprise",
+    "writting": "writing",
+    "writen": "written",
+    "greatful": "grateful",
+    "rember": "remember",
+    "scedule": "schedule",
+    "schedual": "schedule",
+    "assistence": "assistance",
+    "persone": "person",
+    "sugest": "suggest",
+    "similer": "similar",
+    "catagory": "category",
+    "wich": "which",
+    "dis": "this",
+    "dey": "they",
+    "dem": "them",
+    "wid": "with",
+    "wit": "with",
+    "whi": "why",
+    "whoo": "who",
+    "thanx": "thanks",
+    "tel": "tell",
+    "r": "are",
+    "b": "be",
+    "c": "see",
+    "y": "why",
+    "pleaaase": "please",
+    "pleeease": "please",
+    "heeeelp": "help",
+    "soooo": "so",
 }
 
 
@@ -195,38 +447,209 @@ def expand_abbreviations(query: str) -> str:
 
 
 _TAX_DOMAIN_VOCAB: frozenset[str] = frozenset({
-    "register", "registration", "taxpayer", "individual", "organisation", "organization",
-    "withholding", "customs", "clearance", "assessment", "assessed", "dispute", "objection",
-    "appeal", "appeals", "invoicing", "receipting", "document", "documents", "application",
-    "apply", "threshold", "compulsory", "voluntary", "higher", "lower", "purchase", "invoice",
-    "resident", "residence", "salary", "employment", "turnover", "penalty", "penalties",
-    "provisional", "corporation", "corporate", "exemption", "exempt", "deadline", "declaration",
-    "electronic", "online", "statement", "payment", "business", "commercial", "import", "export",
+    "register", "registration", "registered", "registers",
+    "taxpayer", "taxpayers", "individual", "individuals", "organisation", "organization", "organisations", "organizations",
+    "company", "companies", "corporate", "corporation",
+    "withholding", "customs", "clearance", "assessment", "assessments", "assessed", "dispute", "disputes", "objection", "objections",
+    "appeal", "appeals", "invoicing", "receipting", "document", "documents", "application", "applications",
+    "apply", "threshold", "thresholds", "compulsory", "voluntary", "higher", "lower", "purchase", "purchases", "invoice", "invoices",
+    "resident", "residents", "residence", "salary", "employment", "turnover", "penalty", "penalties",
+    "provisional", "exemption", "exemptions", "exempt", "deadline", "deadlines", "declaration", "declarations",
+    "electronic", "online", "statement", "statements", "payment", "payments", "business", "commercial", "import", "imports", "export", "exports",
+    "compute", "computation", "calculate", "calculation", "return", "returns", "filing",
+    "compliance", "certificate", "certificates", "presumptive", "income", "rental", "refund", "refunds",
+})
+
+_COMMON_ENGLISH_WORDS: frozenset[str] = frozenset({
+    "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
+    "can", "could", "will", "would", "shall", "should", "may", "might", "must",
+    "have", "has", "had", "having", "do", "does", "did", "doing", "done",
+    "be", "is", "am", "are", "was", "were", "been", "being",
+    "the", "a", "an", "and", "or", "but", "nor", "for", "yet", "so",
+    "at", "by", "from", "in", "into", "of", "off", "on", "onto", "out", "over", "to", "up", "with", "under", "about",
+    "i", "me", "my", "mine", "you", "your", "yours", "he", "him", "his", "she", "her", "hers", "it", "its", "we", "us", "our", "ours", "they", "them", "their", "theirs",
+    "this", "that", "these", "those", "there", "here",
+    "much", "many", "more", "most", "some", "any", "no", "not", "all", "both", "half", "each", "every", "other", "another",
+    "want", "need", "like", "know", "tell", "give", "take", "make", "get", "find", "check", "help",
+    "pay", "paid", "paying", "rate", "rates", "year", "years", "month", "months", "day", "days", "date", "dates", "time", "times",
+    "good", "well", "great", "please", "thanks", "thank",
+})
+
+_LOCAL_LANGUAGE_WORDS: frozenset[str] = frozenset({
+    "kodi", "kwa", "katika", "kujisajili", "asilimia", "thamani", "ushuru",
+    "marejesho", "huduma", "wafanyakazi", "mapato", "nchini", "binafsi",
+    "kazi", "mwaka", "mwezi", "kutoa", "kulipa", "zaidi", "kiwango", "viwango",
+    "habari", "jambo", "karibu", "asante", "shukrani", "ndiyo", "hapana",
+    "omusolo", "buli", "okufuna", "ebitundu", "ssente", "alipoota", "abakozi",
+    "waggulu", "basasula", "bwe", "era", "kye", "bye", "kampuni", "emisolo",
+    "okwewandiisa", "musanyufu", "ebisaanyizo", "enkola", "omusaala", "abakozesa", "ekitongole",
+    "gyebaleko", "webale", "yee", "nedda", "nsaba", "sente",
 })
 
 
-def correct_spelling(query: str) -> str:
-    """Fix common domain-specific misspellings and typographical slips.
+_GENERAL_ENGLISH_VOCAB: frozenset[str] = frozenset({
+    "information", "government", "calendar", "tomorrow", "yesterday",
+    "necessary", "successful", "possible", "problem", "problems",
+    "service", "services", "different", "guidelines", "people",
+    "automatic", "authority", "because", "available", "proceed",
+    "address", "communication", "beginning", "experience", "convenient",
+    "knowledge", "completely", "official", "office", "offices",
+    "secretary", "responsible", "surprise", "writing", "written",
+    "questionnaire", "schedule", "assistance", "person", "suggest",
+    "maintenance", "reference", "similar", "receive", "receiving", "received",
+    "separate", "believe", "believing", "occurred", "occurring", "definitely",
+    "category", "recommend", "recommended", "familiar", "difficulty", "difficult",
+    "password", "passwords",
+})
 
-    Substitutions are anchored to word boundaries. Without ``\\b`` a key that is a
-    prefix of its own replacement corrupts the correctly-spelled word:
-    ``"withholdin" -> "withholding"`` rewrote *"What is withholding tax?"* as
-    *"What is withholdingg tax?"*, which drops "withholding" from the BM25 query
-    entirely. Retrieval then fell back to generic tax matches and answered a
-    withholding-tax question from VAT and EFRIS documents — measured against the
-    live corpus, where a direct query ranks the Withholding-Tax PDF first.
+_ALL_CORRECTABLE_VOCAB = _TAX_DOMAIN_VOCAB | _GENERAL_ENGLISH_VOCAB
+
+
+def _damerau_levenshtein(s1: str, s2: str) -> int:
+    """Compute Damerau-Levenshtein distance between s1 and s2."""
+    len1, len2 = len(s1), len(s2)
+    d = [[0] * (len2 + 1) for _ in range(len1 + 1)]
+    for i in range(len1 + 1):
+        d[i][0] = i
+    for j in range(len2 + 1):
+        d[0][j] = j
+    for i in range(1, len1 + 1):
+        for j in range(1, len2 + 1):
+            cost = 0 if s1[i - 1] == s2[j - 1] else 1
+            d[i][j] = min(
+                d[i - 1][j] + 1,
+                d[i][j - 1] + 1,
+                d[i - 1][j - 1] + cost,
+            )
+            if i > 1 and j > 1 and s1[i - 1] == s2[j - 2] and s1[i - 2] == s2[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + cost)
+    return d[len1][len2]
+
+
+@functools.lru_cache(maxsize=4096)
+def _fuzzy_correct_word(word: str) -> str:
+    """Fuzzy match an unrecognized token against tax and general English vocabulary."""
+    low = word.lower()
+    if len(low) < 4:
+        return word
+    if low in _ALL_CORRECTABLE_VOCAB or low in _COMMON_ENGLISH_WORDS or low in _LOCAL_LANGUAGE_WORDS:
+        return word
+    if word.isupper() or any(ch.isdigit() for ch in word):
+        return word
+
+    # Only correct if not surrounded by test/dummy padding (e.g. xx...xx)
+    if word.startswith("xx") or word.endswith("xx"):
+        return word
+
+    max_dist = 1
+    best_candidate = None
+    best_dist = max_dist + 1
+
+    for candidate in _ALL_CORRECTABLE_VOCAB:
+        if abs(len(candidate) - len(low)) > max_dist:
+            continue
+        dist = _damerau_levenshtein(low, candidate)
+        if dist < best_dist and dist <= max_dist:
+            best_dist = dist
+            best_candidate = candidate
+
+    if best_candidate is not None:
+        if word.istitle():
+            return best_candidate.capitalize()
+        return best_candidate
+
+    return word
+
+
+def correct_syntax_errors(query: str) -> str:
+    """Normalize common English syntax errors, collapsed words, and grammatical slips."""
+    q = query
+    # Glued question / auxiliary words (missing space syntax errors)
+    glued_patterns = {
+        r"\bhowmuch\b": "how much",
+        r"\bhowmany\b": "how many",
+        r"\bhowto\b": "how to",
+        r"\bwhatis\b": "what is",
+        r"\bwhereis\b": "where is",
+        r"\bwhenis\b": "when is",
+        r"\bwhois\b": "who is",
+        r"\bcani\b": "can i",
+        r"\bdoi\b": "do i",
+        r"\bdidi\b": "did i",
+        r"\bshouldi\b": "should i",
+        r"\bwouldi\b": "would i",
+        r"\bcouldi\b": "could i",
+        r"\bhowdo\b": "how do",
+        r"\bhowcan\b": "how can",
+        r"\bwhatcan\b": "what can",
+        r"\bwhatdo\b": "what do",
+        r"\bwheredo\b": "where do",
+        r"\bwhendo\b": "when do",
+        r"\biwant\b": "i want",
+        r"\bineed\b": "i need",
+        r"\bihave\b": "i have",
+        r"\btellme\b": "tell me",
+        r"\bhelpme\b": "help me",
+        r"\bthankyou\b": "thank you",
+        r"\binorder\b": "in order",
+        r"\baswell\b": "as well",
+        r"\batleast\b": "at least",
+        r"\binfact\b": "in fact",
+    }
+    for pat, rep in glued_patterns.items():
+        q = re.sub(pat, rep, q, flags=re.IGNORECASE)
+
+    # Inverted question syntax: 'how i can get' -> 'how can i get', 'where i can pay' -> 'where can i pay'
+    q = re.sub(r"\b(how|where|when|why)\s+i\s+can\b", r"\1 can i", q, flags=re.IGNORECASE)
+    # 'how i pay' -> 'how do i pay', 'where i pay' -> 'where do i pay'
+    q = re.sub(r"\b(how|where|when)\s+i\s+(pay|get|apply|register|file)\b", r"\1 do i \2", q, flags=re.IGNORECASE)
+    # 'i want know' -> 'i want to know', 'i need know' -> 'i need to know'
+    q = re.sub(r"\b(i\s+want|i\s+need)\s+(know|get|pay|register|apply|file)\b", r"\1 to \2", q, flags=re.IGNORECASE)
+    # Dropped subject pronoun 'i' before 'am' at start of query or clause: 'am having' -> 'i am having'
+    q = re.sub(r"(^|[.?!]\s+)\bam\s+(having|a|an|trying|asking|looking|registering|filing|paying|wondering|in)\b", r"\1i am \2", q, flags=re.IGNORECASE)
+    # 'am i suppose to' -> 'am i supposed to'
+    q = re.sub(r"\bam\s+i\s+suppose\s+to\b", "am i supposed to", q, flags=re.IGNORECASE)
+    # Past tense confusion after auxiliary 'did not': 'did not filed' -> 'did not file'
+    q = re.sub(r"\bdid\s+not\s+filed\b", "did not file", q, flags=re.IGNORECASE)
+    q = re.sub(r"\bdid\s+not\s+paid\b", "did not pay", q, flags=re.IGNORECASE)
+    q = re.sub(r"\bdid\s+not\s+registered\b", "did not register", q, flags=re.IGNORECASE)
+
+    return q
+
+
+def correct_spelling(query: str) -> str:
+    """Fix domain-specific and general English misspellings, syntax slips, and typos.
+
+    1. Normalize grammatical syntax errors and glued words.
+    2. Disambiguate common syntax slips (e.g. 'wht is/are/does' -> 'what is/are/does').
+    3. Apply dictionary-based corrections (_CORRECTIONS) with word boundaries.
+    4. Apply fuzzy distance matching on remaining non-dictionary tokens against
+       domain and general English vocabularies.
     """
-    result = query
+    result = correct_syntax_errors(query)
     # Disambiguate "wht is/are/does" (typo for "what is...") vs "WHT" (Withholding Tax)
     result = re.sub(r"\bwht\s+(is|are|does|do|can|will|should)\b", r"what \1", result, flags=re.IGNORECASE)
     for wrong, right in _CORRECTIONS.items():
         result = re.sub(rf"\b{re.escape(wrong)}\b", right, result, flags=re.IGNORECASE)
+
+    # Token-level fuzzy corrections for non-dictionary typographical slips
+    def _token_replace(match: re.Match) -> str:
+        token = match.group(0)
+        return _fuzzy_correct_word(token)
+
+    result = re.sub(r"\b[A-Za-z]{4,}\b", _token_replace, result)
     return result
 
 
 def normalize(query: str) -> str:
     """Whitespace and basic cleanup."""
-    return re.sub(r"\s+", " ", query.strip())
+    q = re.sub(r"\s+", " ", (query or "").strip())
+    # Clean multiple consecutive punctuation marks
+    q = re.sub(r"\?{2,}", "?", q)
+    q = re.sub(r"!{2,}", "!", q)
+    # Ensure space after comma if followed by a letter
+    q = re.sub(r"([A-Za-z]),([A-Za-z])", r"\1, \2", q)
+    return q
 
 
 def rewrite_with_history(
@@ -432,43 +855,52 @@ def language_detection_backend() -> str:
     return "lingua" if _get_language_detector() is not None else "heuristic"
 
 
-def detect_language(text: str) -> str:
+def detect_language(text: str, default_lang: str = "en") -> str:
     """Detect input language, returning a locale code (en, lg, sw, nyn, ach).
 
-    Uses a lightweight heuristic chain:
-      1. Runyankole / Acholi / Swahili marker patterns (cheap, local)
-      2. LanguageDetector from ml.scripts.lang_id (lingua or heuristic)
-      3. Sunbird API as cloud fallback (only if local confidence is low)
-
-    Returns "en" as default when detection is inconclusive.
+    Understands syntax errors, typos, and user intent before classification:
+    misspellings of words must not alter the response language, and the default
+    set language is preserved unless there is genuine lexical evidence for a
+    different supported language.
     """
-    if not text or len(text.strip()) < 5:
-        return "en"
+    if not text or len(text.strip()) < 4:
+        return default_lang
 
-    cleaned = text.strip().lower()
-    words = re.findall(r"[a-z\']+", cleaned)
+    # Understand syntax and typos before checking language
+    corrected = correct_spelling(normalize(text))
+    cleaned = corrected.strip().lower()
+    words = set(re.findall(r"[a-z']+", cleaned))
+    if not words:
+        return default_lang
+
     n_words = max(len(words), 1)
 
-    # Consult the statistical detector BEFORE the marker heuristics below.
-    #
-    # The markers cannot tell Luganda from Runyankole: the two languages share
-    # the oku-/omu-/eby- infinitive and noun-class prefixes that _NYN_PREFIXES
-    # matches on, so any Luganda sentence carrying two of them short-circuited
-    # to "nyn" and never reached lingua at all. That is not a cosmetic
-    # mislabel — nyn is not in SUPPORTED_LOCALES, so service.py's gate then
-    # declines to promote the locale and the question is answered in ENGLISH.
-    # Measured on this project's own Luganda question bank, 3 of 6 questions
-    # went that way (penalties, returns, withholding); lingua calls the same
-    # six "lg" with 0.91-0.998 confidence.
-    #
-    # The markers still run below and still own nyn/ach — lingua has no model
-    # for either language, so it is only trusted here for a locale it actually
-    # knows AND is confident about. Everything else keeps the original order.
+    # 1. Lexical markers for English, Luganda, and Swahili
+    en_hits = len(words & _COMMON_ENGLISH_WORDS) + len(words & _TAX_DOMAIN_VOCAB)
+    lg_hits = len(words & _LOCAL_LANGUAGE_WORDS)
+    sw_hits = len(_SW_MARKERS.findall(cleaned))
+
+    # A misspelled or noisy English query (e.g. "wat is the vat rat?",
+    # "How do I pay assessmnt witholding tax?") resolves to English tokens and
+    # must NEVER be hijacked to Luganda or Swahili.
+    if en_hits > 0 and lg_hits == 0 and sw_hits == 0:
+        return default_lang
+
+    # 2. Strong lexical signals for supported Ugandan / East African locales
+    if sw_hits >= 2 or (sw_hits >= 1 and en_hits == 0):
+        return "sw"
+    if lg_hits >= 2 or (lg_hits >= 1 and en_hits == 0):
+        return "lg"
+
+    # Consult statistical detector (lingua) on the corrected text
     det = _get_language_detector()
     if det is not None:
         try:
-            result = det.detect(text)
+            result = det.detect(corrected)
             if result.lang in SUPPORTED_LOCALES and result.is_confident(0.75):
+                # Extra guard: lingua must not override to lg/sw if English words dominate
+                if result.lang in ("lg", "sw") and en_hits > 0 and lg_hits == 0 and sw_hits == 0:
+                    return default_lang
                 return result.lang
         except Exception:
             logger.debug("LanguageDetector.detect failed; using marker heuristics")
@@ -476,41 +908,42 @@ def detect_language(text: str) -> str:
     # Quick heuristic: count marker hits per language
     nyn_hits = len(_NYN_PREFIXES.findall(cleaned)) + len(_NYN_WORDS.findall(cleaned))
     ach_hits = len(_ACH_MARKERS.findall(cleaned))
-    sw_hits = len(_SW_MARKERS.findall(cleaned))
 
     nyn_ratio = nyn_hits / n_words
     ach_ratio = ach_hits / n_words
     sw_ratio = sw_hits / n_words
 
-    # Strong signal thresholds
-    if nyn_ratio >= 0.15 and nyn_hits >= 2:
+    # Strong signal thresholds for regional dialects
+    if nyn_ratio >= 0.20 and nyn_hits >= 2 and en_hits == 0:
         return "nyn"
-    if ach_ratio >= 0.15 and ach_hits >= 2:
+    if ach_ratio >= 0.20 and ach_hits >= 2 and en_hits == 0:
         return "ach"
     if sw_ratio >= 0.15 and sw_hits >= 2:
         return "sw"
 
-    # Fall back to the cached LanguageDetector (en/lg/sw via lingua)
-    det = _get_language_detector()
+    # Fall back to statistical detector with lower confidence threshold
     if det is not None:
         try:
-            result = det.detect(text)
+            result = det.detect(corrected)
             if result.is_confident(0.55):
+                if result.lang in ("lg", "sw") and en_hits > 0 and lg_hits == 0 and sw_hits == 0:
+                    return default_lang
                 return result.lang
         except Exception:
             logger.debug("LanguageDetector.detect failed; using heuristic only")
 
-    # If local detection is low-confidence, try Sunbird API
-    try:
-        from . import sunbird
-        if sunbird.is_available():
-            sb_result = sunbird.detect_language(text)
-            if sb_result and sb_result.get("locale"):
-                return sb_result["locale"]
-    except Exception:
-        logger.debug("Sunbird language detection unavailable")
+    # If local detection is low-confidence and no English words found, try Sunbird API
+    if en_hits == 0:
+        try:
+            from . import sunbird
+            if sunbird.is_available():
+                sb_result = sunbird.detect_language(corrected)
+                if sb_result and sb_result.get("locale"):
+                    return sb_result["locale"]
+        except Exception:
+            logger.debug("Sunbird language detection unavailable")
 
-    return "en"
+    return default_lang
 
 
 def rewrite(
@@ -792,12 +1225,26 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
 
         return sunbird.translate_to_english(query, locale)
 
+    def _fast_fallback() -> str | None:
+        try:
+            from .speech_service import SpeechModel
+
+            out = SpeechModel._gemini_translate(query, locale, "en")
+            if out and out.strip():
+                return out.strip()
+            out = SpeechModel._cf_llama_translate(query, locale, "en")
+            if out and out.strip():
+                return out.strip()
+        except Exception:
+            logger.debug("Fast cloud retrieval translation fallback failed (%s)", _log_safe(locale), exc_info=True)
+        return None
+
     if RETRIEVAL_MT_BACKEND == "local":
         order = (("local", _local),)
     elif RETRIEVAL_MT_BACKEND == "sunbird":
-        order = (("sunbird", _cloud),)
+        order = (("sunbird", _cloud), ("fast_fallback", _fast_fallback))
     else:
-        order = (("local", _local), ("sunbird", _cloud))
+        order = (("local", _local), ("sunbird", _cloud), ("fast_fallback", _fast_fallback))
 
     for name, fn in order:
         try:

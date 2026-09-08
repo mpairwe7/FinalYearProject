@@ -2449,12 +2449,26 @@ def _translate_reply(text: str, locale: str) -> str | None:
 
         return sunbird.translate_from_english(text, locale)
 
+    def _fast_fallback() -> str | None:
+        try:
+            from .speech_service import SpeechModel
+
+            out = SpeechModel._gemini_translate(text, "en", locale)
+            if out and out.strip():
+                return out.strip()
+            out = SpeechModel._cf_llama_translate(text, "en", locale)
+            if out and out.strip():
+                return out.strip()
+        except Exception:
+            logger.debug("Fast cloud translation fallback failed (%s)", locale, exc_info=True)
+        return None
+
     if REPLY_MT_BACKEND == "local":
         order = (("local", _local),)
     elif REPLY_MT_BACKEND == "sunbird":
-        order = (("sunbird", _cloud),)
+        order = (("sunbird", _cloud), ("fast_fallback", _fast_fallback))
     else:
-        order = (("local", _local), ("sunbird", _cloud))
+        order = (("local", _local), ("sunbird", _cloud), ("fast_fallback", _fast_fallback))
 
     for name, fn in order:
         try:
@@ -2523,6 +2537,7 @@ def _is_already_in_locale(text: str, target_locale: str) -> bool:
             "kodi", "kwa", "katika", "kujisajili", "asilimia", "thamani", "ushuru",
             "marejesho", "huduma", "wafanyakazi", "mapato", "nchini", "binafsi",
             "kazi", "mwaka", "mwezi", "kutoa", "kulipa", "zaidi", "kiwango", "viwango",
+            "habari", "jambo", "karibu", "asante", "shukrani", "ndiyo", "hapana",
         )
         return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
     if target_locale == "lg":
@@ -2530,6 +2545,7 @@ def _is_already_in_locale(text: str, target_locale: str) -> bool:
             "omusolo", "buli", "okufuna", "ebitundu", "ssente", "alipoota", "abakozi",
             "waggulu", "basasula", "bwe", "era", "kye", "bye", "kampuni", "emisolo",
             "okwewandiisa", "musanyufu", "ebisaanyizo", "enkola", "omusaala", "abakozesa", "ekitongole",
+            "gyebaleko", "webale", "yee", "nedda", "nsaba", "sente",
         )
         return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
     return False
@@ -5273,7 +5289,7 @@ class ChatModel:
             #     running an incomplete translation/localization round trip.
             if locale == "en":
                 with trace_stage("lang_detect", timings=timings):
-                    detected_locale = detect_language(message)
+                    detected_locale = detect_language(rewritten, default_lang=locale)
                     if detected_locale != "en" and detected_locale in SUPPORTED_LOCALES:
                         locale = detected_locale
                         logger.info("Auto-detected locale: %s", locale)
@@ -6718,7 +6734,7 @@ class ChatModel:
         # promotes to a locale in SUPPORTED_LOCALES; see _generate_en's
         # matching gate above for the full reasoning.
         if locale == "en":
-            detected_locale = detect_language(message)
+            detected_locale = detect_language(rewritten, default_lang=locale)
             if detected_locale != "en" and detected_locale in SUPPORTED_LOCALES:
                 locale = detected_locale
                 logger.info("Auto-detected locale: %s (streaming)", locale)
