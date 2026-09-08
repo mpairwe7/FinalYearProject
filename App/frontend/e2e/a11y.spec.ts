@@ -241,6 +241,10 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
       await visitInTheme(page, "/signin", theme);
       await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
       await expectNoSeriousOrCritical(page, `sign-in (${theme})`);
+
+      await visitInTheme(page, "/signup", theme);
+      await expect(page.getByRole("heading", { name: "Create an account", exact: true })).toBeVisible();
+      await expectNoSeriousOrCritical(page, `sign-up (${theme})`);
     }
   });
 

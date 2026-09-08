@@ -91,6 +91,8 @@ export default function SignUpPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createdRole, setCreatedRole] = useState<string | null>(null);
 
@@ -284,55 +286,103 @@ export default function SignUpPage() {
               Create your account with your personal email (e.g. Gmail, Yahoo Mail, Outlook) to save tax conversations and customize your taxpayer profile:
             </p>
 
-            <form onSubmit={handleLocalSignUp} style={{ display: "grid", gap: "10px" }}>
-              <label className="signin-field">
-                <span>Full Name</span>
+            <form onSubmit={handleLocalSignUp} style={{ display: "grid", gap: "12px" }}>
+              <div className="signin-field">
+                <label htmlFor="signup-fullname">
+                  <span>Full Name</span>
+                </label>
                 <input
+                  id="signup-fullname"
                   type="text"
                   className="signin-input"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="e.g. Ronald Kigozi"
+                  autoComplete="name"
                 />
-              </label>
+              </div>
 
-              <label className="signin-field">
-                <span>Email Address</span>
+              <div className="signin-field">
+                <label htmlFor="signup-email">
+                  <span>Email Address</span>
+                </label>
                 <input
+                  id="signup-email"
                   type="email"
                   className="signin-input"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="e.g. yourname@gmail.com, yourname@yahoo.com"
                   required
+                  aria-required="true"
+                  autoComplete="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
                 />
-              </label>
+              </div>
 
-              <label className="signin-field">
-                <span>Create Password</span>
-                <input
-                  type="password"
-                  className="signin-input"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  required
-                  minLength={6}
-                />
-              </label>
+              <div className="signin-field">
+                <label htmlFor="signup-password">
+                  <span>Create Password</span>
+                </label>
+                <div className="signin-input-wrap">
+                  <input
+                    id="signup-password"
+                    type={showPassword ? "text" : "password"}
+                    className="signin-input"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    required
+                    aria-required="true"
+                    minLength={6}
+                    autoComplete="new-password"
+                    aria-describedby="signup-password-hint"
+                  />
+                  <button
+                    type="button"
+                    className="signin-pw-toggle"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                  >
+                    {showPassword ? "🙈" : "👁️"}
+                  </button>
+                </div>
+                <span id="signup-password-hint" className="signin-hint" style={{ marginTop: "3px" }}>
+                  Must be at least 6 characters long
+                </span>
+              </div>
 
-              <label className="signin-field">
-                <span>Confirm Password</span>
-                <input
-                  type="password"
-                  className="signin-input"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Re-type your password"
-                  required
-                  minLength={6}
-                />
-              </label>
+              <div className="signin-field">
+                <label htmlFor="signup-confirm-password">
+                  <span>Confirm Password</span>
+                </label>
+                <div className="signin-input-wrap">
+                  <input
+                    id="signup-confirm-password"
+                    type={showConfirmPassword ? "text" : "password"}
+                    className="signin-input"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-type your password"
+                    required
+                    aria-required="true"
+                    minLength={6}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="signin-pw-toggle"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    aria-label={showConfirmPassword ? "Hide password confirmation" : "Show password confirmation"}
+                    aria-pressed={showConfirmPassword}
+                  >
+                    {showConfirmPassword ? "🙈" : "👁️"}
+                  </button>
+                </div>
+              </div>
 
               <button
                 type="submit"
