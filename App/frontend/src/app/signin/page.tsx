@@ -29,6 +29,7 @@
  * OIDC Core 1.0 §3.1; WCAG 2.2 AA for the form semantics.
  */
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   setAuthToken,
@@ -61,6 +62,7 @@ const DEV_SIGNIN_ENABLED =
   process.env.NEXT_PUBLIC_DEV_SIGNIN === "true" || !OIDC_CONFIGURED;
 
 export default function SignInPage() {
+  const router = useRouter();
   const [role, setRole] = useState<string>("ura_staff");
   const [customEmail, setCustomEmail] = useState("");
   const [devToken, setDevToken] = useState("");
@@ -73,6 +75,56 @@ export default function SignInPage() {
   // mount. It also means signing out updates this without a manual setState.
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
   const signedIn = Boolean(token);
+
+  // Read URL parameters on mount to prefill email/role and show account creation success notices
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const wasRegistered = params.get("registered") === "true";
+    const emailParam = params.get("email");
+    const roleParam = params.get("role");
+
+    queueMicrotask(() => {
+      if (wasRegistered) {
+        setStatus({
+          kind: "ok",
+          message: "Account created successfully! Sign in below to enter your workspace.",
+        });
+      }
+      if (emailParam) {
+        setCustomEmail(emailParam);
+      }
+      if (roleParam) {
+        setRole(roleParam);
+      }
+    });
+  }, []);
+
+  /**
+   * Determine the internal destination based on the user's role and any requested returnTo parameter.
+   * URA Staff -> /agent (My Queue & User Query Flows)
+   * URA Admin -> /admin (Operations Console)
+   * URA Auditor -> /analytics (Auditor View)
+   * Taxpayer -> / (Assistant Chat)
+   */
+  const resolveRoleDestination = useCallback((targetRole: string) => {
+    if (typeof window === "undefined") return "/";
+    const params = new URLSearchParams(window.location.search);
+    const returnTo = params.get("returnTo");
+    const staff = isStaffRole(targetRole);
+
+    if (returnTo && returnTo.startsWith("/")) {
+      if (!staff && (returnTo.startsWith("/admin") || returnTo.startsWith("/agent"))) {
+        return "/";
+      }
+      return returnTo;
+    }
+
+    if (targetRole === "ura_staff") return "/agent";
+    if (targetRole === "ura_admin") return "/admin";
+    if (targetRole === "ura_auditor") return "/analytics";
+    return "/";
+  }, []);
 
   /**
    * `prompt` is what makes "sign in as somebody else" work.
@@ -172,12 +224,16 @@ export default function SignInPage() {
         setAuthToken(data.token, "dev");
         setLoading(false);
         const staff = isStaffRole(data.role);
+        const dest = resolveRoleDestination(data.role);
         setStatus({
           kind: "ok",
           message: staff
-            ? `Signed in as ${data.email || data.user_id} (${data.role}). Use "My Queue & User Queries" below to view escalations and query flows.`
-            : `Signed in as ${data.email || data.user_id} (${data.role}).`,
+            ? `Signed in as ${data.email || data.user_id} (${data.role})! Redirecting to workspace...`
+            : `Signed in as ${data.email || data.user_id} (${data.role})! Redirecting to assistant...`,
         });
+        setTimeout(() => {
+          router.push(dest);
+        }, 500);
       } catch (err) {
         setLoading(false);
         setStatus({
@@ -186,7 +242,7 @@ export default function SignInPage() {
         });
       }
     },
-    [],
+    [resolveRoleDestination, router],
   );
 
   const useDevToken = useCallback(async () => {
@@ -225,19 +281,23 @@ export default function SignInPage() {
       // does not try to end a provider session that never existed.
       setAuthToken(token, "dev");
       const staff = isStaffRole(body.role);
+      const dest = resolveRoleDestination(body.role);
       setStatus({
         kind: "ok",
         message: staff
-          ? `Signed in as ${body.email || body.external_id || "staff"} (${body.role}).`
-          : `Token accepted, but role "${body.role}" is not staff — the dashboards will refuse it.`,
+          ? `Signed in as ${body.email || body.external_id || "staff"} (${body.role})! Redirecting to workspace...`
+          : `Signed in as ${body.email || body.external_id || "taxpayer"} (${body.role})! Redirecting to assistant...`,
       });
+      setTimeout(() => {
+        router.push(dest);
+      }, 500);
     } catch (err) {
       // Nothing was stored on this path, so there is nothing to roll back —
       // and clearing here would sign out a session that this attempt never
       // touched.
       setStatus({ kind: "error", message: `Could not reach the backend: ${(err as Error).message}` });
     }
-  }, [devToken]);
+  }, [devToken, resolveRoleDestination, router]);
 
   const signOut = useCallback(() => {
     const method = getAuthMethod();

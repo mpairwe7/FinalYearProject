@@ -18,6 +18,7 @@
  */
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   getAuthToken,
@@ -45,6 +46,7 @@ const BENEFITS = [
 ] as const;
 
 export default function SignUpPage() {
+  const router = useRouter();
   const [status, setStatus] = useState<{ kind: "idle" | "info" | "error"; message: string }>({
     kind: "idle",
     message: "",
@@ -98,14 +100,22 @@ export default function SignUpPage() {
         setSubmitting(false);
         setStatus({
           kind: "info",
-          message: `Account created for ${data.email || data.user_id} (${data.role})! You are now signed in.`,
+          message: `Account created for ${data.email || data.user_id}! Redirecting to sign in...`,
         });
+        // Redirect user to sign-in screen with pre-filled credentials for a polished onboarding UX
+        const params = new URLSearchParams();
+        params.set("registered", "true");
+        params.set("email", userEmail);
+        params.set("role", selectedRole);
+        setTimeout(() => {
+          router.push(`/signin?${params.toString()}`);
+        }, 800);
       } catch (err) {
         setSubmitting(false);
         setStatus({ kind: "error", message: `Could not complete registration: ${(err as Error).message}` });
       }
     },
-    [email, fullName, selectedRole],
+    [email, fullName, selectedRole, router],
   );
 
   const startSignUp = useCallback(async () => {
