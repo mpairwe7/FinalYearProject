@@ -40,16 +40,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build
 
 # Stage 3: Production runtime (minimal Node.js image)
-# Next.js 16 requires Node.js 20.9+ — pin to a specific 20 LTS patch to
-# guarantee the floor at build time and prevent silent downgrades.
-FROM node:20.18-slim AS runner
+# Next.js 16 requires Node.js 20.9+ — use actively-maintained Node.js LTS with latest security patches.
+FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Non-root user for security
-RUN groupadd --gid 10001 appuser && \
+# Security updates, strip unused build tools (npm/yarn/corepack) to eliminate CVEs in bundled CLI deps, and create non-root user
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn* /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/corepack && \
+    groupadd --gid 10001 appuser && \
     useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser
 
 # Copy standalone output from builder
