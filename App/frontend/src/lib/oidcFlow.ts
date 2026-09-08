@@ -291,10 +291,12 @@ export function endOidcSession(): boolean {
   }
 
   url.searchParams.set("client_id", OIDC_CLIENT_ID);
-  url.searchParams.set(
-    "post_logout_redirect_uri",
-    `${window.location.origin}${OIDC_POST_LOGOUT_PATH}`,
-  );
+  const origin = window.location.origin;
+  // Auth0 allowed logout URLs: ngrok uses bare origin; HF Space and CraneCloud use /signin
+  const postLogoutUri = origin.includes("ngrok-free.dev") || origin.includes("ngrok.io")
+    ? origin
+    : `${origin}${OIDC_POST_LOGOUT_PATH}`;
+  url.searchParams.set("post_logout_redirect_uri", postLogoutUri);
   url.searchParams.set("state", randomHex(8));
   window.location.assign(url.toString());
   return true;
