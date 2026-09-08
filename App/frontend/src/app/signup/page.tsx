@@ -45,6 +45,18 @@ const BENEFITS = [
   },
 ] as const;
 
+async function hashCredential(pwd: string, email: string): Promise<string> {
+  if (typeof window === "undefined" || !window.crypto?.subtle) {
+    return "";
+  }
+  const enc = new TextEncoder();
+  const data = enc.encode(`ura-taxpayer:${email.toLowerCase()}:${pwd}`);
+  const buffer = await window.crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export default function SignUpPage() {
   const router = useRouter();
   const [status, setStatus] = useState<{ kind: "idle" | "info" | "error"; message: string }>({
@@ -105,12 +117,13 @@ export default function SignUpPage() {
           return;
         }
 
-        // Store taxpayer credentials locally for consistent prototype login verification
+        // Store salted credential hash locally for prototype login verification (CWE-312: no plaintext)
         if (typeof window !== "undefined") {
           try {
+            const pwdHash = await hashCredential(password, userEmail);
             localStorage.setItem(
               `taxpayer_cred_${userEmail.toLowerCase()}`,
-              JSON.stringify({ fullName: userName, email: userEmail, password, role: "public" }),
+              JSON.stringify({ fullName: userName, email: userEmail, pwdHash, role: "public" }),
             );
           } catch {
             // storage quota fallback

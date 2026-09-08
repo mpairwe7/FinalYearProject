@@ -61,6 +61,18 @@ const DEV_ROLE_OPTIONS = [
 const DEV_SIGNIN_ENABLED =
   process.env.NEXT_PUBLIC_DEV_SIGNIN === "true" || !OIDC_CONFIGURED;
 
+async function hashCredential(pwd: string, email: string): Promise<string> {
+  if (typeof window === "undefined" || !window.crypto?.subtle) {
+    return "";
+  }
+  const enc = new TextEncoder();
+  const data = enc.encode(`ura-taxpayer:${email.toLowerCase()}:${pwd}`);
+  const buffer = await window.crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export default function SignInPage() {
   const router = useRouter();
   const [role, setRole] = useState<string>("ura_staff");
@@ -377,7 +389,7 @@ export default function SignInPage() {
             </p>
 
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
                 const mail = taxpayerEmail.trim();
                 if (!mail) {
@@ -389,13 +401,14 @@ export default function SignInPage() {
                   return;
                 }
 
-                // Verify saved password if created locally
+                // Verify saved credential hash if created locally (CWE-312: no plaintext)
                 if (typeof window !== "undefined") {
                   try {
                     const raw = localStorage.getItem(`taxpayer_cred_${mail.toLowerCase()}`);
                     if (raw) {
                       const cred = JSON.parse(raw);
-                      if (cred.password && cred.password !== taxpayerPassword) {
+                      const inputHash = await hashCredential(taxpayerPassword, mail);
+                      if (cred.pwdHash && cred.pwdHash !== inputHash) {
                         setStatus({ kind: "error", message: "Incorrect password. Please verify your credentials." });
                         return;
                       }
