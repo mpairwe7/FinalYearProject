@@ -170,29 +170,40 @@ export default function SignUpPage() {
           </p>
         </header>
 
-        {OIDC_CONFIGURED ? (
-          <section className="signin-block" aria-labelledby="signup-h">
-            <h2 id="signup-h">Register with the URA identity provider</h2>
-            <p className="signin-note">
-              Accounts, passwords, multi-factor setup and recovery are held by the
-              identity provider — this application never sees a password. You will
-              be taken there to register and returned here once you are done.
+        <section className="signin-block" aria-labelledby="signup-h">
+          <h2 id="signup-h">Register with the URA identity provider</h2>
+          <p className="signin-note">
+            Accounts, passwords, multi-factor setup and recovery are held by the
+            identity provider — this application never sees a password. You will
+            be taken there to register and returned here once you are done.
+          </p>
+          <button
+            type="button"
+            className="signin-primary"
+            onClick={startSignUp}
+            disabled={!OIDC_CONFIGURED || starting}
+          >
+            {!OIDC_CONFIGURED
+              ? "Identity provider not configured"
+              : starting
+                ? "Opening the provider…"
+                : "Continue to registration"}
+          </button>
+          {!OIDC_CONFIGURED && (
+            <p className="signin-hint">
+              Set <code>NEXT_PUBLIC_OIDC_ISSUER</code> and{" "}
+              <code>NEXT_PUBLIC_OIDC_CLIENT_ID</code> to enable this. Until then
+              the assistant still answers questions signed out.
             </p>
-            <button
-              type="button"
-              className="signin-primary"
-              onClick={startSignUp}
-              disabled={starting}
-            >
-              {starting ? "Opening the provider…" : "Continue to registration"}
-            </button>
-          </section>
-        ) : (
+          )}
+        </section>
+
+        {!OIDC_CONFIGURED && (
           <section className="signin-block signin-dev" aria-labelledby="signup-local-h">
             <div className="signin-dev-flag" role="note">
               Quick Account Creation
             </div>
-            <h2 id="signup-local-h">Create an account</h2>
+            <h2 id="signup-local-h">Staff & User Registration</h2>
             <p className="signin-note">
               Non-IT staff, officers, and taxpayers can create an account below to explore user queries, escalations, and system flows:
             </p>
