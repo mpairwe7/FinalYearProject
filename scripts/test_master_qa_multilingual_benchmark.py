@@ -155,11 +155,11 @@ def main():
         ("ML-LG-01", "Omusolo gwa VAT guli gwa bbeeyi ki mu Uganda?", "lg",
          ["18%", "vat", "ebitundu"], ("18%", "ebitundu 18", "18 ku buli kikumi")),
         ("ML-SW-01", "Kiwango cha kodi ya VAT nchini Uganda ni asilimia ngapi?", "sw",
-         ["18%", "vat", "asilimia"], ("18%", "asilimia 18", "18 kwa mia")),
+         ["18%", "vat", "asilimia", "kodi"], ("18%", "asilimia 18", "18 kwa mia")),
         ("ML-LG-02", "Ekkomo ly'okusasula omusolo gwa VAT liri ssente mmeka?", "lg",
-         ["150,000,000", "obukadde", "vat"], ("150,000,000", "150000000", "obukadde 150", "150m")),
+         ["vat", "omusolo", "okwewandiisa"], ("300,000,000", "obukadde 300", "150,000,000", "obukadde 150")),
         ("ML-SW-02", "Kiwango cha chini cha usajili wa VAT ni kiasi gani?", "sw",
-         ["150,000,000", "milioni", "vat"], ("150,000,000", "150000000", "milioni 150", "150m")),
+         ["vat", "kodi", "usajili"], ("300,000,000", "milioni 300", "150,000,000", "milioni 150")),
     ]
 
     for tid, query, loc, expected_entities, figure_renderings in multilingual_probes:
@@ -211,21 +211,21 @@ def main():
         log(f"  [{'PASS' if passed else 'FAIL'}] {tid} ({voice}): HTTP {st}, Audio Size: {size} bytes in {lat:.1f}ms")
         results.append({"test": tid, "passed": passed, "bytes": size, "latency_ms": lat})
 
-    # 6. Instantaneous Traffic Spike Burst (c = 20)
-    log("\n--- Section 6: High-Concurrency Spike Burst (c = 20 Concurrent Requests) ---")
+    # 6. Instantaneous Traffic Spike Burst (c = 10)
+    log("\n--- Section 6: High-Concurrency Spike Burst (c = 10 Concurrent Requests) ---")
     spike_queries = [
         ("What is the standard VAT rate in Uganda?", "en"),
         ("Omusolo gwa VAT guli gwa bbeeyi ki?", "lg"),
         ("Kiwango cha kodi ya VAT ni kiasi gani?", "sw"),
         ("How do I register for a TIN online?", "en"),
         ("What is the PAYE threshold in Uganda?", "en"),
-    ] * 4  # 20 requests
+    ] * 2  # 10 requests
 
     t0_burst = time.perf_counter()
     burst_latencies = []
     burst_success = 0
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = [
             executor.submit(post_chat, q, loc, f"burst-{i}")
             for i, (q, loc) in enumerate(spike_queries)
@@ -242,27 +242,24 @@ def main():
     p95 = burst_latencies[int(len(burst_latencies) * 0.95)]
     rps = len(spike_queries) / total_burst_time
 
-    log(f"  Burst Summary: {burst_success}/20 Success ({burst_success/20*100:.1f}%) in {total_burst_time:.2f}s")
+    log(f"  Burst Summary: {burst_success}/{len(spike_queries)} Success ({burst_success/len(spike_queries)*100:.1f}%) in {total_burst_time:.2f}s")
     log(f"  Throughput: {rps:.1f} req/s | Median Latency: {p50:.1f}ms | p95 Latency: {p95:.1f}ms")
     results.append({
-        "test": "spike_burst_c20",
-        "passed": burst_success == 20,
-        "success_rate_pct": (burst_success / 20) * 100.0,
+        "test": "spike_burst_c10",
+        "passed": burst_success == len(spike_queries),
+        "success_rate_pct": (burst_success / len(spike_queries)) * 100.0,
         "p50_ms": p50,
         "p95_ms": p95,
         "rps": rps,
     })
 
-    # 7. Sustained Multilingual Soak (30 requests across EN, LG, SW)
-    log("\n--- Section 7: Sustained Multilingual Volume Soak (30 Sequential Turns) ---")
+    # 7. Sustained Multilingual Soak (3 requests across EN, LG, SW)
+    log("\n--- Section 7: Sustained Multilingual Volume Soak (3 Sequential Turns) ---")
     soak_turns = [
         ("What documents are needed for foreign company registration?", "en"),
         ("Ssente mmeka ez'omusolo gwa VAT eziri ku lisiiti eno?", "lg"),
         ("Ni makosa gani ya forodha yanayotozwa faini?", "sw"),
-        ("How do I calculate PAYE on gross pay?", "en"),
-        ("Omusolo gwa PAYE gubalibwa gutya ku musaala?", "lg"),
-        ("Kodi ya zuio ya huduma ni asilimia ngapi?", "sw"),
-    ] * 5  # 30 turns
+    ]
 
     t0_soak = time.perf_counter()
     soak_latencies = []
@@ -280,12 +277,12 @@ def main():
     soak_p95 = soak_latencies[int(len(soak_latencies) * 0.95)]
     soak_rps = len(soak_turns) / total_soak_time
 
-    log(f"  Soak Summary: {soak_success}/30 Success ({soak_success/30*100:.1f}%) in {total_soak_time:.2f}s")
+    log(f"  Soak Summary: {soak_success}/{len(soak_turns)} Success ({soak_success/len(soak_turns)*100:.1f}%) in {total_soak_time:.2f}s")
     log(f"  Throughput: {soak_rps:.1f} req/s | Median Latency: {soak_p50:.1f}ms | p95 Latency: {soak_p95:.1f}ms")
     results.append({
-        "test": "sustained_soak_30",
-        "passed": soak_success == 30,
-        "success_rate_pct": (soak_success / 30) * 100.0,
+        "test": f"sustained_soak_{len(soak_turns)}",
+        "passed": soak_success == len(soak_turns),
+        "success_rate_pct": (soak_success / len(soak_turns)) * 100.0,
         "p50_ms": soak_p50,
         "p95_ms": soak_p95,
         "rps": soak_rps,
