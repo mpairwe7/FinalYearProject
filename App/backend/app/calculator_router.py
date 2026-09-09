@@ -224,6 +224,7 @@ _ALREADY_REGISTERED_RE = re.compile(
 
 _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     ("withholding", re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
+    ("rental", re.compile(r"\b(rent(?:al)?\s+(?:income|tax)|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?|tax\b.*\brent(?:al)?)\b", re.IGNORECASE)),
     (
         "paye",
         re.compile(
@@ -234,7 +235,6 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
             re.IGNORECASE,
         ),
     ),
-    ("rental", re.compile(r"\b(rent(?:al)?\s+(?:income|tax)|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?|tax\b.*\brent(?:al)?)\b", re.IGNORECASE)),
     ("capital_gains", re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
     (
         "corporation",
@@ -664,9 +664,10 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me|kiwango|omuwendo|bitundu|asilimia)\b[^?]*\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo|bitundu|asilimia)\b"
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia)\b[^?]*\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo|bitundu|asilimia|tax|pay|charged|deducted|cut|take)\b"
     r"|\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo)\s+(of|for|kya|cha|ku|kwa|kye|gwa)\b"
-    r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente)\b",
+    r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente)\b"
+    r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b",
     re.IGNORECASE,
 )
 
@@ -713,22 +714,22 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         ),
     ),
     (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht|zuio)\b", re.IGNORECASE)),
-    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+bands?|abakozi|wafanyakazi)\b", re.IGNORECASE)),
     (
         RatePlan(tax_type="rental_tax_company"),
         re.compile(
-            r"\b(compan(?:y|ies)|business|kkampuni|kampuni)\b.*\b(?:rent(?:al)?|upangishaji|(?:gw['’])?o?bupangisa)\b"
-            r"|\b(?:rent(?:al)?|upangishaji|(?:gw['’])?o?bupangisa)\b.*\b(compan(?:y|ies)|business|kkampuni|kampuni)\b",
+            r"\b(compan(?:y|ies)|business|kkampuni|kampuni)\b.*\b(?:rent(?:al|ed|ing)?|upangishaji|kupangisha|majengo|(?:gw['’])?o?bupangisa)\b"
+            r"|\b(?:rent(?:al|ed|ing)?|upangishaji|kupangisha|majengo|(?:gw['’])?o?bupangisa)\b.*\b(compan(?:y|ies)|business|kkampuni|kampuni)\b",
             re.IGNORECASE,
         ),
     ),
     (
         RatePlan(summary="rental"),
         re.compile(
-            r"\b(?:rent(?:al)?|upangishaji|(?:gw['’])?o?bupangisa|amayumba|nyumba)\b",
+            r"\b(?:rent(?:al|ed|ing)?|upangishaji|kupangisha|majengo|(?:gw['’])?o?bupangisa|amayumba|nnyumba|nyumba)\b",
             re.IGNORECASE,
         ),
     ),
+    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+bands?|abakozi|wafanyakazi)\b", re.IGNORECASE)),
     (RatePlan(tax_type="capital_gains_corporate"), re.compile(r"\b(capital\s+gains?|cgt|magoba\s+ku\s+byamaguzi)\b", re.IGNORECASE)),
     (RatePlan(tax_type="corporation_tax"), re.compile(r"\b(corporation|corporate|company)\s+(income\s+)?tax\b", re.IGNORECASE)),
     (RatePlan(tax_type="customs_duty_common"), re.compile(r"\b(customs|import\s+dut(?:y|ies)|ushuru\s+wa\s+forodha|omusolo\s+gw'okuyingiza)\b", re.IGNORECASE)),
@@ -774,7 +775,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
                 subtype = next((k for k, p in _WHT_SUBTYPE_RES if p.search(text)), "")
                 if subtype:
                     return RatePlan(tax_type=subtype)
-            if plan.summary == "rental" and re.search(r"\bindividual\b", text, re.IGNORECASE):
+            if plan.summary == "rental" and re.search(r"\b(individual|person|natural\s+person|ssekinnoomu|binafsi|gross)\b", text, re.IGNORECASE):
                 return RatePlan(tax_type="rental_tax_individual")
             return plan
     return None

@@ -2117,6 +2117,49 @@ _FAQ_TERM_ALIASES = {
     "german": "language",
     "chinese": "language",
     "arabic": "language",
+    # Multilingual Tax Lemmas (Luganda)
+    "omusolo": "tax",
+    "emisolo": "tax",
+    "ebitundu": "rate",
+    "kikumi": "percent",
+    "obupangisa": "rental",
+    "mayumba": "rental",
+    "nnyumba": "rental",
+    "ebiwandiiko": "document",
+    "okwewandiisa": "registration",
+    "ssekinnoomu": "individual",
+    "bannansi": "resident",
+    "obusuubuzi": "business",
+    "abasuubuzi": "business",
+    "magoba": "income",
+    "bizinensi": "business",
+    "ssente": "amount",
+    "akawumbi": "million",
+    "obukadde": "million",
+    "kikuubo": "trader",
+    # Multilingual Tax Lemmas (Swahili)
+    "kodi": "tax",
+    "ushuru": "tax",
+    "ongezeko": "vat",
+    "thamani": "vat",
+    "majengo": "rental",
+    "kupangisha": "rental",
+    "upangishaji": "rental",
+    "makampuni": "company",
+    "asilimia": "rate",
+    "kiwango": "rate",
+    "viwango": "rate",
+    "usajili": "registration",
+    "kujisajili": "registration",
+    "hati": "document",
+    "pingamizi": "objection",
+    "adhabu": "penalty",
+    "marejesho": "return",
+    "wakaazi": "resident",
+    "mshahara": "paye",
+    "mapato": "income",
+    "bidhaa": "goods",
+    "huduma": "service",
 }
 
 _FAQ_PHRASE_SYNONYMS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -3311,6 +3354,13 @@ def _filter_unbound_faq_hits(query: str, hits: list[dict[str, Any]]) -> list[dic
         # with "a return of income is a declaration…", losing by 0.009 to a row
         # that does not answer it at all.
         if hit.get("faq_priority"):
+            continue
+        # Reranking & semantic separation: when the cross-encoder or multilingual dense model
+        # scores the passage with strong confidence (score_rerank >= 0.35 or score_norm >= 0.60),
+        # preserve the candidate rather than discarding it via monolingual token overlap.
+        rerank_score = float(hit.get("score_rerank") or 0.0)
+        norm_score = float(hit.get("score_norm") or 0.0)
+        if rerank_score >= 0.35 or norm_score >= 0.60:
             continue
         score = float(hit.get("faq_match_score") or _faq_match_score(query, hit))
         scores[idx] = score
@@ -4740,10 +4790,10 @@ class ChatModel:
             or self._maybe_handle_tin_clarification(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
-            or self._maybe_handle_calculator(
+            or self._maybe_handle_rate_lookup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
-            or self._maybe_handle_rate_lookup(
+            or self._maybe_handle_calculator(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
         )
@@ -5689,12 +5739,21 @@ class ChatModel:
             # 1a1b. Deterministic tax calculator — instant when the message
             #       carries the figures, guided elicitation when it doesn't.
             with trace_stage("calculator_router", timings=timings):
-                calc_result = self._maybe_handle_fast_paths(
-                    message=router_message,
-                    rewritten=router_rewritten,
-                    thread_id=thread_id,
-                    locale=locale,
-                )
+                calc_result = None
+                if message != router_message:
+                    calc_result = self._maybe_handle_fast_paths(
+                        message=message,
+                        rewritten=rewritten,
+                        thread_id=thread_id,
+                        locale=locale,
+                    )
+                if not calc_result:
+                    calc_result = self._maybe_handle_fast_paths(
+                        message=router_message,
+                        rewritten=router_rewritten,
+                        thread_id=thread_id,
+                        locale=locale,
+                    )
             if calc_result:
                 if distress and calc_result.get("reply"):
                     calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
