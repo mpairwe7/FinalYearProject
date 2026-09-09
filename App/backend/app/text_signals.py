@@ -354,7 +354,7 @@ _EXPORT_TO_FOREIGN_RE = re.compile(
     re.IGNORECASE,
 )
 _PURE_FOREIGN_TAX_RE = re.compile(
-    r"\b(in\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|uk|usa|us|united\s+states)|kenyan\s+(?:vat|tax|revenue|kra)|rwandan\s+(?:vat|tax|revenue|rra))\b",
+    r"\b(in\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|uk|usa|the\s+us|united\s+states)|kenyan\s+(?:vat|tax|revenue|kra)|rwandan\s+(?:vat|tax|revenue|rra))\b",
     re.IGNORECASE,
 )
 

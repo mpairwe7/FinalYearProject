@@ -122,7 +122,7 @@ User Query
 | Fusion | Reciprocal Rank Fusion (RRF) via Qdrant query API |
 | Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0) |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
-| Fallback | Keyword-overlap search on in-memory FAQ index |
+| Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
 
 ### LLM Generation (`llm.py`)
 

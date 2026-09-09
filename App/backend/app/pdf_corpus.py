@@ -104,6 +104,15 @@ _FIGURE_PLACEHOLDER_RE = re.compile(
     re.I,
 )
 _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
+_MD_LIST_ITALIC_RE = re.compile(r"\(\s*_([a-zA-Z0-9]+)_\s*\)")
+_PDF_BLOCKQUOTE_MARGINAL_RE = re.compile(r"(?m)^\s*>.*$")
+_PDF_REVISION_TAG_RE = re.compile(r"\[Rev\.\s*\d{4}\]?", re.IGNORECASE)
+_PDF_LEGAL_HEADER_RE = re.compile(
+    r"(?i)_?(?:East\s+African\s+Community(?:\s+Customs\s+Management)?(?:\s+Act)?|"
+    r"Taxation\s+handbook|Anti-Money\s+Laundering\s+Act|Tax\s+Procedures\s+Code\s+Act|"
+    r"Income\s+Tax\s+Act|Value\s+Added\s+Tax\s+Act|EAC-CET)_?",
+)
+_PDF_STANDALONE_PAGE_RE = re.compile(r"(?m)^\s*\d{1,4}\s*$")
 
 # Fiscal year in a filename, e.g. "...-FY-2024-25-1.pdf", "...FY2023-24.pdf",
 # "...Sector-2025-26.pdf". A candidate is only accepted when the two years are
@@ -162,10 +171,15 @@ def normalise_extracted_text(text: str) -> str:
     """
     if not text:
         return ""
+    text = _MD_LIST_ITALIC_RE.sub(r"(\1)", text)
+    text = _PDF_BLOCKQUOTE_MARGINAL_RE.sub(" ", text)
+    text = _PDF_REVISION_TAG_RE.sub(" ", text)
+    text = _PDF_LEGAL_HEADER_RE.sub(" ", text)
+    text = _PDF_STANDALONE_PAGE_RE.sub(" ", text)
     text = _DIGIT_DOT_RE.sub(".", text)
     text = _LEADER_RUN_RE.sub(" ", text)
     text = _FIGURE_PLACEHOLDER_RE.sub(" ", text)
-    text = text.replace("�", "")
+    text = text.replace("\ufffd", "")
     lines = [_MULTI_SPACE_RE.sub(" ", line).rstrip() for line in text.split("\n")]
     return "\n".join(lines).strip()
 

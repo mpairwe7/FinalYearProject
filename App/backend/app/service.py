@@ -313,19 +313,40 @@ _PARA_BREAK_RE = re.compile(r"[ \t]*\n(?:[ \t]*\n)+[ \t]*")
 _PARA_SENTINEL = "\x00PARA\x00"
 
 
+_PDF_LEGAL_HEADER_RE = re.compile(
+    r"(?i)_?(?:East\s+African\s+Community(?:\s+Customs\s+Management)?(?:\s+Act)?|"
+    r"Taxation\s+handbook|Anti-Money\s+Laundering\s+Act|Tax\s+Procedures\s+Code\s+Act|"
+    r"Income\s+Tax\s+Act|Value\s+Added\s+Tax\s+Act|EAC-CET)_?",
+)
+_PDF_REVISION_TAG_RE = re.compile(
+    r"\[Rev\.\s*\d{4}\]?",
+    re.IGNORECASE,
+)
+_PDF_BLOCKQUOTE_MARGINAL_RE = re.compile(r"(?m)^\s*>.*$")
+_PDF_STANDALONE_PAGE_RE = re.compile(r"(?m)^\s*\d{1,4}\s*$")
+_PDF_ALL_CAPS_HEADER_RE = re.compile(r"(?m)^[A-Z\s]{5,}\s*$")
+_MD_LIST_ITALIC_RE = re.compile(r"\(\s*_([a-zA-Z0-9]+)_\s*\)")
+
+
 def _clean_passage_text(text: str) -> str:
     """Remove PDF-extraction and Markdown artifacts from a retrieved chunk,
     preserving paragraph breaks; no-op for clean text."""
     if not text:
         return ""
-    t = _PIC_BLOCK_RE.sub(" ", text)
+    t = _MD_LIST_ITALIC_RE.sub(r"(\1)", text)
+    t = _PDF_STANDALONE_PAGE_RE.sub(" ", t)
+    t = _PDF_BLOCKQUOTE_MARGINAL_RE.sub(" ", t)
+    t = _PDF_REVISION_TAG_RE.sub(" ", t)
+    t = _PDF_LEGAL_HEADER_RE.sub(" ", t)
+    t = _PDF_ALL_CAPS_HEADER_RE.sub(" ", t)
+    t = _PIC_BLOCK_RE.sub(" ", t)
     t = _PIC_MARK_RE.sub(" ", t)
     t = _PDF_FOOTER_RE.sub(" ", t)
     t = _PDF_EDITION_RE.sub(" ", t)
     t = _DOT_LEADER_RE.sub(" ", t)
     t = _SPACED_LETTERS_RE.sub(" ", t)
     t = _MOJIBAKE_DECIMAL_RE.sub(".", t)
-    t = t.replace("�", "")
+    t = t.replace("\ufffd", "")
     t = _MD_HEADING_RE.sub(_PARA_SENTINEL, t)
     t = _MD_BOLD_RE.sub("", t)
     t = _PARA_BREAK_RE.sub(_PARA_SENTINEL, t)
@@ -335,7 +356,6 @@ def _clean_passage_text(text: str) -> str:
     t = re.sub(rf"^(?:{re.escape(_PARA_SENTINEL)}[ ]*)+", "", t)  # trim leading break
     t = re.sub(rf"(?:{re.escape(_PARA_SENTINEL)}[ ]*)+$", "", t)  # trim trailing break
     t = t.replace(_PARA_SENTINEL, "\n\n")
-    t = re.sub(r"(?m)^\s*\d{1,3}\s*$", "", t)  # standalone orphan page numbers
     t = re.sub(r"[\s;]+\d{1,3}\s*$", "", t)  # trailing orphan page number
     t = re.sub(r"[\s;]+\d{1,2}\.\s*$", "", t)  # trailing orphan list marker
     return t.strip()
@@ -2007,7 +2027,8 @@ _STOP_WORDS = frozenset(
     "can could may might must have has had of in on at to for with by from "
     "and or not no nor but so if then than that this these those it its i me "
     "my we our you your he she they them their what which who whom how when "
-    "where why all each every any some".split()
+    "where why all each every any some out up down off into over much many more "
+    "allowed able happens happen instead without".split()
 )
 
 # Keyword retrieval is deliberately conservative.  A FAQ answer can contain
@@ -2027,6 +2048,7 @@ _FAQ_QUERY_STOP_WORDS = _STOP_WORDS | frozenset(
         "please",
         "tell",
         "want",
+        "work",
     }
 )
 _FAQ_TERM_ALIASES = {
@@ -2043,7 +2065,81 @@ _FAQ_TERM_ALIASES = {
     "taxes": "tax",
     "thresholds": "threshold",
     "vehicles": "vehicle",
+    # Vehicles & Transport domain synonyms
+    "lorry": "vehicle",
+    "lorries": "vehicle",
+    "truck": "vehicle",
+    "trucks": "vehicle",
+    "car": "vehicle",
+    "cars": "vehicle",
+    "bus": "vehicle",
+    "buses": "vehicle",
+    "motorcycle": "vehicle",
+    "motorcycles": "vehicle",
+    "bodaboda": "vehicle",
+    "boda": "vehicle",
+    "capacity": "capacity",
+    "loading": "capacity",
+    "carrying": "capacity",
+    "carry": "capacity",
+    # Documents, Papers & Records
+    "papers": "document",
+    "paperwork": "document",
+    "forms": "form",
+    "records": "record",
+    "books": "record",
+    "bookkeeping": "record",
+    "accounts": "record",
+    # Business & Entities
+    "enterprise": "company",
+    "enterprises": "company",
+    "firm": "company",
+    "firms": "company",
+    "corporation": "company",
+    # Operations
+    "operating": "operate",
+    "operation": "operate",
+    # Free Zones, EPZ & Customs Offences
+    "freeport": "epz",
+    "freeports": "epz",
+    "freezone": "epz",
+    "freezones": "epz",
+    "permission": "authority",
+    "permit": "authority",
+    "authorization": "authority",
+    "move": "removing",
+    "moving": "removing",
+    "remove": "removing",
+    "taking": "removing",
+    "offense": "offence",
+    # Language references
+    "french": "language",
+    "german": "language",
+    "chinese": "language",
+    "arabic": "language",
 }
+
+_FAQ_PHRASE_SYNONYMS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(?:free\s+zones?|freeports?)\b", re.IGNORECASE), "epz"),
+    (re.compile(r"\b(?:business\s+books|books\s+of\s+accounts?)\b", re.IGNORECASE), "tax records"),
+    (re.compile(r"\b(?:lorr(?:y|ies)|trucks?)\b", re.IGNORECASE), "goods vehicles"),
+    (re.compile(r"\b(?:allowed\s+to\s+carry|can\s+carry|carrying\s+capacity)\b", re.IGNORECASE), "loading capacity"),
+    (re.compile(r"\b(?:work\s+out|figure\s+out)\b", re.IGNORECASE), "determine"),
+    (re.compile(r"\b(?:papers|paperwork)\b", re.IGNORECASE), "documents"),
+    (re.compile(r"\b(?:foreign\s+business)\b", re.IGNORECASE), "foreign company"),
+    (re.compile(r"\b(?:start\s+operating)\b", re.IGNORECASE), "register and operate"),
+    (re.compile(r"\b(?:move\s+goods\s+out|taking\s+goods\s+out)\b", re.IGNORECASE), "removing goods from epz"),
+    (re.compile(r"\b(?:without\s+permission|without\s+authorization)\b", re.IGNORECASE), "without authority offence"),
+    (re.compile(r"\b(?:in\s+french\s+instead\s+of\s+english|in\s+another\s+language)\b", re.IGNORECASE), "another language translation"),
+)
+
+
+def _expand_faq_synonyms(text: str) -> str:
+    """Normalize domain phrase synonyms to improve lexical recall on natural user paraphrases."""
+    t = text
+    for pat, rep in _FAQ_PHRASE_SYNONYMS:
+        t = pat.sub(rep, t)
+    return t
 
 #: Closed-class words an acronym's initials may skip.  "Pay As You Earn" is
 #: PAYE, "Free On Board" is FOB.  Restricting skips to function words is what
@@ -2335,9 +2431,14 @@ def _retain_faq_candidates(
     best_match = max(match for _rank, _entry, match in scored)
     cutoff = max(_FAQ_MATCH_MIN, best_match * _FAQ_MATCH_RELATIVE)
     retained: list[dict[str, str]] = []
+    q_norm = query.strip().lower()
     for rank, entry, match in sorted(
         scored,
-        key=lambda item: (item[2], item[0]),
+        key=lambda item: (
+            1 if str(item[1].get("question", "")).strip().lower() == q_norm else 0,
+            item[2],
+            item[0],
+        ),
         reverse=True,
     ):
         if match < cutoff:
@@ -2709,6 +2810,10 @@ def _simple_search(
         return _retain_faq_candidates(bind_text, scored_fallback, top_k)
 
     hits = _one_pass(query, match_query)
+    if not hits:
+        expanded_query = _expand_faq_synonyms(query)
+        if expanded_query != query:
+            hits = _one_pass(expanded_query, expanded_query)
     if hits or not locale or locale == "en":
         return hits
 
@@ -3358,7 +3463,10 @@ class ChatModel:
 
     @staticmethod
     def _content_tokens(text: str) -> set[str]:
-        return set(re.findall(r"[a-z0-9]+", text.lower())) - _STOP_WORDS
+        return {
+            _FAQ_TERM_ALIASES.get(w, w)
+            for w in re.findall(r"[a-z0-9]+", text.lower())
+        } - _STOP_WORDS
 
     @staticmethod
     def _extract_grounded_answer_text(hit: dict[str, Any]) -> str:
@@ -3481,7 +3589,7 @@ class ChatModel:
             excerpts.append(excerpt)
             excerpt_tokens.append(tokens)
             # A curated FAQ row already comprehensively answers the question — do not dilute with a second chunk
-            if is_faq and len(excerpt) >= 120:
+            if is_faq and len(excerpt) >= 40:
                 break
         if not excerpts:
             return ""
