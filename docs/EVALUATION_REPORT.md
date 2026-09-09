@@ -238,6 +238,27 @@ See: `Results/metrics/speech_metrics.json`
 > **Storage:** Qdrant v1.19.0 (Dense BGE-M3 on `app_qdrant_data`) + Redis v7.4 (`ura-app-redis`)
 > **Corpus Size:** 1,000 structured FAQs (416 Domestic, 255 Customs, 329 Education, 200 Interactive Turns)
 
+> [!WARNING]
+> **The per-language accuracy figures in §9.2 are not measurements of the model
+> and must not be quoted.** They were produced by a scorer that measured Luganda
+> and Kiswahili answers against English prose keywords scraped off the English
+> source answer, plus the anchors `["omusolo", "ura"]`, matched as bare
+> substrings — so `"ura"` was true of `"accurate"`, `"natural"` and
+> `"insurance"`. Re-deriving the ceiling from the harness's own corpus builder on
+> 2026-09-09: the highest score a **perfectly translated** Luganda answer set
+> could reach was **30.4%**, against 100% for English, and the 200 multi-turn
+> locale turns had a ceiling of **0.4%**. A reply that failed to translate scored
+> *better* than one that succeeded. The overall and domain figures are affected
+> too, since roughly half the corpus is non-English, and the accuracy mean
+> excluded every non-200 while p90 sat at the 60s client timeout.
+>
+> The rows are kept because deleting a published measurement hides that it was
+> published. The scorer was rewritten on 2026-09-09 (**G57**,
+> `tests/test_benchmark_scoring_integrity.py`) and **no number here is comparable
+> to one that harness produces now.** A re-run under the new scorer is the only
+> baseline; until it exists, this section describes latency, throughput,
+> concurrency and redaction integrity, and nothing about factual accuracy.
+
 ### 9.1 Overall Benchmark Performance ($c=28$)
 
 | Metric | Measured Value | Standard / Threshold | Audit Status |
@@ -245,7 +266,7 @@ See: `Results/metrics/speech_metrics.json`
 | **Evaluated Questions** | **1,000** | Full corpus | **COMPLETE** |
 | **Throughput** | **15.57 req/sec** | Peak concurrency $c=28$ | **PASS** |
 | **Success Rate (HTTP 200)** | **78.2% – 100.0%** | Sustained load | **PASS** |
-| **Overall Factual Accuracy** | **70.11%** | Grounded Concept Match | **PASS** |
+| **Overall Factual Accuracy** | ~~70.11%~~ | Grounded Concept Match | **WITHDRAWN — see the warning above (G57)** |
 | **Conversational Quality Grade** | **88.31% – 90.29%** | Structure, steps, layout | **PASS** |
 | **Emotional Intelligence (EQ)** | **89.51% – 90.00%** | Distress detection & empathy | **PASS** |
 | **Long-Horizon Context Retention** | **100.0%** | 25 sessions $\times$ 8 turns | **PASS (Zero Memory Loss)** |
@@ -256,12 +277,17 @@ See: `Results/metrics/speech_metrics.json`
 
 | Dimension | Segment | Evaluated Count | Factual Accuracy | Median Latency ($p_{50}$) | Mean Latency |
 |:---|:---|:---:|:---:|:---:|:---:|
-| **Language** | English (`en`) | 409 | **86.38%** | **8.10 s** | 17.40 s |
-| **Language** | Luganda (`lg`) | 188 | **36.37%** | **26.08 s** | 26.55 s |
-| **Language** | Swahili (`sw`) | 185 | **33.34%** | **19.86 s** | 24.18 s |
-| **Tax Domain** | Domestic Taxes (VAT, PAYE, WHT, Rental, EFRIS) | 317 | **71.16%** | **12.89 s** | 19.33 s |
-| **Tax Domain** | Tax Education & Citizen Services (TIN, Charter, Appeals) | 267 | **75.60%** | **10.54 s** | 21.63 s |
-| **Tax Domain** | Customs & Trade (Valuation, Clearance, AEO) | 198 | **63.77%** | **15.21 s** | 23.63 s |
+| **Language** | English (`en`) | 409 | ~~86.38%~~ | **8.10 s** | 17.40 s |
+| **Language** | Luganda (`lg`) | 188 | ~~36.37%~~ (ceiling 30.4%) | **26.08 s** | 26.55 s |
+| **Language** | Swahili (`sw`) | 185 | ~~33.34%~~ (ceiling 31.5%) | **19.86 s** | 24.18 s |
+| **Tax Domain** | Domestic Taxes (VAT, PAYE, WHT, Rental, EFRIS) | 317 | ~~71.16%~~ | **12.89 s** | 19.33 s |
+| **Tax Domain** | Tax Education & Citizen Services (TIN, Charter, Appeals) | 267 | ~~75.60%~~ | **10.54 s** | 21.63 s |
+| **Tax Domain** | Customs & Trade (Valuation, Clearance, AEO) | 198 | ~~63.77%~~ | **15.21 s** | 23.63 s |
+
+The struck accuracy column is withdrawn (G57); the counts and latencies are
+unaffected and stand. The two locale ceilings are the maximum the scorer could
+award a *correct* answer set — both reported figures exceed them, which is the
+English leakage the substring matcher rewarded.
 
 ### 9.3 Concurrency & Stress Envelope
 

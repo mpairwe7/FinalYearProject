@@ -593,11 +593,31 @@ asked for Luganda anyway returned a degenerate repetition loop rather than
 sentences. Two instructions pointing opposite ways, with the language of the
 question breaking the tie.
 
-Two guards sit on the translated text, both of which prefer the English answer
-to a bad localized one:
+Five guards sit on the translated text, every one of which prefers the English
+answer to a bad localized one. They exist because the answer was generated *and
+claim-verified* in English: everything `claim_verifier` concluded describes the
+draft, so each property it relied on has to be re-checked against the text
+actually shipped.
 
-* **Collapse** — a translation shorter than a tenth of the source is a degraded
-  model response, not an answer.
+* **Collapse** (`mt.length_plausible`) — a translation far shorter than its
+  source is a degraded model response, not an answer. The floor is **measured**:
+  across the 23,838 aligned human pairs in `Data/online_corpora/salt/`, one in a
+  thousand falls below 0.449 (en→lg) and 0.434 (en→sw), and below 0.4 lies
+  0.04%. `MT_MIN_LENGTH_RATIO` defaults to 0.35, under both. It was a tenth of
+  the source, which caught a *collapsed* response and not a *truncated* one — and
+  a truncated answer reads as complete while omitting the taxpayer's obligations.
+* **Units** (`mt.units_survived`) — `protect_figures` masks digits and leaves the
+  percent sign and currency code visible on purpose, so "18%" arriving as a bare
+  "18" kept every digit and passed everything below. Fires only on *total* loss
+  of a marker kind, because `figures()` pools categories precisely to tolerate
+  one rate rendering as a word.
+* **Citations** (`mt.citations_survived`) — `claim_verifier` keys off the `[n]`
+  markers to decide whether a claim was supported at all. A translation that
+  drops or renumbers one ships an answer whose provenance no longer matches the
+  report that approved it. Set equality, not order: a marker that moved with its
+  clause is still attached to the right claim.
+* **Sentinel residue** — a leftover `#NMBR…#` fragment is visible garbage in a
+  taxpayer's answer, so the round trip is spent whatever the figures say.
 * **Figures** (`mt.figures_survived`) — machine translation paraphrases, and a
   paraphrased amount is a different amount. A reply that said "UGX 235,000" and
   comes back saying "UGX 253,000" is indistinguishable from the assistant
@@ -608,6 +628,16 @@ to a bad localized one:
   * **Spoken Percentages**: `entailment.py` supports both Swahili (`_SWAHILI_PCT_WORDS`, e.g. `asilimia kumi na nane` $\rightarrow$ 18) and Luganda (`_LUGANDA_PCT_WORDS`, e.g. `ebitundu kumi na munaana` $\rightarrow$ 18, `ebitundu mukaaga` $\rightarrow$ 6).
   * **Vernacular Multipliers**: Recognizes East African singular forms (`akakadde` 1M, `omutwalo` 10k, `olukumi` 1k, `akawumbi` 1B) alongside plurals (`obukadde`, `emitwalo`, `enkumi`, `milioni`, `laki`).
   * **Contact Line Exclusion**: Ugandan toll-free and mobile patterns (`0800 117 000`, `0772 140 000`) are stripped before currency extraction so helpdesk footers are not misread as hundred-million shilling tax figures.
+
+Each failure has its own metric and log line —
+`reply_localization_{figures_changed,units_dropped,citations_lost}_total` — rather
+than sharing one: right digits with a lost unit is a different fault from a
+paraphrased number and needs a different fix.
+
+**Not covered.** Semantic drift inside the translated prose — a flipped
+negation, a dropped condition — passes all five. Detecting it needs entailment
+over the localized text and a per-locale golden set to gate it (G58).
+
 * **Stream Transport Resilience**: `/v1/chat/stream` emits `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`, and Next.js standalone disables proxy compression (`compress: false`), preventing reverse proxies (ngrok, Cloudflare) from gzipping and buffering event streams.
 
 | Setting | Default | Effect |
@@ -617,6 +647,7 @@ to a bad localized one:
 | `MT_CACHE_SIZE` | 512 | Per-process translation memo (`app/mt.py`); 0 disables |
 | `MT_CACHE_MAX_CHARS` | 4000 | Longer text is translated but not memoised |
 | `MT_PROTECT_FIGURES` | `true` | Mask figures behind sentinels before translation and restore after (`app/mt.py`); kill switch only — a tier that cannot carry them is retried unprotected |
+| `MT_MIN_LENGTH_RATIO` | 0.35 | Shortest a translation may be, as a fraction of the source (`app/mt.py`). Measured from the 23,838 aligned pairs in `Data/online_corpora/salt/`: the one-in-a-thousand ratio is 0.449 (en→lg) and 0.434 (en→sw). Replaces a floor at one tenth, which passed a translation that had dropped nine tenths of the answer |
 
 The cache is why a non-English turn is no longer two to three times slower than
 the same question in English. One turn translated the same question **twice** —

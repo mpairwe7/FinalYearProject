@@ -2359,6 +2359,32 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     if not query_terms:
         return 0.0
 
+    # G35: coverage is judged against the terms that *constitute the question*,
+    # not every term the taxpayer supplied.
+    #
+    # The denominator used to be the whole query, so context lowered the score
+    # of the row that answers it. "I am opening a hardware store in Jinja. Do I
+    # have to charge VAT?" scored 0.273 against the 0.58 floor; the bare
+    # question scored 0.700, and the answer is in ura_vat_faqs.csv throughout.
+    # Four words of situation — opening, hardware, store, Jinja — no FAQ row
+    # can cover are what the row was charged for.
+    #
+    # This is the narrowing the *scorer* needs, and deliberately not the one
+    # the call sites tried. Ungating `extract_question_span` on the retrieval
+    # query was measured on 2026-09-01 and cost 37 points of VAT-journey fact
+    # coverage (81.2% -> 43.8%): against a healthy dense index the preamble is
+    # useful retrieval signal. Nothing here reaches retrieval.
+    #
+    # Both sides of the ratio narrow, and that is load-bearing. The first
+    # version of this fix kept the whole query in the numerator, meaning to
+    # credit a row that also covers the situation. What it actually did was let
+    # situation terms *substitute* for question terms: a row about the licences
+    # a hardware store in Jinja needs scored 0.7955 on "Do I have to charge
+    # VAT?" — above the 0.640 of the row that answers it. Coverage of the
+    # question is not something the preamble can pay for (found by CodeRabbit
+    # on #487).
+    asked_terms = _faq_terms(extract_question_span(query)) or query_terms
+
     q_raw = str(entry.get("question") or "")
     a_raw = str(entry.get("answer") or "")
     text_raw = str(entry.get("text") or "")
@@ -2382,12 +2408,21 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     if query_terms & timing_terms and not (timing_evidence & body_terms):
         return 0.0
 
-    body_coverage = len(query_terms & body_terms) / len(query_terms)
+    body_coverage = len(asked_terms & body_terms) / len(asked_terms)
 
     # Focus is judged on subjects, not spellings: "What is PAYE?" against "What
     # is PAYE (Pay As You Earn)?" is one subject asked once, not one term out
     # of four.  See :func:`_faq_subject_terms` for why coverage above keeps the
     # unfolded view.
+    # Deliberately the *whole* query, unlike the coverage denominator above.
+    # Narrowing this too was tried and reverted: it made recall trivially 1.0
+    # for any row containing the question's one remaining subject, which trips
+    # the focus gate below and hard-zeroes the row. Five FAQ rows stopped
+    # retrieving their own question — "Bona fide changing residence – what is
+    # exempt?" narrows to "what is exempt?", and the subject the taxpayer asked
+    # about is the half that gets dropped. Focus is about how well the row's
+    # question matches everything asked; coverage is about what the row can
+    # fairly be charged for. They want different views of the query.
     asked_subjects = _faq_subject_terms(query)
     question_subjects = _faq_subject_terms(q_raw)
     matched = len(asked_subjects & question_subjects)
@@ -2738,11 +2773,26 @@ def localize_reply(reply: str, locale: str) -> str:
                 # taxpayer's answer, so this round trip is spent whatever the
                 # figures say.
                 return None, "sentinel_residue"
-        # Guard against a collapsed MT response replacing a real answer.
-        if len(candidate) < max(12, len(text) // 10):
+        # Guard against a collapsed or truncated MT response replacing a real
+        # answer. The floor is measured from the aligned SALT pairs in
+        # `Data/online_corpora/salt/` — see `mt.MT_MIN_LENGTH_RATIO`. The
+        # previous floor was one tenth of the source, which passed a
+        # translation that had dropped nine tenths of the taxpayer's answer.
+        if not mt.length_plausible(text, candidate):
             return None, "collapsed"
         if not mt.figures_survived(text, candidate):
             return None, "figures_changed"
+        # A figure that kept its digits and lost its unit is still a wrong
+        # answer: "18%" arriving as a bare "18" reads as eighteen shillings.
+        # `protect_figures` masks digits only and leaves the percent sign and
+        # the currency code visible, so nothing above this line looks at them.
+        if not mt.units_survived(text, candidate):
+            return None, "units_dropped"
+        # Claim verification ran on the English draft and keyed off these
+        # markers. A translation that drops or renumbers one ships an answer
+        # whose provenance no longer matches the report that approved it.
+        if not mt.citations_survived(text, candidate):
+            return None, "citations_lost"
         return candidate, "ok"
 
     # Protected pass first: the translator is handed sentinels in place of the
@@ -2777,6 +2827,23 @@ def localize_reply(reply: str, locale: str) -> str:
             metrics.inc("reply_localization_figures_changed_total", labels={"locale": locale})
             logger.warning(
                 "reply localization to %s changed the figures; serving English",
+                safe_locale,
+            )
+        elif reason == "units_dropped":
+            # Separate from figures_changed on purpose: the digits were right
+            # and the unit was lost, which is a translator problem rather than
+            # a paraphrased-number one and needs a different fix.
+            metrics.inc("reply_localization_units_dropped_total", labels={"locale": locale})
+            logger.warning(
+                "reply localization to %s kept the figures but dropped their units; "
+                "serving English",
+                safe_locale,
+            )
+        elif reason == "citations_lost":
+            metrics.inc("reply_localization_citations_lost_total", labels={"locale": locale})
+            logger.warning(
+                "reply localization to %s lost or renumbered its citation markers; "
+                "serving English",
                 safe_locale,
             )
         elif reason == "collapsed":
@@ -5267,10 +5334,29 @@ class ChatModel:
         if matched is None:
             return None
         combined_query = f"{message or ''} {rewritten or ''}".strip()
-        if (
+        # G39: a question must not be captured as a task, in any language.
+        #
+        # `_INFORMATIONAL_WORKFLOW_QUERY_RE` is an English word list — "how do
+        # I", "what are the steps", "procedure". A Luganda or Kiswahili
+        # question matches no part of it, and reaches `match_trigger` through
+        # `rewritten`, its own English translation. So the trigger fired and
+        # the escape could not, and 80 of 186 measured probes were answered
+        # with a slot prompt instead of an answer — every one of them Luganda
+        # or Kiswahili.
+        #
+        # G38 fixed the mirror image of this on the way *out* of a flow and
+        # established the test to use: `_reads_as_question` reads an English
+        # interrogative opener or a trailing "?" on three words or more, which
+        # is what carries across locales. Applying it here closes the entrance
+        # the same way. It is asked of `message` — the taxpayer's own words —
+        # because `rewritten` is already English and already covered above.
+        #
+        # An explicit request to start a flow still starts one: "help me
+        # register" is not a question and does not reach this at all.
+        informational = bool(
             _INFORMATIONAL_WORKFLOW_QUERY_RE.search(combined_query)
-            and not _EXPLICIT_WORKFLOW_START_RE.search(combined_query)
-        ):
+        ) or _reads_as_question(message)
+        if informational and not _EXPLICIT_WORKFLOW_START_RE.search(combined_query):
             return None
 
         session = WorkflowRegistry.create_session(matched.id)

@@ -148,6 +148,7 @@ Masking is unit-tested and does not need a live model:
 PYTHONPATH=App/backend python3 -m pytest \
   App/backend/tests/test_mt_cache.py \
   App/backend/tests/test_reply_localization.py \
+  App/backend/tests/test_localization_integrity.py \
   App/backend/tests/test_statutory_projection.py -q
 ```
 
@@ -164,6 +165,13 @@ digit-transposing tier no longer costs the figure, an echoing tier never ships
 a fragment, and a tier that drops sentinels still yields a vernacular answer
 through the unprotected retry.
 
+`test_localization_integrity.py` covers the three properties masking does *not*
+protect and that claim verification, having run on the English draft, assumes:
+the unit survives ("18%" must not arrive as a bare "18"), the answer is not
+truncated (the floor is measured from `Data/online_corpora/salt/`, not chosen),
+and the `[n]` citation markers still match the ones the verification report was
+written about.
+
 Against a live deployment, do not read success off the response body. The
 translation chain has four tiers (`local` → `sunbird` → Gemini → CF Llama) and
 a failure in one is invisible downstream — probe per locale and compare the
@@ -176,6 +184,8 @@ reply came back at all.
 |---|---|
 | `reply_localization_protected_retry_total{locale,reason}` | A *recovered* condition, not a served failure. A steady low rate is the mechanism working. |
 | `reply_localization_figures_changed_total{locale}` | Both passes failed and the taxpayer got English. This is the correctness signal. |
+| `reply_localization_units_dropped_total{locale}` | The digits survived and the unit did not — "18%" came back as "18". A translator-side fault, not a paraphrased number, and it wants a different fix from the row above. |
+| `reply_localization_citations_lost_total{locale}` | The translation dropped or renumbered a `[n]` marker, so the shipped answer's provenance no longer matches the claim-verification report that approved it. |
 
 `reason=sentinel_residue` climbing for one locale says that locale's MT tier
 mangles sentinels and is now running every figure-bearing reply through two
@@ -196,12 +206,25 @@ the scrubbed, trimmed text the model actually sees — and emits a
 `## Figure cross-check` block in which every figure carries the passages that
 state it. See Decision 4 below.
 
+Closed (2026-09-09, **G57**): the cross-lingual eval stemmer in
+`scripts/evaluate_1000_faqs_ngrok.py` was one of four defects that capped its
+Luganda and Kiswahili scores near 30% by construction — the locale keyword lists
+were English prose scraped off the English answer, `"ura"` was an anchor in both
+languages and matched inside `"accurate"`, non-answers scored 0.75, and every
+non-200 left the denominator. **No score that harness published before
+2026-09-09 is comparable to one it publishes after.** A re-run under the new
+scorer is the only baseline.
+
+Closed (2026-09-09, **G58**): masking protects the digits and nothing checked
+the units, the length or the citation markers. All three are now guards on the
+same round trip.
+
 Still open:
 
-- The cross-lingual eval stemmer in `scripts/evaluate_1000_faqs_ngrok.py` was
-  loosened in the same PR series that reports accuracy gains; those scores are
-  not comparable to the pre-#478 baseline until it is re-run under the new
-  scorer.
+- Semantic drift inside the translated prose — a flipped negation, a dropped
+  condition — passes every guard on this path. The guards cover mechanical
+  harms; detecting meaning change needs entailment over the localized text and a
+  per-locale golden set to gate it.
 - `scripts/test_master_qa_multilingual_benchmark.py` cannot yet detect two of
   the failures it exists to catch, so **do not read a pass from it as
   confirmation**:

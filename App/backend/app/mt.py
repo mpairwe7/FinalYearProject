@@ -55,7 +55,7 @@ import logging
 import os
 import re
 import threading
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Callable
 
 from .entailment import canonical_amounts, percentages
@@ -199,6 +199,114 @@ def figures_survived(source: str, translated: str) -> bool:
         # figure of its own, which is the invention case.
         return not figures(translated)
     return figures(translated) == source_figures
+
+
+#: Tokens that mark an amount as money, in any of the three languages served.
+#: ``ssente`` (Luganda) and ``shilingi`` (Kiswahili) are read from
+#: ``Data/eval/rag_eval_lg.jsonl`` and the reviewed probes in
+#: ``tests/load/tax_education_accuracy_eval.py`` — no vocabulary is coined here.
+_CURRENCY_TOKEN_RE = re.compile(
+    r"\b(?:UGX|USh(?:s)?|Shs?|shillings?|shilingi|ssente|sente)\b",
+    re.IGNORECASE,
+)
+
+
+#: Shortest a translation may be, as a fraction of the source it renders.
+#:
+#: Measured, not chosen. Across the 23,838 aligned English→Luganda and
+#: English→Kiswahili pairs in ``Data/online_corpora/salt/`` (human
+#: translations, sentences of 20 characters or more):
+#:
+#: ===========  ======  ======  ======  ======  ======
+#: direction    p0.1    p1      p50     p95     p99
+#: ===========  ======  ======  ======  ======  ======
+#: en→lg        0.449   0.603   1.048   1.463   1.717
+#: en→sw        0.434   0.582   0.973   1.302   1.500
+#: ===========  ======  ======  ======  ======  ======
+#:
+#: Below 0.4 lies 0.042% of Luganda pairs and 0.050% of Kiswahili ones; below
+#: 0.3, fewer than one in eight thousand. A whole answer is many sentences and
+#: its ratio concentrates harder around the median than any single pair, so
+#: 0.35 is looser for the text this actually guards than the table suggests.
+#:
+#: The guard it replaces was ``len(candidate) < max(12, len(text) // 10)`` — a
+#: floor at one tenth, which passes a translation that dropped nine tenths of
+#: the answer. It was written to catch a collapsed MT response and does; what
+#: it does not catch is a truncated one, which reads as a complete answer that
+#: happens to omit the taxpayer's obligations.
+MT_MIN_LENGTH_RATIO = float(os.getenv("MT_MIN_LENGTH_RATIO", "0.35"))
+
+
+def length_plausible(source: str, translated: str) -> bool:
+    """True when *translated* is long enough to be a rendering of *source*.
+
+    Only a floor. There is no ceiling: a translation running long is a
+    stylistic matter, and the p99 above (1.7) shows how ordinary that is.
+    """
+    source_length = len((source or "").strip())
+    if source_length < 40:
+        # Too short to take a ratio of — a greeting or a one-line abstention,
+        # where a legitimate rendering can be a single word.
+        return len((translated or "").strip()) > 0
+    return len((translated or "").strip()) >= source_length * MT_MIN_LENGTH_RATIO
+
+
+#: A citation marker as the answer carries it. Same shape ``claim_verifier``
+#: reads, and deliberately so: the two must agree on what a citation is or the
+#: verification report describes a different text than the one shipped.
+_CITATION_MARKER_RE = re.compile(r"\[(\d{1,3})\]")
+
+
+def citations_survived(source: str, translated: str) -> bool:
+    """True when *translated* still carries the citation markers *source* had.
+
+    The markers are what tie each claim to the URA passage that supports it,
+    and ``claim_verifier`` reads them to decide whether a claim was verified at
+    all. That verification runs on the English draft, *before* this module sees
+    the text — so a translator that drops ``[2]``, renumbers it, or merges two
+    sentences and their markers ships an answer whose provenance no longer
+    matches the report that approved it. The taxpayer loses the source link and
+    the audit trail loses its subject.
+
+    Multiplicity, not order. A translation may reorder clauses, and a marker
+    that moved with its clause is still attached to the right claim — so this
+    does not compare sequences. It does compare *counts*: a set comparison
+    passes a source citing ``[1]`` after two separate claims whose translation
+    kept one of them, and the claim that lost its marker is exactly the one
+    whose provenance nobody can now check (found by CodeRabbit on #487).
+    """
+    source_markers = Counter(_CITATION_MARKER_RE.findall(source or ""))
+    if not source_markers:
+        return True
+    return Counter(_CITATION_MARKER_RE.findall(translated or "")) == source_markers
+
+
+def units_survived(source: str, translated: str) -> bool:
+    """True when *translated* still marks its figures as rates and amounts.
+
+    ``figures_survived`` compares digits, and ``protect_figures`` masks only
+    digits — the percent sign and the currency code are left visible on
+    purpose, because they are the cue the target language needs to build
+    "ebitundu 18 ku buli kikumi". Both decisions are right and together they
+    leave one thing unchecked: a translation that keeps every digit and drops
+    the unit. "18%" arriving as a bare "18", or "UGX 300,000,000" as
+    "300,000,000", passes every guard above and hands a taxpayer a number with
+    no idea what it counts.
+
+    Deliberately one-directional, and only on total loss. The check fires when
+    the source marked a figure and the translation marks none of that kind at
+    all — not when the sets differ, which is what ``figures()`` pools
+    categories to tolerate. A translator that renders one of two rates as a
+    word keeps its marker for the other and passes here, as it should:
+    ``localize_reply`` answers a failure by falling back to English, so a
+    stricter test buys precision on a rare fault by costing vernacular answers
+    on a common one.
+    """
+    if percentages(source) and not percentages(translated):
+        return False
+    if _CURRENCY_TOKEN_RE.search(source or "") and not _CURRENCY_TOKEN_RE.search(translated or ""):
+        return False
+    return True
 
 
 def _sentinel_label(index: int) -> str:
