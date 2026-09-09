@@ -30,7 +30,8 @@ HARNESS_PATH = REPO_ROOT / "scripts" / "evaluate_1000_faqs_ngrok.py"
 
 def _harness():
     spec = importlib.util.spec_from_file_location("_faq_harness", HARNESS_PATH)
-    assert spec and spec.loader
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["_faq_harness"] = module
     spec.loader.exec_module(module)
@@ -41,13 +42,13 @@ ev = pytest.importorskip("httpx") and _harness()
 
 
 def _faq(**overrides):
-    defaults = dict(
-        faq_id="T-1",
-        domain="domestic",
-        topic="vat",
-        query="What is the VAT rate?",
-        expected_keywords=[],
-    )
+    defaults = {
+        "faq_id": "T-1",
+        "domain": "domestic",
+        "topic": "vat",
+        "query": "What is the VAT rate?",
+        "expected_keywords": [],
+    }
     defaults.update(overrides)
     return ev.EvalFAQ(**defaults)
 
@@ -56,7 +57,7 @@ def _faq(**overrides):
 # Token boundaries (G37)
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "haystack, term",
+    ("haystack", "term"),
     [
         ("this figure is accurate", "ura"),
         ("a natural person", "ura"),

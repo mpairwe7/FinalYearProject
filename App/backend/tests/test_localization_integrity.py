@@ -26,7 +26,6 @@ an answer whose provenance no longer matches the report that approved it.
 from __future__ import annotations
 
 import pytest
-
 from app import mt
 
 
@@ -117,6 +116,13 @@ def test_a_short_source_is_not_held_to_a_ratio():
     """A greeting or a one-line abstention can legitimately render as one word."""
     assert mt.length_plausible("Hello.", "Ki kati?")
     assert not mt.length_plausible("Hello.", "")
+
+
+def test_an_amount_and_a_rate_both_losing_their_markers_are_rejected():
+    assert not mt.units_survived(
+        "VAT is 18% on a threshold of UGX 300,000,000.",
+        "Omusolo guli 18 ku kkomo 300,000,000.",
+    )
 
 
 # ---------------------------------------------------------------------------
