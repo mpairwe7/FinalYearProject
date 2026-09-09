@@ -125,19 +125,122 @@ class CacheTest(unittest.TestCase):
         self.assertIsNone(cache.get("en", "lg", "anything"))
 
 
-class FigureHealingTest(unittest.TestCase):
-    def test_missing_percentage_unit_is_healed(self):
-        source = "The VAT rate is 18%."
-        translated = "Omusolo gwa VAT guli 18 bbeeyi."
-        self.assertTrue(mt.figures_survived(source, translated))
+class FigureProtectionTest(unittest.TestCase):
+    """Digits are masked before translation, so MT never sees one to rewrite.
 
-    def test_completely_absent_figures_are_not_invented(self):
-        source = "The threshold is UGX 150,000,000."
-        translated = "Ekkomo liri waggulu mu Uganda."
-        self.assertFalse(mt.figures_survived(source, translated))
-        healed = mt.heal_vernacular_figures(source, translated, locale="lg")
-        self.assertFalse(mt.figures_survived(source, healed))
-        self.assertNotIn("UGX 150,000,000", healed)
+    The mechanism these replace (``heal_vernacular_figures``) tried to repair
+    the output afterwards. Repairing means guessing where a number belonged,
+    and the narrowed version that could no longer guess could no longer fire
+    at all: a figure only counted as missing once its digits were absent, and
+    every insertion path it had left required those digits to be present.
+    """
+
+    SOURCE = "The VAT rate is 18% and the threshold is UGX 150,000,000."
+
+    def test_masking_and_restoring_is_the_identity(self):
+        text = "Pay UGX 150,000,000 or 1.5m by the 15th; call 0800 117 000."
+        masked, mapping = mt.protect_figures(text)
+        restored, residue = mt.restore_figures(masked, mapping)
+        self.assertEqual(restored, text)
+        self.assertEqual(residue, 0)
+
+    def test_only_the_digits_are_masked(self):
+        """The currency code and percent sign stay: they are the language cue.
+
+        Luganda renders a rate as "ebitundu 18 ku buli kikumi", which it can
+        only do if it can still see that the figure was a percentage.
+        """
+        masked, mapping = mt.protect_figures(self.SOURCE)
+        self.assertIn("%", masked)
+        self.assertIn("UGX", masked)
+        self.assertNotIn("18", masked)
+        self.assertNotIn("150,000,000", masked)
+        self.assertEqual(sorted(mapping.values()), ["150,000,000", "18"])
+
+    def test_a_translator_that_rewrites_digits_cannot_touch_a_masked_figure(self):
+        """The guarantee. Digit transposition is the failure that motivated this."""
+        masked, mapping = mt.protect_figures(self.SOURCE)
+        # A translator that mangles every digit it is given; it is given none.
+        mangled = "".join("0" if ch.isdigit() else ch for ch in masked)
+        restored, residue = mt.restore_figures(mangled, mapping)
+        self.assertEqual(residue, 0)
+        self.assertTrue(mt.figures_survived(self.SOURCE, restored))
+        self.assertIn("150,000,000", restored)
+        self.assertIn("18%", restored)
+
+    def test_repeated_figures_get_distinct_sentinels(self):
+        """Restoration is positional, so a reorder cannot swap two figures."""
+        masked, mapping = mt.protect_figures("18% here and 18% there")
+        self.assertEqual(len(mapping), 2)
+        self.assertEqual(len(set(mapping)), 2)
+        self.assertEqual(masked, "#NMBRA#% here and #NMBRB#% there")
+
+    def test_labels_stay_distinct_past_the_alphabet(self):
+        """``#NMBRA#`` must not match inside ``#NMBRAA#``."""
+        text = " ".join(str(n) for n in range(1, 31))
+        masked, mapping = mt.protect_figures(text)
+        self.assertEqual(len(mapping), 30)
+        self.assertIn("#NMBRAA#", masked)
+        restored, residue = mt.restore_figures(masked, mapping)
+        self.assertEqual(restored, text)
+        self.assertEqual(residue, 0)
+
+    def test_space_grouped_digits_are_one_span(self):
+        """"1 500 000" and "0800 117 000" are one figure, not three.
+
+        The grouping branch is what keeps a phone number intact through
+        translation. Consecutive three-digit numbers are read the same way,
+        which costs nothing: the whole run is masked and restored verbatim.
+        """
+        masked, mapping = mt.protect_figures("Call 0800 117 000 about UGX 1 500 000.")
+        self.assertEqual(sorted(mapping.values()), ["0800 117 000", "1 500 000"])
+        restored, residue = mt.restore_figures(masked, mapping)
+        self.assertEqual(restored, "Call 0800 117 000 about UGX 1 500 000.")
+        self.assertEqual(residue, 0)
+
+    def test_restoration_tolerates_what_translators_do_to_a_sentinel(self):
+        _, mapping = mt.protect_figures(self.SOURCE)
+        for mangled in (
+            "Omusolo guli #nmbra#% ne ekkomo UGX #NMBRB#.",   # lowercased
+            "Omusolo guli # NMBRA #% ne ekkomo UGX #NMBRB#.",  # spaced out
+            "Omusolo guli NMBRA% ne ekkomo UGX NMBRB.",        # hashes stripped
+            "Omusolo guli omuNMBRA#% ne ekkomo UGX #NMBRB#.",  # prefix glued on
+        ):
+            with self.subTest(mangled=mangled):
+                restored, residue = mt.restore_figures(mangled, mapping)
+                self.assertEqual(residue, 0)
+                self.assertTrue(mt.figures_survived(self.SOURCE, restored))
+
+    def test_an_echoed_sentinel_is_reported_as_residue(self):
+        """Visible garbage in a taxpayer's answer; the caller must not ship it."""
+        _, mapping = mt.protect_figures(self.SOURCE)
+        restored, residue = mt.restore_figures(
+            "Guli #NMBRA# ne #NMBRA# ne UGX #NMBRB#.", mapping
+        )
+        self.assertEqual(residue, 1)
+        self.assertIn("NMBR", restored)
+
+    def test_a_dropped_sentinel_leaves_no_residue_and_is_caught_by_the_guard(self):
+        """Masking stops mutation; it cannot stop omission, which still falls back."""
+        _, mapping = mt.protect_figures(self.SOURCE)
+        restored, residue = mt.restore_figures("Omusolo guli waggulu.", mapping)
+        self.assertEqual(residue, 0)
+        self.assertFalse(mt.figures_survived(self.SOURCE, restored))
+
+    def test_text_without_figures_is_untouched(self):
+        """The common case pays nothing and skips restoration entirely."""
+        text = "Genda mu ofiisi ya URA yonna."
+        masked, mapping = mt.protect_figures(text)
+        self.assertEqual(masked, text)
+        self.assertEqual(mapping, {})
+
+    def test_ordinary_prose_is_never_read_as_residue(self):
+        """The sentinel core is not a substring of any English word."""
+        restored, residue = mt.restore_figures(
+            "Check the figure in the config for that number.", {}
+        )
+        self.assertEqual(residue, 0)
+        self.assertEqual(restored, "Check the figure in the config for that number.")
 
 
 if __name__ == "__main__":

@@ -142,27 +142,44 @@ def main():
 
     # 3. Multilingual Grounding & Slot-Healing (Luganda & Swahili)
     log("\n--- Section 3: Multilingual Grounding & Slot-Healing (EN, LG, SW) ---")
+    # Each probe carries the statutory value it is about, written every way the
+    # service may legitimately render it. Matching an entity is not enough: a
+    # reply saying "VAT" while dropping 18% is exactly the figure-fidelity
+    # failure this section exists to catch, and it used to pass. The renderings
+    # are alternatives for one value, not extra requirements — "obukadde 150"
+    # and "150,000,000" are the same threshold, and a correct Luganda answer may
+    # use either.
     multilingual_probes = [
-        ("ML-EN-01", "What is the standard VAT rate in Uganda?", "en", ["18%", "vat"]),
-        ("ML-LG-01", "Omusolo gwa VAT guli gwa bbeeyi ki mu Uganda?", "lg", ["18%", "vat", "ebitundu"]),
-        ("ML-SW-01", "Kiwango cha kodi ya VAT nchini Uganda ni asilimia ngapi?", "sw", ["18%", "vat", "asilimia"]),
-        ("ML-LG-02", "Ekkomo ly'okusasula omusolo gwa VAT liri ssente mmeka?", "lg", ["150,000,000", "obukadde", "vat"]),
-        ("ML-SW-02", "Kiwango cha chini cha usajili wa VAT ni kiasi gani?", "sw", ["150,000,000", "milioni", "vat"]),
+        ("ML-EN-01", "What is the standard VAT rate in Uganda?", "en",
+         ["18%", "vat"], ("18%", "18 per cent")),
+        ("ML-LG-01", "Omusolo gwa VAT guli gwa bbeeyi ki mu Uganda?", "lg",
+         ["18%", "vat", "ebitundu"], ("18%", "ebitundu 18", "18 ku buli kikumi")),
+        ("ML-SW-01", "Kiwango cha kodi ya VAT nchini Uganda ni asilimia ngapi?", "sw",
+         ["18%", "vat", "asilimia"], ("18%", "asilimia 18", "18 kwa mia")),
+        ("ML-LG-02", "Ekkomo ly'okusasula omusolo gwa VAT liri ssente mmeka?", "lg",
+         ["150,000,000", "obukadde", "vat"], ("150,000,000", "150000000", "obukadde 150", "150m")),
+        ("ML-SW-02", "Kiwango cha chini cha usajili wa VAT ni kiasi gani?", "sw",
+         ["150,000,000", "milioni", "vat"], ("150,000,000", "150000000", "milioni 150", "150m")),
     ]
 
-    for tid, query, loc, expected_entities in multilingual_probes:
+    for tid, query, loc, expected_entities, figure_renderings in multilingual_probes:
         st, body, lat = post_chat(query, locale=loc, conv_id=f"conv-{tid.lower()}")
         reply = body.get("reply", "")
         rep_low = reply.lower()
         matched = [e for e in expected_entities if e.lower() in rep_low]
-        passed = st == 200 and len(matched) >= 1
-        log(f"  [{'PASS' if passed else 'FAIL'}] {tid} ({loc}): \"{query[:40]}...\" -> HTTP {st} in {lat:.1f}ms (Entities: {matched})")
+        figure_seen = next((r for r in figure_renderings if r.lower() in rep_low), "")
+        passed = st == 200 and bool(matched) and bool(figure_seen)
+        log(f"  [{'PASS' if passed else 'FAIL'}] {tid} ({loc}): \"{query[:40]}...\" -> HTTP {st} in {lat:.1f}ms (Entities: {matched}, Figure: {figure_seen or 'MISSING'})")
+        if not passed and st == 200 and not figure_seen:
+            log(f"         Figure missing — expected one of {list(figure_renderings)}")
+            log(f"         Reply: {reply[:160]}...")
         results.append({
             "test": tid,
             "locale": loc,
             "passed": passed,
             "latency_ms": lat,
             "entities": matched,
+            "figure": figure_seen,
         })
 
     # 4. Fuzzy & Typo Tolerance (Language Invariant Guard)

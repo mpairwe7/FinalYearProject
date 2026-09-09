@@ -111,10 +111,23 @@ serving it. A rising number is not a failure of the guard — it is the guard
 working — but a *sustained* rise says the generation or translation tier has
 degraded.
 
+`reply_localization_protected_retry_total` reads differently from the rest of
+this table: it counts a *recovered* condition, not a served failure. Figures
+are masked before translation (`mt.protect_figures`), and a tier that cannot
+carry the sentinels is retried unprotected, so a steady low rate here is the
+mechanism working as designed. What matters is the shape. A `reason` of
+`sentinel_residue` climbing for one locale says that locale's MT tier mangles
+the sentinels and is running every figure-bearing reply through two round
+trips — a latency problem, not a correctness one, and the reason to look at
+`REPLY_MT_BACKEND` for that locale. `reply_localization_figures_changed_total`
+rising *alongside* it is the correctness signal: both passes failed and the
+taxpayer got English.
+
 | Metric                                    | Type    | Labels   | Description |
 |-------------------------------------------|---------|----------|-------------|
 | `contradicted_reply_withheld_total`        | counter | --       | An answer whose figures contradicted its cited passage was replaced rather than shown (`service.withhold_if_contradicted`) |
-| `reply_localization_figures_changed_total` | counter | `locale` | A translation changed a money amount or percentage, so the English text was served instead (`mt.figures_survived`) |
+| `reply_localization_figures_changed_total` | counter | `locale` | A translation changed or dropped a money amount or percentage, so the English text was served instead (`mt.figures_survived`). Counted only after the unprotected retry has also failed, so it means the answer really did reach the taxpayer in English |
+| `reply_localization_protected_retry_total` | counter | `locale`, `reason` | The figure-masked translation pass was unusable and was retried unprotected (`mt.protect_figures`). `reason` is `sentinel_residue` (the tier echoed or mangled a sentinel), `figures_changed` (it dropped one), `collapsed`, `mt_failed` or `empty`. Not a taxpayer-visible failure on its own — the retry usually succeeds |
 | `numeric_verification_rejected_total`      | counter | --       | A money figure disagreed with the calculator that produced it |
 | `numeric_revision_fixed_total`             | counter | --       | The one bounded revision corrected it |
 | `numeric_revision_failed_total`            | counter | --       | The revision did not correct it |
@@ -222,6 +235,7 @@ http_request_duration_ms{quantile="0.95",method="POST",path="/v1/chat"} 892.1100
 | Taxpayers asking for a person | `rate(escalation_requested_total[15m])` grouped by `outcome`               |
 | Answers withheld      | `rate(contradicted_reply_withheld_total[1h])`                                      |
 | Translations refused  | `rate(reply_localization_figures_changed_total[1h])` grouped by `locale`           |
+| Figure masking not carried | `rate(reply_localization_protected_retry_total[1h])` grouped by `locale`, `reason` |
 | Retrieval mode split  | `rate(retrieval_mode_total[5m])` grouped by `mode`                                 |
 | Token usage           | `rate(gen_ai_client_token_usage[5m])` by `gen_ai.token.type`                       |
 | Qdrant query latency  | `gen_ai_retrieval_duration` (histogram from OTLP)                                  |

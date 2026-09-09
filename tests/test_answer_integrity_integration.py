@@ -165,8 +165,16 @@ class TestFiguresSurviveTranslation:
             return_value="Ekipimo kya UGX 100,000,000 buli mwaka.",
         ) as backend:
             service_module.localize_reply(english, "lg")
+            after_first_turn = backend.call_count
             service_module.localize_reply(english, "lg")
-        assert backend.call_count == 2
+        # A figure-bearing reply costs two round trips per turn once the
+        # protected pass fails — one masked, one unprotected retry (see
+        # docs/runbooks/multilingual-figure-fidelity.md). The count itself is
+        # not the property under test: what matters is that the second turn
+        # paid a backend again rather than being served a refused translation
+        # out of the memo.
+        assert backend.call_count == after_first_turn * 2
+        assert mt.cache.get("en", "lg", english) is None
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Capacity / SLO runbook](runbooks/capacity-slo.md) | Operator headroom, seed commands, SLO split |
 | [Corpus coverage runbook](runbooks/corpus-coverage.md) | Curated taxpayer question bank, per-domain coverage floors, corpus/api/voice modes, URA sign-off |
 | [SALT speech backends runbook](runbooks/salt-speech-backends.md) | Sunbird SALT ASR (on by default) + TTS (opt-in) — verified language tokens, speaker ids, checkout recipe |
+| [Multilingual figure fidelity runbook](runbooks/multilingual-figure-fidelity.md) | Figure masking before translation, unprotected retry, decoding parameters per path, and what the localization metrics mean |
 | **Security** |
 | [Security Policy](../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
 | [AI Red Team](../scripts/ai_red_team.py) | 50 adversarial prompts across 10 NIST AI 600-1 categories |
