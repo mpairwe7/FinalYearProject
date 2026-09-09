@@ -1,27 +1,46 @@
-"""Why the question-span narrowing stays gated on distress.
+"""G35: a situational preamble must not cost a row the answer.
 
-`_faq_match_score` divides coverage by the terms the *user* supplied, so a
-calm situational preamble dilutes the score of the row that answers the
-question exactly the way a distressed one does:
+``_faq_match_score`` divided coverage by every term the *user* supplied, so
+context lowered the score of the row that answers the question:
 
     "Do I have to charge VAT?"                                    0.700
     "I am opening a hardware store in Jinja. Do I have to         0.273
      charge VAT?"
 
-The floor is 0.58, and the answer is in ``ura_vat_faqs.csv`` throughout. That
-looks like a reason to run ``extract_question_span`` on every preamble, not
-only on distressed turns — and against a thin index it measures like one.
+The floor is 0.58 and the answer is in ``ura_vat_faqs.csv`` throughout. Four
+words of situation — *opening, hardware, store, Jinja* — that no FAQ row can
+cover are what the row was charged for.
 
-It is not. Measured 2026-09-01 against a rebuilt 7,970-document index, ungating
-the narrowing *cost* fact coverage on the VAT onboarding journey (81.2% ->
-43.8%; turn 1 1.00 -> 0.25, turn 2 0.75 -> 0.00). The FAQ scorer only decides
-the answer once retrieval has fallen back to keyword matching; against a healthy
-dense index the preamble is useful retrieval context and stripping it loses
-signal. The earlier "win" was measured against a stale 729-document snapshot.
+That looked like a reason to run ``extract_question_span`` on every preamble
+rather than only on distressed turns, and against a thin index it measured like
+one. It is not. Measured 2026-09-01 against a rebuilt 7,970-document index,
+ungating the narrowing *cost* fact coverage on the VAT onboarding journey
+(81.2% -> 43.8%; turn 1 1.00 -> 0.25, turn 2 0.75 -> 0.00). The FAQ scorer only
+decides the answer once retrieval has fallen back to keyword matching; against a
+healthy dense index the preamble is useful retrieval context and stripping it
+loses signal. The earlier "win" was measured against a stale 729-document
+snapshot.
 
-So these tests pin two things: the dilution is real (it is the reason the
-distress narrowing exists at all), and a calm preamble is deliberately left
-alone. Fixing the dilution belongs in the scorer, not in the call sites.
+So the narrowing belonged in the scorer, where nothing reaches retrieval, and
+that is where it now is — in **one** of the scorer's two terms. Coverage is
+divided by the question span's terms while the numerator still reads the whole
+query, so a row that also covers the situation is credited for it and one that
+does not is not penalised. Subject *focus* keeps the whole query: narrowing that
+as well was tried and reverted, because it makes recall trivially 1.0 for any row
+containing the one remaining subject, which trips the focus gate and hard-zeroes
+the row. Five FAQ rows stopped retrieving their own question — "Bona fide
+changing residence – what is exempt?" narrows to "what is exempt?", and the
+subject asked about is the half that gets dropped.
+
+The preamble question goes 0.273 -> 0.640 against a bare-question 0.700 and a
+0.58 floor. The remaining 0.06 is the focus term, and that is the part that
+should move.
+
+These tests pin three things: the dilution is gone, the query that reaches
+retrieval is untouched — the measured regression above is the one that matters —
+and the distress narrowing still strips a distressed turn. That narrowing now has
+no FAQ-scoring justification left; it stays because it also shapes
+``binding_query`` and the distress path, not because the scorer needs it.
 """
 
 from __future__ import annotations
@@ -60,22 +79,55 @@ class PreambleDilutionTest(unittest.TestCase):
             _FAQ_MATCH_MIN,
         )
 
-    def test_same_question_with_preamble_falls_under_the_floor(self) -> None:
-        # Not a statement about what *should* happen — this is the dilution
-        # itself, and it is why the distress narrowing exists. If this ever
-        # stops holding, the narrowing has lost its reason to exist and can be
-        # removed rather than merely re-gated.
-        self.assertLess(
+    def test_same_question_with_preamble_now_clears_it_too(self) -> None:
+        """G35. This asserted `assertLess` — it was pinning the defect."""
+        self.assertGreaterEqual(
             _faq_match_score(_PREAMBLE_QUESTION, _VAT_OBLIGATIONS_ROW),
             _FAQ_MATCH_MIN,
         )
 
-    def test_narrowing_would_restore_the_score(self) -> None:
-        span = extract_question_span(_PREAMBLE_QUESTION)
-        self.assertEqual(span, _BARE_QUESTION)
+    def test_the_preamble_barely_costs_the_row_anything(self) -> None:
+        """0.273 -> 0.640 against a bare-question 0.700.
+
+        Not equality, and deliberately not. Coverage — what the row can fairly
+        be charged for — is now judged on the question's own terms. Subject
+        *focus* is still judged on everything asked, because narrowing that too
+        makes recall trivially 1.0 and trips the focus gate: five FAQ rows
+        stopped retrieving their own question when it was tried. The residual
+        0.06 is that focus term, and it is the part that should move.
+        """
+        bare = _faq_match_score(_BARE_QUESTION, _VAT_OBLIGATIONS_ROW)
+        preamble = _faq_match_score(_PREAMBLE_QUESTION, _VAT_OBLIGATIONS_ROW)
+        self.assertGreaterEqual(preamble, _FAQ_MATCH_MIN)
+        self.assertLess(bare - preamble, 0.1)
+
+    def test_a_distressed_preamble_also_clears_the_floor_now(self) -> None:
+        """The same root cause reached the distress path; see
+        ``test_distress_retrieval_query.py``."""
         self.assertGreaterEqual(
-            _faq_match_score(span, _VAT_OBLIGATIONS_ROW),
+            _faq_match_score(_DISTRESSED_QUESTION, _VAT_OBLIGATIONS_ROW),
             _FAQ_MATCH_MIN,
+        )
+
+    def test_the_span_the_scorer_narrows_to_is_the_bare_question(self) -> None:
+        self.assertEqual(extract_question_span(_PREAMBLE_QUESTION), _BARE_QUESTION)
+
+    def test_an_unrelated_row_is_still_rejected(self) -> None:
+        """The denominator narrowed; the gate did not open.
+
+        Narrowing what a row is measured against must not turn every row into a
+        match — the numerator still has to find the question's own terms.
+        """
+        unrelated = {
+            "question": "How do I clear a consignment at Malaba?",
+            "answer": (
+                "Lodge a customs declaration through ASYCUDA, pay the assessed "
+                "duty, and present the release order at the border post."
+            ),
+            "source": "ura_customs_valuation_faqs.csv",
+        }
+        self.assertLess(
+            _faq_match_score(_PREAMBLE_QUESTION, unrelated), _FAQ_MATCH_MIN
         )
 
     def test_a_situational_preamble_is_not_distress(self) -> None:

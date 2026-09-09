@@ -2359,6 +2359,25 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     if not query_terms:
         return 0.0
 
+    # G35: coverage is judged against the terms that *constitute the question*,
+    # not every term the taxpayer supplied.
+    #
+    # The denominator used to be the whole query, so context lowered the score
+    # of the row that answers it. "I am opening a hardware store in Jinja. Do I
+    # have to charge VAT?" scored 0.273 against the 0.58 floor; the bare
+    # question scored 0.700, and the answer is in ura_vat_faqs.csv throughout.
+    # Four words of situation — opening, hardware, store, Jinja — no FAQ row
+    # can cover are what the row was charged for.
+    #
+    # This is the narrowing the *scorer* needs, and deliberately not the one
+    # the call sites tried. Ungating `extract_question_span` on the retrieval
+    # query was measured on 2026-09-01 and cost 37 points of VAT-journey fact
+    # coverage (81.2% -> 43.8%): against a healthy dense index the preamble is
+    # useful retrieval signal. Nothing here reaches retrieval. The full query
+    # still supplies the numerator, so a row that also covers the situation is
+    # credited for it — it just cannot be penalised for one it does not.
+    asked_terms = _faq_terms(extract_question_span(query)) or query_terms
+
     q_raw = str(entry.get("question") or "")
     a_raw = str(entry.get("answer") or "")
     text_raw = str(entry.get("text") or "")
@@ -2382,12 +2401,21 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     if query_terms & timing_terms and not (timing_evidence & body_terms):
         return 0.0
 
-    body_coverage = len(query_terms & body_terms) / len(query_terms)
+    body_coverage = min(1.0, len(query_terms & body_terms) / len(asked_terms))
 
     # Focus is judged on subjects, not spellings: "What is PAYE?" against "What
     # is PAYE (Pay As You Earn)?" is one subject asked once, not one term out
     # of four.  See :func:`_faq_subject_terms` for why coverage above keeps the
     # unfolded view.
+    # Deliberately the *whole* query, unlike the coverage denominator above.
+    # Narrowing this too was tried and reverted: it made recall trivially 1.0
+    # for any row containing the question's one remaining subject, which trips
+    # the focus gate below and hard-zeroes the row. Five FAQ rows stopped
+    # retrieving their own question — "Bona fide changing residence – what is
+    # exempt?" narrows to "what is exempt?", and the subject the taxpayer asked
+    # about is the half that gets dropped. Focus is about how well the row's
+    # question matches everything asked; coverage is about what the row can
+    # fairly be charged for. They want different views of the query.
     asked_subjects = _faq_subject_terms(query)
     question_subjects = _faq_subject_terms(q_raw)
     matched = len(asked_subjects & question_subjects)
