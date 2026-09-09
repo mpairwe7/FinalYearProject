@@ -127,6 +127,54 @@ class TestOffDomainQuestionsAreRefused(unittest.TestCase):
         promoted = service._promote_equivalent_faq_hits(query, filtered)
         self.assertEqual(promoted[0]["source"], "ura_about_ura_faqs.csv")
 
+    def test_natural_user_paraphrases_match_indexed_faqs(self):
+        """Natural paraphrases from Issue #430 must match their indexed FAQ answers."""
+        corpus = {
+            "transport": [
+                {
+                    "question": "How do I determine the loading capacity for goods vehicles?",
+                    "answer": "Use the logbook values: loading capacity = gross weight – net weight.",
+                    "source": "ura_advance_tax_transport_faqs.csv",
+                }
+            ],
+            "records": [
+                {
+                    "question": "What does the Tax Procedures Code Act (S15) require about records?",
+                    "answer": (
+                        "Keep records in English (physical or electronic); if using another "
+                        "language/currency, seek Commissioner General’s permission and translate on "
+                        "request. Retain records for five years after the tax period."
+                    ),
+                    "source": "ura_business_records_faqs.csv",
+                }
+            ],
+            "offences": [
+                {
+                    "question": "Is removing goods from an EPZ/Freeport for home use without authority an offence?",
+                    "answer": "Yes; fine USD 5,000 or 50% of goods’ value, whichever is higher.",
+                    "source": "ura_customs_offences_faqs.csv",
+                }
+            ],
+            "foreign": [
+                {
+                    "question": "What documents are needed for a foreign company to register and operate in Uganda?",
+                    "answer": "Certificate of incorporation; board resolution to register in Uganda; memorandum and articles of association...",
+                    "source": "ura_documents_point_of_entry_faqs.csv",
+                }
+            ],
+        }
+        probes = [
+            ("how do i work out how much my lorry is allowed to carry", "loading capacity"),
+            ("what papers does a foreign business need to start operating in uganda", "documents are needed"),
+            ("can i keep my business books in french instead of english", "Tax Procedures Code Act (S15)"),
+            ("what happens if i move goods out of a free zone without permission", "removing goods from an EPZ/Freeport"),
+        ]
+        for query, expected_sub in probes:
+            with self.subTest(query=query):
+                hits = service._simple_search(query, corpus, top_k=2)
+                self.assertTrue(hits, f"Natural paraphrase '{query}' yielded 0 hits")
+                self.assertIn(expected_sub.lower(), hits[0]["question"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()

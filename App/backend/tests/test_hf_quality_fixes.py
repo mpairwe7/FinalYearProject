@@ -391,6 +391,50 @@ class TinClarificationTests(unittest.TestCase):
         self.assertEqual(result["response_judge"]["confidence_band"], "high")
         self.assertIn("official rate table", result["response_judge"]["reasons"])
 
+    def test_pdf_page_furniture_and_marginal_notes_cleaned(self) -> None:
+        from app.service import _clean_passage_text
+
+        raw = (
+            "EXPORT PROCESSING ZONES AND FREEPORTS\n"
+            "> Goods iprocessing zon export nes or 167. (1) Subject to the Customs\n"
+            "laws, goods in export freeports. processing zones or freeports, whether of foreign\n"
+            "99\n"
+            "[Rev. 2009 _East African Community Customs Management_ ( _a_ ) export\n"
+            "after undergoing processing in an export processing zone; or ..."
+        )
+        cleaned = _clean_passage_text(raw)
+        self.assertNotIn("EXPORT PROCESSING ZONES AND FREEPORTS", cleaned)
+        self.assertNotIn("> Goods iprocessing", cleaned)
+        self.assertNotIn("Rev. 2009", cleaned)
+        self.assertNotIn("East African Community Customs Management", cleaned)
+        self.assertNotIn("99", cleaned)
+        self.assertIn("(a)", cleaned)
+        self.assertIn("goods in export freeports", cleaned)
+
+    def test_concise_faq_answer_is_not_diluted_by_second_chunk(self) -> None:
+        from app import service
+
+        hits = [
+            {
+                "source": "ura_customs_offences_faqs.csv",
+                "question": "Is removing goods from an EPZ/Freeport for home use without authority an offence?",
+                "answer": "Yes; fine USD 5,000 or 50% of goods' value, whichever is higher.",
+                "doc_type": "faq",
+            },
+            {
+                "source": "East_Africa_Community_Customs_Management_Act_Revised.pdf",
+                "text": (
+                    "EXPORT PROCESSING ZONES AND FREEPORTS\n"
+                    "167. (1) Subject to the Customs laws, goods in export processing zones..."
+                ),
+            },
+        ]
+        out = service.ChatModel._build_grounded_revision(
+            hits, [], "Is removing goods from an EPZ/Freeport for home use without authority an offence?"
+        )
+        self.assertIn("Yes; fine USD 5,000 or 50% of goods' value, whichever is higher.", out)
+        self.assertNotIn("167. (1) Subject to the Customs laws", out)
+
 
 if __name__ == "__main__":
     unittest.main()
