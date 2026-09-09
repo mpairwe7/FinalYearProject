@@ -1121,7 +1121,7 @@ class URAEvaluationEngine:
             pending_single = [f for f in single_turn_faqs if f.faq_id not in completed_results]
             print(f"--- Phase 2: Single-Turn Core FAQs ({len(pending_single)} pending questions out of {len(single_turn_faqs)}) ---", flush=True)
             
-            chunk_size = 20
+            chunk_size = 32
             for i in range(0, len(pending_single), chunk_size):
                 chunk = pending_single[i : i + chunk_size]
                 chunk_tasks = [self.evaluate_single_faq(client, f) for f in chunk]
@@ -1146,6 +1146,72 @@ class URAEvaluationEngine:
                     f"Temp: {telem.get('temperature_c', 0):.0f}°C",
                     flush=True,
                 )
+
+            # Phase 3: Speech Pipeline Evaluation (Whisper-SALT STT & Spark-TTS-SALT)
+            print("\n--- Phase 3: Speech Pipeline Evaluation (Whisper-SALT STT & Spark-TTS-SALT) ---", flush=True)
+            speech_results: dict[str, Any] = {"tts": [], "stt": []}
+            speech_prompts = [
+                ("en", "The standard Value Added Tax rate in Uganda is 18 percent.", "en-US-AriaNeural"),
+                ("lg", "Omusolo gwa VAT guli ebitundu 18 ku buli kikumi mu Uganda.", "spark_salt_lg"),
+                ("sw", "Kiwango cha kodi ya ongezeko la thamani nchini Uganda ni asilimia 18.", "spark_salt_sw"),
+            ]
+            for lang, phrase, v_name in speech_prompts:
+                t0_tts = time.perf_counter()
+                tts_status = 0
+                audio_len = 0
+                audio_bytes = b""
+                try:
+                    tts_resp = await client.post(
+                        f"{self.base_url}/v1/tts",
+                        json={"text": phrase, "language": lang, "voice": v_name},
+                        headers={"ngrok-skip-browser-warning": "true"},
+                        timeout=30.0,
+                    )
+                    tts_status = tts_resp.status_code
+                    if tts_status == 200:
+                        body = tts_resp.json()
+                        b64 = body.get("audio_base64")
+                        if b64:
+                            import base64
+                            audio_bytes = base64.b64decode(b64)
+                            audio_len = len(audio_bytes)
+                except Exception as e:
+                    print(f"  [FAIL] TTS {lang}: {e}")
+
+                tts_lat = time.perf_counter() - t0_tts
+                speech_results["tts"].append({
+                    "locale": lang,
+                    "status": tts_status,
+                    "bytes": audio_len,
+                    "latency_s": round(tts_lat, 3),
+                })
+                print(f"  [TTS - {lang.upper()}] HTTP {tts_status} | Size: {audio_len} bytes in {tts_lat:.2f}s", flush=True)
+
+                if audio_bytes:
+                    t0_stt = time.perf_counter()
+                    stt_status = 0
+                    transcript = ""
+                    try:
+                        asr_resp = await client.post(
+                            f"{self.base_url}/v1/asr?language={lang}",
+                            content=audio_bytes,
+                            headers={"Content-Type": "audio/wav", "ngrok-skip-browser-warning": "true"},
+                            timeout=30.0,
+                        )
+                        stt_status = asr_resp.status_code
+                        if stt_status == 200:
+                            stt_body = asr_resp.json()
+                            transcript = stt_body.get("text", "")
+                    except Exception as e:
+                        print(f"  [FAIL] STT {lang}: {e}")
+                    stt_lat = time.perf_counter() - t0_stt
+                    speech_results["stt"].append({
+                        "locale": lang,
+                        "status": stt_status,
+                        "transcript": transcript,
+                        "latency_s": round(stt_lat, 3),
+                    })
+                    print(f"  [STT - {lang.upper()}] HTTP {stt_status} | Transcript: \"{transcript[:50]}...\" in {stt_lat:.2f}s", flush=True)
 
         all_results = [completed_results[f.faq_id] for f in faqs if f.faq_id in completed_results]
 
@@ -1285,6 +1351,7 @@ class URAEvaluationEngine:
                     "mean_latency_s": round(statistics.mean([r.latency_s for r in edu_results]), 3) if edu_results else 0,
                 },
             },
+            "speech_pipeline": speech_results if "speech_results" in locals() else {},
             "retrieval_mode_distribution": modes,
             "sample_turn_evaluations": [asdict(r) for r in all_results[:25]],
         }
@@ -1376,6 +1443,12 @@ def main():
     print(f"Conversational Grade:         {s['conversational_grade_pct']}%")
     print(f"Emotional Intelligence (EQ):  {s['emotional_intelligence_pct']}%")
     print(f"Official Contact Integrity:   {'PASSED (Zero false redactions)' if s['zero_false_redaction_privacy_passed'] else 'FAILED'}")
+    if "speech_pipeline" in report and report["speech_pipeline"]:
+        sp = report["speech_pipeline"]
+        tts_ok = sum(1 for t in sp.get("tts", []) if t.get("status") == 200)
+        stt_ok = sum(1 for t in sp.get("stt", []) if t.get("status") == 200)
+        print(f"Speech TTS (Spark-TTS):       {tts_ok}/{len(sp.get('tts', []))} PASSED")
+        print(f"Speech STT (Whisper-SALT):    {stt_ok}/{len(sp.get('stt', []))} PASSED")
     print(f"Latency Profile:              p50={l['median_p50']}s | p90={l['p90']}s | p95={l['p95']}s | p99={l['p99']}s")
     print(f"Report written to:            {out_path}")
     print("======================================================================\n")
