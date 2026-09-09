@@ -37,7 +37,10 @@ Environment variables:
     LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 8192)
     LLM_TEMPERATURE         – generation temperature (default: 0.2)
     LLM_MAX_TOKENS          – max new tokens (default: 512)
-    LLM_REPETITION_PENALTY  – vLLM repetition penalty (default: 1.1)
+    LLM_REPETITION_PENALTY  – repetition penalty, both paths (default: 1.1)
+    LLM_MIN_P               – min-p sampling floor, vLLM path only (default: 0.08)
+    LLM_PRESENCE_PENALTY    – presence penalty, vLLM path only (default: 0.05)
+    LLM_NO_REPEAT_NGRAM_SIZE – hard n-gram block, Transformers path only (default: 0/off)
     LLM_ENABLED             – set to "false" to fall back to FAQ lookup
     LLM_DEVICE              – "auto", "cpu", "cuda" (default: auto)
     LLM_TORCH_DTYPE         – "float16", "bfloat16", "float32" (default: auto)
@@ -85,12 +88,27 @@ LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # not enough to push the model off the repeated legal phrasing that correct
 # tax answers legitimately contain.
 LLM_REPETITION_PENALTY = float(os.getenv("LLM_REPETITION_PENALTY", "1.1"))
-# 2026 dynamic min_p sampling — truncates candidates with prob < min_p * max_prob,
-# breaking low-perplexity agglutinative loops in Bantu languages while preserving
-# legitimate statutory repetition.
+# min_p truncates candidates below min_p * max_prob, which breaks a
+# low-perplexity agglutinative loop without capping the tail the way top_k
+# would. It reaches the vLLM path only: `min_p` is a vLLM SamplingParams
+# field, and the local Transformers path is a fallback whose decoding is not
+# worth diverging over. Note that at LLM_TEMPERATURE=0.2 the distribution is
+# already sharp enough that this rarely binds — the loop-breaking on the
+# served path is carried mostly by the repetition and presence penalties, and
+# raising min_p is only meaningful alongside a higher temperature.
 LLM_MIN_P = float(os.getenv("LLM_MIN_P", "0.08"))
 LLM_PRESENCE_PENALTY = float(os.getenv("LLM_PRESENCE_PENALTY", "0.05"))
-LLM_NO_REPEAT_NGRAM_SIZE = int(os.getenv("LLM_NO_REPEAT_NGRAM_SIZE", "6"))
+# Transformers-path only, and off by default. vLLM has no `no_repeat_ngram_size`
+# in SamplingParams, so this never reaches Sunflower-14B-FP8 however it is set —
+# docs that described it as a property of the served model were wrong and have
+# been corrected. It is off rather than 6 because a hard block on every repeated
+# 6-gram is the wrong instrument for statutory text: a correct tax answer repeats
+# phrases like "value added tax (VAT) registration threshold" and repeats a
+# citation string verbatim, and forbidding that outright forces the model off a
+# correct phrasing. The graded penalties above break loops without banning
+# anything. Set it to 6 only when debugging a Transformers-path loop that the
+# penalties did not catch.
+LLM_NO_REPEAT_NGRAM_SIZE = int(os.getenv("LLM_NO_REPEAT_NGRAM_SIZE", "0"))
 LLM_ENABLED = os.getenv("LLM_ENABLED", "true").lower() == "true"
 LLM_DEVICE = os.getenv("LLM_DEVICE", "auto")
 LLM_TORCH_DTYPE = os.getenv("LLM_TORCH_DTYPE", "auto")

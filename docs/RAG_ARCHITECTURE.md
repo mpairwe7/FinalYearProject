@@ -135,10 +135,10 @@ User Query
 | Dtype | `auto` | `LLM_TORCH_DTYPE` |
 | Temperature | 0.2 | `LLM_TEMPERATURE` |
 | Max tokens | 512 | `LLM_MAX_TOKENS` |
-| Min-p sampling | 0.08 | `LLM_MIN_P` (Bantu loop truncation) |
-| Presence penalty | 0.05 | `LLM_PRESENCE_PENALTY` |
-| Repetition penalty | 1.1 | `LLM_REPETITION_PENALTY` |
-| No repeat n-gram | 6 | `LLM_NO_REPEAT_NGRAM_SIZE` |
+| Repetition penalty | 1.1 | `LLM_REPETITION_PENALTY` (both paths) |
+| Min-p sampling | 0.08 | `LLM_MIN_P` — **vLLM path only**; rarely binds at temperature 0.2 |
+| Presence penalty | 0.05 | `LLM_PRESENCE_PENALTY` — **vLLM path only** |
+| No repeat n-gram | 0 (off) | `LLM_NO_REPEAT_NGRAM_SIZE` — **Transformers path only**; vLLM `SamplingParams` has no such field |
 | Concurrency | 2 | `LLM_MAX_CONCURRENCY` |
 | Deadline | 45s | `LLM_DEADLINE_SECONDS` |
 | Trust remote code | `false` | `LLM_TRUST_REMOTE_CODE` (OWASP LLM03) |
@@ -247,9 +247,13 @@ questions in English while `ChatModel.generate()` handled them correctly.
 - Re-retrieves with expanded query + domain context
 - Merges and deduplicates by chunk_id, keeps results only if quality improved
 
-**Cross-Lingual Entity Slot-Healing & Statutory Projection** (`mt.py`, `service.py`, `llm.py`):
-- Structured key-value statutory metadata slots (`## Statutory Parameters`) extracted from retrieved passages and projected into model prompts.
-- When `figures_survived` flags missing numbers or mutated percentages in vernacular translations, deterministic slot-healing (`heal_vernacular_figures`) re-anchors statutory figures (`obukadde 150`, `UGX 150,000,000`, `18%`) before translation cache insertion, avoiding abrupt English fallbacks.
+**Protected translation & statutory projection** (`mt.py`, `service.py`, `llm.py`):
+- Figures are masked behind opaque sentinels (`#NMBRA#`) *before* a reply is handed to a translator and restored verbatim afterwards — `mt.protect_figures` / `mt.restore_figures`, wired in `service.localize_reply`. A translator that never sees a digit cannot paraphrase one, so figure mutation is prevented rather than detected.
+- Only the digits are masked. The currency code and the percent sign stay visible because they are the cue the target language needs to build the right construction: Luganda renders a rate as "ebitundu 18 ku buli kikumi" and can only do so if it can still see that 18 was a percentage.
+- `figures_survived` remains as the assertion, not the mechanism. It still fires when a tier drops a sentinel outright rather than mutating it, and English remains the fallback for that case.
+- A tier that cannot carry the sentinels (an NMT model that drops unknown tokens) fails a guard and is retried **unprotected**, which is the pre-existing behaviour. Protection therefore only ever adds vernacular coverage, at the cost of one extra round trip on a path that was already failing. `MT_PROTECT_FIGURES=false` is the kill switch.
+- This replaced `heal_vernacular_figures`, which repaired MT output after the fact. Repairing means guessing where a number belonged; guessing wrong wrote a figure into a sentence that never had one, and narrowing it until it could not guess left it unable to fire at all. See G55 in `docs/GAPS_AND_AGENTIC_ROADMAP.md`.
+- Structured key-value statutory metadata slots (`## Statutory Parameters`) are extracted from retrieved passages and projected into model prompts by `llm.extract_statutory_context`. Known limitations are tracked as G56: the extractor re-reads raw passage text after `scan_retrieved_text` has scrubbed it elsewhere, and its slots carry no entity label or passage marker.
 
 **Escalation** (`guardrails.py` → `OutputGuard.should_escalate()`):
 - Low faithfulness score (< 0.25)
@@ -609,6 +613,7 @@ to a bad localized one:
 | `REPLY_MT_BACKEND` | `local_first` | Answer → the taxpayer's language |
 | `MT_CACHE_SIZE` | 512 | Per-process translation memo (`app/mt.py`); 0 disables |
 | `MT_CACHE_MAX_CHARS` | 4000 | Longer text is translated but not memoised |
+| `MT_PROTECT_FIGURES` | `true` | Mask figures behind sentinels before translation and restore after (`app/mt.py`); kill switch only — a tier that cannot carry them is retried unprotected |
 
 The cache is why a non-English turn is no longer two to three times slower than
 the same question in English. One turn translated the same question **twice** —
