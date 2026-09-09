@@ -2028,7 +2028,7 @@ _STOP_WORDS = frozenset(
     "and or not no nor but so if then than that this these those it its i me "
     "my we our you your he she they them their what which who whom how when "
     "where why all each every any some out up down off into over much many more "
-    "allowed able happens happen instead without keep".split()
+    "allowed able happens happen instead without".split()
 )
 
 # Keyword retrieval is deliberately conservative.  A FAQ answer can contain
@@ -2431,9 +2431,14 @@ def _retain_faq_candidates(
     best_match = max(match for _rank, _entry, match in scored)
     cutoff = max(_FAQ_MATCH_MIN, best_match * _FAQ_MATCH_RELATIVE)
     retained: list[dict[str, str]] = []
+    q_norm = query.strip().lower()
     for rank, entry, match in sorted(
         scored,
-        key=lambda item: (item[2], item[0]),
+        key=lambda item: (
+            1 if str(item[1].get("question", "")).strip().lower() == q_norm else 0,
+            item[2],
+            item[0],
+        ),
         reverse=True,
     ):
         if match < cutoff:
