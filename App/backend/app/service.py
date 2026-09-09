@@ -4790,10 +4790,10 @@ class ChatModel:
             or self._maybe_handle_tin_clarification(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
-            or self._maybe_handle_rate_lookup(
+            or self._maybe_handle_calculator(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
-            or self._maybe_handle_calculator(
+            or self._maybe_handle_rate_lookup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
         )
@@ -5069,6 +5069,9 @@ class ChatModel:
         calculator workflow starts pre-filled with everything the message
         did contain, so the user is asked only for what's absent.
         """
+        # Rate-table inquiries carry no amounts and are answered by _maybe_handle_rate_lookup.
+        if plan_rate_lookup(message) or plan_rate_lookup(rewritten):
+            return None
         plan = plan_calculation(message) or plan_calculation(rewritten)
         if plan is None:
             return None
