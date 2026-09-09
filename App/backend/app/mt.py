@@ -154,9 +154,11 @@ def figures_survived(source: str, translated: str) -> bool:
 
 
 def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") -> str:
-    """Attempt deterministic slot-healing of statutory numbers when translation drops or mutates figures.
+    """Attempt deterministic slot-healing of statutory numbers when translation drops units.
 
-    Uses direct token and string insertion rather than dynamic regex matching to prevent ReDoS risks.
+    Only inserts a missing percent sign or currency unit when the corresponding
+    numeric token already exists in the translated text. Does not invent placement
+    when the numbers themselves were not translated.
     """
     import re
     src_figs = figures(source)
@@ -174,22 +176,14 @@ def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") ->
             if f_val in missing:
                 if f"{pct_val}%" in healed:
                     continue
-                token_lead = f" {pct_val}"
-                token_trail = f"{pct_val} "
-                if token_lead in healed:
-                    healed = healed.replace(token_lead, f" {pct_val}%", 1)
-                elif token_trail in healed:
-                    healed = healed.replace(token_trail, f"{pct_val}% ", 1)
-                else:
-                    idx = healed.find(".")
-                    if idx != -1:
-                        healed = f"{healed[:idx]} ({pct_val}%){healed[idx:]}"
-                    else:
-                        healed = f"{healed} ({pct_val}%)"
+                # Match standalone numeric token not adjacent to digits, commas, or periods
+                pct_pattern = re.compile(rf"(?<![\d.,]){re.escape(pct_val)}(?![\d.,%])")
+                if pct_pattern.search(healed):
+                    healed = pct_pattern.sub(f"{pct_val}%", healed, count=1)
         except ValueError:
             continue
 
-    # 2. Canonical money amounts (e.g. UGX 150,000,000)
+    # 2. Canonical money amounts (e.g. UGX 150,000,000 or 150M)
     money_matches = re.findall(r"(?:UGX|Shs\.?|USh)\s*([\d,]+(?:\.\d+)?)", source, re.IGNORECASE)
     for m_val in money_matches:
         cleaned_num = m_val.replace(",", "")
@@ -197,12 +191,14 @@ def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") ->
             val_float = float(cleaned_num)
             if val_float in missing:
                 canonical = f"UGX {m_val}"
-                if canonical not in healed:
-                    idx = healed.find(".")
-                    if idx != -1:
-                        healed = f"{healed[:idx]} ({canonical}){healed[idx:]}"
-                    else:
-                        healed = f"{healed} ({canonical})"
+                bare_pattern = re.compile(rf"(?<!UGX\s)(?<!Shs\.\s)(?<!USh\s)\b{re.escape(m_val)}\b", re.IGNORECASE)
+                if bare_pattern.search(healed):
+                    healed = bare_pattern.sub(canonical, healed, count=1)
+                elif val_float >= 1_000_000 and val_float % 1_000_000 == 0:
+                    millions = int(val_float // 1_000_000)
+                    vern_pattern = re.compile(rf"\b((?:obukadde|akakadde|milioni)\s+{millions})\b", re.IGNORECASE)
+                    if vern_pattern.search(healed):
+                        healed = vern_pattern.sub(rf"\1 ({canonical})", healed, count=1)
         except ValueError:
             continue
 
