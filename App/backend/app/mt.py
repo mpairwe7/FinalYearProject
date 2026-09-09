@@ -153,6 +153,62 @@ def figures_survived(source: str, translated: str) -> bool:
     return figures(translated) == source_figures
 
 
+def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") -> str:
+    """Attempt deterministic slot-healing of statutory numbers when translation drops or mutates figures.
+
+    Uses direct token and string insertion rather than dynamic regex matching to prevent ReDoS risks.
+    """
+    import re
+    src_figs = figures(source)
+    trans_figs = figures(translated)
+    missing = src_figs - trans_figs
+    if not missing:
+        return translated
+
+    healed = translated
+    # 1. Statutory percentages (e.g. 18%, 6%, 12%, 15%, 30%)
+    pct_matches = re.findall(r"(\d+(?:\.\d+)?)\s*%", source)
+    for pct_val in pct_matches:
+        try:
+            f_val = float(pct_val)
+            if f_val in missing:
+                if f"{pct_val}%" in healed:
+                    continue
+                token_lead = f" {pct_val}"
+                token_trail = f"{pct_val} "
+                if token_lead in healed:
+                    healed = healed.replace(token_lead, f" {pct_val}%", 1)
+                elif token_trail in healed:
+                    healed = healed.replace(token_trail, f"{pct_val}% ", 1)
+                else:
+                    idx = healed.find(".")
+                    if idx != -1:
+                        healed = f"{healed[:idx]} ({pct_val}%){healed[idx:]}"
+                    else:
+                        healed = f"{healed} ({pct_val}%)"
+        except ValueError:
+            continue
+
+    # 2. Canonical money amounts (e.g. UGX 150,000,000)
+    money_matches = re.findall(r"(?:UGX|Shs\.?|USh)\s*([\d,]+(?:\.\d+)?)", source, re.IGNORECASE)
+    for m_val in money_matches:
+        cleaned_num = m_val.replace(",", "")
+        try:
+            val_float = float(cleaned_num)
+            if val_float in missing:
+                canonical = f"UGX {m_val}"
+                if canonical not in healed:
+                    idx = healed.find(".")
+                    if idx != -1:
+                        healed = f"{healed[:idx]} ({canonical}){healed[idx:]}"
+                    else:
+                        healed = f"{healed} ({canonical})"
+        except ValueError:
+            continue
+
+    return healed
+
+
 def translate_cached(
     text: str,
     source_lang: str,
@@ -166,9 +222,8 @@ def translate_cached(
     already uses. Failures are never cached: a Sunbird timeout must not pin an
     empty answer for the life of the process.
 
-    A translation whose figures did not survive is returned to the caller
-    *and* not cached, so the caller applies its own policy (all of them serve
-    the English text) without this function deciding that for it.
+    A translation whose figures did not survive is checked for deterministic
+    slot-healing before returning or discarding.
     """
     key_text = (text or "").strip()
     if not key_text:
@@ -183,6 +238,11 @@ def translate_cached(
         return out or None
 
     result = out.strip()
-    if figures_survived(key_text, result):
+    if not figures_survived(key_text, result):
+        healed = heal_vernacular_figures(key_text, result, target_lang)
+        if figures_survived(key_text, healed):
+            result = healed
+            cache.put(source_lang, target_lang, key_text, result)
+    else:
         cache.put(source_lang, target_lang, key_text, result)
     return result

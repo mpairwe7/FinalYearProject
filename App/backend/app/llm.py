@@ -56,8 +56,6 @@ import os
 import re
 import threading
 import time
-import urllib.parse
-import urllib.request
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
@@ -87,6 +85,12 @@ LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # not enough to push the model off the repeated legal phrasing that correct
 # tax answers legitimately contain.
 LLM_REPETITION_PENALTY = float(os.getenv("LLM_REPETITION_PENALTY", "1.1"))
+# 2026 dynamic min_p sampling — truncates candidates with prob < min_p * max_prob,
+# breaking low-perplexity agglutinative loops in Bantu languages while preserving
+# legitimate statutory repetition.
+LLM_MIN_P = float(os.getenv("LLM_MIN_P", "0.08"))
+LLM_PRESENCE_PENALTY = float(os.getenv("LLM_PRESENCE_PENALTY", "0.05"))
+LLM_NO_REPEAT_NGRAM_SIZE = int(os.getenv("LLM_NO_REPEAT_NGRAM_SIZE", "6"))
 LLM_ENABLED = os.getenv("LLM_ENABLED", "true").lower() == "true"
 LLM_DEVICE = os.getenv("LLM_DEVICE", "auto")
 LLM_TORCH_DTYPE = os.getenv("LLM_TORCH_DTYPE", "auto")
@@ -272,6 +276,32 @@ def _trim_to_tokens(tokenizer: Any, text: str, max_tokens: int) -> str:
         return text[: max_tokens * 4]
 
 
+def extract_statutory_context(passages: list[dict[str, Any]]) -> str:
+    """Extract structured key-value statutory metadata slots from retrieved passages.
+
+    Helps decoder translation anchor to verified statutory rates and thresholds
+    rather than dropping or mutating figures when synthesizing in vernacular languages.
+    """
+    slots = []
+    seen: set[str] = set()
+    for p in (passages or []):
+        txt = str(p.get("text") or p.get("answer") or "")
+        # Extract statutory rates/percentages
+        for pct in re.findall(r"\b(\d+(?:\.\d+)?%)", txt):
+            if pct not in seen:
+                seen.add(pct)
+                slots.append(f"- Statutory Rate: {pct}")
+        # Extract statutory thresholds/amounts
+        for amt in re.findall(r"(?:UGX|Shs\.?|USh)\s*([\d,]{6,})", txt, re.IGNORECASE):
+            clean_amt = f"UGX {amt}"
+            if clean_amt not in seen:
+                seen.add(clean_amt)
+                slots.append(f"- Statutory Threshold/Amount: {clean_amt}")
+    if slots:
+        return "## Statutory Parameters\n" + "\n".join(slots[:5])
+    return ""
+
+
 def _build_messages(
     query: str,
     passages: list[dict[str, Any]],
@@ -382,6 +412,11 @@ def _build_messages(
 
     parts.append(f"## User question\n{query}")
     parts.append("")
+
+    stat_params = extract_statutory_context(passages)
+    if stat_params:
+        parts.append(stat_params)
+        parts.append("")
 
     # The answer language, stated every time rather than only when it is not
     # English.
@@ -681,6 +716,8 @@ def _vllm_generate(
                 "messages": messages,
                 "temperature": LLM_TEMPERATURE if temperature is None else temperature,
                 "top_p": 0.95 if top_p is None else top_p,
+                "min_p": LLM_MIN_P,
+                "presence_penalty": LLM_PRESENCE_PENALTY,
                 "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
                 "repetition_penalty": LLM_REPETITION_PENALTY,
                 "stream": False,
@@ -720,6 +757,8 @@ def _vllm_chat_completion(
             "messages": messages,
             "temperature": LLM_TEMPERATURE if temperature is None else temperature,
             "top_p": 0.95 if top_p is None else top_p,
+            "min_p": LLM_MIN_P,
+            "presence_penalty": LLM_PRESENCE_PENALTY,
             "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": False,
@@ -802,6 +841,8 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
                 "messages": messages,
                 "temperature": LLM_TEMPERATURE,
                 "top_p": 0.95,
+                "min_p": LLM_MIN_P,
+                "presence_penalty": LLM_PRESENCE_PENALTY,
                 "max_tokens": LLM_MAX_TOKENS,
                 "repetition_penalty": LLM_REPETITION_PENALTY,
                 "stream": True,
@@ -903,6 +944,8 @@ def generate(
                     max_new_tokens=LLM_MAX_TOKENS,
                     temperature=max(LLM_TEMPERATURE, 0.01),  # avoid 0.0
                     top_p=0.95,
+                    repetition_penalty=LLM_REPETITION_PENALTY,
+                    no_repeat_ngram_size=LLM_NO_REPEAT_NGRAM_SIZE,
                     do_sample=LLM_TEMPERATURE > 0,
                     pad_token_id=_tokenizer.eos_token_id,
                 )
@@ -1252,6 +1295,8 @@ def generate_stream(
                 "max_new_tokens": LLM_MAX_TOKENS,
                 "temperature": max(LLM_TEMPERATURE, 0.01),
                 "top_p": 0.95,
+                "repetition_penalty": LLM_REPETITION_PENALTY,
+                "no_repeat_ngram_size": LLM_NO_REPEAT_NGRAM_SIZE,
                 "do_sample": LLM_TEMPERATURE > 0,
                 "pad_token_id": _tokenizer.eos_token_id,
                 "streamer": streamer,
