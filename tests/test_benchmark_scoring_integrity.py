@@ -19,6 +19,7 @@ tree CI actually runs.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -228,6 +229,26 @@ def test_kiswahili_probe_ids_do_not_shift_with_the_luganda_corpus():
     probes = ev.reviewed_vernacular_probes()
     sw_ids = [p.faq_id for p in probes if p.locale == "sw"]
     assert sw_ids == [f"VERN-SW-{i:02d}" for i in range(1, len(sw_ids) + 1)]
+
+
+def test_every_reviewed_luganda_question_is_actually_used():
+    """The corpus file is the supply of reviewed vernacular questions.
+
+    Leaving rows in it unused is the quiet failure: the harness looks like it
+    asks in-language while most of the reviewed material sits idle, and the
+    count reported in a PR or a runbook drifts from the count that runs. Four
+    of the twelve were unused when this was first written.
+    """
+    corpus = REPO_ROOT / "Data" / "eval" / "rag_eval_lg.jsonl"
+    if not corpus.exists():
+        pytest.skip("Luganda eval corpus not present in this checkout")
+    questions = {
+        json.loads(line)["question"]
+        for line in corpus.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    asked = {p.query for p in ev.reviewed_vernacular_probes() if p.locale == "lg"}
+    assert questions - asked == set(), "reviewed Luganda questions left unused"
 
 
 def test_no_item_scores_a_locale_against_bare_english_keywords():

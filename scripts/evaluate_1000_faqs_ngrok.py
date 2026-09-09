@@ -190,7 +190,12 @@ def reviewed_vernacular_probes() -> list["EvalFAQ"]:
     """
     probes: list[EvalFAQ] = []
 
-    #: (question index in rag_eval_lg.jsonl, domain, topic, numbers, citations)
+    #: Every question in ``Data/eval/rag_eval_lg.jsonl``, mapped to the
+    #: language-invariant evidence its own English ground truth states.
+    #: Figures and citations only — the reviewed Luganda text supplies the
+    #: question, and nothing here invents an expected Luganda phrasing for the
+    #: answer.
+    #: ``question -> (domain, topic, expected numbers, statutory citations)``
     lg_expectations: dict[str, tuple[str, str, list[str], list[str]]] = {
         "Nnina okwewandiisa otya okufuna TIN mu Uganda?": ("tax_education", "tin", [], []),
         "Omusolo gwa VAT gw'ameka mu Uganda?": ("domestic", "vat", ["18%"], []),
@@ -200,6 +205,10 @@ def reviewed_vernacular_probes() -> list["EvalFAQ"]:
         "Bwe nsazaamu obutaggya return y'omusolo, kiki ekibaawo?": ("domestic", "penalties", ["2%"], ["Tax Procedures Code"]),
         "Corporate tax rate ya Uganda y'emeka?": ("domestic", "corporation_tax", ["30%"], ["Income Tax Act"]),
         "Nkola ntya okuwakanya assessment y'omusolo?": ("tax_education", "objections", ["45"], ["Tax Procedures Code"]),
+        "Nfaayo ki ezeetaagisa okukola ku masannyalaze ga URA?": ("tax_education", "e_services", [], []),
+        "Nsobola ntya okusasula emisolo gyange ku ssimu?": ("domestic", "payments", ["48"], []),
+        "Withholding tax kye ki?": ("domestic", "withholding_tax", ["6%", "15%"], []),
+        "Nsobola ntya okufuna ennyingiza y'emisolo egy'entadde?": ("tax_education", "tax_clearance", [], []),
     }
     try:
         with open("Data/eval/rag_eval_lg.jsonl", encoding="utf-8") as fh:
