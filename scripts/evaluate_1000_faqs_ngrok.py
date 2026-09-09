@@ -81,7 +81,20 @@ class EvalFAQ:
     topic: str
     query: str
     expected_keywords: list[str]
+    #: Language the *answer* must be in.
     locale: str = "en"
+    #: Language the *question* is asked in. Distinct from ``locale`` because a
+    #: run that asks in English and requires a Luganda answer exercises only
+    #: output translation: ``translate_retrieve``, the query rewriter and
+    #: ``WorkflowRegistry.match_trigger`` all read the question, and all three
+    #: see English. Reporting such an item as "Luganda accuracy" is what let
+    #: G39 — the workflow router being too eager in local languages — stay
+    #: invisible to this harness while it was the largest measured cause of the
+    #: real locale gap.
+    query_locale: str = "en"
+    #: Terms a correct answer contains *in ``locale``*. The only keyword list
+    #: that can score a non-English reply; see ``score_reply``.
+    vernacular_keywords: list[str] = field(default_factory=list)
     expected_numbers: list[str] = field(default_factory=list)
     statutory_citations: list[str] = field(default_factory=list)
     session_id: str | None = None
@@ -113,6 +126,19 @@ class EvalResult:
     matched_numbers: list[str]
     matched_citations: list[str]
     accuracy_score: float
+    #: False when the harness had no evidence it could score in this locale.
+    #: Such an item is left out of the accuracy mean rather than recorded as a
+    #: zero — it is a gap in the harness, not a model failure.
+    scorable: bool
+    #: The reply declined, abstained, or asked for more input.
+    non_answer: bool
+    #: The reply is actually in ``locale`` (always True for ``en``).
+    language_ok: bool
+    #: The reply came back in English. ``service.localize_reply`` returns the
+    #: English text on every failure path, so this separates a translation that
+    #: was never attempted from one that was attempted and degraded.
+    english_fallback: bool
+    query_locale: str
     context_preserved: bool
     conversational_score: float
     eq_score: float
@@ -121,6 +147,116 @@ class EvalResult:
     turn: int
     is_multi_turn: bool
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Vernacular expectations
+# ---------------------------------------------------------------------------
+#: The vernacular word for "tax" in each locale, and nothing else. A correct
+#: Luganda or Kiswahili answer to any question in this corpus names the tax it
+#: is about, so this is the one term that can be asserted across all of them
+#: without a native speaker having reviewed the specific answer.
+#:
+#: Deliberately short. The previous anchor list was ``["omusolo", "ura"]`` and
+#: ``["kodi", "ura"]``; ``"ura"`` was not a vernacular word at all and matched
+#: inside English prose. Padding this list to make scores look better would
+#: repeat that mistake in the other direction — the rest of a non-English
+#: item's denominator comes from ``CROSS_LINGUAL_CONCEPT_MAP`` and from the
+#: figures and citations, which is coverage the repo can actually vouch for.
+VERNACULAR_ANCHORS: dict[str, tuple[str, ...]] = {
+    "lg": ("omusolo",),
+    "sw": ("kodi",),
+}
+
+
+def reviewed_vernacular_probes() -> list["EvalFAQ"]:
+    """Probes whose *question* is genuinely Luganda or Kiswahili.
+
+    Every other item in this corpus asks in English and only requires the
+    answer in the locale, which exercises ``service.localize_reply`` and
+    nothing else. These reach the parts of the stack that read the question:
+    ``FLAG_TRANSLATE_RETRIEVE``, the query rewriter, and
+    ``WorkflowRegistry.match_trigger`` — the last of which is G39, the
+    still-open defect where the workflow router captures a local-language
+    question as a task and answers a slot prompt instead.
+
+    No vocabulary is invented here. The Luganda questions are read verbatim
+    from ``Data/eval/rag_eval_lg.jsonl``; the Kiswahili ones are the reviewed
+    probes already carried by ``tests/load/tax_education_accuracy_eval.py`` and
+    ``scripts/test_master_qa_multilingual_benchmark.py``. Expectations are
+    figures, statutory citations and acronyms — the evidence that does not
+    change with the language — taken from the same records' English ground
+    truth.
+    """
+    probes: list[EvalFAQ] = []
+
+    #: (question index in rag_eval_lg.jsonl, domain, topic, numbers, citations)
+    lg_expectations: dict[str, tuple[str, str, list[str], list[str]]] = {
+        "Nnina okwewandiisa otya okufuna TIN mu Uganda?": ("tax_education", "tin", [], []),
+        "Omusolo gwa VAT gw'ameka mu Uganda?": ("domestic", "vat", ["18%"], []),
+        "Kiki ekibaawo bw'osasula omusolo nga wayiise obudde?": ("domestic", "penalties", ["2%"], []),
+        "EFRIS kye ki era ekola etya?": ("domestic", "efris", [], []),
+        "Emirimu ki egiteekeddwawo okuba egitasasulwako musolo gwa VAT?": ("domestic", "vat_exempt", [], []),
+        "Bwe nsazaamu obutaggya return y'omusolo, kiki ekibaawo?": ("domestic", "penalties", ["2%"], ["Tax Procedures Code"]),
+        "Corporate tax rate ya Uganda y'emeka?": ("domestic", "corporation_tax", ["30%"], ["Income Tax Act"]),
+        "Nkola ntya okuwakanya assessment y'omusolo?": ("tax_education", "objections", ["45"], ["Tax Procedures Code"]),
+    }
+    try:
+        with open("Data/eval/rag_eval_lg.jsonl", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                question = (row.get("question") or "").strip()
+                spec = lg_expectations.get(question)
+                if not spec:
+                    continue
+                domain, topic, numbers, citations = spec
+                probes.append(
+                    EvalFAQ(
+                        faq_id=f"VERN-LG-{len(probes) + 1:02d}",
+                        domain=domain,
+                        topic=topic,
+                        query=question,
+                        locale="lg",
+                        query_locale="lg",
+                        expected_keywords=[],
+                        vernacular_keywords=list(VERNACULAR_ANCHORS["lg"]),
+                        expected_numbers=numbers,
+                        statutory_citations=citations,
+                    )
+                )
+    except FileNotFoundError:
+        # The corpus directory is gitignored; a checkout without it still runs,
+        # and `report` records how many vernacular-query probes were reached.
+        pass
+
+    # Reviewed Kiswahili probes. Sources, in order:
+    #   tests/load/tax_education_accuracy_eval.py  (vat_standard_rate_sw)
+    #   scripts/test_master_qa_multilingual_benchmark.py  (ML-SW-01, ML-SW-02, customs)
+    sw_probes: list[tuple[str, str, str, list[str]]] = [
+        ("Kiwango cha kodi ya VAT nchini Uganda ni asilimia ngapi?", "domestic", "vat", ["18%"]),
+        ("Kiwango cha chini cha usajili wa VAT ni kiasi gani?", "domestic", "vat_threshold", ["150,000,000"]),
+        ("Kiwango cha kodi ya VAT ni kiasi gani?", "domestic", "vat", ["18%"]),
+        ("Ni makosa gani ya forodha yanayotozwa faini?", "customs", "customs_offences", []),
+    ]
+    for question, domain, topic, numbers in sw_probes:
+        probes.append(
+            EvalFAQ(
+                faq_id=f"VERN-SW-{len(probes) + 1:02d}",
+                domain=domain,
+                topic=topic,
+                query=question,
+                locale="sw",
+                query_locale="sw",
+                expected_keywords=[],
+                vernacular_keywords=list(VERNACULAR_ANCHORS["sw"]),
+                expected_numbers=numbers,
+                statutory_citations=[],
+            )
+        )
+    return probes
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +648,9 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                     topic=j["topic"],
                     query=t["query"],
                     locale=sess_loc,
+                    query_locale="en",
                     expected_keywords=t["kw"],
+                    vernacular_keywords=list(VERNACULAR_ANCHORS.get(sess_loc, ())),
                     expected_numbers=t.get("nums", []),
                     statutory_citations=t.get("cits", []),
                     session_id=sid,
@@ -540,7 +678,9 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                     topic=tmpl_name.lower().replace(" ", "_")[:30],
                     query=q_text,
                     locale=sess_loc,
+                    query_locale="en",
                     expected_keywords=kws,
+                    vernacular_keywords=list(VERNACULAR_ANCHORS.get(sess_loc, ())),
                     expected_numbers=[],
                     statutory_citations=[],
                     session_id=sid,
@@ -616,10 +756,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
             kws = ["tax", "ura"]
 
         loc = "lg" if (single_turn_id % 4 == 0) else ("sw" if (single_turn_id % 4 == 1) else "en")
-        if loc == "lg":
-            kws = kws + ["omusolo", "ura"]
-        elif loc == "sw":
-            kws = kws + ["kodi", "ura"]
+        vern = list(VERNACULAR_ANCHORS.get(loc, ()))
 
         faqs.append(
             EvalFAQ(
@@ -628,7 +765,9 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 topic=src.replace("ura_", "").replace("_faqs.jsonl", "")[:30],
                 query=q_clean,
                 locale=loc,
+                query_locale="en",
                 expected_keywords=kws,
+                vernacular_keywords=vern,
                 expected_numbers=[],
                 statutory_citations=[],
                 is_multi_turn=False,
@@ -697,10 +836,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                     break
                 kws = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", q_text) if w.lower() not in {"what", "when", "where", "does", "from", "with"}][:3]
                 loc = "lg" if (single_turn_id % 4 == 0) else ("sw" if (single_turn_id % 4 == 1) else "en")
-                if loc == "lg":
-                    kws = (kws or ["tax", "ura"]) + ["omusolo", "ura"]
-                elif loc == "sw":
-                    kws = (kws or ["tax", "ura"]) + ["kodi", "ura"]
+                vern = list(VERNACULAR_ANCHORS.get(loc, ()))
                 faqs.append(
                     EvalFAQ(
                         faq_id=f"FAQ-{single_turn_id:04d}",
@@ -708,7 +844,9 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                         topic=top,
                         query=q_text,
                         locale=loc,
-                        expected_keywords=kws or ["tax", "ura"],
+                        query_locale="en",
+                        expected_keywords=kws or ["tax"],
+                        vernacular_keywords=vern,
                         expected_numbers=[],
                         statutory_citations=[],
                         is_multi_turn=False,
@@ -717,7 +855,24 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 )
                 single_turn_id += 1
 
-    return faqs[:1000]
+    faqs = faqs[:1000]
+
+    # Swap the reviewed vernacular-query probes in over English-query items of
+    # the same locale, so the corpus stays at exactly 1,000 while a labelled
+    # subset actually asks in Luganda and Kiswahili. Single-turn items only:
+    # a session's turns share a conversation and cannot be replaced piecemeal.
+    for probe in reviewed_vernacular_probes():
+        for position, existing in enumerate(faqs):
+            if (
+                existing.locale == probe.locale
+                and existing.query_locale == "en"
+                and not existing.is_multi_turn
+            ):
+                probe.domain = probe.domain or existing.domain
+                faqs[position] = probe
+                break
+
+    return faqs
 
 
 # ---------------------------------------------------------------------------
@@ -815,6 +970,324 @@ NUMERICAL_EQUIVALENTS_SW: dict[str, list[str]] = {
 
 
 # ---------------------------------------------------------------------------
+# Scoring primitives
+# ---------------------------------------------------------------------------
+# These re-apply the corrections G37 made to
+# ``tests/load/tax_education_accuracy_eval.py`` (see
+# ``docs/GAPS_AND_AGENTIC_ROADMAP.md`` §2.9). This harness was written later and
+# reintroduced every one of them:
+#
+#   * Bare substring matching. ``"150"`` matched inside ``"1,500,000"`` and
+#     ``"ura"`` matched inside ``"accurate"``, ``"natural"`` and ``"insurance"``
+#     — so the Luganda/Kiswahili anchor ``"ura"`` was true of ordinary English
+#     prose. It is no longer a marker in either language.
+#   * No non-answer detection. A guided-workflow slot prompt names the topic it
+#     is asking about, so it matched topic keywords and scored as an answer.
+#   * An elicitation floor that awarded 0.75 to any reply containing
+#     ``"how much"``.
+#
+# The fourth correction is this harness's own: an English keyword list cannot
+# score a Luganda answer. See ``score_reply`` for what replaces it.
+# ---------------------------------------------------------------------------
+
+
+def _contains_term(haystack_lower: str, term: str) -> bool:
+    """True when *term* appears in *haystack_lower* on token boundaries."""
+    if not term:
+        return False
+    pattern = r"(?<![0-9a-z])" + re.escape(term.lower()) + r"(?![0-9a-z])"
+    return re.search(pattern, haystack_lower) is not None
+
+
+def _matched_terms(haystack_lower: str, terms: list[str]) -> list[str]:
+    return [t for t in terms if _contains_term(haystack_lower, t)]
+
+
+#: Replies that are not answers, whatever words they happen to contain. Kept in
+#: step with ``tests/load/tax_education_accuracy_eval.py``; the vernacular lines
+#: are the deterministic templates ``service.localize_reply`` translates, not
+#: invented vocabulary.
+_NON_ANSWER_MARKERS: tuple[str, ...] = (
+    "i couldn't find a reliable answer",
+    "i could not find a reliable answer",
+    "couldn't find a reliable answer",
+    "i don't have enough information",
+    "i do not have enough information",
+    "i just need a detail or two",
+    "please give me one",
+    "i'll need a little more",
+    "could you tell me",
+)
+
+#: Retrieval modes that are never an answer to the question asked.
+_NON_ANSWER_MODES: frozenset[str] = frozenset({"abstained", "error", "clarification"})
+
+
+#: Longest reply still treated as a slot prompt rather than an answer. The
+#: guided-flow steps in ``App/backend/app/workflows/flows/*.yaml`` are one
+#: sentence — "What is your **gross monthly salary** in UGX? (e.g. 1,500,000 or
+#: 1.5m)" is 70 characters, and the longest reaches ~200 with the
+#: ``"I can work that out for you"`` intro ``service.py`` prepends. A grounded
+#: answer clears this comfortably; this harness's own conversational grade
+#: already treats 150 characters as the floor for a substantive reply.
+_SLOT_PROMPT_MAX_CHARS = 220
+
+
+def _is_non_answer(reply: str, retrieval_mode: str) -> bool:
+    """Whether the reply declines, defers, or asks for more input.
+
+    Three signals, because no one of them covers the cases that mattered.
+
+    ``retrieval_mode`` catches abstentions and clarifications, which the
+    service labels. It cannot catch a workflow slot prompt: a *completed*
+    workflow reports ``"workflow"`` too, and that is a real answer.
+
+    The marker list catches the fixed English templates —
+    ``slots.py`` and ``service.py`` own the strings.
+
+    The shape test catches the rest, and is the only one that survives
+    translation. A guided-flow step is a short question; a grounded answer is
+    neither. G38 made the service's own workflow escape language-neutral for
+    exactly this reason — the English-only version stranded every Luganda and
+    Kiswahili user — and a scorer that only recognises English slot prompts
+    would credit the vernacular ones as answers, which is the same bug facing
+    the other way.
+    """
+    if str(retrieval_mode).lower() in _NON_ANSWER_MODES:
+        return True
+    text = (reply or "").strip()
+    low = text.lower()
+    if any(marker in low for marker in _NON_ANSWER_MARKERS):
+        return True
+    return len(text) <= _SLOT_PROMPT_MAX_CHARS and text.endswith("?")
+
+
+#: Words that mark a reply as actually being in the target language. Every one
+#: is drawn from an asset already in this repo that a native speaker reviewed —
+#: ``Data/eval/rag_eval_lg.jsonl``, the reviewed probes in
+#: ``tests/load/tax_education_accuracy_eval.py`` and
+#: ``scripts/test_master_qa_multilingual_benchmark.py``. No vocabulary is
+#: invented here: ``app.agents.patterns`` refuses that without native-speaker
+#: review and an eval harness has no better claim to it.
+#:
+#: None of them occurs in English, which is the property ``"ura"`` lacked.
+LANGUAGE_MARKERS: dict[str, tuple[str, ...]] = {
+    "lg": (
+        "omusolo", "emisolo", "ebitundu", "okwewandiisa", "kuwandiisa",
+        "ssente", "lisiiti", "bizinensi", "okusasula", "ekkomo", "obukadde",
+        "kikakatako", "abasuubuzi", "omusuubuzi", "eby'obusuubuzi", "olina",
+        "oyinza", "bw'oba", "mmeka", "kikozesebwa",
+    ),
+    "sw": (
+        "kodi", "asilimia", "usajili", "kujisajili", "biashara", "malipo",
+        "risiti", "lazima", "kiwango", "milioni", "ushuru", "forodha",
+        "mapato", "marejesho", "kuwasilisha", "mfanyabiashara", "unaweza",
+        "gharama", "tarehe", "ankara",
+    ),
+}
+
+#: Function words that are common in English and absent from Luganda and
+#: Kiswahili. Used only to tell an English fallback from a real translation:
+#: ``service.localize_reply`` deliberately returns the English text on every
+#: failure path, so a locale run that silently served English has to be
+#: distinguishable from one that translated.
+_ENGLISH_FUNCTION_WORDS: tuple[str, ...] = (
+    "the", "and", "you", "your", "for", "with", "that", "this", "from",
+    "have", "must", "which", "will",
+)
+
+
+def language_fidelity(reply: str, locale: str) -> tuple[bool, bool]:
+    """``(in_target_language, looks_like_english_fallback)`` for *reply*.
+
+    A reply is in the target language when it carries at least two distinct
+    markers of it. Two rather than one because a single vernacular noun
+    survives inside an otherwise English sentence — ``"You must pay omusolo by
+    the 15th"`` is an English answer, and one marker would call it Luganda.
+
+    English fallback is reported separately rather than folded into the first
+    value because the two failures need different fixes: a reply that is
+    neither in the target language nor recognisably English is a degraded
+    translation, while one that is plain English is
+    ``localize_reply`` having exhausted its guards and returned the source.
+    """
+    if locale in ("", "en"):
+        return True, False
+    low = (reply or "").lower()
+    markers = LANGUAGE_MARKERS.get(locale, ())
+    hits = {m for m in markers if _contains_term(low, m)}
+    english_hits = sum(1 for w in _ENGLISH_FUNCTION_WORDS if _contains_term(low, w))
+    in_target = len(hits) >= 2
+    return in_target, (not in_target and english_hits >= 3)
+
+
+#: Bantu noun-class prefixes, stripped from both sides before a vernacular term
+#: is compared. Luganda inflects the noun ("omusolo" singular, "emisolo"
+#: plural) and Kiswahili does the same, so an exact token match alone
+#: under-counts a correct answer. This is the legitimate use of the stemmer the
+#: previous scorer had: it compares vernacular to vernacular. Its earlier use —
+#: looking for an English stem inside a Luganda token — could only ever fire
+#: when the reply had failed to translate.
+_LG_PREFIXES = ("omu", "emi", "eby", "ebi", "eki", "aba", "obu", "ama", "oku", "olu", "aka", "otu")
+_SW_PREFIXES = ("wa", "ya", "za", "ki", "vi", "mi", "ma", "u", "m")
+
+
+def _stem(word: str, locale: str) -> str:
+    prefixes = _LG_PREFIXES if locale == "lg" else _SW_PREFIXES
+    s = word.lower().strip(".,;:?!\"'()")
+    for pfx in prefixes:
+        if s.startswith(pfx) and len(s) > len(pfx) + 2:
+            return s[len(pfx):]
+    return s
+
+
+def _vernacular_contains(reply_lower: str, term: str, locale: str) -> bool:
+    """True when *term* appears in *reply_lower*, allowing noun-class inflection."""
+    if _contains_term(reply_lower, term):
+        return True
+    target = _stem(term, locale)
+    if len(target) < 4:
+        return False
+    return any(_stem(tok, locale) == target for tok in re.findall(r"[\w']+", reply_lower))
+
+
+#: Terms that stay in English inside a correct Luganda or Kiswahili answer:
+#: acronyms and URA product names. ``Data/eval/rag_eval_lg.jsonl`` keeps "VAT"
+#: and "TIN" untranslated in reviewed Luganda answers, so finding them there is
+#: evidence of a correct answer rather than of a failed translation.
+_LOCALE_INVARIANT_TERMS: frozenset[str] = frozenset({
+    "vat", "efris", "tin", "ura", "paye", "wht", "dts", "aeo", "eaccma",
+    "sct", "adr", "nin", "prn", "asycuda", "eac", "cif", "fob",
+})
+
+
+def _is_locale_invariant(term: str) -> bool:
+    """Whether *term* is expected to survive translation unchanged."""
+    return term.lower() in _LOCALE_INVARIANT_TERMS or (term.isupper() and len(term) <= 6)
+
+
+def _concept_synonyms(term: str, locale: str) -> set[str]:
+    entry = CROSS_LINGUAL_CONCEPT_MAP.get(term.lower())
+    if not entry:
+        return set()
+    return entry[0] if locale == "lg" else entry[1]
+
+
+def _number_matched(num_str: str, reply_lower: str, locale: str) -> bool:
+    if _contains_term(reply_lower, num_str):
+        return True
+    equivalents = (
+        NUMERICAL_EQUIVALENTS_LG.get(num_str)
+        if locale == "lg"
+        else NUMERICAL_EQUIVALENTS_SW.get(num_str)
+        if locale == "sw"
+        else None
+    )
+    return bool(equivalents) and any(_contains_term(reply_lower, e) for e in equivalents)
+
+
+def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, Any]:
+    """Score *reply* against *faq*, on evidence that survives the target language.
+
+    The scorer this replaces measured a Luganda answer against English prose
+    keywords scraped off the English source answer, plus the anchors
+    ``["omusolo", "ura"]``. Because ``"ura"`` matches inside ``"accurate"`` and
+    the English words match only when translation has failed, the highest score
+    a fully translated Luganda answer set could reach was **30.4%** — against a
+    100% ceiling for English. The reported 29.70% was 98% of that maximum, so
+    the 43-point "multilingual accuracy gap" was the instrument, not the model.
+
+    What is scored for a non-English locale is therefore only what a correct
+    answer in that language actually contains:
+
+    * **Vernacular terms** for the answer's concepts (``faq.vernacular_keywords``),
+      matched allowing noun-class inflection.
+    * **English terms that have a vernacular rendering** in
+      ``CROSS_LINGUAL_CONCEPT_MAP`` — scored on that rendering.
+    * **Locale-invariant terms** — ``VAT``, ``EFRIS``, ``TIN`` — which reviewed
+      Luganda answers keep in English.
+    * **Figures and statutory citations**, which do not translate at all.
+
+    An English prose term with no vernacular rendering is dropped from the
+    denominator rather than counted as a miss. It is not evidence either way:
+    its absence is what a correct translation looks like, and its presence is
+    what a failed one looks like.
+
+    ``scorable`` is False when nothing above applies, and the caller must then
+    leave the item out of the accuracy mean rather than record a zero. An item
+    the harness cannot score is a gap in the harness, and reporting it as a
+    model failure is how the previous numbers were built.
+    """
+    low = (reply or "").lower()
+    non_answer = _is_non_answer(reply, retrieval_mode)
+    language_ok, english_fallback = language_fidelity(reply, faq.locale)
+
+    matched: list[str] = []
+    missing: list[str] = []
+
+    def _record(term: str, hit: bool) -> None:
+        (matched if hit else missing).append(term)
+
+    if faq.locale in ("", "en"):
+        for kw in faq.expected_keywords:
+            _record(kw, _contains_term(low, kw))
+    else:
+        for term in faq.vernacular_keywords:
+            _record(term, _vernacular_contains(low, term, faq.locale))
+        for kw in faq.expected_keywords:
+            if _is_locale_invariant(kw):
+                _record(kw, _contains_term(low, kw))
+                continue
+            synonyms = _concept_synonyms(kw, faq.locale)
+            if not synonyms:
+                continue  # no vernacular rendering known — not evidence either way
+            _record(kw, any(_vernacular_contains(low, s, faq.locale) for s in synonyms))
+
+    matched_numbers = [n for n in faq.expected_numbers if _number_matched(n, low, faq.locale)]
+    matched_citations = [c for c in faq.statutory_citations if _contains_term(low, c)]
+
+    term_total = len(matched) + len(missing)
+    term_ratio = len(matched) / term_total if term_total else None
+    num_ratio = (
+        len(matched_numbers) / len(faq.expected_numbers) if faq.expected_numbers else None
+    )
+    cit_ratio = (
+        len(matched_citations) / len(faq.statutory_citations)
+        if faq.statutory_citations
+        else None
+    )
+
+    # Weights are applied only over the components this item actually has, then
+    # renormalised, so an item with no figures is not silently scored out of
+    # 0.7 — which is how the previous formula treated one.
+    components = [(term_ratio, 0.6), (num_ratio, 0.3), (cit_ratio, 0.1)]
+    present = [(value, weight) for value, weight in components if value is not None]
+    scorable = bool(present)
+    if not scorable:
+        accuracy = 0.0
+    elif non_answer:
+        # A slot prompt or an abstention is a failure to answer, whatever words
+        # it happens to contain. This is the elicitation floor's replacement:
+        # the floor awarded such a reply 0.75.
+        accuracy = 0.0
+    else:
+        total_weight = sum(weight for _, weight in present)
+        accuracy = sum(value * weight for value, weight in present) / total_weight
+
+    return {
+        "matched_terms": matched,
+        "missing_terms": missing,
+        "matched_numbers": matched_numbers,
+        "matched_citations": matched_citations,
+        "accuracy": round(accuracy, 4),
+        "non_answer": non_answer,
+        "language_ok": language_ok,
+        "english_fallback": english_fallback,
+        "scorable": scorable,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Evaluator Engine
 # ---------------------------------------------------------------------------
 class URAEvaluationEngine:
@@ -888,76 +1361,17 @@ class URAEvaluationEngine:
             claim_score = claim_data.get("score") if isinstance(claim_data, dict) else None
             sources = body.get("sources", [])
 
-            # 1. Statutory & Concept Accuracy Scoring (Cross-Lingual Awareness & Morphological Lemmatization)
-            _BANTU_PREFIXES = ("ogw'", "egy'", "omw'", "eby'", "eny'", "oku", "omu", "emi", "aba", "eki", "ebi", "obu", "aha", "ku", "mu", "ne", "nga")
-            _SW_PREFIXES = ("kwa", "cha", "vya", "wa", "ya", "za", "ku", "ki", "vi", "m", "wa", "u", "i")
-
-            def _bantu_stem(w: str) -> str:
-                s = w.lower().strip(".,;:?!\"'()")
-                for pfx in _BANTU_PREFIXES:
-                    if s.startswith(pfx) and len(s) > len(pfx) + 2:
-                        return s[len(pfx):]
-                return s
-
-            def _sw_stem(w: str) -> str:
-                s = w.lower().strip(".,;:?!\"'()")
-                for pfx in _SW_PREFIXES:
-                    if s.startswith(pfx) and len(s) > len(pfx) + 2:
-                        return s[len(pfx):]
-                return s
-
-            def _concept_in_reply(term: str, rep: str, loc: str) -> bool:
-                rep_low = rep.lower()
-                term_low = term.lower()
-                if term_low in rep_low:
-                    return True
-                if loc == "lg":
-                    lg_match = CROSS_LINGUAL_CONCEPT_MAP.get(term_low)
-                    if lg_match and any(syn in rep_low for syn in lg_match[0]):
-                        return True
-                    t_stem = _bantu_stem(term_low)
-                    if len(t_stem) >= 4 and any(t_stem in _bantu_stem(token) for token in rep_low.split()):
-                        return True
-                elif loc == "sw":
-                    sw_match = CROSS_LINGUAL_CONCEPT_MAP.get(term_low)
-                    if sw_match and any(syn in rep_low for syn in sw_match[1]):
-                        return True
-                    t_stem = _sw_stem(term_low)
-                    if len(t_stem) >= 4 and any(t_stem in _sw_stem(token) for token in rep_low.split()):
-                        return True
-                return False
-
-            matched_kws = [kw for kw in faq.expected_keywords if _concept_in_reply(kw, reply, faq.locale)]
-            missing_kws = [kw for kw in faq.expected_keywords if not _concept_in_reply(kw, reply, faq.locale)]
-            kw_ratio = len(matched_kws) / len(faq.expected_keywords) if faq.expected_keywords else 1.0
-
-            # Numerical Accuracy (with vernacular numbers and words)
-            def _num_in_reply(num_str: str, rep: str, loc: str) -> bool:
-                rep_low = rep.lower()
-                if num_str.lower() in rep_low:
-                    return True
-                if loc == "lg":
-                    lg_equivs = NUMERICAL_EQUIVALENTS_LG.get(num_str)
-                    if lg_equivs and any(e in rep_low for e in lg_equivs):
-                        return True
-                elif loc == "sw":
-                    sw_equivs = NUMERICAL_EQUIVALENTS_SW.get(num_str)
-                    if sw_equivs and any(e in rep_low for e in sw_equivs):
-                        return True
-                return False
-
-            matched_nums = [n for n in faq.expected_numbers if _num_in_reply(n, reply, faq.locale)]
-            num_ratio = len(matched_nums) / len(faq.expected_numbers) if faq.expected_numbers else 1.0
-
-            # Citation Accuracy
-            matched_cits = [c for c in faq.statutory_citations if c.lower() in reply.lower()]
-
-            # Elicitation turns (asking for missing calculation parameter or individual vs company)
-            # count as accurate assistant conversational responses when status_code == 200
-            if status_code == 200 and ("individual" in reply.lower() and "organisation" in reply.lower() or "how much" in reply.lower() or "ssente mmeka" in reply.lower() or "kiasi gani" in reply.lower()):
-                accuracy = max(0.75, (0.7 * kw_ratio) + (0.3 * num_ratio) if faq.expected_numbers else kw_ratio)
-            else:
-                accuracy = (0.7 * kw_ratio) + (0.3 * num_ratio) if faq.expected_numbers else kw_ratio
+            # 1. Statutory & concept accuracy (see `score_reply`).
+            scored = score_reply(faq, reply, retrieval_mode)
+            matched_kws = scored["matched_terms"]
+            missing_kws = scored["missing_terms"]
+            matched_nums = scored["matched_numbers"]
+            matched_cits = scored["matched_citations"]
+            accuracy = scored["accuracy"]
+            non_answer = scored["non_answer"]
+            language_ok = scored["language_ok"]
+            english_fallback = scored["english_fallback"]
+            scorable = scored["scorable"]
 
             # 2. Context & Long-Horizon Memory Preservation
             context_preserved = True
@@ -1013,6 +1427,11 @@ class URAEvaluationEngine:
                 matched_numbers=matched_nums,
                 matched_citations=matched_cits,
                 accuracy_score=round(accuracy, 3),
+                scorable=scorable,
+                non_answer=non_answer,
+                language_ok=language_ok,
+                english_fallback=english_fallback,
+                query_locale=getattr(faq, "query_locale", "en"),
                 context_preserved=context_preserved,
                 conversational_score=round(conversational_score, 3),
                 eq_score=round(eq_score, 3),
@@ -1232,8 +1651,34 @@ class URAEvaluationEngine:
         successful = [r for r in all_results if r.status_code == 200]
         success_rate = (len(successful) / len(all_results)) * 100 if all_results else 0.0
 
-        # Accuracies
-        avg_accuracy = statistics.mean([r.accuracy_score for r in successful]) * 100 if successful else 0.0
+        # Accuracies.
+        #
+        # Two denominators, both reported, because they answer different
+        # questions and the previous report answered only the flattering one.
+        #
+        # `delivered` is accuracy over the turns that produced an answer this
+        # harness could score. `end_to_end` counts a non-200 as 0.0: the
+        # p90 sat at the 60s client timeout, ~12% of turns never returned, and
+        # averaging only over the survivors reported the accuracy of a system
+        # that had already dropped its slowest eighth of traffic.
+        #
+        # An item with `scorable=False` is in neither: the harness had no
+        # evidence it could weigh in that locale, and recording a zero for it
+        # would charge the model for a gap in the corpus.
+        def _accuracy(rows: list[EvalResult]) -> tuple[float, float, int]:
+            scorable = [r for r in rows if r.scorable and r.status_code == 200]
+            delivered = statistics.mean([r.accuracy_score for r in scorable]) * 100 if scorable else 0.0
+            attempted = [r for r in rows if r.scorable or r.status_code != 200]
+            end_to_end = (
+                sum(r.accuracy_score if r.status_code == 200 else 0.0 for r in attempted)
+                / len(attempted)
+                * 100
+                if attempted
+                else 0.0
+            )
+            return delivered, end_to_end, len(scorable)
+
+        avg_accuracy, avg_accuracy_e2e, scorable_count = _accuracy(all_results)
         avg_conversational = statistics.mean([r.conversational_score for r in successful]) * 100 if successful else 0.0
         avg_eq = statistics.mean([r.eq_score for r in successful]) * 100 if successful else 0.0
 
@@ -1242,42 +1687,68 @@ class URAEvaluationEngine:
         cust_results = [r for r in successful if r.domain == "customs"]
         edu_results = [r for r in successful if r.domain == "tax_education"]
 
-        dom_acc = statistics.mean([r.accuracy_score for r in dom_results]) * 100 if dom_results else 0.0
-        cust_acc = statistics.mean([r.accuracy_score for r in cust_results]) * 100 if cust_results else 0.0
-        edu_acc = statistics.mean([r.accuracy_score for r in edu_results]) * 100 if edu_results else 0.0
+        dom_acc, dom_acc_e2e, dom_scorable = _accuracy([r for r in all_results if r.domain == "domestic"])
+        cust_acc, cust_acc_e2e, cust_scorable = _accuracy([r for r in all_results if r.domain == "customs"])
+        edu_acc, edu_acc_e2e, edu_scorable = _accuracy([r for r in all_results if r.domain == "tax_education"])
 
         # Multilingual breakdown
         en_results = [r for r in successful if r.locale == "en"]
         lg_results = [r for r in successful if r.locale == "lg"]
         sw_results = [r for r in successful if r.locale == "sw"]
 
-        en_acc = statistics.mean([r.accuracy_score for r in en_results]) * 100 if en_results else 0.0
-        lg_acc = statistics.mean([r.accuracy_score for r in lg_results]) * 100 if lg_results else 0.0
-        sw_acc = statistics.mean([r.accuracy_score for r in sw_results]) * 100 if sw_results else 0.0
+        en_acc, en_acc_e2e, en_scorable = _accuracy([r for r in all_results if r.locale == "en"])
+        lg_acc, lg_acc_e2e, lg_scorable = _accuracy([r for r in all_results if r.locale == "lg"])
+        sw_acc, sw_acc_e2e, sw_scorable = _accuracy([r for r in all_results if r.locale == "sw"])
 
         en_lats = [r.latency_s for r in en_results]
         lg_lats = [r.latency_s for r in lg_results]
         sw_lats = [r.latency_s for r in sw_results]
 
+        def _locale_block(
+            rows: list[EvalResult],
+            lats: list[float],
+            delivered: float,
+            end_to_end: float,
+            scorable: int,
+            locale: str,
+        ) -> dict[str, Any]:
+            """One locale's row, carrying what the score is and is not evidence of.
+
+            ``scorable_count`` below ``count`` means the harness could not weigh
+            every turn in this locale. Reading ``accuracy_pct`` without it is
+            how "Luganda 29.70%" came to be quoted against "English 73.14%"
+            when the Luganda scorer's own ceiling was 30.4%.
+            """
+            vernacular_query = [r for r in rows if r.query_locale == locale]
+            return {
+                "count": len(rows),
+                "scorable_count": scorable,
+                "accuracy_pct": round(delivered, 2),
+                "end_to_end_accuracy_pct": round(end_to_end, 2),
+                "vernacular_query_count": len(vernacular_query),
+                "in_target_language_pct": (
+                    round(sum(1 for r in rows if r.language_ok) / len(rows) * 100, 2)
+                    if rows
+                    else 0.0
+                ),
+                "english_fallback_pct": (
+                    round(sum(1 for r in rows if r.english_fallback) / len(rows) * 100, 2)
+                    if rows
+                    else 0.0
+                ),
+                "non_answer_pct": (
+                    round(sum(1 for r in rows if r.non_answer) / len(rows) * 100, 2)
+                    if rows
+                    else 0.0
+                ),
+                "p50_latency_s": round(statistics.median(lats), 3) if lats else 0,
+                "mean_latency_s": round(statistics.mean(lats), 3) if lats else 0,
+            }
+
         multilingual_breakdown = {
-            "english": {
-                "count": len(en_results),
-                "accuracy_pct": round(en_acc, 2),
-                "p50_latency_s": round(statistics.median(en_lats), 3) if en_lats else 0,
-                "mean_latency_s": round(statistics.mean(en_lats), 3) if en_lats else 0,
-            },
-            "luganda": {
-                "count": len(lg_results),
-                "accuracy_pct": round(lg_acc, 2),
-                "p50_latency_s": round(statistics.median(lg_lats), 3) if lg_lats else 0,
-                "mean_latency_s": round(statistics.mean(lg_lats), 3) if lg_lats else 0,
-            },
-            "swahili": {
-                "count": len(sw_results),
-                "accuracy_pct": round(sw_acc, 2),
-                "p50_latency_s": round(statistics.median(sw_lats), 3) if sw_lats else 0,
-                "mean_latency_s": round(statistics.mean(sw_lats), 3) if sw_lats else 0,
-            },
+            "english": _locale_block(en_results, en_lats, en_acc, en_acc_e2e, en_scorable, "en"),
+            "luganda": _locale_block(lg_results, lg_lats, lg_acc, lg_acc_e2e, lg_scorable, "lg"),
+            "swahili": _locale_block(sw_results, sw_lats, sw_acc, sw_acc_e2e, sw_scorable, "sw"),
         }
 
         # Multi-turn long-horizon context retention
@@ -1316,7 +1787,18 @@ class URAEvaluationEngine:
             },
             "summary_scores": {
                 "success_rate_pct": round(success_rate, 2),
+                # Accuracy over the turns that answered and could be scored.
                 "overall_accuracy_pct": round(avg_accuracy, 2),
+                # The same turns plus every non-200 as 0.0 — what a taxpayer
+                # sending this traffic would actually experience.
+                "end_to_end_accuracy_pct": round(avg_accuracy_e2e, 2),
+                "scorable_turns": scorable_count,
+                "unscorable_turns": len(all_results) - scorable_count - (len(all_results) - len(successful)),
+                "non_answer_pct": (
+                    round(sum(1 for r in successful if r.non_answer) / len(successful) * 100, 2)
+                    if successful
+                    else 0.0
+                ),
                 "conversational_grade_pct": round(avg_conversational, 2),
                 "emotional_intelligence_pct": round(avg_eq, 2),
                 "long_horizon_context_retention_pct": round(context_retention_pct, 2),
@@ -1337,17 +1819,23 @@ class URAEvaluationEngine:
             "domain_accuracy_breakdown": {
                 "domestic_taxes": {
                     "count": len(dom_results),
+                    "scorable_count": dom_scorable,
                     "accuracy_pct": round(dom_acc, 2),
+                    "end_to_end_accuracy_pct": round(dom_acc_e2e, 2),
                     "mean_latency_s": round(statistics.mean([r.latency_s for r in dom_results]), 3) if dom_results else 0,
                 },
                 "customs_and_border_trade": {
                     "count": len(cust_results),
+                    "scorable_count": cust_scorable,
                     "accuracy_pct": round(cust_acc, 2),
+                    "end_to_end_accuracy_pct": round(cust_acc_e2e, 2),
                     "mean_latency_s": round(statistics.mean([r.latency_s for r in cust_results]), 3) if cust_results else 0,
                 },
                 "tax_education_and_formalisation": {
                     "count": len(edu_results),
+                    "scorable_count": edu_scorable,
                     "accuracy_pct": round(edu_acc, 2),
+                    "end_to_end_accuracy_pct": round(edu_acc_e2e, 2),
                     "mean_latency_s": round(statistics.mean([r.latency_s for r in edu_results]), 3) if edu_results else 0,
                 },
             },
@@ -1430,12 +1918,29 @@ def main():
     print(f"Total Evaluated:              {m['total_faqs_evaluated']}")
     print(f"Total Duration:               {m['total_duration_s']}s ({m['throughput_qps']} req/sec)")
     print(f"Success Rate:                 {s['success_rate_pct']}%")
-    print(f"Overall Accuracy:             {s['overall_accuracy_pct']}%")
+    print(f"Accuracy (answered+scorable): {s['overall_accuracy_pct']}%  over {s['scorable_turns']} turns")
+    print(f"Accuracy (end-to-end):        {s['end_to_end_accuracy_pct']}%  non-200 counted as 0")
+    print(f"Non-answers among 200s:       {s['non_answer_pct']}%")
     if "multilingual_breakdown" in report:
         mb = report["multilingual_breakdown"]
-        print(f"  - English (en) Accuracy:    {mb.get('english', {}).get('accuracy_pct')}% (p50: {mb.get('english', {}).get('p50_latency_s')}s, n={mb.get('english', {}).get('count')})")
-        print(f"  - Luganda (lg) Accuracy:    {mb.get('luganda', {}).get('accuracy_pct')}% (p50: {mb.get('luganda', {}).get('p50_latency_s')}s, n={mb.get('luganda', {}).get('count')})")
-        print(f"  - Swahili (sw) Accuracy:    {mb.get('swahili', {}).get('accuracy_pct')}% (p50: {mb.get('swahili', {}).get('p50_latency_s')}s, n={mb.get('swahili', {}).get('count')})")
+        for label, key in (("English (en)", "english"), ("Luganda (lg)", "luganda"), ("Swahili (sw)", "swahili")):
+            b = mb.get(key, {})
+            print(
+                f"  - {label:<13} acc={b.get('accuracy_pct')}% "
+                f"(e2e={b.get('end_to_end_accuracy_pct')}%) "
+                f"scorable={b.get('scorable_count')}/{b.get('count')} "
+                f"in-language={b.get('in_target_language_pct')}% "
+                f"en-fallback={b.get('english_fallback_pct')}% "
+                f"vernacular-query={b.get('vernacular_query_count')} "
+                f"p50={b.get('p50_latency_s')}s"
+            )
+    lg_b = report.get("multilingual_breakdown", {}).get("luganda", {})
+    if lg_b and lg_b.get("scorable_count", 0) < lg_b.get("count", 0):
+        print(
+            "  ! Some non-English turns carried no evidence this harness could score "
+            "and are excluded from the mean, not recorded as failures. Read "
+            "scorable/count before comparing a locale against English."
+        )
     print(f"Domestic Taxes Accuracy:      {report['domain_accuracy_breakdown']['domestic_taxes']['accuracy_pct']}%")
     print(f"Customs & Trade Accuracy:     {report['domain_accuracy_breakdown']['customs_and_border_trade']['accuracy_pct']}%")
     print(f"Tax Education Accuracy:       {report['domain_accuracy_breakdown']['tax_education_and_formalisation']['accuracy_pct']}%")
