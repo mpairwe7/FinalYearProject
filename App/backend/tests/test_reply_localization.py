@@ -80,6 +80,93 @@ class LocalizeReplyTest(unittest.TestCase):
             self.assertEqual(service.localize_reply(self.ENGLISH, "sw"), swahili)
 
 
+class ProtectedLocalizationTest(unittest.TestCase):
+    """End to end: what the taxpayer actually receives when MT touches a figure."""
+
+    ENGLISH = "The standard VAT rate in Uganda is 18% on taxable supplies."
+    THRESHOLD = "The VAT registration threshold is UGX 150,000,000 a year."
+
+    def setUp(self) -> None:
+        mt.cache.clear()
+
+    def test_a_digit_mangling_translator_no_longer_costs_the_figure(self):
+        """The headline change.
+
+        This translator transposes every digit it is shown — the "UGX 235,000
+        comes back as UGX 253,000" failure. Before protection it produced a
+        wrong figure, the guard caught it, and the taxpayer got English.
+        Now it is never shown a digit, so there is nothing to transpose and
+        the taxpayer gets Luganda with the right number.
+        """
+
+        def _transposing(text: str, locale: str) -> str:
+            swapped = text.replace("18", "81").replace("150,000,000", "105,000,000")
+            return f"Omusolo gwa VAT mu Uganda guli {swapped} ku bintu ebiguzibwa."
+
+        with mock.patch("app.sunbird.translate_from_english", side_effect=_transposing):
+            out = service.localize_reply(self.ENGLISH, "lg")
+        self.assertNotEqual(out, self.ENGLISH)
+        self.assertIn("18%", out)
+        self.assertTrue(mt.figures_survived(self.ENGLISH, out))
+
+    def test_a_translator_that_echoes_a_sentinel_never_ships_the_fragment(self):
+        """Residue is visible garbage; English is the honest answer instead."""
+
+        def _echoing(text: str, locale: str) -> str:
+            return f"Omusolo gwa VAT guli {text} ne {text} ku bintu ebiguzibwa."
+
+        with mock.patch("app.sunbird.translate_from_english", side_effect=_echoing):
+            out = service.localize_reply(self.ENGLISH, "lg")
+        self.assertNotIn("NMBR", out)
+
+    def test_a_translator_that_drops_the_sentinel_falls_back_unprotected(self):
+        """Protection can only add coverage, never remove it.
+
+        This tier cannot carry a sentinel — it drops unknown tokens, as an NMT
+        model does — but translates the plain sentence correctly. The protected
+        pass fails its guards, the unprotected retry succeeds, and the taxpayer
+        gets the vernacular answer they would have got before this change.
+        """
+        luganda = "Omusolo gwa VAT mu Uganda guli ebitundu 18 ku buli kikumi."
+
+        def _drops_sentinels(text: str, locale: str) -> str:
+            if "NMBR" in text:
+                return "Omusolo gwa VAT mu Uganda guli ebitundu ku buli kikumi."
+            return luganda
+
+        with mock.patch("app.sunbird.translate_from_english", side_effect=_drops_sentinels):
+            self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), luganda)
+
+    def test_the_kill_switch_restores_the_unprotected_path(self):
+        """``MT_PROTECT_FIGURES=false`` means the translator sees the digits."""
+        seen: list[str] = []
+
+        def _record(text: str, locale: str) -> str:
+            seen.append(text)
+            return "Ekkomo ly'okwewandiisa VAT liri obukadde 150 buli mwaka."
+
+        with mock.patch.object(mt, "MT_PROTECT_FIGURES", False), mock.patch(
+            "app.sunbird.translate_from_english", side_effect=_record
+        ):
+            service.localize_reply(self.THRESHOLD, "lg")
+        self.assertEqual(len(seen), 1)
+        self.assertIn("150,000,000", seen[0])
+        self.assertNotIn("NMBR", seen[0])
+
+    def test_a_reply_without_figures_is_never_masked(self):
+        """No sentinels, no retry, no extra round trip on the common case."""
+        english = "Visit any URA office or call the contact centre for help."
+        seen: list[str] = []
+
+        def _record(text: str, locale: str) -> str:
+            seen.append(text)
+            return "Genda mu ofiisi ya URA yonna oba okube essimu."
+
+        with mock.patch("app.sunbird.translate_from_english", side_effect=_record):
+            service.localize_reply(english, "lg")
+        self.assertEqual(seen, [english])
+
+
 class GenerationLanguageTest(unittest.TestCase):
     """The model is only asked for a language it can actually produce."""
 

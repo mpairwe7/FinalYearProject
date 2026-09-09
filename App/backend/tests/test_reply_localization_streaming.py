@@ -232,8 +232,16 @@ class ReplyCacheTest(unittest.TestCase):
             service, "_translate_reply", return_value="Ekipimo kya UGX 100,000,000 buli mwaka."
         ) as backend:
             service.localize_reply(english, "lg")
+            after_first_turn = backend.call_count
             service.localize_reply(english, "lg")
-        self.assertEqual(backend.call_count, 2)
+        # A figure-bearing reply costs two round trips per turn once the
+        # protected pass fails — one masked, one unprotected retry (see
+        # docs/runbooks/multilingual-figure-fidelity.md). The count itself is
+        # not the property under test: what matters is that the second turn
+        # paid a backend again rather than being served a rejected
+        # translation out of the memo.
+        self.assertEqual(backend.call_count, after_first_turn * 2)
+        self.assertIsNone(mt.cache.get("en", "lg", english))
 
 
 if __name__ == "__main__":

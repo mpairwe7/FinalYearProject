@@ -16,10 +16,33 @@ of that cost without touching a model or a server.
 saying "UGX 235,000" can come back saying "UGX 253,000", or lose the amount
 entirely — and unlike a clumsy phrasing, a wrong figure on a revenue
 authority's assistant is indistinguishable from the assistant making it up.
-:func:`figures_survived` compares the money amounts and percentages on both
-sides so the caller can refuse a translation that changed them; the existing
-behaviour for a refused translation is to serve the English text, which is a
+
+Two mechanisms address that, in this order.
+
+:func:`protect_figures` masks every digit group behind an opaque sentinel
+before the text is handed to a translator, and :func:`restore_figures` puts
+the original digits back afterwards. A translator that never sees a digit
+cannot paraphrase one, so mutation stops being a thing that has to be
+detected. Only the digits are masked: the currency code and the percent sign
+stay visible because they are the cue the target language needs to build the
+right construction — Luganda states a rate as "ebitundu 18 ku buli kikumi",
+and it can only do that if it can still see that 18 was a percentage.
+
+:func:`figures_survived` remains, now as the assertion rather than the
+mechanism. It compares the money amounts and percentages on both sides so the
+caller can refuse a translation that changed them, and it still fires when a
+translator drops a sentinel outright rather than mutating it. The behaviour
+for a refused translation is unchanged: serve the English text, which is a
 worse read but never a wrong number.
+
+An earlier attempt (``heal_vernacular_figures``, PRs #481/#482) tried to
+repair a bad translation *after* the fact by re-inserting statutory figures
+into the output. Repairing after the fact means guessing where the number
+belonged, and guessing wrong writes a figure into a sentence that never had
+one. Narrowing it until it could not guess left it unable to fire at all —
+by then a figure only counted as missing when its digits were absent, and
+every remaining insertion path required those digits to be present. Masking
+before the fact needs no guess, which is why it replaced it.
 
 Both are per-process and deliberately so: this is a hot-path memo, not a
 system of record, and replicas do not need to agree about it.
@@ -30,6 +53,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
@@ -45,6 +69,30 @@ MT_CACHE_SIZE = int(os.getenv("MT_CACHE_SIZE", "512"))
 #: Text longer than this is not cached. A long reply is unlikely to repeat
 #: verbatim and would evict many short entries that do.
 MT_CACHE_MAX_CHARS = int(os.getenv("MT_CACHE_MAX_CHARS", "4000"))
+
+#: Mask figures before translation and restore them after. On by default
+#: because it is the only mechanism here that prevents a mutated figure
+#: rather than detecting one. It is a kill switch rather than a rollout
+#: flag: a translation tier that cannot carry the sentinels degrades to the
+#: unprotected path on its own (see ``service.localize_reply``), so this
+#: exists for the case where that degradation is itself the problem and an
+#: operator needs it off without a redeploy.
+MT_PROTECT_FIGURES = os.getenv("MT_PROTECT_FIGURES", "true").lower() in ("1", "true", "yes", "on")
+
+#: Sentinel core. Deliberately not a substring of any English word, so
+#: leftover sentinel fragments can be counted with a plain search without
+#: matching "figure", "config" or "number" in ordinary prose.
+_SENTINEL_CORE = "NMBR"
+
+#: A figure as it is written: "150,000,000", "1 500 000", "1.5", "18".
+#: The currency code and the percent sign are outside the span on purpose —
+#: see the module docstring. A trailing sentence period is not consumed
+#: because the decimal branch requires digits after the point.
+_FIGURE_SPAN_RE = re.compile(r"\d+(?:[,\u00a0 ]\d{3})*(?:\.\d+)?")
+
+#: Any surviving sentinel fragment. Case-insensitive because a translator
+#: that lowercases the sentence lowercases the sentinel with it.
+_SENTINEL_RESIDUE_RE = re.compile(_SENTINEL_CORE, re.IGNORECASE)
 
 
 def _key(source_lang: str, target_lang: str, text: str) -> tuple[str, str, str]:
@@ -153,56 +201,70 @@ def figures_survived(source: str, translated: str) -> bool:
     return figures(translated) == source_figures
 
 
-def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") -> str:
-    """Attempt deterministic slot-healing of statutory numbers when translation drops units.
+def _sentinel_label(index: int) -> str:
+    """``A``, ``B`` … ``Z``, ``AA`` — letters, never digits.
 
-    Only inserts a missing percent sign or currency unit when the corresponding
-    numeric token already exists in the translated text. Does not invent placement
-    when the numbers themselves were not translated.
+    The index has to survive a translator that rewrites numbers, which is the
+    exact failure this whole mechanism exists to stop. A numeric index would
+    be as exposed as the figure it stands in for.
     """
-    import re
-    src_figs = figures(source)
-    trans_figs = figures(translated)
-    missing = src_figs - trans_figs
-    if not missing:
-        return translated
+    label = ""
+    n = index + 1
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        label = chr(ord("A") + remainder) + label
+    return label
 
-    healed = translated
-    # 1. Statutory percentages (e.g. 18%, 6%, 12%, 15%, 30%)
-    pct_matches = re.findall(r"(\d+(?:\.\d+)?)\s*%", source)
-    for pct_val in pct_matches:
-        try:
-            f_val = float(pct_val)
-            if f_val in missing:
-                if f"{pct_val}%" in healed:
-                    continue
-                # Match standalone numeric token not adjacent to digits, commas, or periods
-                pct_pattern = re.compile(rf"(?<![\d.,]){re.escape(pct_val)}(?![\d.,%])")
-                if pct_pattern.search(healed):
-                    healed = pct_pattern.sub(f"{pct_val}%", healed, count=1)
-        except ValueError:
-            continue
 
-    # 2. Canonical money amounts (e.g. UGX 150,000,000 or 150M)
-    money_matches = re.findall(r"(?:UGX|Shs\.?|USh)\s*([\d,]+(?:\.\d+)?)", source, re.IGNORECASE)
-    for m_val in money_matches:
-        cleaned_num = m_val.replace(",", "")
-        try:
-            val_float = float(cleaned_num)
-            if val_float in missing:
-                canonical = f"UGX {m_val}"
-                bare_pattern = re.compile(rf"(?<!UGX\s)(?<!Shs\.\s)(?<!USh\s)\b{re.escape(m_val)}\b", re.IGNORECASE)
-                if bare_pattern.search(healed):
-                    healed = bare_pattern.sub(canonical, healed, count=1)
-                elif val_float >= 1_000_000 and val_float % 1_000_000 == 0:
-                    millions = int(val_float // 1_000_000)
-                    vern_pattern = re.compile(rf"\b((?:obukadde|akakadde|milioni)\s+{millions})\b", re.IGNORECASE)
-                    if vern_pattern.search(healed):
-                        healed = vern_pattern.sub(rf"\1 ({canonical})", healed, count=1)
-        except ValueError:
-            continue
+def protect_figures(text: str) -> tuple[str, dict[str, str]]:
+    """Mask every digit group in *text*, returning the masked text and its map.
 
-    return healed
+    ``"The threshold is UGX 150,000,000."`` becomes
+    ``"The threshold is UGX #NMBRA#."`` with ``{"#NMBRA#": "150,000,000"}``.
+
+    Each occurrence gets its own sentinel even when two of them read the same,
+    so restoration is positional and a translator that reorders a sentence
+    cannot swap one figure for another.
+
+    Text with no figures returns unchanged with an empty map, which is the
+    common case and lets the caller skip the round trip through
+    :func:`restore_figures` entirely.
+    """
+    mapping: dict[str, str] = {}
+
+    def _mask(match: re.Match[str]) -> str:
+        token = f"#{_SENTINEL_CORE}{_sentinel_label(len(mapping))}#"
+        mapping[token] = match.group(0)
+        return token
+
+    return _FIGURE_SPAN_RE.sub(_mask, text or ""), mapping
+
+
+def restore_figures(text: str, mapping: dict[str, str]) -> tuple[str, int]:
+    """Put the original digits back, returning the text and any residue count.
+
+    Matching is deliberately tolerant. A translator hands the sentinel back
+    lowercased, spaced out, or stripped of one or both hashes, and all of
+    those are still the sentinel; a Bantu translator may also glue a
+    noun-class prefix onto the front of it, so no left boundary is required.
+    The right boundary is required, or ``#NMBRA#`` would match inside
+    ``#NMBRAA#`` and restore the wrong figure.
+
+    The second element is the number of sentinel fragments still in the text
+    afterwards — a translator that echoed one twice, or mangled it past
+    recognition. It is never zero-and-fine to ignore: a fragment left in the
+    output is visible garbage in a taxpayer's answer, so the caller must
+    treat any residue as a failed round trip rather than shipping it.
+    """
+    restored = text or ""
+    for token, original in mapping.items():
+        label = token[1 + len(_SENTINEL_CORE) : -1]
+        pattern = re.compile(
+            rf"(?:#\s*)?{_SENTINEL_CORE}\s*{label}(?![A-Za-z])(?:\s*#)?",
+            re.IGNORECASE,
+        )
+        restored = pattern.sub(lambda _match, _original=original: _original, restored, count=1)
+    return restored, len(_SENTINEL_RESIDUE_RE.findall(restored))
 
 
 def translate_cached(
@@ -218,8 +280,11 @@ def translate_cached(
     already uses. Failures are never cached: a Sunbird timeout must not pin an
     empty answer for the life of the process.
 
-    A translation whose figures did not survive is checked for deterministic
-    slot-healing before returning or discarding.
+    A translation whose figures did not survive is returned to the caller
+    *and* not cached, so the caller applies its own policy (all of them serve
+    the English text) without this function deciding that for it. Callers that
+    want the figures protected rather than merely checked mask the text with
+    :func:`protect_figures` before building *translate*.
     """
     key_text = (text or "").strip()
     if not key_text:
@@ -234,11 +299,6 @@ def translate_cached(
         return out or None
 
     result = out.strip()
-    if not figures_survived(key_text, result):
-        healed = heal_vernacular_figures(key_text, result, target_lang)
-        if figures_survived(key_text, healed):
-            result = healed
-            cache.put(source_lang, target_lang, key_text, result)
-    else:
+    if figures_survived(key_text, result):
         cache.put(source_lang, target_lang, key_text, result)
     return result

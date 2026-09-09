@@ -2713,43 +2713,81 @@ def localize_reply(reply: str, locale: str) -> str:
     cached = mt.cache.get("en", locale, text)
     if cached is not None:
         return cached
-    translated = _translate_reply(text, locale)
-    if translated is None:
-        logger.info("reply localization to %s failed; serving English", locale)
-        return reply
-    if not translated or not translated.strip():
-        return reply
-    # Guard against a collapsed MT response replacing a real answer.
-    if len(translated.strip()) < max(12, len(text) // 10):
-        logger.info(
-            "reply localization to %s returned %d chars for %d; serving English",
-            locale,
-            len(translated.strip()),
-            len(text),
-        )
-        return reply
-    localized = translated.strip()
-    # Figures must survive the round trip. Machine translation paraphrases,
-    # and a paraphrased amount is a different amount: a reply that said
-    # "UGX 235,000" and comes back saying "UGX 253,000" is indistinguishable
-    # from the assistant inventing a figure, which is the one failure a
-    # revenue authority's assistant cannot ship. Serving the English text is
-    # the worse read and the only safe one — the same policy every other
-    # failure path here already takes.
-    if not mt.figures_survived(text, localized):
-        # 2026 Slot-healing: attempt deterministic reconciliation before dropping to English
-        healed = mt.heal_vernacular_figures(text, localized, locale)
-        if mt.figures_survived(text, healed):
-            metrics.inc("reply_localization_figures_healed_total", labels={"locale": locale})
-            localized = healed
-        else:
+
+    safe_locale = re.sub(r"[^a-zA-Z0-9_-]", "", locale)[:10]
+
+    def _attempt(source_text: str, figure_map: dict[str, str]) -> tuple[str | None, str]:
+        """One MT round trip and every guard, returning the text and a reason.
+
+        Figures must survive the round trip. Machine translation paraphrases,
+        and a paraphrased amount is a different amount: a reply that said
+        "UGX 235,000" and comes back saying "UGX 253,000" is indistinguishable
+        from the assistant inventing a figure, which is the one failure a
+        revenue authority's assistant cannot ship.
+        """
+        out = _translate_reply(source_text, locale)
+        if out is None:
+            return None, "mt_failed"
+        if not out or not out.strip():
+            return None, "empty"
+        candidate = out.strip()
+        if figure_map:
+            candidate, residue = mt.restore_figures(candidate, figure_map)
+            if residue:
+                # A sentinel fragment left in the text is visible garbage in a
+                # taxpayer's answer, so this round trip is spent whatever the
+                # figures say.
+                return None, "sentinel_residue"
+        # Guard against a collapsed MT response replacing a real answer.
+        if len(candidate) < max(12, len(text) // 10):
+            return None, "collapsed"
+        if not mt.figures_survived(text, candidate):
+            return None, "figures_changed"
+        return candidate, "ok"
+
+    # Protected pass first: the translator is handed sentinels in place of the
+    # digits, so it has nothing to paraphrase (``mt.protect_figures``). A tier
+    # that cannot carry the sentinels — an NMT model that drops unknown tokens,
+    # say — fails one of the guards above rather than producing a wrong figure,
+    # and the unprotected retry below is what keeps that from costing the
+    # taxpayer a vernacular answer they would otherwise have got. Protection
+    # can therefore only add coverage, never remove it, at the price of one
+    # extra round trip on a path that was already failing.
+    localized: str | None = None
+    reason = "skipped"
+    if mt.MT_PROTECT_FIGURES:
+        protected, figure_map = mt.protect_figures(text)
+        if figure_map:
+            localized, reason = _attempt(protected, figure_map)
+            if localized is None:
+                metrics.inc(
+                    "reply_localization_protected_retry_total",
+                    labels={"locale": locale, "reason": reason},
+                )
+                logger.info(
+                    "protected reply localization to %s failed (%s); retrying unprotected",
+                    safe_locale,
+                    reason,
+                )
+    if localized is None:
+        localized, reason = _attempt(text, {})
+
+    if localized is None:
+        if reason == "figures_changed":
             metrics.inc("reply_localization_figures_changed_total", labels={"locale": locale})
-            safe_locale = re.sub(r"[^a-zA-Z0-9_-]", "", locale)[:10]
             logger.warning(
                 "reply localization to %s changed the figures; serving English",
                 safe_locale,
             )
-            return reply
+        elif reason == "collapsed":
+            logger.info(
+                "reply localization to %s collapsed the answer; serving English",
+                safe_locale,
+            )
+        elif reason == "mt_failed":
+            logger.info("reply localization to %s failed; serving English", safe_locale)
+        return reply
+
     mt.cache.put("en", locale, text, localized)
     return localized
 
