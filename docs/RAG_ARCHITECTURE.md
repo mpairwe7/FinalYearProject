@@ -617,6 +617,7 @@ to a bad localized one:
 | `MT_CACHE_SIZE` | 512 | Per-process translation memo (`app/mt.py`); 0 disables |
 | `MT_CACHE_MAX_CHARS` | 4000 | Longer text is translated but not memoised |
 | `MT_PROTECT_FIGURES` | `true` | Mask figures behind sentinels before translation and restore after (`app/mt.py`); kill switch only — a tier that cannot carry them is retried unprotected |
+| `MT_MIN_LENGTH_RATIO` | 0.35 | Shortest a translation may be, as a fraction of the source (`app/mt.py`). Measured from the 23,838 aligned pairs in `Data/online_corpora/salt/`: the one-in-a-thousand ratio is 0.449 (en→lg) and 0.434 (en→sw). Replaces a floor at one tenth, which passed a translation that had dropped nine tenths of the answer |
 
 The cache is why a non-English turn is no longer two to three times slower than
 the same question in English. One turn translated the same question **twice** —
