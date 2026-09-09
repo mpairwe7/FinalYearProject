@@ -21,7 +21,7 @@
 
 | Component | Model | Parameters | Purpose |
 |-----------|-------|------------|---------|
-| **LLM (server)** | Sunbird/Sunflower-14B-FP8 (via vLLM) | 14.8B (FP8 quantized) | Answer generation + tool-calling (Apache-2.0, Qwen3-14B arch, 8K context configured, natively multilingual across 31 Ugandan languages + English, gated on HF); Qwen/Qwen3-8B is the simple local-Transformers fallback (see docs/MODEL_SWAP_GUIDE.md) |
+| **LLM (server)** | Sunbird/Sunflower-14B-FP8 (via vLLM) | 14.8B (FP8 quantized) | Answer generation + tool-calling (Apache-2.0, Qwen3-14B arch, 8K context configured, natively multilingual across 31 Ugandan languages + English, min-p=0.08 dynamic sampling, presence_penalty=0.05, no_repeat_ngram_size=6, gated on HF); Qwen/Qwen3-8B is the simple local-Transformers fallback (see docs/MODEL_SWAP_GUIDE.md) |
 | **LLM (mobile)** | google/gemma-2-2b-it GGUF Q4_K_M | 2B (quantised) | Offline mobile inference |
 | **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings (MTEB 63.0) |
 | **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |

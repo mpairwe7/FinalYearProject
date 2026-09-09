@@ -135,6 +135,10 @@ User Query
 | Dtype | `auto` | `LLM_TORCH_DTYPE` |
 | Temperature | 0.2 | `LLM_TEMPERATURE` |
 | Max tokens | 512 | `LLM_MAX_TOKENS` |
+| Min-p sampling | 0.08 | `LLM_MIN_P` (Bantu loop truncation) |
+| Presence penalty | 0.05 | `LLM_PRESENCE_PENALTY` |
+| Repetition penalty | 1.1 | `LLM_REPETITION_PENALTY` |
+| No repeat n-gram | 6 | `LLM_NO_REPEAT_NGRAM_SIZE` |
 | Concurrency | 2 | `LLM_MAX_CONCURRENCY` |
 | Deadline | 45s | `LLM_DEADLINE_SECONDS` |
 | Trust remote code | `false` | `LLM_TRUST_REMOTE_CODE` (OWASP LLM03) |
@@ -242,6 +246,10 @@ questions in English while `ChatModel.generate()` handled them correctly.
 - Triggers when average reranker score < `CORRECTIVE_RAG_THRESHOLD` (default: 0.3)
 - Re-retrieves with expanded query + domain context
 - Merges and deduplicates by chunk_id, keeps results only if quality improved
+
+**Cross-Lingual Entity Slot-Healing & Statutory Projection** (`mt.py`, `service.py`, `llm.py`):
+- Structured key-value statutory metadata slots (`## Statutory Parameters`) extracted from retrieved passages and projected into model prompts.
+- When `figures_survived` flags missing numbers or mutated percentages in vernacular translations, deterministic slot-healing (`heal_vernacular_figures`) re-anchors statutory figures (`obukadde 150`, `UGX 150,000,000`, `18%`) before translation cache insertion, avoiding abrupt English fallbacks.
 
 **Escalation** (`guardrails.py` → `OutputGuard.should_escalate()`):
 - Low faithfulness score (< 0.25)

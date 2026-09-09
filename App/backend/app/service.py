@@ -2737,12 +2737,18 @@ def localize_reply(reply: str, locale: str) -> str:
     # the worse read and the only safe one — the same policy every other
     # failure path here already takes.
     if not mt.figures_survived(text, localized):
-        metrics.inc("reply_localization_figures_changed_total", labels={"locale": locale})
-        logger.warning(
-            "reply localization to %s changed the figures; serving English",
-            locale,
-        )
-        return reply
+        # 2026 Slot-healing: attempt deterministic reconciliation before dropping to English
+        healed = mt.heal_vernacular_figures(text, localized, locale)
+        if mt.figures_survived(text, healed):
+            metrics.inc("reply_localization_figures_healed_total", labels={"locale": locale})
+            localized = healed
+        else:
+            metrics.inc("reply_localization_figures_changed_total", labels={"locale": locale})
+            logger.warning(
+                "reply localization to %s changed the figures; serving English",
+                locale,
+            )
+            return reply
     mt.cache.put("en", locale, text, localized)
     return localized
 

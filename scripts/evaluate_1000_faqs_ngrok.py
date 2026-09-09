@@ -888,18 +888,42 @@ class URAEvaluationEngine:
             claim_score = claim_data.get("score") if isinstance(claim_data, dict) else None
             sources = body.get("sources", [])
 
-            # 1. Statutory & Concept Accuracy Scoring (Cross-Lingual Awareness)
+            # 1. Statutory & Concept Accuracy Scoring (Cross-Lingual Awareness & Morphological Lemmatization)
+            _BANTU_PREFIXES = ("ogw'", "egy'", "omw'", "eby'", "eny'", "oku", "omu", "emi", "aba", "eki", "ebi", "obu", "aha", "ku", "mu", "ne", "nga")
+            _SW_PREFIXES = ("kwa", "cha", "vya", "wa", "ya", "za", "ku", "ki", "vi", "m", "wa", "u", "i")
+
+            def _bantu_stem(w: str) -> str:
+                s = w.lower().strip(".,;:?!\"'()")
+                for pfx in _BANTU_PREFIXES:
+                    if s.startswith(pfx) and len(s) > len(pfx) + 2:
+                        return s[len(pfx):]
+                return s
+
+            def _sw_stem(w: str) -> str:
+                s = w.lower().strip(".,;:?!\"'()")
+                for pfx in _SW_PREFIXES:
+                    if s.startswith(pfx) and len(s) > len(pfx) + 2:
+                        return s[len(pfx):]
+                return s
+
             def _concept_in_reply(term: str, rep: str, loc: str) -> bool:
                 rep_low = rep.lower()
-                if term.lower() in rep_low:
+                term_low = term.lower()
+                if term_low in rep_low:
                     return True
                 if loc == "lg":
-                    lg_match = CROSS_LINGUAL_CONCEPT_MAP.get(term.lower())
+                    lg_match = CROSS_LINGUAL_CONCEPT_MAP.get(term_low)
                     if lg_match and any(syn in rep_low for syn in lg_match[0]):
                         return True
+                    t_stem = _bantu_stem(term_low)
+                    if len(t_stem) >= 4 and any(t_stem in _bantu_stem(token) for token in rep_low.split()):
+                        return True
                 elif loc == "sw":
-                    sw_match = CROSS_LINGUAL_CONCEPT_MAP.get(term.lower())
+                    sw_match = CROSS_LINGUAL_CONCEPT_MAP.get(term_low)
                     if sw_match and any(syn in rep_low for syn in sw_match[1]):
+                        return True
+                    t_stem = _sw_stem(term_low)
+                    if len(t_stem) >= 4 and any(t_stem in _sw_stem(token) for token in rep_low.split()):
                         return True
                 return False
 

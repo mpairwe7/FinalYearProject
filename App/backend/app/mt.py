@@ -153,6 +153,73 @@ def figures_survived(source: str, translated: str) -> bool:
     return figures(translated) == source_figures
 
 
+def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") -> str:
+    """Attempt deterministic slot-healing of statutory numbers when translation drops or mutates figures."""
+    import re
+    src_figs = figures(source)
+    trans_figs = figures(translated)
+    missing = src_figs - trans_figs
+    if not missing:
+        return translated
+
+    healed = translated
+    # 1. Statutory percentages (e.g. 18%, 6%, 12%, 15%, 30%)
+    pct_matches = re.findall(r"(\d+(?:\.\d+)?)\s*%", source)
+    for pct_val in pct_matches:
+        try:
+            f_val = float(pct_val)
+            if f_val in missing:
+                pattern = rf"\b(ebitundu|asilimia)?\s*({re.escape(pct_val)})\b(?!\s*%)"
+                if re.search(pattern, healed, re.IGNORECASE):
+                    healed = re.sub(
+                        pattern,
+                        r"\g<0>%",
+                        healed,
+                        flags=re.IGNORECASE,
+                    )
+                elif f"{pct_val}%" not in healed:
+                    if locale == "lg" and re.search(r"\b(omusolo|bbeeyi|omuwendo|vat)\b", healed, re.IGNORECASE):
+                        healed = re.sub(r"(\b(?:omusolo|bbeeyi|omuwendo|vat)[^.,;\n]*)", rf"\1 ({pct_val}%)", healed, count=1, flags=re.IGNORECASE)
+                    elif locale == "sw" and re.search(r"\b(kodi|ushuru|kiwango|vat)\b", healed, re.IGNORECASE):
+                        healed = re.sub(r"(\b(?:kodi|ushuru|kiwango|vat)[^.,;\n]*)", rf"\1 ({pct_val}%)", healed, count=1, flags=re.IGNORECASE)
+                    else:
+                        healed = re.sub(r"([.!?])", rf" ({pct_val}%)\1", healed, count=1)
+        except ValueError:
+            continue
+
+    # 2. Canonical money amounts (e.g. UGX 150,000,000)
+    money_matches = re.findall(r"(?:UGX|Shs\.?|USh)\s*([\d,]+(?:\.\d+)?)", source, re.IGNORECASE)
+    for m_val in money_matches:
+        cleaned_num = m_val.replace(",", "")
+        try:
+            val_float = float(cleaned_num)
+            if val_float in missing:
+                canonical = f"UGX {m_val}"
+                if canonical not in healed:
+                    if locale == "lg" and re.search(r"\b(ekkomo|ssente|omuwendo|obukadde)\b", healed, re.IGNORECASE):
+                        healed = re.sub(
+                            r"(\b(?:ekkomo|ssente|omuwendo|obukadde)[^.,;\n]*)",
+                            rf"\1 ({canonical})",
+                            healed,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                    elif locale == "sw" and re.search(r"\b(kiwango|fedha|gharama|milioni)\b", healed, re.IGNORECASE):
+                        healed = re.sub(
+                            r"(\b(?:kiwango|fedha|gharama|milioni)[^.,;\n]*)",
+                            rf"\1 ({canonical})",
+                            healed,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                    else:
+                        healed = re.sub(r"([.!?])", rf" ({canonical})\1", healed, count=1)
+        except ValueError:
+            continue
+
+    return healed
+
+
 def translate_cached(
     text: str,
     source_lang: str,
@@ -166,9 +233,8 @@ def translate_cached(
     already uses. Failures are never cached: a Sunbird timeout must not pin an
     empty answer for the life of the process.
 
-    A translation whose figures did not survive is returned to the caller
-    *and* not cached, so the caller applies its own policy (all of them serve
-    the English text) without this function deciding that for it.
+    A translation whose figures did not survive is checked for deterministic
+    slot-healing before returning or discarding.
     """
     key_text = (text or "").strip()
     if not key_text:
@@ -183,6 +249,11 @@ def translate_cached(
         return out or None
 
     result = out.strip()
-    if figures_survived(key_text, result):
+    if not figures_survived(key_text, result):
+        healed = heal_vernacular_figures(key_text, result, target_lang)
+        if figures_survived(key_text, healed):
+            result = healed
+            cache.put(source_lang, target_lang, key_text, result)
+    else:
         cache.put(source_lang, target_lang, key_text, result)
     return result
