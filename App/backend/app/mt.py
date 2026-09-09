@@ -55,7 +55,7 @@ import logging
 import os
 import re
 import threading
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Callable
 
 from .entailment import canonical_amounts, percentages
@@ -268,14 +268,17 @@ def citations_survived(source: str, translated: str) -> bool:
     matches the report that approved it. The taxpayer loses the source link and
     the audit trail loses its subject.
 
-    Set equality, not order: a translation may reorder clauses, and a marker
-    that moved with its clause is still attached to the right claim. What may
-    not happen is a marker appearing or disappearing.
+    Multiplicity, not order. A translation may reorder clauses, and a marker
+    that moved with its clause is still attached to the right claim — so this
+    does not compare sequences. It does compare *counts*: a set comparison
+    passes a source citing ``[1]`` after two separate claims whose translation
+    kept one of them, and the claim that lost its marker is exactly the one
+    whose provenance nobody can now check (found by CodeRabbit on #487).
     """
-    source_markers = set(_CITATION_MARKER_RE.findall(source or ""))
+    source_markers = Counter(_CITATION_MARKER_RE.findall(source or ""))
     if not source_markers:
         return True
-    return set(_CITATION_MARKER_RE.findall(translated or "")) == source_markers
+    return Counter(_CITATION_MARKER_RE.findall(translated or "")) == source_markers
 
 
 def units_survived(source: str, translated: str) -> bool:

@@ -2373,9 +2373,16 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     # the call sites tried. Ungating `extract_question_span` on the retrieval
     # query was measured on 2026-09-01 and cost 37 points of VAT-journey fact
     # coverage (81.2% -> 43.8%): against a healthy dense index the preamble is
-    # useful retrieval signal. Nothing here reaches retrieval. The full query
-    # still supplies the numerator, so a row that also covers the situation is
-    # credited for it — it just cannot be penalised for one it does not.
+    # useful retrieval signal. Nothing here reaches retrieval.
+    #
+    # Both sides of the ratio narrow, and that is load-bearing. The first
+    # version of this fix kept the whole query in the numerator, meaning to
+    # credit a row that also covers the situation. What it actually did was let
+    # situation terms *substitute* for question terms: a row about the licences
+    # a hardware store in Jinja needs scored 0.7955 on "Do I have to charge
+    # VAT?" — above the 0.640 of the row that answers it. Coverage of the
+    # question is not something the preamble can pay for (found by CodeRabbit
+    # on #487).
     asked_terms = _faq_terms(extract_question_span(query)) or query_terms
 
     q_raw = str(entry.get("question") or "")
@@ -2401,7 +2408,7 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
     if query_terms & timing_terms and not (timing_evidence & body_terms):
         return 0.0
 
-    body_coverage = min(1.0, len(query_terms & body_terms) / len(asked_terms))
+    body_coverage = len(asked_terms & body_terms) / len(asked_terms)
 
     # Focus is judged on subjects, not spellings: "What is PAYE?" against "What
     # is PAYE (Pay As You Earn)?" is one subject asked once, not one term out

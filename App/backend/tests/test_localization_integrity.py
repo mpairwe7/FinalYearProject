@@ -145,6 +145,28 @@ def test_reordered_clauses_keep_their_markers_and_pass():
     assert mt.citations_survived(source, reordered)
 
 
+def test_a_repeated_marker_dropped_once_is_rejected():
+    """Set equality passed this: two claims cite [1], the translation keeps one.
+
+    The claim that lost its marker is exactly the one whose provenance nobody
+    can now check. Found by CodeRabbit on #487.
+    """
+    source = "VAT is charged at 18% [1]. A registered person files monthly [1]."
+    kept_one = "Omusolo gwa VAT guli ebitundu 18 [1]. Awaayo buli mwezi."
+    assert not mt.citations_survived(source, kept_one)
+
+
+def test_a_repeated_marker_kept_the_same_number_of_times_passes():
+    source = "VAT is charged at 18% [1]. A registered person files monthly [1]."
+    kept_both = "Omusolo gwa VAT guli ebitundu 18 [1]. Awaayo buli mwezi [1]."
+    assert mt.citations_survived(source, kept_both)
+
+
+def test_a_marker_duplicated_by_the_translator_is_rejected():
+    source = "VAT is charged at 18% [1]."
+    assert not mt.citations_survived(source, "Omusolo guli ebitundu 18 [1] [1].")
+
+
 def test_an_uncited_reply_passes_trivially():
     assert mt.citations_survived("Hello, how can I help?", "Ki kati, nkuyambe ntya?")
 

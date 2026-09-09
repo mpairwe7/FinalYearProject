@@ -241,10 +241,14 @@ def reviewed_vernacular_probes() -> list["EvalFAQ"]:
         ("Kiwango cha kodi ya VAT ni kiasi gani?", "domestic", "vat", ["18%"]),
         ("Ni makosa gani ya forodha yanayotozwa faini?", "customs", "customs_offences", []),
     ]
-    for question, domain, topic, numbers in sw_probes:
+    # Numbered from its own sequence, not from ``len(probes)``: the Luganda
+    # block above is skipped when its corpus file is absent, and an id that
+    # shifts with it would key the same probe to two different checkpoint
+    # entries across runs (found by CodeRabbit on #487).
+    for index, (question, domain, topic, numbers) in enumerate(sw_probes, 1):
         probes.append(
             EvalFAQ(
-                faq_id=f"VERN-SW-{len(probes) + 1:02d}",
+                faq_id=f"VERN-SW-{index:02d}",
                 domain=domain,
                 topic=topic,
                 query=question,
@@ -1059,7 +1063,11 @@ def _is_non_answer(reply: str, retrieval_mode: str) -> bool:
     low = text.lower()
     if any(marker in low for marker in _NON_ANSWER_MARKERS):
         return True
-    return len(text) <= _SLOT_PROMPT_MAX_CHARS and text.endswith("?")
+    # Anywhere in the text, not only at the end: the PAYE step reads "What is
+    # your **gross monthly salary** in UGX? (e.g. 1,500,000 or 1.5m)" and closes
+    # on a parenthetical, so a trailing-"?" test let the most common slot prompt
+    # in the corpus score as an answer (found by CodeRabbit on #487).
+    return len(text) <= _SLOT_PROMPT_MAX_CHARS and "?" in text
 
 
 #: Words that mark a reply as actually being in the target language. Every one
@@ -1934,8 +1942,12 @@ def main():
                 f"vernacular-query={b.get('vernacular_query_count')} "
                 f"p50={b.get('p50_latency_s')}s"
             )
-    lg_b = report.get("multilingual_breakdown", {}).get("luganda", {})
-    if lg_b and lg_b.get("scorable_count", 0) < lg_b.get("count", 0):
+    breakdown = report.get("multilingual_breakdown", {})
+    if any(
+        (block := breakdown.get(key, {}))
+        and block.get("scorable_count", 0) < block.get("count", 0)
+        for key in ("luganda", "swahili")
+    ):
         print(
             "  ! Some non-English turns carried no evidence this harness could score "
             "and are excluded from the mean, not recorded as failures. Read "

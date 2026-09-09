@@ -205,7 +205,29 @@ def test_the_corpus_reaches_the_vernacular_input_path_at_all():
     faqs = ev.build_1000_faqs_dataset()
     vernacular = [f for f in faqs if f.query_locale != "en"]
     assert vernacular, "no probe in this corpus asks in Luganda or Kiswahili"
-    assert {f.query_locale for f in vernacular} == {"lg", "sw"}
+    locales = {f.query_locale for f in vernacular}
+    # The Kiswahili probes are inline and always present. The Luganda ones are
+    # read from a corpus file `reviewed_vernacular_probes` explicitly tolerates
+    # the absence of, so asserting both unconditionally would fail a checkout
+    # without it rather than the behaviour under test (CodeRabbit, #487).
+    assert "sw" in locales
+    if (REPO_ROOT / "Data" / "eval" / "rag_eval_lg.jsonl").exists():
+        assert "lg" in locales
+
+
+def test_a_slot_prompt_whose_question_mark_is_not_last_is_still_a_non_answer():
+    """The PAYE step closes on a parenthetical example, not on the "?"."""
+    paye_step = "What is your **gross monthly salary** in UGX? (e.g. 1,500,000 or 1.5m)"
+    assert ev._is_non_answer(paye_step, "workflow")
+    faq = _faq(expected_keywords=["salary", "paye"])
+    assert ev.score_reply(faq, paye_step, "workflow")["accuracy"] == 0.0
+
+
+def test_kiswahili_probe_ids_do_not_shift_with_the_luganda_corpus():
+    """`faq_id` keys the checkpoint, so it must not depend on another corpus."""
+    probes = ev.reviewed_vernacular_probes()
+    sw_ids = [p.faq_id for p in probes if p.locale == "sw"]
+    assert sw_ids == [f"VERN-SW-{i:02d}" for i in range(1, len(sw_ids) + 1)]
 
 
 def test_no_item_scores_a_locale_against_bare_english_keywords():

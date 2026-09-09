@@ -23,9 +23,14 @@ snapshot.
 
 So the narrowing belonged in the scorer, where nothing reaches retrieval, and
 that is where it now is — in **one** of the scorer's two terms. Coverage is
-divided by the question span's terms while the numerator still reads the whole
-query, so a row that also covers the situation is credited for it and one that
-does not is not penalised. Subject *focus* keeps the whole query: narrowing that
+computed over the question span's terms on *both* sides of the ratio, so a row
+is neither charged for situation it cannot cover nor paid for situation it can.
+The first version of the fix kept the whole query in the numerator, meaning to
+credit a row that also matched the context; what it did instead was let
+situation terms substitute for question terms, and a row about the licences a
+hardware store in Jinja needs scored **0.7955** on "Do I have to charge VAT?" —
+above the 0.640 of the row that answers it (CodeRabbit, #487). Subject *focus*
+keeps the whole query: narrowing that
 as well was tried and reverted, because it makes recall trivially 1.0 for any row
 containing the one remaining subject, which trips the focus gate and hard-zeroes
 the row. Five FAQ rows stopped retrieving their own question — "Bona fide
@@ -111,6 +116,29 @@ class PreambleDilutionTest(unittest.TestCase):
 
     def test_the_span_the_scorer_narrows_to_is_the_bare_question(self) -> None:
         self.assertEqual(extract_question_span(_PREAMBLE_QUESTION), _BARE_QUESTION)
+
+    def test_a_row_matching_only_the_situation_is_rejected(self) -> None:
+        """The hole the first version of this fix opened.
+
+        Narrowing the denominator without narrowing the numerator let the
+        preamble pay for coverage of the question. This row answers the
+        situation and says nothing about VAT.
+        """
+        hardware_licence = {
+            "question": "What licences does a hardware store in Jinja need?",
+            "answer": (
+                "A hardware store opening in Jinja must obtain a trading licence "
+                "from the municipal council."
+            ),
+            "source": "ura_tax_education_faqs.csv",
+        }
+        self.assertLess(
+            _faq_match_score(_PREAMBLE_QUESTION, hardware_licence), _FAQ_MATCH_MIN
+        )
+        self.assertLess(
+            _faq_match_score(_PREAMBLE_QUESTION, hardware_licence),
+            _faq_match_score(_PREAMBLE_QUESTION, _VAT_OBLIGATIONS_ROW),
+        )
 
     def test_an_unrelated_row_is_still_rejected(self) -> None:
         """The denominator narrowed; the gate did not open.
