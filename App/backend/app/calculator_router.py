@@ -664,7 +664,7 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia)\b[^?]*\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo|bitundu|asilimia|tax|pay|charged|deducted|cut|take)\b"
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia)\b[^?]*\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo|bitundu|asilimia|pay|charged|deducted|cut|take)\b"
     r"|\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo)\s+(of|for|kya|cha|ku|kwa|kye|gwa)\b"
     r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b",
