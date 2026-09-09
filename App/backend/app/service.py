@@ -6038,8 +6038,9 @@ class ChatModel:
                 return result
 
             # 3e. Epistemic false-premise guard (G43) — reject non-existent statutory instruments
-            premise_res = check_false_premise(rewritten, hits)
-            if premise_res.is_false_premise:
+            # Skipped when attachments are present: questions then ask about terms in the attached document
+            premise_res = check_false_premise(rewritten, hits) if not attachments else None
+            if premise_res and premise_res.is_false_premise:
                 premise_reply = self._finalize_reply(premise_res.reply)
                 premise_result = {
                     "reply": premise_reply,
@@ -7247,9 +7248,9 @@ class ChatModel:
                     "_short_circuit": True,
                 }
 
-        # Epistemic false-premise guard (G43)
-        premise_res = check_false_premise(rewritten, hits)
-        if premise_res.is_false_premise:
+        # Epistemic false-premise guard (G43) — skipped when attachments are present
+        premise_res = check_false_premise(rewritten, hits) if not attachments else None
+        if premise_res and premise_res.is_false_premise:
             reply = self._finalize_reply(premise_res.reply)
             return {
                 "reply": reply,

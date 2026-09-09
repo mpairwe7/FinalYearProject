@@ -2,8 +2,8 @@
   "analysis_tests": {
     "invoice_pdf": {
       "status": 200,
-      "latency_sec": 0.7178116515278816,
-      "document_id": "30efc81bfeb04267a288da5cbcff1f19",
+      "latency_sec": 0.6375706121325493,
+      "document_id": "ce1db2423e424fd79bf51eb45bd2def8",
       "doc_type": "receipt",
       "tins": [
         "1009182341",
@@ -13,14 +13,14 @@
     },
     "paye_xlsx": {
       "status": 200,
-      "latency_sec": 0.6106532216072083,
-      "document_id": "d4080398cce84865a3460191730aa2c9",
+      "latency_sec": 0.7901490107178688,
+      "document_id": "69186e82f66c48af986c59a22bfad592",
       "tables_count": 1
     },
     "wht_docx": {
       "status": 200,
-      "latency_sec": 0.9342560693621635,
-      "document_id": "ecdcd80055ce4db89daa7880aa4aee7f",
+      "latency_sec": 0.8875434696674347,
+      "document_id": "d8c9f5ee4ca048c993dec8143a43243e",
       "tins": [
         "1006655443",
         "1007788990"
@@ -28,28 +28,28 @@
     },
     "customs_csv": {
       "status": 200,
-      "latency_sec": 0.5265641212463379,
-      "document_id": "fddc9239b32945e8aa57299ddaa62211",
+      "latency_sec": 0.49111563712358475,
+      "document_id": "b8a744fd67424d02b5e229d765a086b4",
       "tables_count": 1
     }
   },
   "report_tests": {
     "invoice_report": {
       "status": 200,
-      "latency_sec": 1.339879885315895,
-      "size_bytes": 43360,
+      "latency_sec": 0.8254996910691261,
+      "size_bytes": 3105,
       "content_type": "application/pdf",
-      "disposition": "attachment; filename=\"ura_document_report_30efc81b.pdf\""
+      "disposition": "attachment; filename=\"ura_document_report_ce1db242.pdf\""
     }
   },
   "chat_attachment_tests": {
     "invoice_chat": {
       "status": 200,
-      "latency_sec": 8.028560400009155,
+      "latency_sec": 6.459298104047775,
       "tin_grounded": true,
       "amount_grounded": true,
-      "sources_count": 5,
-      "retrieval_mode": "vector"
+      "sources_count": 3,
+      "retrieval_mode": "hybrid"
     }
   },
   "security_tests": {
