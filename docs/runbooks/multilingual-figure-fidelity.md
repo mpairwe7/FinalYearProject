@@ -202,3 +202,20 @@ Still open:
   loosened in the same PR series that reports accuracy gains; those scores are
   not comparable to the pre-#478 baseline until it is re-run under the new
   scorer.
+- `scripts/test_master_qa_multilingual_benchmark.py` cannot yet detect two of
+  the failures it exists to catch, so **do not read a pass from it as
+  confirmation**:
+  - Its TTS section reads `len(response.body)` and asserts `> 2000`. `/v1/tts`
+    returns JSON (`SynthesizeResponse`), not audio bytes, so a JSON *error*
+    payload passes. It never reads the `backend` or `error` fields, which are
+    the only way to tell Spark-TTS-SALT from a fallback tier.
+  - Its chat probes assert keyword hits and `retrieval_mode`, both of which raw
+    extractive passages satisfy, so it reports PASS while LLM generation is
+    gated off. `ChatResponse` carries no generation-provenance field; adding one
+    is what would make this assertable from the response body instead of from
+    Space logs.
+  - It always exits 0, so it cannot gate anything, and its paths are
+    `/api/v1/...` (the frontend proxy) rather than the backend's `/v1/...`, so
+    it cannot be pointed at the Space without editing.
+  - `scripts/` is outside the CI lint scope (`ruff check ml/ App/backend/`), so
+    its unused-variable and swallowed-exception findings do not surface.
