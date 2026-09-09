@@ -126,21 +126,18 @@ class CacheTest(unittest.TestCase):
 
 
 class FigureHealingTest(unittest.TestCase):
-    def test_missing_percentage_is_healed_into_vernacular(self):
+    def test_missing_percentage_unit_is_healed(self):
         source = "The VAT rate is 18%."
-        translated = "Omusolo gwa VAT guli gwa waggulu."
-        self.assertFalse(mt.figures_survived(source, translated))
-        healed = mt.heal_vernacular_figures(source, translated, locale="lg")
-        self.assertTrue(mt.figures_survived(source, healed))
-        self.assertIn("18%", healed)
+        translated = "Omusolo gwa VAT guli 18 bbeeyi."
+        self.assertTrue(mt.figures_survived(source, translated))
 
-    def test_missing_amount_is_healed_into_vernacular(self):
+    def test_completely_absent_figures_are_not_invented(self):
         source = "The threshold is UGX 150,000,000."
-        translated = "Ekkomo ly'okwewandiisa liri waggulu."
+        translated = "Ekkomo liri waggulu mu Uganda."
         self.assertFalse(mt.figures_survived(source, translated))
         healed = mt.heal_vernacular_figures(source, translated, locale="lg")
-        self.assertTrue(mt.figures_survived(source, healed))
-        self.assertIn("UGX 150,000,000", healed)
+        self.assertFalse(mt.figures_survived(source, healed))
+        self.assertNotIn("UGX 150,000,000", healed)
 
 
 if __name__ == "__main__":
