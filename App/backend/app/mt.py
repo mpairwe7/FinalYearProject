@@ -154,7 +154,10 @@ def figures_survived(source: str, translated: str) -> bool:
 
 
 def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") -> str:
-    """Attempt deterministic slot-healing of statutory numbers when translation drops or mutates figures."""
+    """Attempt deterministic slot-healing of statutory numbers when translation drops or mutates figures.
+
+    Uses direct token and string insertion rather than dynamic regex matching to prevent ReDoS risks.
+    """
     import re
     src_figs = figures(source)
     trans_figs = figures(translated)
@@ -169,21 +172,20 @@ def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") ->
         try:
             f_val = float(pct_val)
             if f_val in missing:
-                pattern = rf"\b(ebitundu|asilimia)?\s*({re.escape(pct_val)})\b(?!\s*%)"
-                if re.search(pattern, healed, re.IGNORECASE):
-                    healed = re.sub(
-                        pattern,
-                        r"\g<0>%",
-                        healed,
-                        flags=re.IGNORECASE,
-                    )
-                elif f"{pct_val}%" not in healed:
-                    if locale == "lg" and re.search(r"\b(omusolo|bbeeyi|omuwendo|vat)\b", healed, re.IGNORECASE):
-                        healed = re.sub(r"(\b(?:omusolo|bbeeyi|omuwendo|vat)[^.,;\n]*)", rf"\1 ({pct_val}%)", healed, count=1, flags=re.IGNORECASE)
-                    elif locale == "sw" and re.search(r"\b(kodi|ushuru|kiwango|vat)\b", healed, re.IGNORECASE):
-                        healed = re.sub(r"(\b(?:kodi|ushuru|kiwango|vat)[^.,;\n]*)", rf"\1 ({pct_val}%)", healed, count=1, flags=re.IGNORECASE)
+                if f"{pct_val}%" in healed:
+                    continue
+                token_lead = f" {pct_val}"
+                token_trail = f"{pct_val} "
+                if token_lead in healed:
+                    healed = healed.replace(token_lead, f" {pct_val}%", 1)
+                elif token_trail in healed:
+                    healed = healed.replace(token_trail, f"{pct_val}% ", 1)
+                else:
+                    idx = healed.find(".")
+                    if idx != -1:
+                        healed = f"{healed[:idx]} ({pct_val}%){healed[idx:]}"
                     else:
-                        healed = re.sub(r"([.!?])", rf" ({pct_val}%)\1", healed, count=1)
+                        healed = f"{healed} ({pct_val}%)"
         except ValueError:
             continue
 
@@ -196,24 +198,11 @@ def heal_vernacular_figures(source: str, translated: str, locale: str = "lg") ->
             if val_float in missing:
                 canonical = f"UGX {m_val}"
                 if canonical not in healed:
-                    if locale == "lg" and re.search(r"\b(ekkomo|ssente|omuwendo|obukadde)\b", healed, re.IGNORECASE):
-                        healed = re.sub(
-                            r"(\b(?:ekkomo|ssente|omuwendo|obukadde)[^.,;\n]*)",
-                            rf"\1 ({canonical})",
-                            healed,
-                            count=1,
-                            flags=re.IGNORECASE,
-                        )
-                    elif locale == "sw" and re.search(r"\b(kiwango|fedha|gharama|milioni)\b", healed, re.IGNORECASE):
-                        healed = re.sub(
-                            r"(\b(?:kiwango|fedha|gharama|milioni)[^.,;\n]*)",
-                            rf"\1 ({canonical})",
-                            healed,
-                            count=1,
-                            flags=re.IGNORECASE,
-                        )
+                    idx = healed.find(".")
+                    if idx != -1:
+                        healed = f"{healed[:idx]} ({canonical}){healed[idx:]}"
                     else:
-                        healed = re.sub(r"([.!?])", rf" ({canonical})\1", healed, count=1)
+                        healed = f"{healed} ({canonical})"
         except ValueError:
             continue
 

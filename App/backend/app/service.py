@@ -2744,9 +2744,10 @@ def localize_reply(reply: str, locale: str) -> str:
             localized = healed
         else:
             metrics.inc("reply_localization_figures_changed_total", labels={"locale": locale})
+            safe_locale = re.sub(r"[^a-zA-Z0-9_-]", "", locale)[:10]
             logger.warning(
                 "reply localization to %s changed the figures; serving English",
-                locale,
+                safe_locale,
             )
             return reply
     mt.cache.put("en", locale, text, localized)
