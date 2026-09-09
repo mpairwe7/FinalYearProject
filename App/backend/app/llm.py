@@ -294,30 +294,98 @@ def _trim_to_tokens(tokenizer: Any, text: str, max_tokens: int) -> str:
         return text[: max_tokens * 4]
 
 
-def extract_statutory_context(passages: list[dict[str, Any]]) -> str:
-    """Extract structured key-value statutory metadata slots from retrieved passages.
+#: Figures listed in the cross-check block. Twelve short lines cost roughly
+#: sixty tokens, and a list longer than that stops being a cross-check the
+#: model can hold against its own draft.
+_FIGURE_CROSSCHECK_LIMIT = 12
 
-    Helps decoder translation anchor to verified statutory rates and thresholds
-    rather than dropping or mutating figures when synthesizing in vernacular languages.
+#: A statutory rate: "18%", "18 per cent", and the vernacular constructions
+#: `entailment.percentages` already recognises.
+_CROSSCHECK_PCT_RE = re.compile(
+    r"(?:asilimia|ebitundu)\s*\d+(?:\.\d+)?"
+    r"|\d+(?:\.\d+)?\s*(?:%|per\s?cent(?:age)?)",
+    re.IGNORECASE,
+)
+
+#: A statutory amount. Currency-prefixed only: a bare number in a legal
+#: passage is as likely to be a section number or a year as an amount, and a
+#: cross-check list that admits those stops constraining anything.
+_CROSSCHECK_AMOUNT_RE = re.compile(
+    # "USh" in full, never a bare "US": G51 was this repo learning what a
+    # two-letter match on "us" costs. The digits must end in a digit, so a
+    # sentence comma is not swallowed into the figure.
+    r"(?:UGX|USh(?:s)?\.?|Shs?\.?)\s*\d+(?:,\d{3})*(?:\.\d+)?",
+    re.IGNORECASE,
+)
+
+
+def extract_statutory_context(prepared: list[tuple[int, str]]) -> str:
+    """Project the figures in the prompt's own passages into a cross-check list.
+
+    *prepared* is ``(citation index, passage text)`` for the text that was
+    actually placed in the prompt — already scrubbed by
+    :func:`~.guardrails.scan_retrieved_text` and already trimmed to the token
+    budget. Passing the raw retrieval payload instead is a defect, and was
+    one: the first version of this function re-read ``p["text"]`` after
+    ``_build_messages`` had scrubbed and trimmed the same passages, so a
+    figure planted in an injected span reached the model inside a
+    privileged-looking header having skipped the LLM01 scrub this module's
+    docstring promises, and a figure trimmed away for budget was projected
+    with no passage left to support it.
+
+    Two further properties matter and are why this is not a bare list of
+    numbers.
+
+    *Attribution.* Each figure carries the citation index of every passage
+    that states it. Retrieval routinely returns 18% VAT, 6% withholding and
+    30% corporate tax in the same context, and an unattributed menu of three
+    rates invites exactly the cross-contamination the block was added to
+    prevent.
+
+    *No new text.* Only the figure and its indices are emitted — never a
+    quotation of the surrounding prose. The passage bodies are isolated
+    inside hash-bound ``<passage>`` spotlight markers, and lifting a clause
+    out of one to caption a number here would move attacker-controlled text
+    outside that isolation for no grounding the citation index does not
+    already give.
+
+    Ordering follows retrieval rank, and truncation is declared in the block
+    rather than silent: a partial list that reads as exhaustive is worse than
+    no list, because the model has no way to tell it is missing the figure it
+    needs.
     """
-    slots = []
-    seen: set[str] = set()
-    for p in (passages or []):
-        txt = str(p.get("text") or p.get("answer") or "")
-        # Extract statutory rates/percentages
-        for pct in re.findall(r"\b(\d+(?:\.\d+)?%)", txt):
-            if pct not in seen:
-                seen.add(pct)
-                slots.append(f"- Statutory Rate: {pct}")
-        # Extract statutory thresholds/amounts
-        for amt in re.findall(r"(?:UGX|Shs\.?|USh)\s*([\d,]{6,})", txt, re.IGNORECASE):
-            clean_amt = f"UGX {amt}"
-            if clean_amt not in seen:
-                seen.add(clean_amt)
-                slots.append(f"- Statutory Threshold/Amount: {clean_amt}")
-    if slots:
-        return "## Statutory Parameters\n" + "\n".join(slots[:5])
-    return ""
+    indices: dict[str, list[int]] = {}
+    for index, text in prepared or []:
+        for match in (
+            *_CROSSCHECK_PCT_RE.finditer(text or ""),
+            *_CROSSCHECK_AMOUNT_RE.finditer(text or ""),
+        ):
+            figure = " ".join(match.group(0).split())
+            seen_in = indices.setdefault(figure, [])
+            if index not in seen_in:
+                seen_in.append(index)
+
+    if not indices:
+        return ""
+
+    listed = list(indices.items())[:_FIGURE_CROSSCHECK_LIMIT]
+    omitted = len(indices) - len(listed)
+    lines = [
+        "## Figure cross-check",
+        "Every figure below appears verbatim in the passages above, with the "
+        "passage that states it. Do not state a figure that is not in this "
+        "list, and do not attribute one to a passage it is not listed against.",
+    ]
+    lines += [
+        f"- {figure} " + "".join(f"[{i}]" for i in sorted(index_list))
+        for figure, index_list in listed
+    ]
+    if omitted > 0:
+        lines.append(
+            f"({omitted} further figure(s) in the passages are not listed here; "
+            "the list is not exhaustive.)"
+        )
+    return "\n".join(lines)
 
 
 def _build_messages(
@@ -408,6 +476,10 @@ def _build_messages(
     # Passage assembly — scrub + spotlight + trim
     # ------------------------------------------------------------------
     parts: list[str] = ["## Retrieved passages"]
+    # What actually reached the prompt: scrubbed and trimmed, paired with the
+    # citation index it was headed with. `extract_statutory_context` reads
+    # this and never the raw retrieval payload.
+    prepared_passages: list[tuple[int, str]] = []
     for i, p in enumerate(passages, 1):
         source = p.get("source", "unknown")
         page = p.get("page", "")
@@ -427,11 +499,12 @@ def _build_messages(
         parts.append(header)
         parts.append(f'<passage id="{marker}">{trimmed}</passage>')
         parts.append("")
+        prepared_passages.append((i, trimmed))
 
     parts.append(f"## User question\n{query}")
     parts.append("")
 
-    stat_params = extract_statutory_context(passages)
+    stat_params = extract_statutory_context(prepared_passages)
     if stat_params:
         parts.append(stat_params)
         parts.append("")

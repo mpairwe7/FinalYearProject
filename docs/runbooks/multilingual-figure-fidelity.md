@@ -106,6 +106,40 @@ enough that `min_p=0.08` rarely binds. Loop-breaking on the served path is
 carried mostly by the repetition and presence penalties. Raising `min_p` is
 only meaningful alongside a higher temperature.
 
+## Decision 4 — the figure cross-check is built from the prompt's own text
+
+`llm.extract_statutory_context` lists every figure found in the retrieved
+passages, each with the citation index of the passages that state it, and tells
+the model not to state a figure absent from the list.
+
+**It reads the prepared passage text, never the raw retrieval payload.**
+`_build_messages` scrubs each passage with `scan_retrieved_text` (LLM01) and
+trims it to the token budget before wrapping it in a hash-bound `<passage>`
+spotlight marker. The first version of this function re-read `p["text"]` after
+all of that, which put it behind both defences: a figure planted inside an
+injected span was mined for the prompt after the passage body carrying it had
+been redacted, and a figure trimmed away for budget was projected with no
+passage left to support it. It now takes `(citation index, prepared text)`
+pairs, so what it lists is exactly what the model can read.
+
+**What it is and is not.** It is an allowlist derived from what was retrieved:
+it constrains the model to the retrieved figure set and binds each figure to a
+passage. It does **not** validate that the corpus is correct — `scan_retrieved_text`
+removes injection *phrasing*, not planted numbers, so a poisoned corpus entry
+saying "the rate is 99%" still reaches the passage body and therefore the list.
+That is a corpus-provenance problem, handled by source allowlisting and the
+freshness/coverage gates, not by this block.
+
+**No prose leaves the spotlight.** Only the figure and its indices are emitted.
+Quoting the clause around a number would caption it usefully and move
+attacker-controlled text outside the `<passage>` isolation to do it; the
+citation index gives the same attribution without that trade.
+
+Ordering follows retrieval rank, and truncation past
+`_FIGURE_CROSSCHECK_LIMIT` is declared in the block. A partial list that reads
+as exhaustive is worse than no list: the model has no way to tell it is missing
+the figure it needs.
+
 ## Verifying a change here
 
 Masking is unit-tested and does not need a live model:
@@ -113,8 +147,14 @@ Masking is unit-tested and does not need a live model:
 ```bash
 PYTHONPATH=App/backend python3 -m pytest \
   App/backend/tests/test_mt_cache.py \
-  App/backend/tests/test_reply_localization.py -q
+  App/backend/tests/test_reply_localization.py \
+  App/backend/tests/test_statutory_projection.py -q
 ```
+
+Run `pytest tests/` as well before pushing. The command in `AGENTS.md`
+(`App/backend/tests tests/agents tests/chaos`) does not cover the whole
+`tests/` tree, which CI does — a duplicate assertion living there is how a
+green local run reached a red **Lint & Unit Tests**.
 
 `FigureProtectionTest` covers the round trip, the sentinel-tolerance cases a
 real translator produces (lowercased, spaced, hashes stripped, noun-class
@@ -147,15 +187,17 @@ Full metric definitions: `docs/MONITORING.md`.
 
 ## Known gaps
 
-Tracked as **G56** in `docs/GAPS_AND_AGENTIC_ROADMAP.md`, not fixed here:
+Tracked as **G56** in `docs/GAPS_AND_AGENTIC_ROADMAP.md`.
 
-- `llm.extract_statutory_context` re-reads raw passage text after
-  `scan_retrieved_text` has scrubbed and trimmed the same passages in
-  `_build_messages`, so a poisoned or budget-trimmed passage's numbers can
-  reach the prompt through a privileged `## Statutory Parameters` header
-  without the LLM01 scrub.
-- Those slots carry no entity label and no passage marker, so several rates in
-  context arrive as an unattributed menu of numbers.
+Closed: `llm.extract_statutory_context` used to re-read raw passage text after
+`scan_retrieved_text` had scrubbed and trimmed the same passages in
+`_build_messages`. It now takes the prepared `(citation index, text)` pairs —
+the scrubbed, trimmed text the model actually sees — and emits a
+`## Figure cross-check` block in which every figure carries the passages that
+state it. See Decision 4 below.
+
+Still open:
+
 - The cross-lingual eval stemmer in `scripts/evaluate_1000_faqs_ngrok.py` was
   loosened in the same PR series that reports accuracy gains; those scores are
   not comparable to the pre-#478 baseline until it is re-run under the new
