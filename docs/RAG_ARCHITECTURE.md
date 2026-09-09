@@ -590,6 +590,10 @@ to a bad localized one:
   before comparison, because the *category* does not survive translation even
   when the number does — Luganda states a rate as "ebitundu 18 ku buli kikumi",
   with no percent sign.
+  * **Spoken Percentages**: `entailment.py` supports both Swahili (`_SWAHILI_PCT_WORDS`, e.g. `asilimia kumi na nane` $\rightarrow$ 18) and Luganda (`_LUGANDA_PCT_WORDS`, e.g. `ebitundu kumi na munaana` $\rightarrow$ 18, `ebitundu mukaaga` $\rightarrow$ 6).
+  * **Vernacular Multipliers**: Recognizes East African singular forms (`akakadde` 1M, `omutwalo` 10k, `olukumi` 1k, `akawumbi` 1B) alongside plurals (`obukadde`, `emitwalo`, `enkumi`, `milioni`, `laki`).
+  * **Contact Line Exclusion**: Ugandan toll-free and mobile patterns (`0800 117 000`, `0772 140 000`) are stripped before currency extraction so helpdesk footers are not misread as hundred-million shilling tax figures.
+* **Stream Transport Resilience**: `/v1/chat/stream` emits `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`, and Next.js standalone disables proxy compression (`compress: false`), preventing reverse proxies (ngrok, Cloudflare) from gzipping and buffering event streams.
 
 | Setting | Default | Effect |
 |---------|---------|--------|

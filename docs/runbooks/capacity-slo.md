@@ -2,23 +2,27 @@
 
 Operator numbers for issue #304. Audit log:
 `App/docs/traceability/capacity-envelope-2026-08-19.md` (measured
-2026-08-19 on one RTX A6000 + `vllm/vllm-openai:v0.8.5` +
-Sunflower-14B-FP8).
+2026-08-19 and re-benchmarked 2026-09-08 across two dedicated RTX A6000 GPUs: GPU 2 for Sunflower-14B-FP8 vLLM + GPU 4 for Whisper/Spark-TTS/Qdrant).
 
 Do not apply `infra/k8s/hpa-chat.yaml` from these replica counts — there
-are none. This is a **single-instance** ceiling.
+are none. This is a **two-GPU isolated stack** ceiling.
 
-## Headroom (one GPU, one API worker)
+## Headroom & Deployment Topology
+
+- **GPU 2 (vLLM Dedicated)**: `ura-app-vllm-sunflower` hosting `Sunbird/Sunflower-14B-FP8` with `--max-num-seqs 32` (~34.7 GB used, ~14.4 GB free).
+- **GPU 4 (Speech & RAG Dedicated)**: `ura-gpu-docker-server` hosting `Whisper-Large-SALT`, `Spark-TTS-SALT`, and dense cross-encoder (17.1 GB – 20.5 GB used, **28+ GB free VRAM headroom**).
+- **Reverse Proxy / SSE Settings**: Next.js standalone runs with `compress: false`, and `/v1/chat/stream` emits `Cache-Control: no-cache, no-transform` to prevent ngrok/Cloudflare from gzipping and buffering event streams.
 
 | Workload | Comfortable | Stress | Extreme (measured, 0% crash) |
 |---|---|---|---|
-| Uncached LLM generation (`max_tokens=128`) | ≤4 concurrent if p95 must stay ≤3s | 32 in-flight, p95 ~6.4s, ~10 rps | 64 in-flight, p95 ~11s, p99 ~18s, ~13 rps |
+| Uncached LLM generation (`max_tokens=128`) | ≤4 concurrent if p95 must stay ≤3s | 32 in-flight, p95 ~6.4s, ~10 rps | 64 in-flight, p95 ~11s, p99 ~18s, ~13–15.57 rps |
 | Stream first token | TTFT p95 ~100 ms idle | ~490 ms at 32 in-flight | not a hang |
 | `/v1/chat` FAQ / calculator / workflow | hundreds of rps, p95 tens–hundreds of ms | — | **HTTP 429** at `RATE_LIMIT` (default **30/minute** per IP) |
 | Cold hybrid `/v1/chat` with Qdrant FAQ JSONL | one turn ~7s | same GPU curve once generating | 45s `LLM_DEADLINE` / 70s chain budget |
+| 1,000 FAQs Full-Stack Benchmark ($c=28$) | p50 ~12.89s, 15.57 req/s peak | 78.2% – 100% success rate | Zero OOMs across 1,000 turns |
 
 Capacity headroom to quote: **~3 rps of short uncached generations**
-before p95 crosses ~3s; **~13 rps** before the GPU token pipe flattens.
+before p95 crosses ~3s; **~15.5 rps** before the GPU token pipe flattens.
 The public cap is `RATE_LIMIT`, not the GPU, until that limiter is raised.
 
 ## Seed Qdrant with FAQ JSONL

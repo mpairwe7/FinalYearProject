@@ -1,17 +1,15 @@
-# Staff Auth — Deployed Configuration
+# Staff & Taxpayer Auth — Deployed Configuration
 
-Audit reference for how staff sign-in is wired on the live Hugging Face Space.
+Audit reference for how authentication is wired on the live system (Hugging Face Space, Crane Cloud, and ngrok development).
 Setup instructions live in `docs/PROJECT_SETUP.md` → *Staff Sign-In (OIDC)*; this
 file records **what is actually configured**, where each value lives, and why.
 
-Last updated: 2026-08-13.
+Last updated: 2026-09-08 (PR #476, commit `4c2bdecc85`).
 
-**Current status:** deployed on image `sha-459533c` and **fully verified against the
-live Space with real Auth0 identities** — 10/10 for `ura_admin`, 11/11 for
-`ura_staff`. Each run covers the whole chain: runtime discovery, the PKCE S256
-redirect with audience and no client secret, Auth0 Universal Login, the code
-exchange, RS256 verification against the tenant's JWKS, role resolution, the
-landing page, role-scoped navigation, and (for staff) refusal from `/admin`.
+**Current status:** deployed and **fully verified against real Auth0 identities** — 10/10 for `ura_admin`, 11/11 for
+`ura_staff`, and comprehensive taxpayer onboarding. In-app custom credential forms and mock role selectors are **deferred**; all authentication flows route exclusively through Auth0 Universal Login (`dev-s16d7m00eyrksjy2.us.auth0.com`). Each run covers the whole chain: runtime discovery, PKCE S256
+redirect with audience and no client secret, Auth0 Universal Login (Google OAuth2 or username/password), the code
+exchange, dynamic RS256 verification against the tenant's JWKS on `/api/v1/me`, role resolution, role-scoped dispatch, and (for staff) refusal from `/admin`.
 
 Roles reach the token as **`permissions`**, so `OIDC_ROLE_CLAIM` is deliberately
 unset. Configured as: RBAC + *Add Permissions in the Access Token* enabled on the
@@ -27,7 +25,7 @@ display issue; identity, role and gating are all correct.
 ## Topology
 
 ```
-browser ──1── /signin  (Next.js, public client, no secret)
+browser ──1── /signin  (Next.js, public client, initiates Auth0 Universal Login)
           or  /signup  (same request + prompt=create & screen_hint=signup)
         ──2── Auth0 /authorize      (redirect, PKCE S256 + audience)
         ──3── /signin/callback      (code → token, direct to Auth0 /oauth/token)
@@ -37,14 +35,21 @@ browser ──1── /signin  (Next.js, public client, no secret)
 
 `/signup` is not a second flow: `src/lib/oidcFlow.ts` builds one authorization
 request for both entry points and adds the registration hints. Both return
-through leg 3, and the callback then routes by role — staff to `/agent` or
-`/admin`, anyone else back to where the flow started (`/` for a sign-up, so a
-taxpayer who registers from the assistant lands in the assistant).
+through leg 3, and the callback then routes by role:
+- `ura_staff` $\rightarrow$ `/agent` (Escalation queue and officer workbench)
+- `ura_admin` $\rightarrow$ `/admin` (Operations console)
+- `ura_auditor` $\rightarrow$ `/analytics` (Auditor dashboard)
+- Citizen taxpayers $\rightarrow$ `/` (Tax Assistant Chat)
 
 Leg 3 is the only browser call that does **not** go through the `/api/*` rewrite.
 A public client holds no secret, so there is nothing for a server-side proxy to
 protect, and the backend issues no tokens of its own. That is why the provider
 origin must appear in `connect-src` — see *CSP* below.
+
+### Dynamic Post-Logout Redirect
+When signing out via `endOidcSession()`, the redirect target is resolved dynamically:
+- On ngrok: redirects to bare origin `<app-origin>` (e.g. `https://struttingly-nongeological-briella.ngrok-free.dev`) matching the registered Auth0 Allowed Logout URL.
+- On HF Space and Crane Cloud: redirects to `<app-origin>/signin`.
 
 ## Identity provider
 
