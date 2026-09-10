@@ -155,10 +155,12 @@ def _citation_contexts(
     by_ref: dict[str, str] = {}
     for idx, citation in enumerate(citations or [], 1):
         ref = str(citation.get("ref") or f"[{idx}]").strip("[]")
-        passage = str(citation.get("passage") or "").strip()
-        if not passage and idx - 1 < len(hits or []):
+        passage = ""
+        if idx - 1 < len(hits or []):
             hit = hits[idx - 1]
             passage = str(hit.get("text") or hit.get("answer") or "").strip()
+        if not passage:
+            passage = str(citation.get("passage") or "").strip()
         by_ref[ref] = passage
 
     contexts = [by_ref[ref] for ref in refs if by_ref.get(ref)]
