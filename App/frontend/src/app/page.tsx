@@ -814,6 +814,7 @@ export default function Page() {
     const requestHeaders = authHeaders({
       'Content-Type': 'application/json',
       'X-Session-ID': getAnalyticsSessionId(),
+      'ngrok-skip-browser-warning': 'true',
     });
 
     const applySyncReply = async (signal = ac.signal) => {
@@ -867,6 +868,7 @@ export default function Page() {
         headers: {
           ...requestHeaders,
           Accept: 'text/event-stream',
+          'ngrok-skip-browser-warning': 'true',
         },
         body: requestBody,
         signal: ac.signal,
