@@ -482,18 +482,38 @@ class OutputGuard:
         text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
         text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
 
-        # Separate lead-in from first numbered item if smashed (e.g. 'including:1.' or 'services:1.**')
+        # Unsmash sentence punctuation glued to capital words (e.g. 'Uganda.Here' -> 'Uganda. Here')
+        text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
+
+        # Separate lead-in from first numbered item if smashed (e.g. 'offered:1.Tax' or 'services:1.**')
         text = re.sub(
-            r"([;:])\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
+            r"([;:\.!?])\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
             r"\1\n\n\2. \3",
             text,
         )
-        # Separate subsequent inline numbered items: 'laws.2.Bar' or 'trade. 3. Digital'
+        # Separate subsequent inline numbered items with or without a period (e.g. 'taxes.2.Bar' or 'Taxes2.Customs')
         text = re.sub(
-            r"([a-z0-9\)])\.\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
-            r"\1.\n\n\2. \3",
+            r"([a-zA-Z\)])(\.?)\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
+            r"\1\2\n\n\3. \4",
             text,
         )
+        # Unsmash web domain names glued to capitalized words (e.g. '.ugThese' -> '.ug\n\nThese')
+        text = re.sub(r"(\.(?:ug|go\.ug|com|org|net))([A-Z])", r"\1\n\n\2", text)
+
+        # Convert inline hyphen-separated lists under a colon into vertical bullet points
+        lines = text.split("\n")
+        formatted_lines = []
+        for line in lines:
+            if " - " in line and not line.strip().startswith("-") and not line.strip().startswith("*"):
+                parts = [p.strip() for p in line.split(" - ") if p.strip()]
+                if len(parts) >= 2:
+                    formatted_lines.extend(f"- {p}" for p in parts)
+                    continue
+            formatted_lines.append(line)
+        text = "\n".join(formatted_lines)
+
+        # Bold numbered list headers if followed by a colon: e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:'
+        text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9\s/&,]+?):(\s+)", r"\n\1**\2**:\3", text)
         # Separate smashed bullet items (e.g. 'including:* Item' or 'laws.- Item')
         text = re.sub(
             r"([;:])\s*([*\-•])(?!\*)\s*([A-Za-z])",

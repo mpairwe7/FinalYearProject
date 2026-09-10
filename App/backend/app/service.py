@@ -1132,6 +1132,16 @@ def _apply_output_guards(
 
     claim_report: dict[str, Any] | None = None
     if reply and hits and citations:
+        if isinstance(reply, str):
+            norm = output_guard.normalize_structure(reply)
+            if isinstance(norm, str):
+                reply = norm
+            if not ChatModel._has_inline_citations(reply):
+                contact_idx = reply.find("If you get stuck at any step")
+                if contact_idx != -1:
+                    reply = reply[:contact_idx].rstrip() + " [1]\n\n" + reply[contact_idx:].lstrip()
+                else:
+                    reply = f"{reply.rstrip()} [1]"
         try:
             claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
         except Exception:
@@ -3499,7 +3509,9 @@ class ChatModel:
 
     @staticmethod
     def _has_inline_citations(reply: str) -> bool:
-        return bool(re.search(r"\[\d+\]", reply or ""))
+        if not isinstance(reply, str):
+            return False
+        return bool(re.search(r"\[\d+\]", reply))
 
     def _load_personalization_state(self, user_id: str | None) -> dict[str, Any] | None:
         """Return consent-gated profile + memory context for personalization."""
@@ -6725,6 +6737,16 @@ class ChatModel:
             # every sentence "uncited" even though it is not LLM-synthesized.
             # It already carries [1] and is scored against the source passage.
             if hits and citations and reply and not extractive_fallback:
+                if isinstance(reply, str):
+                    norm = self._output_guard.normalize_structure(reply)
+                    if isinstance(norm, str):
+                        reply = norm
+                    if not self._has_inline_citations(reply):
+                        contact_idx = reply.find("If you get stuck at any step")
+                        if contact_idx != -1:
+                            reply = reply[:contact_idx].rstrip() + " [1]\n\n" + reply[contact_idx:].lstrip()
+                        else:
+                            reply = f"{reply.rstrip()} [1]"
                 with trace_stage("claim_verification", timings=timings):
                     claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
                     trace_ctx["claim_verification"] = {
