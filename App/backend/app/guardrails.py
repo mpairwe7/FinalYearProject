@@ -493,7 +493,7 @@ class OutputGuard:
         )
         # Separate subsequent inline numbered items with or without a period (e.g. 'taxes.2.Bar' or 'Taxes2.Customs')
         text = re.sub(
-            r"([a-zA-Z0-9\)])(\.?)\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
+            r"([a-zA-Z\)])(\.?)\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
             r"\1\2\n\n\3. \4",
             text,
         )
