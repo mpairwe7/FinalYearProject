@@ -2898,6 +2898,7 @@ def localize_reply(reply: str, locale: str) -> str:
             logger.info("reply localization to %s failed; serving English", safe_locale)
         return reply
 
+    localized = OutputGuard.normalize_structure(localized)
     mt.cache.put("en", locale, text, localized)
     return localized
 

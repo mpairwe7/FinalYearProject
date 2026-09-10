@@ -477,8 +477,9 @@ class OutputGuard:
         # Correct tokenization / completion drift in URA domain terminology
         text = re.sub(r"\bCustomary Services\b", "Customs Services", text)
 
-        # Remove digit bracket glitches and rogue language tags (e.g. '335,0[[i]00' -> '335,000')
+        # Remove digit bracket glitches, intra-word bracket artifacts, and rogue language tags
         text = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", text)
+        text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
         text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
 
         # Separate lead-in from first numbered item if smashed (e.g. 'including:1.' or 'services:1.**')
