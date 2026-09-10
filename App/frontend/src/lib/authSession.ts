@@ -158,8 +158,12 @@ export function clearAuthToken(): void {
 
 export function authHeaders(base: Record<string, string> = {}): Record<string, string> {
   const token = getAuthToken();
-  if (!token) return { ...base };
-  return { ...base, Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = {
+    'ngrok-skip-browser-warning': 'true',
+    ...base,
+  };
+  if (!token) return headers;
+  return { ...headers, Authorization: `Bearer ${token}` };
 }
 
 export function appendAuthToken(url: string): string {
