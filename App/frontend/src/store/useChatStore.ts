@@ -352,20 +352,36 @@ function looksLikeThinking(block: string): boolean {
   return THINKING_SIGNALS.some((rx) => rx.test(trimmed));
 }
 
-export function normalizeAssistantResponse(text: string): string {
+/** Strip internal telemetry/metadata/agent trace JSON blobs that leak into prose. */
+export function stripTelemetryJson(text: string): string {
+  if (!text) return '';
   return text
+    .replace(/\{[^{}]*"(?:sources|workflow|retrieval_mode)"[^{}]*\{[^{}]*\}[^{}]*\}/g, '')
+    .replace(/\{[^{}]*"(?:sources|retrieval_mode|faithfulness_score)"[^{}]*\}/g, '')
+    .replace(/\[\s*\{\s*"type"\s*:\s*"(?:retrieval|iteration|tool_call)\.[^\]]*?\]/g, '')
+    .trim();
+}
+
+export function normalizeAssistantResponse(text: string): string {
+  const stripped = stripTelemetryJson(text);
+  return stripped
     .replace(/\r\n?/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
-    .replace(/(^|\n)\s*(\d+)\)\s+/g, '$1$2. ')
-    .replace(/(^|\n)\s*\u2022\s+/g, '$1- ')
-    .replace(/(^|\n)\s*([*+])\s+/g, '$1- ')
+    // Standardize numbered lists: "1) Item" or "1. Item" -> "1. Item"
+    .replace(/(^|\n)\s*(\d+)[\.)]\s+/g, '$1$2. ')
+    // Standardize unordered bullets: "*", "+", "•" -> "- "
+    .replace(/(^|\n)\s*[\u2022*+]\s+/g, '$1- ')
+    // Emphasize title before colon on bullet lists: "- Tax Administration: text" -> "- **Tax Administration**: text"
+    .replace(/(^|\n)-\s+([A-Z][A-Za-z0-9\s/&-]{1,60}):\s+/g, '$1- **$2**: ')
+    // Emphasize title before colon on numbered lists: "1. Registration: text" -> "1. **Registration**: text"
+    .replace(/(^|\n)(\d+\.)\s+([A-Z][A-Za-z0-9\s/&-]{1,60}):\s+/g, '$1$2 **$3**: ')
     .replace(/([.!?])\s+(?=(Note|Important|Tip|Warning|Caution|Summary):\s)/g, '$1\n\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
 export function cleanResponse(text: string): string {
-  let cleaned = text.trim();
+  let cleaned = stripTelemetryJson(text);
   if (!cleaned) return cleaned;
 
   // Split into paragraph blocks

@@ -25,7 +25,7 @@ import {
   transcribe,
   voiceChat,
 } from '../services/voiceService';
-import { authHeaders } from '../lib/authSession';
+import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import {
   MAX_ATTACHMENTS,
@@ -818,12 +818,23 @@ export default function Page() {
     });
 
     const applySyncReply = async (signal = ac.signal) => {
-      const sync = await fetch(`${API_URL}/v1/chat`, {
+      let sync = await fetch(`${API_URL}/v1/chat`, {
         method: 'POST',
         headers: requestHeaders,
         body: requestBody,
         signal,
       });
+      if (sync.status === 401 && getAuthToken()) {
+        clearAuthToken();
+        const anonHeaders = { ...requestHeaders };
+        delete anonHeaders['Authorization'];
+        sync = await fetch(`${API_URL}/v1/chat`, {
+          method: 'POST',
+          headers: anonHeaders,
+          body: requestBody,
+          signal,
+        });
+      }
       if (!sync.ok) throw new Error(`API ${sync.status}`);
       const d = await sync.json();
       if (d.conversation_id) sessionIdRef.current = d.conversation_id;
@@ -874,6 +885,10 @@ export default function Page() {
         signal: ac.signal,
       });
       if (!res.ok) {
+        if (res.status === 401 && getAuthToken()) {
+          clearAuthToken();
+          delete requestHeaders['Authorization'];
+        }
         await applySyncReply();
         setChatLiveStatus('URA response ready.');
         return;
@@ -903,6 +918,36 @@ export default function Page() {
             if (ln.startsWith('event: ')) { evt = ln.slice(7).trim(); continue; }
             if (!ln.startsWith('data: ')) continue;
             const data = ln.slice(6);
+            const trimmedData = data.trim();
+
+            // Intercept internal telemetry/metadata/agent trace JSON so it never leaks into visible prose
+            if (
+              trimmedData.startsWith('{"sources":') ||
+              trimmedData.startsWith('{"faithfulness_score":') ||
+              trimmedData.startsWith('[{"type":') ||
+              (trimmedData.startsWith('{') && (trimmedData.includes('"retrieval_mode"') || trimmedData.includes('"workflow":')))
+            ) {
+              try {
+                const p = JSON.parse(trimmedData);
+                if (p && typeof p === 'object' && !Array.isArray(p)) {
+                  meta = { ...meta, ...p };
+                  if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+                  if (typeof p.reply === 'string' && p.reply.trim()) {
+                    reveal.set(cleanResponse(p.reply));
+                  }
+                  updateLastTurn((t) => ({
+                    ...t,
+                    citations: p.citations ?? t.citations,
+                    faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+                    retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+                    escalationRequired: p.escalation_required ?? t.escalationRequired,
+                    escalationReason: p.escalation_reason ?? t.escalationReason,
+                  }));
+                }
+              } catch {}
+              continue;
+            }
+
             if (evt === 'error') { updateLastTurn((t) => ({ ...t, content: 'Sorry, an error occurred. Please try again.' })); evt = 'token'; continue; }
             if (evt === 'done') {
               const trimmed = data.trim();
@@ -916,7 +961,7 @@ export default function Page() {
                   }
                   updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason }));
                 } catch {
-                  reveal.push(data);
+                  // Do not push unparsed done frames into visible prose
                 }
               }
               evt = 'token';

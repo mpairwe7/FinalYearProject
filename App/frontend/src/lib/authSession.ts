@@ -88,10 +88,37 @@ export function looksLikeJwt(token: string): boolean {
   const parts = token.split('.');
   return parts.length === 3 && parts[0].length > 0 && parts[1].length > 0;
 }
+
+/** Check if a JWT token has expired based on its exp claim. */
+export function isJwtExpired(token: string): boolean {
+  if (!looksLikeJwt(token)) return false;
+  try {
+    const payloadPart = token.split('.')[1];
+    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
+    const decoded = atob(padded);
+    const parsed = JSON.parse(decoded);
+    if (typeof parsed.exp === 'number') {
+      // 5 seconds skew tolerance
+      return parsed.exp * 1000 <= Date.now() - 5000;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 export function getAuthToken(): string {
   if (typeof window === 'undefined') return '';
   try {
-    return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
+    const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
+    if (token && isJwtExpired(token)) {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      window.localStorage.removeItem(AUTH_METHOD_STORAGE_KEY);
+      notify();
+      return '';
+    }
+    return token;
   } catch {
     return '';
   }

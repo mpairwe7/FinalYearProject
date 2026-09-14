@@ -2151,6 +2151,7 @@ main {
 }
 
 .md-list {
+  list-style-type: disc;
   margin: 0.65em 0;
   padding-left: 1.4em;
   max-width: 70ch;

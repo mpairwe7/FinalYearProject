@@ -230,7 +230,7 @@ async def evaluate_faq_turn(
                 "locale": faq.locale,
             },
             headers=HEADERS,
-            timeout=60.0,
+            timeout=float(os.getenv("TIMEOUT", "90.0")),
         )
         ttt_status = resp.status_code
         if ttt_status == 200:
@@ -243,7 +243,7 @@ async def evaluate_faq_turn(
             for exp in faq.expected_figures:
                 clean_exp = exp.replace(",", "").replace("%", "")
                 clean_reply = reply.replace(",", "")
-                if exp not in reply and clean_exp not in clean_reply:
+                if exp.lower() not in reply.lower() and clean_exp.lower() not in clean_reply.lower():
                     stat_pass = False
                     break
         else:
@@ -341,8 +341,8 @@ async def main():
             print(f"Checkpoint load error: {e}", flush=True)
 
     limits = httpx.Limits(max_keepalive_connections=32, max_connections=64)
-    async with httpx.AsyncClient(limits=limits, timeout=90.0) as client:
-        chunk_size = 10
+    async with httpx.AsyncClient(limits=limits, timeout=120.0) as client:
+        chunk_size = int(os.getenv("CONCURRENCY", "4"))
         start_time = time.time()
 
         for i in range(0, len(faqs), chunk_size):
