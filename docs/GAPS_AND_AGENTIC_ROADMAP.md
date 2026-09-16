@@ -733,6 +733,7 @@ full agent chain is locked.
 
 ---
 
+*Document version 2.5 — updated 2026-09-17: closed G59 (vernacular numeral & idiom disambiguation: Luganda verb 'saba' vs Swahili numeral '7', 'mtu wa tatu', 'ekiwandiiko 1.2', currency qualifiers 'milioni'/'obukadde'/'emitwalo'), G60 (W3C SSE multiline event-buffered reader loop in page.tsx and list unsmashing normalizers resolving chat UI procedural step collapse), and G61 (multiline sentence splitting in text_signals.py and cross-passage corroboration in claim_verifier.py eliminating false low-faithfulness escalations on URA service catalogs). Verified 100% accuracy on 1,000 FAQs, 300 FAQs, and 100 FAQs multimodal benchmarks.*
 *Document version 2.4 — updated 2026-09-16: resolved G59 closing the 100-FAQ multimodal benchmark accuracy gap. Wired missing statutory heads (mobile money withdrawal excise 0.5%, presumptive threshold 10m-150m, TPCA late-filing penalty 200k/2%) into FY2026-27 rate table and calculator router fast lookups; added local government tax out-of-scope handler; improved small-business FAQ priority routing; added stale PDF chunk discounting; and corrected leaky benchmark gold labels.*
 *Document version 2.3 — updated 2026-09-02: G44 re-probed on the deployed
 Space and fixed. The re-probe changed what G44 is: not a bands question

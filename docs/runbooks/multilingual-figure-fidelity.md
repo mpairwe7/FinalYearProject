@@ -219,6 +219,26 @@ Closed (2026-09-09, **G58**): masking protects the digits and nothing checked
 the units, the length or the citation markers. All three are now guards on the
 same round trip.
 
+Closed (2026-09-17, **G59**): vernacular numeral and idiom disambiguation in
+`entailment.py` and `mt.py`. Disambiguated Luganda action verb *"saba"* (*"to
+apply/request"*) from Swahili cardinal numeral *"saba"* (*7*); shielded non-numeric
+idioms (*"mtu wa tatu"*, *"third party"*); added English number words (`two`...`ten`,
+`twenty`...`fifty`) to align with translated vernacular words; shielded decimal legal
+citations (`Article 1.2`, `ekiwandiiko 1.2`, `kawaayiro 1.2`); and included East African
+currency tokens (`milioni`, `obukadde`, `emitwalo`) in `_CURRENCY_TOKEN_RE`.
+
+Closed (2026-09-17, **G60**): W3C Server-Sent Events (SSE) multiline token stream
+preservation in `App/frontend/src/app/page.tsx` and list step unsmashing in
+`useChatStore.ts` and `guardrails.py`. Pushed lines within a single SSE event are
+joined with `\n` on event boundaries (`\r\n\r\n`), eliminating line smashing in chat UI
+numbered lists and procedural instructions.
+
+Closed (2026-09-17, **G61**): multiline sentence splitting for RAG faithfulness scoring in
+`text_signals.py` (`_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+|\n+")`). Bulleted lists,
+numbered steps, and catalogued services are split into discrete clauses rather than
+evaluated as one composite sentence, eliminating false `low_faithfulness=0.00` escalations
+on comprehensive answers (e.g. *"What services does URA provide?"*).
+
 Still open:
 
 - Semantic drift inside the translated prose — a flipped negation, a dropped

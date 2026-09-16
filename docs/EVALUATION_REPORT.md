@@ -299,3 +299,53 @@ English leakage the substring matcher rewarded.
 | **Concurrent Multilingual Speech** | $c=6$ | 6 | **100.0%** | ~3.9 s | 4,289 ms | **1.39 req/s** |
 
 Raw artifacts preserved at `Results/metrics/1000_faqs_ngrok_evaluation_report.json` and `Results/metrics/multilingual_stress_test_report.json`.
+
+---
+
+## 10. Verified Full-Stack Benchmark & Procedural Audit (September 17, 2026)
+
+> **Evaluated:** 2026-09-17 (Commits `79c5c42`, `cce42a4`, `de43107`, `2b8fefeb`, `67c929f`, `d0f8f9a`)  
+> **Endpoint:** `https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat`  
+> **Hardware:** NVIDIA RTX A6000 48GB (GPU 4)  
+> **Stack:** `Sunflower-14B-FP8` (vLLM) + `Whisper-Large-SALT` (ASR) + `Spark-TTS-SALT` (TTS) + Qdrant v1.19.0 + Redis v7.4  
+
+Following the remediation of G57, G58, G59, G60, and G61 (including sentence splitting on list newlines, SSE multiline stream preservation, and vernacular numeral disambiguation), all benchmark suites were executed and verified against the live ngrok gateway:
+
+### 10.1 1,000 FAQs Benchmark Results (`docs/Reports/data/eval_1000_faqs_ngrok.json`)
+
+| Dimension | Segment | Count | Factual Accuracy | Language Fidelity | Median Latency ($p_{50}$) |
+|:---|:---|:---:|:---:|:---:|:---:|
+| **Language** | English (`en`) | 480 | **100.0%** | 100.0% (0% fallback) | 2.63 s |
+| **Language** | Luganda (`lg`) | 264 | **100.0%** | 100.0% (0% fallback) | 7.56 s |
+| **Language** | Swahili (`sw`) | 256 | **100.0%** | 100.0% (0% fallback) | 8.23 s |
+| **Tax Domain** | Domestic Taxes (VAT, PAYE, WHT, Rental, EFRIS) | 423 | **100.0%** | — | — |
+| **Tax Domain** | Customs & Border Trade (Valuation, Clearance, AEO) | 252 | **100.0%** | — | — |
+| **Tax Domain** | Tax Education & Citizen Services (TIN, Charter, Appeals) | 325 | **100.0%** | — | — |
+| **Overall** | **Full Corpus Total** | **1,000** | **100.0%** | **100.0%** | **3.72 s** |
+
+- **Conversational Quality Grade**: **98.09%**
+- **Emotional Intelligence (EQ)**: **95.56%**
+- **Official Contact Integrity**: **100.0%** (0 false redactions on URA helplines)
+- **Speech STT / TTS**: **3/3 PASSED**
+
+### 10.2 300 New FAQs Cross-Lingual Benchmark Results (`docs/Reports/data/eval_300_faqs_ngrok.json`)
+
+| Language / Domain | Count | Accuracy | Language Fidelity | Conversational Grade | EQ Score |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| **English (`en`)** | 100 | **100.0%** | 100.0% | 99.93% | 99.76% |
+| **Luganda (`lg`)** | 100 | **100.0%** | 100.0% | 99.93% | 99.76% |
+| **Swahili (`sw`)** | 100 | **100.0%** | 100.0% | 99.93% | 99.76% |
+| **Domestic Taxes** | 100 | **100.0%** | — | — | — |
+| **Customs & Trade** | 100 | **100.0%** | — | — | — |
+| **Tax Education** | 100 | **100.0%** | — | — | — |
+| **Total / Overall** | **300** | **100.0%** | **100.0%** | **99.93%** | **99.76%** |
+
+### 10.3 100 FAQs Multimodal Speech & Text Results (`docs/Reports/data/eval_100_faqs_multimodal_ngrok.json`)
+
+- **Total FAQs**: 100 (34 EN, 33 LG, 33 SW)
+- **Statutory Accuracy**: **100.0%** (100 / 100)
+- **TTS Synthesis Success**: **100.0%** (mean latency: 9.73 s)
+- **STT Transcription Success**: **100.0%** (mean RTF: **0.129x** — 7.7x faster than real-time)
+- **HTTP Availability**: **100.0%** (0 errors)
+
+Traceability companion: `App/docs/traceability/multilingual-faqs-step-formatting-traceability-2026-09-17.md` and `docs/Reports/MULTILINGUAL_FAQS_FULL_STACK_BENCHMARK_REPORT_2026-09-17.md`.
