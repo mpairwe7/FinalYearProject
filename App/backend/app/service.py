@@ -4405,8 +4405,6 @@ class ChatModel:
         revised_reply = ""
         if decision == "revise":
             revised_reply = self._build_grounded_revision(hits, citations, message)
-            if revised_reply and locale not in ("", "en"):
-                revised_reply = localize_reply(revised_reply, locale)
             if not revised_reply:
                 decision = "escalate"
                 reasons.append("no deterministic grounded fallback was available")

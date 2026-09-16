@@ -187,8 +187,13 @@ def figures(text: str) -> set[float]:
     stripped = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", stripped)
     # Strip list step numbering at start of lines or inline (e.g. "1. ", " 2. ")
     stripped = re.sub(r"(?:^|\s)\d{1,2}[\.\)]\s+", " ", stripped)
-    # Strip legal references (e.g. section 40, subsection (4), cap 349)
-    stripped = re.sub(r"\b(?:sub-?section|section|schedule|cap\.?|article|clause)\s*\(?\d+\)?\b", " ", stripped, flags=re.IGNORECASE)
+    # Strip legal references (e.g. section 40, subsection (4), cap 349, article 1.2, ekiwandiiko 1.2, ekitundu 1.2)
+    stripped = re.sub(
+        r"\b(?:sub-?section|section|schedule|cap\.?|article|clause|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*\(?\d+(?:\.\d+)?\)?\b",
+        " ",
+        stripped,
+        flags=re.IGNORECASE,
+    )
     stripped = re.sub(r"\(\d+\)", " ", stripped)
     values = canonical_amounts(stripped)
     values |= {float(value) for value in percentages(stripped)}
@@ -406,6 +411,13 @@ def protect_figures(text: str) -> tuple[str, dict[str, str]]:
     clean_text = re.sub(r"(?:^|\s)(\d{1,2}[\.\)])\s+", lambda m: f" {_shield(m)} ", clean_text)
     # 3. Shield statutory citation markers [1], [2]
     clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
+    # 4. Shield legal references (e.g. section 40, article 1.2, cap 349)
+    clean_text = re.sub(
+        r"\b(?:sub-?section|section|schedule|cap\.?|article|clause)\s*\(?\d+(?:\.\d+)?\)?\b",
+        _shield,
+        clean_text,
+        flags=re.IGNORECASE,
+    )
 
     def _mask(match: re.Match[str]) -> str:
         token = f"#{_SENTINEL_CORE}{_sentinel_label(len(mapping))}#"

@@ -238,9 +238,14 @@ def canonical_amounts(text: str) -> set[float]:
         value *= _AMOUNT_SUFFIX.get((match.group(2) or "").lower(), 1)
         amounts.add(value)
 
-    # 3. Vernacular word numbers for small cardinal integers
+    # 3. Small cardinal integers across English, Luganda, and Swahili
     _CARDINAL_WORDS = {
-        "munaana": 8.0, "minane": 8.0, "nane": 8.0, "musanvu": 7.0, "saba": 7.0,
+        # English
+        "two": 2.0, "three": 3.0, "four": 4.0, "five": 5.0, "six": 6.0,
+        "seven": 7.0, "eight": 8.0, "nine": 9.0, "ten": 10.0,
+        "twenty": 20.0, "thirty": 30.0, "forty": 40.0, "fifty": 50.0,
+        # Luganda & Swahili
+        "munaana": 8.0, "minane": 8.0, "nane": 8.0, "musanvu": 7.0,
         "mukaaga": 6.0, "sita": 6.0, "ttaano": 5.0, "taano": 5.0, "tano": 5.0,
         "nnya": 4.0, "nne": 4.0, "ssatu": 3.0, "tatu": 3.0, "bbiri": 2.0, "mbili": 2.0,
         "kkumi": 10.0, "kumi": 10.0, "asatu": 30.0, "thelathini": 30.0, "abiri": 20.0,
@@ -249,6 +254,9 @@ def canonical_amounts(text: str) -> set[float]:
     for word, val in _CARDINAL_WORDS.items():
         if re.search(rf"\b{word}\b", remainder):
             amounts.add(val)
+    # Swahili 'saba' (7) in numeric/counting contexts (avoids Luganda verb 'saba' meaning to apply/request)
+    if re.search(r"\b(?:siku|miezi|miaka|asilimia|watu|mara|nambari|namba|bidhaa|kiasi|kiwango|tarehe)\s+saba\b|\bsaba\s+(?:ya|za|wa|kwa)\b", remainder, re.IGNORECASE):
+        amounts.add(7.0)
     return amounts
 
 

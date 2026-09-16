@@ -489,16 +489,16 @@ class OutputGuard:
         # Unsmash sentence punctuation glued to capital words (e.g. 'Uganda.Here' -> 'Uganda. Here')
         text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
 
-        # Separate lead-in from first numbered item if smashed (e.g. 'offered:1.Tax' or 'services:1.**')
+        # Separate lead-in from first numbered item if smashed on same line (e.g. 'offered:1.Tax' or 'services:1.**')
         text = re.sub(
-            r"([;:\.!?])\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
+            r"([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
             r"\1\n\n\2. \3",
             text,
         )
-        # Separate subsequent inline numbered items with or without a period (e.g. 'taxes.2.Bar' or 'Taxes2.Customs')
+        # Separate subsequent inline numbered items smashed on the same line (e.g. 'taxes. 2.Bar' or 'Taxes 2.Customs')
         text = re.sub(
-            r"([a-zA-Z\)])(\.?)\s*(\d{1,2})[\.\)]\s*(\*{0,2}[A-Za-z])",
-            r"\1\2\n\n\3. \4",
+            r"([a-zA-Z\)])(\.?)[ \t]+(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
+            r"\1\2\n\3. \4",
             text,
         )
         # Unsmash web domain names glued to capitalized words (e.g. '.ugThese' -> '.ug\n\nThese')
@@ -516,8 +516,8 @@ class OutputGuard:
             formatted_lines.append(line)
         text = "\n".join(formatted_lines)
 
-        # Bold numbered list headers if followed by a colon: e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:'
-        text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9\s/&,]+?):(\s+)", r"\n\1**\2**:\3", text)
+        # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
+        text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,-]+?):([ \t]+)", r"\n\1**\2**:\3", text)
         # Separate smashed bullet items (e.g. 'including:* Item' or 'laws.- Item')
         text = re.sub(
             r"([;:])\s*([*\-•])(?!\*)\s*([A-Za-z])",

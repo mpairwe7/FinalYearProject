@@ -1299,11 +1299,9 @@ def translate_text(
     constraint_note = (
         " Keep all statutory tax acronyms (such as VAT, TIN, EFRIS, DTS, PAYE, WHT, URA, TCC, EACCMA) verbatim. "
         "Preserve all citation markers (such as [1], [2], [3]) verbatim and in-place. "
-        "Write all numbers, percentages (e.g. 18%), dates (15th), and monetary amounts (e.g. UGX 150,000,000) "
-        "using exact Arabic numerals and standard currency notation — do NOT write numbers or amounts out as words."
+        "Write all numbers, percentages, dates, and monetary amounts "
+        "using exact Arabic numerals and standard currency notation — do NOT invent or add any new numbers, percentages, or figures, and do NOT write numbers or amounts out as words."
     )
-    if target_lang == "sw":
-        constraint_note += " For percentages, write either '18%' or 'asilimia 18'."
     if target_lang == "en":
         user_prompt = (
             f"Translate the following {src_name} text into {lang_name}. "
