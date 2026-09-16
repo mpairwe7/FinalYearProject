@@ -405,13 +405,11 @@ def protect_figures(text: str) -> tuple[str, dict[str, str]]:
         shield_map[key] = m.group(0)
         return key
 
-    # 1. Shield Ugandan toll-free and mobile phone numbers (e.g. 0800 117 000)
-    clean_text = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", _shield, text or "")
-    # 2. Shield list numbering at start of lines or inline (e.g. "1. ", " 2. ")
-    clean_text = re.sub(r"(?:^|\s)(\d{1,2}[\.\)])\s+", lambda m: f" {_shield(m)} ", clean_text)
-    # 3. Shield statutory citation markers [1], [2]
+    # 1. Shield list numbering at start of lines or inline (e.g. "1. ", " 2. ")
+    clean_text = re.sub(r"(?:^|\s)(\d{1,2}[\.\)])\s+", lambda m: f" {_shield(m)} ", text or "")
+    # 2. Shield statutory citation markers [1], [2]
     clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
-    # 4. Shield legal references (e.g. section 40, article 1.2, cap 349)
+    # 3. Shield legal references (e.g. section 40, article 1.2, cap 349)
     clean_text = re.sub(
         r"\b(?:sub-?section|section|schedule|cap\.?|article|clause)\s*\(?\d+(?:\.\d+)?\)?\b",
         _shield,

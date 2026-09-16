@@ -284,8 +284,8 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
     if model_pct and xp and model_pct.isdisjoint(xp):
         # A percentage is only a contradiction if the claim and the cited context
         # are actually discussing the same subject rather than unrelated facts.
-        claim_words = set(re.findall(r"\w{4,}", claim.lower()))
-        context_words = set(re.findall(r"\w{4,}", context.lower()))
+        claim_words = set(re.findall(r"\w{3,}", claim.lower()))
+        context_words = set(re.findall(r"\w{3,}", context.lower()))
         shared = (claim_words & context_words) - {"that", "with", "from", "this", "have", "were", "will", "your", "under"}
         if shared:
             return True

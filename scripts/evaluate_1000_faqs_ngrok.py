@@ -757,6 +757,14 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
     single_turn_id = 1
     target_single_turn = 800  # Total single-turn FAQs needed
     
+    stopwords = {
+        "this", "that", "with", "from", "have", "they", "will", "what", "which",
+        "does", "when", "where", "into", "their", "under", "about", "your", "then",
+        "been", "must", "should", "could", "also", "some", "only", "other", "such",
+        "than", "these", "those", "were", "there", "each", "both", "more", "most",
+        "are", "the", "and", "can", "how", "who", "why", "did", "for", "all", "any", "not", "out", "was", "has", "had"
+    }
+
     # Process official items first
     for item in official_faqs:
         src = item["source"]
@@ -769,13 +777,6 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
 
         q_clean = item["question"]
         ans = item["answer"]
-        stopwords = {
-            "this", "that", "with", "from", "have", "they", "will", "what", "which",
-            "does", "when", "where", "into", "their", "under", "about", "your", "then",
-            "been", "must", "should", "could", "also", "some", "only", "other", "such",
-            "than", "these", "those", "were", "there", "each", "both", "more", "most",
-            "are", "the", "and", "can", "how", "who", "why", "did", "for", "all", "any", "not", "out", "was", "has", "had"
-        }
         q_words = [w for w in re.findall(r"\b[A-Za-z]{3,}\b", q_clean) if w.lower() not in stopwords]
         a_words = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", ans) if w.lower() not in stopwords]
         kws = list(dict.fromkeys(q_words[:2] + a_words[:3]))
@@ -1201,8 +1202,6 @@ def _is_non_answer(reply: str, retrieval_mode: str) -> bool:
     """
     if str(retrieval_mode).lower() in _NON_ANSWER_MODES:
         return True
-    if str(retrieval_mode).lower() == "workflow" and len((reply or "").strip()) > 40:
-        return False
     text = (reply or "").strip()
     low = text.lower()
     if any(marker in low for marker in _NON_ANSWER_MARKERS):
@@ -1484,7 +1483,7 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
     else:
         markers = LANGUAGE_MARKERS.get(faq.locale, ())
         m_hits = [m for m in markers if _contains_term(clean_text, m)]
-        if m_hits:
+        if m_hits and (faq.vernacular_keywords or any(_concept_synonyms(kw, faq.locale) for kw in faq.expected_keywords)):
             _record("domain_marker", True)
         for term in faq.vernacular_keywords:
             if _vernacular_contains(clean_text, term, faq.locale):
@@ -1520,10 +1519,13 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
     matched_numbers = m_nums
     matched_citations = [c for c in faq.statutory_citations if _citation_matched(c, clean_text)]
 
-    if faq.locale in ("", "en"):
+    term_total = len(matched) + len(missing)
+    if term_total == 0:
+        term_ratio = None
+    elif faq.locale in ("", "en"):
         term_ratio = 1.0 if len(matched) >= 1 else 0.0
     else:
-        term_ratio = 1.0 if len(matched) >= 1 else (0.90 if m_hits else 0.0)
+        term_ratio = 1.0 if len(matched) >= 1 else 0.0
 
     # Official guided workflow turns are valid conversational fulfillments
     if retrieval_mode == "workflow" and len(clean_text) > 40:

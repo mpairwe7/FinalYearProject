@@ -2685,7 +2685,7 @@ def _translate_reply(text: str, locale: str) -> str | None:
 #: mode of turning it off is a wrong tax figure on screen, which nobody should
 #: reach through the flag console at runtime.
 WITHHOLD_CONTRADICTED_CLAIMS = (
-    os.getenv("WITHHOLD_CONTRADICTED_CLAIMS", "false").lower() == "true"
+    os.getenv("WITHHOLD_CONTRADICTED_CLAIMS", "true").lower() == "true"
 )
 
 

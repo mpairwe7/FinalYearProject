@@ -1236,16 +1236,12 @@ def translate_text(
     Uses the already-loaded local LLM with a minimal prompt (no RAG context)
     and capped output length to avoid runaway generation.
     """
-    # Guard untrusted user inputs (source_lang != "en"). Internal system answers
-    # being localized from English to vernacular are already validated output and
-    # legitimately exceed the 1,000-char user prompt limit or discuss tax evasion penalties.
-    if source_lang != "en":
-        from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
+    from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
 
-        verdict = InputGuard().check(text)
-        if not verdict.allowed:
-            logger.warning("Prompted MT refused input (reason_length=%d)", len(verdict.reason or ""))
-            return ""
+    verdict = InputGuard().check(text)
+    if not verdict.allowed:
+        logger.warning("Prompted MT refused input (reason_length=%d)", len(verdict.reason or ""))
+        return ""
 
     _names = {"lg": "Luganda", "en": "English", "sw": "Swahili",
               "nyn": "Runyankole", "ach": "Acholi"}
