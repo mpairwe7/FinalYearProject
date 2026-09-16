@@ -28,7 +28,7 @@ _CONTRADICTION_PROB_MIN = float(os.getenv("ENTAILMENT_CONTRADICTION_MIN", "0.6")
 # or Luganda ("ebitundu 18 ku buli kikumi").
 _PCT_RE = re.compile(
     r"(?:"
-    r"\b(?:asilimia|ebitundu)\s*(\d+(?:\.\d+)?)\b"
+    r"\b(?:asilimia|ebitundu|kigero\s+kya)\s*(\d+(?:\.\d+)?)\b"
     r"|"
     r"(\d+(?:\.\d+)?)\s*(?:%|per\s?cent(?:age)?|\b(?:kwa\s+mia|ku\s+buli\s+kikumi|ku\s+100)\b)"
     r")",
@@ -40,11 +40,28 @@ _SWAHILI_PCT_WORDS = [
     ("kumi na tano", "15"),
     ("kumi na nane", "18"),
     ("kumi", "10"),
-    ("sifuri", "0"),
+    ("tisa", "9"),
+    ("nane", "8"),
+    ("minane", "8"),
+    ("saba", "7"),
     ("sita", "6"),
+    ("tano", "5"),
+    ("nne", "4"),
+    ("tatu", "3"),
+    ("mbili", "2"),
+    ("moja nukta tano", "1.5"),
+    ("moja", "1"),
+    ("nusu", "0.5"),
+    ("sifuri", "0"),
     ("ishirini", "20"),
     ("thelathini", "30"),
     ("arobaini", "40"),
+    ("hamsini", "50"),
+    ("sitini", "60"),
+    ("sabini", "70"),
+    ("themanini", "80"),
+    ("tisini", "90"),
+    ("mia", "100"),
 ]
 
 _LUGANDA_PCT_WORDS = [
@@ -55,13 +72,27 @@ _LUGANDA_PCT_WORDS = [
     ("kumi na munaana", "18"),
     ("kumi na munaanana", "18"),
     ("kumi", "10"),
+    ("mwenda", "9"),
+    ("munaana", "8"),
+    ("musanvu", "7"),
     ("mukaaga", "6"),
+    ("ttaano", "5"),
+    ("taano", "5"),
+    ("nnya", "4"),
+    ("ssatu", "3"),
+    ("bbiri", "2"),
+    ("emu n'ekitundu", "1.5"),
+    ("emu", "1"),
+    ("kitundu", "0.5"),
     ("abiri", "20"),
     ("amakumi abiri", "20"),
     ("asatu", "30"),
     ("amakumi asatu", "30"),
     ("ana", "40"),
     ("amakumi ana", "40"),
+    ("ataano", "50"),
+    ("amakumi ataano", "50"),
+    ("kikumi", "100"),
 ]
 
 # A money amount: comma- or space-grouped ("1,500,000"), plain ("335000"), or
@@ -169,6 +200,10 @@ def canonical_amounts(text: str) -> set[float]:
     # Percentages are handled separately; drop them so "18%" is not read
     # as the amount 18.
     without_pct = _PCT_RE.sub(" ", lowered)
+    for phrase, _ in _SWAHILI_PCT_WORDS:
+        without_pct = re.sub(r"\basilimia\s+" + re.escape(phrase) + r"\b", " ", without_pct)
+    for phrase, _ in _LUGANDA_PCT_WORDS:
+        without_pct = re.sub(r"\bebitundu\s+" + re.escape(phrase) + r"\b", " ", without_pct)
     # Strip Ugandan toll-free and mobile phone numbers (e.g. 0800 117 000, 0772 140 000)
     # so contact lines are not falsely parsed as tax amounts
     without_pct = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", without_pct)
@@ -198,6 +233,18 @@ def canonical_amounts(text: str) -> set[float]:
             continue
         value *= _AMOUNT_SUFFIX.get((match.group(2) or "").lower(), 1)
         amounts.add(value)
+
+    # 3. Vernacular word numbers for small cardinal integers
+    _CARDINAL_WORDS = {
+        "munaana": 8.0, "minane": 8.0, "nane": 8.0, "musanvu": 7.0, "saba": 7.0,
+        "mukaaga": 6.0, "sita": 6.0, "ttaano": 5.0, "taano": 5.0, "tano": 5.0,
+        "nnya": 4.0, "nne": 4.0, "ssatu": 3.0, "tatu": 3.0, "bbiri": 2.0, "mbili": 2.0,
+        "kkumi": 10.0, "kumi": 10.0, "asatu": 30.0, "thelathini": 30.0, "abiri": 20.0,
+        "ishirini": 20.0, "ana": 40.0, "arobaini": 40.0, "ataano": 50.0, "hamsini": 50.0,
+    }
+    for word, val in _CARDINAL_WORDS.items():
+        if re.search(rf"\b{word}\b", remainder):
+            amounts.add(val)
     return amounts
 
 
@@ -223,7 +270,13 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
     qp = percentages(user_query) if user_query else set()
     model_pct = cp - qp
     if model_pct and xp and model_pct.isdisjoint(xp):
-        return True
+        # A percentage is only a contradiction if the claim and the cited context
+        # are actually discussing the same subject rather than unrelated facts.
+        claim_words = set(re.findall(r"\w{4,}", claim.lower()))
+        context_words = set(re.findall(r"\w{4,}", context.lower()))
+        shared = (claim_words & context_words) - {"that", "with", "from", "this", "have", "were", "will", "your", "under"}
+        if shared:
+            return True
 
     if not _RULE_CUE_RE.search(claim):
         return False

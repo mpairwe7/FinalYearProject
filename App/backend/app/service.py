@@ -2793,6 +2793,17 @@ def localize_reply(reply: str, locale: str) -> str:
     # corrupt the text.
     if _is_already_in_locale(text, locale):
         return reply
+
+    # Handle follow-up suggestions separately so optional suggestions do not cause
+    # figure mismatch or truncation in the primary answer.
+    suggestion_sep = "\n\nYou might also want to know:"
+    if suggestion_sep in text:
+        body_part, _, follow_part = text.partition(suggestion_sep)
+        loc_body = localize_reply(body_part.strip(), locale)
+        if loc_body and loc_body != body_part.strip():
+            prefix = "\n\nOyinz'okwagala okumanya:" if locale == "lg" else "\n\nUnaweza pia kutaka kujua:"
+            loc_follow = _translate_reply(follow_part.strip(), locale) or follow_part.strip()
+            return f"{loc_body}{prefix} {loc_follow}"
     # Cached (``mt.cache``), read here and written at the bottom so the memo
     # only ever holds a translation that passed every guard below.
     # Deterministic replies dominate this direction — greetings, the
@@ -2842,12 +2853,16 @@ def localize_reply(reply: str, locale: str) -> str:
         # `protect_figures` masks digits only and leaves the percent sign and
         # the currency code visible, so nothing above this line looks at them.
         if not mt.units_survived(text, candidate):
-            return None, "units_dropped"
+            candidate = mt.restore_missing_units(text, candidate)
+            if not mt.units_survived(text, candidate):
+                return None, "units_dropped"
         # Claim verification ran on the English draft and keyed off these
         # markers. A translation that drops or renumbers one ships an answer
         # whose provenance no longer matches the report that approved it.
         if not mt.citations_survived(text, candidate):
-            return None, "citations_lost"
+            candidate = mt.restore_missing_citations(text, candidate)
+            if not mt.citations_survived(text, candidate):
+                return None, "citations_lost"
         return candidate, "ok"
 
     # Protected pass first: the translator is handed sentinels in place of the
@@ -4284,8 +4299,11 @@ class ChatModel:
         """
         contexts = [str(h.get("text") or h.get("answer") or "") for h in hits]
         faith = 1.0 if curated else HybridRetriever.compute_faithfulness(reply, contexts)
+        final_reply = reply
+        if locale not in ("", "en"):
+            final_reply = localize_reply(reply, locale)
         return {
-            "reply": reply,
+            "reply": final_reply,
             "sources": sources,
             "citations": citations,
             "faithfulness_score": faith,

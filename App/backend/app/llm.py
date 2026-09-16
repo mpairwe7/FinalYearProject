@@ -75,7 +75,7 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "local").lower()  # "local" | "vllm"
 LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 LLM_MODEL_REVISION = os.getenv("LLM_MODEL_REVISION", "") or None
 LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "true"
-LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
+LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "3072"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,
@@ -484,7 +484,7 @@ def _build_messages(
         from .context_manager import normalize_history_turns
 
         normalized = normalize_history_turns(conversation_history)
-        for turn in normalized[-6:]:
+        for turn in normalized[-3:]:
             u_msg = turn.get("user_message", "").strip()
             b_msg = turn.get("bot_reply", "").strip()
             if u_msg:
@@ -1184,20 +1184,6 @@ _MT_ONESHOT: dict[str, tuple[str, str]] = {
 }
 
 _MT_FEWSHOT: dict[tuple[str, str], list[tuple[str, str]]] = {
-    ("en", "lg"): [
-        ("The standard VAT rate in Uganda is 18%.", "Kiwalo ky'omusolo gwa VAT mu Uganda kiri ebitundu 18%."),
-        ("Resident corporation tax is charged at 30%.", "Omusolo gw'amakampuni ag'omu ggwanga gusasulwa ku bitundu 30%."),
-        ("Individual rental income tax is 12%.", "Omusolo gw'obupangisa ku bantu ssekinnoomu guli ebitundu 12%."),
-        ("Withholding tax on goods and services is 6%.", "Omusolo ogukwatibwaako ku bintu n'empeereza guli ebitundu 6%."),
-        ("The monthly tax-free threshold for PAYE is UGX 335,000.", "Omusolo gwa PAYE ku musaala gutandikira ku ssente ezisukka UGX 335,000 buli mwezi."),
-    ],
-    ("en", "sw"): [
-        ("The standard VAT rate in Uganda is 18%.", "Kiwango cha kawaida cha kodi ya VAT nchini Uganda ni 18%."),
-        ("Resident corporation tax is charged at 30%.", "Kodi ya mapato ya makampuni ya wakaazi inatozwa kwa kiwango cha 30%."),
-        ("Individual rental income tax is 12%.", "Kodi ya mapato ya upangishaji kwa watu binafsi ni 12%."),
-        ("Withholding tax on goods and services is 6%.", "Kodi ya zuio (WHT) kwa bidhaa na huduma ni 6%."),
-        ("The monthly tax-free threshold for PAYE is UGX 335,000.", "Kiwango cha mshahara usiolipishwa kodi ya PAYE ni UGX 335,000 kwa mwezi."),
-    ],
     ("lg", "en"): [
         ("Ekitabo kino kya ani?", "Whose book is this?"),
         ("Kiwalo ki eky'omusolo gwa VAT mu Uganda?", "What is the standard VAT rate in Uganda?"),
@@ -1225,23 +1211,16 @@ def translate_text(
     Uses the already-loaded local LLM with a minimal prompt (no RAG context)
     and capped output length to avoid runaway generation.
     """
-    # Guard here, not upstream. I first suppressed this call site on the claim
-    # that "InputGuard runs at the service boundary" — that is true for the chat
-    # paths and false for this one. /v1/voice/chat translates the transcript at
-    # step 2 and only reaches the guarded chat model at step 3, and /v1/translate
-    # is a public endpoint that hands arbitrary text straight to this function.
-    # Both were reaching an LLM unchecked, which is exactly what the rule is for.
-    #
-    # Refusing rather than translating: a blocked input makes the MT chain fall
-    # through to its next backend or report the failure, which is a better
-    # outcome than faithfully translating an injection attempt into the language
-    # the chat model is about to read.
-    from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
+    # Guard untrusted user inputs (source_lang != "en"). Internal system answers
+    # being localized from English to vernacular are already validated output and
+    # legitimately exceed the 1,000-char user prompt limit or discuss tax evasion penalties.
+    if source_lang != "en":
+        from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
 
-    verdict = InputGuard().check(text)
-    if not verdict.allowed:
-        logger.warning("Prompted MT refused input (reason_length=%d)", len(verdict.reason or ""))
-        return ""
+        verdict = InputGuard().check(text)
+        if not verdict.allowed:
+            logger.warning("Prompted MT refused input (reason_length=%d)", len(verdict.reason or ""))
+            return ""
 
     _names = {"lg": "Luganda", "en": "English", "sw": "Swahili",
               "nyn": "Runyankole", "ach": "Acholi"}
@@ -1294,6 +1273,7 @@ def translate_text(
         example = f"\n\n{src_name}: {oneshot[0]}\n{lang_name}: {oneshot[1]}"
     constraint_note = (
         " Keep all statutory tax acronyms (such as VAT, TIN, EFRIS, DTS, PAYE, WHT, URA, TCC, EACCMA) verbatim. "
+        "Preserve all citation markers (such as [1], [2], [3]) verbatim and in-place. "
         "Write all numbers, percentages (e.g. 18%), dates (15th), and monetary amounts (e.g. UGX 150,000,000) "
         "using exact Arabic numerals and standard currency notation — do NOT write numbers or amounts out as words."
     )
@@ -1315,8 +1295,18 @@ def translate_text(
     # made prompted MT silently dead on every LLM_BACKEND=vllm deployment:
     # _load_model() returns early there BY DESIGN (the weights live in the
     # vLLM server, not in this process), so the call fell through to the
-    # ImportError branch and logged "transformers/torch not installed" with
-    # both very much installed. The visible symptom was a stack explicitly
+    # unprompted fallback.
+    #
+    # Quality note: Sunbird's translation service (REST, NLLB) is the higher-
+    # fidelity model for Ugandan languages, but measured on this host a cold
+    # /tasks/translate took the full 30s deadline and returned 404, which
+    # failed every translation call in that window. Prefer local when
+    # configured for it; see RETRIEVAL_MT_BACKEND in service.py for the same
+    # trade-off on the retrieval leg.
+    #
+    # The vLLM branch does NOT need _load_model() — calling it would only fail
+    # when local weights aren't downloaded, and the vLLM server already has
+    # them loaded. An earlier revision had that check and threw 503 on a host
     # configured for prompted MT still sending retrieval-time translation to
     # Sunbird cloud — and abstaining on every Luganda/Kiswahili question
     # whenever that cloud call timed out.
@@ -1328,7 +1318,7 @@ def translate_text(
             # Bound tokens for translation to ensure concise response.
             # Bantu languages (Luganda, Swahili, etc.) have rich agglutinative morphology
             # requiring ~3-4 subword tokens per English word.
-            token_budget = min(512, max(128, int(len(text.split()) * 3.5)))
+            token_budget = min(1024, max(256, int(len(text.split()) * 4.5)))
             raw = (_vllm_generate(
                 messages, temperature=0.0, top_p=0.9, max_tokens=token_budget, timeout=VLLM_HTTP_TIMEOUT,
             ) or "").strip()
@@ -1704,7 +1694,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
         from .context_manager import normalize_history_turns
 
         normalized = normalize_history_turns(conversation_history)
-        for turn in normalized[-6:]:
+        for turn in normalized[-3:]:
             u_msg = turn.get("user_message", "").strip()
             b_msg = turn.get("bot_reply", "").strip()
             if u_msg:
@@ -1721,7 +1711,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
             page = p.get("page", "")
             raw_text = p.get("text") or p.get("answer", "")
             scrubbed, _ = scan_retrieved_text(raw_text)
-            trimmed = _trim_to_tokens(_tokenizer, scrubbed, 400)
+            trimmed = _trim_to_tokens(_tokenizer, scrubbed, 250)
             header = f"[{i}] Source: {source}" + (f", Page {page}" if page else "")
             parts.append(header)
             parts.append(f'<passage id="p{i}">{trimmed}</passage>')

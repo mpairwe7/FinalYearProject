@@ -150,6 +150,8 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "collecting", "collected", "remit", "remitting", "remitted", "avoid", "evade", "evading",
     "learn", "know", "see", "show", "tell", "check", "verify", "get", "got", "help", "want",
     "need", "wish", "like", "prefer", "ask", "start", "stop", "resume",
+    "order", "ordering", "ordered", "acquire", "acquiring", "acquired", "buy", "buying", "bought",
+    "purchase", "purchasing", "purchased", "obtain", "obtaining", "obtained",
     "use", "using", "used", "utilize", "utilizing", "utilized", "require", "required", "requiring",
     "mandate", "mandated", "mandating", "adopt", "adopting", "adopted", "enforce", "enforcing",
     "enforced", "operate", "operating", "operated", "impose", "imposing", "imposed", "exempt",
@@ -161,12 +163,13 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours",
     "he", "him", "his", "she", "her", "hers", "it", "its", "they", "them", "their", "theirs",
     "one", "someone", "anyone", "everyone", "who", "whom", "whose", "what", "which",
-    # Prepositions and adverbs
+    # Prepositions, adverbs, ordinals and determiners
     "how", "why", "when", "where", "to", "for", "about", "on", "in", "at", "by", "from", "of",
     "with", "into", "through", "during", "before", "after", "above", "below", "under", "up",
     "down", "off", "over", "again", "further", "then", "once", "here", "there", "all", "any",
     "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only",
     "own", "same", "so", "than", "too", "very", "s", "t", "just", "don", "now", "as", "per",
+    "first", "second", "third", "initial", "primary", "main", "major", "general", "direct", "indirect", "next", "prior",
     # Generic context nouns & qualifiers
     "online", "offline", "portal", "ura", "uganda", "ugandan", "government", "official",
     "law", "laws", "act", "acts", "policy", "rate", "rates", "table", "tables", "system",

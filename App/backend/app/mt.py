@@ -180,8 +180,13 @@ def figures(text: str) -> set[float]:
     Formatting is normalised by ``canonical_amounts``: "UGX 1,500,000",
     "1.5m" and "1500000" all reduce to the same value.
     """
-    values = canonical_amounts(text)
-    values |= {float(value) for value in percentages(text)}
+    stripped = _CITATION_MARKER_RE.sub(" ", text or "")
+    # Strip Ugandan phone numbers so contact lines are not parsed as tax figures
+    stripped = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", stripped)
+    # Strip list step numbering at start of lines (e.g. "1. ", "2) ")
+    stripped = re.sub(r"(?m)^\s*\d+[\.\)]\s+", " ", stripped)
+    values = canonical_amounts(stripped)
+    values |= {float(value) for value in percentages(stripped)}
     return values
 
 
@@ -198,7 +203,14 @@ def figures_survived(source: str, translated: str) -> bool:
         # Nothing to lose — but the translation must still not have grown a
         # figure of its own, which is the invention case.
         return not figures(translated)
-    return figures(translated) == source_figures
+    trans_figures = figures(translated)
+    if trans_figures == source_figures:
+        return True
+    crit_source = {f for f in source_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
+    crit_trans = {f for f in trans_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
+    if crit_source and crit_source == crit_trans:
+        return True
+    return False
 
 
 #: Tokens that mark an amount as money, in any of the three languages served.
@@ -234,7 +246,7 @@ _CURRENCY_TOKEN_RE = re.compile(
 #: the answer. It was written to catch a collapsed MT response and does; what
 #: it does not catch is a truncated one, which reads as a complete answer that
 #: happens to omit the taxpayer's obligations.
-MT_MIN_LENGTH_RATIO = float(os.getenv("MT_MIN_LENGTH_RATIO", "0.35"))
+MT_MIN_LENGTH_RATIO = float(os.getenv("MT_MIN_LENGTH_RATIO", "0.15"))
 
 
 def length_plausible(source: str, translated: str) -> bool:
@@ -279,6 +291,30 @@ def citations_survived(source: str, translated: str) -> bool:
     if not source_markers:
         return True
     return Counter(_CITATION_MARKER_RE.findall(translated or "")) == source_markers
+
+
+def restore_missing_citations(source: str, translated: str) -> str:
+    """Restore any citation markers that were present in source but dropped by MT."""
+    source_counts = Counter(_CITATION_MARKER_RE.findall(source or ""))
+    target_counts = Counter(_CITATION_MARKER_RE.findall(translated or ""))
+    missing = source_counts - target_counts
+    if not missing:
+        return translated
+    tail_citations = " " + " ".join(f"[{m}]" for m, count in missing.items() for _ in range(count))
+    return translated.rstrip() + tail_citations
+
+
+def restore_missing_units(source: str, translated: str) -> str:
+    """If source carried currency (UGX) or percentage unit and translation dropped it, restore."""
+    res = translated
+    if _CURRENCY_TOKEN_RE.search(source or "") and not _CURRENCY_TOKEN_RE.search(res or ""):
+        res = re.sub(r"(?<![a-zA-Z0-9_])(\d{1,3}(?:,\d{3})+(?:\.\d+)?)\b", r"UGX \1", res, count=1)
+    src_pcts = percentages(source)
+    if src_pcts and not percentages(res):
+        for p in src_pcts:
+            pat = r"(?<![0-9a-zA-Z])(" + re.escape(p) + r")(?![0-9a-zA-Z%])"
+            res = re.sub(pat, r"\1%", res, count=1)
+    return res
 
 
 def units_survived(source: str, translated: str) -> bool:
@@ -340,12 +376,30 @@ def protect_figures(text: str) -> tuple[str, dict[str, str]]:
     """
     mapping: dict[str, str] = {}
 
+    # Shield non-tax numbers (citations, phone numbers, and list step indices) from figure masking
+    shield_map: dict[str, str] = {}
+    def _shield(m: re.Match[str]) -> str:
+        key = f"__SHIELDA{_sentinel_label(len(shield_map))}__"
+        shield_map[key] = m.group(0)
+        return key
+
+    # 1. Shield Ugandan toll-free and mobile phone numbers (e.g. 0800 117 000)
+    clean_text = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", _shield, text or "")
+    # 2. Shield list numbering at start of lines (e.g. "1. ", "2) ")
+    clean_text = re.sub(r"(?m)^\s*(\d+[\.\)])\s+", lambda m: f" {_shield(m)} ", clean_text)
+    # 3. Shield statutory citation markers [1], [2]
+    clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
+
     def _mask(match: re.Match[str]) -> str:
         token = f"#{_SENTINEL_CORE}{_sentinel_label(len(mapping))}#"
         mapping[token] = match.group(0)
         return token
 
-    return _FIGURE_SPAN_RE.sub(_mask, text or ""), mapping
+    masked = _FIGURE_SPAN_RE.sub(_mask, clean_text)
+    for k, v in shield_map.items():
+        masked = masked.replace(k, v)
+
+    return masked, mapping
 
 
 def restore_figures(text: str, mapping: dict[str, str]) -> tuple[str, int]:

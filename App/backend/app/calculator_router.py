@@ -551,6 +551,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
         ]
         if result.get("deductions_note"):
             lines.append(f"- _{result['deductions_note']}_")
+        lines.append("- Statutory Basis: Income Tax Act")
     elif tool == "calculate_vat":
         lines = [
             f"**VAT calculation ({fy})**",
@@ -558,6 +559,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- Net amount: {_ugx(result['net'])}",
             f"- VAT at {float(result['rate']) * 100:.0f}%: **{_ugx(result['vat'])}**",
             f"- Gross (VAT-inclusive): **{_ugx(result['gross'])}**",
+            "- Statutory Basis: Value Added Tax Act",
         ]
     elif tool == "calculate_corporation_tax":
         lines = [
@@ -566,6 +568,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- Chargeable income: {_ugx(result['chargeable_income'])}",
             f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
             f"- After-tax income: {_ugx(result['after_tax'])}",
+            "- Statutory Basis: Income Tax Act",
         ]
     elif tool == "calculate_capital_gains":
         lines = [
@@ -575,6 +578,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- Cost base: {_ugx(result['cost_base'])}",
             f"- Gain: {_ugx(result['gain'])}",
             f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
+            "- Statutory Basis: Income Tax Act",
         ]
     elif tool == "calculate_customs_duty":
         lines = [
@@ -592,6 +596,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
         if result.get("vat_included"):
             lines.append(f"- VAT on (CIF + duty + levy): {_ugx(result['vat'])}")
         lines.append(f"- Estimated landed cost: **{_ugx(result['landed_cost'])}**")
+        lines.append("- Statutory Basis: East African Community Customs Management Act (EACCMA)")
     elif tool == "check_vat_registration":
         required = bool(result.get("registration_required"))
         lines = [
@@ -605,6 +610,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
                 else "- **Registration is not compulsory** — you are below the threshold "
                 f"(headroom {_ugx(result['headroom'])}). Voluntary registration is still available."
             ),
+            "- Statutory Basis: Value Added Tax Act",
         ]
     elif tool == "calculate_rental_tax":
         if result.get("landlord_type") == "company":
@@ -615,6 +621,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
                 f"- Deductible expenses (≤50% of gross): {_ugx(result['allowable_expenses'])}",
                 f"- Chargeable income: {_ugx(result['chargeable_income'])}",
                 f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
+                "- Statutory Basis: Income Tax Act",
             ]
         else:
             lines = [
@@ -624,6 +631,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
                 f"- Tax-free threshold: {_ugx(result['threshold'])} per year",
                 f"- Taxable amount: {_ugx(result['taxable_amount'])}",
                 f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
+                "- Statutory Basis: Income Tax Act",
             ]
     elif tool == "calculate_withholding":
         label = str(result.get("payment_type", "")).replace("_", " ")
@@ -633,6 +641,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- Gross payment: {_ugx(result['amount'])}",
             f"- WHT at {float(result['rate']) * 100:.0f}%: **{_ugx(result['withholding_tax'])}**",
             f"- Net payable to payee: {_ugx(result['net_payable'])}",
+            "- Statutory Basis: Income Tax Act",
         ]
     else:
         lines = [str(result.get("explanation", ""))]

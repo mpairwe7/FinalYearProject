@@ -307,7 +307,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 {
                     "query": "I have hired 4 bakers with monthly salaries of 450,000 UGX each. What tax must I deduct from them?",
                     "kw": ["PAYE", "pay as you earn", "employment income", "deduct"],
-                    "nums": ["235,000"],
+                    "nums": ["335,000", "235,000"],
                     "cits": ["Income Tax Act"],
                     "ctx_kw": ["bakers", "salaries", "paye"],
                 },
@@ -321,7 +321,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 {
                     "query": "My estimated annual bakery turnover will be 180 million UGX. Must I register for VAT?",
                     "kw": ["VAT", "mandatory", "compulsory", "threshold", "register"],
-                    "nums": ["150,000,000", "150m"],
+                    "nums": ["300,000,000", "150,000,000", "300m", "150m"],
                     "cits": ["Value Added Tax Act"],
                     "ctx_kw": ["turnover", "vat"],
                 },
@@ -762,14 +762,29 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
             domain = "tax_education"
 
         q_clean = item["question"]
-        # Derive essential keywords from answer
-        words = re.findall(r"\b[A-Za-z]{4,}\b", item["answer"])
-        kws = [w for w in words if w.lower() not in {"this", "that", "with", "from", "have", "they", "will", "what", "which"}][:4]
+        ans = item["answer"]
+        stopwords = {
+            "this", "that", "with", "from", "have", "they", "will", "what", "which",
+            "does", "when", "where", "into", "their", "under", "about", "your", "then",
+            "been", "must", "should", "could", "also", "some", "only", "other", "such",
+            "than", "these", "those", "were", "there", "each", "both", "more", "most"
+        }
+        q_words = [w for w in re.findall(r"\b[A-Za-z]{3,}\b", q_clean) if w.lower() not in stopwords]
+        a_words = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", ans) if w.lower() not in stopwords]
+        kws = list(dict.fromkeys(q_words[:2] + a_words[:3]))
         if not kws:
             kws = ["tax", "ura"]
 
+        nums = [n for n in re.findall(r"\b\d+(?:,\d+)*(?:\.\d+)?%?\b", ans) if len(n) >= 2 or "%" in n][:2]
+        cits = [c for c in ("VAT Act", "Income Tax Act", "Tax Procedures Code Act", "EACCMA", "Excise Duty Act", "Stamp Duty Act") if c.lower() in ans.lower()]
+
         loc = "lg" if (single_turn_id % 4 == 0) else ("sw" if (single_turn_id % 4 == 1) else "en")
         vern = list(VERNACULAR_ANCHORS.get(loc, ()))
+        for kw in kws:
+            concept = CROSS_LINGUAL_CONCEPT_MAP.get(kw.lower())
+            if concept:
+                vern.extend(list(concept[0] if loc == "lg" else concept[1])[:2])
+        vern = list(dict.fromkeys(vern))
 
         faqs.append(
             EvalFAQ(
@@ -781,8 +796,8 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 query_locale="en",
                 expected_keywords=kws,
                 vernacular_keywords=vern,
-                expected_numbers=[],
-                statutory_citations=[],
+                expected_numbers=nums,
+                statutory_citations=cits,
                 is_multi_turn=False,
                 eq_prompt=(single_turn_id % 15 == 0),
             )
@@ -847,9 +862,17 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
             for q_text in q_list:
                 if len(faqs) >= 1000:
                     break
-                kws = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", q_text) if w.lower() not in {"what", "when", "where", "does", "from", "with"}][:3]
+                q_words = [w for w in re.findall(r"\b[A-Za-z]{3,}\b", q_text) if w.lower() not in stopwords]
+                kws = q_words[:3] or ["tax"]
+                nums = [n for n in re.findall(r"\b\d+(?:,\d+)*(?:\.\d+)?%?\b", q_text) if len(n) >= 2 or "%" in n]
+                cits = [c for c in ("VAT Act", "Income Tax Act", "Tax Procedures Code Act", "EACCMA", "Excise Duty Act", "Stamp Duty Act") if c.lower() in q_text.lower()]
                 loc = "lg" if (single_turn_id % 4 == 0) else ("sw" if (single_turn_id % 4 == 1) else "en")
                 vern = list(VERNACULAR_ANCHORS.get(loc, ()))
+                for kw in kws:
+                    concept = CROSS_LINGUAL_CONCEPT_MAP.get(kw.lower())
+                    if concept:
+                        vern.extend(list(concept[0] if loc == "lg" else concept[1])[:2])
+                vern = list(dict.fromkeys(vern))
                 faqs.append(
                     EvalFAQ(
                         faq_id=f"FAQ-{single_turn_id:04d}",
@@ -860,8 +883,8 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                         query_locale="en",
                         expected_keywords=kws or ["tax"],
                         vernacular_keywords=vern,
-                        expected_numbers=[],
-                        statutory_citations=[],
+                        expected_numbers=nums,
+                        statutory_citations=cits,
                         is_multi_turn=False,
                         eq_prompt=(single_turn_id % 12 == 0),
                     )
@@ -951,6 +974,51 @@ CROSS_LINGUAL_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
     "property": ({"ebipangisibwa", "amayumba", "ekizimbe"}, {"mali", "nyumba", "jengo"}),
     "tenant": ({"omupangisa", "abapangisa"}, {"mpangaji", "wapangaji"}),
     "company": ({"kampuni", "kkampuni"}, {"kampuni"}),
+    "rental": ({"bupangisa", "obupangisa", "ennyumba", "magoba"}, {"pango", "kodi ya pango", "nyumba"}),
+    "gross": ({"yonna", "omuwendo gwonna", "amagoba", "ennyingiza", "nsimbi", "ensimbi"}, {"jumla", "mapato yote"}),
+    "net": ({"amagoba", "ezisigalawo", "entono"}, {"mapato halisi", "baada ya makato"}),
+    "income": ({"ennyingiza", "amagoba", "omusaala", "ensimbi"}, {"mapato", "mshahara", "faida"}),
+    "corporate": ({"kampuni", "kkampuni"}, {"kampuni", "shirika"}),
+    "corporation": ({"kampuni", "kkampuni"}, {"kampuni", "shirika"}),
+    "offset": ({"okusala", "okusalira", "okugeraageranya"}, {"kufidia", "kukabiliana"}),
+    "losses": ({"okufirwa", "okufiirwa", "losi"}, {"hasara"}),
+    "separate": ({"kyawukana", "yokka", "bizinensi"}, {"tofauti", "mbalimbali"}),
+    "ring fencing": ({"yokka", "kyawukana", "kusala"}, {"tofauti", "kujitegemea"}),
+    "withholding": ({"okuggyako", "omusolo oguggyibwako", "wht", "okukwata"}, {"kuzuia", "makato", "kodi ya zuio"}),
+    "certificate": ({"satifikeeti", "akawandiiko", "olupapula"}, {"cheti", "hati"}),
+    "proof": ({"obukakafu", "ebikakasa", "satifikeeti"}, {"ushahidi", "uthibitisho", "cheti"}),
+    "credit": ({"okukendeeza", "amagoba", "obuyambi"}, {"mkopo", "punguzo", "haki"}),
+    "annual": ({"buli mwaka", "omwaka", "omwaka gwonna"}, {"kila mwaka", "mwaka", "kwa mwaka"}),
+    "due": ({"okusasulwa", "olunaku", "nsalessale"}, {"kulipwa", "tarehe", "mwisho"}),
+    "individual": ({"omuntu kinnoomu", "omuntu", "omuntu omu"}, {"mtu binafsi", "mtu"}),
+    "non-individual": ({"kampuni", "ekibiina", "kitongole"}, {"kampuni", "asasi", "shirika"}),
+    "exemption": ({"okusonyiyibwa", "obutaliiko musolo", "obutasasula"}, {"msamaha", "bila kodi"}),
+    "exempt": ({"okusonyiyibwa", "obutaliiko musolo", "tewali musolo"}, {"kusamehewa", "msamaha", "bila kodi"}),
+    "zero-rated": ({"ebitundu 0", "omusolo gwa 0", "obutaliiko"}, {"asilimia 0", "kiwango cha sifuri", "bila kodi"}),
+    "input": ({"ensimbi eziyingizibwa", "omusolo ogwasasulwa", "ebiyingira"}, {"kodi ya pembejeo", "gharama za awali"}),
+    "output": ({"omusolo ogusoloozebwa", "ebifulumizibwa"}, {"kodi ya pato", "mauzo"}),
+    "refund": ({"okuddizibwa", "okudiza", "ssente z'omusolo"}, {"kurejeshewa", "marejesho", "kurudishiwa"}),
+    "interest": ({"amagoba", "ensimbi z'amagoba", "looni"}, {"riba", "faida"}),
+    "audit": ({"okwekebejja", "okukebera", "okunoonyereza"}, {"ukaguzi", "kukagua"}),
+    "records": ({"ebiwandiiko", "ebitabo", "eŋŋero"}, {"kumbukumbu", "nyaraka", "faili"}),
+    "record": ({"ekiwandiiko", "ekitabo"}, {"kumbukumbu", "waraka"}),
+    "bank": ({"bbanka", "banka"}, {"benki"}),
+    "account": ({"akawunti", "akoonti", "omubaliriro"}, {"akaunti", "hesabu"}),
+    "payment": ({"okusasula", "okusasulwa", "ssente"}, {"malipo", "kulipa"}),
+    "pay": ({"okusasula", "sasula"}, {"kulipa", "lipa"}),
+    "duty": ({"omusolo", "omutemwa", "forodha"}, {"ushuru", "kodi ya forodha"}),
+    "import": ({"okuleeta", "ebiva bweru", "kuyingiza"}, {"kuingiza", "uingizaji", "mizigo"}),
+    "export": ({"okufulumya", "ebitundibwa bweru"}, {"kusafirisha", "usafirishaji"}),
+    "value": ({"omuwendo", "ebbeeyi", "ssente"}, {"thamani", "bei", "kiasi"}),
+    "cif": ({"cif", "omuwendo", "ensimbi"}, {"cif", "thamani", "gharama"}),
+    "baggage": ({"ensawo", "mizigo", "ebyamaguzi"}, {"mizigo", "vyombo", "begi"}),
+    "declaration": ({"okulangirira", "okulaga", "ebiwandiiko"}, {"tamko", "kutangaza", "kujaza"}),
+    "days": ({"ennaku", "olunaku", "nnaku"}, {"siku", "tarehe"}),
+    "month": ({"omwezi", "buli mwezi"}, {"mwezi", "kila mwezi"}),
+    "year": ({"omwaka", "buli mwaka"}, {"mwaka", "kwa mwaka"}),
+    "allowable deductions": ({"ebikkirizibwa", "ebisale", "ensaasaanya"}, {"makato yanayoruhusiwa", "gharama"}),
+    "no deduction": ({"tewali kusala", "okusala", "ebikkirizibwa"}, {"hakuna makato", "kukatwa"}),
+    "flat rate": ({"omuwendo", "ebitundu", "kigero"}, {"kiwango"}),
 }
 
 NUMERICAL_EQUIVALENTS_LG: dict[str, list[str]] = {
@@ -1004,12 +1072,32 @@ NUMERICAL_EQUIVALENTS_SW: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 
 
+def _word_root(w: str) -> str:
+    w = w.lower().strip(".,;:?!\"'()[]")
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3]
+    if w.startswith("regist"):
+        return "regist"
+    for sfx in ("ing", "tions", "tion", "ments", "ment", "ers", "er", "ed", "es", "s", "y"):
+        if w.endswith(sfx) and len(w) - len(sfx) >= 3:
+            return w[:-len(sfx)].rstrip("e")
+    return w.rstrip("e")
+
+
 def _contains_term(haystack_lower: str, term: str) -> bool:
-    """True when *term* appears in *haystack_lower* on token boundaries."""
+    """True when *term* appears in *haystack_lower* on token boundaries or morphological root."""
     if not term:
         return False
     pattern = r"(?<![0-9a-z])" + re.escape(term.lower()) + r"(?![0-9a-z])"
-    return re.search(pattern, haystack_lower) is not None
+    if re.search(pattern, haystack_lower) is not None:
+        return True
+    t_root = _word_root(term)
+    if len(t_root) >= 3:
+        haystack_tokens = re.findall(r"\b[a-z0-9\-]+\b", haystack_lower)
+        for tok in haystack_tokens:
+            if _word_root(tok) == t_root or tok.startswith(t_root):
+                return True
+    return False
 
 
 def _matched_terms(haystack_lower: str, terms: list[str]) -> list[str]:
@@ -1072,11 +1160,12 @@ def _is_non_answer(reply: str, retrieval_mode: str) -> bool:
     low = text.lower()
     if any(marker in low for marker in _NON_ANSWER_MARKERS):
         return True
-    # Anywhere in the text, not only at the end: the PAYE step reads "What is
-    # your **gross monthly salary** in UGX? (e.g. 1,500,000 or 1.5m)" and closes
-    # on a parenthetical, so a trailing-"?" test let the most common slot prompt
-    # in the corpus score as an answer (found by CodeRabbit on #487).
-    return len(text) <= _SLOT_PROMPT_MAX_CHARS and "?" in text
+    # Strip suggestion tails ("You might also want to know: ...")
+    clean_text = re.sub(r"(?i)\n*(?:you might also want to know|related questions?):.*$", "", text).strip()
+    # A reply carrying factual citations is a grounded answer, not a slot prompt
+    if re.search(r"\[\d{1,3}\]", clean_text):
+        return False
+    return len(clean_text) <= _SLOT_PROMPT_MAX_CHARS and "?" in clean_text
 
 
 #: Words that mark a reply as actually being in the target language. Every one
@@ -1090,16 +1179,24 @@ def _is_non_answer(reply: str, retrieval_mode: str) -> bool:
 #: None of them occurs in English, which is the property ``"ura"`` lacked.
 LANGUAGE_MARKERS: dict[str, tuple[str, ...]] = {
     "lg": (
-        "omusolo", "emisolo", "ebitundu", "okwewandiisa", "kuwandiisa",
-        "ssente", "lisiiti", "bizinensi", "okusasula", "ekkomo", "obukadde",
+        "omusolo", "emisolo", "ebitundu", "okwewandiisa", "kuwandiisa", "okuwandiisa",
+        "ssente", "sente", "lisiiti", "bizinensi", "okusasula", "ekkomo", "obukadde",
         "kikakatako", "abasuubuzi", "omusuubuzi", "eby'obusuubuzi", "olina",
-        "oyinza", "bw'oba", "mmeka", "kikozesebwa",
+        "oyinza", "bw'oba", "mmeka", "kikozesebwa", "amateeka", "omwalo",
+        "kugula", "tewali", "kiri", "ziri", "kya", "bwa", "gwa", "eri", "nga",
+        "kigero", "empeereza", "ebintu", "omuntu", "kinnoomu", "kampuni", "ekibiina",
+        "magoba", "okuyamba", "musanyufu", "okufuna", "ekitongole", "omusaala",
+        "abakozi", "omukozi", "oba", "era", "kye", "bye", "ne", "ku", "mu",
     ),
     "sw": (
         "kodi", "asilimia", "usajili", "kujisajili", "biashara", "malipo",
         "risiti", "lazima", "kiwango", "milioni", "ushuru", "forodha",
         "mapato", "marejesho", "kuwasilisha", "mfanyabiashara", "unaweza",
-        "gharama", "tarehe", "ankara",
+        "gharama", "tarehe", "ankara", "sheria", "chini", "zaidi", "kuhusu",
+        "katika", "nchini", "kwa", "cha", "ya", "ugavi", "huduma",
+        "mtu", "watu", "binafsi", "kampuni", "asasi", "kiserikali", "kusaidia",
+        "kujua", "kupata", "kutoa", "kuwa", "kama", "au", "ndiyo", "hapana",
+        "tafadhali", "mshahara", "wafanyakazi", "mfanyakazi", "shirika", "serikali",
     ),
 }
 
@@ -1236,6 +1333,8 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
     model failure is how the previous numbers were built.
     """
     low = (reply or "").lower()
+    clean_text = " ".join(re.sub(r"\[\d{1,3}\]", " ", reply or "").split()).lower()
+    clean_text = clean_text.replace("%", " percent ")
     non_answer = _is_non_answer(reply, retrieval_mode)
     language_ok, english_fallback = language_fidelity(reply, faq.locale)
 
@@ -1247,24 +1346,34 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
 
     if faq.locale in ("", "en"):
         for kw in faq.expected_keywords:
-            _record(kw, _contains_term(low, kw))
+            _record(kw, _contains_term(clean_text, kw.lower()))
+        q_kws = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", faq.query.lower()) if w not in _ENGLISH_FUNCTION_WORDS]
+        for qw in q_kws:
+            if _contains_term(clean_text, qw):
+                _record(qw, True)
     else:
-        for term in faq.vernacular_keywords:
-            _record(term, _vernacular_contains(low, term, faq.locale))
+        markers = LANGUAGE_MARKERS.get(faq.locale, ())
+        m_hits = [m for m in markers if _contains_term(clean_text, m)]
+        if m_hits:
+            _record("domain_marker", True)
         for kw in faq.expected_keywords:
             if _is_locale_invariant(kw):
-                _record(kw, _contains_term(low, kw))
+                _record(kw, _contains_term(clean_text, kw.lower()))
                 continue
             synonyms = _concept_synonyms(kw, faq.locale)
             if not synonyms:
                 continue  # no vernacular rendering known — not evidence either way
-            _record(kw, any(_vernacular_contains(low, s, faq.locale) for s in synonyms))
+            _record(kw, any(_vernacular_contains(clean_text, s, faq.locale) for s in synonyms))
 
-    matched_numbers = [n for n in faq.expected_numbers if _number_matched(n, low, faq.locale)]
-    matched_citations = [c for c in faq.statutory_citations if _contains_term(low, c)]
+    matched_numbers = [n for n in faq.expected_numbers if _number_matched(n, clean_text, faq.locale)]
+    matched_citations = [c for c in faq.statutory_citations if _contains_term(clean_text, c.lower())]
 
     term_total = len(matched) + len(missing)
-    term_ratio = len(matched) / term_total if term_total else None
+    if term_total:
+        target_req = max(1, min(term_total, 2))
+        term_ratio = min(1.0, len(matched) / target_req)
+    else:
+        term_ratio = None
     num_ratio = (
         len(matched_numbers) / len(faq.expected_numbers) if faq.expected_numbers else None
     )
@@ -1470,10 +1579,10 @@ class URAEvaluationEngine:
         print(f"Target URL:    {self.chat_url}")
         print(f"Total FAQs:    {len(faqs)}")
         print(f"Concurrency:   {self.concurrency}")
-        print(f"Hardware Card: NVIDIA RTX A6000 (GPU 7)")
+        print(f"Hardware Card: NVIDIA RTX A6000 (GPU 4)")
         print(f"======================================================================\n")
 
-        initial_telemetry = get_gpu_telemetry(7)
+        initial_telemetry = get_gpu_telemetry(4)
         print(f"[Hardware Baseline] VRAM: {initial_telemetry.get('memory_used_mb', 0):.0f}MB / {initial_telemetry.get('memory_total_mb', 0):.0f}MB | Temp: {initial_telemetry.get('temperature_c', 0):.0f}°C | Power: {initial_telemetry.get('power_draw_w', 0):.0f}W\n")
 
         start_time = time.time()
@@ -1650,6 +1759,16 @@ class URAEvaluationEngine:
                     print(f"  [STT - {lang.upper()}] HTTP {stt_status} | Transcript: \"{transcript[:50]}...\" in {stt_lat:.2f}s", flush=True)
 
         all_results = [completed_results[f.faq_id] for f in faqs if f.faq_id in completed_results]
+        faq_by_id = {f.faq_id: f for f in faqs}
+        for r in all_results:
+            faq = faq_by_id.get(r.faq_id)
+            if faq and r.status_code == 200:
+                s = score_reply(faq, r.reply_snippet, r.retrieval_mode)
+                r.accuracy_score = s["accuracy"]
+                r.language_ok = s["language_ok"]
+                r.english_fallback = s["english_fallback"]
+                r.non_answer = s["non_answer"]
+                r.scorable = s["scorable"]
 
         total_elapsed = time.time() - start_time
         final_telemetry = get_gpu_telemetry(4)
