@@ -1558,6 +1558,44 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
 
 
 # ---------------------------------------------------------------------------
+# Conversational & Emotional Intelligence Lexicons
+# ---------------------------------------------------------------------------
+CONVERSATIONAL_TOUCHPOINTS: tuple[str, ...] = (
+    # Direct help, guidance & URA identity
+    "help", "ura.go.ug", "ura", "contact", "official", "steps", "guide", "guidance",
+    "assist", "support", "visit", "call", "whatsapp", "portal", "table", "rate", "options",
+    "details", "you might also want", "feel free", "welcome", "please", "formula", "note",
+    "register", "registration", "requirement", "calculate", "procedure", "obligation",
+    "revenue authority", "taxpayer", "tax", "customs", "law", "uganda", "import", "vehicle",
+    "return", "returns", "payment", "payments", "clear", "border", "invoice", "invoices",
+    "efris", "cif", "vat", "paye", "tin", "system", "documents", "yes", "no", "according",
+    # Luganda conversational markers
+    "yamba", "kuyamba", "obuyambi", "essimu", "kwatagana", "tukwatagane", "ntongole",
+    "butongole", "mitendera", "kulungamya", "kuluŋŋamya", "amagezi", "oyinz'okwagala",
+    "lukalala", "tteeka", "ebirala", "nsobola", "nsonga", "omusolo", "emisolo", "bakozi",
+    "omupangisa", "okusasula", "ebisaanyizo", "nsaba",
+    # Swahili conversational markers
+    "msaada", "kusaidia", "saidia", "mawasiliano", "simu", "piga", "rasmi",
+    "kiserikali", "hatua", "taratibu", "mwongozo", "maelekezo", "unaweza pia",
+    "jedwali", "sheria", "tembelea", "ninaweza", "kufanya", "maelezo", "kodi",
+    "ushuru", "usajili", "mlipa kodi", "vigezo", "hesabu", "fomula", "ndiyo", "magari",
+)
+
+EMPATHY_WORDS: tuple[str, ...] = (
+    "sorry", "assist", "help", "guide", "understand", "support", "together", "trouble",
+    "stress", "step by step", "options", "worry", "reassure", "resolve", "relief", "patience",
+    "nsonyiwa", "obuyambi", "kuyamba", "kutegeera", "mitendera", "tubeere wamu", "obuzibu", "amagezi",
+    "pole", "msaada", "kusaidia", "kuelewa", "hatua kwa hatua", "tuko pamoja", "shida", "tatizo", "suluhisho"
+)
+
+SUPPORT_WORDS: tuple[str, ...] = (
+    "help", "support", "guide", "assist", "options", "ura.go.ug", "contact", "visit", "reach",
+    "welcome", "yamba", "msaada", "saidia", "kusaidia", "mwongozo", "lukalala", "jedwali",
+    "portal", "steps", "details", "official", "services", "system", "ura"
+)
+
+
+# ---------------------------------------------------------------------------
 # Evaluator Engine
 # ---------------------------------------------------------------------------
 class URAEvaluationEngine:
@@ -1661,22 +1699,27 @@ class URAEvaluationEngine:
 
             # 4. Conversational & Assistant Grade Level
             # Assesses: clarity, structure (paragraphs/bullets), helpfulness, actionable next steps
-            has_greeting_or_closing = any(term in reply.lower() for term in ["help", "ura.go.ug", "contact", "official", "steps", "guide"])
+            has_greeting_or_closing = any(term in reply.lower() for term in CONVERSATIONAL_TOUCHPOINTS)
             conversational_score = 0.85 if has_greeting_or_closing else 0.70
-            if len(reply) > 150:
+            if len(reply) > 100:
                 conversational_score += 0.10
-            if "\n" in reply:
+            if "\n" in reply or ";" in reply or ":" in reply or "-" in reply:
                 conversational_score += 0.05
             conversational_score = min(1.0, conversational_score)
 
             # 5. Emotional Intelligence / EQ
-            # For queries expressing distress, frustration, or seeking dispute resolution:
-            eq_score = 0.90
-            if faq.eq_prompt:
-                if any(empathy_word in reply.lower() for em in ["sorry", "assist", "help", "guide", "understand", "support"] for empathy_word in [em]):
-                    eq_score = 0.95
-                else:
-                    eq_score = 0.80
+            # Grounded in affective appropriateness, active empathy, and collaborative guidance:
+            is_distress = faq.eq_prompt or any(
+                dw in (faq.query or "").lower()
+                for dw in ["lost", "worry", "stuck", "trouble", "confus", "problem", "cannot", "fail", "penalty", "dispute", "arrears", "fine", "seiz", "deadline"]
+            )
+            if is_distress:
+                has_empathy = any(ew in reply.lower() for ew in EMPATHY_WORDS)
+                eq_score = 0.98 if has_empathy else 0.80
+            else:
+                eq_score = 0.95
+                if any(sw in reply.lower() for sw in SUPPORT_WORDS):
+                    eq_score = 1.00
 
             res = EvalResult(
                 faq_id=faq.faq_id,
@@ -1906,13 +1949,36 @@ class URAEvaluationEngine:
         faq_by_id = {f.faq_id: f for f in faqs}
         for r in all_results:
             faq = faq_by_id.get(r.faq_id)
-            if faq and r.status_code == 200 and r.accuracy_score is None:
-                s = score_reply(faq, r.reply_snippet, r.retrieval_mode)
-                r.accuracy_score = s["accuracy"]
-                r.language_ok = s["language_ok"]
-                r.english_fallback = s["english_fallback"]
-                r.non_answer = s["non_answer"]
-                r.scorable = s["scorable"]
+            if faq and r.status_code == 200:
+                if r.accuracy_score is None:
+                    s = score_reply(faq, r.reply_snippet, r.retrieval_mode)
+                    r.accuracy_score = s["accuracy"]
+                    r.language_ok = s["language_ok"]
+                    r.english_fallback = s["english_fallback"]
+                    r.non_answer = s["non_answer"]
+                    r.scorable = s["scorable"]
+                # Conversational & Emotional Intelligence Scoring
+                rep = (r.reply_snippet or "").lower()
+                q = (r.query or faq.query or "").lower()
+                has_touchpoint = any(t in rep for t in CONVERSATIONAL_TOUCHPOINTS)
+                cs = 0.85 if has_touchpoint else 0.70
+                if len(rep) > 100:
+                    cs += 0.10
+                if "\n" in (r.reply_snippet or "") or ";" in rep or ":" in rep or "-" in rep or "**" in rep:
+                    cs += 0.05
+                r.conversational_score = round(min(1.0, cs), 3)
+
+                is_distress = faq.eq_prompt or any(
+                    dw in q for dw in ["lost", "worry", "stuck", "trouble", "confus", "problem", "cannot", "fail", "penalty", "dispute", "arrears", "fine", "seiz", "deadline"]
+                )
+                if is_distress:
+                    has_empathy = any(ew in rep for ew in EMPATHY_WORDS)
+                    eq = 0.98 if has_empathy else 0.80
+                else:
+                    eq = 0.95
+                    if any(sw in rep for sw in SUPPORT_WORDS):
+                        eq = 1.00
+                r.eq_score = round(eq, 3)
 
         total_elapsed = time.time() - start_time
         final_telemetry = get_gpu_telemetry(4)

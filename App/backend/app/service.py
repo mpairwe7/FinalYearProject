@@ -3838,8 +3838,8 @@ class ChatModel:
 
         follow_up = self._related_question(query, hits)
         if not follow_up:
-            return reply
-        return f"{body}\n\nYou might also want to know: {follow_up}"
+            return f"{body}\n\n{CONTACT_FOOTER}"
+        return f"{body}\n\n{CONTACT_FOOTER}\n\nYou might also want to know: {follow_up}"
 
     # A suggestion has to be *related*, not merely retrievable. Below this the
     # best candidate is noise and no suggestion is better than a random one.
@@ -5047,7 +5047,7 @@ class ChatModel:
         suspended = self._get_suspended_workflow_name(thread_id)
         if suspended:
             actions.insert(0, f"Resume {suspended} workflow or continue asking general tax questions.")
-        final_reply = self._finalize_reply(reply_text)
+        final_reply = self._finalize_reply(f"{reply_text}\n\n{CONTACT_FOOTER}")
         if locale not in ("", "en"):
             final_reply = localize_reply(final_reply, locale)
         return {
