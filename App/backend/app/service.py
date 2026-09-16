@@ -4385,10 +4385,10 @@ class ChatModel:
 
         if claim_report:
             claim_decision = str(claim_report.get("decision", "approve"))
-            if claim_decision == "escalate":
+            if claim_report.get("contradicted_claims"):
                 decision = "escalate"
-                reasons.append("claim verification found unsupported factual claims")
-            elif claim_decision == "revise" and decision != "escalate":
+                reasons.append("claim verification found contradicted factual claims")
+            elif claim_decision in ("escalate", "revise") and decision != "escalate":
                 if claim_report.get("unsupported_claims"):
                     decision = "revise"
                     reasons.append("claim verification found weakly supported factual claims")

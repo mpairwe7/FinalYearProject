@@ -35,7 +35,7 @@ STOPWORDS: frozenset[str] = frozenset(
 )
 
 _WORD_RE = re.compile(r"\w+")
-_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+")
+_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+|\n+")
 
 # The three official URA hotline numbers are the only digit sequences a
 # courtesy sentence may contain (contact footers quote them verbatim).

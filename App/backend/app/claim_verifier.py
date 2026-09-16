@@ -16,7 +16,7 @@ from .entailment import canonical_amounts, is_contradicted, percentages
 from .text_signals import is_courtesy_sentence
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
-_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|$)")
+_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|(?=\n)|$)")
 _WORD_RE = re.compile(r"[a-zA-Z0-9]+")
 _MIN_SUPPORT = float(os.getenv("CLAIM_VERIFIER_MIN_SUPPORT", "0.32"))
 _STOPWORDS = {
@@ -132,7 +132,7 @@ def _split_claims(reply: str) -> list[str]:
     for raw in _SENTENCE_RE.findall(text):
         sentence = " ".join(raw.strip(" -\t\r\n").split())
         sentence = sentence.replace("<decimal_point>", ".")
-        if len(sentence) < 18:
+        if len(sentence) < 10:
             continue
         lowered = sentence.lower()
         if any(hint in lowered for hint in _NON_CLAIM_HINTS):
@@ -213,6 +213,16 @@ def verify_claims(
         context_tokens = _tokens(context_text)
         overlap = len(claim_tokens & context_tokens) / max(1, len(claim_tokens))
 
+        # If overlap is below threshold against the specifically cited passage,
+        # verify if the claim is supported across any of the other retrieved hits
+        if overlap < threshold and hits:
+            all_contexts = [str(h.get("text") or h.get("answer") or "") for h in hits]
+            all_tokens = _tokens(" ".join(all_contexts))
+            all_overlap = len(claim_tokens & all_tokens) / max(1, len(claim_tokens))
+            if all_overlap >= threshold:
+                overlap = all_overlap
+                contexts = all_contexts
+
         # Cross-lingual claim support: when the reply is generated in a local
         # language (e.g. Swahili or Luganda) against English retrieved context passages,
         # lexical token overlap is naturally suppressed across languages.
@@ -266,8 +276,6 @@ def verify_claims(
 
     if report["contradicted_claims"]:
         report["decision"] = "escalate"
-    elif report["unsupported_claims"]:
-        report["decision"] = "escalate" if report["score"] < 0.5 else "revise"
-    elif report["uncited_claims"]:
+    elif report["unsupported_claims"] or report["uncited_claims"]:
         report["decision"] = "revise"
     return report
