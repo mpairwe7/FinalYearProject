@@ -57,6 +57,10 @@ _DISPLAY_NAMES: dict[str, str] = {
     "presumptive_tax_upper_threshold": "Presumptive tax threshold (upper turnover bound, annual)",
     "penal_tax_late_filing_monthly_rate": "Penal tax for late filing (monthly rate)",
     "penal_tax_late_filing_minimum_ugx": "Penal tax for late filing (minimum amount)",
+    "stamp_duty_property_transfer": "Stamp duty on transfer of property",
+    "objection_timeline_days": "Objection notice statutory timeline (days)",
+    "paye_due_date_monthly": "PAYE monthly filing due date (day of month)",
+    "passenger_baggage_allowance_usd": "Passenger baggage duty-free allowance (USD)",
 }
 
 #: Keys that are money thresholds rather than rates — reporting these as
@@ -68,6 +72,9 @@ _AMOUNT_KEYS = frozenset(
         "presumptive_tax_lower_threshold",
         "presumptive_tax_upper_threshold",
         "penal_tax_late_filing_minimum_ugx",
+        "objection_timeline_days",
+        "paye_due_date_monthly",
+        "passenger_baggage_allowance_usd",
     }
 )
 

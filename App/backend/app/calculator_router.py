@@ -664,9 +664,9 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia)\b[^?]*\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|kiwango|viwango|omuwendo|ekkomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa)\b"
-    r"|\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|kiwango|viwango|omuwendo|ekkomo|adhabu|okubonerezebwa)\s+(of|for|kya|cha|ku|kwa|kye|gwa)\b"
-    r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente)\b"
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
+    r"|\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
+    r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b",
     re.IGNORECASE,
 )
@@ -708,8 +708,8 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="vat_registration_threshold_annual"),
         re.compile(
-            r"\bv\.?a\.?t\.?\b[^?]{0,40}\b(registration|register|threshold|okwewandiisa|usajili|ekkomo|kiwango)\b"
-            r"|\b(registration|register|threshold|okwewandiisa|usajili|ekkomo|kiwango)\b[^?]{0,40}\bv\.?a\.?t\.?\b",
+            r"\bv\.?a\.?t\.?\b[^?]{0,50}\b(registration|register|threshold|okwewandiisa|usajili|ekkomo|bizinensi)\b"
+            r"|\b(registration|register|threshold|okwewandiisa|usajili|ekkomo)\b[^?]{0,50}\bv\.?a\.?t\.?\b",
             re.IGNORECASE,
         ),
     ),
@@ -737,7 +737,39 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
             re.IGNORECASE,
         ),
     ),
-    (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht|zuio)\b", re.IGNORECASE)),
+    (
+        RatePlan(tax_type="stamp_duty_property_transfer"),
+        re.compile(
+            r"\b(stamp\s*duty|stempu|stampu)\b[^?]{0,50}\b(transfer|property|land|ettaka|ardhi|ekyapa|kikyusa)\b"
+            r"|\b(transfer|property|land|ettaka|ardhi|ekyapa|kikyusa)\b[^?]{0,50}\b(stamp\s*duty|stempu|stampu)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="objection_timeline_days"),
+        re.compile(
+            r"\b(objection|pingamizi|kwekubira\s+ebyondo|appeal)\b[^?]{0,60}\b(days?|siku|nnaku|time|period|deadline)\b"
+            r"|\b(days?|siku|nnaku|time|period|deadline)\b[^?]{0,60}\b(objection|pingamizi|kwekubira\s+ebyondo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="paye_due_date_monthly"),
+        re.compile(
+            r"\b(paye|pay\s+as\s+you\s+earn)\b[^?]{0,60}\b(due\s+date|deadline|when|schedule|ebiseera|mwisho|tarehe|ddi|lini)\b"
+            r"|\b(due\s+date|deadline|when|schedule|ebiseera|mwisho|tarehe|ddi|lini)\b[^?]{0,60}\b(paye|pay\s+as\s+you\s+earn)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="passenger_baggage_allowance"),
+        re.compile(
+            r"\b(baggage|passenger|abagenyi|abasaabaze|abiria|mizigo)\b[^?]{0,60}\b(allowance|duty[-\s]?free|bitasasulwako|isiyotozwa)\b"
+            r"|\b(allowance|duty[-\s]?free|bitasasulwako|isiyotozwa)\b[^?]{0,60}\b(baggage|passenger|abagenyi|abasaabaze|abiria|mizigo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht|zuio|dividends?|migabo|interest|riba|magoba)\b", re.IGNORECASE)),
     (
         RatePlan(tax_type="rental_tax_company"),
         re.compile(
@@ -762,14 +794,15 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
 
 _WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("withholding_management_fees", re.compile(r"\bmanagement\s+fees?\b", re.IGNORECASE)),
-    ("withholding_dividend", re.compile(r"\bdividends?\b", re.IGNORECASE)),
+    ("withholding_dividend", re.compile(r"\b(dividends?|migabo)\b", re.IGNORECASE)),
+    ("withholding_foreign_interest", re.compile(r"\b(foreign\s+interest|interest\s+earned|bank\s+deposits?|magoba\s+ga\s+bbanka|riba)\b", re.IGNORECASE)),
     ("withholding_royalty", re.compile(r"\broyalt(?:y|ies)\b", re.IGNORECASE)),
     (
         "withholding_public_entertainer",
         re.compile(r"\b(public\s+)?entertainer\w*|\bartiste?s?\b|\bperformer\w*", re.IGNORECASE),
     ),
-    ("withholding_betting_winnings", re.compile(r"\b(betting|gaming|gambl\w+)\b", re.IGNORECASE)),
-    ("withholding_services", re.compile(r"\bservices?\b", re.IGNORECASE)),
+    ("withholding_betting_winnings", re.compile(r"\b(betting|gaming|gambl\w+|michezo\s+ya\s+kubahatisha|okuteega|ezaala)\b", re.IGNORECASE)),
+    ("withholding_services", re.compile(r"\b(services?|professional\s+fees?|emirimu\s+egy'ekikugu|huduma\s+za\s+kitaalamu)\b", re.IGNORECASE)),
     ("withholding_goods", re.compile(r"\bgoods\b", re.IGNORECASE)),
 ]
 
@@ -958,6 +991,22 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "{pct} of the tax payable per month** (or part of a month) that the return "
             "remains unfiled, whichever is higher, under Section 49 of the Tax Procedures Code Act."
         ),
+        "stamp_duty_property_transfer": (
+            "**The stamp duty rate on transfer of property (land or buildings) is {pct}** ({fy}) "
+            "under the Stamp Duty Act."
+        ),
+        "objection_timeline_days": (
+            "**A taxpayer has 45 days to lodge an objection** against a tax assessment from the date of service "
+            "of the notice under Section 24 of the Tax Procedures Code Act ({fy})."
+        ),
+        "paye_due_date_monthly": (
+            "**PAYE returns and payments are due by the 15th day of each month** following the payroll period "
+            "under the Tax Procedures Code Act and Income Tax Act ({fy})."
+        ),
+        "passenger_baggage_allowance": (
+            "**The passenger baggage duty-free allowance is USD 500** for accompanying personal effects "
+            "under the East African Community Customs Management Act ({fy})."
+        ),
     }
     template = descriptions.get(plan.tax_type)
     rate = rates.get(plan.tax_type)
@@ -966,6 +1015,12 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             rate = rates.get("presumptive_tax_upper_threshold")
         elif plan.tax_type == "penal_tax_late_filing":
             rate = rates.get("penal_tax_late_filing_monthly_rate")
+        elif plan.tax_type == "objection_timeline_days":
+            rate = rates.get("objection_timeline_days", 45)
+        elif plan.tax_type == "paye_due_date_monthly":
+            rate = rates.get("paye_due_date_monthly", 15)
+        elif plan.tax_type == "passenger_baggage_allowance":
+            rate = rates.get("passenger_baggage_allowance_usd", 500)
     if template is None or rate is None:
         return "", []
     reply = template.format(

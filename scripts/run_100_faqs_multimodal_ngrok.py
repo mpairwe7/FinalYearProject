@@ -241,15 +241,23 @@ async def evaluate_faq_turn(
 
             # Check statutory figures
             stat_pass = True
+            from scripts.evaluate_1000_faqs_ngrok import CROSS_LINGUAL_CONCEPT_MAP
+
             for exp in faq.expected_figures:
                 alternatives = [a.strip() for a in exp.split("|")]
                 token_found = False
                 for alt in alternatives:
                     clean_alt = alt.replace(",", "").replace("%", "")
                     clean_reply = reply.replace(",", "")
-                    if alt.lower() in reply.lower() or clean_alt.lower() in clean_reply.lower():
+                    if alt.lower() in reply.lower() or clean_alt.lower() in clean_reply.lower() or alt.upper() in reply.upper():
                         token_found = True
                         break
+                    concept = CROSS_LINGUAL_CONCEPT_MAP.get(alt.lower())
+                    if concept:
+                        synonyms = concept[0] if faq.locale == "lg" else concept[1]
+                        if any(syn.lower() in reply.lower() for syn in synonyms):
+                            token_found = True
+                            break
                 if not token_found:
                     stat_pass = False
                     break

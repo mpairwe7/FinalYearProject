@@ -5113,7 +5113,7 @@ class ChatModel:
             pending_slot=turn.slot_name,
         )
         return {
-            "reply": f"Happy to help you get registered!\n\n{prompt}",
+            "reply": f"Happy to help you register for a TIN!\n\n{prompt}",
             "sources": [],
             "citations": [],
             "faithfulness_score": None,

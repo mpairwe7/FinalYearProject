@@ -79,7 +79,11 @@
     "presumptive_tax_lower_threshold": 10000000,
     "presumptive_tax_upper_threshold": 150000000,
     "penal_tax_late_filing_monthly_rate": 0.02,
-    "penal_tax_late_filing_minimum_ugx": 200000
+    "penal_tax_late_filing_minimum_ugx": 200000,
+    "stamp_duty_property_transfer": 0.01,
+    "objection_timeline_days": 45,
+    "paye_due_date_monthly": 15,
+    "passenger_baggage_allowance_usd": 500
   },
   "unverified": [
     "vat_registration_threshold_annual",
