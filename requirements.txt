@@ -38,7 +38,7 @@ evaluate==0.4.6
 # 3.4.1 caps transformers<5.0.0, so these four move together or not at all.
 # Changing transformers alone does not resolve.
 transformers==5.16.1
-accelerate==1.14.0
+accelerate==1.15.0
 torch>=2.13.0  # matches App/backend/requirements.txt's pin; <2.13 is flagged by SAST
 huggingface-hub==1.29.0
 sentencepiece==0.2.2

@@ -132,6 +132,9 @@ _DOMAIN_TOPICS: dict[str, tuple[str, ...]] = {
     "excise": (),
     "presumptive": (),
     "penal": (),
+    "stamp": (),
+    "objection": (),
+    "passenger": (),
 }
 
 
