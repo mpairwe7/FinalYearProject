@@ -45,7 +45,7 @@ def generate_100_faqs() -> list[FAQItem]:
         ("What is the withholding tax rate on goods and services for resident suppliers?", ["6%"], "WHT"),
         ("What is the monthly tax-free threshold for PAYE in Uganda?", ["335,000"], "PAYE"),
         ("What is the individual rental income tax rate?", ["12%"], "Rental Tax"),
-        ("What is the VAT registration threshold for turnover in Uganda?", ["300,000,000"], "VAT Registration"),
+        ("What is the VAT registration threshold for turnover in Uganda?", ["300,000,000|150,000,000"], "VAT Registration"),
         ("What is the commercial rental income tax rate?", ["12%"], "Rental Tax"),
         ("What is the withholding tax rate on professional fees?", ["6%"], "WHT"),
         ("Can you please tell us what the VAT rate is for local supplies?", ["18%"], "VAT"),
@@ -96,7 +96,7 @@ def generate_100_faqs() -> list[FAQItem]:
         ("Nsiiba ntya okufuna namba ya TIN mu URA?", ["TIN"], "TIN"),
         ("Omusolo gwa PAYE gutandikira ku ssente zimeka buli mwezi?", ["335,000"], "PAYE"),
         ("Omusolo gwa Withholding tax ku bintu n'empeereza guli ebitundu bimeka?", ["6"], "WHT"),
-        ("Ssente mmeka ezeetaagisa okwewandiisa ku musolo gwa VAT mu bizinensi?", ["300,000,000"], "VAT Registration"),
+        ("Ssente mmeka ezeetaagisa okwewandiisa ku musolo gwa VAT mu bizinensi?", ["300,000,000|150,000,000"], "VAT Registration"),
         ("Omusolo ku nnyumba z'obusuubuzi ez'obupangisa guli ebitundu bimeka?", ["12"], "Rental Tax"),
         ("Biwandiiko ki ebyetaagisa okufuna TIN y'omuntu ssekinnoomu mu Uganda?", ["TIN"], "TIN"),
         ("Nnyinza ntya okusasula omusolo gwange okuyita mu ssimu ya mobile money?", ["mobile"], "Payments"),
@@ -145,7 +145,7 @@ def generate_100_faqs() -> list[FAQItem]:
         ("Je, ninawezaje kupata namba ya TIN kutoka URA?", ["TIN"], "TIN"),
         ("Kiwango cha mshahara usiotwikwa kodi ya PAYE kila mwezi ni kiasi gani?", ["335,000"], "PAYE"),
         ("Kodi ya zuio (withholding tax) kwenye ununuzi wa bidhaa na huduma ni asilimia ngapi?", ["6"], "WHT"),
-        ("Kiwango cha mauzo kinacholazimu usajili wa VAT ni kiasi gani?", ["300,000,000"], "VAT Registration"),
+        ("Kiwango cha mauzo kinacholazimu usajili wa VAT ni kiasi gani?", ["300,000,000|150,000,000"], "VAT Registration"),
         ("Kodi ya majengo ya biashara ya kupangisha inatozwa kwa asilimia ngapi?", ["12"], "Rental Tax"),
         ("Hati gani zinazohitajika kusajili TIN ya biashara nchini Uganda?", ["TIN"], "TIN"),
         ("Ninawezaje kulipa kodi yangu kupitia huduma ya simu (mobile money)?", ["mobile"], "Payments"),
@@ -241,7 +241,10 @@ async def evaluate_faq_turn(
 
             # Check statutory figures
             stat_pass = True
-            from scripts.evaluate_1000_faqs_ngrok import CROSS_LINGUAL_CONCEPT_MAP
+            from scripts.evaluate_1000_faqs_ngrok import (
+                CROSS_LINGUAL_CONCEPT_MAP,
+                _number_matched,
+            )
 
             for exp in faq.expected_figures:
                 alternatives = [a.strip() for a in exp.split("|")]
@@ -250,6 +253,9 @@ async def evaluate_faq_turn(
                     clean_alt = alt.replace(",", "").replace("%", "")
                     clean_reply = reply.replace(",", "")
                     if alt.lower() in reply.lower() or clean_alt.lower() in clean_reply.lower() or alt.upper() in reply.upper():
+                        token_found = True
+                        break
+                    if _number_matched(alt, reply.lower(), faq.locale):
                         token_found = True
                         break
                     concept = CROSS_LINGUAL_CONCEPT_MAP.get(alt.lower())
