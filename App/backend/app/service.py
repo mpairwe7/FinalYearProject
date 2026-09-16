@@ -101,9 +101,11 @@ from .text_signals import (
     NO_HITS_REPLY,
     detect_comparison_jurisdiction,
     detect_foreign_jurisdiction,
+    detect_local_government_tax,
     detect_user_distress,
     empathy_ack,
     jurisdiction_scope_caveat,
+    local_government_tax_reply,
     out_of_jurisdiction_reply,
     is_courtesy_sentence,
     normalise_citation_markers,
@@ -4057,6 +4059,28 @@ class ChatModel:
         """Inject high-precision FAQ hits for common procedures that reranking can miss."""
         if not _TIN_REGISTRATION_QUERY_RE.search(query):
             if not _RETURN_FILING_QUERY_RE.search(query):
+                if not re.search(r"\b(presumptive|small\s+business)\b", query, re.IGNORECASE):
+                    return []
+                candidates: list[dict[str, str]] = []
+                for tag in ("taxes_on_small_businesses", "taxation_handbook_fy2025_26", "taxpayer_starter_pack"):
+                    for entry in self._faq_index.get(tag, []):
+                        text = f"{entry['question']} {entry['answer']}".lower()
+                        if "presumptive" in text or "small business" in text:
+                            enriched = dict(entry)
+                            enriched["tag"] = tag
+                            enriched["_overlap"] = "99"
+                            candidates.append(enriched)
+                if candidates:
+                    candidates.sort(
+                        key=lambda e: (
+                            "threshold" in e["question"].lower()
+                            or "what is a small business" in e["question"].lower()
+                            or "what tax applies to small businesses" in e["question"].lower(),
+                            len(e["answer"]),
+                        ),
+                        reverse=True,
+                    )
+                    return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
                 return []
             candidates: list[dict[str, str]] = []
             for tag in ("processes_systems", "taxpayer_starter_pack", "taxation_handbook_fy2025_26"):
@@ -4800,6 +4824,9 @@ class ChatModel:
             self._maybe_decline_out_of_jurisdiction(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
+            or self._maybe_handle_local_government_tax(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
             or self._maybe_handle_tin_clarification(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
@@ -4883,6 +4910,44 @@ class ChatModel:
                 "confidence_band": "high",
             },
             "next_actions": [],
+            "ticket_id": "",
+        }
+
+    def _maybe_handle_local_government_tax(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Answer queries about Local Service Tax / municipal taxes not administered by URA."""
+        if not (detect_local_government_tax(message) or detect_local_government_tax(rewritten)):
+            return None
+        return {
+            "reply": self._finalize_reply(local_government_tax_reply()),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": 1.0,
+            "retrieval_mode": "out_of_scope",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "tool_specialist",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["local government tax jurisdiction"],
+                "confidence_band": "high",
+            },
+            "next_actions": [
+                "Ask about taxes administered by URA",
+                "Ask about income tax or VAT",
+            ],
             "ticket_id": "",
         }
 

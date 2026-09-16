@@ -1336,23 +1336,50 @@ class HybridRetriever:
             self._query_vec_cache.popitem(last=False)
         return vector
 
-    def _rerank(self, query: str, candidates: list[dict[str, Any]]) -> None:
+    def _rerank(
+        self,
+        query: str,
+        candidates: list[dict[str, Any]],
+        english_query: str | None = None,
+    ) -> None:
         """Score *candidates* with the cross-encoder, in place.
 
         Passages are truncated for scoring only.  A cross-encoder is
         quadratic in sequence length and its own input window is far
         shorter than a full chunk, so feeding untruncated text costs
         latency to produce a score the model derived from the head of the
-        passage anyway.
+        passage anyway. When an English translation is supplied, dual-scores
+        and preserves the higher relevance across both representations.
         """
         pairs = [
             (query, (c.get("text") or c.get("answer") or c.get("question", ""))[:_RERANK_CHARS])
             for c in candidates
         ]
         scores = self._reranker.predict(pairs)
+        if english_query and english_query.casefold() != query.casefold():
+            en_pairs = [
+                (english_query, (c.get("text") or c.get("answer") or c.get("question", ""))[:_RERANK_CHARS])
+                for c in candidates
+            ]
+            en_scores = self._reranker.predict(en_pairs)
+            scores = [max(float(s), float(es)) for s, es in zip(scores, en_scores)]
+
         for i, s in enumerate(scores):
             candidates[i]["score_rerank"] = float(s)
             candidates[i]["score_norm"] = normalize_rerank_score(float(s))
+
+        # Stale-year penalty for rate/duty tables: if a chunk explicitly cites superseded
+        # years (e.g. 2020, 2021, 2022) and the query is not asking for that historical year,
+        # discount its score so modern guidance and current rate tables outrank it.
+        query_years = set(re.findall(r"\b(20[0-2][0-9])\b", query))
+        for c in candidates:
+            doc_src = str(c.get("source", "")).lower()
+            doc_txt = str(c.get("text", "")).lower()
+            if any(y in doc_src or f"rates {y}" in doc_txt or f"fy {y}" in doc_txt for y in ("2020", "2021", "2022")):
+                if not any(y in query_years for y in ("2020", "2021", "2022")):
+                    c["score_rerank"] = float(c.get("score_rerank", 0.0)) - 0.25
+                    c["score_norm"] = max(0.0, float(c.get("score_norm", 0.0)) - 0.15)
+
         candidates.sort(key=lambda x: x.get("score_rerank", 0.0), reverse=True)
 
     def search(
@@ -1363,6 +1390,7 @@ class HybridRetriever:
         filters: dict[str, Any] | None = None,
         *,
         subject: str | None = None,
+        locale: str | None = None,
     ) -> list[dict[str, Any]]:
         """Hybrid search with RRF fusion + optional cross-encoder rerank.
 
@@ -1535,7 +1563,10 @@ class HybridRetriever:
 
             # Cross-encoder reranking
             if self._reranker and candidates:
-                self._rerank(query, candidates)
+                from .query import english_retrieval_query
+
+                en_query = english_retrieval_query(query, locale) if locale and locale not in ("en", "") else None
+                self._rerank(query, candidates, english_query=en_query)
 
             self._circuit.record_success()
             self._ready = True  # ensure readiness restored on success
@@ -1587,6 +1618,7 @@ class HybridRetriever:
                     prefetch_limit=prefetch_limit,
                     filters=merged_filters or None,
                     subject=subject,
+                    locale=locale,
                 )
                 for sub in subqueries
             ]
@@ -1598,6 +1630,7 @@ class HybridRetriever:
                 prefetch_limit=prefetch_limit,
                 filters=merged_filters or None,
                 subject=subject,
+                locale=locale,
             )
         hits = apply_preference_boost(hits, plan["prefer"])
         return self._merge_translated_leg(

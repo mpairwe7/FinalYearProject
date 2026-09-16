@@ -52,12 +52,23 @@ _DISPLAY_NAMES: dict[str, str] = {
     "withholding_non_business_asset": "WHT on purchase of a non-business asset",
     "customs_duty_common": "Customs duty (common finished goods)",
     "environmental_levy_used_clothing": "Environmental levy (used clothing imports)",
+    "excise_duty_mobile_money_withdrawal": "Excise duty on mobile money cash withdrawals",
+    "presumptive_tax_lower_threshold": "Presumptive tax threshold (lower turnover bound, annual)",
+    "presumptive_tax_upper_threshold": "Presumptive tax threshold (upper turnover bound, annual)",
+    "penal_tax_late_filing_monthly_rate": "Penal tax for late filing (monthly rate)",
+    "penal_tax_late_filing_minimum_ugx": "Penal tax for late filing (minimum amount)",
 }
 
 #: Keys that are money thresholds rather than rates — reporting these as
 #: a percentage would turn UGX 300,000,000 into "30,000,000,000%".
 _AMOUNT_KEYS = frozenset(
-    {"vat_registration_threshold_annual", "rental_tax_individual_threshold"}
+    {
+        "vat_registration_threshold_annual",
+        "rental_tax_individual_threshold",
+        "presumptive_tax_lower_threshold",
+        "presumptive_tax_upper_threshold",
+        "penal_tax_late_filing_minimum_ugx",
+    }
 )
 
 #: MCP server that owns the rate lookups.

@@ -74,7 +74,12 @@
     "withholding_non_business_asset": 0.06,
     "customs_duty_common": 0.25,
     "environmental_levy_used_clothing": 0.3,
-    "nssf_employee_contribution": 0.05
+    "nssf_employee_contribution": 0.05,
+    "excise_duty_mobile_money_withdrawal": 0.005,
+    "presumptive_tax_lower_threshold": 10000000,
+    "presumptive_tax_upper_threshold": 150000000,
+    "penal_tax_late_filing_monthly_rate": 0.02,
+    "penal_tax_late_filing_minimum_ugx": 200000
   },
   "unverified": [
     "vat_registration_threshold_annual",
@@ -104,9 +109,17 @@
     "withholding_non_business_asset": "Income Tax (Amendment) Act 2026, s.13 inserting s.130(3); Schedule 4 Part X item 4",
     "customs_duty_common": "EAC Common External Tariff - finished goods band",
     "environmental_levy_used_clothing": "Excise Duty (Amendment) Act 2026 - worn clothing imports, share of CIF value",
-    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE."
+    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE.",
+    "excise_duty_mobile_money_withdrawal": "Excise Duty (Amendment) Act 2018, Schedule 2 Part II item 13(b) - 0.5% on cash withdrawals",
+    "presumptive_tax_lower_threshold": "Income Tax Act (Cap 338), s.4(5) and Second Schedule",
+    "presumptive_tax_upper_threshold": "Income Tax Act (Cap 338), s.4(5) and Second Schedule",
+    "penal_tax_late_filing_monthly_rate": "Tax Procedures Code Act (Cap 343), s.49(1)",
+    "penal_tax_late_filing_minimum_ugx": "Tax Procedures Code Act (Cap 343), s.49(1)"
   },
   "notes": {
+    "excise_duty_mobile_money_withdrawal": "Excise duty of 0.5% applies to cash withdrawals from mobile money. Transfers and deposits are not charged this 0.5% withdrawal duty.",
+    "presumptive_tax_upper_threshold": "Businesses with annual gross turnover between UGX 10,000,000 and UGX 150,000,000 qualify for the presumptive tax regime. Above UGX 150,000,000, standard corporate or individual income tax rules apply.",
+    "penal_tax_late_filing_monthly_rate": "Penal tax for failure to furnish a tax return by the due date is UGX 200,000 or 2% of the tax payable per month (or part of a month) that the return remains unfiled, whichever is greater.",
     "paye_bands_resident": "Schedule 4 Part I states ANNUAL chargeable income; these are the monthly equivalents (annual divided by 12). The Act's table is: nil up to UGX 4,020,000; 20% of the excess over 4,020,000 up to 4,920,000; UGX 180,000 plus 25% of the excess over 4,920,000 up to 5,820,000; UGX 405,000 plus 30% of the excess over 5,820,000 up to 120,000,000; above 120,000,000 the same plus an additional 10% of the excess over 120,000,000. The top band is expressed here as a single 40% marginal rate.",
     "paye_bands_non_resident": "The 2026 Act substitutes only Schedule 4 Part I, which by its terms applies to resident individuals. Part II (non-residents) is not amended, so the Cap 338 rates continue to apply.",
     "withholding_royalty": "The 2026 Act amends only the s.2 definition of 'royalty' (inserting 'software'); it does not change the rate. The 15% here is the pre-existing Cap 338 rate and has not been reconciled against s.83 directly.",

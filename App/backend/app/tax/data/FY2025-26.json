@@ -68,7 +68,12 @@
     "withholding_dividend": 0.15,
     "customs_duty_common": 0.25,
     "environmental_levy_used_clothing": 0.15,
-    "nssf_employee_contribution": 0.05
+    "nssf_employee_contribution": 0.05,
+    "excise_duty_mobile_money_withdrawal": 0.005,
+    "presumptive_tax_lower_threshold": 10000000,
+    "presumptive_tax_upper_threshold": 150000000,
+    "penal_tax_late_filing_monthly_rate": 0.02,
+    "penal_tax_late_filing_minimum_ugx": 200000
   },
   "legal_basis": {
     "vat_standard": "VAT Act (Cap 349), s.78 and Schedule 3",
@@ -85,7 +90,12 @@
     "withholding_dividend": "Income Tax Act (Cap 340), s.118",
     "customs_duty_common": "EAC Common External Tariff - finished goods band",
     "environmental_levy_used_clothing": "Environmental levy on worn clothing imports, share of CIF value",
-    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE."
+    "nssf_employee_contribution": "National Social Security Fund Act (Cap 230), s.11 - standard employee contribution. A social-security contribution, not a URA tax; it is not deductible before PAYE.",
+    "excise_duty_mobile_money_withdrawal": "Excise Duty (Amendment) Act 2018, Schedule 2 Part II item 13(b) - 0.5% on cash withdrawals",
+    "presumptive_tax_lower_threshold": "Income Tax Act (Cap 340), s.4(5) and Second Schedule",
+    "presumptive_tax_upper_threshold": "Income Tax Act (Cap 340), s.4(5) and Second Schedule",
+    "penal_tax_late_filing_monthly_rate": "Tax Procedures Code Act (Cap 343), s.49(1)",
+    "penal_tax_late_filing_minimum_ugx": "Tax Procedures Code Act (Cap 343), s.49(1)"
   },
   "notes": {
     "paye_bands_resident": "The top band is the 30% band plus the additional 10% charge on chargeable income above UGX 10,000,000 per month, expressed here as a single 40% marginal rate.",

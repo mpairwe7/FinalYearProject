@@ -664,8 +664,8 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia)\b[^?]*\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo|bitundu|asilimia|pay|charged|deducted|cut|take)\b"
-    r"|\b(rates?|thresholds?|bands?|kiwango|viwango|omuwendo|ekkomo)\s+(of|for|kya|cha|ku|kwa|kye|gwa)\b"
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia)\b[^?]*\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|kiwango|viwango|omuwendo|ekkomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa)\b"
+    r"|\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|kiwango|viwango|omuwendo|ekkomo|adhabu|okubonerezebwa)\s+(of|for|kya|cha|ku|kwa|kye|gwa)\b"
     r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b",
     re.IGNORECASE,
@@ -710,6 +710,30 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         re.compile(
             r"\bv\.?a\.?t\.?\b[^?]{0,40}\b(registration|register|threshold|okwewandiisa|usajili|ekkomo|kiwango)\b"
             r"|\b(registration|register|threshold|okwewandiisa|usajili|ekkomo|kiwango)\b[^?]{0,40}\bv\.?a\.?t\.?\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_mobile_money_withdrawal"),
+        re.compile(
+            r"\b(mobile\s*money|cash\s*withdrawal)\b[^?]{0,50}\b(excise|duty|rate|levy)\b"
+            r"|\b(excise|duty|rate|levy)\b[^?]{0,50}\b(mobile\s*money|cash\s*withdrawal)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="presumptive_tax_threshold"),
+        re.compile(
+            r"\b(presumptive|small\s+business)\b[^?]{0,50}\b(threshold|turnover|limit|bands?|ekkomo|kiwango)\b"
+            r"|\b(threshold|turnover|limit|bands?|ekkomo|kiwango)\b[^?]{0,50}\b(presumptive|small\s+business)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="penal_tax_late_filing"),
+        re.compile(
+            r"\b(penalt(?:y|ies)|fine|fines|adhabu|okubonerezebwa)\b[^?]{0,60}\b(late\s+filing|filing\s+late|late\s+return|failure\s+to\s+file|kuchelewa\s+kuwasilisha|obutawaayo|income\s+tax\s+return|tax\s+return)\b"
+            r"|\b(late\s+filing|filing\s+late|late\s+return|failure\s+to\s+file|kuchelewa\s+kuwasilisha|obutawaayo)\b[^?]{0,60}\b(penalt(?:y|ies)|fine|fines|adhabu|okubonerezebwa)\b",
             re.IGNORECASE,
         ),
     ),
@@ -761,7 +785,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     if not text or extract_amounts(text):
         return None
     short_ask = len(text.split()) <= 8 and re.search(
-        r"\b(rates?|thresholds?|bands?)\b", text, re.IGNORECASE
+        r"\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?)\b", text, re.IGNORECASE
     )
     if not (_RATE_ASK_RE.search(text) or short_ask):
         # A salary-threshold question names no tax and no "rate"/"threshold",
@@ -800,7 +824,10 @@ def rate_lookup_calendar_years(message: str) -> tuple[int, ...]:
 
 
 def _pct(rate: object) -> str:
-    return f"{float(rate) * 100:.0f}%"
+    val = float(rate) * 100
+    if val == int(val):
+        return f"{int(val)}%"
+    return f"{val:.1f}%"
 
 
 def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]:
@@ -915,9 +942,30 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "**The environmental levy on imported used clothing is {pct}** of the CIF "
             "value ({fy})."
         ),
+        "excise_duty_mobile_money_withdrawal": (
+            "**The excise duty rate on mobile money cash withdrawals is {pct}** ({fy}) "
+            "of the transaction value under the Excise Duty Act. Deposits and transfers "
+            "are not subject to this withdrawal levy."
+        ),
+        "presumptive_tax_threshold": (
+            "**The turnover threshold for small businesses using presumptive tax is between "
+            "{presumptive_min} and {presumptive_max}** annual gross turnover ({fy}). "
+            "Businesses below UGX 10,000,000 are exempt, while those with turnover exceeding "
+            "UGX 150,000,000 must file standard income tax returns."
+        ),
+        "penal_tax_late_filing": (
+            "**The penalty for late filing of a tax return is {late_min} or "
+            "{pct} of the tax payable per month** (or part of a month) that the return "
+            "remains unfiled, whichever is higher, under Section 49 of the Tax Procedures Code Act."
+        ),
     }
     template = descriptions.get(plan.tax_type)
     rate = rates.get(plan.tax_type)
+    if rate is None:
+        if plan.tax_type == "presumptive_tax_threshold":
+            rate = rates.get("presumptive_tax_upper_threshold")
+        elif plan.tax_type == "penal_tax_late_filing":
+            rate = rates.get("penal_tax_late_filing_monthly_rate")
     if template is None or rate is None:
         return "", []
     reply = template.format(
@@ -926,6 +974,9 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         threshold=f"UGX {float(rates.get('rental_tax_individual_threshold', 0)):,.0f}",
         threshold_vat=f"UGX {float(rates.get('vat_registration_threshold_annual', 0)):,.0f}",
         cap=_pct(rates.get("rental_company_expense_cap", 0)),
+        presumptive_min=f"UGX {float(rates.get('presumptive_tax_lower_threshold', 10000000)):,.0f}",
+        presumptive_max=f"UGX {float(rates.get('presumptive_tax_upper_threshold', 150000000)):,.0f}",
+        late_min=f"UGX {float(rates.get('penal_tax_late_filing_minimum_ugx', 200000)):,.0f}",
     )
     actions = NEXT_ACTIONS_BY_TOOL.get(
         {
@@ -937,6 +988,9 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "rental_tax_individual": "calculate_rental_tax",
             "rental_tax_company": "calculate_rental_tax",
             "vat_registration_threshold_annual": "check_vat_registration",
+            "excise_duty_mobile_money_withdrawal": "calculate_withholding",
+            "presumptive_tax_threshold": "calculate_corporation_tax",
+            "penal_tax_late_filing": "calculate_corporation_tax",
         }.get(plan.tax_type, "calculate_withholding"),
         [],
     )

@@ -60,7 +60,7 @@ import re
 import threading
 import time
 from contextlib import nullcontext
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from .agents.loop_control import ToolCallBudget
 from .agents.prompts import specialist_prompt
@@ -388,6 +388,43 @@ def extract_statutory_context(prepared: list[tuple[int, str]]) -> str:
     return "\n".join(lines)
 
 
+_FEW_SHOT_PROMPTS_BY_LOCALE: Final[dict[str, str]] = {
+    "en": (
+        "## Grounded reference examples\n"
+        "User question: What is the standard VAT rate in Uganda?\n"
+        "[1] Source: ura_vat_faqs.csv\n"
+        "<passage id=\"p1\">Standard rate of VAT in Uganda is 18% on taxable supplies under the Value Added Tax Act.</passage>\n"
+        "Answer: The standard Value Added Tax (VAT) rate in Uganda is 18% on taxable goods and services [1].\n\n"
+        "User question: What is the resident corporation tax rate?\n"
+        "[1] Source: ura_taxation_handbook.pdf\n"
+        "<passage id=\"p1\">The resident corporation income tax rate is 30% on taxable business profits.</passage>\n"
+        "Answer: The corporation tax rate for resident companies in Uganda is 30% on taxable profit [1]."
+    ),
+    "lg": (
+        "## Grounded reference examples (Luganda)\n"
+        "User question: Kiwalo ki eky'omusolo gwa VAT mu Uganda?\n"
+        "[1] Source: ura_vat_faqs.csv\n"
+        "<passage id=\"p1\">Standard rate of VAT in Uganda is 18% on taxable supplies under the Value Added Tax Act.</passage>\n"
+        "Answer: Omusolo gw'Okwongera ku Muwendo (VAT) mu Uganda gusasulwa ku kigero kya 18% ku bintu n'empeereza ebisasulwako omusolo [1].\n\n"
+        "User question: Omusolo gwa kampuni guli ebitundu bimeka?\n"
+        "[1] Source: ura_taxation_handbook.pdf\n"
+        "<passage id=\"p1\">The resident corporation income tax rate is 30% on taxable business profits.</passage>\n"
+        "Answer: Omusolo gw'amakampuni ag'omu ggwanga (Corporation Tax) guli ebitundu 30% ku magoba agasasulirwako omusolo [1]."
+    ),
+    "sw": (
+        "## Grounded reference examples (Swahili)\n"
+        "User question: Kiwango cha kodi ya ongezeko la thamani (VAT) nchini Uganda ni asilimia ngapi?\n"
+        "[1] Source: ura_vat_faqs.csv\n"
+        "<passage id=\"p1\">Standard rate of VAT in Uganda is 18% on taxable supplies under the Value Added Tax Act.</passage>\n"
+        "Answer: Kiwango cha kawaida cha kodi ya ongezeko la thamani (VAT) nchini Uganda ni 18% kwa bidhaa na huduma zinazotozwa kodi [1].\n\n"
+        "User question: Kodi ya mapato ya makampuni ni kiasi gani nchini Uganda?\n"
+        "[1] Source: ura_taxation_handbook.pdf\n"
+        "<passage id=\"p1\">The resident corporation income tax rate is 30% on taxable business profits.</passage>\n"
+        "Answer: Kiwango cha kodi ya mapato ya makampuni (Corporation Tax) kwa makampuni ya wakaazi ni 30% ya faida inayotozwa kodi [1]."
+    ),
+}
+
+
 def _build_messages(
     query: str,
     passages: list[dict[str, Any]],
@@ -507,6 +544,12 @@ def _build_messages(
     stat_params = extract_statutory_context(prepared_passages)
     if stat_params:
         parts.append(stat_params)
+        parts.append("")
+
+    loc = (locale or "en").strip().lower().split("-")[0]
+    few_shot = _FEW_SHOT_PROMPTS_BY_LOCALE.get(loc)
+    if few_shot:
+        parts.append(few_shot)
         parts.append("")
 
     # The answer language, stated every time rather than only when it is not
@@ -1134,9 +1177,41 @@ def classify_choice(reply: str, options: list[str]) -> str:
 # Each pair was checked by hand against this model before being used; an
 # exemplar that is itself a bad translation teaches the bad shape. Verify the
 # same way before adding a locale.
+# Few-shot exemplars for prompted MT, covering both directions for English, Luganda, and Swahili.
 _MT_ONESHOT: dict[str, tuple[str, str]] = {
     "lg": ("Ekitabo kino kya ani?", "Whose book is this?"),
     "sw": ("Kitabu hiki ni cha nani?", "Whose book is this?"),
+}
+
+_MT_FEWSHOT: dict[tuple[str, str], list[tuple[str, str]]] = {
+    ("en", "lg"): [
+        ("The standard VAT rate in Uganda is 18%.", "Kiwalo ky'omusolo gwa VAT mu Uganda kiri ebitundu 18%."),
+        ("Resident corporation tax is charged at 30%.", "Omusolo gw'amakampuni ag'omu ggwanga gusasulwa ku bitundu 30%."),
+        ("Individual rental income tax is 12%.", "Omusolo gw'obupangisa ku bantu ssekinnoomu guli ebitundu 12%."),
+        ("Withholding tax on goods and services is 6%.", "Omusolo ogukwatibwaako ku bintu n'empeereza guli ebitundu 6%."),
+        ("The monthly tax-free threshold for PAYE is UGX 335,000.", "Omusolo gwa PAYE ku musaala gutandikira ku ssente ezisukka UGX 335,000 buli mwezi."),
+    ],
+    ("en", "sw"): [
+        ("The standard VAT rate in Uganda is 18%.", "Kiwango cha kawaida cha kodi ya VAT nchini Uganda ni 18%."),
+        ("Resident corporation tax is charged at 30%.", "Kodi ya mapato ya makampuni ya wakaazi inatozwa kwa kiwango cha 30%."),
+        ("Individual rental income tax is 12%.", "Kodi ya mapato ya upangishaji kwa watu binafsi ni 12%."),
+        ("Withholding tax on goods and services is 6%.", "Kodi ya zuio (WHT) kwa bidhaa na huduma ni 6%."),
+        ("The monthly tax-free threshold for PAYE is UGX 335,000.", "Kiwango cha mshahara usiolipishwa kodi ya PAYE ni UGX 335,000 kwa mwezi."),
+    ],
+    ("lg", "en"): [
+        ("Ekitabo kino kya ani?", "Whose book is this?"),
+        ("Kiwalo ki eky'omusolo gwa VAT mu Uganda?", "What is the standard VAT rate in Uganda?"),
+        ("Omusolo gw'obupangisa bwa mayumba ku bantu ssekinnoomu guli ebitundu bimeka?", "What is the individual rental income tax rate?"),
+        ("Nteekwa kusasula musolo gwa kampuni ku bitundu bimeka mu Uganda?", "What is the corporation tax rate in Uganda?"),
+        ("Omusolo gwa PAYE gutandikira ku ssente zimeka buli mwezi?", "What is the monthly tax-free threshold for PAYE in Uganda?"),
+    ],
+    ("sw", "en"): [
+        ("Kitabu hiki ni cha nani?", "Whose book is this?"),
+        ("Kiwango cha kodi ya ongezeko la thamani (VAT) nchini Uganda ni asilimia ngapi?", "What is the standard VAT rate in Uganda?"),
+        ("Kiwango cha kodi ya mapato ya kodi ya majengo ya kupangisha ni asilimia ngapi?", "What is the rental income tax rate in Uganda?"),
+        ("Kiwango cha kodi ya mapato ya makampuni ni kiasi gani nchini Uganda?", "What is the corporation tax rate in Uganda?"),
+        ("Kiwango cha mshahara usiotwikwa kodi ya PAYE kila mwezi ni kiasi gani?", "What is the monthly tax-free threshold for PAYE in Uganda?"),
+    ],
 }
 
 
@@ -1210,9 +1285,12 @@ def translate_text(
     # instruction, which is where every pair was before this.
     from .glossary import get_translation_glossary_hints
 
-    oneshot = _MT_ONESHOT.get(source_lang) if target_lang == "en" else None
+    shots = _MT_FEWSHOT.get((source_lang, target_lang))
     example = ""
-    if oneshot:
+    if shots:
+        example = "\n\n" + "\n\n".join(f"{src_name}: {s}\n{lang_name}: {t}" for s, t in shots)
+    elif target_lang == "en" and source_lang in _MT_ONESHOT:
+        oneshot = _MT_ONESHOT[source_lang]
         example = f"\n\n{src_name}: {oneshot[0]}\n{lang_name}: {oneshot[1]}"
     constraint_note = (
         " Keep all statutory tax acronyms (such as VAT, TIN, EFRIS, DTS, PAYE, WHT, URA, TCC, EACCMA) verbatim. "

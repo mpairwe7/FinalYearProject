@@ -575,3 +575,39 @@ class VatRegistrationScopeTests(unittest.TestCase):
                 plan = plan_calculation(message)
                 self.assertIsNotNone(plan, message)
                 self.assertEqual(plan.tool, "check_vat_registration")
+
+
+class NewRateLookupsTests(unittest.TestCase):
+    def test_mobile_money_cash_withdrawal_excise_lookup(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        plan = plan_rate_lookup("What is the excise duty rate on mobile money cash withdrawals?")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tax_type, "excise_duty_mobile_money_withdrawal")
+        reply, _actions = format_rate_reply(plan, get_table())
+        self.assertIn("0.5%", reply)
+        self.assertIn("Excise Duty Act", reply)
+
+    def test_penal_tax_late_filing_lookup(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        plan = plan_rate_lookup("What is the penalty for late filing of an income tax return?")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tax_type, "penal_tax_late_filing")
+        reply, _actions = format_rate_reply(plan, get_table())
+        self.assertIn("UGX 200,000", reply)
+        self.assertIn("2%", reply)
+        self.assertIn("Tax Procedures Code Act", reply)
+
+    def test_presumptive_tax_threshold_lookup(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        plan = plan_rate_lookup("What is the turnover threshold for small businesses using presumptive tax?")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tax_type, "presumptive_tax_threshold")
+        reply, _actions = format_rate_reply(plan, get_table())
+        self.assertIn("150,000,000", reply)
+        self.assertIn("10,000,000", reply)

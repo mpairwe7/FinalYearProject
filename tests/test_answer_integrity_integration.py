@@ -368,3 +368,51 @@ class TestTaxpayerEscalationEndpoint:
             assert ticket["priority"] == "normal"
         finally:
             flags.clear("ticket_queue")
+
+
+class TestStatutoryGapFixes:
+    def test_excise_duty_mobile_money_withdrawal_answers_from_rate_table(self, client):
+        res = client.post(
+            "/v1/chat",
+            json={"message": "What is the excise duty rate on mobile money cash withdrawals?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["retrieval_mode"] == "calculator"
+        assert "0.5%" in body["reply"]
+        assert "Excise Duty Act" in body["reply"]
+
+    def test_late_filing_penalty_answers_from_rate_table(self, client):
+        res = client.post(
+            "/v1/chat",
+            json={"message": "What is the penalty for late filing of an income tax return?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["retrieval_mode"] == "calculator"
+        assert "200,000" in body["reply"]
+        assert "2%" in body["reply"]
+        assert "Tax Procedures Code Act" in body["reply"]
+
+    def test_presumptive_tax_threshold_answers_from_rate_table(self, client):
+        res = client.post(
+            "/v1/chat",
+            json={"message": "What is the turnover threshold for small businesses using presumptive tax?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["retrieval_mode"] == "calculator"
+        assert "150,000,000" in body["reply"]
+        assert "10,000,000" in body["reply"]
+
+    def test_local_service_tax_answers_out_of_scope_clearly(self, client):
+        res = client.post(
+            "/v1/chat",
+            json={"message": "What is the local service tax policy for municipal authorities?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["retrieval_mode"] == "out_of_scope"
+        assert "Local Service Tax" in body["reply"]
+        assert "Local Governments (Amendment) Act 2008" in body["reply"]
+        assert "URA does not assess, collect, or enforce" in body["reply"]

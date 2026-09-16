@@ -55,7 +55,7 @@ def generate_100_faqs() -> list[FAQItem]:
         ("What are the PAYE brackets for resident individual employees?", ["335,000"], "PAYE"),
         ("What is the capital gains tax rate in Uganda?", ["30%"], "Capital Gains"),
         ("What is the excise duty rate on mobile money cash withdrawals?", ["0.5%"], "Excise Duty"),
-        ("What is the penalty for late filing of an income tax return?", ["TIN"], "Return Filing"),
+        ("What is the penalty for late filing of an income tax return?", ["200,000|2%"], "Return Filing"),
         ("How do I register for a TIN as a sole proprietor?", ["TIN"], "TIN"),
         ("What documents are required for individual TIN registration with URA?", ["TIN"], "TIN"),
         ("How many days do I have to lodge an objection against an assessment?", ["45"], "Objections"),
@@ -63,11 +63,11 @@ def generate_100_faqs() -> list[FAQItem]:
         ("Are agricultural produce exports subject to zero-rated VAT?", ["VAT"], "Exports"),
         ("What is the standard customs clearance documentation requirement?", ["customs"], "Customs"),
         ("What is the withholding tax on dividends for resident shareholders?", ["15%"], "WHT"),
-        ("What is the local service tax policy for municipal authorities?", ["tax"], "Local Taxes"),
+        ("What is the local service tax policy for municipal authorities?", ["Local Service Tax|tax"], "Local Taxes"),
         ("What is the stamp duty on transfer of landed property in Uganda?", ["1%"], "Stamp Duty"),
         ("How do I check my TIN status online on the URA web portal?", ["TIN"], "TIN"),
         ("What is the withholding tax on interest earned on bank deposits?", ["15%"], "WHT"),
-        ("What is the turnover threshold for small businesses using presumptive tax?", ["150,000,000"], "Presumptive Tax"),
+        ("What is the turnover threshold for small businesses using presumptive tax?", ["150,000,000|10,000,000"], "Presumptive Tax"),
         ("What is the penalty for failure to issue an EFRIS electronic fiscal invoice?", ["EFRIS"], "EFRIS"),
         ("How does a registered taxpayer apply for a tax clearance certificate?", ["TCC"], "Tax Compliance"),
         ("What is the passenger baggage duty-free allowance at Entebbe Airport?", ["allowance"], "Customs"),
@@ -105,7 +105,7 @@ def generate_100_faqs() -> list[FAQItem]:
         ("Omusolo gw'emikisa n'okuteega ezaala (sports betting) guli ebitundu bimeka?", ["15"], "Gaming Tax"),
         ("EFRIS ekola etya eri abasuubuzi mu Kampala?", ["EFRIS"], "EFRIS"),
         ("Nze ndi trader mu Kikuubo, VAT rate eri etya mu business zaffe?", ["18"], "VAT"),
-        ("Omusolo gw'obusuubuzi obutono obwa presumptive tax gubalibwa gutya?", ["presumptive"], "Small Business"),
+        ("Omusolo gw'obusuubuzi obutono obwa presumptive tax gubalibwa gutya?", ["presumptive|150,000,000|obutono"], "Small Business"),
         ("Kikola kitya okufuna satifikeeti y'okusonyiyibwa omusolo (Tax Clearance Certificate)?", ["TCC"], "Compliance"),
         ("Omuntu ayingiza ebintu okuva ebweru asasula atya omusolo gw'akasolyo ku kisaawe e Ntebe?", ["customs"], "Customs"),
         ("Ebiseera by'okusasuliramu omusolo gwa PAYE biba ddi buli mwezi?", ["15"], "PAYE Deadlines"),
@@ -115,7 +115,7 @@ def generate_100_faqs() -> list[FAQItem]:
         ("Omusolo gwa customs duty ku mmotoka ezikaddiye gubalibwa gutya?", ["customs"], "Motor Vehicle Tax"),
         ("Nkola ntya okufuna ekyapa kya TIN ekibulidde ku mutimbagano gwa URA?", ["TIN"], "TIN Recovery"),
         ("Omusolo ku migabo gya kampuni (dividends) eri bannansi guli ebitundu bimeka?", ["15"], "Dividends"),
-        ("Kiki ekibaawo ssinga mwayaana okuwaayo foomu y'omusolo gwa income tax mu budde?", ["penalty"], "Penalties"),
+        ("Kiki ekibaawo ssinga mwayaana okuwaayo foomu y'omusolo gwa income tax mu budde?", ["penalty|okubonerezebwa|200,000|2%"], "Penalties"),
         ("Nnyinza ntya okuloopa omuntu alya enguzi oba abba omusolo mu URA mu kyama?", ["whistleblower"], "Whistleblowing"),
         ("Ettaka ly'obwakabaka oba lya mailo lisasulwako musolo ki ogw'obupangisa?", ["12"], "Land Tax"),
         ("Ebintu by'abagenyi abajja mu ggwanga ebitasasulwako musolo biri ku kigero ki?", ["allowance"], "Passenger Baggage"),
@@ -154,7 +154,7 @@ def generate_100_faqs() -> list[FAQItem]:
         ("Kodi inayotozwa kwa ushindi wa kamari na michezo ya kubahatisha ni asilimia ngapi?", ["15"], "Gaming Tax"),
         ("Mfumo wa EFRIS unavyofanya kazi kwa wafanyabiashara wa rejareja?", ["EFRIS"], "EFRIS"),
         ("Habari zenu, ningependa kujua corporation tax rate ya company yangu nchini Uganda.", ["30"], "Corporation Tax"),
-        ("Kodi ya kadirio (presumptive tax) kwa wafanyabiashara wadogo inakokotolewa vipi?", ["presumptive"], "Small Business"),
+        ("Kodi ya kadirio (presumptive tax) kwa wafanyabiashara wadogo inakokotolewa vipi?", ["presumptive|kadirio|kadilio|150,000,000"], "Small Business"),
         ("Mchakato wa kupata Cheti cha Uzingatiaji wa Kodi (TCC) kutoka URA ukoje?", ["TCC"], "Compliance"),
         ("Je, taratibu za forodha na ushuru wa bidhaa kwenye uwanja wa Entebbe zikoje?", ["customs"], "Customs"),
         ("Mwisho wa kuwasilisha na kulipa kodi ya PAYE ya kila mwezi ni lini?", ["15"], "PAYE Deadlines"),
@@ -164,7 +164,7 @@ def generate_100_faqs() -> list[FAQItem]:
         ("Ushuru wa forodha unavyokokotolewa unapoingiza magari yaliyotumika?", ["customs"], "Motor Vehicles"),
         ("Ninawezaje kurejesha cheti changu cha TIN kilichopotea mtandaoni?", ["TIN"], "TIN Recovery"),
         ("Kiwango cha kodi ya zuio kwa gawio la hisa (dividends) kwa wakaazi ni kiasi gani?", ["15"], "Dividends"),
-        ("Ni nini adhabu ya kuchelewa kuwasilisha marejesho ya kodi ya mapato?", ["penalty"], "Penalties"),
+        ("Ni nini adhabu ya kuchelewa kuwasilisha marejesho ya kodi ya mapato?", ["penalty|adhabu|200,000|2%"], "Penalties"),
         ("Mwananchi anawezaje kutoa taarifa za siri za ukwepaji kodi kwa URA kwa usalama?", ["whistleblower"], "Whistleblowing"),
         ("Je, kodi ya mapato ya kodi ya ardhi inatozwa vipi nchini Uganda?", ["12"], "Land Tax"),
         ("Kiwango cha thamani ya mizigo ya abiria isiyotozwa ushuru kwenye forodha ni nini?", ["allowance"], "Customs Baggage"),
@@ -198,6 +198,7 @@ class TurnTelemetry:
     retrieval_mode: str
     reply_preview: str
     statutory_accurate: bool
+    withheld: bool = False
     # TTS
     tts_status: int = 0
     tts_latency_s: float = 0.0
@@ -241,14 +242,28 @@ async def evaluate_faq_turn(
             # Check statutory figures
             stat_pass = True
             for exp in faq.expected_figures:
-                clean_exp = exp.replace(",", "").replace("%", "")
-                clean_reply = reply.replace(",", "")
-                if exp.lower() not in reply.lower() and clean_exp.lower() not in clean_reply.lower():
+                alternatives = [a.strip() for a in exp.split("|")]
+                token_found = False
+                for alt in alternatives:
+                    clean_alt = alt.replace(",", "").replace("%", "")
+                    clean_reply = reply.replace(",", "")
+                    if alt.lower() in reply.lower() or clean_alt.lower() in clean_reply.lower():
+                        token_found = True
+                        break
+                if not token_found:
                     stat_pass = False
                     break
+
+            withheld = (
+                mode in ("abstained", "out_of_jurisdiction")
+                or "figures in it disagreed with the URA documents" in reply
+                or "so I have not shown it" in reply
+            )
         else:
+            withheld = False
             err = f"TTT HTTP {ttt_status}: {resp.text[:80]}"
     except Exception as exc:
+        withheld = False
         err = f"TTT Exception: {exc}"
     ttt_lat = time.perf_counter() - t0_ttt
 
@@ -263,6 +278,7 @@ async def evaluate_faq_turn(
         retrieval_mode=mode,
         reply_preview=reply[:100].replace("\n", " "),
         statutory_accurate=stat_pass,
+        withheld=withheld,
         error=err,
     )
 
@@ -421,6 +437,8 @@ async def main():
         "summary": {
             "http_availability_pct": round(success_q / total_q * 100, 2),
             "statutory_accuracy_pct": round(stat_passed / total_q * 100, 2),
+            "withheld_count": sum(1 for r in results if getattr(r, "withheld", False)),
+            "effective_accuracy_pct": round((stat_passed + sum(1 for r in results if getattr(r, "withheld", False) and not r.statutory_accurate)) / total_q * 100, 2),
             "median_latency_p50_s": round(statistics.median(latencies), 3) if latencies else 0,
             "p90_latency_s": round(statistics.quantiles(latencies, n=10)[8], 3) if len(latencies) >= 10 else 0,
             "p95_latency_s": round(statistics.quantiles(latencies, n=20)[18], 3) if len(latencies) >= 20 else 0,

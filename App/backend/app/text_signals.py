@@ -444,6 +444,31 @@ def out_of_jurisdiction_reply(country: str) -> str:
     )
 
 
+_LOCAL_GOVERNMENT_TAX_RE = re.compile(
+    r"\b(local\s+service\s+tax|lst\b|local\s+hotel\s+tax|municipal\s+(?:tax|taxes|levy|levies|authorit\w+|policy)|city\s+council\s+(?:tax|taxes|dues|rates)|local\s+government\s+(?:tax|taxes|rates))\b",
+    re.IGNORECASE,
+)
+
+
+def detect_local_government_tax(message: str) -> bool:
+    """True when the message asks about local government/municipal levies rather than URA taxes."""
+    text = message or ""
+    return bool(_LOCAL_GOVERNMENT_TAX_RE.search(text))
+
+
+def local_government_tax_reply() -> str:
+    """Authoritative answer for Local Service Tax and municipal levies not administered by URA."""
+    return (
+        "**Local Service Tax (LST)** is a local government tax administered and collected "
+        "directly by local government authorities (such as City Councils including KCCA, "
+        "Municipalities, and District Local Governments) under the Local Governments (Amendment) "
+        "Act 2008, rather than the Uganda Revenue Authority (URA).\n\n"
+        "The URA does not assess, collect, or enforce Local Service Tax or municipal hotel taxes. "
+        "For policy guidelines, assessment schedules, and payment procedures for Local Service Tax, "
+        "please consult your respective city council, municipality, or local government authority office."
+    )
+
+
 def empathy_ack(kind: str) -> str:
     """One short, translation-friendly empathetic opener for a distress kind.
 
