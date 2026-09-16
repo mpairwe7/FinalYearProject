@@ -1302,6 +1302,7 @@ def translate_text(
         "Write all numbers, percentages, dates, and monetary amounts "
         "using exact Arabic numerals and standard currency notation — do NOT invent or add any new numbers, percentages, or figures, and do NOT write numbers or amounts out as words."
     )
+    glossary_hints = get_translation_glossary_hints(text, target_lang)
     if target_lang == "en":
         user_prompt = (
             f"Translate the following {src_name} text into {lang_name}. "

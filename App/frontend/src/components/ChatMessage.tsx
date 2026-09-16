@@ -1,4 +1,4 @@
-import React, { lazy, memo, Suspense, useCallback, useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
 import { formatDocType } from '../lib/attachments';
@@ -10,8 +10,7 @@ import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
 import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon } from './Icons';
 import LoadingState, { formatElapsed } from './LoadingState';
-
-const Markdown = lazy(() => import('./Markdown'));
+import Markdown from './Markdown';
 
 /** Copy an assistant reply to the clipboard with a brief confirmation. */
 function CopyButton({ text, noun = 'reply' }: { text: string; noun?: string }) {
@@ -152,7 +151,7 @@ function ChatMessageInner({
         )}
         <div className="msg-content">
           {isAssistant ? (
-            <Suspense fallback={turn.content}><Markdown content={turn.content} /></Suspense>
+            <Markdown content={turn.content} />
           ) : (
             turn.content
           )}

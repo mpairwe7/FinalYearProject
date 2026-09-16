@@ -495,10 +495,10 @@ class OutputGuard:
             r"\1\n\n\2. \3",
             text,
         )
-        # Separate subsequent inline numbered items smashed on the same line (e.g. 'taxes. 2.Bar' or 'Taxes 2.Customs')
+        # Separate subsequent inline numbered items smashed on the same line (e.g. 'section.2.**' or 'template2. Enable' or 'taxes. 2.Bar')
         text = re.sub(
-            r"([a-zA-Z\)])(\.?)[ \t]+(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
-            r"\1\2\n\3. \4",
+            r"([a-zA-Z\)])(\.?)[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
+            r"\1.\n\n\3. \4",
             text,
         )
         # Unsmash web domain names glued to capitalized words (e.g. '.ugThese' -> '.ug\n\nThese')

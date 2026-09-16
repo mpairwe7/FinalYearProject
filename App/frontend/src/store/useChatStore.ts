@@ -367,6 +367,12 @@ export function normalizeAssistantResponse(text: string): string {
   return stripped
     .replace(/\r\n?/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
+    // Unsmash lead-ins into first numbered item (e.g. 'steps:1.**' or 'steps: 1.')
+    .replace(/([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])/g, '$1\n\n$2. $3')
+    // Unsmash subsequent inline numbered items (e.g. 'section.2.**' or 'template2. Enable' or 'details. 2. ')
+    .replace(/([a-zA-Z\)])(\.?)[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])/g, '$1.\n\n$3. $4')
+    // Separate closing/assistance paragraphs (e.g. 'month.For assistance' -> 'month.\n\nFor assistance')
+    .replace(/([a-z0-9\)])\.\s*(?=(?:For assistance|If you (?:need|get)|Contact URA|Please note|Note:))/gi, '$1.\n\n')
     // Standardize numbered lists: "1) Item" or "1. Item" -> "1. Item"
     .replace(/(^|\n)\s*(\d+)[\.)]\s+/g, '$1$2. ')
     // Standardize unordered bullets: "*", "+", "•" -> "- "

@@ -897,6 +897,104 @@ export default function Page() {
       if (!reader) throw new Error('No body');
       const dec = new TextDecoder();
       let buf = '', meta: Record<string, unknown> = {}, evt = 'token';
+      let currentDataLines: string[] = [];
+
+      const dispatchEvent = (eventName: string, dataLines: string[]) => {
+        if (dataLines.length === 0) return;
+        const data = dataLines.join('\n');
+        const trimmedData = data.trim();
+
+        // Intercept internal telemetry/metadata/agent trace JSON so it never leaks into visible prose
+        if (
+          trimmedData.startsWith('{"sources":') ||
+          trimmedData.startsWith('{"faithfulness_score":') ||
+          trimmedData.startsWith('[{"type":') ||
+          (trimmedData.startsWith('{') && (trimmedData.includes('"retrieval_mode"') || trimmedData.includes('"workflow":')))
+        ) {
+          try {
+            const p = JSON.parse(trimmedData);
+            if (p && typeof p === 'object' && !Array.isArray(p)) {
+              meta = { ...meta, ...p };
+              if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+              if (typeof p.reply === 'string' && p.reply.trim()) {
+                reveal.set(cleanResponse(p.reply));
+              }
+              updateLastTurn((t) => ({
+                ...t,
+                citations: p.citations ?? t.citations,
+                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+                escalationRequired: p.escalation_required ?? t.escalationRequired,
+                escalationReason: p.escalation_reason ?? t.escalationReason,
+              }));
+            }
+          } catch {}
+          return;
+        }
+
+        if (eventName === 'error') {
+          updateLastTurn((t) => ({ ...t, content: 'Sorry, an error occurred. Please try again.' }));
+          return;
+        }
+        if (eventName === 'done') {
+          if (trimmedData) {
+            try {
+              const p = JSON.parse(trimmedData);
+              meta = { ...meta, ...p };
+              if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+              if (typeof p.reply === 'string' && p.reply.trim()) {
+                reveal.set(cleanResponse(p.reply));
+              }
+              updateLastTurn((t) => ({
+                ...t,
+                citations: p.citations ?? t.citations,
+                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+                escalationRequired: p.escalation_required ?? t.escalationRequired,
+                escalationReason: p.escalation_reason ?? t.escalationReason,
+              }));
+            } catch {}
+          }
+          return;
+        }
+        if (eventName === 'revision') {
+          reveal.set(cleanResponse(data));
+          return;
+        }
+        if (eventName === 'metadata' || eventName === 'grounding') {
+          if (eventName === 'metadata') setTurnPhase('churning');
+          try {
+            const p = JSON.parse(data);
+            meta = { ...meta, ...p };
+            if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+            updateLastTurn((t) => ({
+              ...t,
+              citations: p.citations ?? t.citations,
+              faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+              retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+              escalationRequired: p.escalation_required ?? t.escalationRequired,
+              escalationReason: p.escalation_reason ?? t.escalationReason,
+            }));
+          } catch {}
+          return;
+        }
+        if (eventName === 'phase') {
+          const name = trimmedData;
+          if (name === 'retrieval.started') setTurnPhase('searching');
+          else if (name === 'translation.started') setTurnPhase('translating');
+          else if (name === 'translation.completed') setTurnPhase('churning');
+          return;
+        }
+        if (eventName === 'agent_trace') {
+          return;
+        }
+        // Token event — preserves exact multiline formatting, paragraph breaks, and numbered lists
+        if (data || eventName === 'token') {
+          setTurnPhase('churning');
+          reveal.push(data || '\n');
+        }
+      };
+
       /* Tokens go through the reveal queue rather than straight into the store,
          so the answer types itself out at a steady rate no matter how bursty
          the stream is. `reveal.getTarget()` is everything that has arrived —
@@ -915,101 +1013,36 @@ export default function Page() {
           const lines = normalized.split('\n');
           buf = lines.pop() || '';
           for (const ln of lines) {
-            if (ln.startsWith('event: ')) { evt = ln.slice(7).trim(); continue; }
-            if (!ln.startsWith('data: ')) continue;
-            const data = ln.slice(6);
-            const trimmedData = data.trim();
-
-            // Intercept internal telemetry/metadata/agent trace JSON so it never leaks into visible prose
-            if (
-              trimmedData.startsWith('{"sources":') ||
-              trimmedData.startsWith('{"faithfulness_score":') ||
-              trimmedData.startsWith('[{"type":') ||
-              (trimmedData.startsWith('{') && (trimmedData.includes('"retrieval_mode"') || trimmedData.includes('"workflow":')))
-            ) {
-              try {
-                const p = JSON.parse(trimmedData);
-                if (p && typeof p === 'object' && !Array.isArray(p)) {
-                  meta = { ...meta, ...p };
-                  if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-                  if (typeof p.reply === 'string' && p.reply.trim()) {
-                    reveal.set(cleanResponse(p.reply));
-                  }
-                  updateLastTurn((t) => ({
-                    ...t,
-                    citations: p.citations ?? t.citations,
-                    faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
-                    retrievalMode: p.retrieval_mode ?? t.retrievalMode,
-                    escalationRequired: p.escalation_required ?? t.escalationRequired,
-                    escalationReason: p.escalation_reason ?? t.escalationReason,
-                  }));
-                }
-              } catch {}
-              continue;
-            }
-
-            if (evt === 'error') { updateLastTurn((t) => ({ ...t, content: 'Sorry, an error occurred. Please try again.' })); evt = 'token'; continue; }
-            if (evt === 'done') {
-              const trimmed = data.trim();
-              if (trimmed) {
-                try {
-                  const p = JSON.parse(trimmed);
-                  meta = { ...meta, ...p };
-                  if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-                  if (typeof p.reply === 'string' && p.reply.trim()) {
-                    reveal.set(cleanResponse(p.reply));
-                  }
-                  updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason }));
-                } catch {
-                  // Do not push unparsed done frames into visible prose
-                }
+            if (ln === '') {
+              // Empty line signals end of an SSE event
+              if (currentDataLines.length > 0) {
+                dispatchEvent(evt, currentDataLines);
+                currentDataLines = [];
               }
               evt = 'token';
               continue;
             }
-            if (evt === 'revision') {
-              reveal.set(cleanResponse(data));
-              evt = 'token';
+            if (ln.startsWith('event: ')) {
+              if (currentDataLines.length > 0) {
+                dispatchEvent(evt, currentDataLines);
+                currentDataLines = [];
+              }
+              evt = ln.slice(7).trim();
               continue;
             }
-            if (evt === 'metadata' || evt === 'grounding') {
-              // Retrieval is finished by the time metadata lands and the model
-              // is about to start writing, so this is the churning boundary.
-              if (evt === 'metadata') setTurnPhase('churning');
-              try { const p = JSON.parse(data); meta = { ...meta, ...p }; if (p.conversation_id) sessionIdRef.current = p.conversation_id; updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason })); } catch {}
-              evt = 'token'; continue;
-            }
-            if (evt === 'phase') {
-              // Live retrieval boundaries (main.py). This needs its own branch
-              // for the same reason agent_trace does — see the note below: an
-              // unhandled event falls through to the token branch and its raw
-              // data is appended straight into the visible reply.
-              const name = data.trim();
-              if (name === 'retrieval.started') setTurnPhase('searching');
-              // Localization runs after the English answer is complete, so
-              // this arrives last and is the only phase that can follow
-              // churning.
-              else if (name === 'translation.started') setTurnPhase('translating');
-              else if (name === 'translation.completed') setTurnPhase('churning');
-              evt = 'token';
+            if (ln.startsWith('data: ')) {
+              currentDataLines.push(ln.slice(6));
               continue;
             }
-            if (evt === 'agent_trace') {
-              // Buffered retrieval/iteration/tool-call trace, emitted just before
-              // `grounding` (see chat_stream in main.py). Nothing in this UI
-              // visualizes it yet; without this case it fell through to the
-              // token branch below and the raw JSON trace was appended straight
-              // into the visible reply, right where the citation marker sits.
-              evt = 'token'; continue;
+            if (ln === 'data:' || ln === 'data: ') {
+              currentDataLines.push('');
+              continue;
             }
-            if (data || evt === 'token') {
-              // A token arriving before any metadata frame — the short-circuit
-              // branches do exactly that — still means the answer has started.
-              setTurnPhase('churning');
-              reveal.push(data || '\n');
-            }
-            evt = 'token';
           }
+        }
+        if (currentDataLines.length > 0) {
+          dispatchEvent(evt, currentDataLines);
+          currentDataLines = [];
         }
         dec.decode();
         const arrived = reveal.getTarget();
