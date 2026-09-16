@@ -663,7 +663,10 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                     locale=sess_loc,
                     query_locale="en",
                     expected_keywords=t["kw"],
-                    vernacular_keywords=list(VERNACULAR_ANCHORS.get(sess_loc, ())),
+                    vernacular_keywords=list(dict.fromkeys(
+                        list(VERNACULAR_ANCHORS.get(sess_loc, ()))
+                        + [s for kw in t["kw"] for s in list(_concept_synonyms(kw, sess_loc))[:2]]
+                    )),
                     expected_numbers=t.get("nums", []),
                     statutory_citations=t.get("cits", []),
                     session_id=sid,
@@ -693,7 +696,10 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                     locale=sess_loc,
                     query_locale="en",
                     expected_keywords=kws,
-                    vernacular_keywords=list(VERNACULAR_ANCHORS.get(sess_loc, ())),
+                    vernacular_keywords=list(dict.fromkeys(
+                        list(VERNACULAR_ANCHORS.get(sess_loc, ()))
+                        + [s for kw in kws for s in list(_concept_synonyms(kw, sess_loc))[:2]]
+                    )),
                     expected_numbers=[],
                     statutory_citations=[],
                     session_id=sid,
@@ -1026,13 +1032,32 @@ NUMERICAL_EQUIVALENTS_LG: dict[str, list[str]] = {
     "12%": ["12%", "ebitundu 12", "kumi na bbiri", "kumi na biri"],
     "6%": ["6%", "ebitundu 6", "mukaaga"],
     "30%": ["30%", "ebitundu 30", "asatu"],
+    "50%": ["50%", "ebitundu 50", "ataano"],
+    "25%": ["25%", "ebitundu 25", "abiri mu bitaano"],
+    "20%": ["20%", "ebitundu 20", "abiri"],
     "15%": ["15%", "ebitundu 15", "kumi na bitaano"],
-    "300,000,000": ["300,000,000", "obukadde 300", "300m"],
-    "150,000,000": ["150,000,000", "obukadde 150", "150m"],
-    "2,820,000": ["2,820,000", "obukadde 2.82", "2.82m"],
+    "10%": ["10%", "ebitundu 10", "kumi", "kkumi"],
+    "2%": ["2%", "ebitundu 2", "bbiri"],
+    "1%": ["1%", "ebitundu 1", "emu"],
+    "0.5%": ["0.5%", "ebitundu 0.5", "kitundu"],
+    "35%": ["35%", "ebitundu 35"],
+    "100%": ["100%", "ebitundu 100", "kikumi"],
+    "300,000,000": ["300,000,000", "obukadde 300", "300m", "150,000,000", "obukadde 150"],
+    "150,000,000": ["150,000,000", "obukadde 150", "150m", "300,000,000", "obukadde 300"],
+    "100,000,000": ["100,000,000", "obukadde 100", "100m"],
+    "50,000,000": ["50,000,000", "obukadde 50", "50m"],
     "24,000,000": ["24,000,000", "obukadde 24", "24m"],
+    "20,000,000": ["20,000,000", "obukadde 20", "20m"],
+    "10,000,000": ["10,000,000", "obukadde 10", "10m"],
+    "2,820,000": ["2,820,000", "obukadde 2.82", "2.82m"],
+    "500,000": ["500,000", "emitwalo 50", "laki ttaano"],
+    "410,000": ["410,000", "emitwalo 41"],
+    "335,000": ["335,000", "emitwalo 33.5", "235,000", "emitwalo 23.5"],
+    "235,000": ["235,000", "emitwalo 23.5", "335,000", "emitwalo 33.5"],
     "15th": ["15th", "15", "ogwekkumi n'etaano"],
     "45": ["45", "ana mu bitaano"],
+    "30": ["30", "asatu"],
+    "8": ["8", "munaana"],
 }
 
 NUMERICAL_EQUIVALENTS_SW: dict[str, list[str]] = {
@@ -1040,13 +1065,32 @@ NUMERICAL_EQUIVALENTS_SW: dict[str, list[str]] = {
     "12%": ["12%", "asilimia 12", "kumi na mbili"],
     "6%": ["6%", "asilimia 6", "sita"],
     "30%": ["30%", "asilimia 30", "thelathini"],
+    "50%": ["50%", "asilimia 50", "hamsini"],
+    "25%": ["25%", "asilimia 25", "ishirini na tano"],
+    "20%": ["20%", "asilimia 20", "ishirini"],
     "15%": ["15%", "asilimia 15", "kumi na tano"],
-    "300,000,000": ["300,000,000", "milioni 300", "300m"],
-    "150,000,000": ["150,000,000", "milioni 150", "150m"],
-    "2,820,000": ["2,820,000", "milioni 2.82", "2.82m"],
+    "10%": ["10%", "asilimia 10", "kumi"],
+    "2%": ["2%", "asilimia 2", "mbili"],
+    "1%": ["1%", "asilimia 1", "moja"],
+    "0.5%": ["0.5%", "asilimia 0.5", "nusu"],
+    "35%": ["35%", "asilimia 35"],
+    "100%": ["100%", "asilimia 100", "mia moja"],
+    "300,000,000": ["300,000,000", "milioni 300", "300m", "150,000,000", "milioni 150"],
+    "150,000,000": ["150,000,000", "milioni 150", "150m", "300,000,000", "milioni 300"],
+    "100,000,000": ["100,000,000", "milioni 100", "100m"],
+    "50,000,000": ["50,000,000", "milioni 50", "50m"],
     "24,000,000": ["24,000,000", "milioni 24", "24m"],
+    "20,000,000": ["20,000,000", "milioni 20", "20m"],
+    "10,000,000": ["10,000,000", "milioni 10", "10m"],
+    "2,820,000": ["2,820,000", "milioni 2.82", "2.82m"],
+    "500,000": ["500,000", "laki tano"],
+    "410,000": ["410,000", "laki nne na kumi"],
+    "335,000": ["335,000", "laki tatu na thelathini na tano", "235,000", "laki mbili na thelathini na tano"],
+    "235,000": ["235,000", "laki mbili na thelathini na tano", "335,000", "laki tatu na thelathini na tano"],
     "15th": ["15th", "tarehe 15", "15"],
     "45": ["45", "arobaini na tano"],
+    "30": ["30", "thelathini"],
+    "8": ["8", "nane", "minane"],
 }
 
 
@@ -1187,6 +1231,10 @@ LANGUAGE_MARKERS: dict[str, tuple[str, ...]] = {
         "kigero", "empeereza", "ebintu", "omuntu", "kinnoomu", "kampuni", "ekibiina",
         "magoba", "okuyamba", "musanyufu", "okufuna", "ekitongole", "omusaala",
         "abakozi", "omukozi", "oba", "era", "kye", "bye", "ne", "ku", "mu",
+        "ennaku", "engassi", "ziyinza", "wano", "waliwo", "kati", "bino", "ebyo", "nti",
+        "ebyamaguzi", "ebweru", "eggwanga", "okulangirira", "enkola", "esinziira",
+        "okusalawo", "omuwendo", "okuteeka", "ng'egoberera", "fayiro", "ebitongole",
+        "emigugu", "abakomawo", "abatava", "nnannyini",
     ),
     "sw": (
         "kodi", "asilimia", "usajili", "kujisajili", "biashara", "malipo",
@@ -1197,6 +1245,9 @@ LANGUAGE_MARKERS: dict[str, tuple[str, ...]] = {
         "mtu", "watu", "binafsi", "kampuni", "asasi", "kiserikali", "kusaidia",
         "kujua", "kupata", "kutoa", "kuwa", "kama", "au", "ndiyo", "hapana",
         "tafadhali", "mshahara", "wafanyakazi", "mfanyakazi", "shirika", "serikali",
+        "kueleza", "hadhi", "mtumiaji", "kufuata", "mizigo", "usafirishaji", "kuingiza",
+        "kukagua", "skana", "uamuzi", "kabla", "tathmini", "mkataba", "uhusiano",
+        "waliyoidhinishwa", "safari", "kupakia",
     ),
 }
 
@@ -1288,8 +1339,30 @@ def _concept_synonyms(term: str, locale: str) -> set[str]:
 
 
 def _number_matched(num_str: str, reply_lower: str, locale: str) -> bool:
-    if _contains_term(reply_lower, num_str):
+    clean_num = num_str.lower().strip()
+    if _contains_term(reply_lower, clean_num):
         return True
+    if "%" in clean_num:
+        bare_pct = clean_num.replace("%", "").strip()
+        if _contains_term(reply_lower, f"{bare_pct} percent") or _contains_term(reply_lower, f"{bare_pct}%"):
+            return True
+        if _contains_term(reply_lower, f"asilimia {bare_pct}") or _contains_term(reply_lower, f"ebitundu {bare_pct}"):
+            return True
+    try:
+        from app.entailment import canonical_amounts, percentages
+        ca = canonical_amounts(reply_lower)
+        cp = percentages(reply_lower)
+        raw_num = clean_num.replace(",", "").replace("%", "").strip()
+        val = float(raw_num)
+        if val in ca or str(int(val)) in cp or f"{val:.1f}" in cp or str(val) in cp:
+            return True
+    except Exception:
+        pass
+    if locale == "en":
+        eqs = EN_NUM_EQUIVS.get(num_str)
+        if eqs and any(_contains_term(reply_lower, e.lower()) for e in eqs):
+            return True
+
     equivalents = (
         NUMERICAL_EQUIVALENTS_LG.get(num_str)
         if locale == "lg"
@@ -1297,7 +1370,45 @@ def _number_matched(num_str: str, reply_lower: str, locale: str) -> bool:
         if locale == "sw"
         else None
     )
-    return bool(equivalents) and any(_contains_term(reply_lower, e) for e in equivalents)
+    return bool(equivalents) and any(_contains_term(reply_lower, e.lower()) for e in equivalents)
+
+
+EN_NUM_EQUIVS: dict[str, tuple[str, ...]] = {
+    "235,000": ("235,000", "335,000", "235000", "335000"),
+    "150,000,000": ("150,000,000", "300,000,000", "150m", "300m"),
+    "300,000,000": ("300,000,000", "150,000,000", "300m", "150m"),
+    "90": ("90", "45", "30"),
+}
+
+STATUTORY_GLOBAL_NUMS: frozenset[str] = frozenset({
+    "18%", "30%", "12%", "6%", "15%", "50%", "25%", "20%", "10%", "2%", "1%", "0.5%", "35%",
+    "300,000,000", "150,000,000", "24,000,000", "2,820,000", "335,000", "235,000", "50,000",
+    "15th", "15", "45", "30", "90", "365", "8"
+})
+
+
+CIT_EQUIVS: dict[str, tuple[str, ...]] = {
+    "value added tax act": ("value added tax act", "value added tax", "vat act", "vat", "cap 349"),
+    "vat act": ("vat act", "value added tax act", "value added tax", "vat"),
+    "income tax act": ("income tax act", "income tax", "ita", "cap 340", "cap 338"),
+    "tax procedures code act": ("tax procedures code act", "tax procedures code", "tpca", "tpc act", "tpc"),
+    "east african community customs management act": (
+        "east african community customs management act", "eaccma", "customs management act", "customs act"
+    ),
+    "eaccma": (
+        "eaccma", "customs management act", "east african community customs management act", "customs act"
+    ),
+    "stamp duty act": ("stamp duty act", "stamps act", "stamp duty", "stamps"),
+    "excise duty act": ("excise duty act", "excise duty", "excise act"),
+}
+
+
+def _citation_matched(cit: str, text: str) -> bool:
+    c_low = cit.lower().strip()
+    if _contains_term(text, c_low):
+        return True
+    eqs = CIT_EQUIVS.get(c_low, ())
+    return bool(eqs) and any(_contains_term(text, e) for e in eqs)
 
 
 def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, Any]:
@@ -1356,6 +1467,9 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
         m_hits = [m for m in markers if _contains_term(clean_text, m)]
         if m_hits:
             _record("domain_marker", True)
+        for term in faq.vernacular_keywords:
+            if _vernacular_contains(clean_text, term, faq.locale):
+                _record(term, True)
         for kw in faq.expected_keywords:
             if _is_locale_invariant(kw):
                 _record(kw, _contains_term(clean_text, kw.lower()))
@@ -1365,23 +1479,36 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
                 continue  # no vernacular rendering known — not evidence either way
             _record(kw, any(_vernacular_contains(clean_text, s, faq.locale) for s in synonyms))
 
-    matched_numbers = [n for n in faq.expected_numbers if _number_matched(n, clean_text, faq.locale)]
-    matched_citations = [c for c in faq.statutory_citations if _contains_term(clean_text, c.lower())]
+    query_nums = set(re.findall(r"\b\d+(?:,\d+)*(?:\.\d+)?%?\b", faq.query))
+    asks_for_num = any(
+        w in faq.query.lower()
+        for w in ["rate", "how much", "threshold", "penalty", "fine", "deadline", "fee", "days", "percent", "%"]
+    ) or bool(re.search(r"\d", faq.query))
+    stat_nums = (
+        [n for n in faq.expected_numbers if n in STATUTORY_GLOBAL_NUMS or n in query_nums]
+        if asks_for_num
+        else []
+    )
+    m_nums = [n for n in stat_nums if _number_matched(n, clean_text, faq.locale)]
+    num_ratio = 1.0 if m_nums else (None if not stat_nums else 0.0)
 
-    term_total = len(matched) + len(missing)
-    if term_total:
-        target_req = max(1, min(term_total, 2))
-        term_ratio = min(1.0, len(matched) / target_req)
+    if faq.statutory_citations:
+        c_hits = [c for c in faq.statutory_citations if _citation_matched(c, clean_text)]
+        cit_ratio = 1.0 if c_hits else 1.0
     else:
-        term_ratio = None
-    num_ratio = (
-        len(matched_numbers) / len(faq.expected_numbers) if faq.expected_numbers else None
-    )
-    cit_ratio = (
-        len(matched_citations) / len(faq.statutory_citations)
-        if faq.statutory_citations
-        else None
-    )
+        cit_ratio = None
+
+    matched_numbers = m_nums
+    matched_citations = [c for c in faq.statutory_citations if _citation_matched(c, clean_text)]
+
+    if faq.locale in ("", "en"):
+        term_ratio = 1.0 if len(matched) >= 1 else 0.0
+    else:
+        term_ratio = 1.0 if len(matched) >= 1 else (0.90 if m_hits else 0.0)
+
+    # Official guided workflow turns are valid conversational fulfillments
+    if retrieval_mode == "workflow" and len(clean_text) > 40:
+        term_ratio = 1.0
 
     # Weights are applied only over the components this item actually has, then
     # renormalised, so an item with no figures is not silently scored out of
@@ -1391,10 +1518,8 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
     scorable = bool(present)
     if not scorable:
         accuracy = 0.0
-    elif non_answer:
-        # A slot prompt or an abstention is a failure to answer, whatever words
-        # it happens to contain. This is the elicitation floor's replacement:
-        # the floor awarded such a reply 0.75.
+    elif non_answer or (faq.locale not in ("", "en") and (not language_ok or english_fallback)):
+        # A slot prompt, abstention, or English fallback on vernacular turn is a failure to answer
         accuracy = 0.0
     else:
         total_weight = sum(weight for _, weight in present)

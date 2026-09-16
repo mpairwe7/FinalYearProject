@@ -183,8 +183,8 @@ def figures(text: str) -> set[float]:
     stripped = _CITATION_MARKER_RE.sub(" ", text or "")
     # Strip Ugandan phone numbers so contact lines are not parsed as tax figures
     stripped = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", stripped)
-    # Strip list step numbering at start of lines (e.g. "1. ", "2) ")
-    stripped = re.sub(r"(?m)^\s*\d+[\.\)]\s+", " ", stripped)
+    # Strip list step numbering at start of lines or inline (e.g. "1. ", " 2. ")
+    stripped = re.sub(r"(?:^|\s)\d{1,2}[\.\)]\s+", " ", stripped)
     values = canonical_amounts(stripped)
     values |= {float(value) for value in percentages(stripped)}
     return values
@@ -209,6 +209,8 @@ def figures_survived(source: str, translated: str) -> bool:
     crit_source = {f for f in source_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
     crit_trans = {f for f in trans_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
     if crit_source and crit_source == crit_trans:
+        return True
+    if crit_source and crit_source.issubset(trans_figures):
         return True
     return False
 
@@ -294,14 +296,24 @@ def citations_survived(source: str, translated: str) -> bool:
 
 
 def restore_missing_citations(source: str, translated: str) -> str:
-    """Restore any citation markers that were present in source but dropped by MT."""
+    """Restore any citation markers that were present in source but dropped or duplicated by MT."""
     source_counts = Counter(_CITATION_MARKER_RE.findall(source or ""))
     target_counts = Counter(_CITATION_MARKER_RE.findall(translated or ""))
     missing = source_counts - target_counts
-    if not missing:
-        return translated
-    tail_citations = " " + " ".join(f"[{m}]" for m, count in missing.items() for _ in range(count))
-    return translated.rstrip() + tail_citations
+    excess = target_counts - source_counts
+    res = translated
+    if excess:
+        for m, count in excess.items():
+            pat = re.compile(rf"\s*\[{m}\]")
+            for _ in range(count):
+                matches = list(pat.finditer(res))
+                if matches:
+                    last = matches[-1]
+                    res = res[:last.start()] + res[last.end():]
+    if missing:
+        tail_citations = " " + " ".join(f"[{m}]" for m, count in missing.items() for _ in range(count))
+        res = res.rstrip() + tail_citations
+    return res
 
 
 def restore_missing_units(source: str, translated: str) -> str:
@@ -385,8 +397,8 @@ def protect_figures(text: str) -> tuple[str, dict[str, str]]:
 
     # 1. Shield Ugandan toll-free and mobile phone numbers (e.g. 0800 117 000)
     clean_text = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", _shield, text or "")
-    # 2. Shield list numbering at start of lines (e.g. "1. ", "2) ")
-    clean_text = re.sub(r"(?m)^\s*(\d+[\.\)])\s+", lambda m: f" {_shield(m)} ", clean_text)
+    # 2. Shield list numbering at start of lines or inline (e.g. "1. ", " 2. ")
+    clean_text = re.sub(r"(?:^|\s)(\d{1,2}[\.\)])\s+", lambda m: f" {_shield(m)} ", clean_text)
     # 3. Shield statutory citation markers [1], [2]
     clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
 

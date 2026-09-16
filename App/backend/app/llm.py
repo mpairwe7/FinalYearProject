@@ -844,6 +844,18 @@ def _vllm_generate(
         import json as _json
         import urllib.request
 
+        # Ensure total context length strictly respects vLLM's 4096-token hard limit
+        total_chars = sum(len(m.get("content", "")) for m in messages)
+        while len(messages) > 2 and total_chars > 10500:
+            popped = messages.pop(1)
+            total_chars -= len(popped.get("content", ""))
+
+        est_prompt_tokens = max(100, total_chars // 3)
+        safe_max_tokens = min(
+            LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+            max(64, 4000 - est_prompt_tokens),
+        )
+
         body = _json.dumps(
             {
                 "model": LLM_MODEL,
@@ -852,7 +864,7 @@ def _vllm_generate(
                 "top_p": 0.95 if top_p is None else top_p,
                 "min_p": LLM_MIN_P,
                 "presence_penalty": LLM_PRESENCE_PENALTY,
-                "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+                "max_tokens": safe_max_tokens,
                 "repetition_penalty": LLM_REPETITION_PENALTY,
                 "stream": False,
                 "chat_template_kwargs": {"enable_thinking": False},
@@ -886,6 +898,19 @@ def _vllm_chat_completion(
         import json as _json
         import urllib.request
 
+        total_chars = sum(len(m.get("content", "")) for m in messages)
+        if tools:
+            total_chars += len(_json.dumps(tools))
+        while len(messages) > 2 and total_chars > 10500:
+            popped = messages.pop(1)
+            total_chars -= len(popped.get("content", ""))
+
+        est_prompt_tokens = max(100, total_chars // 3)
+        safe_max_tokens = min(
+            LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+            max(64, 4000 - est_prompt_tokens),
+        )
+
         payload: dict[str, Any] = {
             "model": LLM_MODEL,
             "messages": messages,
@@ -893,7 +918,7 @@ def _vllm_chat_completion(
             "top_p": 0.95 if top_p is None else top_p,
             "min_p": LLM_MIN_P,
             "presence_penalty": LLM_PRESENCE_PENALTY,
-            "max_tokens": LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+            "max_tokens": safe_max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": False},

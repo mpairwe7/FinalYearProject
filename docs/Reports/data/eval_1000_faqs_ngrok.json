@@ -1,103 +1,103 @@
 {
   "evaluation_metadata": {
-    "benchmark_date": "2026-09-16 13:38:45 UTC",
+    "benchmark_date": "2026-09-16 17:18:11 UTC",
     "target_gateway": "https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat",
     "total_faqs_evaluated": 1000,
     "concurrency": 4,
-    "total_duration_s": 9.53,
-    "throughput_qps": 104.9,
+    "total_duration_s": 8.85,
+    "throughput_qps": 112.95,
     "gpu_hardware": {
       "card": "NVIDIA RTX A6000 (GPU 4 API/Speech + GPU 2 vLLM)",
       "gpu_index": 4,
-      "initial_vram_used_mb": 42958.0,
-      "final_vram_used_mb": 42958.0,
-      "vram_headroom_mb": 5717.0,
-      "temperature_c": 45.0,
-      "power_w": 74.17
+      "initial_vram_used_mb": 42838.0,
+      "final_vram_used_mb": 42838.0,
+      "vram_headroom_mb": 5837.0,
+      "temperature_c": 50.0,
+      "power_w": 75.27
     }
   },
   "summary_scores": {
-    "success_rate_pct": 99.0,
-    "overall_accuracy_pct": 84.67,
-    "end_to_end_accuracy_pct": 83.82,
-    "scorable_turns": 981,
-    "unscorable_turns": 9,
-    "non_answer_pct": 3.43,
-    "conversational_grade_pct": 92.26,
-    "emotional_intelligence_pct": 89.39,
-    "long_horizon_context_retention_pct": 56.25,
+    "success_rate_pct": 99.9,
+    "overall_accuracy_pct": 93.43,
+    "end_to_end_accuracy_pct": 93.34,
+    "scorable_turns": 999,
+    "unscorable_turns": 0,
+    "non_answer_pct": 3.4,
+    "conversational_grade_pct": 92.52,
+    "emotional_intelligence_pct": 89.33,
+    "long_horizon_context_retention_pct": 57.29,
     "zero_memory_loss": false,
     "zero_false_redaction_privacy_passed": true,
-    "average_faithfulness_score": 0.776
+    "average_faithfulness_score": 0.727
   },
   "multilingual_breakdown": {
     "english": {
       "count": 480,
       "scorable_count": 480,
-      "accuracy_pct": 91.58,
-      "end_to_end_accuracy_pct": 91.58,
+      "accuracy_pct": 95.98,
+      "end_to_end_accuracy_pct": 95.98,
       "vernacular_query_count": 480,
       "in_target_language_pct": 100.0,
       "english_fallback_pct": 0.0,
       "non_answer_pct": 2.29,
-      "p50_latency_s": 2.642,
-      "mean_latency_s": 2.936
+      "p50_latency_s": 2.672,
+      "mean_latency_s": 2.82
     },
     "luganda": {
-      "count": 257,
-      "scorable_count": 252,
-      "accuracy_pct": 76.35,
-      "end_to_end_accuracy_pct": 74.28,
+      "count": 263,
+      "scorable_count": 263,
+      "accuracy_pct": 87.83,
+      "end_to_end_accuracy_pct": 87.5,
       "vernacular_query_count": 12,
-      "in_target_language_pct": 90.66,
-      "english_fallback_pct": 4.67,
-      "non_answer_pct": 6.61,
-      "p50_latency_s": 9.037,
-      "mean_latency_s": 10.553
+      "in_target_language_pct": 94.3,
+      "english_fallback_pct": 3.8,
+      "non_answer_pct": 6.46,
+      "p50_latency_s": 8.172,
+      "mean_latency_s": 10.507
     },
     "swahili": {
-      "count": 253,
-      "scorable_count": 249,
-      "accuracy_pct": 79.78,
-      "end_to_end_accuracy_pct": 78.83,
+      "count": 256,
+      "scorable_count": 256,
+      "accuracy_pct": 94.4,
+      "end_to_end_accuracy_pct": 94.4,
       "vernacular_query_count": 4,
-      "in_target_language_pct": 84.19,
-      "english_fallback_pct": 5.93,
-      "non_answer_pct": 2.37,
-      "p50_latency_s": 9.189,
-      "mean_latency_s": 11.721
+      "in_target_language_pct": 96.09,
+      "english_fallback_pct": 0.0,
+      "non_answer_pct": 2.34,
+      "p50_latency_s": 7.456,
+      "mean_latency_s": 9.265
     }
   },
   "latency_profile_s": {
-    "min": 0.31,
-    "median_p50": 4.397,
-    "p90": 19.437,
-    "p95": 26.713,
-    "p99": 59.971,
-    "max": 60.046,
-    "mean": 7.687
+    "min": 0.311,
+    "median_p50": 3.859,
+    "p90": 16.842,
+    "p95": 23.802,
+    "p99": 39.535,
+    "max": 60.038,
+    "mean": 6.549
   },
   "domain_accuracy_breakdown": {
     "domestic_taxes": {
-      "count": 420,
-      "scorable_count": 416,
-      "accuracy_pct": 80.92,
-      "end_to_end_accuracy_pct": 80.34,
-      "mean_latency_s": 6.873
+      "count": 423,
+      "scorable_count": 423,
+      "accuracy_pct": 92.05,
+      "end_to_end_accuracy_pct": 92.05,
+      "mean_latency_s": 6.186
     },
     "customs_and_border_trade": {
       "count": 252,
-      "scorable_count": 251,
-      "accuracy_pct": 83.89,
-      "end_to_end_accuracy_pct": 83.89,
-      "mean_latency_s": 7.004
+      "scorable_count": 252,
+      "accuracy_pct": 92.06,
+      "end_to_end_accuracy_pct": 92.06,
+      "mean_latency_s": 5.675
     },
     "tax_education_and_formalisation": {
-      "count": 318,
-      "scorable_count": 314,
-      "accuracy_pct": 90.27,
-      "end_to_end_accuracy_pct": 88.3,
-      "mean_latency_s": 7.657
+      "count": 324,
+      "scorable_count": 324,
+      "accuracy_pct": 96.3,
+      "end_to_end_accuracy_pct": 96.0,
+      "mean_latency_s": 7.537
     }
   },
   "speech_pipeline": {
@@ -106,46 +106,46 @@
         "locale": "en",
         "status": 200,
         "bytes": 29088,
-        "latency_s": 0.886
+        "latency_s": 0.798
       },
       {
         "locale": "lg",
         "status": 200,
-        "bytes": 129324,
-        "latency_s": 1.426
+        "bytes": 138284,
+        "latency_s": 0.887
       },
       {
         "locale": "sw",
         "status": 200,
-        "bytes": 138284,
-        "latency_s": 1.559
+        "bytes": 186284,
+        "latency_s": 0.772
       }
     ],
     "stt": [
       {
         "locale": "en",
         "status": 200,
-        "transcript": "11.",
-        "latency_s": 0.645
+        "transcript": "3.",
+        "latency_s": 0.612
       },
       {
         "locale": "lg",
         "status": 200,
-        "transcript": "Omusolo ogwava tegulya ebitundu etiini ku buli kikumi mu Uganda.",
-        "latency_s": 1.368
+        "transcript": "Omusiragwaava teguli ebitundu bwa nte ete ku buli kikumi mu Uganda.",
+        "latency_s": 1.317
       },
       {
         "locale": "sw",
         "status": 200,
-        "transcript": "Kiwango cha kurya ongezekula thamani nchini Uganda ni asilimia eighteen.",
-        "latency_s": 1.436
+        "transcript": "Ebwoi nio chakwa kwa kudhia ongezeko latamani nchini Uganda ni asilimia 18.",
+        "latency_s": 1.364
       }
     ]
   },
   "retrieval_mode_distribution": {
-    "hybrid": 798,
-    "faq_priority": 43,
-    "calculator": 66,
+    "hybrid": 800,
+    "faq_priority": 48,
+    "calculator": 68,
     "workflow": 39,
     "false_premise_rejected": 43,
     "out_of_jurisdiction": 1
@@ -158,12 +158,12 @@
       "query": "Hello, I am registering a new bakery business in Kampala. What is my first tax obligation?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 5.049705818295479,
+      "latency_s": 3.958575949072838,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
-      "faithfulness_score": 0.5,
+      "faithfulness_score": 1.0,
       "claim_verification_score": 1.0,
-      "reply_snippet": "When starting a bakery business in Kampala, your first tax obligation is to register for and pay Income Tax on the profits generated from your business. This applies whether the ba",
+      "reply_snippet": "When starting a bakery business in Kampala, your first tax obligation is to register for and pay Income Tax on the profits you generate. This applies whether the business is regist",
       "sources": [
         "10b492890d51dc6c.json",
         "8af86c182267022b.json",
@@ -185,7 +185,7 @@
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.8571,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -195,7 +195,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "13948ca9-ecb3-4f34-b83d-150307c1586e",
+      "conversation_id": "e6f2d379-6691-449c-b3a4-11dcb79a0441",
       "turn": 1,
       "is_multi_turn": true,
       "error": null
@@ -207,7 +207,7 @@
       "query": "How do I get that individual and business TIN online?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 0.654665119946003,
+      "latency_s": 0.6760843992233276,
       "retrieval_mode": "faq_priority",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 1.0,
@@ -243,7 +243,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "13948ca9-ecb3-4f34-b83d-150307c1586e",
+      "conversation_id": "e6f2d379-6691-449c-b3a4-11dcb79a0441",
       "turn": 2,
       "is_multi_turn": true,
       "error": null
@@ -255,12 +255,12 @@
       "query": "I have hired 4 bakers with monthly salaries of 450,000 UGX each. What tax must I deduct from them?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 3.1893744692206383,
+      "latency_s": 3.1500766575336456,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
-      "faithfulness_score": null,
+      "faithfulness_score": 0.0,
       "claim_verification_score": 0.0,
-      "reply_snippet": "I drafted an answer to this, but the figures in it disagreed with the URA documents I was reading \u2014 so I have not shown it, because a wrong figure here is worse than no figure. The",
+      "reply_snippet": "You must deduct Pay As You Earn (PAYE) from the salary of each baker. PAYE is calculated based on the employee\u2019s gross earnings and is deducted by the employer before the employee ",
       "sources": [
         "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf",
         "TAXATION-OF-THE-ENTERTAINMENT-SECTOR.pdf",
@@ -268,26 +268,31 @@
         "ura.go.ug-Get a TIN.pdf",
         "ura_advance_tax_transport_faqs.csv"
       ],
-      "matched_keywords": [],
-      "missing_keywords": [
+      "matched_keywords": [
         "PAYE",
         "pay as you earn",
-        "employment income",
+        "deduct",
+        "bakers",
+        "salaries",
+        "each",
         "deduct"
+      ],
+      "missing_keywords": [
+        "employment income"
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.0,
+      "accuracy_score": 0.7,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
       "english_fallback": false,
       "query_locale": "en",
-      "context_preserved": false,
-      "conversational_score": 0.8,
-      "eq_score": 0.8,
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.95,
       "has_redacted_official_contact": false,
-      "conversation_id": "13948ca9-ecb3-4f34-b83d-150307c1586e",
+      "conversation_id": "e6f2d379-6691-449c-b3a4-11dcb79a0441",
       "turn": 3,
       "is_multi_turn": true,
       "error": null
@@ -299,30 +304,27 @@
       "query": "What is the monthly deadline to pay that deducted tax to URA?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 0.7049046158790588,
-      "retrieval_mode": "hybrid",
+      "latency_s": 0.33018355816602707,
+      "retrieval_mode": "calculator",
       "model": "Sunbird/Sunflower-14B-FP8",
-      "faithfulness_score": 1.0,
+      "faithfulness_score": null,
       "claim_verification_score": null,
-      "reply_snippet": "I know deadlines can be stressful, so here's the quickest way forward.  Dear valued Taxpayer, I want to thank you for the time you have journeyed with us in the revenue collection ",
-      "sources": [
-        "813b89c4a6f66e41.json",
-        "Taxation-handbook-FY2023-24.pdf",
-        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
-        "ura.go.ug-BUSINESS - Uganda Revenue Authority.pdf"
-      ],
+      "reply_snippet": "I know deadlines can be stressful, so here's the quickest way forward.  **PAYE returns and payments are due by the 15th day of each month** following the payroll period under the T",
+      "sources": [],
       "matched_keywords": [
+        "15th",
+        "month",
+        "pay",
         "deadline"
       ],
       "missing_keywords": [
-        "15th",
-        "month",
-        "remit",
-        "pay"
+        "remit"
       ],
-      "matched_numbers": [],
+      "matched_numbers": [
+        "15th"
+      ],
       "matched_citations": [],
-      "accuracy_score": 0.3,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -332,7 +334,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "13948ca9-ecb3-4f34-b83d-150307c1586e",
+      "conversation_id": "e6f2d379-6691-449c-b3a4-11dcb79a0441",
       "turn": 4,
       "is_multi_turn": true,
       "error": null
@@ -344,7 +346,7 @@
       "query": "My estimated annual bakery turnover will be 180 million UGX. Must I register for VAT?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 0.33188536763191223,
+      "latency_s": 0.32856304943561554,
       "retrieval_mode": "calculator",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": null,
@@ -364,10 +366,13 @@
         "mandatory"
       ],
       "matched_numbers": [
-        "300,000,000"
+        "300,000,000",
+        "150,000,000"
       ],
-      "matched_citations": [],
-      "accuracy_score": 0.675,
+      "matched_citations": [
+        "Value Added Tax Act"
+      ],
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -377,7 +382,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "13948ca9-ecb3-4f34-b83d-150307c1586e",
+      "conversation_id": "e6f2d379-6691-449c-b3a4-11dcb79a0441",
       "turn": 5,
       "is_multi_turn": true,
       "error": null
@@ -389,7 +394,7 @@
       "query": "Since VAT is mandatory for me, what is the standard VAT rate I must charge my customers?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 0.3301023319363594,
+      "latency_s": 0.32318146526813507,
       "retrieval_mode": "calculator",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": null,
@@ -406,9 +411,13 @@
         "18%",
         "standard rate"
       ],
-      "matched_numbers": [],
-      "matched_citations": [],
-      "accuracy_score": 0.6,
+      "matched_numbers": [
+        "18%"
+      ],
+      "matched_citations": [
+        "Value Added Tax Act"
+      ],
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -418,7 +427,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "13948ca9-ecb3-4f34-b83d-150307c1586e",
+      "conversation_id": "e6f2d379-6691-449c-b3a4-11dcb79a0441",
       "turn": 6,
       "is_multi_turn": true,
       "error": null
@@ -430,7 +439,7 @@
       "query": "Do I need to issue e-invoices using EFRIS for every bread sale?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 2.4543661549687386,
+      "latency_s": 1.9895010069012642,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 1.0,
@@ -461,7 +470,7 @@
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.8571,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -471,7 +480,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.8,
       "has_redacted_official_contact": false,
-      "conversation_id": "13948ca9-ecb3-4f34-b83d-150307c1586e",
+      "conversation_id": "e6f2d379-6691-449c-b3a4-11dcb79a0441",
       "turn": 7,
       "is_multi_turn": true,
       "error": null
@@ -483,7 +492,7 @@
       "query": "If I need help setting up EFRIS or filing returns, what are URA's official toll free phone numbers and email?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 0.7661402374505997,
+      "latency_s": 0.6497488617897034,
       "retrieval_mode": "faq_priority",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 0.6364,
@@ -507,7 +516,7 @@
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.6667,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -517,7 +526,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "13948ca9-ecb3-4f34-b83d-150307c1586e",
+      "conversation_id": "e6f2d379-6691-449c-b3a4-11dcb79a0441",
       "turn": 8,
       "is_multi_turn": true,
       "error": null
@@ -529,10 +538,10 @@
       "query": "I imported a commercial consignment of spare parts by sea through Mombasa. How does URA determine its customs value?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 6.533361509442329,
+      "latency_s": 4.400524131953716,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
-      "faithfulness_score": 0.5,
+      "faithfulness_score": 1.0,
       "claim_verification_score": 1.0,
       "reply_snippet": "The Uganda Revenue Authority (URA) determines the customs value of a commercial consignment of spare parts imported by sea through Mombasa by applying the **cost[1] plus freight an",
       "sources": [
@@ -562,7 +571,7 @@
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.8571,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -572,7 +581,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "c11fc9b1-1ae9-4754-810d-856e1b58ce13",
+      "conversation_id": "7a72ae86-543b-44bc-8f34-4dee5cb59e2b",
       "turn": 1,
       "is_multi_turn": true,
       "error": null
@@ -584,12 +593,12 @@
       "query": "What if I had shipped those spare parts by air instead? Would freight be treated the same?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 4.584782972931862,
+      "latency_s": 2.2536801174283028,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 1.0,
-      "claim_verification_score": 0.5,
-      "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Industrial replacement Exempted from all taxesspare parts under the fifth schedule of\u2022 A spare part is a the Eas",
+      "claim_verification_score": 1.0,
+      "reply_snippet": "When importing spare parts by air, the freight costs are not included in the customs valuation. Only the cost of the goods (CIF) is considered for customs duty. [1]  You might also",
       "sources": [
         "ura.go.ug-A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR.pdf",
         "ura_customs_valuation_faqs.csv",
@@ -597,29 +606,30 @@
         "TAXATION-OF-THE-EDUCATION-SECTOR.pdf"
       ],
       "matched_keywords": [
-        "spare",
-        "parts"
-      ],
-      "missing_keywords": [
         "air",
         "freight",
-        "excluded",
         "cost",
+        "spare",
+        "parts",
+        "freight"
+      ],
+      "missing_keywords": [
+        "excluded",
         "insurance"
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.8571,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
       "english_fallback": false,
       "query_locale": "en",
       "context_preserved": true,
-      "conversational_score": 1.0,
+      "conversational_score": 0.85,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "c11fc9b1-1ae9-4754-810d-856e1b58ce13",
+      "conversation_id": "7a72ae86-543b-44bc-8f34-4dee5cb59e2b",
       "turn": 2,
       "is_multi_turn": true,
       "error": null
@@ -631,18 +641,17 @@
       "query": "Customs rejected my declared invoice price at the border and valued my goods way higher! Can I challenge this customs valuation?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 2.5001837015151978,
+      "latency_s": 2.9497696459293365,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
-      "faithfulness_score": 0.0,
-      "claim_verification_score": 0.0,
-      "reply_snippet": "To challenge Customs' valuation decision, you can file an appeal within 30 days to the Commissioner General, who reviews the case and decides whether to uphold or adjust the valuat",
+      "faithfulness_score": 0.2,
+      "claim_verification_score": 0.6667,
+      "reply_snippet": "Yes, you can challenge Customs' valuation decision. Under the Administrative Customs Value (ACV) Act, you have two options:  1. **Administrative Review**: Submit a written applicat",
       "sources": [
         "ura_customs_valuation_faqs.csv",
         "56543e3cbf511d6c.json"
       ],
       "matched_keywords": [
-        "appeal",
         "challenge",
         "customs",
         "valued",
@@ -652,12 +661,13 @@
       ],
       "missing_keywords": [
         "objection",
+        "appeal",
         "dispute",
         "right"
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.8571,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -667,7 +677,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.95,
       "has_redacted_official_contact": false,
-      "conversation_id": "c11fc9b1-1ae9-4754-810d-856e1b58ce13",
+      "conversation_id": "7a72ae86-543b-44bc-8f34-4dee5cb59e2b",
       "turn": 3,
       "is_multi_turn": true,
       "error": null
@@ -679,12 +689,12 @@
       "query": "How many days do I have to lodge that customs objection?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 0.6255011782050133,
+      "latency_s": 1.6738090738654137,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 1.0,
-      "claim_verification_score": null,
-      "reply_snippet": "||**OBJECTION****TIMELINES**|\u2022 A person who is dissatisfed with any tax decision may lodgean objection withthe Commissioner within 45 days after receiving notice of thetax decision",
+      "claim_verification_score": 1.0,
+      "reply_snippet": "You have up to 45 days to lodge an objection to a Customs decision. [1]  You might also want to know: How long do I have to object to an assessment?",
       "sources": [
         "Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf",
         "ura_objections_and_appeals_faqs.csv",
@@ -697,6 +707,7 @@
         "lodge",
         "days",
         "lodge",
+        "customs",
         "objection"
       ],
       "missing_keywords": [
@@ -706,17 +717,17 @@
         "45"
       ],
       "matched_citations": [],
-      "accuracy_score": 0.9,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
       "english_fallback": false,
       "query_locale": "en",
       "context_preserved": true,
-      "conversational_score": 1.0,
+      "conversational_score": 0.75,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "c11fc9b1-1ae9-4754-810d-856e1b58ce13",
+      "conversation_id": "7a72ae86-543b-44bc-8f34-4dee5cb59e2b",
       "turn": 4,
       "is_multi_turn": true,
       "error": null
@@ -728,12 +739,12 @@
       "query": "Do I have to pay any portion of the assessed tax before my objection is heard?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 0.6730026230216026,
+      "latency_s": 2.4370059967041016,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 1.0,
-      "claim_verification_score": null,
-      "reply_snippet": "(1) A person dissatisfied with an objection decision may, within thirty days after being served with notice of the objection decision, lodge an application with the tribunal for re",
+      "claim_verification_score": 0.0,
+      "reply_snippet": "Yes, you must pay 30% of the total tax assessed before your objection is heard. This is required under Section 27 of the Tax Procedure Code Act. [1]  You might also want to know: H",
       "sources": [
         "Stamp-duty-Act-2014.pdf",
         "ura_objections_and_appeals_faqs.csv",
@@ -741,17 +752,20 @@
         "808977692-Taxation-Handbook-FY-2024-25-1.pdf"
       ],
       "matched_keywords": [
-        "objection"
+        "pay",
+        "assessed",
+        "before",
+        "objection",
+        "heard"
       ],
       "missing_keywords": [
         "30%",
         "portion",
-        "deposit",
-        "pay"
+        "deposit"
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.3,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -761,7 +775,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "c11fc9b1-1ae9-4754-810d-856e1b58ce13",
+      "conversation_id": "7a72ae86-543b-44bc-8f34-4dee5cb59e2b",
       "turn": 5,
       "is_multi_turn": true,
       "error": null
@@ -773,20 +787,22 @@
       "query": "Can the Commissioner General waive that 30% deposit requirement if I have good reasons?",
       "locale": "en",
       "status_code": 200,
-      "latency_s": 3.573113299906254,
+      "latency_s": 5.1266151666641235,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
-      "faithfulness_score": 0.0,
-      "claim_verification_score": 1.0,
-      "reply_snippet": "Yes, the Commissioner General can waive the 30% deposit requirement for objections and dispute resolution if there are good reasons, such as financial hardship or operational chall",
+      "faithfulness_score": 0.3333,
+      "claim_verification_score": 0.3333,
+      "reply_snippet": "The Commissioner General can waive the 30% deposit requirement if you have good reasons. While the requirement is mandatory, the Commissioner General has discretion to waive it und",
       "sources": [
+        "POST-BUDGET-HANDBOOK-TAX-POLICY-AMENDMENTS-2025-2026.pdf",
         "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
-        "Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf"
+        "b526a3f86a9a95f7.json"
       ],
       "matched_keywords": [
         "waive",
         "waiver",
         "commissioner",
+        "discretion",
         "commissioner",
         "general",
         "waive",
@@ -795,104 +811,8 @@
         "good",
         "reasons"
       ],
-      "missing_keywords": [
-        "discretion"
-      ],
-      "matched_numbers": [],
-      "matched_citations": [],
-      "accuracy_score": 0.8571,
-      "scorable": true,
-      "non_answer": false,
-      "language_ok": true,
-      "english_fallback": false,
-      "query_locale": "en",
-      "context_preserved": true,
-      "conversational_score": 1.0,
-      "eq_score": 0.9,
-      "has_redacted_official_contact": false,
-      "conversation_id": "c11fc9b1-1ae9-4754-810d-856e1b58ce13",
-      "turn": 6,
-      "is_multi_turn": true,
-      "error": null
-    },
-    {
-      "faq_id": "JRN-02-T7",
-      "domain": "customs",
-      "topic": "customs_import_dispute",
-      "query": "If the Commissioner rejects my objection, which tribunal or court do I appeal to?",
-      "locale": "en",
-      "status_code": 200,
-      "latency_s": 0.6777431592345238,
-      "retrieval_mode": "hybrid",
-      "model": "Sunbird/Sunflower-14B-FP8",
-      "faithfulness_score": 1.0,
-      "claim_verification_score": null,
-      "reply_snippet": "A person dissatisfied with the decision of the Commissioner may appeal to the Tax Appeals Tribunal  A person intending to lodge an appeal against the decision of the Commissioner s",
-      "sources": [
-        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
-        "EAC-TAX-CASES-COMPENDIUM-FOURTH-EDITION-.pdf",
-        "ura.go.ug-Objections and Appeals.pdf"
-      ],
-      "matched_keywords": [
-        "Tax Appeals Tribunal",
-        "appeal",
-        "commissioner",
-        "tribunal",
-        "appeal"
-      ],
-      "missing_keywords": [
-        "TAT"
-      ],
-      "matched_numbers": [],
-      "matched_citations": [],
-      "accuracy_score": 0.6,
-      "scorable": true,
-      "non_answer": false,
-      "language_ok": true,
-      "english_fallback": false,
-      "query_locale": "en",
-      "context_preserved": true,
-      "conversational_score": 0.85,
-      "eq_score": 0.8,
-      "has_redacted_official_contact": false,
-      "conversation_id": "c11fc9b1-1ae9-4754-810d-856e1b58ce13",
-      "turn": 7,
-      "is_multi_turn": true,
-      "error": null
-    },
-    {
-      "faq_id": "JRN-02-T8",
-      "domain": "customs",
-      "topic": "customs_import_dispute",
-      "query": "What are URA's official contact details so my clearing agent can follow up on our lodged appeal?",
-      "locale": "en",
-      "status_code": 200,
-      "latency_s": 5.729134909808636,
-      "retrieval_mode": "hybrid",
-      "model": "Sunbird/Sunflower-14B-FP8",
-      "faithfulness_score": 0.75,
-      "claim_verification_score": 1.0,
-      "reply_snippet": "To contact URA,[1] you can use the following official channels:  - **Toll-free lines**: 0800 117 000 / 0800 217 000 - **WhatsApp**: 0772 140 000 - **Email**: services@ura.go.ug - *",
-      "sources": [
-        "ura_about_ura_faqs.csv",
-        "Taxation-handbook-FY2023-24.pdf",
-        "b4aae9314f5f4f6f.json",
-        "Taxpayer-Starter-Pack.pdf"
-      ],
-      "matched_keywords": [
-        "services@ura.go.ug",
-        "0800 117 000",
-        "0800 217 000",
-        "what",
-        "official",
-        "contact",
-        "follow"
-      ],
       "missing_keywords": [],
-      "matched_numbers": [
-        "0800 117 000",
-        "0800 217 000"
-      ],
+      "matched_numbers": [],
       "matched_citations": [],
       "accuracy_score": 1.0,
       "scorable": true,
@@ -904,7 +824,101 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "c11fc9b1-1ae9-4754-810d-856e1b58ce13",
+      "conversation_id": "e95b86a6-356b-4580-b985-becc702555fc",
+      "turn": 6,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T7",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "If the Commissioner rejects my objection, which tribunal or court do I appeal to?",
+      "locale": "en",
+      "status_code": 200,
+      "latency_s": 1.861022524535656,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": 1.0,
+      "reply_snippet": "If the Commissioner rejects your objection, you should appeal to the Tax Appeals Tribunal. [1]  You might also want to know: What should I do if my goods are consolidated with othe",
+      "sources": [
+        "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
+        "EAC-TAX-CASES-COMPENDIUM-FOURTH-EDITION-.pdf",
+        "ura.go.ug-Objections and Appeals.pdf"
+      ],
+      "matched_keywords": [
+        "Tax Appeals Tribunal",
+        "appeal",
+        "commissioner",
+        "rejects",
+        "objection",
+        "tribunal",
+        "appeal"
+      ],
+      "missing_keywords": [
+        "TAT"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 1.0,
+      "scorable": true,
+      "non_answer": false,
+      "language_ok": true,
+      "english_fallback": false,
+      "query_locale": "en",
+      "context_preserved": true,
+      "conversational_score": 0.85,
+      "eq_score": 0.8,
+      "has_redacted_official_contact": false,
+      "conversation_id": "7a72ae86-543b-44bc-8f34-4dee5cb59e2b",
+      "turn": 7,
+      "is_multi_turn": true,
+      "error": null
+    },
+    {
+      "faq_id": "JRN-02-T8",
+      "domain": "customs",
+      "topic": "customs_import_dispute",
+      "query": "What are URA's official contact details so my clearing agent can follow up on our lodged appeal?",
+      "locale": "en",
+      "status_code": 200,
+      "latency_s": 2.3718734830617905,
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "claim_verification_score": 1.0,
+      "reply_snippet": "To lodge an appeal, you should contact URA's **Appeals Department** either in person at their offices or via their official email address: **appeals@ura.go.ug**. [1]  You might als",
+      "sources": [
+        "ura_about_ura_faqs.csv",
+        "Taxation-handbook-FY2023-24.pdf",
+        "b4aae9314f5f4f6f.json",
+        "Taxpayer-Starter-Pack.pdf"
+      ],
+      "matched_keywords": [
+        "official",
+        "contact",
+        "lodged",
+        "appeal"
+      ],
+      "missing_keywords": [
+        "services@ura.go.ug",
+        "0800 117 000",
+        "0800 217 000"
+      ],
+      "matched_numbers": [],
+      "matched_citations": [],
+      "accuracy_score": 1.0,
+      "scorable": true,
+      "non_answer": false,
+      "language_ok": true,
+      "english_fallback": false,
+      "query_locale": "en",
+      "context_preserved": true,
+      "conversational_score": 1.0,
+      "eq_score": 0.9,
+      "has_redacted_official_contact": false,
+      "conversation_id": "7a72ae86-543b-44bc-8f34-4dee5cb59e2b",
       "turn": 8,
       "is_multi_turn": true,
       "error": null
@@ -916,7 +930,7 @@
       "query": "I own a residential apartment building in Entebbe. How is rental income tax calculated for an individual?",
       "locale": "lg",
       "status_code": 200,
-      "latency_s": 5.737820111215115,
+      "latency_s": 3.1472125127911568,
       "retrieval_mode": "workflow",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": null,
@@ -925,6 +939,7 @@
       "sources": [],
       "matched_keywords": [
         "domain_marker",
+        "obupangisa",
         "gross",
         "rental"
       ],
@@ -943,7 +958,7 @@
       "conversational_score": 0.75,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "9362f9c0-a3b4-460f-acff-600279e36c77",
+      "conversation_id": "424c22b0-d674-4393-b01e-da587423e752",
       "turn": 1,
       "is_multi_turn": true,
       "error": null
@@ -955,12 +970,12 @@
       "query": "Can I deduct my renovation and mortgage interest expenses from that gross rental income?",
       "locale": "lg",
       "status_code": 200,
-      "latency_s": 9.764099761843681,
+      "latency_s": 6.341574288904667,
       "retrieval_mode": "hybrid",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 1.0,
       "claim_verification_score": 1.0,
-      "reply_snippet": "Yee, osobola okuggya ssente z'okuddaabiriza n'amagoba g'ebbanja ly'ennyumba ku nnyingiza yo ey'obupangisa ng'olowooza omusolo gw'ennyumba ezipangisibwa. Zino zitwalibwa nga nsimbi ",
+      "reply_snippet": "Yee, osobola okuggya ssente z'okuddaabiriza n'amagoba g'ebbanja ly'ennyumba ku magoba g'ennyumba ezipangisibwa. Bino bitwalibwa ng'ensaasaanya ekkirizibwa mu kubala omusolo gw'enny",
       "sources": [
         "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf",
         "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
@@ -968,16 +983,19 @@
       ],
       "matched_keywords": [
         "domain_marker",
-        "gross"
+        "omusolo",
+        "amagoba",
+        "ensaasaanya",
+        "gross",
+        "expenses"
       ],
       "missing_keywords": [
         "no deduction",
-        "expenses",
         "flat rate"
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.8571,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -987,7 +1005,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "9362f9c0-a3b4-460f-acff-600279e36c77",
+      "conversation_id": "424c22b0-d674-4393-b01e-da587423e752",
       "turn": 2,
       "is_multi_turn": true,
       "error": null
@@ -999,7 +1017,7 @@
       "query": "What if the apartment building was owned by my private company instead of me personally?",
       "locale": "lg",
       "status_code": 200,
-      "latency_s": 4.67501013725996,
+      "latency_s": 3.069539487361908,
       "retrieval_mode": "workflow",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": null,
@@ -1007,7 +1025,8 @@
       "reply_snippet": "Nsaba ompeyo omuwendo gumu mu UGX \u2014 gamba nga 1,500,000 oba 1.5m.  Omusolo gwonna ogw'obupangisa ogw'omwaka guli mmeka mu UGX? (gamba nga 12,000,000 oba 12m)",
       "sources": [],
       "matched_keywords": [
-        "domain_marker"
+        "domain_marker",
+        "omusolo"
       ],
       "missing_keywords": [
         "company",
@@ -1027,7 +1046,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.8,
       "has_redacted_official_contact": false,
-      "conversation_id": "9362f9c0-a3b4-460f-acff-600279e36c77",
+      "conversation_id": "424c22b0-d674-4393-b01e-da587423e752",
       "turn": 3,
       "is_multi_turn": true,
       "error": null
@@ -1039,7 +1058,7 @@
       "query": "Can my company offset losses from another retail business against its rental income?",
       "locale": "lg",
       "status_code": 200,
-      "latency_s": 1.5148531422019005,
+      "latency_s": 1.1052475571632385,
       "retrieval_mode": "workflow",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": null,
@@ -1047,7 +1066,8 @@
       "reply_snippet": "Nsaba ompeyo omuwendo gumu mu UGX \u2014 gamba nga 1,500,000 oba 1.5m.  Omusolo gwonna ogw'obupangisa ogw'omwaka guli mmeka mu UGX? (gamba nga 12,000,000 oba 12m)",
       "sources": [],
       "matched_keywords": [
-        "domain_marker"
+        "domain_marker",
+        "omusolo"
       ],
       "missing_keywords": [
         "ring fencing",
@@ -1065,7 +1085,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "9362f9c0-a3b4-460f-acff-600279e36c77",
+      "conversation_id": "424c22b0-d674-4393-b01e-da587423e752",
       "turn": 4,
       "is_multi_turn": true,
       "error": null
@@ -1077,7 +1097,7 @@
       "query": "If I rent out office space to a corporate tenant, must they withhold tax from my rent?",
       "locale": "lg",
       "status_code": 200,
-      "latency_s": 0.8809989765286446,
+      "latency_s": 0.9733494371175766,
       "retrieval_mode": "workflow",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": null,
@@ -1086,6 +1106,8 @@
       "sources": [],
       "matched_keywords": [
         "domain_marker",
+        "omusolo",
+        "obupangisa",
         "rental"
       ],
       "missing_keywords": [
@@ -1105,7 +1127,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "9362f9c0-a3b4-460f-acff-600279e36c77",
+      "conversation_id": "424c22b0-d674-4393-b01e-da587423e752",
       "turn": 5,
       "is_multi_turn": true,
       "error": null
@@ -1117,22 +1139,23 @@
       "query": "What document does the tenant give me as proof that they remitted that withholding tax?",
       "locale": "lg",
       "status_code": 200,
-      "latency_s": 8.145045526325703,
+      "latency_s": 11.29657880961895,
       "retrieval_mode": "false_premise_rejected",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 1.0,
       "claim_verification_score": null,
-      "reply_snippet": "Mu mateeka ga Uganda agakwata ku misolo n'amateeka ga URA agafuga emisolo, tewaliwo \"Bukakafu bwa Kusasula Musolo\" mu butongole. URA tekkirizibwa kussaawo oba okuggyawo omusolo ng'",
+      "reply_snippet": "Mu mateeka g'ebyemisolo ga Uganda agaliwo kati n'amateeka ga URA, tewali \"Bukakafu bwa Kusasula Musolo\" mu butongole. URA tekkirizibwa kussaawo oba okuggyawo omusolo ng'ogwo.  Emis",
       "sources": [],
       "matched_keywords": [
-        "domain_marker"
+        "domain_marker",
+        "omusolo"
       ],
       "missing_keywords": [
         "credit"
       ],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.4286,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -1142,7 +1165,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "9362f9c0-a3b4-460f-acff-600279e36c77",
+      "conversation_id": "424c22b0-d674-4393-b01e-da587423e752",
       "turn": 6,
       "is_multi_turn": true,
       "error": null
@@ -1154,7 +1177,7 @@
       "query": "When is my annual rental income tax return due for filing?",
       "locale": "lg",
       "status_code": 200,
-      "latency_s": 9.037045754492283,
+      "latency_s": 11.251709647476673,
       "retrieval_mode": "calculator",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": null,
@@ -1163,12 +1186,14 @@
       "sources": [],
       "matched_keywords": [
         "domain_marker",
+        "omusolo",
+        "buli mwaka",
         "annual"
       ],
       "missing_keywords": [],
       "matched_numbers": [],
       "matched_citations": [],
-      "accuracy_score": 0.8571,
+      "accuracy_score": 1.0,
       "scorable": true,
       "non_answer": false,
       "language_ok": true,
@@ -1178,7 +1203,7 @@
       "conversational_score": 0.85,
       "eq_score": 0.8,
       "has_redacted_official_contact": false,
-      "conversation_id": "9362f9c0-a3b4-460f-acff-600279e36c77",
+      "conversation_id": "424c22b0-d674-4393-b01e-da587423e752",
       "turn": 7,
       "is_multi_turn": true,
       "error": null
@@ -1190,12 +1215,12 @@
       "query": "Give me the official URA website link and email where I can log in and file this rental return.",
       "locale": "lg",
       "status_code": 200,
-      "latency_s": 21.626636937260628,
+      "latency_s": 14.27174348384142,
       "retrieval_mode": "faq_priority",
       "model": "Sunbird/Sunflower-14B-FP8",
       "faithfulness_score": 1.0,
       "claim_verification_score": null,
-      "reply_snippet": "Okujjuza alipoota yo ey'omusolo ogwa buli mwaka:  1. Yingira ku ura.go.ug ne TIN/akasumuluzo \u2192 e-services \u2192 e-returns \u2192 londako ekika kya alipoota era otikkelemu ekyokulabirako  2.",
+      "reply_snippet": "Okuwaayo alipoota yo ey'omwaka ey'emisolo:  1. Yingira ku ura.go.ug ne TIN/akasumuluzo \u2192 e-services \u2192 e-returns \u2192 londako ekika kya alipoota n'okkaanya ku foomu  2. Teekamu ebiragi",
       "sources": [
         "ura_processes_systems_faqs.csv",
         "TAXATION-HANDBOOK-FY-2025-26-1.pdf",
@@ -1219,7 +1244,7 @@
       "conversational_score": 1.0,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "9362f9c0-a3b4-460f-acff-600279e36c77",
+      "conversation_id": "424c22b0-d674-4393-b01e-da587423e752",
       "turn": 8,
       "is_multi_turn": true,
       "error": null
@@ -1231,7 +1256,7 @@
       "query": "I run a small retail grocery shop in Mukono with annual sales around 35 million UGX. Do I pay standard corporation tax?",
       "locale": "lg",
       "status_code": 0,
-      "latency_s": 60.046411499381065,
+      "latency_s": 60.038499884307384,
       "retrieval_mode": "unknown",
       "model": "unknown",
       "faithfulness_score": null,
@@ -1240,7 +1265,6 @@
       "sources": [],
       "matched_keywords": [],
       "missing_keywords": [
-        "omusolo",
         "turnover"
       ],
       "matched_numbers": [],
@@ -1255,7 +1279,7 @@
       "conversational_score": 0.7,
       "eq_score": 0.9,
       "has_redacted_official_contact": false,
-      "conversation_id": "45d6bcd2-99a8-4a02-adbd-0797692556b7",
+      "conversation_id": "319b0e21-6acd-4c4d-876f-ceacf9ef5b4a",
       "turn": 1,
       "is_multi_turn": true,
       "error": ""

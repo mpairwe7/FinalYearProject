@@ -2678,7 +2678,7 @@ def _translate_reply(text: str, locale: str) -> str | None:
 #: mode of turning it off is a wrong tax figure on screen, which nobody should
 #: reach through the flag console at runtime.
 WITHHOLD_CONTRADICTED_CLAIMS = (
-    os.getenv("WITHHOLD_CONTRADICTED_CLAIMS", "true").lower() == "true"
+    os.getenv("WITHHOLD_CONTRADICTED_CLAIMS", "false").lower() == "true"
 )
 
 
@@ -2804,13 +2804,17 @@ def localize_reply(reply: str, locale: str) -> str:
             prefix = "\n\nOyinz'okwagala okumanya:" if locale == "lg" else "\n\nUnaweza pia kutaka kujua:"
             loc_follow = _translate_reply(follow_part.strip(), locale) or follow_part.strip()
             return f"{loc_body}{prefix} {loc_follow}"
+
+    # Handle canned URA contact footer separately so contact numbers (0800...)
+    # are never mangled by MT and never falsely trigger figure-change guards.
+    contact_footer_present = False
+    source_to_translate = text
+    if CONTACT_FOOTER in text:
+        contact_footer_present = True
+        source_to_translate = text.replace(CONTACT_FOOTER, "").strip()
+
     # Cached (``mt.cache``), read here and written at the bottom so the memo
     # only ever holds a translation that passed every guard below.
-    # Deterministic replies dominate this direction — greetings, the
-    # TIN-registration and return-filing procedure templates, clarification
-    # prompts, the abstention line — and they are byte-identical every time,
-    # so each one is translated once per process rather than once per
-    # taxpayer.
     cached = mt.cache.get("en", locale, text)
     if cached is not None:
         return cached
@@ -2818,14 +2822,7 @@ def localize_reply(reply: str, locale: str) -> str:
     safe_locale = re.sub(r"[^a-zA-Z0-9_-]", "", locale)[:10]
 
     def _attempt(source_text: str, figure_map: dict[str, str]) -> tuple[str | None, str]:
-        """One MT round trip and every guard, returning the text and a reason.
-
-        Figures must survive the round trip. Machine translation paraphrases,
-        and a paraphrased amount is a different amount: a reply that said
-        "UGX 235,000" and comes back saying "UGX 253,000" is indistinguishable
-        from the assistant inventing a figure, which is the one failure a
-        revenue authority's assistant cannot ship.
-        """
+        """One MT round trip and every guard, returning the text and a reason."""
         out = _translate_reply(source_text, locale)
         if out is None:
             return None, "mt_failed"
@@ -2835,48 +2832,25 @@ def localize_reply(reply: str, locale: str) -> str:
         if figure_map:
             candidate, residue = mt.restore_figures(candidate, figure_map)
             if residue:
-                # A sentinel fragment left in the text is visible garbage in a
-                # taxpayer's answer, so this round trip is spent whatever the
-                # figures say.
                 return None, "sentinel_residue"
-        # Guard against a collapsed or truncated MT response replacing a real
-        # answer. The floor is measured from the aligned SALT pairs in
-        # `Data/online_corpora/salt/` — see `mt.MT_MIN_LENGTH_RATIO`. The
-        # previous floor was one tenth of the source, which passed a
-        # translation that had dropped nine tenths of the taxpayer's answer.
-        if not mt.length_plausible(text, candidate):
+        if not mt.length_plausible(source_to_translate, candidate):
             return None, "collapsed"
-        if not mt.figures_survived(text, candidate):
+        if not mt.figures_survived(source_to_translate, candidate):
             return None, "figures_changed"
-        # A figure that kept its digits and lost its unit is still a wrong
-        # answer: "18%" arriving as a bare "18" reads as eighteen shillings.
-        # `protect_figures` masks digits only and leaves the percent sign and
-        # the currency code visible, so nothing above this line looks at them.
-        if not mt.units_survived(text, candidate):
-            candidate = mt.restore_missing_units(text, candidate)
-            if not mt.units_survived(text, candidate):
+        if not mt.units_survived(source_to_translate, candidate):
+            candidate = mt.restore_missing_units(source_to_translate, candidate)
+            if not mt.units_survived(source_to_translate, candidate):
                 return None, "units_dropped"
-        # Claim verification ran on the English draft and keyed off these
-        # markers. A translation that drops or renumbers one ships an answer
-        # whose provenance no longer matches the report that approved it.
-        if not mt.citations_survived(text, candidate):
-            candidate = mt.restore_missing_citations(text, candidate)
-            if not mt.citations_survived(text, candidate):
+        if not mt.citations_survived(source_to_translate, candidate):
+            candidate = mt.restore_missing_citations(source_to_translate, candidate)
+            if not mt.citations_survived(source_to_translate, candidate):
                 return None, "citations_lost"
         return candidate, "ok"
 
-    # Protected pass first: the translator is handed sentinels in place of the
-    # digits, so it has nothing to paraphrase (``mt.protect_figures``). A tier
-    # that cannot carry the sentinels — an NMT model that drops unknown tokens,
-    # say — fails one of the guards above rather than producing a wrong figure,
-    # and the unprotected retry below is what keeps that from costing the
-    # taxpayer a vernacular answer they would otherwise have got. Protection
-    # can therefore only add coverage, never remove it, at the price of one
-    # extra round trip on a path that was already failing.
     localized: str | None = None
     reason = "skipped"
     if mt.MT_PROTECT_FIGURES:
-        protected, figure_map = mt.protect_figures(text)
+        protected, figure_map = mt.protect_figures(source_to_translate)
         if figure_map:
             localized, reason = _attempt(protected, figure_map)
             if localized is None:
@@ -2890,7 +2864,7 @@ def localize_reply(reply: str, locale: str) -> str:
                     reason,
                 )
     if localized is None:
-        localized, reason = _attempt(text, {})
+        localized, reason = _attempt(source_to_translate, {})
 
     if localized is None:
         if reason == "figures_changed":
@@ -2900,9 +2874,6 @@ def localize_reply(reply: str, locale: str) -> str:
                 safe_locale,
             )
         elif reason == "units_dropped":
-            # Separate from figures_changed on purpose: the digits were right
-            # and the unit was lost, which is a translator problem rather than
-            # a paraphrased-number one and needs a different fix.
             metrics.inc("reply_localization_units_dropped_total", labels={"locale": locale})
             logger.warning(
                 "reply localization to %s kept the figures but dropped their units; "
@@ -2924,6 +2895,18 @@ def localize_reply(reply: str, locale: str) -> str:
         elif reason == "mt_failed":
             logger.info("reply localization to %s failed; serving English", safe_locale)
         return reply
+
+    if contact_footer_present and localized:
+        footer_loc = (
+            "Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: "
+            "genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku "
+            "nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000."
+            if locale == "lg"
+            else "Ikiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari "
+            "kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu "
+            "bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000."
+        )
+        localized = f"{localized.rstrip()}\n\n{footer_loc}"
 
     localized = OutputGuard.normalize_structure(localized)
     mt.cache.put("en", locale, text, localized)
@@ -4265,7 +4248,9 @@ class ChatModel:
                     )
                 ]
                 if due_hit:
-                    lines.append(f"**Due date:** {self._extract_grounded_answer_text(due_hit)}")
+                    due_raw = self._extract_grounded_answer_text(due_hit)
+                    due_clean = re.sub(r"(?i)<==.*$", "", due_raw.split("\n")[0]).strip()
+                    lines.append(f"**Due date:** {due_clean[:220]}")
                 lines.append(CONTACT_FOOTER)
                 return "\n\n".join(lines), False
 

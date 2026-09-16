@@ -940,49 +940,56 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         "vat_standard": (
             "**The standard VAT rate in Uganda is {pct}** ({fy}). Value Added Tax "
             "is charged at {pct} on taxable supplies of goods and services; "
-            "VAT-registered businesses collect it from customers and remit it to URA."
+            "VAT-registered businesses collect it from customers and remit it to URA.\n\n"
+            "- Statutory Basis: Value Added Tax Act"
         ),
         "corporation_tax": (
             "**The corporation tax rate in Uganda is {pct}** ({fy}), applied to a "
-            "company's annual chargeable income."
+            "company's annual chargeable income.\n\n"
+            "- Statutory Basis: Income Tax Act"
         ),
         "capital_gains_corporate": (
             "**Capital gains are taxed at {pct}** ({fy}) — the gain is included "
-            "in chargeable income."
+            "in chargeable income.\n\n"
+            "- Statutory Basis: Income Tax Act"
         ),
         "customs_duty_common": (
             "**The common external tariff for finished goods is {pct}** ({fy}). "
-            "The exact duty depends on the EAC tariff classification of the goods."
+            "The exact duty depends on the EAC tariff classification of the goods.\n\n"
+            "- Statutory Basis: East African Community Customs Management Act (EACCMA)"
         ),
         "rental_tax_individual": (
             "**Individual rental income is taxed at {pct}** ({fy}) on gross rent "
-            "above the annual threshold of {threshold}."
+            "above the annual threshold of {threshold}.\n\n"
+            "- Statutory Basis: Income Tax Act"
         ),
         "rental_tax_company": (
             "**Company rental income is taxed at {pct}** ({fy}) on chargeable "
-            "income, with expenses deductible up to {cap} of gross rent."
+            "income, with expenses deductible up to {cap} of gross rent.\n\n"
+            "- Statutory Basis: Income Tax Act"
         ),
-        "withholding_services": "**WHT on services is {pct}** ({fy}), withheld at source.",
-        "withholding_goods": "**WHT on goods is {pct}** ({fy}), withheld at source.",
-        "withholding_management_fees": "**WHT on management fees is {pct}** ({fy}), withheld at source.",
-        "withholding_dividend": "**WHT on dividends is {pct}** ({fy}), withheld at source.",
-        "withholding_royalty": "**WHT on royalties is {pct}** ({fy}), withheld at source.",
+        "withholding_services": "**WHT on services is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
+        "withholding_goods": "**WHT on goods is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
+        "withholding_management_fees": "**WHT on management fees is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
+        "withholding_dividend": "**WHT on dividends is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
+        "withholding_royalty": "**WHT on royalties is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
         "withholding_public_entertainer": (
-            "**WHT on payments to public entertainers is {pct}** ({fy}), withheld at source."
+            "**WHT on payments to public entertainers is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act"
         ),
         "withholding_betting_winnings": (
-            "**WHT on betting winnings is {pct}** ({fy}), withheld at source by the operator."
+            "**WHT on betting winnings is {pct}** ({fy}), withheld at source by the operator.\n\n- Statutory Basis: Income Tax Act"
         ),
         "withholding_foreign_interest": (
-            "**WHT on interest paid to non-resident lenders is {pct}** ({fy}), withheld at source."
+            "**WHT on interest paid to non-resident lenders is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act"
         ),
         "vat_registration_threshold_annual": (
             "**VAT registration is compulsory once annual taxable turnover reaches "
-            "{threshold_vat}** ({fy}). Below that, registration is voluntary."
+            "{threshold_vat}** ({fy}). Below that, registration is voluntary.\n\n"
+            "- Statutory Basis: Value Added Tax Act"
         ),
         "environmental_levy_used_clothing": (
             "**The environmental levy on imported used clothing is {pct}** of the CIF "
-            "value ({fy})."
+            "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act (EACCMA)"
         ),
         "excise_duty_mobile_money_withdrawal": (
             "**The excise duty rate on mobile money cash withdrawals is {pct}** ({fy}) "

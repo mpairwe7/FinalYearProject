@@ -125,9 +125,10 @@ _AMOUNT_SUFFIX = {
     "olukumi": 1_000,
 }
 
-# Multipliers placed BEFORE digits (common in Swahili & Luganda, e.g. "milioni 150", "obukadde 150")
+# Multipliers placed BEFORE digits (common in Swahili & Luganda, e.g. "milioni 150", "obukadde 150", "obukadde bwa siringi 5")
 _AMOUNT_PREFIX_RE = re.compile(
-    r"\b(milioni|bilioni|elfu|laki|obukadde|akakadde|obuwumbi|akawumbi|emitwalo|omutwalo|enkumi|olukumi)\s+"
+    r"\b(milioni|bilioni|elfu|laki|obukadde|akakadde|obuwumbi|akawumbi|emitwalo|omutwalo|enkumi|olukumi)"
+    r"(?:\s+(?:bwa|kwa|za|ya|nga)?\s*(?:ssente|sente|siringi|shilingi|shs|ugx)?)?\s+"
     r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\b",
     re.IGNORECASE,
 )

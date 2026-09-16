@@ -343,9 +343,11 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
 
 def is_official_ura_email(email: str) -> bool:
     """Return True if email is an official public contact address for URA or Uganda gov."""
-    addr = email.strip().lower()
+    addr = email.strip().strip(".,;:\"'").lower()
     return (
-        addr.endswith("@ura.go.ug")
+        "ura.go.ug" in addr
+        or "go.ug" in addr
+        or addr.endswith("@ura.go.ug")
         or addr.endswith(".ura.go.ug")
         or addr.endswith("@go.ug")
         or addr.endswith(".go.ug")
