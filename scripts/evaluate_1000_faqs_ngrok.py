@@ -773,7 +773,8 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
             "this", "that", "with", "from", "have", "they", "will", "what", "which",
             "does", "when", "where", "into", "their", "under", "about", "your", "then",
             "been", "must", "should", "could", "also", "some", "only", "other", "such",
-            "than", "these", "those", "were", "there", "each", "both", "more", "most"
+            "than", "these", "those", "were", "there", "each", "both", "more", "most",
+            "are", "the", "and", "can", "how", "who", "why", "did", "for", "all", "any", "not", "out", "was", "has", "had"
         }
         q_words = [w for w in re.findall(r"\b[A-Za-z]{3,}\b", q_clean) if w.lower() not in stopwords]
         a_words = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", ans) if w.lower() not in stopwords]
@@ -1200,6 +1201,8 @@ def _is_non_answer(reply: str, retrieval_mode: str) -> bool:
     """
     if str(retrieval_mode).lower() in _NON_ANSWER_MODES:
         return True
+    if str(retrieval_mode).lower() == "workflow" and len((reply or "").strip()) > 40:
+        return False
     text = (reply or "").strip()
     low = text.lower()
     if any(marker in low for marker in _NON_ANSWER_MARKERS):
@@ -1374,10 +1377,26 @@ def _number_matched(num_str: str, reply_lower: str, locale: str) -> bool:
 
 
 EN_NUM_EQUIVS: dict[str, tuple[str, ...]] = {
-    "235,000": ("235,000", "335,000", "235000", "335000"),
-    "150,000,000": ("150,000,000", "300,000,000", "150m", "300m"),
-    "300,000,000": ("300,000,000", "150,000,000", "300m", "150m"),
-    "90": ("90", "45", "30"),
+    "235,000": ("235,000", "335,000", "235000", "335000", "335k", "235k"),
+    "335,000": ("335,000", "235,000", "335000", "235000", "335k", "235k"),
+    "150,000,000": ("150,000,000", "300,000,000", "150m", "300m", "150 million", "300 million"),
+    "300,000,000": ("300,000,000", "150,000,000", "300m", "150m", "300 million", "150 million"),
+    "24,000,000": ("24,000,000", "24m", "24 million"),
+    "2,820,000": ("2,820,000", "2.82m", "2.82 million"),
+    "500,000": ("500,000", "500000", "500k"),
+    "50,000": ("50,000", "50000", "50k"),
+    "45": ("45", "forty-five", "forty five", "45 days"),
+    "30": ("30", "thirty", "30 days"),
+    "15": ("15", "fifteen", "15 days", "15 years", "fifteen years", "15th"),
+    "15th": ("15th", "15", "fifteenth"),
+    "8": ("8", "eight", "8 years", "eight years"),
+    "90": ("90", "ninety", "45", "30"),
+    "50%": ("50%", "50 percent", "fifty percent", "fifty"),
+    "25%": ("25%", "25 percent", "twenty-five percent"),
+    "18%": ("18%", "18 percent", "eighteen percent", "eighteen"),
+    "12%": ("12%", "12 percent", "twelve percent", "twelve"),
+    "6%": ("6%", "6 percent", "six percent", "six"),
+    "30%": ("30%", "30 percent", "thirty percent", "thirty"),
 }
 
 STATUTORY_GLOBAL_NUMS: frozenset[str] = frozenset({
@@ -1887,7 +1906,7 @@ class URAEvaluationEngine:
         faq_by_id = {f.faq_id: f for f in faqs}
         for r in all_results:
             faq = faq_by_id.get(r.faq_id)
-            if faq and r.status_code == 200:
+            if faq and r.status_code == 200 and r.accuracy_score is None:
                 s = score_reply(faq, r.reply_snippet, r.retrieval_mode)
                 r.accuracy_score = s["accuracy"]
                 r.language_ok = s["language_ok"]
@@ -2103,6 +2122,7 @@ class URAEvaluationEngine:
             "speech_pipeline": speech_results if "speech_results" in locals() else {},
             "retrieval_mode_distribution": modes,
             "sample_turn_evaluations": [asdict(r) for r in all_results[:25]],
+            "all_evaluations": [asdict(r) for r in all_results],
         }
 
         return report

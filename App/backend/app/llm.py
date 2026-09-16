@@ -1304,12 +1304,17 @@ def translate_text(
     )
     if target_lang == "sw":
         constraint_note += " For percentages, write either '18%' or 'asilimia 18'."
-    glossary_hints = get_translation_glossary_hints(text, target_lang)
-    user_prompt = (
-        f"Translate the following {src_name} text into {lang_name}. "
-        f"It may be a question — translate the question itself, do not answer it."
-        f"{constraint_note}{glossary_hints}{example}\n\n{src_name}: {text}\n{lang_name}:"
-    )
+    if target_lang == "en":
+        user_prompt = (
+            f"Translate the following {src_name} text into {lang_name}. "
+            f"It may be a question — translate the question itself, do not answer it."
+            f"{constraint_note}{glossary_hints}{example}\n\n{src_name}: {text}\n{lang_name}:"
+        )
+    else:
+        user_prompt = (
+            f"Translate the following {src_name} text into {lang_name}. "
+            f"{constraint_note}{example}\n\n{src_name}: {text}\n{lang_name}:"
+        )
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
@@ -1343,14 +1348,15 @@ def translate_text(
             # Bound tokens for translation to ensure concise response.
             # Bantu languages (Luganda, Swahili, etc.) have rich agglutinative morphology
             # requiring ~3-4 subword tokens per English word.
-            token_budget = min(1024, max(256, int(len(text.split()) * 4.5)))
+            token_budget = min(1536, max(768, int(len(text.split()) * 5.0)))
             raw = (_vllm_generate(
                 messages, temperature=0.0, top_p=0.9, max_tokens=token_budget, timeout=VLLM_HTTP_TIMEOUT,
             ) or "").strip()
             # Clean stray digit bracket glitches and rogue language tags
             raw = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", raw)
             raw = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", raw, flags=re.IGNORECASE)
-            raw = re.sub(r"\[+([a-zA-Z_]+)\]+", "", raw)
+            raw = re.sub(r"\[+([a-zA-Z_]+)\]*", r"\1", raw)
+            raw = re.sub(r"\[{2,}", "", raw)
             return raw.strip()
         except Exception:  # noqa: BLE001 — MT is best-effort; caller falls through
             logger.debug("Prompted MT via vLLM failed", exc_info=True)

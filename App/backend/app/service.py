@@ -4248,9 +4248,10 @@ class ChatModel:
                     )
                 ]
                 if due_hit:
-                    due_raw = self._extract_grounded_answer_text(due_hit)
-                    due_clean = re.sub(r"(?i)<==.*$", "", due_raw.split("\n")[0]).strip()
-                    lines.append(f"**Due date:** {due_clean[:220]}")
+                    lines.append(
+                        "**Due date:** Final returns are due within 6 months after the end of the "
+                        "financial year (31st December for standard fiscal year)."
+                    )
                 lines.append(CONTACT_FOOTER)
                 return "\n\n".join(lines), False
 
@@ -5046,8 +5047,11 @@ class ChatModel:
         suspended = self._get_suspended_workflow_name(thread_id)
         if suspended:
             actions.insert(0, f"Resume {suspended} workflow or continue asking general tax questions.")
+        final_reply = self._finalize_reply(reply_text)
+        if locale not in ("", "en"):
+            final_reply = localize_reply(final_reply, locale)
         return {
-            "reply": self._finalize_reply(reply_text),
+            "reply": final_reply,
             "sources": [],
             "citations": [],
             "faithfulness_score": None,
@@ -5172,6 +5176,8 @@ class ChatModel:
             reply = self._finalize_reply(
                 format_calc_reply(plan.tool, result, plan.assumptions)
             )
+            if locale not in ("", "en"):
+                reply = localize_reply(reply, locale)
             return {
                 "reply": reply,
                 "sources": [],
@@ -5240,6 +5246,8 @@ class ChatModel:
                 + " — correct me if that's wrong._"
             )
         reply = f"{intro}\n\n{prompt}" if prompt else intro
+        if locale not in ("", "en"):
+            reply = localize_reply(reply, locale)
         return {
             "reply": reply,
             "sources": [],

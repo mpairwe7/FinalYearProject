@@ -224,6 +224,9 @@ def canonical_amounts(text: str) -> set[float]:
     # Normalize English ordinal dates (e.g. "15th", "1st", "30th") to cardinal digits
     # so statutory filing deadlines survive translation into Swahili and Luganda
     remainder = re.sub(r"\b(\d{1,2})(?:st|nd|rd|th)\b", r"\1", remainder, flags=re.IGNORECASE)
+    # Strip common non-numeric idioms containing cardinal/ordinal words (e.g. "third party", "mtu wa tatu")
+    remainder = re.sub(r"\b(?:mtu|watu|upande|pande|chama|mtu\s+yeyote)\s+wa\s+tatu\b", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\bthird[-\s]part(?:y|ies)\b", " ", remainder, flags=re.IGNORECASE)
 
     # 2. Standard suffixes (e.g. "150m", "150 million", "UGX 150,000,000") and plain numbers
     for match in _AMOUNT_RE.finditer(remainder):

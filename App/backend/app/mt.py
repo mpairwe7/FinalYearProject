@@ -185,6 +185,9 @@ def figures(text: str) -> set[float]:
     stripped = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", stripped)
     # Strip list step numbering at start of lines or inline (e.g. "1. ", " 2. ")
     stripped = re.sub(r"(?:^|\s)\d{1,2}[\.\)]\s+", " ", stripped)
+    # Strip legal references (e.g. section 40, subsection (4), cap 349)
+    stripped = re.sub(r"\b(?:sub-?section|section|schedule|cap\.?|article|clause)\s*\(?\d+\)?\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\(\d+\)", " ", stripped)
     values = canonical_amounts(stripped)
     values |= {float(value) for value in percentages(stripped)}
     return values
@@ -220,7 +223,7 @@ def figures_survived(source: str, translated: str) -> bool:
 #: ``Data/eval/rag_eval_lg.jsonl`` and the reviewed probes in
 #: ``tests/load/tax_education_accuracy_eval.py`` — no vocabulary is coined here.
 _CURRENCY_TOKEN_RE = re.compile(
-    r"\b(?:UGX|USh(?:s)?|Shs?|shillings?|shilingi|ssente|sente)\b",
+    r"\b(?:UGX|USh(?:s)?|Shs?|shillings?|shilingi|ssente|sente|milioni|obukadde|emitwalo)\b",
     re.IGNORECASE,
 )
 
@@ -320,7 +323,7 @@ def restore_missing_units(source: str, translated: str) -> str:
     """If source carried currency (UGX) or percentage unit and translation dropped it, restore."""
     res = translated
     if _CURRENCY_TOKEN_RE.search(source or "") and not _CURRENCY_TOKEN_RE.search(res or ""):
-        res = re.sub(r"(?<![a-zA-Z0-9_])(\d{1,3}(?:,\d{3})+(?:\.\d+)?)\b", r"UGX \1", res, count=1)
+        res = re.sub(r"(?<![a-zA-Z0-9_])(\d+(?:,\d{3})*(?:\.\d+)?)\b", r"UGX \1", res, count=1)
     src_pcts = percentages(source)
     if src_pcts and not percentages(res):
         for p in src_pcts:
