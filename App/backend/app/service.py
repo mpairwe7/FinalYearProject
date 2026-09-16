@@ -328,6 +328,12 @@ _PDF_BLOCKQUOTE_MARGINAL_RE = re.compile(r"(?m)^\s*>.*$")
 _PDF_STANDALONE_PAGE_RE = re.compile(r"(?m)^\s*\d{1,4}\s*$")
 _PDF_ALL_CAPS_HEADER_RE = re.compile(r"(?m)^[A-Z\s]{5,}\s*$")
 _MD_LIST_ITALIC_RE = re.compile(r"\(\s*_([a-zA-Z0-9]+)_\s*\)")
+_WEB_SCRAPE_ARTIFACT_RE = re.compile(
+    r"<==\*?"
+    r"|ura\.go\.ug\s+/en/[^\s]+"
+    r"|[A-Z][a-z]+\s+[A-Z][a-z]+\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}",
+    re.IGNORECASE,
+)
 
 
 def _clean_passage_text(text: str) -> str:
@@ -335,7 +341,8 @@ def _clean_passage_text(text: str) -> str:
     preserving paragraph breaks; no-op for clean text."""
     if not text:
         return ""
-    t = _MD_LIST_ITALIC_RE.sub(r"(\1)", text)
+    t = _WEB_SCRAPE_ARTIFACT_RE.sub(" ", text)
+    t = _MD_LIST_ITALIC_RE.sub(r"(\1)", t)
     t = _PDF_STANDALONE_PAGE_RE.sub(" ", t)
     t = _PDF_BLOCKQUOTE_MARGINAL_RE.sub(" ", t)
     t = _PDF_REVISION_TAG_RE.sub(" ", t)
@@ -3701,6 +3708,21 @@ class ChatModel:
                 priority += 8
             if "return" in query.lower() and "file a return" in body.lower():
                 priority += 8
+            if "agricultural" in query.lower() and (
+                "agricultural" in body.lower()
+                or "agriculture" in body.lower()
+                or "unprocessed" in body.lower()
+            ):
+                priority += 12
+            if "efris" in query.lower() and "api" in query.lower() and (
+                "api" in body.lower()
+                or "integration" in body.lower()
+                or "developer" in body.lower()
+            ):
+                priority += 12
+            if "aeoi" in query.lower() or "automatic exchange" in query.lower():
+                if "aeoi" in body.lower() or "automatic exchange" in body.lower():
+                    priority += 12
             if str(hit.get("source", "")).lower() in {
                 "ura_objection_appeals_faqs.csv",
                 "ura_double_taxation_agreements_faqs.csv",

@@ -180,7 +180,9 @@ def figures(text: str) -> set[float]:
     Formatting is normalised by ``canonical_amounts``: "UGX 1,500,000",
     "1.5m" and "1500000" all reduce to the same value.
     """
-    stripped = _CITATION_MARKER_RE.sub(" ", text or "")
+    # Normalize glued citation markers (e.g. otherL1] or word[1] -> word [1])
+    norm_text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text or "")
+    stripped = _CITATION_MARKER_RE.sub(" ", norm_text)
     # Strip Ugandan phone numbers so contact lines are not parsed as tax figures
     stripped = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", stripped)
     # Strip list step numbering at start of lines or inline (e.g. "1. ", " 2. ")

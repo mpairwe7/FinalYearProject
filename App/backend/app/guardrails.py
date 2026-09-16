@@ -428,6 +428,8 @@ class OutputGuard:
         text = re.sub(r"<script[^>]*>.*?</script\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove HTML tags
         text = re.sub(r"<[^>]+>", "", text)
+        # Normalize glued/malformed citation markers like otherL1] or word[1] -> word [1]
+        text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text)
         # Remove markdown image links to non-URA domains
         text = re.sub(
             r"!\[.*?\]\((?!https?://ura\.go\.ug).*?\)",
