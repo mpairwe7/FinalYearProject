@@ -139,6 +139,10 @@ export class AudioRecorder {
     return this._recording;
   }
 
+  getStream(): MediaStream | null {
+    return this.stream;
+  }
+
   /** Check if MediaRecorder + microphone are available. */
   static isSupported(): boolean {
     return (

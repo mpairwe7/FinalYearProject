@@ -54,13 +54,32 @@ interface ChatInputProps {
   dictationNotice?: string | null;
   /** Abort an in-flight reply. When set, the primary slot becomes Stop while loading. */
   onStop?: () => void;
+  /** Live audio frequency levels [0..1] for responsive waveform */
+  audioLevels?: number[];
 }
 
-/** Inline waveform — 5 animated bars */
-function InlineWaveform() {
+/** Inline waveform — 5 bars responsive to live microphone levels when available */
+function InlineWaveform({ levels }: { levels?: number[] }) {
+  const hasLevels = levels && levels.length >= 5 && levels.some((v) => v > 0.05);
   return (
     <div className="composer-waveform" aria-hidden="true">
-      <span /><span /><span /><span /><span />
+      {Array.from({ length: 5 }).map((_, i) => {
+        const val = hasLevels ? Math.min(1.0, Math.max(0.15, levels[i] ?? 0.2)) : null;
+        return (
+          <span
+            key={i}
+            style={
+              val !== null
+                ? {
+                    transform: `scaleY(${val})`,
+                    animation: 'none',
+                    transition: 'transform 0.08s ease-out',
+                  }
+                : undefined
+            }
+          />
+        );
+      })}
     </div>
   );
 }
@@ -85,6 +104,7 @@ function ChatInputInner({
   voiceModeDisabled,
   dictationNotice,
   onStop,
+  audioLevels,
 }: ChatInputProps) {
   const t = useTranslation();
   const [isDragging, setIsDragging] = useState(false);
@@ -158,7 +178,7 @@ function ChatInputInner({
             {t('composer.listening')}
           </div>
           <div className="composer-rec-controls">
-            <InlineWaveform />
+            <InlineWaveform levels={audioLevels} />
             <button
               className="composer-rec-cancel"
               data-testid="composer-rec-cancel"

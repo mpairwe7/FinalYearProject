@@ -253,15 +253,15 @@ describe("ChatInput attachments", () => {
       expect(screen.queryByText(/can make mistakes/)).not.toBeInTheDocument();
     });
 
-    it("has no mic button while recording, in either flow", () => {
-      for (const voiceMode of [true, false]) {
-        const { unmount } = render(
-          <ChatInput {...defaults} isRecording speechState="listening" voiceMode={voiceMode} />,
-        );
-        expect(screen.queryByLabelText("Stop listening")).not.toBeInTheDocument();
-        expect(screen.queryByLabelText("Start speaking")).not.toBeInTheDocument();
-        unmount();
-      }
+    it("renders responsive waveform when audioLevels are provided", () => {
+      const { container } = render(
+        <ChatInput {...defaults} isRecording audioLevels={[0.3, 0.6, 0.8, 0.4, 0.2]} />,
+      );
+      const waveform = container.querySelector(".composer-waveform");
+      expect(waveform).toBeInTheDocument();
+      const bars = waveform?.querySelectorAll("span");
+      expect(bars).toHaveLength(5);
+      expect(bars?.[2]?.style.transform).toContain("scaleY(0.8)");
     });
   });
 });

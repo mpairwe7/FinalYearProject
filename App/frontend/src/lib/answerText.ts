@@ -36,3 +36,32 @@ export function stripCitationMarkers(text: string): string {
     .replace(/[ \t]+([.,;:!?])/g, '$1') // space pushed onto punctuation
     .replace(/[ \t]+$/gm, ''); //          trailing space on a line
 }
+
+/**
+ * Pre-process text for TTS narration: strips citations, code blocks, links,
+ * and markdown formatting (headings, bold, lists, tables).
+ */
+export function cleanMarkdownForSpeech(text: string): string {
+  if (!text) return '';
+  let cleaned = stripCitationMarkers(text);
+  // Strip links [Title](url) -> Title
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+  // Strip code blocks
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
+  cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+  // Strip table rows
+  cleaned = cleaned.replace(/^\s*\|.*\|\s*$/gm, ' ');
+  cleaned = cleaned.replace(/\s*\|\s*/g, ', ');
+  // Strip headers and list bullets
+  cleaned = cleaned.replace(/^\s*#{1,6}\s+/gm, '');
+  cleaned = cleaned.replace(/^\s*[-*+]\s+/gm, '');
+  // Strip bold and italics
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/__([^_]+)__/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  // Collapse whitespace
+  cleaned = cleaned.replace(/[ \t]+/g, ' ');
+  cleaned = cleaned.replace(/\n\s*\n+/g, '\n\n');
+  return cleaned.trim();
+}

@@ -149,6 +149,19 @@ class TestSentenceSplitting(unittest.TestCase):
         result = _split_sentences("  ")
         self.assertEqual(len(result), 1)
 
+    def test_long_sentence_clause_split(self):
+        from app.voice_stream import _split_sentences
+
+        long_text = (
+            "Under Section 15 of the Value Added Tax Act, every taxable person who makes a taxable supply "
+            "must issue a tax invoice generated through the EFRIS system, and payments must be completed "
+            "within fifteen days following the close of the respective tax accounting period."
+        )
+        result = _split_sentences(long_text)
+        self.assertTrue(len(result) > 1)
+        for chunk in result:
+            self.assertTrue(len(chunk) <= 150)
+
 
 # ---------------------------------------------------------------------------
 # VoiceSession pipeline tests

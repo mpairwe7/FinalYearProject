@@ -1193,6 +1193,15 @@ class SpeechModel:
                 audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
                 latency_s=0.0, backend="disabled", voice="", error="SPEECH_ENABLED=false",
             )
+        from .speech_normalization import clean_text_for_speech
+
+        text = clean_text_for_speech(text, locale=language)
+        if not text:
+            return SynthesizeResult(
+                audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
+                latency_s=0.0, backend="empty", voice=voice or "", error="Empty text after normalization",
+            )
+
         voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
 
         # ⓪ Phrase cache — repeated short prompts (greetings, empathy openers,

@@ -601,12 +601,34 @@ def _split_sentences(text: str) -> list[str]:
 
     parts = _SENTENCE_RE.split(protected.strip())
 
-    # Restore protected tokens
+    # Maximum character limit to respect Spark-TTS-SALT ~8s training limit
+    max_chunk_chars = 140
+    clause_re = re.compile(r"(?<=[;:,—–])\s+")
+
+    # Restore protected tokens and split oversized sentences on clause boundaries
     result: list[str] = []
     for part in parts:
         part = part.replace("\x00", ".").replace("\x01", ".").strip()
         if not part:
             continue
+
+        # If sentence exceeds safe TTS limit, subdivide along clause boundaries
+        if len(part) > max_chunk_chars:
+            clauses = clause_re.split(part)
+            current_sub = ""
+            for clause in clauses:
+                clause = clause.strip()
+                if not clause:
+                    continue
+                if current_sub and (len(current_sub) + len(clause) + 1 > max_chunk_chars):
+                    result.append(current_sub)
+                    current_sub = clause
+                else:
+                    current_sub = (current_sub + " " + clause).strip() if current_sub else clause
+            if current_sub:
+                result.append(current_sub)
+            continue
+
         # Merge tiny non-sentence fragments, but keep short complete sentences.
         if result and len(part) < 15 and not re.search(r"[.!?]$", part):
             result[-1] = result[-1] + " " + part

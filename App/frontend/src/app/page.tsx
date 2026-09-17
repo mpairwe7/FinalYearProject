@@ -32,6 +32,8 @@ import {
   MAX_ATTACHMENT_BYTES,
   PendingAttachment,
 } from '../lib/attachments';
+import { cleanMarkdownForSpeech } from '../lib/answerText';
+import { audioSignifiers } from '../lib/audioSignifiers';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
 import ConfirmDialog, { ConfirmRequest } from '../components/ConfirmDialog';
@@ -314,9 +316,73 @@ export default function Page() {
   const [voiceMode, setVoiceMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [audioLevels, setAudioLevels] = useState<number[] | undefined>(undefined);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const animFrameRef = useRef<number | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
+
+  // Live microphone frequency analyser for responsive composer waveform
+  useEffect(() => {
+    if (!isRecording) {
+      if (animFrameRef.current !== null) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        void audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      setAudioLevels(undefined);
+      return;
+    }
+
+    const stream = recorderRef.current?.getStream();
+    if (!stream) return;
+
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      audioContextRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const update = () => {
+        if (!recorderRef.current?.isRecording) return;
+        analyser.getByteFrequencyData(dataArray);
+        const bands = [
+          dataArray[1] / 255,
+          dataArray[3] / 255,
+          dataArray[6] / 255,
+          dataArray[10] / 255,
+          dataArray[15] / 255,
+        ].map((v) => Math.min(1.0, Math.max(0.15, (v || 0) * 1.6)));
+        setAudioLevels(bands);
+        animFrameRef.current = requestAnimationFrame(update);
+      };
+      animFrameRef.current = requestAnimationFrame(update);
+    } catch {
+      setAudioLevels(undefined);
+    }
+
+    return () => {
+      if (animFrameRef.current !== null) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        void audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+    };
+  }, [isRecording]);
 
   // TanStack Query — cached speech health (auto-refreshes every 60s)
   const { data: speechHealth } = useSpeechHealth();
@@ -595,6 +661,7 @@ export default function Page() {
       dictationStartedAtRef.current = Date.now();
       disarmMic();
       setSpeechState('listening');
+      audioSignifiers.playMicStart();
     };
     recog.onerror = (event) => {
       // "no-speech" is a pause, not a failure: the engine gives up on silence
@@ -603,6 +670,7 @@ export default function Page() {
       if (event.error === 'no-speech' || event.error === 'aborted') return;
       disarmMic();
       dictationActiveRef.current = false;
+      audioSignifiers.playError();
       // Say which failure it was. "not-allowed" is a permission the person can
       // grant, and telling them so is the difference between a fixable state
       // and a mic that is simply red.
@@ -668,8 +736,13 @@ export default function Page() {
     stopPlayback();
     setTtsLoading(turnId);
     try {
+      const speechText = cleanMarkdownForSpeech(text);
+      if (!speechText) {
+        setTtsLoading(null);
+        return;
+      }
       const result = await ttsMutation.mutateAsync({
-        text,
+        text: speechText,
         language: locale,
         voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
       });
@@ -1136,6 +1209,7 @@ export default function Page() {
           recorderRef.current = null;
           setIsRecording(false);
           setSpeechState('idle');
+          audioSignifiers.playMicStop();
           const pcm16 = await rec.stop();
           if (pcm16.byteLength === 0) return;
           setIsLoading(true);
@@ -1192,10 +1266,12 @@ export default function Page() {
             disarmMic();
             setIsRecording(true);
             setSpeechState('listening');
+            audioSignifiers.playMicStart();
             trackVoiceUsed();
           } catch {
             disarmMic();
             recorderRef.current = null;
+            audioSignifiers.playError();
             setDictationNotice(
               'The microphone did not open. Check your browser’s microphone permission, or type instead.',
             );
@@ -1264,6 +1340,7 @@ export default function Page() {
         recorderRef.current = null;
         setIsRecording(false);
         setSpeechState('idle');
+        audioSignifiers.playMicStop();
         const pcm16 = await rec.stop();
         if (pcm16.byteLength === 0) return;
         setSpeechState('processing');
@@ -1315,10 +1392,12 @@ export default function Page() {
           disarmMic();
           setIsRecording(true);
           setSpeechState('listening');
+          audioSignifiers.playMicStart();
           trackVoiceUsed();
         } catch {
           disarmMic();
           recorderRef.current = null;
+          audioSignifiers.playError();
           setDictationNotice(
             'The microphone did not open. Check your browser’s microphone permission, or type instead.',
           );
@@ -1422,6 +1501,7 @@ export default function Page() {
     message,
     isLoading,
     isRecording,
+    audioLevels,
     isTransitioning,
     speechUnavailable: speechState === 'unavailable' && !hasMediaRecorder,
     speechState,
