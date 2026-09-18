@@ -1063,9 +1063,9 @@ class AgenticCloudFallbackChainTest(unittest.TestCase):
 
     def test_nonempty_agentic_reply_skips_plain_chain(self):
         out, ag, fb = self._generate(
-            "How is rental income taxed in Uganda?",
+            "What documents do I need for vehicle clearance?",
             {
-                "text": "Agentic answer: rental income is taxed at 12% [1].",
+                "text": "Agentic answer: clearance requires bill of lading [1].",
                 "tool_calls": [],
                 "iterations": 1,
                 "truncated": False,
