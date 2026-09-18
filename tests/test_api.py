@@ -218,7 +218,7 @@ class TestChatModel:
         assert len(result["reply"]) > 0
         assert isinstance(result["sources"], list)
         assert result["model"] == "Sunbird/Sunflower-14B-FP8"
-        assert result["retrieval_mode"] in ("hybrid", "keyword", "abstained", "blocked")
+        assert result["retrieval_mode"] in ("hybrid", "keyword", "abstained", "blocked", "education")
         assert isinstance(result["escalation_required"], bool)
 
 

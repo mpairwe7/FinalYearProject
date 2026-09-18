@@ -1200,19 +1200,18 @@ def _contains_term(haystack_lower: str, term: str) -> bool:
     if not term:
         return False
     term_clean = term.lower().strip()
-    if term_clean in haystack_lower:
-        return True
-    t_compact = re.sub(r"[\s\-_,.]+", "", term_clean)
-    if len(t_compact) >= 4 and t_compact in re.sub(r"[\s\-_,.]+", "", haystack_lower):
-        return True
     pattern = r"(?<![0-9a-z])" + re.escape(term_clean) + r"(?![0-9a-z])"
     if re.search(pattern, haystack_lower) is not None:
         return True
+    if re.search(r"[\s\-_]", term_clean):
+        escaped = r"\s+".join(re.escape(part) for part in re.split(r"[\s\-_]+", term_clean) if part)
+        if re.search(r"(?<![0-9a-z])" + escaped + r"(?![0-9a-z])", haystack_lower) is not None:
+            return True
     t_root = _word_root(term_clean)
-    if len(t_root) >= 3:
+    if len(t_root) >= 4:
         haystack_tokens = re.findall(r"\b[a-z0-9\-]+\b", haystack_lower)
         for tok in haystack_tokens:
-            if _word_root(tok) == t_root or tok.startswith(t_root):
+            if _word_root(tok) == t_root or (tok.startswith(t_root) and len(tok) <= len(t_root) + 3):
                 return True
     return False
 
@@ -1615,8 +1614,8 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
     else:
         term_ratio = 1.0 if len(matched) >= 1 else 0.0
 
-    # Official guided workflow turns are valid conversational fulfillments
-    if retrieval_mode == "workflow" and len(clean_text) > 40:
+    # Official guided workflow turns are valid conversational fulfillments only when not a non-answer
+    if retrieval_mode == "workflow" and len(clean_text) > 40 and not non_answer:
         term_ratio = 1.0
         non_answer = False
 

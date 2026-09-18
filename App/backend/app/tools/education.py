@@ -1165,10 +1165,12 @@ _REVEAL_ASK_RE = re.compile(
 )
 
 _EDU_ASK_RE = re.compile(
-    r"\b(what\s+(?:is|are|does)|how\s+(?:does|do)|explain|teach\s+me\s+about|"
+    r"\b(what\s+(?:is|are|does\b.*\bmean)|how\s+(?:does|do)\b.*\bwork|"
+    r"explain\b|teach\s+me\s+about|"
     r"don't\s+understand|walk\s+me\s+through|tell\s+me\s+about|give\s+me\b|"
     r"deep\s+dive|overview\s+of|guide\s+to|"
-    r"difference\s+between|meaning\s+of|kye\s+ki|kiki|omukozi\s+wa|nnyonnyola|njigiriza|ni\s+nini|eleza|inafanyaje\s+kazi)\b",
+    r"difference\s+between|meaning\s+of|"
+    r"kye\s+ki|kiki|omukozi\s+wa|nnyonnyola|njigiriza|ni\s+nini|eleza|inafanyaje\s+kazi)\b",
     re.IGNORECASE,
 )
 
@@ -1178,7 +1180,7 @@ _TOPIC_DETECTION_RES: list[tuple[str, re.Pattern[str]]] = [
     ("stamp_duty", re.compile(r"\b(stamp\s+duty|stempu|stampu)\b", re.IGNORECASE)),
     ("tax_objections_appeals", re.compile(r"\b(objections?|appeals?|tat\b|tax\s+appeals\s+tribunal|pingamizi|dispute\s+assessment)\b", re.IGNORECASE)),
     ("customs_valuation", re.compile(r"\b(customs\s+valuation|valuation\s+method|wto\s+valuation|transaction\s+value|cif\s+value)\b", re.IGNORECASE)),
-    ("customs_duty", re.compile(r"\b(customs|import\s+duty|landed\s+cost|forodha)\b", re.IGNORECASE)),
+    ("customs_duty", re.compile(r"\b(customs\s+dut(?:y|ies)|import\s+dut(?:y|ies)|landed\s+cost|forodha|what\s+is\s+customs)\b", re.IGNORECASE)),
     ("excise_duty", re.compile(r"\b(excise(?:\s+duty)?|mobile\s+money\s+tax|ushuru\s+wa\s+bidhaa)\b", re.IGNORECASE)),
     ("capital_gains", re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
     ("corporation_tax", re.compile(r"\b(corporation|corporate|company)\s+(?:income\s+)?tax\b|\bcit\b", re.IGNORECASE)),
@@ -1226,8 +1228,13 @@ def detect_education_intent(
     if plan_rate_lookup(text):
         return None, "beginner", False
 
+    # Exclude operational queries about charging, filing, or clearance
+    if re.search(r"\b(charged\s+on|filing\s+process|clearance\s+requirements|how\s+to\s+apply)\b", text, re.IGNORECASE):
+        return None, "beginner", False
+
     has_edu_ask = bool(_EDU_ASK_RE.search(text))
-    short_inquiry = len(text.split()) <= 8
+    if not has_edu_ask:
+        return None, "beginner", False
 
     matched_topic: str | None = None
     for key, pat in _TOPIC_DETECTION_RES:
@@ -1236,9 +1243,6 @@ def detect_education_intent(
             break
 
     if not matched_topic:
-        return None, "beginner", False
-
-    if not (has_edu_ask or short_inquiry):
         return None, "beginner", False
 
     level = "beginner"

@@ -4964,6 +4964,8 @@ class ChatModel:
         gets a scope caveat appended, so the half URA cannot speak to is never
         left unmarked.
         """
+        if flags.is_enabled("langgraph"):
+            return None
         result = (
             self._maybe_decline_out_of_jurisdiction(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
