@@ -138,15 +138,7 @@ const GREETING: ChatTurn = {
 export function createTurn(
   role: 'user' | 'assistant',
   content: string,
-  meta?: {
-    citations?: Citation[];
-    faithfulnessScore?: number | null;
-    retrievalMode?: string;
-    escalationRequired?: boolean;
-    escalationReason?: string;
-    attachments?: ChatAttachment[];
-    thoughtForMs?: number;
-  },
+  meta?: Partial<Omit<ChatTurn, 'id' | 'role' | 'content' | 'timestamp'>>,
 ): ChatTurn {
   return { id: generateId(), role, content, timestamp: Date.now(), ...meta };
 }

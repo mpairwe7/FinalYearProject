@@ -13,6 +13,11 @@ describe('OfflineBanner', () => {
     vi.spyOn(networkHook, 'useNetworkStatus').mockReturnValue({
       isOnline: false,
       isOffline: true,
+      isLowBandwidth: false,
+      effectiveType: 'unknown',
+      saveData: false,
+      downlink: null,
+      rtt: null,
     });
 
     render(<OfflineBanner />);
