@@ -124,11 +124,8 @@
 
 .tickets-body {
   display: grid;
-  grid-template-columns: minmax(320px, 420px) 1fr;
+  grid-template-columns: minmax(360px, 460px) 1fr;
   gap: var(--ops-gutter);
-  /* Stretch, not start: the queue and the case are two halves of one view, and
-     letting each size to its own content left an empty-state pane sitting
-     beside a full-height one. */
   align-items: stretch;
 }
 
@@ -145,16 +142,16 @@
   flex-direction: column;
   gap: var(--ops-space-1);
   padding: var(--ops-space-2);
-  max-height: calc(100dvh - var(--ops-nav-h) - 230px);
-  min-height: 280px;
+  max-height: calc(100dvh - var(--ops-nav-h) - 130px);
+  min-height: 380px;
   overflow-y: auto;
 }
 
 .tickets-detail {
   padding: var(--ops-space-5);
   /* Owns its scroll so the sticky case header has something to stick to. */
-  max-height: calc(100dvh - var(--ops-nav-h) - 230px);
-  min-height: 280px;
+  max-height: calc(100dvh - var(--ops-nav-h) - 130px);
+  min-height: 380px;
   overflow-y: auto;
 }
 

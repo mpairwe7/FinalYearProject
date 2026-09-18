@@ -1468,6 +1468,7 @@ def list_tickets(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    q: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tickets, urgent first then oldest within a priority.
 
@@ -1502,6 +1503,14 @@ def list_tickets(
     if team:
         sql += " AND team = ?" if (status or params) else " WHERE team = ?"
         params.append(team)
+    if q and q.strip():
+        term = q.strip().lstrip("#")
+        if term.upper().startswith("TIC-"):
+            term = term[4:]
+        q_like = f"%{term}%"
+        clause = "(id LIKE ? OR reason LIKE ? OR user_query LIKE ? OR assignee LIKE ? OR team LIKE ? OR staff_note LIKE ? OR officer_reply LIKE ? OR transcript_json LIKE ?)"
+        sql += " AND " + clause if (status or priority or team or " WHERE " in sql) else " WHERE " + clause
+        params.extend([q_like] * 8)
     sql += (
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
@@ -1511,6 +1520,31 @@ def list_tickets(
     params.extend([limit, offset])
     rows = conn.execute(sql, params).fetchall()
     return [_hydrate_ticket(r) for r in rows]
+
+
+def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
+    """Append a taxpayer follow-up message to the ticket transcript."""
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        return None
+    transcript = list(ticket.get("transcript") or [])
+    now = time.time()
+    turn = {
+        "user_message": message.strip()[:2000],
+        "bot_reply": "",
+        "created_at": now,
+        "sender": "taxpayer",
+    }
+    transcript.append(turn)
+    transcript_json = json.dumps(transcript)
+    conn = _get_connection()
+    new_status = "assigned" if ticket.get("status") in ("assigned", "resolved") else "open"
+    conn.execute(
+        "UPDATE tickets SET transcript_json = ?, status = ?, updated_at = ? WHERE id = ?",
+        (transcript_json, new_status, now, ticket_id),
+    )
+    conn.commit()
+    return get_ticket(ticket_id)
 
 
 def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
@@ -2758,6 +2792,7 @@ if ANALYTICS_BACKEND == "postgres":
         find_open_ticket = _pg.find_open_ticket  # type: ignore
         pending_officer_reply = _pg.pending_officer_reply  # type: ignore
         mark_reply_delivered = _pg.mark_reply_delivered  # type: ignore
+        append_taxpayer_reply = _pg.append_taxpayer_reply  # type: ignore
         sla_stats = _pg.sla_stats  # type: ignore
         heartbeat_ticket_presence = _pg.heartbeat_ticket_presence  # type: ignore
         list_ticket_viewers = _pg.list_ticket_viewers  # type: ignore

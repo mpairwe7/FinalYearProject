@@ -312,6 +312,7 @@ class ToolRegistry:
 # ---------------------------------------------------------------------------
 from . import calculators as _calculators  # noqa: E402, F401
 from . import calendar as _calendar  # noqa: E402, F401
+from . import document_audit as _document_audit  # noqa: E402, F401
 from . import education as _education  # noqa: E402, F401
 from . import empathy as _empathy  # noqa: E402, F401
 from . import escalate as _escalate  # noqa: E402, F401

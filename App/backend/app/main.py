@@ -67,6 +67,7 @@ from .models import (
     ClassifyRequest,
     ClassifyResponse,
     DocumentAnalysisResponse,
+    EscalationDetailResponse,
     EscalationRequest,
     EscalationResponse,
     ExportConversationRequest,
@@ -86,6 +87,7 @@ from .models import (
     SynthesizeRequest,
     SynthesizeResponse,
     TagListResponse,
+    TaxpayerReplyRequest,
     TranscribeResponse,
     TranslateRequest,
     TranslateResponse,
@@ -2264,6 +2266,123 @@ def request_human_officer(
     )
 
 
+@app.get("/v1/escalate/{ticket_id}", response_model=EscalationDetailResponse, tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+def get_escalation_status(
+    request: Request,
+    ticket_id: str,
+) -> EscalationDetailResponse:
+    """Public status endpoint for an escalated support case.
+
+    Enables detached support room / drawer tracking and real-time officer reply delivery.
+    """
+    clean_id = (ticket_id or "").strip().lstrip("#")
+    if clean_id.upper().startswith("TIC-"):
+        clean_id = clean_id[4:]
+    ticket = db.get_ticket(clean_id)
+    if not ticket:
+        candidates = db.list_tickets(limit=1, q=clean_id)
+        ticket = candidates[0] if candidates else None
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support case not found")
+
+    tid = str(ticket.get("id") or clean_id)
+    status = str(ticket.get("status") or "open")
+    priority = str(ticket.get("priority") or "normal")
+    team = str(ticket.get("team") or "general")
+    assignee = str(ticket.get("assignee") or "")
+    officer_reply = str(ticket.get("officer_reply") or "")
+    reply_at = float(ticket.get("reply_at") or 0.0)
+    created_at = float(ticket.get("created_at") or 0.0)
+    resolved_at = float(ticket.get("resolved_at") or 0.0)
+    reply_delivered_at = float(ticket.get("reply_delivered_at") or 0.0)
+
+    if officer_reply and not reply_delivered_at:
+        try:
+            db.mark_reply_delivered(tid)
+            reply_delivered_at = time.time()
+        except Exception:
+            pass
+
+    status_labels = {
+        "open": "Awaiting Officer Assignment",
+        "assigned": "In Review by URA Officer",
+        "resolved": "Resolved",
+        "wontfix": "Closed",
+    }
+    team_labels = {
+        "domestic_taxes": "Domestic Taxes - Objections & Advisory",
+        "customs": "Customs & Border Control Unit",
+        "disputes": "Tax Appeals & Legal Disputes Unit",
+        "general": "Taxpayer Services & Citizen Helpdesk",
+    }
+
+    ref = f"TIC-{tid[:8].upper()}"
+    status_label = status_labels.get(status, status.capitalize())
+    if officer_reply and status != "resolved":
+        status_label = "Officer Response Ready"
+
+    return EscalationDetailResponse(
+        ok=True,
+        ticket_id=tid,
+        reference=ref,
+        status=status,
+        status_label=status_label,
+        priority=priority,
+        team=team,
+        team_label=team_labels.get(team, team.replace("_", " ").title()),
+        assignee=assignee,
+        assignee_display=f"Officer {assignee.split('@')[0].capitalize()}" if assignee else "URA Support Officer",
+        reason=str(ticket.get("reason") or "Assistance required"),
+        user_query=str(ticket.get("user_query") or ""),
+        officer_reply=officer_reply,
+        reply_at=reply_at,
+        reply_delivered=bool(reply_delivered_at > 0),
+        created_at=created_at,
+        resolved_at=resolved_at,
+        transcript=ticket.get("transcript") or [],
+        can_reply=status not in ("wontfix",),
+    )
+
+
+@app.post("/v1/escalate/{ticket_id}/reply", response_model=dict, tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+def reply_to_escalation(
+    request: Request,
+    ticket_id: str,
+    body: TaxpayerReplyRequest,
+) -> dict:
+    """Taxpayer sends a follow-up message or reference directly to the assigned officer."""
+    clean_id = (ticket_id or "").strip().lstrip("#")
+    if clean_id.upper().startswith("TIC-"):
+        clean_id = clean_id[4:]
+    ticket = db.get_ticket(clean_id)
+    if not ticket:
+        candidates = db.list_tickets(limit=1, q=clean_id)
+        ticket = candidates[0] if candidates else None
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support case not found")
+
+    tid = str(ticket.get("id") or clean_id)
+    updated = db.append_taxpayer_reply(tid, body.message)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to record taxpayer reply")
+
+    try:
+        from .ticket_events import build_event, publish
+
+        publish(build_event(updated, event_type="escalation.taxpayer_reply"))
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "ticket_id": tid,
+        "status": updated.get("status", "open"),
+        "message": "Your reply was received by the URA officer.",
+    }
+
+
 @app.patch("/v1/feedback/{message_id}/comment", tags=["feedback"])
 def update_feedback_comment(
     message_id: str,
@@ -2431,13 +2550,14 @@ def list_tickets_endpoint(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    q: str | None = None,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """List escalation tickets for URA staff triage.
 
     Requires an authenticated staff/admin user, or the configured
     operator key as a break-glass fallback. Filter via the query
-    string: ``?status=open``, ``?priority=urgent``.
+    string: ``?status=open``, ``?priority=urgent``, ``?q=TIN``.
 
     Ordered urgent-first, then oldest within a priority, so a waiting
     taxpayer moves up the queue rather than being buried by newer
@@ -2454,7 +2574,7 @@ def list_tickets_endpoint(
         raise HTTPException(status_code=400, detail="invalid priority")
 
     rows = db.list_tickets(
-        status=status, limit=limit, offset=offset, priority=priority, team=team
+        status=status, limit=limit, offset=offset, priority=priority, team=team, q=q
     )
     return {
         "count": len(rows),
@@ -2674,7 +2794,7 @@ def get_ticket_endpoint(
 
 
 @app.patch("/v1/admin/tickets/{ticket_id}", tags=["admin"])
-def update_ticket_endpoint(
+async def update_ticket_endpoint(
     request: Request,
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
     status: str | None = None,
@@ -2691,6 +2811,23 @@ def update_ticket_endpoint(
     fields on purpose — an officer's candid note is not something the
     taxpayer should ever read.
     """
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                if "status" in body:
+                    status = body["status"]
+                if "assignee" in body:
+                    assignee = body["assignee"]
+                if "staff_note" in body:
+                    staff_note = body["staff_note"]
+                if "priority" in body:
+                    priority = body["priority"]
+                if "officer_reply" in body:
+                    officer_reply = body["officer_reply"]
+        except Exception:
+            pass
+
     ok = db.update_ticket(
         ticket_id,
         status=status,

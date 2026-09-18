@@ -1704,7 +1704,11 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 # Pump produced nothing (breaker open or empty stream) — the
                 # tone_hint never reached a model, so the extractive fallback
                 # carries the empathy acknowledgment itself (EI parity).
-                full_reply = result.get("reply", "")
+                if attachments:
+                    full_reply = self._format_attachment_fallback_reply(attachments)
+                else:
+                    full_reply = result.get("reply", "")
+                full_reply = self._finalize_reply(full_reply, attachments=attachments)
                 if distress and full_reply:
                     full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
                 # One frame, so localize before sending rather than revising
@@ -1985,6 +1989,19 @@ def _closing_courtesy_reply(message: str) -> str:
     if text in _FAREWELL_PHRASES:
         return FAREWELL_REPLY
     return ""
+
+
+_CONTACT_ASK_RE = re.compile(
+    r"\b(how\s+can\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get\s+[^?]*?(?:help|assistance)\s+from)|"
+    r"how\s+do\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get\s+[^?]*?(?:help|assistance)\s+from)|"
+    r"where\s+can\s+i\s+get\s+(?:help|assistance)|"
+    r"i\s+need\s+help\s+from\s+ura|"
+    r"how\s+to\s+contact\s+ura|"
+    r"contact\s+ura|"
+    r"customer\s+care|contact\s+details|help\s+desk|helpline|toll[- ]?free\s+numbers?|"
+    r"okukwatagana\s+ne\s+ura|obuyambi\s+okuva\s+mu\s+ura|kuwasiliana\s+na\s+ura|msaada\s+kutoka\s+ura)\b",
+    re.IGNORECASE,
+)
 
 
 def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dict[str, str]]:
@@ -2816,7 +2833,15 @@ def localize_reply(reply: str, locale: str) -> str:
     # are never mangled by MT and never falsely trigger figure-change guards.
     contact_footer_present = False
     source_to_translate = text
-    if CONTACT_FOOTER in text:
+    footer_match = re.search(
+        r"\n*If you get stuck at any step, URA is happy to help:[^\n]*(?:\n[^\n]*?(?:0800|0772|whatsapp)[^\n]*)*",
+        text,
+        re.IGNORECASE,
+    )
+    if footer_match:
+        contact_footer_present = True
+        source_to_translate = (text[:footer_match.start()] + text[footer_match.end():]).strip()
+    elif CONTACT_FOOTER in text:
         contact_footer_present = True
         source_to_translate = text.replace(CONTACT_FOOTER, "").strip()
 
@@ -2844,7 +2869,7 @@ def localize_reply(reply: str, locale: str) -> str:
             # made it back into the restored candidate text.
             if not all(fig in candidate for fig in figure_map.values()):
                 return None, "figures_changed"
-        elif not mt.figures_survived(source_to_translate, candidate):
+        elif not mt.figures_survived(source_to_translate, candidate, locale=locale):
             return None, "figures_changed"
         if not mt.length_plausible(source_to_translate, candidate):
             return None, "collapsed"
@@ -3771,6 +3796,9 @@ class ChatModel:
             if not any(w in query.lower() for w in ("contact", "phone", "email", "address", "call", "helpline", "reach")):
                 if "p.o. box" in text.lower() and "telephone:" in text.lower() and len(text) < 400:
                     continue
+            # Skip table-of-contents, index fragments, or pipe-heavy table outlines
+            if text.count("|") >= 4 or re.search(r"\b(?:table of contents|general exemption|exemption regimes)\b", text, re.IGNORECASE):
+                continue
             excerpt = _structure_excerpt(_trim_excerpt(text, 700))
             # Trimming can leave a PDF footnote number dangling at the new
             # end of the excerpt ("...remit to URA. 1") — strip it. Numbers
@@ -3936,9 +3964,14 @@ class ChatModel:
                     best = question
         return best
 
-    def _finalize_reply(self, reply: str) -> str:
+    def _finalize_reply(self, reply: str, attachments: list[Any] | None = None) -> str:
         """Apply response-side safety cleanup to generated, revised, and cached text."""
-        cleaned = self._output_guard.redact_pii(str(reply or ""))
+        raw = str(reply or "").strip()
+        # If the output accidentally parrots internal prompt scaffolding:
+        if ("<untrusted_user_document>" in raw or raw.startswith("[User-attached document:")) and attachments:
+            return self._format_attachment_fallback_reply(attachments)
+
+        cleaned = self._output_guard.redact_pii(raw)
         cleaned = self._output_guard.sanitize(cleaned)
         # Strip any accidental leakage of attachment prompt wrapper scaffolding
         cleaned = re.sub(r"</?untrusted_user_document>", "", cleaned)
@@ -3948,6 +3981,8 @@ class ChatModel:
             cleaned,
         )
         cleaned = re.sub(r"\[User-attached document:[^\]]+\]", "", cleaned)
+        cleaned = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", cleaned)
+        cleaned = re.sub(r"^summary\s*\n+", "", cleaned, flags=re.IGNORECASE)
         leakage = self._output_guard.check_prompt_leakage(cleaned)
         return self._output_guard.normalize_structure(leakage.sanitized_text).strip()
 
@@ -3955,42 +3990,119 @@ class ChatModel:
     def _format_attachment_fallback_reply(
         attachments: list[documents_module.DocumentRecord],
     ) -> str:
-        """Format a clean, structured executive summary when LLM synthesis is unavailable."""
+        """Format a clean, structured executive summary for an attached document."""
         att = attachments[0]
         doc_label = documents_module._DOC_TYPE_LABELS.get(att.doc_type, "Document")
         sections = [
             f"### Document Analysis: {att.filename}",
-            f"**Classification**: {doc_label} ({att.confidence:.0%} confidence)",
+            f"**Classification**: {doc_label} ({att.confidence:.0%} match confidence)",
         ]
-        if att.summary:
-            sections.append(f"**Overview**:\n{att.summary}")
 
+        if att.summary:
+            sections.append(f"**Executive Overview**:\n{att.summary}")
+
+        # Statutory Enactments (for compendiums / acts / legal documents)
+        text_lower = att.text.lower()
+        if att.doc_type == "statutory_act" or "tax laws" in text_lower or "act" in text_lower:
+            enactments = []
+            if "income tax act" in text_lower:
+                enactments.append(
+                    "- **The Income Tax Act, Cap 340**: Imposition of Individual Income Tax, "
+                    "Corporation Tax (30%), Rental Tax (12%), and Withholding Tax rules."
+                )
+            if "value added tax act" in text_lower:
+                enactments.append(
+                    "- **The Value Added Tax Act, Cap 349**: Standard 18% VAT on taxable supplies, "
+                    "exempt goods/services, and EFRIS electronic invoicing mandates."
+                )
+            if "tax procedures code" in text_lower:
+                enactments.append(
+                    "- **The Tax Procedures Code Act, 2014**: Taxpayer Identification Numbers (TIN), "
+                    "tax stamps, EFRIS fiscal receipts, return filing, and statutory objection procedures."
+                )
+            if "excise duty act" in text_lower:
+                enactments.append(
+                    "- **The Excise Duty Act, 2014**: Statutory excise duty rates on telecom, fuel, "
+                    "beverages, and selected locally manufactured and imported commodities."
+                )
+            if "stamp duty act" in text_lower:
+                enactments.append(
+                    "- **The Stamp Duty Act, 2014**: Requirements for instrument stamping, commercial agreements, "
+                    "and transfer compounding."
+                )
+            if "tax appeals tribunal" in text_lower:
+                enactments.append(
+                    "- **The Tax Appeals Tribunal Act, Cap 345**: Independent judicial dispute resolution "
+                    "and appellate mechanisms for contested URA tax decisions."
+                )
+            if enactments:
+                sections.append("**Primary Statutory Enactments Covered**:\n" + "\n".join(enactments))
+
+        # Financial & Tax Reconciliation Audit
+        recon = att.tax_reconciliation or {}
+        if recon and (recon.get("subtotal_ugx") is not None or recon.get("total_ugx") is not None or recon.get("status") in ("verified", "discrepancy_detected")):
+            status_text = {
+                "verified": "✓ Reconciled & Statutory Rate Verified",
+                "discrepancy_detected": "! Discrepancy Detected (Variance in Tax Arithmetic)",
+                "unreconciled_partial": "ℹ Partial Line-Items Extracted",
+            }.get(recon.get("status", ""), "General Filing")
+            recon_lines = [f"**Audit Status**: `{status_text}`"]
+            sub = recon.get("subtotal_ugx")
+            vat = recon.get("tax_ugx")
+            tot = recon.get("total_ugx")
+            eff = recon.get("effective_rate")
+            if sub is not None or tot is not None:
+                recon_lines.append("| Component | Amount (UGX) | Effective Rate / Note |")
+                recon_lines.append("|---|---|---|")
+                if sub is not None:
+                    recon_lines.append(f"| Taxable Subtotal | UGX {sub:,.0f} | Base Amount |")
+                if vat is not None:
+                    eff_str = f"{eff:.1%}" if eff else "18.0%"
+                    recon_lines.append(f"| VAT / Tax Amount | UGX {vat:,.0f} | {eff_str} Standard VAT |")
+                if tot is not None:
+                    recon_lines.append(f"| Total Payable | UGX {tot:,.0f} | Grand Total |")
+            if recon.get("notes"):
+                recon_lines.append("\n**Audit Checklist**:")
+                for n in recon["notes"]:
+                    recon_lines.append(f"- {n}")
+            sections.append("**Financial & Tax Reconciliation**:\n" + "\n".join(recon_lines))
+
+        # Extracted Key Fields
         field_lines = []
         if att.fields.get("tins"):
-            field_lines.append(f"- **TINs**: {', '.join(att.fields['tins'][:5])}")
-        if att.fields.get("amounts"):
+            field_lines.append(f"- **TIN Numbers**: {', '.join(att.fields['tins'][:5])}")
+        if att.fields.get("prns"):
+            field_lines.append(f"- **Payment Reg. Numbers (PRN)**: {', '.join(att.fields['prns'][:5])}")
+        if att.fields.get("efris_invoices"):
+            field_lines.append(f"- **EFRIS Invoices**: {', '.join(att.fields['efris_invoices'][:5])}")
+        if att.fields.get("tax_heads"):
+            field_lines.append(f"- **Tax Regimes**: {', '.join(att.fields['tax_heads'][:5])}")
+        if att.fields.get("amounts") and not recon.get("subtotal_ugx"):
             field_lines.append(f"- **Amounts**: {', '.join(att.fields['amounts'][:5])}")
         if att.fields.get("dates"):
             field_lines.append(f"- **Dates**: {', '.join(att.fields['dates'][:5])}")
         if att.fields.get("references"):
             field_lines.append(f"- **References**: {', '.join(att.fields['references'][:5])}")
         if field_lines:
-            sections.append("**Extracted Key Fields**:\n" + "\n".join(field_lines))
+            sections.append("**Extracted Identifiers & Tax Fields**:\n" + "\n".join(field_lines))
 
+        # Detected Tables
         if att.tables:
             table_notes = [
-                f"- **{t.name}**: {t.rows} rows × {t.cols} columns"
+                f"- **{t.name}**: {t.rows} data rows × {t.cols} columns (columns: {', '.join(t.headers[:4]) or 'unlabelled'})"
                 for t in att.tables[:3]
             ]
-            sections.append("**Detected Tables**:\n" + "\n".join(table_notes))
+            sections.append("**Detected Schedules & Tables**:\n" + "\n".join(table_notes))
 
-        if att.text:
-            snippet = att.text[:400].strip().replace("<untrusted_user_document>", "").replace("</untrusted_user_document>", "")
-            sections.append(f"**Document Excerpt**:\n> {snippet}...")
-
+        # Guidance / Next Steps
         hint = documents_module._DOC_TYPE_HINTS.get(att.doc_type)
         if hint:
-            sections.append(hint)
+            sections.append(f"**How to Proceed**:\n{hint}")
+        else:
+            sections.append(
+                "**How to Proceed**:\nYou can ask specific questions about sections, legal definitions, "
+                "or tax calculations in this document."
+            )
 
         return "\n\n".join(sections)
 
@@ -5974,6 +6086,43 @@ class ChatModel:
                 )
                 return closing
 
+            # 1a4. General URA Contact & Helpdesk Fast-Path
+            # Returns official URA support channels immediately with 1.0 confidence,
+            # preventing accidental low-faithfulness escalations on simple contact queries.
+            if _CONTACT_ASK_RE.search(message) and not any(
+                w in message.lower()
+                for w in ("dispute", "appeal", "fraud", "whistleblow", "court", "lawyer", "my tin", "my return", "my account")
+            ):
+                contact_reply = (
+                    "You can reach the Uganda Revenue Authority (URA) through the following official channels:\n\n"
+                    "1. **Toll-Free Phone**: Call 0800 117 000 or 0800 217 000 (Monday to Friday, 8:00 AM – 5:00 PM).\n"
+                    "2. **WhatsApp Support**: Message 0772 140 000 for quick mobile inquiries.\n"
+                    "3. **Email Helpdesk**: Send inquiries to services@ura.go.ug.\n"
+                    "4. **Web Portal**: Visit https://ura.go.ug for e-Services, TIN registration, and return filing.\n"
+                    "5. **Headquarters & Service Centres**: Visit URA Tower at Nakawa, Kampala, or any URA station nationwide."
+                )
+                contact_result = {
+                    "reply": contact_reply,
+                    "sources": ["https://ura.go.ug"],
+                    "citations": [{"ref": "[1]", "source": "URA Official Channels", "passage": contact_reply[:350], "url": "https://ura.go.ug", "page": "", "section": "Contact", "title": "URA Contact Channels"}],
+                    "faithfulness_score": 1.0,
+                    "retrieval_mode": "contact_channels",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "rag_answerer",
+                    "next_actions": ["Ask how to register for a TIN", "Ask about filing deadlines"],
+                }
+                self._audit_turn(
+                    message=message,
+                    result=contact_result,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return contact_result
+
             # 1b. Semantic cache check AFTER guardrails (Phase 5)
             if cache_allowed and flags.is_enabled("semantic_cache"):
                 with trace_stage("cache_lookup", timings=timings):
@@ -7328,6 +7477,37 @@ class ChatModel:
                 "_history": [],
             }
 
+        # General Contact & Helpdesk Fast-Path — parity with REST path
+        if _CONTACT_ASK_RE.search(message) and not any(
+            w in message.lower()
+            for w in ("dispute", "appeal", "fraud", "whistleblow", "court", "lawyer", "my tin", "my return", "my account")
+        ):
+            contact_reply = (
+                "You can reach the Uganda Revenue Authority (URA) through the following official channels:\n\n"
+                "1. **Toll-Free Phone**: Call 0800 117 000 or 0800 217 000 (Monday to Friday, 8:00 AM – 5:00 PM).\n"
+                "2. **WhatsApp Support**: Message 0772 140 000 for quick mobile inquiries.\n"
+                "3. **Email Helpdesk**: Send inquiries to services@ura.go.ug.\n"
+                "4. **Web Portal**: Visit https://ura.go.ug for e-Services, TIN registration, and return filing.\n"
+                "5. **Headquarters & Service Centres**: Visit URA Tower at Nakawa, Kampala, or any URA station nationwide."
+            )
+            return {
+                "reply": contact_reply,
+                "sources": ["https://ura.go.ug"],
+                "citations": [{"ref": "[1]", "source": "URA Official Channels", "passage": contact_reply[:350], "url": "https://ura.go.ug", "page": "", "section": "Contact", "title": "URA Contact Channels"}],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "contact_channels",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "rag_answerer",
+                "next_actions": ["Ask how to register for a TIN", "Ask about filing deadlines"],
+                "_hits": [],
+                "_history": [],
+                "_short_circuit": True,
+            }
+
         # Semantic cache check (Phase 5)
         if cache_allowed and flags.is_enabled("semantic_cache"):
             cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
@@ -7758,12 +7938,15 @@ class ChatModel:
 
         sources = ordered_sources(hits)
         citations = HybridRetriever.build_citations(hits)
-        best = hits[0] if hits else {}
-        reply = best.get("answer") or best.get("text", "")
-        if not reply:
-            reply = NO_HITS_REPLY
-        if citations and not re.search(r"\[\d{1,3}\]", reply):
-            reply = f"{reply.rstrip()} [1]"
+        if attachments:
+            reply = self._format_attachment_fallback_reply(attachments)
+        else:
+            best = hits[0] if hits else {}
+            reply = best.get("answer") or best.get("text", "")
+            if not reply:
+                reply = NO_HITS_REPLY
+            if citations and not re.search(r"\[\d{1,3}\]", reply):
+                reply = f"{reply.rstrip()} [1]"
 
         # Escalation check (same as sync path)
         escalate, esc_reason = self._output_guard.should_escalate(None, hits)

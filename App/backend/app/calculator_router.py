@@ -27,7 +27,19 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Amount extraction
 # ---------------------------------------------------------------------------
-_CURRENCY = r"(?:ugx|ug\s?shs?|shs|shillings?)"
+_CURRENCY = r"(?:ugx|ug\s?shs?|shs|shillings?|ssente|ensimbi|shilingi)"
+_AMOUNT_PREFIX_RE = re.compile(
+    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?nkumi|o?lukumi)\s+"
+    r"(\d{1,3}(?:[,\s]\d{3})*|\d+(?:\.\d+)?)\b",
+    re.IGNORECASE,
+)
+_AMOUNT_PREFIX_MULTIPLIERS = {
+    "milioni": 1e6, "bilioni": 1e9, "elfu": 1e3, "laki": 1e5,
+    "bukadde": 1e6, "obukadde": 1e6, "kakadde": 1e6, "akakadde": 1e6,
+    "buwumbi": 1e9, "obuwumbi": 1e9, "kawumbi": 1e9, "akawumbi": 1e9,
+    "mitwalo": 1e4, "emitwalo": 1e4, "mutwalo": 1e4, "omutwalo": 1e4,
+    "nkumi": 1e3, "enkumi": 1e3, "lukumi": 1e3, "olukumi": 1e3,
+}
 _AMOUNT_RE = re.compile(
     rf"""
     (?P<currency>{_CURRENCY}\.?\s*)?              # optional currency prefix
@@ -59,8 +71,24 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
     prefix or a k/m/bn-style suffix — "2 houses" is not two shillings.
     """
     found: list[tuple[float, int, int]] = []
+    seen_spans: list[tuple[int, int]] = []
     percent_spans = [(m.start(1), m.end(1)) for m in _PERCENT_RE.finditer(text or "")]
+
+    # 1. Prefix matches (East African Bantu: Luganda obukadde, Swahili milioni)
+    for m in _AMOUNT_PREFIX_RE.finditer(text or ""):
+        mult = _AMOUNT_PREFIX_MULTIPLIERS.get(m.group(1).lower(), 1)
+        digits = m.group(2).replace(",", "").replace(" ", "")
+        try:
+            val = float(digits) * mult
+            found.append((val, m.start(), m.end()))
+            seen_spans.append((m.start(), m.end()))
+        except ValueError:
+            continue
+
+    # 2. Suffix matches
     for m in _AMOUNT_RE.finditer(text or ""):
+        if any(s <= m.start("number") and m.end("number") <= e for s, e in seen_spans):
+            continue
         raw = m.group("number")
         digits = raw.replace(",", "").replace(" ", "")
         if any(s <= m.start("number") < e or s < m.end("number") <= e for s, e in percent_spans):
@@ -118,9 +146,9 @@ class CalcPlan:
 
 
 _CALC_VERB_RE = re.compile(
-    r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|figure\s+out"
+    r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|figure\s+out|bala|kubala|balira|hesabu|kuhesabu"
     r"|what\s+(?:will|would|tax)\b"
-    r"|what\s+(?:will\s+(?:the|my|i)|do\s+i\s+(?:pay|owe)|duties|charges)\b)",
+    r"|what\s+(?:will\s+(?:the|my|i)|do\s+i\s+(?:pay|owe)|duties|charges)\b)\b",
     re.IGNORECASE,
 )
 
@@ -225,14 +253,22 @@ _ALREADY_REGISTERED_RE = re.compile(
 
 _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     ("withholding", re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
-    ("rental", re.compile(r"\b(rent(?:al)?\s+(?:income|tax)|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?|tax\b.*\brent(?:al)?)\b", re.IGNORECASE)),
+    (
+        "rental",
+        re.compile(
+            r"\b(rent(?:al)?\s+(?:income|tax)|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?|tax\b.*\brent(?:al)?"
+            r"|kodi\s+ya\s+pango|ushuru\s+wa\s+pango|upangishaji|kupangisha"
+            r"|(?:omusolo\s+gw['’])?o?bupangisa|amapangisa|amayumba\s+ag['’]o?bupangisa)\b",
+            re.IGNORECASE,
+        ),
+    ),
     (
         "paye",
         re.compile(
-            r"\b(paye|take[-\s]?home|net[-\s]?pay|gross[-\s]?pay|net[-\s]?salary|gross[-\s]?salary|salary\s+tax"
-            r"|pay\s+as\s+you\s+earn|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salary|income|earnings|pay)"
-            r"|tax\s+on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salary|income|earnings|pay)"
-            r"|tax\b.*\b(?:salary|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salary|income))\b",
+            r"\b(paye|take[-\s]?home|net[-\s]?pay|gross[-\s]?pay|net[-\s]?salary|gross[-\s]?salary|salaries?\s+tax"
+            r"|pay\s+as\s+you\s+earn|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salaries?|income|earnings|pay)"
+            r"|tax\s+on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salaries?|income|earnings|pay)"
+            r"|salaries?\b.*\btax|tax\b.*\b(?:salaries?|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salaries?|income))\b",
             re.IGNORECASE,
         ),
     ),
@@ -674,9 +710,10 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
-    r"|\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
-    r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi)\b"
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(rates?|thresholds?|bands?|allowance|days?|due|calculated|computed|kiwango|viwango|omuwendo|ekkomo|kikomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
+    r"|\b(rates?|thresholds?|bands?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
+    r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|omuwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
+    r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b",
     re.IGNORECASE,
 )
@@ -701,8 +738,10 @@ _RATE_CALENDAR_YEAR_RE = re.compile(
 # Every alternative names employment income, because PAYE is the only URA tax
 # charged on a salary; a turnover or rental question cannot reach this path.
 _PAYE_THRESHOLD_ASK_RE = re.compile(
-    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|mishahara|emisaala|omusaala)\b[^?.!]{0,30}"
-    r"\b(tax[-\s]?free|exempt(?:ed)?|not\s+taxed|untaxed|bure|bwereere|kutoswa)\b"
+    r"\b(paye[e]?|pay\s+as\s+you\s+earn)\b[^?.!]{0,40}\b(threshold|tax[-\s]?free|exempt|bef[ro]+e|untaxed)\b"
+    r"|\b(threshold|tax[-\s]?free|exempt)\b[^?.!]{0,40}\b(paye[e]?|pay\s+as\s+you\s+earn)\b"
+    r"|\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|mishahara|emisaala|omusaala)\b[^?.!]{0,30}"
+    r"\b(tax[-\s]?free|exempt(?:ed)?|not\s+taxed|untaxed|threshold|bure|bwereere|kutoswa)\b"
     r"|\b(tax[-\s]?free|exempt(?:ed)?|bure|bwereere)\b[^?.!]{0,30}"
     r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|mishahara|emisaala|omusaala)\b"
     r"|\b(at|above|from|over)\s+what\b[^?.!]{0,40}"
@@ -791,7 +830,7 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(summary="rental"),
         re.compile(
-            r"\b(?:rent(?:al|ed|ing)?|upangishaji|kupangisha|majengo|(?:gw['’])?o?bupangisa|amayumba|nnyumba|nyumba)\b",
+            r"\b(?:rent(?:al|ed|ing)?|upangishaji|kupangisha|pango|majengo|(?:gw['’])?o?bupangisa|amayumba|nnyumba|nyumba)\b",
             re.IGNORECASE,
         ),
     ),
@@ -826,6 +865,8 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     """
     text = (message or "").strip()
     if not text or extract_amounts(text):
+        return None
+    if re.search(r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison)\b", text, re.IGNORECASE):
         return None
     short_ask = len(text.split()) <= 8 and re.search(
         r"\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?)\b", text, re.IGNORECASE

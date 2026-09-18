@@ -240,3 +240,386 @@
   color: var(--text-2);
   flex-shrink: 0;
 }
+
+/* ---------------------------------------------------------------------------
+ * Document Inspection & Tax Audit Modal
+ * ------------------------------------------------------------------------- */
+.doc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: dlgv2-fade 140ms ease;
+}
+
+.doc-modal-container {
+  position: relative;
+  width: min(640px, 100%);
+  max-height: min(88vh, 760px);
+  background: var(--bg-0, #fff);
+  border: 1px solid var(--border-0, #e0e0e0);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: dlgv2-pop 140ms ease;
+}
+
+.doc-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-0, #e0e0e0);
+  background: var(--bg-1, #f8f9fa);
+}
+
+.doc-modal-title-group {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.doc-modal-icon-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--surface-2, rgba(26, 58, 107, 0.1));
+  color: var(--primary, #1a3a6b);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.doc-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-0, #111);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
+}
+
+.doc-modal-badges {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.doc-modal-type-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(26, 58, 107, 0.1);
+  color: #1a3a6b;
+}
+
+.doc-modal-meta-badge {
+  font-size: 11px;
+  color: var(--text-2, #666);
+  padding: 2px 6px;
+}
+
+.doc-modal-close-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2, #666);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.doc-modal-close-btn:hover {
+  background: var(--surface-2, rgba(0, 0, 0, 0.05));
+  color: var(--text-0, #111);
+}
+
+.doc-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.doc-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-modal-section-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-2, #777);
+  margin: 0;
+}
+
+.doc-modal-summary-text {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-1, #333);
+  margin: 0;
+}
+
+.doc-modal-recon-card {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--bg-1, #f8f9fa);
+  border: 1px solid var(--border-0, #e0e0e0);
+}
+
+.doc-modal-recon-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.doc-modal-status-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+.doc-modal-status-verified {
+  background: rgba(46, 125, 50, 0.12);
+  color: #2e7d32;
+  border: 1px solid rgba(46, 125, 50, 0.25);
+}
+.doc-modal-status-discrepancy_detected {
+  background: rgba(211, 47, 47, 0.12);
+  color: #d32f2f;
+  border: 1px solid rgba(211, 47, 47, 0.25);
+}
+.doc-modal-status-unreconciled_partial {
+  background: rgba(237, 108, 2, 0.12);
+  color: #ed6c02;
+  border: 1px solid rgba(237, 108, 2, 0.25);
+}
+.doc-modal-status-informational_only {
+  background: rgba(2, 136, 209, 0.12);
+  color: #0288d1;
+  border: 1px solid rgba(2, 136, 209, 0.25);
+}
+
+.doc-modal-recon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg-0, #fff);
+  border-radius: 8px;
+  border: 1px solid var(--border-0, #e0e0e0);
+}
+
+.doc-modal-recon-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.doc-modal-recon-label {
+  font-size: 11px;
+  color: var(--text-2, #666);
+}
+.doc-modal-recon-val {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-0, #111);
+}
+.doc-modal-recon-item-total .doc-modal-recon-val {
+  color: var(--primary, #1a3a6b);
+  font-weight: 700;
+}
+
+.doc-modal-notes-list {
+  list-style: none;
+  margin: 10px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.doc-modal-note-item {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-1, #444);
+  align-items: flex-start;
+}
+.doc-modal-note-item svg {
+  color: var(--success, #2e7d32);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.doc-modal-fields-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.doc-modal-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.doc-modal-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2, #666);
+}
+.doc-modal-chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.doc-modal-entity-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-0, #e0e0e0);
+  background: var(--bg-1, #f8f9fa);
+  color: var(--text-0, #111);
+  cursor: pointer;
+  transition: all 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+}
+.doc-modal-entity-chip:hover {
+  background: var(--surface-2, rgba(26, 58, 107, 0.08));
+  border-color: var(--primary, #1a3a6b);
+}
+.doc-modal-tag-chip {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(26, 58, 107, 0.08);
+  color: #1a3a6b;
+  font-weight: 500;
+}
+.doc-modal-val-chip {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--bg-1, #f8f9fa);
+  color: var(--text-0, #111);
+  font-family: monospace;
+}
+.doc-modal-meta-chip {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--bg-1, #f8f9fa);
+  color: var(--text-1, #444);
+}
+
+.doc-modal-tables-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.doc-modal-table-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-1, #f8f9fa);
+  border: 1px solid var(--border-0, #e0e0e0);
+  font-size: 12px;
+}
+.doc-modal-table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-0, #111);
+}
+.doc-modal-table-headers {
+  margin: 4px 0 0 0;
+  color: var(--text-2, #666);
+  font-size: 11.5px;
+}
+
+.doc-modal-prompts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.doc-modal-prompt-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-0, #e0e0e0);
+  background: var(--bg-0, #fff);
+  color: var(--text-0, #111);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 120ms ease;
+  font-family: inherit;
+}
+.doc-modal-prompt-btn:hover {
+  background: rgba(26, 58, 107, 0.08);
+  border-color: var(--primary, #1a3a6b);
+}
+.doc-modal-prompt-btn svg {
+  color: var(--primary, #1a3a6b);
+  flex-shrink: 0;
+}
+
+.doc-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-0, #e0e0e0);
+  background: var(--bg-1, #f8f9fa);
+}
+.doc-modal-report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary, #1a3a6b);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 120ms ease;
+}
+.doc-modal-report-btn:hover {
+  opacity: 0.9;
+}
+.doc-modal-close-secondary-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-0, #e0e0e0);
+  background: transparent;
+  color: var(--text-1, #333);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.doc-modal-close-secondary-btn:hover {
+  background: var(--surface-2, rgba(0, 0, 0, 0.05));
+}

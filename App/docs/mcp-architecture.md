@@ -199,11 +199,26 @@ address.
   tool name into headers. A header that disagrees with the body is
   rejected — otherwise a gateway could authorize one method while the
   server runs another. `mcp_tax_calculator` checks both headers.
-- **Required `_meta`.** Every `tools/list`, `tools/call`, and
-  `server/info` request must carry
+- **Required `_meta`.** Every `tools/list`, `tools/call`, `resources/*`,
+  `prompts/*`, and `server/info` request must carry
   `io.modelcontextprotocol/protocolVersion` and
   `io.modelcontextprotocol/clientCapabilities`. Missing fields are
   JSON-RPC `-32602`. Vendor identity stays under `ug.go.ura.chatbot/`.
+- **Diagnostic Ping & Batching.** Standard `ping` returns `{}` without
+  session state; JSON-RPC 2.0 batch requests (`[...]`) are executed
+  atomically and returned in order.
+- **MCP Resources & Prompts.** Serves statutory URA tax rate cards and
+  deadlines as standard resources (`ura://rates/current`,
+  `ura://calendar/deadlines`) and standard calculation prompt templates
+  (`vat_calculation_guide`, `paye_withholding_guide`).
+- **Connection Pooling.** `HttpTransport` maintains persistent `httpx.Client`
+  connection pools per namespace to minimize SSL/TCP overhead.
+- **Multilingual Tool RAG.** `ToolRAGSelector` expands Ugandan multilingual
+  stems (Luganda & Swahili terms for tax, duty, customs, salaries, withholding)
+  to ensure high retrieval recall across local languages.
+- **Document Audit Tool.** Added `audit_tax_document` to `tax_calculator`,
+  exposing automated financial arithmetic reconciliation and statutory tax rate
+  auditing to MCP clients.
 - **Cacheable lists.** `tools/list` returns `ttlMs` (1h) and
   `cacheScope: "server"`. `HttpTransport` honours `ttlMs` instead of
   caching for process life.

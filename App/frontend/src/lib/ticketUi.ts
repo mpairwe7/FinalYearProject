@@ -88,17 +88,30 @@ export function waitTone(
   return "ok";
 }
 
+export function ticketRef(ticketId: string): string {
+  if (!ticketId) return "";
+  const clean = ticketId.replace(/^TIC-/i, "").replace(/^#/i, "");
+  return `TIC-${clean.slice(0, 8).toUpperCase()}`;
+}
+
 export function ticketMatchesQuery(ticket: TicketQueueItem, query: string): boolean {
-  const q = query.trim().toLowerCase();
+  let q = query.trim().toLowerCase();
   if (!q) return true;
+  if (q.startsWith("#")) q = q.slice(1).trim();
+  if (q.startsWith("tic-")) q = q.slice(4).trim();
+  const shortId = (ticket.id || "").slice(0, 8).toLowerCase();
+  const refCode = ticketRef(ticket.id).toLowerCase();
   const hay = [
     ticket.id,
+    shortId,
+    refCode,
     ticket.reason,
     ticket.user_query,
     ticket.assignee,
     ticket.team,
     ticket.handoff?.topic,
     ticket.handoff?.summary,
+    (ticket as { officer_reply?: string }).officer_reply,
   ]
     .filter(Boolean)
     .join(" ")

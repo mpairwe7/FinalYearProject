@@ -13,7 +13,7 @@ def _rpc(method: str, params: dict | None = None, request_id: int | None = 1, he
     if request_id is not None:
         body["id"] = request_id
     merged = dict(params or {})
-    if method in ("tools/list", "tools/call", "server/info"):
+    if method in ("tools/list", "tools/call", "server/info", "resources/list", "resources/read", "prompts/list", "prompts/get"):
         meta = dict(merged.get("_meta") or {})
         for key, value in request_meta().items():
             meta.setdefault(key, value)
@@ -36,6 +36,55 @@ class ServerInfoTests(unittest.TestCase):
 
     def test_unknown_method_is_a_protocol_error(self) -> None:
         self.assertEqual(_rpc("tools/teleport")["error"]["code"], server.METHOD_NOT_FOUND)
+
+    def test_ping_returns_empty_object(self) -> None:
+        response = _rpc("ping")
+        self.assertNotIn("error", response)
+        self.assertEqual(response["result"], {})
+
+
+class ResourcesTests(unittest.TestCase):
+    def test_resources_list_and_read(self) -> None:
+        listed = _rpc("resources/list")["result"]
+        self.assertIn("resources", listed)
+        uris = [r["uri"] for r in listed["resources"]]
+        self.assertIn("ura://rates/current", uris)
+        self.assertIn("ura://calendar/deadlines", uris)
+
+        rates = _rpc("resources/read", {"uri": "ura://rates/current"})["result"]
+        self.assertEqual(rates["contents"][0]["uri"], "ura://rates/current")
+        self.assertIn("FY2026-27", rates["contents"][0]["text"])
+
+        deadlines = _rpc("resources/read", {"uri": "ura://calendar/deadlines"})["result"]
+        self.assertEqual(deadlines["contents"][0]["uri"], "ura://calendar/deadlines")
+
+    def test_unknown_resource_raises_not_found(self) -> None:
+        err = _rpc("resources/read", {"uri": "ura://secret/keys"})["error"]
+        self.assertEqual(err["code"], server.METHOD_NOT_FOUND)
+
+
+class PromptsTests(unittest.TestCase):
+    def test_prompts_list_and_get(self) -> None:
+        prompts = _rpc("prompts/list")["result"]["prompts"]
+        names = [p["name"] for p in prompts]
+        self.assertIn("vat_calculation_guide", names)
+        self.assertIn("paye_withholding_guide", names)
+
+        rendered = _rpc("prompts/get", {"name": "vat_calculation_guide", "arguments": {"amount": "5000000"}})["result"]
+        self.assertIn("5000000", rendered["messages"][0]["content"]["text"])
+
+
+class BatchRequestTests(unittest.TestCase):
+    def test_batch_request_returns_list_of_responses(self) -> None:
+        batch = [
+            {"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            {"jsonrpc": "2.0", "id": 2, "method": "server/info", "params": {"_meta": request_meta()}},
+        ]
+        res = server.handle_request(batch)
+        self.assertIsInstance(res, list)
+        self.assertEqual(len(res), 2)
+        self.assertEqual(res[0]["id"], 1)
+        self.assertEqual(res[1]["id"], 2)
 
 
 class ToolsListTests(unittest.TestCase):
@@ -177,6 +226,20 @@ class ParityTests(unittest.TestCase):
         via_server = _rpc("tools/call", {"name": "calculate_paye", "arguments": args})["result"]
         via_registry = ToolRegistry.call("calculate_paye", args)
         self.assertEqual(via_server["structuredContent"]["paye"], via_registry["paye"])
+
+    def test_audit_tax_document_mcp_call(self) -> None:
+        text = (
+            "URA EFRIS INVOICE\n"
+            "TIN: 1001234567\n"
+            "PRN: 20261122334455\n"
+            "Subtotal: UGX 1,000,000\n"
+            "VAT (18%): UGX 180,000\n"
+            "Total Amount: UGX 1,180,000\n"
+        )
+        res = _rpc("tools/call", {"name": "audit_tax_document", "arguments": {"text": text}})["result"]
+        self.assertFalse(res["isError"])
+        self.assertEqual(res["structuredContent"]["status"], "verified")
+        self.assertEqual(res["structuredContent"]["effective_rate"], 0.18)
 
 
 if __name__ == "__main__":

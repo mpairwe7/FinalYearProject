@@ -47,9 +47,12 @@ from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .vision.document_classifier import classify_document
 from .vision.ocr import (
     clean_ocr_text,
-    extract_ocr_result,
     extract_dates,
+    extract_efris_invoice_numbers,
+    extract_ocr_result,
+    extract_prn_numbers,
     extract_reference_numbers,
+    extract_tax_heads,
     extract_tin_numbers,
     extract_ugx_amounts,
 )
@@ -282,6 +285,7 @@ class DocumentRecord:
     session_id: str = ""
     user_id: str = ""
     field_evidence: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    tax_reconciliation: dict[str, Any] = field(default_factory=dict)
 
     def _provenance_payload(self) -> dict[str, Any]:
         """Expose bounded evidence metadata without retaining source file bytes."""
@@ -315,6 +319,7 @@ class DocumentRecord:
             "text_preview": self.text[:600],
             "truncated": self.truncated,
             "summary": self.summary,
+            "tax_reconciliation": dict(self.tax_reconciliation),
             "warnings": self.warnings,
             "expires_in_seconds": max(
                 0, int(self.created_at + DOCUMENT_TTL_SECONDS - time.time())
@@ -341,6 +346,7 @@ class DocumentRecord:
             "text": self.text,
             "truncated": self.truncated,
             "summary": self.summary,
+            "tax_reconciliation": dict(self.tax_reconciliation),
             "warnings": self.warnings,
             "analyzed_at": self.created_at,
         }
@@ -357,6 +363,9 @@ class DocumentRecord:
         field_bits = []
         for key, title in (
             ("tins", "TINs"),
+            ("prns", "PRNs"),
+            ("efris_invoices", "EFRIS Invoices"),
+            ("tax_heads", "Tax Regimes"),
             ("amounts", "Amounts"),
             ("dates", "Dates"),
             ("references", "References"),
@@ -366,6 +375,11 @@ class DocumentRecord:
                 field_bits.append(f"{title}: {', '.join(values[:5])}")
         if field_bits:
             lines.append("Key fields — " + "; ".join(field_bits))
+        if self.tax_reconciliation:
+            recon_status = self.tax_reconciliation.get("status")
+            recon_notes = self.tax_reconciliation.get("notes") or []
+            if recon_status in ("verified", "discrepancy_detected") and recon_notes:
+                lines.append(f"Tax Reconciliation ({recon_status}): {recon_notes[0]}")
         for table in self.tables[:3]:
             headers = ", ".join(table.headers[:8]) or "no headers"
             lines.append(
@@ -374,7 +388,9 @@ class DocumentRecord:
             )
         header = "\n".join(lines)
         remaining = max(200, char_budget - len(header) - 80)
-        body = self.text[:remaining]
+        cleaned_text = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", self.text)
+        cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+        body = cleaned_text[:remaining]
         if not body:
             return header
         return (
@@ -1019,6 +1035,9 @@ def _build_summary(
     counts = []
     for key, singular, plural in (
         ("tins", "TIN", "TINs"),
+        ("prns", "PRN", "PRNs"),
+        ("efris_invoices", "EFRIS invoice number", "EFRIS invoice numbers"),
+        ("tax_heads", "tax head", "tax heads"),
         ("amounts", "UGX amount", "UGX amounts"),
         ("dates", "date", "dates"),
         ("references", "reference number", "reference numbers"),
@@ -1091,6 +1110,164 @@ def _field_evidence(
     return evidence
 
 
+def _parse_currency_amount(raw: str) -> float | None:
+    """Extract float value from currency strings like 'UGX 1,180,000.00' or '1,250,000'."""
+    cleaned = re.sub(r"[^\d.]", "", raw.replace(",", ""))
+    try:
+        val = float(cleaned)
+        return val if val > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def reconcile_tax_document(
+    text: str,
+    doc_type: str,
+    fields: dict[str, list[str]],
+    tables: list[TableSummary],
+) -> dict[str, Any]:
+    """Perform automated financial arithmetic reconciliation & statutory tax checks.
+
+    Verifies:
+    1. TIN format & presence (10-digit Uganda TIN starting with 1).
+    2. PRN format & status (12-15 digit Payment Registration Number starting with 2).
+    3. EFRIS fiscal invoice/receipt indicators.
+    4. Arithmetic integrity: Subtotal + Tax == Total (with tolerance for rounding).
+    5. Statutory tax rate compliance: Standard VAT rate is 18.0% (FY2026-27).
+    """
+    notes: list[str] = []
+
+    # 1. Tax Identifiers
+    tins = fields.get("tins") or []
+    for tin in tins:
+        if re.fullmatch(r"1\d{9}", str(tin).strip()):
+            notes.append(f"Uganda TIN {tin} verified (valid 10-digit format).")
+        else:
+            notes.append(f"TIN {tin} has non-standard format (expected 10 digits starting with 1).")
+
+    prns = fields.get("prns") or []
+    for prn in prns:
+        notes.append(f"Payment Registration Number (PRN) {prn} verified for e-Tax / bank payment.")
+
+    efris = fields.get("efris_invoices") or []
+    if efris:
+        notes.append(f"EFRIS fiscal device / invoice record identified ({', '.join(efris[:3])}).")
+
+    # 2. Extract financial figures associated with tax lines
+    subtotal_match = re.search(
+        r"(?:Sub-?total|Taxable\s+Value|Taxable\s+Amount|Net\s+Amount|Total\s+Exclusive)\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.I,
+    )
+    vat_match = re.search(
+        r"(?:V\.?A\.?T\.?|Value\s+Added\s+Tax|Tax\s+Amount)\s*(?:\(18%\))?\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.I,
+    )
+    total_match = re.search(
+        r"(?:Total\s+Payable|Grand\s+Total|Total\s+Amount|Gross\s+Amount|Total\s+Due|Amount\s+Paid|Paid\s+Amount)\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.I,
+    )
+    wht_match = re.search(
+        r"(?:Withholding\s+Tax|W\.?H\.?T\.?)\s*(?:\([0-9.]+%\))?\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.I,
+    )
+
+    subtotal_val = _parse_currency_amount(subtotal_match.group(1)) if subtotal_match else None
+    vat_val = _parse_currency_amount(vat_match.group(1)) if vat_match else None
+    total_val = _parse_currency_amount(total_match.group(1)) if total_match else None
+    wht_val = _parse_currency_amount(wht_match.group(1)) if wht_match else None
+
+    # Fallback to table numeric totals if present
+    if not subtotal_val and tables:
+        for t in tables:
+            for header, tot in t.numeric_totals.items():
+                hl = header.lower()
+                if "subtotal" in hl or "taxable" in hl or "net" in hl:
+                    subtotal_val = tot
+                elif "vat" in hl or "tax" in hl:
+                    vat_val = tot
+                elif "total" in hl or "gross" in hl:
+                    total_val = tot
+
+    status = "informational_only"
+    variance = 0.0
+    effective_rate: float | None = None
+
+    if subtotal_val is not None and vat_val is not None and total_val is not None:
+        expected_total = subtotal_val + vat_val
+        diff = abs(total_val - expected_total)
+        tolerance = max(2.0, total_val * 0.002)
+        effective_rate = round(vat_val / subtotal_val, 4) if subtotal_val > 0 else 0.0
+
+        if diff <= tolerance:
+            variance = 0.0
+            if abs(effective_rate - 0.18) <= 0.005:
+                status = "verified"
+                notes.append(
+                    f"Arithmetic balanced: Subtotal (UGX {subtotal_val:,.0f}) + 18% VAT (UGX {vat_val:,.0f}) "
+                    f"= Total (UGX {total_val:,.0f}). Statutory rate verified."
+                )
+            else:
+                status = "discrepancy_detected"
+                notes.append(
+                    f"Arithmetic balanced (Total UGX {total_val:,.0f}), but effective VAT rate "
+                    f"is {effective_rate:.1%} instead of standard 18.0%."
+                )
+        else:
+            variance = round(total_val - expected_total, 2)
+            status = "discrepancy_detected"
+            notes.append(
+                f"Arithmetic discrepancy detected: Subtotal (UGX {subtotal_val:,.0f}) + "
+                f"VAT (UGX {vat_val:,.0f}) = UGX {expected_total:,.0f}, but document states "
+                f"Total UGX {total_val:,.0f} (variance: UGX {abs(variance):,.0f})."
+            )
+    elif subtotal_val is not None and total_val is not None and vat_val is None:
+        implied_tax = total_val - subtotal_val
+        if implied_tax > 0 and subtotal_val > 0:
+            effective_rate = round(implied_tax / subtotal_val, 4)
+            if abs(effective_rate - 0.18) <= 0.005:
+                status = "verified"
+                notes.append(
+                    f"Standard 18.0% VAT implied: Total UGX {total_val:,.0f} on Subtotal "
+                    f"UGX {subtotal_val:,.0f} matches standard VAT rate."
+                )
+            else:
+                status = "unreconciled_partial"
+                notes.append(
+                    f"Implied tax rate is {effective_rate:.1%} between Subtotal "
+                    f"UGX {subtotal_val:,.0f} and Total UGX {total_val:,.0f}."
+                )
+        else:
+            status = "unreconciled_partial"
+            notes.append("Partial financial amounts extracted; full line-item tax equation could not be constructed.")
+    elif total_val is not None or (fields.get("amounts")):
+        if doc_type in {"receipt", "invoice", "assessment"}:
+            status = "unreconciled_partial"
+            notes.append("Financial amounts extracted, but explicit subtotal/tax line breakdown was not detected.")
+        else:
+            status = "informational_only"
+            notes.append("General document; arithmetic reconciliation not applicable.")
+    else:
+        status = "informational_only"
+        notes.append("Non-financial or administrative text; no numeric tax variance.")
+
+    if wht_val is not None:
+        notes.append(f"Withholding tax (WHT) of UGX {wht_val:,.0f} noted on this record.")
+
+    return {
+        "status": status,
+        "subtotal_ugx": subtotal_val,
+        "tax_ugx": vat_val,
+        "total_ugx": total_val,
+        "effective_rate": effective_rate,
+        "variance_ugx": variance,
+        "notes": notes,
+    }
+
+
 def analyze_document(
     data: bytes,
     filename: str,
@@ -1147,11 +1324,20 @@ def analyze_document(
     classification = classify_document(text)
     fields = {
         "tins": extract_tin_numbers(text)[:_MAX_FIELD_ITEMS],
+        "prns": extract_prn_numbers(text)[:_MAX_FIELD_ITEMS],
+        "efris_invoices": extract_efris_invoice_numbers(text)[:_MAX_FIELD_ITEMS],
         "amounts": extract_ugx_amounts(text)[:_MAX_FIELD_ITEMS],
         "dates": extract_dates(text)[:_MAX_FIELD_ITEMS],
         "references": extract_reference_numbers(text)[:_MAX_FIELD_ITEMS],
+        "tax_heads": extract_tax_heads(text)[:_MAX_FIELD_ITEMS],
     }
     field_evidence = _field_evidence(fields, extraction.meta)
+    tax_reconciliation = reconcile_tax_document(
+        text=text,
+        doc_type=classification.doc_type.value,
+        fields=fields,
+        tables=extraction.tables,
+    )
     summary = _build_summary(
         kind,
         classification.doc_type.value,
@@ -1177,11 +1363,20 @@ def analyze_document(
         tables=extraction.tables,
         meta=extraction.meta,
         summary=summary,
+        tax_reconciliation=tax_reconciliation,
         warnings=extraction.warnings,
         created_at=time.time(),
         session_id=session_id or "",
         user_id=user_id or "",
     )
+    try:
+        from .hitl_routing import assess_document_for_human_review
+        hitl_assessment = assess_document_for_human_review(record)
+        record.meta["hitl_requires_review"] = hitl_assessment.requires_review
+        record.meta["hitl_reasons"] = hitl_assessment.reasons
+        record.meta["hitl_priority"] = hitl_assessment.priority
+    except Exception as hitl_err:
+        logger.debug("HITL assessment skipped: %s", hitl_err)
     _store(record)
     logger.info(
         "document analyzed: id=%s kind=%s type=%s conf=%.2f chars=%d warnings=%d",

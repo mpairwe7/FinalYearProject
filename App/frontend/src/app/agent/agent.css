@@ -39,7 +39,7 @@
 
 .ag-split {
   display: grid;
-  grid-template-columns: minmax(320px, 400px) 1fr;
+  grid-template-columns: minmax(360px, 460px) 1fr;
   gap: var(--ops-gutter);
   /* See tickets.css — the queue and the case are one view, so they share a
      baseline instead of each sizing to its own content. */
@@ -62,8 +62,8 @@
   padding: var(--ops-space-5);
   /* The case pane owns its own scroll so the sticky case header has something
      to stick to; the page behind it stays put. */
-  max-height: calc(100dvh - var(--ops-nav-h) - 190px);
-  min-height: 320px;
+  max-height: calc(100dvh - var(--ops-nav-h) - 130px);
+  min-height: 380px;
   overflow-y: auto;
 }
 
@@ -73,7 +73,7 @@
   padding: 0;
   display: grid;
   gap: var(--ops-space-1);
-  max-height: calc(100dvh - var(--ops-nav-h) - 200px);
+  max-height: calc(100dvh - var(--ops-nav-h) - 140px);
   overflow-y: auto;
 }
 

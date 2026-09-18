@@ -985,6 +985,7 @@ def list_tickets(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    q: str | None = None,
 ) -> list[dict[str, Any]]:
     pool = _get_pool()
     if pool is None:
@@ -1002,6 +1003,14 @@ def list_tickets(
     if team:
         sql += " AND team = %s" if (status or params) else " WHERE team = %s"
         params.append(team)
+    if q and q.strip():
+        term = q.strip().lstrip("#")
+        if term.upper().startswith("TIC-"):
+            term = term[4:]
+        q_like = f"%{term}%"
+        clause = "(id ILIKE %s OR reason ILIKE %s OR user_query ILIKE %s OR assignee ILIKE %s OR team ILIKE %s OR staff_note ILIKE %s OR officer_reply ILIKE %s OR transcript_json ILIKE %s)"
+        sql += " AND " + clause if (status or priority or team or " WHERE " in sql) else " WHERE " + clause
+        params.extend([q_like] * 8)
     sql += (
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
@@ -1012,6 +1021,33 @@ def list_tickets(
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         return [_row_to_ticket(r) for r in cur.fetchall()]
+
+
+def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
+    """Postgres mirror of :func:`database.append_taxpayer_reply`."""
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        return None
+    transcript = list(ticket.get("transcript") or [])
+    now = time.time()
+    turn = {
+        "user_message": message.strip()[:2000],
+        "bot_reply": "",
+        "created_at": now,
+        "sender": "taxpayer",
+    }
+    transcript.append(turn)
+    transcript_json = json.dumps(transcript)
+    pool = _get_pool()
+    if pool is None:
+        return None
+    new_status = "assigned" if ticket.get("status") in ("assigned", "resolved") else "open"
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE tickets SET transcript_json = %s, status = %s, updated_at = %s WHERE id = %s",
+            (transcript_json, new_status, now, ticket_id),
+        )
+    return get_ticket(ticket_id)
 
 
 def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:

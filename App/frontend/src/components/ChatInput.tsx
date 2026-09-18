@@ -11,6 +11,7 @@ import {
   VoiceWaveIcon,
   StopIcon,
   DownloadIcon,
+  EyeIcon,
 } from './Icons';
 import {
   ATTACHMENT_ACCEPT,
@@ -36,6 +37,7 @@ interface ChatInputProps {
   attachments?: PendingAttachment[];
   onAttachFiles?: (files: FileList) => void;
   onRemoveAttachment?: (clientId: string) => void;
+  onInspectAttachment?: (attachment: PendingAttachment) => void;
   /* Voice mode is the composer's only conversation-level control. It renders
      only when its handler is provided. Language is NOT here — it is a
      session-level setting and lives in the header (see ChatHeader).
@@ -100,6 +102,7 @@ function ChatInputInner({
   attachments,
   onAttachFiles,
   onRemoveAttachment,
+  onInspectAttachment,
   onVoiceModeChange,
   voiceModeDisabled,
   dictationNotice,
@@ -238,6 +241,17 @@ function ChatInputInner({
                   {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
                   {a.status === 'error' && (a.error || 'Failed')}
                 </span>
+                {a.status === 'ready' && (
+                  <button
+                    type="button"
+                    className="attachment-report-link"
+                    onClick={() => onInspectAttachment?.(a)}
+                    title="Inspect extracted fields & tax audit"
+                    aria-label={`Inspect ${a.name}`}
+                  >
+                    <EyeIcon />
+                  </button>
+                )}
                 {a.status === 'ready' && a.documentId && (
                   <a
                     href={`/api/v1/documents/${a.documentId}/report`}

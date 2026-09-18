@@ -15,6 +15,7 @@ export const en = {
   // Landing ---------------------------------------------------------------
   'landing.headline': 'How can I help with your taxes?',
   'landing.subtitle': 'Official AI-powered assistant for Uganda Revenue Authority',
+  'chat.greeting': 'Hi! I can answer your questions about URA. Type or speak your question to begin.',
   'landing.authPrompt.signIn': 'Sign in',
   'landing.authPrompt.or': 'or',
   'landing.authPrompt.signUp': 'create an account',
@@ -136,6 +137,16 @@ export const en = {
     'This could not be passed to an officer. Call URA toll-free on 0800 117 000.',
   'handoff.offline':
     'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.',
+  'handoff.open_case': 'Open Support Case',
+  'handoff.case_room': 'URA Officer Support Case',
+  'handoff.officer_response': 'Official URA Officer Response',
+  'handoff.awaiting_officer': 'Awaiting Officer Review',
+  'handoff.in_review': 'Officer In Review',
+  'handoff.reply_placeholder': 'Reply to the officer or provide additional details, PRN, or TIN...',
+  'handoff.send_reply': 'Send Reply',
+  'handoff.call_hotline': 'Call Toll-Free 0800 117 000',
+  'handoff.copy_ref': 'Copy Reference',
+  'handoff.copied': 'Copied!',
 
   // Shared ----------------------------------------------------------------
   'common.cancel': 'Cancel',
@@ -144,6 +155,18 @@ export const en = {
   'common.close': 'Close',
   'common.retry': 'Try again',
   'common.offline': 'You are offline. Messages will send when you reconnect.',
+
+  // Documents & Extraction ------------------------------------------------
+  'documents.inspect': 'Inspect',
+  'documents.downloadReport': 'Download Report',
+  'documents.reconciliation': 'Tax Reconciliation',
+  'documents.verified': 'Verified',
+  'documents.discrepancy': 'Discrepancy',
+  'documents.modalTitle': 'Document Inspection & Tax Audit',
+  'documents.summary': 'Analysis Summary',
+  'documents.entities': 'Extracted Tax Fields',
+  'documents.tables': 'Tables & Worksheets',
+  'documents.suggested': 'Suggested Actions',
 } as const;
 
 export type TranslationKey = keyof typeof en;

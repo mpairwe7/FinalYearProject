@@ -88,7 +88,6 @@ _LUGANDA_PCT_WORDS = [
     ("amakumi abiri", "20"),
     ("asatu", "30"),
     ("amakumi asatu", "30"),
-    ("ana", "40"),
     ("amakumi ana", "40"),
     ("ataano", "50"),
     ("amakumi ataano", "50"),
@@ -169,7 +168,7 @@ _AMOUNT_PREFIX_MULTIPLIERS = {
 #: contradiction check fires only for rule-shaped sentences.
 _RULE_CUE_RE = re.compile(
     r"\b(threshold|above|below|exceed\w*|at\s+least|minimum|maximum|"
-    r"limit|register\w*|registration|band|bracket|allowance|cap(?:ped)?)\b",
+    r"limit|register\w*|registration|band|bracket|allowance|(?:capped|cap\b(?!\s*\.?\s*\d)))\b",
     re.IGNORECASE,
 )
 
@@ -213,7 +212,8 @@ def canonical_amounts(text: str) -> set[float]:
     (Luganda obukadde, Swahili milioni) were dropped, falsely triggering
     numerical mismatch warnings on correct translations.
     """
-    lowered = (text or "").lower()
+    clean_text = re.sub(r"<[^>]+>", " ", text or "")
+    lowered = clean_text.lower()
     # Percentages are handled separately; drop them so "18%" is not read
     # as the amount 18.
     without_pct = _PCT_RE.sub(" ", lowered)
@@ -245,6 +245,13 @@ def canonical_amounts(text: str) -> set[float]:
     remainder = re.sub(r"\b(?:pande|upande|sehemu)\s+(?:za|ya|wa)?\s*mbili\b", " ", remainder, flags=re.IGNORECASE)
     remainder = re.sub(r"\b(?:njuyi|enjuyi|empande)\s+(?:zombi|z'ebbiri)\b", " ", remainder, flags=re.IGNORECASE)
     remainder = re.sub(r"\bthird[-\s]part(?:y|ies)\b", " ", remainder, flags=re.IGNORECASE)
+    # Strip legal references (e.g. Cap 340, Cap. 343, Section 118, Article VII) so statute chapters are not parsed as monetary rules
+    remainder = re.sub(
+        r"\b(?:cap\.?|chapter|section|sura|kifungu|katundu|article)\s*(?:\d+|[IVXLCDM]+)\b",
+        " ",
+        remainder,
+        flags=re.IGNORECASE,
+    )
 
     # 2. Standard suffixes (e.g. "150m", "150 million", "UGX 150,000,000") and plain numbers
     for match in _AMOUNT_RE.finditer(remainder):
@@ -269,7 +276,7 @@ def canonical_amounts(text: str) -> set[float]:
         "bbiri": 2.0, "ebbiri": 2.0, "mbili": 2.0, "zibiri": 2.0, "ebibiri": 2.0,
         "mwenda": 9.0, "tisa": 9.0, "omwenda": 9.0,
         "kkumi": 10.0, "kumi": 10.0, "ekkumi": 10.0, "asatu": 30.0, "thelathini": 30.0, "abiri": 20.0,
-        "ishirini": 20.0, "ana": 40.0, "arobaini": 40.0, "ataano": 50.0, "hamsini": 50.0,
+        "ishirini": 20.0, "amakumi ana": 40.0, "arobaini": 40.0, "ataano": 50.0, "hamsini": 50.0,
     }
     for word, val in _CARDINAL_WORDS.items():
         if re.search(rf"\b{word}\b", remainder):
@@ -302,13 +309,51 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
     qp = percentages(user_query) if user_query else set()
     model_pct = cp - qp
     if model_pct and xp and model_pct.isdisjoint(xp):
-        # A percentage is only a contradiction if the claim and the cited context
-        # are actually discussing the same subject rather than unrelated facts.
-        claim_words = set(re.findall(r"\w{3,}", claim.lower()))
-        context_words = set(re.findall(r"\w{3,}", context.lower()))
-        shared = (claim_words & context_words) - {"that", "with", "from", "this", "have", "were", "will", "your", "under"}
-        if shared:
-            return True
+        # A claim stating Uganda's official statutory 18% VAT rate does not contradict a withholding or income tax passage
+        if model_pct == {"18"} and ("vat" in claim.lower() or "value added" in claim.lower()):
+            pass
+        else:
+            def _tax_head(text: str) -> str | None:
+                tl = text.lower()
+                if "vat" in tl or "value added" in tl:
+                    return "vat"
+                if "withholding" in tl or "wht" in tl:
+                    return "wht"
+                if "paye" in tl or "pay as you earn" in tl or "employment" in tl:
+                    return "paye"
+                if "rental" in tl:
+                    return "rental"
+                if "corporation" in tl or "corporate" in tl:
+                    return "corporation"
+                if "environmental" in tl or "levy" in tl:
+                    return "environmental_levy"
+                if "import duty" in tl or "customs duty" in tl or "external tariff" in tl or "cet" in tl:
+                    return "import_duty"
+                if "infrastructure" in tl or "infrastructural" in tl:
+                    return "infrastructure"
+                if "excise" in tl:
+                    return "excise"
+                if "stamp duty" in tl:
+                    return "stamp_duty"
+                return None
+
+            ch = _tax_head(claim)
+            xh = _tax_head(context)
+            # Only compare if they are about the same tax head (or neither specifies one)
+            if ch and xh and ch != xh:
+                pass
+            elif ch and not xh and model_pct.issubset({"18", "6", "15", "25", "30", "35", "50", "1.5", "2", "0.5"}):
+                pass
+            else:
+                claim_words = set(re.findall(r"\w{3,}", claim.lower()))
+                context_words = set(re.findall(r"\w{3,}", context.lower()))
+                shared = (claim_words & context_words) - {
+                    "that", "with", "from", "this", "have", "were", "will", "your", "under",
+                    "tax", "rate", "rates", "taxes", "standard", "services", "goods", "amount", "payment",
+                    "vehicle", "motor", "used", "imported", "import", "customs", "duty", "levy", "value",
+                }
+                if shared:
+                    return True
 
     if not _RULE_CUE_RE.search(claim):
         return False
@@ -316,8 +361,36 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
     xa = canonical_amounts(context)
     qa = canonical_amounts(user_query) if user_query else set()
     model_amounts = ca - qa
-    if model_amounts and xa and model_amounts.isdisjoint(xa):
-        return True
+    ca_money = {a for a in model_amounts if a >= 1000.0}
+    xa_money = {a for a in xa if a >= 1000.0}
+    if ca_money and xa_money and ca_money.isdisjoint(xa_money):
+        def _rule_subject(text: str) -> str | None:
+            tl = text.lower()
+            if "audit" in tl or "audited" in tl or "accountant" in tl:
+                return "audit"
+            if "vat" in tl or "value added" in tl:
+                return "vat"
+            if "presumptive" in tl or "small business" in tl:
+                return "presumptive"
+            if "paye" in tl or "salary" in tl or "wage" in tl:
+                return "paye"
+            return None
+
+        cs = _rule_subject(claim)
+        xs = _rule_subject(context)
+        if cs and xs and cs != xs:
+            pass  # Different legal rules (e.g. 500m audit vs 150m VAT registration)
+        else:
+            claim_words = set(re.findall(r"\w{3,}", claim.lower()))
+            context_words = set(re.findall(r"\w{3,}", context.lower()))
+            shared = (claim_words & context_words) - {
+                "that", "with", "from", "this", "have", "were", "will", "your", "under",
+                "tax", "rate", "rates", "taxes", "standard", "services", "goods", "amount", "payment",
+                "return", "returns", "filing", "file", "period", "month", "monthly", "annual", "year",
+                "turnover", "gross", "income", "shillings", "person", "business", "taxpayer", "taxpayers",
+            }
+            if shared:
+                return True
     return False
 
 

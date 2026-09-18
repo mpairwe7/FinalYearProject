@@ -15,6 +15,7 @@ import type { Dictionary } from './en';
 export const sw: Partial<Dictionary> = {
   'landing.headline': 'Nikusaidie vipi na kodi zako?',
   'landing.subtitle': 'Msaidizi rasmi wa URA unaotumia AI',
+  'chat.greeting': 'Habari! Ninaweza kujibu maswali yako kuhusu URA. Andika au sema swali lako ili kuanza.',
   'landing.authPrompt.signIn': 'Ingia',
   'landing.authPrompt.or': 'au',
   'landing.authPrompt.signUp': 'fungua akaunti',
@@ -126,5 +127,17 @@ export const sw: Partial<Dictionary> = {
   'common.close': 'Funga',
   'common.retry': 'Jaribu tena',
   'common.offline':
-    'Hauko mtandaoni. Ujumbe utatumwa utakapounganishwa tena.',
+    'Huko mtandaoni. Ujumbe utatumwa punde utakaporejesha muunganisho.',
+
+  // Documents & Extraction ------------------------------------------------
+  'documents.inspect': 'Kagua',
+  'documents.downloadReport': 'Pakua Ripoti',
+  'documents.reconciliation': 'Upatanishi wa Kodi',
+  'documents.verified': 'Imethibitishwa',
+  'documents.discrepancy': 'Hitilafu imepatikana',
+  'documents.modalTitle': 'Ukaguzi wa Nyaraka na Kodi',
+  'documents.summary': 'Muhtasari wa Uchambuzi',
+  'documents.entities': 'Sehemu za Kodi Zilizotolewa',
+  'documents.tables': 'Jedwali na Laha kazi',
+  'documents.suggested': 'Hatua Zinazopendekezwa',
 };

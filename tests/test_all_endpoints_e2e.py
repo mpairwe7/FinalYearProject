@@ -87,6 +87,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/chat"),
     ("POST", "/v1/chat/stream"),
     ("POST", "/v1/escalate"),
+    ("GET", "/v1/escalate/{ticket_id}"),
+    ("POST", "/v1/escalate/{ticket_id}/reply"),
     # --- Classification + knowledge (public) ---
     ("POST", "/classify"),
     ("POST", "/classify/batch"),
@@ -176,6 +178,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/index/freshness"): "this:test_index_freshness",
     ("POST", "/v1/chat"): "this:test_chat_happy_path + test_api_endpoints.ChatEndpoints",
     ("POST", "/v1/escalate"): "this:test_answer_integrity_integration + App/backend/tests/test_taxpayer_escalation.py",
+    ("GET", "/v1/escalate/{ticket_id}"): "App/backend/tests/test_taxpayer_escalation.py",
+    ("POST", "/v1/escalate/{ticket_id}/reply"): "App/backend/tests/test_taxpayer_escalation.py",
     ("POST", "/v1/chat/stream"): "test_fallback_integration.TestChatStreamEndpointFallback",
     ("POST", "/classify"): "test_api_endpoints.ClassificationKnowledge",
     ("POST", "/classify/batch"): "test_api_endpoints.ClassificationKnowledge",
@@ -370,10 +374,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (68 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (70 HTTP + 4 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 68, f"expected 68 HTTP endpoints, found {len(http)}"
+    assert len(http) == 70, f"expected 70 HTTP endpoints, found {len(http)}"
     assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
 
 

@@ -2,7 +2,7 @@
 
 import React, { useEffect } from "react";
 import type { TicketDetail, TicketPatch } from "../../services/analyticsApi";
-import { officerHandle, STATUS_LABEL, topicLabel, waitingFor, waitTone } from "../../lib/ticketUi";
+import { officerHandle, STATUS_LABEL, ticketRef, topicLabel, waitingFor, waitTone } from "../../lib/ticketUi";
 import { analyticsApi } from "../../services/analyticsApi";
 import { Skeleton } from "../ops/States";
 import type { StaffIdentity } from "../StaffGuard";
@@ -98,6 +98,48 @@ export function TicketCase({
             </button>
           ) : null}
           <h2>{ticket.reason || topicLabel(ticket)}</h2>
+          <div className="st-case-ref-bar">
+            <span className="st-case-ref-badge" title="Official URA Reference Code">
+              #{ticketRef(ticket.id)}
+            </span>
+            <button
+              type="button"
+              className="ops-btn is-ghost is-xs"
+              onClick={() => {
+                void navigator.clipboard.writeText(ticketRef(ticket.id));
+              }}
+              title="Copy reference code"
+            >
+              📋 Copy Ref
+            </button>
+            <button
+              type="button"
+              className="ops-btn is-ghost is-xs"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  const url = `${window.location.origin}/admin/tickets?ticket=${encodeURIComponent(ticket.id)}`;
+                  void navigator.clipboard.writeText(url);
+                }
+              }}
+              title="Copy deep link to this ticket"
+            >
+              🔗 Copy Link
+            </button>
+            {ticket.team ? (
+              <span className="st-pill st-pill-team">
+                🏢 {ticket.team.replace(/_/g, " ")}
+              </span>
+            ) : null}
+            {ticket.reply_delivered_at ? (
+              <span className="st-pill is-delivered" title="Taxpayer received officer reply">
+                ✓ Delivered to Taxpayer
+              </span>
+            ) : ticket.officer_reply ? (
+              <span className="st-pill is-pending-delivery" title="Reply queued for taxpayer delivery">
+                ⏳ Queued for Delivery
+              </span>
+            ) : null}
+          </div>
           <p className="st-case-pills">
             <span className={`st-pri st-pri-${ticket.priority}`}>{ticket.priority}</span>
             <span className="st-pill">{STATUS_LABEL[ticket.status] || ticket.status}</span>

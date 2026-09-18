@@ -4,12 +4,13 @@ import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraCo
 import { formatDocType } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { localeLabel } from '../lib/locales';
+import { useTranslation } from '../lib/i18n';
 import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
 import { authHeaders } from '../lib/authSession';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon } from './Icons';
-import LoadingState, { formatElapsed } from './LoadingState';
+import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon } from './Icons';
+import LoadingState from './LoadingState';
 import Markdown from './Markdown';
 
 /** Copy an assistant reply to the clipboard with a brief confirmation. */
@@ -94,6 +95,7 @@ interface ChatMessageProps {
   phaseLabel?: string;
   phaseVariant?: string;
   phaseStartedAt?: number;
+  onInspectAttachment?: (attachment: ChatAttachment) => void;
 }
 
 /**
@@ -130,9 +132,11 @@ function ChatMessageInner({
   phaseLabel,
   phaseVariant,
   phaseStartedAt,
+  onInspectAttachment,
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
+  const t = useTranslation();
 
   return (
     <article className={`message-row message-row-${turn.role}`}>
@@ -146,12 +150,9 @@ function ChatMessageInner({
         {isAssistant && phaseLabel && phaseStartedAt != null && (
           <LoadingState label={phaseLabel} variant={phaseVariant} startedAt={phaseStartedAt} />
         )}
-        {isAssistant && !isGreeting && !phaseLabel && turn.thoughtForMs != null && (
-          <span className="thought-for">Thought for {formatElapsed(turn.thoughtForMs)}</span>
-        )}
         <div className="msg-content">
           {isAssistant ? (
-            <Markdown content={turn.content} />
+            <Markdown content={isGreeting ? t('chat.greeting') : turn.content} />
           ) : (
             turn.content
           )}
@@ -169,7 +170,18 @@ function ChatMessageInner({
               <div className="attachment-chip attachment-chip-sent" key={a.id}>
                 <FileIcon />
                 <span className="attachment-name" title={a.name}>{a.name}</span>
-                <span className="attachment-meta">{formatDocType(a.docType)}</span>
+                <span className="attachment-meta">{formatDocType(a.docType, locale)}</span>
+                {onInspectAttachment && (
+                  <button
+                    type="button"
+                    className="attachment-report-btn"
+                    onClick={() => onInspectAttachment(a)}
+                    title="Inspect extracted fields & tax audit"
+                    aria-label={`Inspect ${a.name}`}
+                  >
+                    <EyeIcon /> Inspect
+                  </button>
+                )}
                 <ReportDownloadButton attachment={a} />
               </div>
             ))}
@@ -319,6 +331,7 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.playingTurnId === next.playingTurnId &&
     prev.ttsLoading === next.ttsLoading &&
     prev.locale === next.locale &&
+    prev.onInspectAttachment === next.onInspectAttachment &&
     prev.isTransitioning === next.isTransitioning
   );
 });

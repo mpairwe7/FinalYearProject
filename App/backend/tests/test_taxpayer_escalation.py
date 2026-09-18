@@ -157,6 +157,58 @@ class EscalationEndpointTest(unittest.TestCase):
         r = client.post("/v1/escalate", json={"reason": "x" * 1001})
         self.assertEqual(r.status_code, 422)
 
+    def test_taxpayer_can_get_status_and_reply_to_case(self):
+        flags.set("ticket_queue", True)
+        client, _ = _client()
+        # Create a ticket in database
+        t_obj = db.create_ticket(
+            reason="Customs clearance issue",
+            user_query="My goods are held at Malaba",
+            bot_reply="",
+            conversation_id="conv-support-case-1",
+        )
+        tid = t_obj["id"]
+        self.assertTrue(tid)
+        # 1. Taxpayer checks status
+        r_get = client.get(f"/v1/escalate/{tid}")
+        self.assertEqual(r_get.status_code, 200)
+        data = r_get.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["ticket_id"], tid)
+        self.assertEqual(data["reference"], f"TIC-{tid[:8].upper()}")
+        self.assertEqual(data["status"], "open")
+        self.assertTrue(data["can_reply"])
+
+        # 2. Staff updates ticket with an officer reply
+        db.update_ticket(
+            ticket_id=tid,
+            status="assigned",
+            assignee="officer.akello@ura.go.ug",
+            officer_reply="Your Malaba entry 2026/0192 has been passed. Present document copy at gate.",
+        )
+
+        # 3. Taxpayer polls and gets officer reply
+        r_poll = client.get(f"/v1/escalate/{tid}")
+        self.assertEqual(r_poll.status_code, 200)
+        poll_data = r_poll.json()
+        self.assertEqual(poll_data["status"], "assigned")
+        self.assertIn("Malaba entry 2026/0192", poll_data["officer_reply"])
+        self.assertTrue(poll_data["reply_delivered"])
+
+        # 4. Taxpayer sends follow-up
+        r_reply = client.post(
+            f"/v1/escalate/{tid}/reply",
+            json={"message": "Thank you Officer Akello, I have collected the release order."},
+        )
+        self.assertEqual(r_reply.status_code, 200)
+        self.assertTrue(r_reply.json()["ok"])
+
+        # Verify transcript has the follow-up
+        t_updated = db.get_ticket(tid)
+        self.assertIsNotNone(t_updated)
+        turns = t_updated.get("transcript") or []
+        self.assertTrue(any("release order" in turn.get("user_message", "") for turn in turns))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ import type { Dictionary } from './en';
 export const lg: Partial<Dictionary> = {
   'landing.headline': 'Nkuyambe ntya ku misolo gyo?',
   'landing.subtitle': 'Omuyambi wa URA akozesa AI',
+  'chat.greeting': 'Oli otya! Nsobola okukuyamba ku bibuuzo byo ebikwata ku URA. Wandiika oba yogera ekibuuzo kyo okutandika.',
   'landing.authPrompt.signIn': 'Yingira',
   'landing.authPrompt.or': 'oba',
   'landing.authPrompt.signUp': 'tondawo akawunti',
@@ -129,4 +130,16 @@ export const lg: Partial<Dictionary> = {
   'common.retry': 'Ddamu ogezeeko',
   'common.offline':
     'Toli ku yintaneeti. Obubaka bujja kusindikibwa bw’oddamu okukwatagana.',
+
+  // Documents & Extraction ------------------------------------------------
+  'documents.inspect': 'Kebera',
+  'documents.downloadReport': 'Funa Alipoota',
+  'documents.reconciliation': 'Okubalirira Omusolo',
+  'documents.verified': 'Kikakasiddwa',
+  'documents.discrepancy': 'Enjawukana ezuliddwa',
+  'documents.modalTitle': "Okwekebejja Ekiwandiiko n'Omusolo",
+  'documents.summary': "Ekinnyonnyolo ky'Ekiwandiiko",
+  'documents.entities': "Ebibuuzo n'Ensimbi Ezuliddwa",
+  'documents.tables': "Emmeeza n'Ebikolwa",
+  'documents.suggested': "Ebirowoozo eby'Okukola",
 };

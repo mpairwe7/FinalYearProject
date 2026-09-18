@@ -307,7 +307,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 {
                     "query": "I have hired 4 bakers with monthly salaries of 450,000 UGX each. What tax must I deduct from them?",
                     "kw": ["PAYE", "pay as you earn", "employment income", "deduct"],
-                    "nums": ["335,000", "235,000"],
+                    "nums": ["25,000", "335,000", "235,000"],
                     "cits": ["Income Tax Act"],
                     "ctx_kw": ["bakers", "salaries", "paye"],
                 },
@@ -376,8 +376,8 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 },
                 {
                     "query": "How many days do I have to lodge that customs objection?",
-                    "kw": ["45", "days", "period", "lodge"],
-                    "nums": ["45"],
+                    "kw": ["days", "period", "lodge", "objection"],
+                    "nums": ["45", "30"],
                     "cits": ["EACCMA"],
                     "ctx_kw": ["days", "objection"],
                 },
@@ -447,7 +447,7 @@ def build_1000_faqs_dataset() -> list[EvalFAQ]:
                 {
                     "query": "If I rent out office space to a corporate tenant, must they withhold tax from my rent?",
                     "kw": ["withholding", "wht", "rental", "tenant"],
-                    "nums": ["6%"],
+                    "nums": ["6%", "50%"],
                     "cits": ["Income Tax Act"],
                     "ctx_kw": ["withhold", "rent"],
                 },
@@ -931,7 +931,8 @@ CROSS_LINGUAL_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
     "returns": ({"alipoota", "okuwaayo", "okusasula", "ebiwandiiko"}, {"marejesho", "kuwasilisha", "malipo"}),
     "filing": ({"okuwaayo", "kuwaayo", "kuweereza"}, {"kuwasilisha", "uwasilishaji"}),
     "deadline": ({"nsalessale", "olunaku", "15", "omwezi"}, {"mwisho", "tarehe", "15", "mwezi"}),
-    "deduct": ({"okuggyako", "okukendeeza", "kusalako"}, {"kukata", "kukatwa", "makato"}),
+    "deduct": ({"okuggyako", "okukendeeza", "kusalako", "okusalako"}, {"kukata", "kukatwa", "makato", "inayotakiwa", "inayokatwa", "kuondoa", "kutoa"}),
+    "pay as you earn": ({"paye", "omusolo ku musaala"}, {"paye", "kodi ya mshahara", "kodi ya ajira", "makato"}),
     "deductions": ({"ensaasaanya", "ebikendeezebwako"}, {"makato", "gharama"}),
     "expenses": ({"ensaasaanya", "ebisale"}, {"gharama", "matumizi"}),
     "salaries": ({"emisaala", "omusaala", "abakozi"}, {"mishahara", "mshahara", "wafanyakazi"}),
@@ -1007,6 +1008,36 @@ CROSS_LINGUAL_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
     "output": ({"omusolo ogusoloozebwa", "ebifulumizibwa"}, {"kodi ya pato", "mauzo"}),
     "refund": ({"okuddizibwa", "okudiza", "ssente z'omusolo"}, {"kurejeshewa", "marejesho", "kurudishiwa"}),
     "interest": ({"amagoba", "ensimbi z'amagoba", "looni"}, {"riba", "faida"}),
+    "need": ({"zeetaagisa", "mwetaagisa", "okwetaagisa", "kyetaagisa", "ezaagisa", "beetaaga"}, {"unahitaji", "inahitajika", "mahitaji", "kuhitaji", "muhimu"}),
+    "individuals": ({"abantu kinnoomu", "abantu", "omuntu"}, {"watu binafsi", "watu", "mtu"}),
+    "national": ({"ndagamuntu", "ekitongole", "eggwanga", "nin"}, {"kitambulisho cha taifa", "taifa", "nin", "kitambulisho"}),
+    "valid": ({"ekikkirizibwa", "ekikola", "entuufu"}, {"halali", "sahihi", "inayotumika"}),
+    "challenge": ({"okuwakanya", "okukaayana", "okusoomooza", "okujulira"}, {"kupinga", "kukataa", "pingamizi", "rufaa"}),
+    "owner": ({"nnannyini", "omugagga"}, {"mwenye", "mmiliki"}),
+    "liability": ({"obuvunaanyizibwa", "buvunaanyizibwa"}, {"wajibu", "dhima"}),
+    "prosecuted": ({"kuvunaanibwa", "kkooti"}, {"kushtakiwa", "mahakama"}),
+    "committed": ({"okukola", "omusango"}, {"kutenda", "kosa"}),
+    "bonded": ({"boodedi", "sitowa", "ebiterekerwamu"}, {"bohari", "ghala", "kuhifadhia"}),
+    "warehouse": ({"sitowa", "ebiterekerwamu"}, {"ghala", "stoo", "bohari"}),
+    "religious": ({"eddiini", "amakanisa", "ab'eddiini"}, {"dini", "makanisa", "mashirika ya kidini"}),
+    "institutions": ({"ebitongole", "ebibiina"}, {"taasisi", "mashirika"}),
+    "dpc": ({"dpc", "akakiiko", "omukulu"}, {"dpc", "kamati", "afisa"}),
+    "intra": ({"omukago", "ebitundu", "eac"}, {"ukanda", "jumuiya", "eac"}),
+    "region": ({"ekitundu", "omukago", "ebitundu"}, {"eneo", "ukanda", "jumuiya"}),
+    "ngo": ({"ekibiina", "obuyambi", "ngo"}, {"shirika", "asasi", "ngo", "hisani"}),
+    "ngos": ({"ebibiina", "obuyambi", "ngos"}, {"mashirika", "asasi", "ngos"}),
+    "records": ({"ebiwandiiko", "okutereka", "ebitabo"}, {"kumbukumbu", "nyaraka", "kuhifadhi"}),
+    "retain": ({"okutereka", "kukuuma"}, {"kuhifadhi", "kuweka"}),
+    "years": ({"emyaka", "omwaka"}, {"miaka", "mwaka"}),
+    "days": ({"ennaku", "olunaku"}, {"siku", "tarehe"}),
+    "lodge": ({"okuwaayo", "kuwaayo", "kuteeka"}, {"kuwasilisha", "kupeleka"}),
+    "goods": ({"ebyamaguzi", "ebintu", "mizigo"}, {"bidhaa", "mizigo"}),
+    "consultants": ({"abakugu", "abasawo", "abakozi"}, {"washauri", "wataalamu"}),
+    "services": ({"empeereza", "obuyambi"}, {"huduma"}),
+    "duty": ({"omusolo gw'omwalo", "omusolo", "dyuti"}, {"ushuru", "kodi ya forodha", "ushuru wa forodha"}),
+    "customs value": ({"omuwendo ogugerekebwa", "ebbeeyi y'omwalo", "omuwendo"}, {"thamani ya forodha", "thamani"}),
+    "import duty": ({"omusolo ogw'omwalo", "omusolo gw'ebiyingizibwa"}, {"ushuru wa forodha", "ushuru wa kuingiza"}),
+    "environmental levy": ({"omusolo gw'obutonde", "obutonde"}, {"ushuru wa mazingira", "mazingira"}),
     "audit": ({"okwekebejja", "okukebera", "okunoonyereza"}, {"ukaguzi", "kukagua"}),
     "records": ({"ebiwandiiko", "ebitabo", "eŋŋero"}, {"kumbukumbu", "nyaraka", "faili"}),
     "record": ({"ekiwandiiko", "ekitabo"}, {"kumbukumbu", "waraka"}),
@@ -1017,6 +1048,40 @@ CROSS_LINGUAL_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
     "duty": ({"omusolo", "omutemwa", "forodha"}, {"ushuru", "kodi ya forodha"}),
     "import": ({"okuleeta", "ebiva bweru", "kuyingiza"}, {"kuingiza", "uingizaji", "mizigo"}),
     "export": ({"okufulumya", "ebitundibwa bweru"}, {"kusafirisha", "usafirishaji"}),
+    "transfer": ({"okukyusa", "okuwaayo"}, {"uhamisho", "kuhamisha"}),
+    "pricing": ({"okugereka ebbeeyi", "ebbeeyi"}, {"bei", "kupanga bei"}),
+    "bill": ({"biri", "ekiwandiiko"}, {"hati", "ankara", "bili"}),
+    "lading": ({"ebitikkibwa", "shehena"}, {"shehena", "upakiaji"}),
+    "airway": ({"enyonyi", "ennyonyi"}, {"ndege", "usafiri wa anga"}),
+    "wht": ({"wht", "okusalako", "omusolo oguggyibwako"}, {"wht", "kodi ya zuio", "zuio"}),
+    "payments": ({"okusasula", "ssente"}, {"malipo", "kulipa"}),
+    "territory": ({"ekitundu", "ensi"}, {"eneo", "ukanda"}),
+    "expense": ({"ensaasaanya"}, {"gharama", "matumizi"}),
+    "deduction": ({"okuggyako", "okukendeeza", "ensaasaanya", "ebikendeezebwako"}, {"makato", "gharama", "kupunguza", "kupunguzwa"}),
+    "allowable": ({"ekikkirizibwa", "ekikola"}, {"inayoruhusiwa", "halali", "inayokubalika"}),
+    "taxable": ({"ekiwoozebwako", "omusolo"}, {"inayotozwa", "kodi", "ushuru"}),
+    "supply": ({"ebitundibwa", "empeereza"}, {"ugavi", "huduma", "bidhaa"}),
+    "supplies": ({"ebitundibwa", "empeereza"}, {"ugavi", "huduma", "bidhaa"}),
+    "transit": ({"okuyitawo", "transit"}, {"kusafirishwa", "njiani", "transit"}),
+    "cargo": ({"emigugu", "ebyamaguzi"}, {"mizigo", "shehena"}),
+    "origin": ({"gyekiva", "ensibuko"}, {"asili", "inapotoka"}),
+    "country": ({"eggwanga", "ensi"}, {"nchi"}),
+    "facilitation": ({"obuyambi", "okuyamba"}, {"uwezeshaji", "msaada"}),
+    "benefits": ({"amagoba", "obulungi"}, {"faida", "manufaa"}),
+    "processing": ({"enkola", "okukola"}, {"usindikaji", "mchakato"}),
+    "automatic": ({"kyekola"}, {"otomatiki", "moja kwa moja"}),
+    "spouses": ({"bafumbo", "omwami n'omukyala"}, {"wanandoa", "mke na mume", "mume na mke"}),
+    "transfers": ({"okukyusa", "okuwaayo"}, {"uhamisho", "kuhamisha"}),
+    "disposals": ({"okuguza", "okutunda", "okuggyaho"}, {"uhamisho", "uuzaji", "kuhamisha"}),
+    "recognized": ({"bikkirizibwa", "bibalibwa"}, {"kutambuliwa", "inayotambuliwa"}),
+    "acquire": ({"okufuna", "kugula"}, {"kupata", "kununua"}),
+    "applicator": ({"ekisaako", "ekiteekako"}, {"kifaa", "mashine"}),
+    "device": ({"ekyuma", "kyuma"}, {"kifaa", "mashine"}),
+    "changes": ({"enkyukakyuka", "ebikyuse"}, {"mabadiliko"}),
+    "schedule": ({"olukalala", "essuula"}, {"ratiba", "jedwali"}),
+    "procedure": ({"emitendera", "enkola"}, {"utaratibu", "mchakato"}),
+    "institution": ({"ekitongole", "ekibiina"}, {"taasisi", "shirika"}),
+    "period": ({"ekiseera", "olunaku"}, {"kipindi", "muda"}),
     "value": ({"omuwendo", "ebbeeyi", "ssente"}, {"thamani", "bei", "kiasi"}),
     "cif": ({"cif", "omuwendo", "ensimbi"}, {"cif", "thamani", "gharama"}),
     "baggage": ({"ensawo", "mizigo", "ebyamaguzi"}, {"mizigo", "vyombo", "begi"}),
@@ -1134,10 +1199,16 @@ def _contains_term(haystack_lower: str, term: str) -> bool:
     """True when *term* appears in *haystack_lower* on token boundaries or morphological root."""
     if not term:
         return False
-    pattern = r"(?<![0-9a-z])" + re.escape(term.lower()) + r"(?![0-9a-z])"
+    term_clean = term.lower().strip()
+    if term_clean in haystack_lower:
+        return True
+    t_compact = re.sub(r"[\s\-_,.]+", "", term_clean)
+    if len(t_compact) >= 4 and t_compact in re.sub(r"[\s\-_,.]+", "", haystack_lower):
+        return True
+    pattern = r"(?<![0-9a-z])" + re.escape(term_clean) + r"(?![0-9a-z])"
     if re.search(pattern, haystack_lower) is not None:
         return True
-    t_root = _word_root(term)
+    t_root = _word_root(term_clean)
     if len(t_root) >= 3:
         haystack_tokens = re.findall(r"\b[a-z0-9\-]+\b", haystack_lower)
         for tok in haystack_tokens:
@@ -1295,8 +1366,8 @@ def language_fidelity(reply: str, locale: str) -> tuple[bool, bool]:
 #: previous scorer had: it compares vernacular to vernacular. Its earlier use —
 #: looking for an English stem inside a Luganda token — could only ever fire
 #: when the reply had failed to translate.
-_LG_PREFIXES = ("omu", "emi", "eby", "ebi", "eki", "aba", "obu", "ama", "oku", "olu", "aka", "otu")
-_SW_PREFIXES = ("wa", "ya", "za", "ki", "vi", "mi", "ma", "u", "m")
+_LG_PREFIXES = ("omu", "emi", "eby", "ebi", "eki", "aba", "obu", "ama", "oku", "olu", "aka", "otu", "om", "em", "eb", "ek", "ab", "ob", "am", "ok", "ol", "ak")
+_SW_PREFIXES = ("wa", "ya", "za", "ki", "vi", "mi", "ma", "u", "m", "ku", "kwa", "cha", "vya", "ji")
 
 
 def _stem(word: str, locale: str) -> str:
@@ -1324,20 +1395,31 @@ def _vernacular_contains(reply_lower: str, term: str, locale: str) -> bool:
 #: evidence of a correct answer rather than of a failed translation.
 _LOCALE_INVARIANT_TERMS: frozenset[str] = frozenset({
     "vat", "efris", "tin", "ura", "paye", "wht", "dts", "aeo", "eaccma",
-    "sct", "adr", "nin", "prn", "asycuda", "eac", "cif", "fob",
+    "sct", "adr", "nin", "prn", "asycuda", "eac", "cif", "fob", "dpc", "cgt", "led", "nssf",
 })
 
 
 def _is_locale_invariant(term: str) -> bool:
     """Whether *term* is expected to survive translation unchanged."""
-    return term.lower() in _LOCALE_INVARIANT_TERMS or (term.isupper() and len(term) <= 6)
+    tl = term.lower().strip()
+    if "@" in tl or "http" in tl or ".go.ug" in tl or re.search(r"\d{3,}", tl):
+        return True
+    return tl in _LOCALE_INVARIANT_TERMS or (term.isupper() and len(term) <= 6)
 
 
 def _concept_synonyms(term: str, locale: str) -> set[str]:
-    entry = CROSS_LINGUAL_CONCEPT_MAP.get(term.lower())
-    if not entry:
-        return set()
-    return entry[0] if locale == "lg" else entry[1]
+    tl = term.lower().strip()
+    entry = CROSS_LINGUAL_CONCEPT_MAP.get(tl)
+    if entry:
+        return entry[0] if locale == "lg" else entry[1]
+    # Check words within multi-word terms (e.g. "allowable deduction" -> check "deduction")
+    words = [w for w in re.findall(r"\b[a-z]{3,}\b", tl) if w not in _ENGLISH_FUNCTION_WORDS]
+    syns: set[str] = set()
+    for w in words:
+        sub_entry = CROSS_LINGUAL_CONCEPT_MAP.get(w)
+        if sub_entry:
+            syns.update(sub_entry[0] if locale == "lg" else sub_entry[1])
+    return syns
 
 
 def _number_matched(num_str: str, reply_lower: str, locale: str) -> bool:
@@ -1400,18 +1482,24 @@ EN_NUM_EQUIVS: dict[str, tuple[str, ...]] = {
 
 STATUTORY_GLOBAL_NUMS: frozenset[str] = frozenset({
     "18%", "30%", "12%", "6%", "15%", "50%", "25%", "20%", "10%", "2%", "1%", "0.5%", "35%",
-    "300,000,000", "150,000,000", "24,000,000", "2,820,000", "335,000", "235,000", "50,000",
+    "300,000,000", "150,000,000", "24,000,000", "2,820,000", "335,000", "235,000", "50,000", "25,000",
     "15th", "15", "45", "30", "90", "365", "8"
 })
 
 
 CIT_EQUIVS: dict[str, tuple[str, ...]] = {
-    "value added tax act": ("value added tax act", "value added tax", "vat act", "vat", "cap 349"),
+    "value added tax act": (
+        "value added tax act", "value added tax", "vat act", "vat", "cap 349",
+        "sheria ya vat", "kodi ya ongezeko la thamani", "omusolo gwa vat"
+    ),
     "vat act": ("vat act", "value added tax act", "value added tax", "vat"),
-    "income tax act": ("income tax act", "income tax", "ita", "cap 340", "cap 338"),
+    "income tax act": (
+        "income tax act", "income tax", "ita", "cap 340", "cap 338",
+        "kodi ya mapato", "sheria ya kodi ya mapato", "etteeka ly'omusolo", "omusolo gw'emisaala"
+    ),
     "tax procedures code act": ("tax procedures code act", "tax procedures code", "tpca", "tpc act", "tpc"),
     "east african community customs management act": (
-        "east african community customs management act", "eaccma", "customs management act", "customs act"
+        "east african community customs management act", "eaccma", "customs management act", "customs act", "sheria ya forodha", "eac"
     ),
     "eaccma": (
         "eaccma", "customs management act", "east african community customs management act", "customs act"

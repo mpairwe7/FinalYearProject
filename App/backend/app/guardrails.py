@@ -482,10 +482,45 @@ class OutputGuard:
         # Correct tokenization / completion drift in URA domain terminology
         text = re.sub(r"\bCustomary Services\b", "Customs Services", text)
 
+        # Strip rogue stream event markers from prose
+        text = re.sub(r"\b(?:translation|retrieval|generation|iteration|tool_call)\.(?:started|completed)\b[ \t]*", "", text)
+
+        # Correct Tanzania / .tz hallucination drift in Swahili translations (URA is Uganda Revenue Authority)
+        text = re.sub(r"\bMamlaka ya Mapato (?:ya )?Tanzania\b", "Mamlaka ya Mapato Uganda (URA)", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:huduma|services)@ura\.go\.tz\b", "services@ura.go.ug", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bura\.go\.tz\b", "ura.go.ug", text, flags=re.IGNORECASE)
+
         # Remove digit bracket glitches, intra-word bracket artifacts, and rogue language tags
         text = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", text)
         text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
         text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
+
+        # Standardize exotic bullet glyphs (, ►, ▪, ▫, •, –, —) to clean Markdown lists
+        text = re.sub(r"^[ \t]*[►▪▫•–—][ \t]*", "- ", text, flags=re.MULTILINE)
+        text = re.sub(r"([;:\.!?])[ \t]*[►▪▫•–—][ \t]*", r"\1\n\n- ", text)
+
+        # Multilingual procedural step unsmashing (English, Swahili, Luganda)
+        # English: Step 1: -> 1.
+        text = re.sub(r"(?:^|\n)[ \t]*Step\s+(\d{1,2})[:\.]?[ \t]*", r"\n\1. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*Step\s+(\d{1,2})[:\.]?[ \t]*", r"\1\n\n\2. ", text, flags=re.IGNORECASE)
+
+        # Swahili step & ordinal unsmashing: Hatua ya 1 / Kwanza / Pili / Tatu
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Hatua\s+ya\s+(\d{1,2})|Hatua\s+(\d{1,2}))[:\.]?[ \t]*", r"\n\1\2. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Hatua\s+ya\s+(\d{1,2})|Hatua\s+(\d{1,2}))[:\.]?[ \t]*", r"\1\n\n\2\3. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Kwanza|Hatua\s+ya\s+kwanza)[:\.]?[ \t]*", r"\1\n\n1. **Kwanza**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Pili|Hatua\s+ya\s+pili)[:\.]?[ \t]*", r"\1\n\n2. **Pili**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Tatu|Hatua\s+ya\s+tatu)[:\.]?[ \t]*", r"\1\n\n3. **Tatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Nne|Hatua\s+ya\s+nne)[:\.]?[ \t]*", r"\1\n\n4. **Nne**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Tano|Hatua\s+ya\s+tano)[:\.]?[ \t]*", r"\1\n\n5. **Tano**: ", text, flags=re.IGNORECASE)
+
+        # Luganda step & ordinal unsmashing: Omutendera 1 / Okusooka / Eky'okubiri / Eky'okusatu
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Omutendera\s+ogwa\s+(\d{1,2})|Omutendera\s+(\d{1,2}))[:\.]?[ \t]*", r"\n\1\2. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Omutendera\s+ogwa\s+(\d{1,2})|Omutendera\s+(\d{1,2}))[:\.]?[ \t]*", r"\1\n\n\2\3. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Okusooka|Omutendera\s+ogusooka)[:\.]?[ \t]*", r"\1\n\n1. **Okusooka**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky\'okubiri|Omutendera\s+ogw\'okubiri)[:\.]?[ \t]*", r"\1\n\n2. **Eky'okubiri**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky\'okusatu|Omutendera\s+ogw\'okusatu)[:\.]?[ \t]*", r"\1\n\n3. **Eky'okusatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky\'okuna|Omutendera\s+ogw\'okuna)[:\.]?[ \t]*", r"\1\n\n4. **Eky'okuna**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky\'okutaano|Omutendera\s+ogw\'okutaano)[:\.]?[ \t]*", r"\1\n\n5. **Eky'okutaano**: ", text, flags=re.IGNORECASE)
 
         # Unsmash sentence punctuation glued to capital words (e.g. 'Uganda.Here' -> 'Uganda. Here')
         text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)

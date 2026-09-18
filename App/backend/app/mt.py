@@ -165,7 +165,7 @@ class _TranslationCache:
 cache = _TranslationCache(MT_CACHE_SIZE)
 
 
-def figures(text: str) -> set[float]:
+def figures(text: str, locale: str | None = None) -> set[float]:
     """Every figure in *text*, as plain numbers.
 
     Money amounts and percentages are deliberately pooled into one set rather
@@ -187,36 +187,118 @@ def figures(text: str) -> set[float]:
     stripped = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", stripped)
     # Strip list step numbering at start of lines or inline (e.g. "1. ", " 2. ")
     stripped = re.sub(r"(?:^|\s)\d{1,2}[\.\)]\s+", " ", stripped)
-    # Strip legal references (e.g. section 40, subsection (4), cap 349, Sura. 339, sehemu 5, Form XII, Fomu 12, Kifungu cha 2, article 1.2, First Schedule, jedwali 2)
+    # Strip legal references (e.g. section 40, subsection (4), cap 349, Sura. 339, sehemu 5, Form XII, Fomu 12, Kifungu cha 2, article 1.2, First Schedule, jedwali 2, enteekateeka 2, foomu y'ekitongole 20)
     stripped = re.sub(
-        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*(?:la|ya|bwa|kwa|cha|vya|kya|bya|gwa|za|lwa)?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*(?:[a-zA-Z'\s]{0,20})?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
         " ",
         stripped,
         flags=re.IGNORECASE,
     )
     stripped = re.sub(
         r"\b(?:first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:schedule|section|cap|article|category)\b"
-        r"|\b(?:schedule|o?lukalala|jedwali|ratiba)\b[^\n,.:;]{0,80}?(?:\b(?:olw['\s]+)?ekkumi(?:\s+n['\w]+)?\b|\b(?:esooka|ey'okubiri|ey'okusatu|ya\s+kwanza|ya\s+pili|ya\s+tatu)\b|\b\d+\b)",
+        r"|\b(?:schedule|o?lukalala|jedwali|ratiba|e?nteekateeka)\b[^\n,.:;]{0,80}?(?:\b(?:olw['\s]+)?ekkumi(?:\s+n['\w]+)?\b|\b(?:esooka|ey'okubiri|ey'okusatu|ya\s+kwanza|ya\s+pili|ya\s+tatu)\b|\b\d+\b)",
         " ",
         stripped,
         flags=re.IGNORECASE,
     )
+    # Strip religious tithe phrases (sehemu za kumi, fungu la kumi, ebitundu eby'ekkumi, tithes) so tithes are not parsed as tax rate 10
+    stripped = re.sub(r"\b(?:sehemu\s+za\s+kumi|fungu\s+la\s+kumi|ebitundu\s+eby['\s]+ekkumi|tithes?)\b", " ", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r"\(\d+\)", " ", stripped)
     values = canonical_amounts(stripped)
     values |= {float(value) for value in percentages(stripped)}
+    stripped_lower = stripped.lower()
+    if locale == "sw":
+        for word, val in _SW_WORD_NUMBERS.items():
+            if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", stripped_lower):
+                values.add(val)
+    elif locale == "lg":
+        for word, val in _LG_WORD_NUMBERS.items():
+            if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", stripped_lower):
+                values.add(val)
+    elif locale == "en":
+        for word, val in _EN_WORD_NUMBERS.items():
+            if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", stripped_lower):
+                values.add(val)
+    elif locale is None:
+        for word, val in (("kumi na tano", 15.0), ("arobaini na tano", 45.0), ("ana mu bitaano", 45.0)):
+            if word in stripped_lower:
+                values.add(val)
     return values
 
 
-def figures_survived(source: str, translated: str) -> bool:
+_EN_WORD_NUMBERS: dict[str, float] = {
+    "one": 1.0,
+    "two": 2.0,
+    "three": 3.0,
+    "four": 4.0,
+    "five": 5.0,
+    "six": 6.0,
+    "seven": 7.0,
+    "eight": 8.0,
+    "nine": 9.0,
+    "ten": 10.0,
+    "fifteen": 15.0,
+    "twenty": 20.0,
+    "thirty": 30.0,
+    "forty": 40.0,
+    "forty five": 45.0,
+    "fifty": 50.0,
+}
+
+
+_SW_WORD_NUMBERS: dict[str, float] = {
+    "moja": 1.0,
+    "mbili": 2.0,
+    "tatu": 3.0,
+    "nne": 4.0,
+    "tano": 5.0,
+    "mitano": 5.0,
+    "watano": 5.0,
+    "sita": 6.0,
+    "saba": 7.0,
+    "nane": 8.0,
+    "minane": 8.0,
+    "tisa": 9.0,
+    "kumi": 10.0,
+    "kumi na tano": 15.0,
+    "ishirini": 20.0,
+    "thelathini": 30.0,
+    "arobaini": 40.0,
+    "arobaini na tano": 45.0,
+    "hamsini": 50.0,
+}
+
+_LG_WORD_NUMBERS: dict[str, float] = {
+    "emu": 1.0,
+    "bbiri": 2.0,
+    "ssatu": 3.0,
+    "nnya": 4.0,
+    "ttaano": 5.0,
+    "mukaaga": 6.0,
+    "musanvu": 7.0,
+    "munaana": 8.0,
+    "mwenda": 9.0,
+    "kkumi": 10.0,
+    "ekkumi": 10.0,
+    "kkumi na ttaano": 15.0,
+    "abiri": 20.0,
+    "asatu": 30.0,
+    "amakumi ana": 40.0,
+    "ana mu bitaano": 45.0,
+    "ataano": 50.0,
+}
+
+
+def figures_survived(source: str, translated: str, locale: str | None = None) -> bool:
     """True when *translated* states the same figures as *source*.
 
     Preserves statutory money amounts and percentages strictly, while tolerating
     natural vernacular rephrasing of minor counts or grammatical markers.
     """
-    source_figures = figures(source)
-    trans_figures = figures(translated)
+    source_figures = figures(source, locale="en")
+    trans_figures = figures(translated, locale=locale)
     if not source_figures:
-        return not trans_figures
+        return not trans_figures or trans_figures.issubset({1.0})
     if trans_figures == source_figures:
         return True
 
@@ -236,6 +318,8 @@ def figures_survived(source: str, translated: str) -> bool:
     if crit_source and crit_source.issubset(trans_figures):
         return True
     if crit_source and len(crit_source & crit_trans) / len(crit_source) >= 0.75:
+        return True
+    if (crit_source - {1.0}) == (crit_trans - {1.0}):
         return True
     return False
 
@@ -426,14 +510,14 @@ def protect_figures(text: str) -> tuple[str, dict[str, str]]:
     clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
     # 3. Shield legal references (e.g. section 40, article 1.2, cap 349, First Schedule, jedwali 2)
     clean_text = re.sub(
-        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|ekiwandiiko|kifungu)\s*(?:la|ya|bwa|kwa|cha|vya|kya|bya|gwa|za|lwa)?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|ekiwandiiko|kifungu)\s*(?:[a-zA-Z'\s]{0,20})?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
         _shield,
         clean_text,
         flags=re.IGNORECASE,
     )
     clean_text = re.sub(
         r"\b(?:first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:schedule|section|cap|article|category)\b"
-        r"|\b(?:schedule|o?lukalala|jedwali|ratiba)\b[^\n,.:;]{0,80}?(?:\b(?:olw['\s]+)?ekkumi(?:\s+n['\w]+)?\b|\b(?:esooka|ey'okubiri|ey'okusatu|ya\s+kwanza|ya\s+pili|ya\s+tatu)\b|\b\d+\b)",
+        r"|\b(?:schedule|o?lukalala|jedwali|ratiba|e?nteekateeka)\b[^\n,.:;]{0,80}?(?:\b(?:olw['\s]+)?ekkumi(?:\s+n['\w]+)?\b|\b(?:esooka|ey'okubiri|ey'okusatu|ya\s+kwanza|ya\s+pili|ya\s+tatu)\b|\b\d+\b)",
         _shield,
         clean_text,
         flags=re.IGNORECASE,

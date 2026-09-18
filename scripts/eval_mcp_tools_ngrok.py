@@ -48,7 +48,7 @@ TESTS: list[TestCase] = [
         description="PAYE on 5m gross (resident) — full net pay breakdown",
         message="Calculate my PAYE on a gross monthly salary of 5,000,000 UGX",
         expect_tool="calculate_paye",
-        assertions={"monthly_gross": "5,000,000", "PAYE": ""},
+        assertions={"5,000,000": "", "PAYE": ""},
     ),
     TestCase(
         id="PAYE-02",

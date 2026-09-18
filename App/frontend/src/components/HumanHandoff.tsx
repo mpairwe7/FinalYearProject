@@ -4,6 +4,7 @@ import React, { useCallback, useState } from 'react';
 import { authHeaders } from '../lib/authSession';
 import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
 import { useTranslation } from '../lib/i18n';
+import { useChatStore } from '../store/useChatStore';
 import { LoadingDots, UserIcon } from './Icons';
 
 /**
@@ -67,7 +68,11 @@ export default function HumanHandoff({ conversationId, locale, reason }: HumanHa
       setState('queued');
       // Short enough to read back over a phone, long enough to be unique in a
       // queue an officer is looking at.
-      setTicketRef(String(body.ticket_id || '').slice(0, 8));
+      const tid = String(body.ticket_id || '');
+      setTicketRef(tid.slice(0, 8));
+      if (tid) {
+        useChatStore.getState().setActiveTicketId(tid);
+      }
       setMessage(body.message || t('handoff.queued'));
     } catch {
       setState('failed');
@@ -79,11 +84,21 @@ export default function HumanHandoff({ conversationId, locale, reason }: HumanHa
     return (
       <div className="handoff handoff-queued" role="status">
         <p className="handoff-msg">{message}</p>
-        {ticketRef && (
-          <p className="handoff-ref">
-            {t('handoff.reference')} <code>{ticketRef}</code>
-          </p>
-        )}
+        <div className="handoff-ref-row">
+          {ticketRef && (
+            <p className="handoff-ref">
+              {t('handoff.reference')} <code>{ticketRef}</code>
+            </p>
+          )}
+          <button
+            type="button"
+            className="handoff-room-btn"
+            onClick={() => useChatStore.getState().setSupportCaseOpen(true)}
+            data-testid="open-support-case-btn"
+          >
+            🎧 {t('handoff.open_case')} ↗
+          </button>
+        </div>
       </div>
     );
   }

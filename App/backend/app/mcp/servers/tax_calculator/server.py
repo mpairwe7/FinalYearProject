@@ -74,7 +74,11 @@ def server_info() -> dict[str, Any]:
         "name": SERVER_NAME,
         "version": SERVER_VERSION,
         "protocolVersion": PROTOCOL_VERSION,
-        "capabilities": {"tools": {"listChanged": False}},
+        "capabilities": {
+            "tools": {"listChanged": False},
+            "resources": {"subscribe": False, "listChanged": False},
+            "prompts": {"listChanged": False},
+        },
     }
 
 
@@ -84,6 +88,127 @@ def handle_tools_list() -> dict[str, Any]:
         "ttlMs": LIST_TTL_MS,
         "cacheScope": LIST_CACHE_SCOPE,
     }
+
+
+def handle_resources_list() -> dict[str, Any]:
+    """List static/reference resources exposed by this server."""
+    return {
+        "resources": [
+            {
+                "uri": "ura://rates/current",
+                "name": "URA Statutory Tax Rates",
+                "description": "Official FY2026-27 statutory tax rate table (VAT, PAYE, WHT, Corporation Tax)",
+                "mimeType": "application/json",
+            },
+            {
+                "uri": "ura://calendar/deadlines",
+                "name": "URA Tax Deadlines Calendar",
+                "description": "Upcoming statutory filing, withholding, and return deadlines calendar",
+                "mimeType": "application/json",
+            },
+        ]
+    }
+
+
+def handle_resources_read(params: dict[str, Any]) -> dict[str, Any]:
+    """Read contents of an exposed statutory tax resource."""
+    uri = str(params.get("uri", ""))
+    if uri == "ura://rates/current":
+        from ....tax.tables import get_table
+
+        table = get_table()
+        payload = {
+            "fiscal_year": table.fiscal_year,
+            "status": table.status,
+            "rates": table.rates,
+            "currency": "UGX",
+        }
+        return {
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps(payload, default=str),
+                }
+            ]
+        }
+    if uri == "ura://calendar/deadlines":
+        deadlines = ToolRegistry.call("get_next_deadlines", {})
+        return {
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps(deadlines, default=str),
+                }
+            ]
+        }
+    raise LookupError(f"Resource not found: '{uri}'")
+
+
+def handle_prompts_list() -> dict[str, Any]:
+    """List standard prompt templates provided by this server."""
+    return {
+        "prompts": [
+            {
+                "name": "vat_calculation_guide",
+                "description": "Guidance template for calculating and verifying standard 18% Value Added Tax in Uganda.",
+                "arguments": [
+                    {
+                        "name": "amount",
+                        "description": "Transaction amount in UGX",
+                        "required": True,
+                    }
+                ],
+            },
+            {
+                "name": "paye_withholding_guide",
+                "description": "Guidance on PAYE income tax brackets and employer withholding obligations.",
+                "arguments": [
+                    {
+                        "name": "monthly_salary",
+                        "description": "Gross monthly salary in UGX",
+                        "required": True,
+                    }
+                ],
+            },
+        ]
+    }
+
+
+def handle_prompts_get(params: dict[str, Any]) -> dict[str, Any]:
+    """Render a named prompt template."""
+    name = str(params.get("name", ""))
+    args = params.get("arguments") or {}
+    if name == "vat_calculation_guide":
+        amt = args.get("amount", "1000000")
+        return {
+            "description": "VAT calculation guidance",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"Please calculate the VAT at the statutory 18% rate on UGX {amt} and explain whether any exemptions apply.",
+                    },
+                }
+            ],
+        }
+    if name == "paye_withholding_guide":
+        salary = args.get("monthly_salary", "2000000")
+        return {
+            "description": "PAYE calculation guidance",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"Please calculate PAYE on a monthly gross salary of UGX {salary} under the current resident PAYE tax bands.",
+                    },
+                }
+            ],
+        }
+    raise LookupError(f"Prompt template not found: '{name}'")
 
 
 def handle_tools_call(params: dict[str, Any]) -> dict[str, Any]:
@@ -139,13 +264,25 @@ def _call_result(payload: dict[str, Any], *, is_error: bool) -> dict[str, Any]:
     }
 
 
-def handle_request(body: Any, headers: dict[str, str] | None = None) -> dict[str, Any] | None:
-    """Handle one JSON-RPC request; ``None`` for a notification.
+def handle_request(body: Any, headers: dict[str, str] | None = None) -> dict[str, Any] | list[dict[str, Any]] | None:
+    """Handle one JSON-RPC request or batch; ``None`` for a notification.
 
     *headers* are checked for consistency when present: a router that
     set ``Mcp-Method`` must agree with the body, otherwise a gateway
     could be authorizing one method while the server runs another.
     """
+    if isinstance(body, list):
+        if not body:
+            return _error(None, INVALID_REQUEST, "empty batch request")
+        if not all(isinstance(item, dict) for item in body):
+            return _error(None, INVALID_REQUEST, "all batch items must be JSON objects")
+        batch_responses = []
+        for item in body:
+            res = handle_request(item, headers)
+            if res is not None and isinstance(res, dict):
+                batch_responses.append(res)
+        return batch_responses if batch_responses else None
+
     if not isinstance(body, dict):
         return _error(None, INVALID_REQUEST, "request must be a JSON object")
 
@@ -172,7 +309,7 @@ def handle_request(body: Any, headers: dict[str, str] | None = None) -> dict[str
             f"Mcp-Name header '{header_name}' does not match body tool '{body_name}'",
         )
 
-    if method in ("tools/list", "tools/call", "server/info"):
+    if method in ("tools/list", "tools/call", "server/info", "resources/list", "resources/read", "prompts/list", "prompts/get"):
         missing = missing_required_meta(params.get("_meta") if isinstance(params, dict) else None)
         if missing:
             return _error(
@@ -185,10 +322,20 @@ def handle_request(body: Any, headers: dict[str, str] | None = None) -> dict[str
         return None
 
     try:
+        if method == "ping":
+            return _ok(request_id, {})
         if method == "tools/list":
             return _ok(request_id, handle_tools_list())
         if method == "tools/call":
             return _ok(request_id, handle_tools_call(params))
+        if method == "resources/list":
+            return _ok(request_id, handle_resources_list())
+        if method == "resources/read":
+            return _ok(request_id, handle_resources_read(params))
+        if method == "prompts/list":
+            return _ok(request_id, handle_prompts_list())
+        if method == "prompts/get":
+            return _ok(request_id, handle_prompts_get(params))
         if method == "server/info":
             return _ok(request_id, server_info())
         if method in ("initialize", "initialized"):

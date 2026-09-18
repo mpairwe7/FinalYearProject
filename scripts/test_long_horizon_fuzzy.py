@@ -46,7 +46,7 @@ def post_chat(base_url: str, message: str, conversation_id: str | None = None) -
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "LongHorizonFuzzyTest/1.0"},
+        headers={"Content-Type": "application/json", "User-Agent": "LongHorizonFuzzyTest/1.0", "ngrok-skip-browser-warning": "1"},
     )
     t0 = time.perf_counter()
     with urllib.request.urlopen(req, timeout=60) as resp:

@@ -515,6 +515,19 @@ class MCPClient:
             },
         }
 
+    def ping(self, namespace: str = "tax_calculator", timeout_s: float = 5.0) -> bool:
+        """Diagnostic reachability probe for an MCP namespace."""
+        transport = self._transport_for(namespace)
+        if isinstance(transport, InProcessTransport):
+            return True
+        if hasattr(transport, "ping"):
+            return transport.ping(timeout_s=timeout_s)
+        try:
+            res = transport._request("ping", {}, timeout_s=timeout_s)
+            return isinstance(res, dict)
+        except Exception:
+            return False
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton so the agent layer always sees the same client.

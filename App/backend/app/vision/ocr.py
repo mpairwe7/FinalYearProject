@@ -16,12 +16,11 @@ Supported Architectures:
 from __future__ import annotations
 
 import io
-import json
 import logging
 import os
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -393,7 +392,28 @@ def extract_reference_numbers(text: str) -> list[str]:
     """Extract URA assessment, case, and transaction reference numbers containing digits."""
     raw_matches = re.findall(r"\b[A-Z]{2,6}(?:[-/][0-9A-Z]+)+\b|\b[A-Z]{2,6}[-/]?[0-9]{4,14}\b", text)
     # Filter out plain English hyphenated words (e.g. ANTI-AVOIDANCE, NON-RESIDENTS) - require digits
-    return list(set(m for m in raw_matches if re.search(r"\d", m)))
+    return list({m for m in raw_matches if re.search(r"\d", m)})
+
+
+_TAX_HEAD_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("Value Added Tax (VAT)", re.compile(r"\b(?:V\.?A\.?T\.?|Value\s+Added\s+Tax)\b", re.I)),
+    ("Pay As You Earn (PAYE)", re.compile(r"\b(?:P\.?A\.?Y\.?E\.?|Pay\s+As\s+You\s+Earn)\b", re.I)),
+    ("Withholding Tax (WHT)", re.compile(r"\b(?:W\.?H\.?T\.?|Withholding\s+Tax)\b", re.I)),
+    ("Income Tax / Corporation Tax", re.compile(r"\b(?:Income\s+Tax|Corporation\s+Tax|Corporate\s+Income\s+Tax|CIT)\b", re.I)),
+    ("Customs & Import Duty", re.compile(r"\b(?:Customs\s+Duty|Import\s+Duty|East\s+African\s+Community\s+Customs|EACCMA)\b", re.I)),
+    ("Local Excise Duty (LED)", re.compile(r"\b(?:Excise\s+Duty|Local\s+Excise\s+Duty|LED)\b", re.I)),
+    ("Rental Income Tax", re.compile(r"\b(?:Rental\s+Income\s+Tax|Rental\s+Tax)\b", re.I)),
+    ("Stamp Duty", re.compile(r"\b(?:Stamp\s+Duty)\b", re.I)),
+]
+
+
+def extract_tax_heads(text: str) -> list[str]:
+    """Identify URA tax heads / regimes referenced in the document text."""
+    found: list[str] = []
+    for label, pat in _TAX_HEAD_PATTERNS:
+        if pat.search(text):
+            found.append(label)
+    return found
 
 
 def clean_ocr_text(raw_text: str) -> str:

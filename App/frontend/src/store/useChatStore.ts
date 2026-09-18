@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { normalizeLocale } from '../lib/locales';
+import type { DocumentAnalysisData } from '../lib/attachments';
 
 export interface Citation {
   ref: string;
@@ -18,6 +19,7 @@ export interface ChatAttachment {
   id: string;
   name: string;
   docType?: string;
+  analysis?: DocumentAnalysisData;
 }
 
 export interface ChatTurn {
@@ -57,6 +59,8 @@ export interface Conversation {
    * Without this flag a rename survives only until the next turn is saved.
    */
   titleCustom?: boolean;
+  /** Active escalation ticket ID associated with this conversation */
+  activeTicketId?: string;
 }
 
 /**
@@ -92,10 +96,14 @@ interface ChatStore {
   // Session management
   conversations: Conversation[];
   activeConversationId: string | null;
+  activeTicketId: string | null;
+  supportCaseOpen: boolean;
   // Actions
   setMessage: (value: string) => void;
   setSpeechState: (state: SpeechState) => void;
   setLocale: (locale: string) => void;
+  setActiveTicketId: (ticketId: string | null) => void;
+  setSupportCaseOpen: (open: boolean) => void;
   addTurns: (turns: ChatTurn[]) => void;
   updateLastTurn: (updater: (turn: ChatTurn) => ChatTurn) => void;
   reset: () => void;
@@ -233,6 +241,7 @@ function sanitizeConversation(value: unknown): Conversation | null {
   };
   if (value.pinned === true) conversation.pinned = true;
   if (value.titleCustom === true) conversation.titleCustom = true;
+  if (typeof value.activeTicketId === 'string' && value.activeTicketId) conversation.activeTicketId = value.activeTicketId;
   return conversation;
 }
 
@@ -356,6 +365,7 @@ function looksLikeThinking(block: string): boolean {
 export function stripTelemetryJson(text: string): string {
   if (!text) return '';
   return text
+    .replace(/\b(?:translation|retrieval|generation|iteration|tool_call)\.(?:started|completed)\b\s*/g, '')
     .replace(/\{[^{}]*"(?:sources|workflow|retrieval_mode)"[^{}]*\{[^{}]*\}[^{}]*\}/g, '')
     .replace(/\{[^{}]*"(?:sources|retrieval_mode|faithfulness_score)"[^{}]*\}/g, '')
     .replace(/\[\s*\{\s*"type"\s*:\s*"(?:retrieval|iteration|tool_call)\.[^\]]*?\]/g, '')
@@ -430,6 +440,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   locale: 'en',
   conversations: [] as Conversation[],
   activeConversationId: null as string | null,
+  activeTicketId: null as string | null,
+  supportCaseOpen: false,
 
   setMessage: (value) => set({ message: value }),
   setSpeechState: (state) => set({ speechState: state }),
@@ -437,6 +449,21 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     set({ locale: normalizeLocale(locale) });
     writePersistedChatState(get());
   },
+  setActiveTicketId: (ticketId) => {
+    const cid = get().activeConversationId;
+    if (cid) {
+      set((state) => ({
+        activeTicketId: ticketId,
+        conversations: state.conversations.map((c) =>
+          c.id === cid ? { ...c, activeTicketId: ticketId || undefined } : c
+        ),
+      }));
+      get().saveCurrentSession();
+    } else {
+      set({ activeTicketId: ticketId });
+    }
+  },
+  setSupportCaseOpen: (open) => set({ supportCaseOpen: open }),
 
   addTurns: (turns) =>
     set((s) => {
@@ -459,6 +486,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       speechState: 'idle',
       locale: 'en',
       activeConversationId: null,
+      activeTicketId: null,
+      supportCaseOpen: false,
     });
     writePersistedChatState(get());
   },
@@ -513,7 +542,13 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   createNewSession: () => {
     const { saveCurrentSession } = get();
     saveCurrentSession();
-    set({ chat: [GREETING], message: '', activeConversationId: null });
+    set({
+      chat: [GREETING],
+      message: '',
+      activeConversationId: null,
+      activeTicketId: null,
+      supportCaseOpen: false,
+    });
     writePersistedChatState(get());
   },
 
@@ -523,7 +558,13 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     saveCurrentSession();
     const target = get().conversations.find((c) => c.id === id);
     if (!target) return;
-    set({ chat: target.turns, activeConversationId: id, message: '' });
+    set({
+      chat: target.turns,
+      activeConversationId: id,
+      message: '',
+      activeTicketId: target.activeTicketId || null,
+      supportCaseOpen: false,
+    });
     writePersistedChatState(get());
   },
 

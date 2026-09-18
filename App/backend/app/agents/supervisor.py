@@ -29,6 +29,7 @@ English regardless of the locale passed.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from ..calculator_router import (
@@ -258,12 +259,22 @@ class Supervisor:
                     suggested_tools=tools + ["search_ura_knowledge_base"],
                 )
 
-        # 6. Customs specialist — vocabulary match routes to specialist
+        # 6. Customs specialist — actionable duty calculation or clearance requests
         customs_matches = sum(1 for p in pats.customs if p.search(q))
-        if customs_matches >= 1:
+        is_calc_or_action = bool(re.search(
+            r"\b(calculate|computation|compute|how much|clearing|clearance\s+process|landed\s+cost|consignment)\b",
+            q,
+            re.IGNORECASE,
+        ))
+        is_faq_style = bool(re.search(
+            r"\b(what\s+is|what\s+are|what\s+benefits|are\s+there|penalty\s+for|benefits?|meaning|explain|define|can\s+i|who\s+is|who\s+are)\b",
+            q,
+            re.IGNORECASE,
+        ))
+        if customs_matches >= 1 and is_calc_or_action and not is_faq_style:
             return RouteDecision(
                 route=AgentRoute.CUSTOMS_SPECIALIST,
-                reason=f"customs vocabulary ({customs_matches} match(es))",
+                reason=f"customs duty/clearance action ({customs_matches} match(es))",
                 confidence=0.78,
                 suggested_tools=[
                     "calculate_customs_duty",

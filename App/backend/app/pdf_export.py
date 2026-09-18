@@ -363,6 +363,9 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
     field_evidence: dict[str, Any] = analysis.get("field_evidence") or {}
     field_rows = [
         ("tins", "TIN numbers", fields.get("tins") or []),
+        ("prns", "PRN numbers", fields.get("prns") or []),
+        ("efris_invoices", "EFRIS invoice numbers", fields.get("efris_invoices") or []),
+        ("tax_heads", "Tax Regimes / Heads", fields.get("tax_heads") or []),
         ("amounts", "Amounts", fields.get("amounts") or []),
         ("dates", "Dates", fields.get("dates") or []),
         ("references", "Reference numbers", fields.get("references") or []),
@@ -404,6 +407,77 @@ def generate_document_report_pdf(analysis: dict[str, Any]) -> bytes:
             )
             pdf.ln()
         pdf.ln(4)
+
+    # Tax Reconciliation & Statutory Audit.
+    recon = analysis.get("tax_reconciliation") or {}
+    if recon:
+        _section_heading(pdf, "Tax Reconciliation & Statutory Audit")
+        status = recon.get("status", "informational_only")
+        if status == "verified":
+            status_text = "[VERIFIED] Arithmetic balanced & statutory rate confirmed"
+            pdf.set_fill_color(230, 245, 230)
+            pdf.set_text_color(20, 100, 30)
+        elif status == "discrepancy_detected":
+            status_text = "[DISCREPANCY DETECTED] Variance found in tax arithmetic"
+            pdf.set_fill_color(255, 235, 235)
+            pdf.set_text_color(160, 30, 30)
+        elif status == "unreconciled_partial":
+            status_text = "[PARTIAL] Line-item figures extracted without full equation"
+            pdf.set_fill_color(255, 248, 225)
+            pdf.set_text_color(140, 90, 10)
+        else:
+            status_text = "[INFORMATIONAL] Non-commercial or administrative filing"
+            pdf.set_fill_color(240, 244, 250)
+            pdf.set_text_color(*_URA_NAVY)
+
+        pdf.set_font(pdf._font_name, "B", 9)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 6, _safe_text(pdf, f" {status_text}"), fill=True)
+        pdf.ln(2)
+
+        subtotal = recon.get("subtotal_ugx")
+        tax = recon.get("tax_ugx")
+        total = recon.get("total_ugx")
+        if total is not None or subtotal is not None:
+            pdf.set_font(pdf._font_name, "B", 8)
+            pdf.set_text_color(*_WHITE)
+            pdf.set_fill_color(*_URA_NAVY)
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(50, 6, "Financial Component", border=1, fill=True)
+            pdf.cell(70, 6, "Declared Amount (UGX)", border=1, fill=True)
+            pdf.cell(70, 6, "Audit Status / Rate", border=1, fill=True)
+            pdf.ln()
+
+            pdf.set_font(pdf._font_name, size=8)
+            pdf.set_text_color(*_DARK_GRAY)
+            items = []
+            if subtotal is not None:
+                items.append(("Taxable Subtotal", f"{subtotal:,.0f}", "Base"))
+            if tax is not None:
+                eff = f" ({recon.get('effective_rate', 0):.1%})" if recon.get("effective_rate") else ""
+                items.append(("VAT / Tax Deducted", f"{tax:,.0f}", f"Rate{eff}"))
+            if total is not None:
+                items.append(("Grand Total Payable", f"{total:,.0f}", "Final"))
+
+            for idx, (label, amt, desc) in enumerate(items):
+                bg = _LIGHT_GRAY if idx % 2 == 0 else _WHITE
+                pdf.set_fill_color(*bg)
+                pdf.set_x(pdf.l_margin)
+                pdf.cell(50, 6, label, border=1, fill=True)
+                pdf.cell(70, 6, amt, border=1, fill=True)
+                pdf.cell(70, 6, desc, border=1, fill=True)
+                pdf.ln()
+            pdf.ln(2)
+
+        notes = recon.get("notes") or []
+        if notes:
+            pdf.set_font(pdf._font_name, size=8)
+            pdf.set_text_color(*_DARK_GRAY)
+            for note in notes:
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 4, _safe_text(pdf, f"- {note}"))
+            pdf.ln(2)
+        pdf.ln(2)
 
     # Tables / sheets.
     tables = analysis.get("tables") or []

@@ -143,6 +143,33 @@ export interface TicketDetail extends TicketQueueItem {
   reply_delivered_at?: number;
 }
 
+export interface EscalationCaseDetail {
+  ok: boolean;
+  ticket_id: string;
+  reference: string;
+  status: string;
+  status_label: string;
+  priority: string;
+  team: string;
+  team_label: string;
+  assignee: string;
+  assignee_display: string;
+  reason: string;
+  user_query: string;
+  officer_reply: string;
+  reply_at: number;
+  reply_delivered: boolean;
+  created_at: number;
+  resolved_at: number;
+  transcript: Array<{
+    user_message?: string;
+    bot_reply?: string;
+    created_at?: number;
+    sender?: string;
+  }>;
+  can_reply: boolean;
+}
+
 export interface TicketSla {
   period_days: number;
   tickets: number;
@@ -230,14 +257,26 @@ export const analyticsApi = {
   dashboard: (days = 30) => fetchJson<DashboardData>(`/v1/analytics/dashboard?days=${days}`),
   feedbackSummary: (days = 30) => fetchJson<FeedbackSummary>(`/v1/feedback/summary?days=${days}`),
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
-  tickets: (status = "open", limit = 8, priority = "", team = "") =>
+  tickets: (status = "open", limit = 8, priority = "", team = "", q?: string) =>
     fetchJson<TicketQueueResponse>(
       // "any" is a UI token; the API takes an absent status to mean all
       // statuses and 400s on anything outside the four real ones.
       `/v1/admin/tickets?status=${encodeURIComponent(status === "any" ? "" : status)}` +
         `&limit=${limit}&offset=0` +
         (priority ? `&priority=${encodeURIComponent(priority)}` : "") +
-        (team ? `&team=${encodeURIComponent(team)}` : ""),
+        (team ? `&team=${encodeURIComponent(team)}` : "") +
+        (q ? `&q=${encodeURIComponent(q)}` : ""),
+    ),
+  publicTicketStatus: (ticketId: string) =>
+    fetchJson<EscalationCaseDetail>(`/v1/escalate/${encodeURIComponent(ticketId)}`),
+  replyToPublicTicket: (ticketId: string, message: string, locale = "en") =>
+    fetchJson<{ ok: boolean; ticket_id: string; status: string; message: string }>(
+      `/v1/escalate/${encodeURIComponent(ticketId)}/reply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, locale }),
+      },
     ),
   ticket: (id: string) => fetchJson<TicketDetail>(`/v1/admin/tickets/${encodeURIComponent(id)}`),
   ticketSla: (days = 30) => fetchJson<TicketSla>(`/v1/admin/tickets/sla?days=${days}`),

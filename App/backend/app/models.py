@@ -240,6 +240,34 @@ class EscalationResponse(BaseModel):
     message: str = Field(..., description="What happens next, in the taxpayer's language")
 
 
+class EscalationDetailResponse(BaseModel):
+    ok: bool = True
+    ticket_id: str
+    reference: str
+    status: str
+    status_label: str
+    priority: str
+    team: str
+    team_label: str
+    assignee: str
+    assignee_display: str
+    reason: str
+    user_query: str
+    officer_reply: str
+    reply_at: float
+    reply_delivered: bool
+    created_at: float
+    resolved_at: float
+    transcript: list[dict[str, Any]] = Field(default_factory=list)
+    can_reply: bool = True
+
+
+class TaxpayerReplyRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    conversation_id: str | None = None
+    locale: str = Field("en", pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$")
+
+
 class FeedbackSummary(BaseModel):
     period_days: int
     total: int
@@ -474,11 +502,14 @@ class DocumentFields(BaseModel):
     """URA-specific fields extracted from an attached document."""
 
     tins: list[str] = Field(default_factory=list, description="Uganda TIN numbers found")
+    prns: list[str] = Field(default_factory=list, description="Uganda Payment Registration Numbers (PRNs) found")
+    efris_invoices: list[str] = Field(default_factory=list, description="EFRIS fiscal invoice/receipt numbers found")
     amounts: list[str] = Field(default_factory=list, description="UGX currency amounts found")
     dates: list[str] = Field(default_factory=list, description="Date strings found")
     references: list[str] = Field(
         default_factory=list, description="URA reference/assessment numbers found"
     )
+    tax_heads: list[str] = Field(default_factory=list, description="Identified URA tax regimes/heads")
 
 
 class DocumentProvenance(BaseModel):
@@ -544,6 +575,10 @@ class DocumentAnalysisResponse(BaseModel):
     text_preview: str = Field("", description="First characters of the extracted text")
     truncated: bool = Field(False, description="Whether extracted text was truncated")
     summary: str = Field("", description="Heuristic analysis summary")
+    tax_reconciliation: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Automated financial reconciliation & rate compliance status",
+    )
     warnings: list[str] = Field(default_factory=list)
     expires_in_seconds: int = Field(0, ge=0, description="TTL until the document is purged")
 

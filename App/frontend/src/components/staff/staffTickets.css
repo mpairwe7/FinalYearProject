@@ -8,10 +8,10 @@
 .st-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 62px 1fr auto;
+  grid-template-columns: 130px 1fr auto;
   align-items: center;
   gap: var(--ops-space-3);
-  padding: 10px var(--ops-space-3);
+  padding: 12px var(--ops-space-3);
   border: 1px solid transparent;
   border-radius: var(--ops-radius-sm);
   background: transparent;
@@ -22,12 +22,38 @@
     border-color var(--ops-dur-fast) var(--ops-ease);
 }
 
+.st-row-badge-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.st-ref-pill {
+  font-family: var(--ops-font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row);
+  color: var(--text-2);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: all 120ms ease;
+}
+
+.st-ref-pill:hover {
+  background: var(--ops-row-hover);
+  color: var(--text-0);
+  border-color: var(--ops-accent);
+}
+
 .st-row:hover {
   background: var(--ops-row-hover);
 }
 
-/* The selected case is named by a filled surface and a stronger border. It
-   also carried an accent bar down the left edge; that bar is gone. */
+/* The selected case is named by a filled surface and a stronger border. */
 .st-row.is-selected {
   background: var(--ops-row-active);
   border-color: var(--ops-line-strong);
@@ -49,21 +75,19 @@
 }
 
 .st-row-topic {
-  font-size: var(--ops-text-sm);
-  font-weight: var(--ops-weight-semi);
+  font-size: var(--ops-text-sm, 14px);
+  font-weight: var(--ops-weight-semi, 600);
+  line-height: 1.4;
   color: var(--text-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.st-row-query,
-.st-row-meta {
-  font-size: var(--ops-text-2xs);
-  color: var(--text-3);
-}
-
 .st-row-query {
+  font-size: var(--ops-text-xs, 12px);
+  line-height: 1.4;
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -71,18 +95,38 @@
 
 .st-row-meta {
   display: flex;
+  align-items: center;
   gap: var(--ops-space-2);
+  font-size: var(--ops-text-2xs, 11px);
+  color: var(--text-3);
   flex-wrap: wrap;
+  margin-top: 2px;
 }
 
 /* Only the team name is title-cased; an assignee is an email address. */
 .st-row-team {
   text-transform: capitalize;
+  font-weight: 500;
+}
+
+.st-row-assignee {
+  color: var(--text-1);
+  font-weight: 500;
 }
 
 .st-row-unclaimed {
   color: var(--ops-warn);
   font-weight: var(--ops-weight-semi);
+}
+
+.st-row-status {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--ops-row);
+  border: 1px solid var(--ops-line);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  color: var(--text-2);
 }
 
 .st-row-wait {
@@ -149,10 +193,8 @@
   top: calc(var(--ops-space-5) * -1);
   z-index: 2;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--ops-space-3);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: var(--ops-space-2);
   margin: calc(var(--ops-space-5) * -1) calc(var(--ops-space-5) * -1) 0;
   padding: var(--ops-space-4) var(--ops-space-5) var(--ops-space-3);
   /* The header stays put while a long transcript scrolls under it, so it is
@@ -166,15 +208,64 @@
 }
 
 .st-case-headline {
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ops-space-2);
+  width: 100%;
 }
 
 .st-case-head h2 {
-  margin: 0 0 var(--ops-space-2);
-  font-size: var(--ops-text-md);
-  font-weight: var(--ops-weight-semi);
-  line-height: var(--ops-lh-snug);
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
   color: var(--text-0);
+}
+
+.st-case-ref-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.st-case-ref-badge {
+  font-family: var(--ops-font-mono, monospace);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #047857;
+  color: #ffffff;
+}
+
+.st-pill-team {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--ops-row);
+  border: 1px solid var(--ops-line);
+  color: var(--text-1);
+}
+
+.st-pill.is-delivered {
+  background: #ecfdf5;
+  border: 1px solid #10b981;
+  color: #047857;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.st-pill.is-pending-delivery {
+  background: #fefce8;
+  border: 1px solid #facc15;
+  color: #854d0e;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
 }
 
 .st-back {
@@ -346,27 +437,66 @@
 
 .st-field {
   display: block;
-  padding-left: var(--ops-space-3);
+}
+
+.st-field textarea {
+  width: 100%;
+  min-height: 120px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  padding: 12px 14px;
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-line);
+  background: var(--ops-row);
+  color: var(--text-0);
+  resize: vertical;
+  transition: border-color var(--ops-dur-fast) var(--ops-ease),
+    box-shadow var(--ops-dur-fast) var(--ops-ease);
+}
+
+.st-field.is-outbound textarea {
+  border-color: #047857;
+  background: rgba(4, 120, 87, 0.03);
+}
+
+.st-field.is-outbound textarea:focus {
+  outline: none;
+  border-color: #059669;
+  box-shadow: 0 0 0 2px rgba(4, 120, 87, 0.2);
+}
+
+.st-field.is-internal textarea {
+  min-height: 80px;
+  border-color: #d97706;
+  background: rgba(217, 119, 6, 0.03);
+}
+
+.st-field.is-internal textarea:focus {
+  outline: none;
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2);
 }
 
 /* One of these reaches the taxpayer and the other never does. That was an edge
    colour; it is the label's job now — `.st-field-label` states it in words. */
 
 .st-field-label {
-  display: block;
-  margin-bottom: var(--ops-space-1);
-  font-size: var(--ops-text-xs);
-  font-weight: var(--ops-weight-semi);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-1);
 }
 
 .st-field-label em {
-  display: block;
   font-style: normal;
-  font-weight: var(--ops-weight-normal);
-  font-size: var(--ops-text-2xs);
+  font-weight: 400;
+  font-size: 11px;
   color: var(--text-3);
-  margin-top: 1px;
 }
 
 .st-actions {

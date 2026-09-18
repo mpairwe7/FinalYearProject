@@ -31,6 +31,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   PendingAttachment,
+  type DocumentAnalysisData,
 } from '../lib/attachments';
 import { cleanMarkdownForSpeech } from '../lib/answerText';
 import { audioSignifiers } from '../lib/audioSignifiers';
@@ -42,6 +43,8 @@ import ConversationSearch from '../components/ConversationSearch';
 import LoadingState from '../components/LoadingState';
 import SettingsDialog, { SettingsTab } from '../components/settings/SettingsDialog';
 import ChatHeader from '../components/ChatHeader';
+import { DocumentInspectionModal } from '../components/DocumentInspectionModal';
+import { SupportCaseModal } from '../components/SupportCaseModal';
 import { useIdentity } from '../hooks/useIdentity';
 
 // ---------------------------------------------------------------------------
@@ -184,6 +187,9 @@ export default function Page() {
   const togglePinSession = useChatStore((s) => s.togglePinSession);
   const ensureActiveConversationId = useChatStore((s) => s.ensureActiveConversationId);
   const saveCurrentSession = useChatStore((s) => s.saveCurrentSession);
+  const activeTicketId = useChatStore((s) => s.activeTicketId);
+  const supportCaseOpen = useChatStore((s) => s.supportCaseOpen);
+  const setSupportCaseOpen = useChatStore((s) => s.setSupportCaseOpen);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   // Live-dictation bookkeeping — see the recognition effect below.
@@ -308,6 +314,13 @@ export default function Page() {
 
   // Document attachments awaiting the next chat turn
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [inspectingDoc, setInspectingDoc] = useState<{
+    id: string;
+    name: string;
+    sizeBytes?: number;
+    docType?: string;
+    analysis?: DocumentAnalysisData;
+  } | null>(null);
 
   // Voice state
   const [autoNarrate, setAutoNarrate] = useState(false);
@@ -795,9 +808,32 @@ export default function Page() {
         throw new Error(detail);
       }
       const analysis = await res.json();
+      const analysisData: DocumentAnalysisData = {
+        documentId: analysis.document_id,
+        filename: analysis.filename,
+        kind: analysis.kind,
+        sizeBytes: analysis.size_bytes,
+        docType: analysis.doc_type,
+        confidence: analysis.confidence,
+        matchedKeywords: analysis.matched_keywords,
+        fields: analysis.fields,
+        tables: analysis.tables,
+        textPreview: analysis.text_preview,
+        truncated: analysis.truncated,
+        summary: analysis.summary,
+        taxReconciliation: analysis.tax_reconciliation,
+        warnings: analysis.warnings,
+        expiresInSeconds: analysis.expires_in_seconds,
+      };
       setPendingAttachments((prev) => prev.map((a) => (
         a.clientId === clientId
-          ? { ...a, status: 'ready', documentId: analysis.document_id, docType: analysis.doc_type }
+          ? {
+              ...a,
+              status: 'ready',
+              documentId: analysis.document_id,
+              docType: analysis.doc_type,
+              analysis: analysisData,
+            }
           : a
       )));
     } catch (err) {
@@ -852,7 +888,12 @@ export default function Page() {
     }
     const sentAttachments = pendingAttachments
       .filter((a) => a.status === 'ready' && a.documentId)
-      .map((a) => ({ id: a.documentId as string, name: a.name, docType: a.docType }));
+      .map((a) => ({
+        id: a.documentId as string,
+        name: a.name,
+        docType: a.docType,
+        analysis: a.analysis,
+      }));
     const conversationId = activeConversationId ?? ensureActiveConversationId();
     shouldStickToBottomRef.current = true;
     setShowScrollToLatest(false);
@@ -974,36 +1015,57 @@ export default function Page() {
 
       const dispatchEvent = (eventName: string, dataLines: string[]) => {
         if (dataLines.length === 0) return;
-        const data = dataLines.join('\n');
-        const trimmedData = data.trim();
 
-        // Intercept internal telemetry/metadata/agent trace JSON so it never leaks into visible prose
-        if (
-          trimmedData.startsWith('{"sources":') ||
-          trimmedData.startsWith('{"faithfulness_score":') ||
-          trimmedData.startsWith('[{"type":') ||
-          (trimmedData.startsWith('{') && (trimmedData.includes('"retrieval_mode"') || trimmedData.includes('"workflow":')))
-        ) {
-          try {
-            const p = JSON.parse(trimmedData);
-            if (p && typeof p === 'object' && !Array.isArray(p)) {
-              meta = { ...meta, ...p };
-              if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-              if (typeof p.reply === 'string' && p.reply.trim()) {
-                reveal.set(cleanResponse(p.reply));
+        // Separate phase / telemetry lines from prose lines so phase tags never leak into chat
+        const cleanLines: string[] = [];
+        for (const line of dataLines) {
+          const tLine = line.trim();
+          if (
+            tLine === 'translation.started' ||
+            tLine === 'translation.completed' ||
+            tLine === 'retrieval.started' ||
+            tLine === 'retrieval.completed' ||
+            tLine.startsWith('generation.') ||
+            tLine.startsWith('iteration.') ||
+            tLine.startsWith('tool_call.')
+          ) {
+            if (tLine === 'retrieval.started') setTurnPhase('searching');
+            else if (tLine === 'translation.started') setTurnPhase('translating');
+            else if (tLine === 'translation.completed') setTurnPhase('churning');
+            continue;
+          }
+          if (
+            tLine.startsWith('{"sources":') ||
+            tLine.startsWith('{"faithfulness_score":') ||
+            tLine.startsWith('[{"type":') ||
+            (tLine.startsWith('{') && (tLine.includes('"retrieval_mode"') || tLine.includes('"workflow":')))
+          ) {
+            try {
+              const p = JSON.parse(tLine);
+              if (p && typeof p === 'object' && !Array.isArray(p)) {
+                meta = { ...meta, ...p };
+                if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+                if (typeof p.reply === 'string' && p.reply.trim()) {
+                  reveal.set(cleanResponse(p.reply));
+                }
+                updateLastTurn((t) => ({
+                  ...t,
+                  citations: p.citations ?? t.citations,
+                  faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+                  retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+                  escalationRequired: p.escalation_required ?? t.escalationRequired,
+                  escalationReason: p.escalation_reason ?? t.escalationReason,
+                }));
               }
-              updateLastTurn((t) => ({
-                ...t,
-                citations: p.citations ?? t.citations,
-                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
-                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
-                escalationRequired: p.escalation_required ?? t.escalationRequired,
-                escalationReason: p.escalation_reason ?? t.escalationReason,
-              }));
-            }
-          } catch {}
-          return;
+            } catch {}
+            continue;
+          }
+          cleanLines.push(line);
         }
+
+        if (cleanLines.length === 0) return;
+        const data = cleanLines.join('\n');
+        const trimmedData = data.trim();
 
         if (eventName === 'error') {
           updateLastTurn((t) => ({ ...t, content: 'Sorry, an error occurred. Please try again.' }));
@@ -1496,6 +1558,26 @@ export default function Page() {
     return map;
   }, [chat]);
 
+  const handleDownloadReport = useCallback(async (docId: string, docName: string) => {
+    try {
+      const res = await fetch(`/api/v1/documents/${docId}/report`, {
+        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+      });
+      if (!res.ok) throw new Error(`report ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ura_analysis_${docName.replace(/\.[^.]+$/, '')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Failed or expired
+    }
+  }, []);
+
   // ---- Shared composer props ----
   const composerProps = {
     message,
@@ -1517,6 +1599,14 @@ export default function Page() {
     attachments: pendingAttachments,
     onAttachFiles: attachFiles,
     onRemoveAttachment: removeAttachment,
+    onInspectAttachment: (att: PendingAttachment) =>
+      setInspectingDoc({
+        id: att.documentId || att.clientId,
+        name: att.name,
+        sizeBytes: att.sizeBytes,
+        docType: att.docType,
+        analysis: att.analysis,
+      }),
     // Voice mode is the composer's only conversation-level control. Language
     // is session-level and lives in the header instead — see <ChatHeader />.
     //
@@ -1610,6 +1700,21 @@ export default function Page() {
         onLocaleChange={setLocale}
       />
 
+      {activeTicketId && (
+        <div className="chat-case-banner">
+          <button
+            type="button"
+            className="chat-case-pill"
+            onClick={() => setSupportCaseOpen(true)}
+            title="Open URA Officer Support Case Room"
+          >
+            <span className="chat-case-pulse" aria-hidden="true" />
+            <span className="chat-case-text">Support Case #TIC-{activeTicketId.slice(0, 8).toUpperCase()}</span>
+            <span className="chat-case-action">Open Case Room ↗</span>
+          </button>
+        </div>
+      )}
+
       <main id="main-content" className="app-content" tabIndex={-1}>
         {!hasStartedChat ? (
           /* ── Landing state — input-first hierarchy (chatv2) ── */
@@ -1688,6 +1793,7 @@ export default function Page() {
                     phaseLabel={isPending ? t(PHASE_UI[turnPhase].label) : undefined}
                     phaseVariant={isPending ? PHASE_UI[turnPhase].variant : undefined}
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
+                    onInspectAttachment={(att) => setInspectingDoc(att)}
                   />
                 );
               })}
@@ -1768,6 +1874,26 @@ export default function Page() {
         onAutoNarrateChange={setNarration}
         speechReady={Boolean(serverReady)}
         blogUrl={BLOG_URL}
+      />
+
+      <DocumentInspectionModal
+        isOpen={inspectingDoc !== null}
+        onClose={() => setInspectingDoc(null)}
+        document={inspectingDoc}
+        onSelectPrompt={(p) => {
+          setMessage(p);
+          window.setTimeout(() => {
+            document.getElementById('composer-input')?.focus();
+          }, 80);
+        }}
+        onDownloadReport={handleDownloadReport}
+      />
+
+      <SupportCaseModal
+        isOpen={supportCaseOpen}
+        onClose={() => setSupportCaseOpen(false)}
+        ticketId={activeTicketId}
+        conversationId={activeConversationId}
       />
 
       </div>{/* end .app-main-col */}

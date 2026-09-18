@@ -12,7 +12,7 @@ import React, { useState } from "react";
 import type { TicketDetail } from "../../services/analyticsApi";
 import type { TicketPatch } from "../../services/analyticsApi";
 import { TICKET_MACROS } from "../../lib/ticketMacros";
-import { officerHandle, STATUS_LABEL, STATUSES } from "../../lib/ticketUi";
+import { officerHandle, STATUS_LABEL, STATUSES, ticketRef } from "../../lib/ticketUi";
 import type { StaffIdentity } from "../StaffGuard";
 import "./staffTickets.css";
 
@@ -73,6 +73,26 @@ export function TicketComposer({
       ) : null}
       <div className="st-macros" role="group" aria-label="Canned replies">
         <span className="st-macros-label">Insert</span>
+        <button
+          type="button"
+          className="st-chip is-ref-chip"
+          onClick={() => {
+            const refTag = `[Case Reference: #${ticketRef(ticket.id)}]`;
+            setReply((prev) => (prev.trim() ? `${prev.trim()}\n\n${refTag}` : refTag));
+          }}
+        >
+          #{ticketRef(ticket.id)}
+        </button>
+        <button
+          type="button"
+          className="st-chip"
+          onClick={() => {
+            const hotline = "For immediate phone follow-up, call URA toll-free 0800 117 000 / 0800 217 000.";
+            setReply((prev) => (prev.trim() ? `${prev.trim()}\n\n${hotline}` : hotline));
+          }}
+        >
+          📞 Hotline
+        </button>
         {TICKET_MACROS.map((macro) => (
           <button
             key={macro.id}

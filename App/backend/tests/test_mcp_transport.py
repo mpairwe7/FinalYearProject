@@ -318,5 +318,32 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(record["namespace"], "tax_calculator")
 
 
+class ClientPingTests(unittest.TestCase):
+    def test_ping_in_process_returns_true(self) -> None:
+        client = MCPClient()
+        self.assertTrue(client.ping("tax_calculator"))
+        self.assertTrue(client.ping("core"))
+
+
+class MultilingualToolRAGTests(unittest.TestCase):
+    def test_multilingual_synonym_expansion(self) -> None:
+        from app.mcp.tool_rag import ToolRAGSelector, _tokenize
+
+        sw_tokens = _tokenize("Nataka kulipa kodi ya forodha")
+        self.assertIn("customs", sw_tokens)
+        self.assertIn("tax", sw_tokens)
+
+        lg_tokens = _tokenize("Njagala kubalirira omusolo gwa VAT")
+        self.assertIn("tax", lg_tokens)
+
+        selector = ToolRAGSelector()
+        selected = selector.select(
+            "kodi ya forodha",
+            ["calculate_customs_duty", "calculate_rental_tax", "lookup_rate"],
+            k=2,
+        )
+        self.assertIn("calculate_customs_duty", selected.tool_names)
+
+
 if __name__ == "__main__":
     unittest.main()

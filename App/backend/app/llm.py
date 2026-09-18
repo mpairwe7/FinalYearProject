@@ -467,12 +467,17 @@ def _build_messages(
     )
     if has_attachment:
         system_content += (
-            "\n\n## Document analysis guidelines\n"
-            "An official document has been provided by the taxpayer in the retrieved passages.\n"
-            "- When asked to summarize or analyze, give an executive summary: Title, Document Type, "
-            "Key Legal Provisions / Sections, Tax Amounts, and Actionable Steps.\n"
-            "- Never output raw internal tags like <untrusted_user_document> or prompt boundary markers.\n"
-            "- Answer specific queries using extracted fields, tables, and passage text directly."
+            "\n\n## Document Analysis & Presentation Guidelines\n"
+            "An attached document has been provided by the taxpayer in the retrieved passages.\n"
+            "- Formatting & Layout: Use clean, professional Markdown with headings (###), bullet points, and clean paragraphs.\n"
+            "- Executive Summary: When asked to summarize or explain the document, provide a structured executive summary:\n"
+            "  1. Overview & Document Classification (type and primary purpose)\n"
+            "  2. Key Legal Provisions, Sections, or Line Items\n"
+            "  3. Tax Figures & Reconciliation (TINs, PRNs, Subtotals, 18% VAT, and Total Payable)\n"
+            "  4. Next Steps & URA Compliance Guidance\n"
+            "- Filter Artifacts: Strip raw OCR artifacts, page headers like 'DOMESTIC TAX LAWS OF UGANDA 1 | P a g e', or unformatted page numbers.\n"
+            "- NEVER echo prompt boundary markers, XML tags, or raw tags like <untrusted_user_document>.\n"
+            "- Never begin your answer with internal prefixes like '[User-attached document: ...]' or 'Summary:'."
         )
 
     messages: list[dict[str, str]] = [
@@ -846,14 +851,23 @@ def _vllm_generate(
 
         # Ensure total context length strictly respects vLLM's 4096-token hard limit
         total_chars = sum(len(m.get("content", "")) for m in messages)
-        while len(messages) > 2 and total_chars > 10500:
-            popped = messages.pop(1)
-            total_chars -= len(popped.get("content", ""))
+        while total_chars > 10000:
+            if len(messages) > 2:
+                popped = messages.pop(1)
+                total_chars -= len(popped.get("content", ""))
+            elif len(messages) > 1 and len(messages[-1].get("content", "")) > 4000:
+                messages[-1]["content"] = messages[-1]["content"][:4000]
+                total_chars = sum(len(m.get("content", "")) for m in messages)
+            elif len(messages) > 0 and len(messages[0].get("content", "")) > 4000:
+                messages[0]["content"] = messages[0]["content"][:4000]
+                total_chars = sum(len(m.get("content", "")) for m in messages)
+            else:
+                break
 
         est_prompt_tokens = max(100, total_chars // 3)
         safe_max_tokens = min(
             LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(64, 4000 - est_prompt_tokens),
+            max(128, 4000 - est_prompt_tokens),
         )
 
         body = _json.dumps(
@@ -901,14 +915,23 @@ def _vllm_chat_completion(
         total_chars = sum(len(m.get("content", "")) for m in messages)
         if tools:
             total_chars += len(_json.dumps(tools))
-        while len(messages) > 2 and total_chars > 10500:
-            popped = messages.pop(1)
-            total_chars -= len(popped.get("content", ""))
+        while total_chars > 8500:
+            if len(messages) > 2:
+                popped = messages.pop(1)
+                total_chars -= len(popped.get("content", ""))
+            elif len(messages) > 1 and len(messages[-1].get("content", "")) > 3000:
+                messages[-1]["content"] = messages[-1]["content"][:3000]
+                total_chars = sum(len(m.get("content", "")) for m in messages) + (len(_json.dumps(tools)) if tools else 0)
+            elif len(messages) > 0 and len(messages[0].get("content", "")) > 3000:
+                messages[0]["content"] = messages[0]["content"][:3000]
+                total_chars = sum(len(m.get("content", "")) for m in messages) + (len(_json.dumps(tools)) if tools else 0)
+            else:
+                break
 
         est_prompt_tokens = max(100, total_chars // 3)
         safe_max_tokens = min(
             LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(64, 4000 - est_prompt_tokens),
+            max(128, 4000 - est_prompt_tokens),
         )
 
         payload: dict[str, Any] = {
@@ -1211,17 +1234,9 @@ _MT_ONESHOT: dict[str, tuple[str, str]] = {
 _MT_FEWSHOT: dict[tuple[str, str], list[tuple[str, str]]] = {
     ("lg", "en"): [
         ("Ekitabo kino kya ani?", "Whose book is this?"),
-        ("Kiwalo ki eky'omusolo gwa VAT mu Uganda?", "What is the standard VAT rate in Uganda?"),
-        ("Omusolo gw'obupangisa bwa mayumba ku bantu ssekinnoomu guli ebitundu bimeka?", "What is the individual rental income tax rate?"),
-        ("Nteekwa kusasula musolo gwa kampuni ku bitundu bimeka mu Uganda?", "What is the corporation tax rate in Uganda?"),
-        ("Omusolo gwa PAYE gutandikira ku ssente zimeka buli mwezi?", "What is the monthly tax-free threshold for PAYE in Uganda?"),
     ],
     ("sw", "en"): [
         ("Kitabu hiki ni cha nani?", "Whose book is this?"),
-        ("Kiwango cha kodi ya ongezeko la thamani (VAT) nchini Uganda ni asilimia ngapi?", "What is the standard VAT rate in Uganda?"),
-        ("Kiwango cha kodi ya mapato ya kodi ya majengo ya kupangisha ni asilimia ngapi?", "What is the rental income tax rate in Uganda?"),
-        ("Kiwango cha kodi ya mapato ya makampuni ni kiasi gani nchini Uganda?", "What is the corporation tax rate in Uganda?"),
-        ("Kiwango cha mshahara usiotwikwa kodi ya PAYE kila mwezi ni kiasi gani?", "What is the monthly tax-free threshold for PAYE in Uganda?"),
     ],
 }
 
@@ -1239,8 +1254,11 @@ def translate_text(
     from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
 
     verdict = InputGuard().check(text)
-    if not verdict.allowed and any(f in ("prompt_injection", "length_exceeded") for f in verdict.flags):
+    if not verdict.allowed and "prompt_injection" in verdict.flags:
         logger.warning("Prompted MT refused input (flags=%s)", verdict.flags)
+        return ""
+    if len(text) > 8000:
+        logger.warning("Prompted MT refused input: text too long (%d chars)", len(text))
         return ""
 
     _names = {"lg": "Luganda", "en": "English", "sw": "Swahili",
@@ -1295,6 +1313,7 @@ def translate_text(
     constraint_note = (
         " Keep all statutory tax acronyms (such as VAT, TIN, EFRIS, DTS, PAYE, WHT, URA, TCC, EACCMA) verbatim. "
         "Preserve all citation markers (such as [1], [2], [3]) verbatim and in-place. "
+        "The authority is Uganda Revenue Authority (URA) in Uganda — do NOT write Tanzania or .tz; use Uganda and .ug. "
         "Write all numbers, percentages, dates, and monetary amounts "
         "using exact Arabic numerals and standard currency notation — do NOT drop, omit, invent, or add any numbers, percentages, dates, or figures, and do NOT write numbers or amounts out as words."
     )
@@ -1352,7 +1371,9 @@ def translate_text(
             raw = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", raw, flags=re.IGNORECASE)
             raw = re.sub(r"\[+([a-zA-Z_]+)\]*", r"\1", raw)
             raw = re.sub(r"\[{2,}", "", raw)
-            raw = re.sub(r"(?:\n|^)\s*(?:\*+)?(?:Note|Kumbuka|Zingatia|Tanbihi|Okulabula|Tahadhari)\s*:\s*.*$", "", raw, flags=re.IGNORECASE | re.DOTALL)
+            raw = re.sub(r"[(\[{\-.,=~]{4,}.*$", "", raw)
+            raw = re.sub(r"([(\[{])\1+", r"\1", raw)
+            raw = re.sub(r"(?:\n\s*)+(?:Note|Kumbuka|Zingatia|Tanbihi|Okulabula|Tahadhari)\s*:\s*(?:As an AI|Kama msaidizi|Nze nga|Please note that this is an automated|Huu ni ushauri tu)[^\n]*$", "", raw, flags=re.IGNORECASE)
             return raw.strip()
         except Exception:  # noqa: BLE001 — MT is best-effort; caller falls through
             logger.debug("Prompted MT via vLLM failed", exc_info=True)
