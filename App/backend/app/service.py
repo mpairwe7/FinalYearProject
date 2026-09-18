@@ -5252,10 +5252,18 @@ class ChatModel:
             logger.exception("education tool execution failed for topic %s", topic)
             return None
 
+        if locale not in ("", "en"):
+            # Localize explanation and why-it-matters prose directly; worked example
+            # tables and statutory figures remain intact to prevent figure corruption.
+            loc_explanation = localize_reply(lesson.get("explanation", ""), locale)
+            loc_why = localize_reply(lesson.get("why_it_matters", ""), locale)
+            if loc_explanation:
+                lesson["explanation"] = loc_explanation
+            if loc_why:
+                lesson["why_it_matters"] = loc_why
+
         reply_md = format_education_reply(lesson, reveal_answer=reveal_answer)
         final_reply = self._finalize_reply(f"{reply_md}\n\n{CONTACT_FOOTER}")
-        if locale not in ("", "en"):
-            final_reply = localize_reply(final_reply, locale)
 
         title = lesson.get("title", topic.replace("_", " ").title())
         actions = []
