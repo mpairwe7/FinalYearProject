@@ -1,20 +1,16 @@
 \documentclass[10pt,a4paper]{article}
 
-% --- Page Layout & Margins ---
-\usepackage[a4paper,top=22mm,bottom=22mm,left=20mm,right=20mm,headsep=8mm,footskip=10mm]{geometry}
-
-% --- Fonts (Standard PostScript Type 1 for robust compilation) ---
-\usepackage{mathptmx} % Clean Times Roman for body
-\usepackage[scaled=0.90]{helvet} % Helvetica for sans-serif headings
-\usepackage{courier} % Courier for monospace / code
-\usepackage{amsmath,amssymb}
-
-% --- Core Typography & Utilities ---
+% --- Essential Packages ---
+\usepackage[margin=18mm,top=20mm,bottom=20mm]{geometry}
+\usepackage{mathptmx}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{microtype}
 \usepackage{xcolor}
 \usepackage{booktabs}
 \usepackage{tabularx}
-\usepackage{array}
 \usepackage{enumitem}
 \usepackage{framed}
 \usepackage{hyperref}
@@ -44,10 +40,10 @@
 
 % --- Paragraph & List Spacing ---
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{2.2mm}
-\linespread{1.08}
-\setlist[itemize]{leftmargin=18pt,itemsep=1.5pt,topsep=1.5pt}
-\setlist[enumerate]{leftmargin=20pt,itemsep=1.5pt,topsep=1.5pt}
+\setlength{\parskip}{2.0mm}
+\linespread{1.06}
+\setlist[itemize]{leftmargin=18pt,itemsep=1.2pt,topsep=1.2pt}
+\setlist[enumerate]{leftmargin=20pt,itemsep=1.2pt,topsep=1.2pt}
 
 % --- Custom Running Header / Footer ---
 \makeatletter
@@ -61,6 +57,14 @@
 \pagestyle{urastyle}
 
 % --- Custom Callout Environments ---
+\newenvironment{memobox}[1][Official Engagement Mandate]{%
+  \def\FrameCommand{\fboxsep=8pt\fcolorbox{uraBurgundy}{uraLightBg}}%
+  \MakeFramed{\advance\hsize-\width\FrameRestore}%
+  \noindent{\sffamily\bfseries\color{uraBurgundy}#1}\par\vspace{1.5mm}\small%
+}{%
+  \endMakeFramed%
+}
+
 \newenvironment{notebox}[1][Key Operational Takeaway]{%
   \def\FrameCommand{\fboxsep=8pt\fcolorbox{uraBorder}{uraLightBg}}%
   \MakeFramed{\advance\hsize-\width\FrameRestore}%
@@ -94,29 +98,58 @@
 \begin{center}
   {\sffamily\Huge\bfseries\color{uraBurgundy} OMUSOLOSMART}\\[2mm]
   {\sffamily\Large\bfseries\color{uraNavy} Taxpayer Conversational AI for the URA Service Environment}\\[2mm]
-  {\sffamily\normalsize\bfseries\color{uraGrey} Strategic Engagement Briefing, CX Insights, System Readiness Audit, and Demonstration Protocol}\\[3mm]
+  {\sffamily\normalsize\bfseries\color{uraGrey} Strategic Engagement Briefing, CX Insights, Expectations, System Readiness Audit, and Demonstration Protocol}\\[3mm]
   \rule{\textwidth}{1.5pt}\\[1.5mm]
   {\sffamily\footnotesize \textbf{Presenting Entity:} School of Computing and Informatics Technology (SCIT), Makerere University \& Sunbird AI\\
   \textbf{Host Audience:} Uganda Revenue Authority (URA) --- Client Experience (CX) \& Virtual Support Channels\\
-  \textbf{Date of Engagement:} September 2026 \textbullet{} Fiscal Year 2026/27 \textbullet{} Document Version 2.5}
+  \textbf{Date of Engagement:} September 2026 \textbullet{} Fiscal Year 2026/27 \textbullet{} Document Version 2.5 (Consolidated Full-Context Edition)}
   \rule{\textwidth}{0.6pt}
 \end{center}
 
 \vspace{1mm}
 
 % =============================================================================
-% 1. EXECUTIVE SUMMARY & ENGAGEMENT OBJECTIVES
+% CONTEXT: THE URA INTERNAL INVITATION MEMO
 % =============================================================================
-\section{Executive Summary \& Strategic Objectives}
-
-\textbf{OmusoloSmart} is Uganda's first sovereign, multilingual conversational intelligence platform designed exclusively for public revenue administration. Unlike generic public commercial chatbots (e.g., ChatGPT, Claude), OmusoloSmart enforces \textbf{mathematical and statutory grounding}: every answer is verified against official URA documentation (Acts, Tariffs, FY2026/27 Rate Tables, and Handbooks) with zero generative hallucination. It natively supports \textbf{English, Luganda, and Swahili} in both voice and text, bridging the communication divide between the formal tax authority and Uganda's diverse commercial landscape.
+\begin{memobox}[Official Engagement Mandate: URA Client Experience Internal Memo]
+\itshape
+``As part of our ongoing efforts to enhance Client Experience through innovative and technology-enabled solutions, we will be hosting a team of software engineers from the School of Computing and Informatics Technology, Makerere University, to present OmusoloSmart, a conversational AI assistant developed specifically for the URA taxpayer service environment.
+\par\vspace{1.5mm}
+OmusoloSmart enables taxpayers to ask tax-related questions through voice or text in Luganda, Swahili, and English, and receive instant responses based strictly on verified information from official URA documentation, 24 hours a day.
+\par\vspace{1.5mm}
+This aspect, in particular, may be of interest to our Client Experience function given our virtual support channels.
+\par\vspace{1.5mm}
+You are therefore invited to the engagement to explore the solution, understand its capabilities and potential application within our support channels, and provide your insights from a Client Experience perspective. So, come prepared to actively engage with the presenters, ask questions, and provide your feedback and recommendations.''
+\end{memobox}
 
 % =============================================================================
-% 2. STAKEHOLDER LANDSCAPE & CX PAIN POINT ANALYSIS
+% 1. EXECUTIVE SUMMARY & STRATEGIC POSITIONING
 % =============================================================================
-\section{Stakeholder Landscape \& CX Pain Points}
+\section{Executive Summary \& Strategic Positioning}
 
-Under the government's Domestic Revenue Mobilization Strategy (DRMS), the URA is actively pivoting from an adversarial enforcement model toward an empathetic, client-centric service delivery model. The URA Client Experience department operates virtual support channels, including the Contact Centre (toll-free \texttt{0800 117 000 / 0800 217 000}), WhatsApp (\texttt{0772 140 000}), web portal live chat, and walk-in service centers across Uganda.
+\textbf{OmusoloSmart} is Uganda's first sovereign, multilingual conversational intelligence platform engineered exclusively for public revenue administration. Developed by researchers and software engineers at Makerere University's School of Computing and Informatics Technology (SCIT) in collaboration with Sunbird AI, the system represents an architectural paradigm shift from generic commercial large language models (LLMs) to a \textbf{statutory-grounded, epistemically disciplined revenue assistant}.
+
+\subsection{Strategic Positioning Pillars}
+\begin{itemize}
+  \item \textbf{Not an Off-the-Shelf Commercial Wrapper:} Unlike generic consumer chatbots (e.g., ChatGPT, Claude) that hallucinate tax figures or produce unverified legal advice, OmusoloSmart enforces \textbf{mathematical and statutory grounding}. Inquiries involving rates, thresholds, and calculations route through deterministic tax engines grounded in versioned FY2026/27 Acts and Tariffs.
+  \item \textbf{Strict Epistemic Discipline:} The system operates at greedy zero-temperature with real-time numeric contradiction withholding: if a drafted answer conflicts with official documentation, it is withheld before reaching the taxpayer.
+  \item \textbf{Tricameral Linguistic Delivery:} Delivers complete functional parity in \textbf{English, Luganda, and Swahili} across both voice and text interfaces, breaking down linguistic and digital literacy barriers for Uganda's informal sector.
+\end{itemize}
+
+% =============================================================================
+% 2. STAKEHOLDER LANDSCAPE & AUDIENCE PROFILE
+% =============================================================================
+\section{Stakeholder Landscape \& Audience Profile}
+
+Under the government's Domestic Revenue Mobilization Strategy (DRMS), the URA is actively pivoting from an enforcement-centric agency toward a \textbf{service-oriented, taxpayer-centric facilitator}. The URA Client Experience department operates virtual support channels, including the Contact Centre (toll-free \texttt{0800 117 000 / 0800 217 000}), WhatsApp (\texttt{0772 140 000}), web portal live chat, and walk-in service centers across Uganda.
+
+\subsection{Audience Profile \& Stakeholder Interests}
+\begin{itemize}
+  \item \textbf{Contact Centre Operations Managers:} Focused on First Contact Resolution (FCR), Average Handling Time (AHT), queue wait times, and preventing agent burnout during filing deadlines.
+  \item \textbf{Taxpayer Education \& Formalization Leads:} Focused on procedural clarity, step-by-step onboarding, and bringing informal traders (Kikuubo wholesalers, boda-boda operators, market vendors) into voluntary compliance.
+  \item \textbf{Digital Support \& Omni-Channel Specialists:} Dedicated to ensuring feature and accuracy parity across the Web Portal, WhatsApp, Mobile App, and telephony IVR.
+  \item \textbf{Compliance, Legal \& Audit Observers:} Concerned with statutory reliability, strict citation of tax legislation, prevention of unauthorized tax advice, and adherence to national data sovereignty.
+\end{itemize}
 
 \begin{figure}[h!]
 \centering
@@ -125,9 +158,9 @@ Under the government's Domestic Revenue Mobilization Strategy (DRMS), the URA is
 \toprule
 \textbf{Operational Challenge} & \textbf{Current CX Pain Point at URA} & \textbf{OmusoloSmart Resolution} \\
 \midrule
-\textbf{Filing Deadline Spikes} & On the 15th of each month (PAYE/VAT) and Dec 31 (Income Tax), inbound queues surge by over 400\%, leading to dropped calls and high Average Handling Time (AHT). & Automates Level-1 repetitive inquiries with sub-second response times ($p_{50} < 700\text{ms}$ on cache/rates), maintaining 100\% availability. \\
+\textbf{Filing Deadline Spikes} & On the 15th of each month (PAYE/VAT) and Dec 31 (Income Tax), inbound queues surge by over 400\%, leading to dropped calls and high AHT. & Automates Level-1 repetitive inquiries with sub-second response times ($p_{50} < 700\text{ms}$ on cache/rates), maintaining 100\% availability. \\
 \addlinespace
-\textbf{Linguistic Divide} & The informal sector (over 50\% of Uganda's GDP, including Kikuubo traders and agricultural producers) conducts business in Luganda and Swahili, but statutory forms are in English. & Delivers trilingual voice and text interaction with native Luganda and Swahili fine-tuning, translating complex tax concepts into local idioms. \\
+\textbf{Linguistic Divide} & The informal sector (over 50\% of Uganda's GDP) conducts business in Luganda and Swahili, but statutory forms are in dense bureaucratic English. & Delivers trilingual voice and text interaction with native Luganda and Swahili fine-tuning, translating complex tax concepts into local idioms. \\
 \addlinespace
 \textbf{Statutory Liability Risk} & Generic AI models hallucinate outdated thresholds (e.g., citing superseded UGX 235,000 PAYE threshold instead of FY2026/27 UGX 335,000). & Uses versioned deterministic tax rate tables and contradiction withholding: wrong figures are blocked before reaching the user. \\
 \addlinespace
@@ -138,28 +171,54 @@ Under the government's Domestic Revenue Mobilization Strategy (DRMS), the URA is
 \end{figure}
 
 % =============================================================================
-% 3. THE FOUR ARCHITECTURAL PILLARS OF OMUSOLOSMART
+% 3. THE FOUR ARCHITECTURAL PILLARS & STRUCTURAL INNOVATIONS
 % =============================================================================
-\section{The Four Architectural Pillars of OmusoloSmart}
-
-The system architecture is engineered to adhere strictly to tax authority standards, ISO 25010 software quality benchmarks, and national data sovereignty regulations:
+\section{The Four Architectural Pillars \& Structural Innovations}
 
 \begin{enumerate}
   \item \textbf{Epistemic Safety \& Zero-Drift Grounding:}
-  Statutory inquiries (rates, thresholds, and calculations) bypass generative token guessing entirely. Queries are routed through deterministic calculators executing versioned FY2026/27 URA rate tables. A real-time claim verification engine compares LLM assertions against cited passages; if an assertion contradicts the legal passage (e.g., claiming VAT is 20\% when the law states 18\%), the system actively intercepts the reply, suppresses the wrong figure, and serves the official URA text.
+  Statutory inquiries (rates, thresholds, and calculations) bypass generative token guessing entirely. Queries are routed through deterministic calculators executing versioned FY2026/27 URA rate tables (\texttt{tables.py}). A real-time claim verification engine compares LLM assertions against cited passages; if an assertion contradicts the legal passage (e.g., claiming VAT is 20\% when the law states 18\%), the system actively intercepts the reply, suppresses the wrong figure, and serves the official URA text.
   
   \item \textbf{Linguistic Parity \& Native Vernacular Voice:}
-  Developed in collaboration with Sunbird AI, the speech stack utilizes \textbf{Whisper-Large-v3-SALT} for Automatic Speech Recognition (ASR) and \textbf{Spark-TTS-SALT} for Text-to-Speech (TTS). Speech inference operates on CUDA at a \textbf{0.129x Real-Time Factor} (processing audio 7.7 times faster than real-time). Vernacular numeral preservation ensures that East African monetary idioms (*``obukadde 150''*, *``milioni 37.5''*, *``emitwalo ebiri''*) are parsed accurately without collapsing to English.
+  Developed in collaboration with Sunbird AI, the speech stack utilizes \textbf{Whisper-Large-v3-SALT} for Automatic Speech Recognition (ASR) and \textbf{Spark-TTS-SALT} for Text-to-Speech (TTS). Speech inference operates on CUDA at a \textbf{0.129x Real-Time Factor} (processing audio 7.7 times faster than real-time). Vernacular numeral preservation ensures that East African monetary idioms (*``obukadde 150''*, *``milioni 37.5''*, *``emitwalo ebiri''*) are parsed accurately without collapsing to English, while disambiguating the Luganda action verb *``Saba''* (*to apply/request*) from the Swahili numeral *``saba''* (*7*).
 
   \item \textbf{Empathetic Warm Escalation (Anti-Frustration Mechanism):}
-  Conversations are continuously evaluated for taxpayer distress. Inquiries expressing hardship (business closure, frozen bank accounts, family illness) or legal disputes trigger emotional intelligence (EQ) de-escalation protocols. Rather than abandoning the taxpayer, OmusoloSmart compiles a structured \textbf{Ticket Context Packet} (conversation history, sentiment, passages reviewed, and recommended officer opening guidance) for seamless takeover by a human Contact Centre agent.
+  Conversations are continuously evaluated for taxpayer distress (hardship, business closure, frozen accounts, penalty anxiety). Rather than abandoning the taxpayer in repetitive loops, OmusoloSmart compiles a structured \textbf{Ticket Context Packet} (full transcript, legal context, sentiment analysis, and opening advice) for seamless takeover by a human Contact Centre agent, reducing officer triage from 8 minutes to under 30 seconds.
 
   \item \textbf{Sovereign On-Premises / National Cloud Deployment:}
   OmusoloSmart complies strictly with the \textbf{Uganda Data Protection and Privacy Act 2019 (PDPO)}. The entire stack runs on local infrastructure (Docker / Kubernetes on sovereign cloud, e.g., Crane Cloud / NITA-U). No taxpayer queries or voice audio files are transmitted to foreign commercial APIs. All interactions are audited through an append-only cryptographic Merkle ledger.
 \end{enumerate}
 
+\subsection{Supplementary Capabilities: Offline Edge \& Omni-Channel Adaptability}
+\begin{itemize}
+  \item \textbf{Standalone Offline Capability:} Includes an exportable, lightweight offline engine (FAISS vector store + SQLite) capable of running on low-power local workstations at remote border posts and regional offices without internet access.
+  \item \textbf{Headless Omni-Channel Delivery:} Standardized REST, W3C Server-Sent Events (SSE), and duplex WebSockets (\texttt{/v1/chat}, \texttt{/v1/chat/stream}, \texttt{/v1/voice/chat/stream}) allow the exact same core intelligence to power Web Chat (Next.js), WhatsApp Business API, and Contact Centre telephony switches (SIP / Asterisk / FreeSWITCH).
+\end{itemize}
+
 % =============================================================================
-% 4. SYSTEM READINESS & EMPIRICAL AUDIT RESULTS
+% 4. EXPECTATIONS FROM BOTH SIDES
+% =============================================================================
+\section{Expectations from Both Sides}
+
+\subsection{What the URA Client Experience Team Expects}
+\begin{itemize}
+  \item \textbf{A Functional System, Not Slideware:} Live execution of real taxpayer queries submitted in natural, messy, conversational language.
+  \item \textbf{Authentic Ugandan Vernacular:} Verification that the AI understands authentic Luganda and Swahili, local commercial slang (*``kikuubo''*, *``omusalaba''*), and bilingual code-switching (*``Luglish''*).
+  \item \textbf{Tangible Queue Reduction:} Proof that the system can meaningfully deflect routine inquiries and lower queue times without increasing escalations.
+  \item \textbf{Integration Simplicity:} Clear architectural pathways to embed into \texttt{ura.go.ug}, the URA Mobile App, WhatsApp, and telephony channels.
+  \item \textbf{Risk \& Governance Transparency:} Explicit demonstrations of how the system refuses out-of-scope inquiries, handles tax evasion prompts, and protects citizen privacy.
+\end{itemize}
+
+\subsection{What Makerere SCIT Must Prepare to Deliver}
+\begin{itemize}
+  \item \textbf{Address Accuracy Skepticism:} Tax officers will probe edge cases (e.g., input VAT deductibility on passenger vehicles, withholding tax exemptions, bad debt relief). Presenters must highlight the deterministic rate tables and cited statutory provisions.
+  \item \textbf{Alleviate Job Security Concerns:} Contact Centre staff may fear automation. Frame OmusoloSmart explicitly as an \textbf{officer co-pilot and force multiplier} that eliminates routine drudgery and prepares structured case briefs.
+  \item \textbf{Demonstrate Voice \& Acoustics Live:} Presenters must use live microphone input and external speakers to showcase real-time Luganda and Swahili voice recognition and synthesis.
+  \item \textbf{Expose Back-Office Diagnostic Views:} Present the supervisor ticket queue, sentiment analytics, and cryptographic audit ledger.
+\end{itemize}
+
+% =============================================================================
+% 5. SYSTEM READINESS & EMPIRICAL AUDIT RESULTS
 % =============================================================================
 \section{System Readiness \& Empirical Audit Results}
 
@@ -193,15 +252,17 @@ OmusoloSmart has completed extensive full-stack benchmarks executed over the liv
 \caption{Consolidated Empirical Results across 1,400 Total Audited Queries}
 \end{table}
 
-\subsection{Key Technical Breakthroughs Verified in Production}
+\subsection{Production Engineering Gates Passed}
 \begin{itemize}
+  \item \textbf{Continuous Integration \& Quality Gates:} 100\% green status across all GitHub Actions workflows (\texttt{ML Pipeline CI/CD}, \texttt{Secret Scanning}, \texttt{CodeQL}, \texttt{Trivy Vulnerability Scanner}).
+  \item \textbf{Comprehensive Test Net:} \textbf{1,979 backend tests} and \textbf{279 frontend tests} passing with zero regressions and strict 40\% code coverage.
   \item \textbf{W3C Server-Sent Events (SSE) Multiline Assembly:} Resolved frontend line-smashing where procedural steps were previously compressed into single unformatted blocks. All numbered steps now arrive as discrete Markdown \texttt{<ol>} list items.
   \item \textbf{Sentence Splitting for Faithfulness:} Updated sentence tokenizer (\texttt{re.compile(r"[.!?]+|\textbackslash n+")}) ensuring bulleted lists and service catalogs (such as \textit{"What services does URA provide?"}) are individually grounded, raising faithfulness from 0.00 to 0.67--1.00 and eliminating false escalations.
-  \item \textbf{Vernacular Linguistic Disambiguation:} Corrected false figure inventions by disambiguating the Luganda action verb *``Saba''* (*to apply/request*) from the Swahili numeral *``saba''* (*7*).
+  \item \textbf{Privacy \& Contact Preservation:} Automated regex sanitization masks NINs, phone numbers, and bank details at the ingress boundary, while preserving official URA toll-free helplines and URLs with zero false redactions.
 \end{itemize}
 
 % =============================================================================
-% 5. CLIENT EXPERIENCE VALUE PROPOSITIONS & OPERATIONAL IMPACT
+% 6. CLIENT EXPERIENCE VALUE PROPOSITIONS & OPERATIONAL IMPACT
 % =============================================================================
 \section{Client Experience Value Propositions \& Impact}
 
@@ -227,11 +288,11 @@ OmusoloSmart has completed extensive full-stack benchmarks executed over the liv
 \end{figure}
 
 % =============================================================================
-% 6. STRUCTURED 4-PHASE DEMONSTRATION PROTOCOL & PERSONA SCRIPTS
+% 7. STRUCTURED 4-PHASE DEMONSTRATION PROTOCOL & PERSONA SCRIPTS
 % =============================================================================
 \section{Structured Live Demonstration Protocol}
 
-To ensure maximum credibility during the presentation, the Makerere team should execute a tightly rehearsed, 4-phase demonstration. Presenters must show \textbf{live execution}, not pre-recorded videos.
+To ensure maximum credibility during the presentation, the Makerere team should execute a tightly rehearsed, 4-phase demonstration showing \textbf{live execution}:
 
 \begin{scriptbox}[Phase 1: The Modern Digital Taxpayer --- English Web Chat]
 \textbf{Objective:} Demonstrate step-by-step procedural clarity, UI bold anchors, and due date callouts.\\
@@ -296,7 +357,7 @@ Provides statutory options under the Tax Procedures Code Act (payment plan appli
 \end{scriptbox}
 
 % =============================================================================
-% 7. STRATEGIC POSITIONING MATRIX: OMUSOLOSMART VS. GENERIC CHATBOTS
+% 8. STRATEGIC POSITIONING MATRIX: OMUSOLOSMART VS. GENERIC CHATBOTS
 % =============================================================================
 \section{Strategic Positioning Matrix: OmusoloSmart vs. Generic AI}
 
@@ -324,57 +385,102 @@ Provides statutory options under the Tax Procedures Code Act (payment plan appli
 \end{table}
 
 % =============================================================================
-% 8. ANTICIPATED QUESTIONS FROM URA LEADERSHIP & DEFENSIVE ANSWERS
+% 9. ANTICIPATED QUESTIONS FROM URA LEADERSHIP & DEFENSIVE ANSWERS
 % =============================================================================
 \section{Anticipated Questions \& Defensible Responses}
 
-Presenters should prepare for probing questions from across URA operational, legal, and IT disciplines:
+Presenters should prepare for probing questions across all four operational, legal, linguistic, and infrastructural disciplines, synthesizing the full context of both analytical engagement reviews:
 
 \subsection{Category A: Client Experience (CX) \& Contact Centre Operations}
 
-\begin{qnabox}[Q1: How does OmusoloSmart reduce our Contact Centre queue times during peak filing deadlines?]
+\begin{qnabox}[Q1: How does OmusoloSmart handle an inquiry during peak return periods when thousands of taxpayers hit the portal simultaneously?]
+\textbf{Defensible Response:}\\
+``The architecture is decoupled into high-throughput microservices. Routine rate lookups, procedure requests, and FAQ inquiries are served via an in-memory Redis semantic cache and deterministic calculator router in sub-second response times ($p_{50} < 700\text{ms}$). Generative RAG turns run with batched inference and concurrency governors to ensure server stability. Under burst testing at 30 concurrent users, the system maintained 100\% HTTP availability with zero dropped requests.''
+\end{qnabox}
+
+\begin{qnabox}[Q2: How does OmusoloSmart reduce our Contact Centre queue times during peak filing deadlines?]
 \textbf{Defensible Response:}\\
 ``Over 70\% of inbound inquiries during deadline weeks are repetitive procedural questions: checking filing due dates, verifying the PAYE threshold, requesting TIN recovery steps, or inquiring about bank payment registration numbers (PRNs). OmusoloSmart resolves these Level-1 inquiries instantly with zero human intervention in sub-second time ($p_{50} < 700\text{ms}$). This deflects thousands of calls from the queue, allowing human officers to focus on high-value taxpayer audits, debt negotiations, and complex exemptions.''
 \end{qnabox}
 
-\begin{qnabox}[Q2: What happens if a taxpayer starts in English, switches to Luganda, and ends in Swahili?]
+\begin{qnabox}[Q3: What happens when a taxpayer is angry, complaining about delayed refunds or unexpected tax penalties?]
 \textbf{Defensible Response:}\\
-``OmusoloSmart features cross-lingual conversational state tracking. The conversation context (such as the taxpayer's business type, turnover amount, or vehicle consignment) is maintained in an underlying state graph. The language detector evaluates each turn dynamically and routes the response in the user's active language without losing context or restarting the dialogue.''
+``The platform includes real-time emotional intelligence (EQ) scoring and distress detection. When a message contains sentiment cues indicating financial hardship, anger, or penalty anxiety, the bot suppresses cheerful marketing tones. It opens with an empathetic acknowledgment (\textit{'I understand this is stressful --- let's look at your options'}), provides the statutory appeal or payment plan procedures under the Tax Procedures Code Act, and generates an automated warm escalation ticket containing the entire diagnostic context for a URA Contact Centre officer.''
+\end{qnabox}
+
+\begin{qnabox}[Q4: Can the taxpayer switch languages midway through a conversation?]
+\textbf{Defensible Response:}\\
+``Yes. OmusoloSmart supports dynamic multi-turn language switching. A taxpayer can begin an inquiry in English, transition to Luganda for procedural clarification, and conclude in Swahili. The context manager preserves the rolling conversation state and entities across language boundaries without losing context or restarting the dialogue.''
+\end{qnabox}
+
+\begin{qnabox}[Q5: Does this replace our existing URA Contact Centre staff?]
+\textbf{Defensible Response:}\\
+``No. OmusoloSmart is designed as a \textbf{force multiplier}, not a replacement. It handles routine Level-1 informational triage 24/7. When a taxpayer faces enforcement notices, audits, or disputes, the bot packages the context and creates a warm handoff to URA officers, ensuring human agents focus their expertise where empathy, negotiation, and discretion are required. Furthermore, Contact Centre officers can use OmusoloSmart as an internal co-pilot to instantly retrieve verified citations during live calls.''
 \end{qnabox}
 
 \subsection{Category B: Statutory Accuracy, Legal Reliability \& Liability}
 
-\begin{qnabox}[Q3: If the Minister of Finance reads new tax amendments in the National Budget, how is the AI updated?]
+\begin{qnabox}[Q6: How can we be certain the AI won't invent a tax rate or give unauthorized tax advice?]
+\textbf{Defensible Response:}\\
+``OmusoloSmart enforces \textbf{three layers of epistemic defense}:
+\begin{enumerate}
+  \item \textit{Deterministic Calculator Router:} Statutory rate lookups (VAT, PAYE, WHT, Corporation Tax) bypass generative guessing entirely and pull directly from the versioned FY2026/27 URA rate table.
+  \item \textit{Entailment \& Contradiction Withholding:} If an LLM-drafted response contradicts cited URA documentation (e.g., drafting 20\% when the statute prescribes 18\%), the system strictly withholds the response, serves the official passage, and alerts an officer.
+  \item \textit{Zero Generative Drift:} The model operates at greedy zero-temperature with statutory prompt guardrails preventing speculative legal interpretation.
+\end{enumerate}''
+\end{qnabox}
+
+\begin{qnabox}[Q7: If the Minister of Finance amends a tax rate in the National Budget in June, how do we update the assistant, and how long does it take?]
 \textbf{Defensible Response:}\\
 ``Unlike deep learning models that require months of retraining or fine-tuning, OmusoloSmart decouples \textbf{knowledge} from \textbf{reasoning}. Statutory rates live in declarative fiscal-year rate tables (\texttt{tables.py}). Updating an excise duty rate or changing a threshold is a single-line configuration change verified by automated test suites in seconds. Superseded handbooks are automatically discounted in retrieval ranking.''
 \end{qnabox}
 
-\begin{qnabox}[Q4: How does URA protect itself from legal claims if a taxpayer acts on inaccurate advice from the bot?]
+\begin{qnabox}[Q8: How does the assistant protect URA from legal liability if a taxpayer relies on its answers?]
 \textbf{Defensible Response:}\\
-``OmusoloSmart enforces a strict epistemic disclaimer framework. Every response cites the statutory basis (e.g., Section 83 of the Income Tax Act). If the response judge detects that a claim has low grounding confidence ($< 0.65$), it suppresses the generated text and serves a pre-verified deterministic passage directly from the official URA handbook, accompanied by URA Contact Centre verification channels.''
+``OmusoloSmart enforces a strict epistemic disclaimer framework. Every substantive response cites its statutory basis (e.g., Section 5 of the Value Added Tax Act, Section 83 of the Income Tax Act). If the claim verification engine detects that a response has low grounding confidence ($< 0.65$) or an uncited factual assertion, it suppresses the generated text and serves a pre-verified deterministic passage directly from the official URA handbook, accompanied by official URA Contact Centre verification channels.''
 \end{qnabox}
 
-\subsection{Category C: Voice AI, Acoustics \& Dialect Robustness}
+\subsection{Category C: Language Models, Vernacular Dialects \& Voice AI}
 
-\begin{qnabox}[Q5: Will the voice system understand a trader speaking Luganda in a noisy market in Kikuubo?]
+\begin{qnabox}[Q9: Why did you choose Sunbird's Sunflower and SALT models over commercial alternatives like OpenAI's GPT-4 or Google Gemini?]
 \textbf{Defensible Response:}\\
-``Whisper-SALT was fine-tuned specifically on local Ugandan acoustic datasets, community radio broadcasts, and field speech recordings gathered across Uganda by Makerere and Sunbird AI. It exhibits high acoustic robustness against background noise and colloquial code-switching compared to standard international speech engines, operating with an average Real-Time Factor of 0.129x.''
+``Two critical reasons: \textbf{linguistic sovereignty} and \textbf{data privacy}. Commercial American models struggle with Ugandan indigenous languages, frequently inventing Swahili-shaped pseudo-words when asked for Luganda, and they require sending sensitive Ugandan taxpayer data outside the country's borders. Sunbird AI's Sunflower-14B, Whisper-SALT, and Spark-TTS-SALT were trained locally on Ugandan speech and text corpora by Ugandan researchers at Makerere, ensuring authentic dialect comprehension, correct pronunciation of local names and institutions, and strict compliance with national data sovereignty.''
 \end{qnabox}
 
-\subsection{Category D: IT Infrastructure, Security \& PDPO Compliance}
+\begin{qnabox}[Q10: How does it perform with real Ugandan dialects, street tax slang, or code-switching between English and Luganda?]
+\textbf{Defensible Response:}\\
+``The language stack uses \textbf{Sunbird AI's SALT models}, trained on verified Ugandan speech and text corpora from Makerere University. It natively tolerates code-switching (\textit{'Luglish'}), vernacular noun-class morphology, and colloquial financial expressions (\textit{'obukadde 5'}, \textit{'siringi emitwalo ebiri'}), without defaulting to European English grammatical conventions.''
+\end{qnabox}
 
-\begin{qnabox}[Q6: Does this solution comply with the Data Protection and Privacy Act 2019 (PDPO)?]
+\begin{qnabox}[Q11: Does the voice system understand people speaking in noisy environments, like a busy market in Kikuubo or near a taxi park?]
+\textbf{Defensible Response:}\\
+``Whisper-SALT was fine-tuned specifically on local Ugandan acoustic datasets, community radio broadcasts, and field speech recordings gathered across Uganda by Makerere and Sunbird AI. It exhibits high acoustic robustness against background market noise, vehicle traffic, and colloquial code-switching compared to standard international speech engines, operating with an average Real-Time Factor of 0.129x.''
+\end{qnabox}
+
+\subsection{Category D: IT Infrastructure, System Integration \& PDPO Compliance}
+
+\begin{qnabox}[Q12: Where does taxpayer data live, and how do we comply with the Data Protection and Privacy Act 2019 (PDPO)?]
 \textbf{Defensible Response:}\\
 ``Yes. OmusoloSmart incorporates privacy-by-design:
 \begin{itemize}
   \item \textbf{Automated PII Redaction:} National Identification Numbers (NINs), phone numbers, bank details, and passwords are sanitized at the input boundary before hitting inference or logging.
   \item \textbf{Data Sovereignty:} The entire software stack runs on local Ugandan hardware (Tier-III data centers or Crane Cloud). No data is exported abroad.
-  \item \textbf{Cryptographic Audit Ledger:} Every query, response, and officer handoff is recorded in an immutable Merkle tree ledger, ensuring tamper-evident accountability.''
-\end{itemize}
+  \item \textbf{Cryptographic Audit Ledger:} Every query, response, and officer handoff is recorded in an immutable Merkle tree ledger, ensuring tamper-evident accountability.
+\end{itemize}''
+\end{qnabox}
+
+\begin{qnabox}[Q13: How easily does this integrate into our existing support channels (WhatsApp, Web Portal, IVR)?]
+\textbf{Defensible Response:}\\
+``The backend provides standardized REST endpoints, W3C Server-Sent Events (SSE), and duplex WebSockets (\texttt{/v1/chat}, \texttt{/v1/chat/stream}, \texttt{/v1/voice/chat/stream}). It integrates into the URA web portal as a lightweight React/Next.js widget, connects to WhatsApp Business API via standard webhooks, and connects to telephony switches (SIP / Asterisk / FreeSWITCH) via standard audio streaming formats (PCM/WAV/MP3).''
+\end{qnabox}
+
+\begin{qnabox}[Q14: Can the system function in remote border posts or regional offices with unstable or absent internet connectivity?]
+\textbf{Defensible Response:}\\
+``Yes. In addition to the cloud/gateway microservices stack, OmusoloSmart includes an exportable, standalone offline engine. Powered by an embedded FAISS vector index and local SQLite database, the offline engine runs on edge laptops or desktop workstations in remote border posts (such as Malaba, Busia, or Mutukula) without requiring active internet connectivity.''
 \end{qnabox}
 
 % =============================================================================
-% 9. PRESENTER CHECKLIST & PRE-FLIGHT PROTOCOL
+% 10. PRESENTER CHECKLIST & PRE-FLIGHT PROTOCOL
 % =============================================================================
 \section{Presenter Checklist \& Engagement Protocol}
 
@@ -385,6 +491,7 @@ Presenters should prepare for probing questions from across URA operational, leg
   \item[\checkmark] \textbf{GPU Stack Readiness:} Verify that vLLM (\texttt{Sunflower-14B-FP8}), Whisper-SALT, and Spark-TTS-SALT are active with VRAM allocated on the designated GPU host.
   \item[\checkmark] \textbf{Audio Peripherals:} Test microphone input levels and ensure an external speaker is connected for the audience to clearly hear Luganda and Swahili voice synthesis.
   \item[\checkmark] \textbf{Cache Warmup:} Run a test query in each language to ensure inference paths and speech models are warm.
+  \item[\checkmark] \textbf{Artifacts on Hand:} Keep evaluation benchmark reports and logs readily available to project empirical proof points if requested.
 \end{itemize}
 
 \subsection{Audience Engagement Strategy}
@@ -394,16 +501,9 @@ Presenters should prepare for probing questions from across URA operational, leg
   \item \textbf{Invite Live Spontaneous Queries:} Encourage URA officers in the room to test their hardest statutory edge cases live during the open floor session.
 \end{itemize}
 
-% =============================================================================
-% 10. CONCLUSION & NEXT STEPS
-% =============================================================================
-\section{Conclusion \& Proposed Roadmap}
-
-OmusoloSmart represents a transformative opportunity for URA's Client Experience Directorate. By combining deterministic tax grounding with native Ugandan voice and text intelligence, the platform establishes a scalable foundation for modern, accessible, and empathetic taxpayer service delivery.
-
-\textbf{Proposed Next Steps with URA Leadership:}
+\subsection{Proposed Next Steps \& Engagement Roadmap}
 \begin{enumerate}
-  \item \textbf{Phase 1 Pilot Deployment:} Integrate OmusoloSmart as a virtual support pilot on `ura.go.ug` and URA's official WhatsApp channel for a 60-day trial covering Domestic Taxes and Instant TIN support.
+  \item \textbf{Phase 1 Pilot Deployment:} Integrate OmusoloSmart as a virtual support pilot on \texttt{ura.go.ug} and URA's official WhatsApp channel for a 60-day trial covering Domestic Taxes and Instant TIN support.
   \item \textbf{Contact Centre Agent Assist Mode:} Deploy OmusoloSmart to Contact Centre agents as an internal co-pilot to instantly retrieve verified citations and calculate complex assessments during live calls.
   \item \textbf{DRMS Regional Outreach Expansion:} Package the offline multimodal voice engine for deployment at mobile tax clinics, border posts, and regional tax education hubs across Uganda.
 \end{enumerate}
