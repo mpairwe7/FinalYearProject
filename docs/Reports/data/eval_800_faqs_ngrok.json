@@ -1,0 +1,89 @@
+{
+  "meta": {
+    "total_faqs": 800,
+    "duration_seconds": 557.32,
+    "throughput_qps": 1.44,
+    "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat",
+    "concurrency": 8,
+    "timestamp": "2026-09-18 22:38:48 UTC"
+  },
+  "performance": {
+    "min_ms": 316.6,
+    "p50_ms": 8202.4,
+    "p90_ms": 23761.7,
+    "p95_ms": 30566.0,
+    "p99_ms": 44300.9,
+    "max_ms": 87058.1,
+    "mean_ms": 10558.8
+  },
+  "accuracy": {
+    "overall_accuracy_pct": 97.83,
+    "scorable_queries": 799,
+    "non_answers_count": 7
+  },
+  "languages": {
+    "en": {
+      "count": 300,
+      "accuracy_pct": 98.56,
+      "avg_latency_ms": 4874.8,
+      "figure_fidelity_pct": 100.0,
+      "http_success_pct": 100.0
+    },
+    "lg": {
+      "count": 250,
+      "accuracy_pct": 97.6,
+      "avg_latency_ms": 14834.1,
+      "figure_fidelity_pct": 98.8,
+      "http_success_pct": 100.0
+    },
+    "sw": {
+      "count": 250,
+      "accuracy_pct": 97.19,
+      "avg_latency_ms": 13104.2,
+      "figure_fidelity_pct": 97.6,
+      "http_success_pct": 100.0
+    }
+  },
+  "domains": {
+    "domestic": {
+      "count": 300,
+      "accuracy_pct": 97.67,
+      "avg_latency_ms": 8934.4
+    },
+    "customs": {
+      "count": 240,
+      "accuracy_pct": 97.78,
+      "avg_latency_ms": 10817.6
+    },
+    "tax_education": {
+      "count": 260,
+      "accuracy_pct": 98.07,
+      "avg_latency_ms": 12194.1
+    }
+  },
+  "retrieval_modes": {
+    "hybrid": 540,
+    "education": 143,
+    "calculator": 52,
+    "faq_priority": 31,
+    "out_of_jurisdiction": 1,
+    "false_premise_rejected": 20,
+    "workflow": 7,
+    "contact_channels": 6
+  },
+  "resilience": {
+    "http_availability_pct": 100.0,
+    "structured_formatting_pct": 42.38,
+    "support_channels_integrity_pct": 99.62
+  },
+  "gpu_telemetry": {
+    "gpu_index": 2,
+    "name": "NVIDIA RTX A6000",
+    "memory_total_mb": 49140.0,
+    "memory_used_mb": 47226.0,
+    "memory_free_mb": 1449.0,
+    "utilization_pct": 0.0,
+    "temperature_c": 81.0,
+    "power_draw_w": 191.23
+  }
+}
