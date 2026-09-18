@@ -107,6 +107,7 @@ in the supervisor-specialist graph.
 | `calculate_customs_duty` | low | pure fn | CIF + duty + levies + VAT landed cost estimator (EAC CET 4-band + vehicle/clothing levies) |
 | `calculate_excise_duty` | low | pure fn | Statutory excise duty (mobile money 0.5%, telecom data/voice 12%, fuel, beer) |
 | `check_vat_registration` | low | pure fn | Annual turnover evaluation against the statutory VAT threshold |
+| `explain_tax_concept` | low | pure fn | Scaffolded, misconception-first tax education with live worked examples & active-recall checks |
 | `get_current_date` | low | read-only | Today's date + Ugandan fiscal year + days remaining |
 | `get_next_deadlines` | low | read-only | Next N upcoming URA filing deadlines |
 | `lookup_rate` | low | read-only | Single tax rate by key (`vat_standard`, `corporation_tax`, …) |

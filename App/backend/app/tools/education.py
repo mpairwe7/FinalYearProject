@@ -36,6 +36,7 @@ provisional or unreconciled figure carries its warning into the lesson.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -571,7 +572,7 @@ _CONCEPTS: tuple[Concept, ...] = (
             "for the specific HS code.",
         ),
         prerequisites=("vat",),
-        next_concepts=("filing_deadlines",),
+        next_concepts=("customs_valuation", "filing_deadlines"),
         example=Example(
             scenario="An importer brings in goods with a CIF value of UGX 10,000,000.",
             tool="calculate_customs_duty",
@@ -619,6 +620,7 @@ _CONCEPTS: tuple[Concept, ...] = (
             "consequences.",
         ),
         prerequisites=("fiscal_year",),
+        next_concepts=("tax_objections_appeals",),
     ),
     Concept(
         key="efris",
@@ -678,6 +680,141 @@ _CONCEPTS: tuple[Concept, ...] = (
         prerequisites=("tin", "fiscal_year"),
         next_concepts=("corporation_tax",),
     ),
+    Concept(
+        key="excise_duty",
+        title="Excise Duty",
+        explanation=(
+            "Excise duty is a tax on specified locally manufactured goods, imported commodities, "
+            "and services (such as telecommunication airtime, internet data, and mobile money cash withdrawals) "
+            "under the Excise Duty Act 2014. It is charged either as a percentage of value (ad valorem) "
+            "or as a fixed amount per unit of quantity (specific rate, such as UGX per litre on fuel)."
+        ),
+        why_it_matters=(
+            "Excise duty is levied directly at the source of manufacture, import, or service delivery. "
+            "For mobile money users, the 0.5% statutory duty applies exclusively to cash withdrawals from "
+            "an agent; sending, receiving, and depositing mobile money are legally exempt."
+        ),
+        check=(
+            "Does a person-to-person mobile money transfer attract the 0.5% mobile money excise duty?",
+            "No. Under the Excise Duty (Amendment) Act 2018, the 0.5% levy applies exclusively to cash withdrawals "
+            "(cashing out at an agent). Sending, receiving, and depositing mobile money are legally exempt from the withdrawal tax.",
+        ),
+        transfer_question=(
+            "Why does the tax law impose a specific duty on petrol (UGX 1,450 per litre) but a percentage duty "
+            "on mobile internet data (12%)? What economic stability purpose does each structure serve?"
+        ),
+        misconceptions=(
+            "Excise duty does not apply to all goods — only items gazetted in the Second Schedule of the Excise Duty Act.",
+            "Sending mobile money to family or suppliers is not subject to the 0.5% withdrawal duty; only cash withdrawals from an agent are taxed.",
+        ),
+        prerequisites=("tin", "fiscal_year"),
+        next_concepts=("filing_deadlines",),
+        example=Example(
+            scenario="A taxpayer withdraws UGX 500,000 cash from their mobile money account at an agent.",
+            tool="calculate_excise_duty",
+            arguments={"excise_type": "mobile_money_withdrawal", "amount": 500_000},
+            steps=(
+                Step("Transaction amount withdrawn", "amount"),
+                Step("Statutory excise rate on cash withdrawal", "rate", "rate"),
+                Step("Excise duty deducted", "excise_duty"),
+            ),
+        ),
+        rate_keys=("excise_duty_mobile_money_withdrawal",),
+    ),
+    Concept(
+        key="customs_valuation",
+        title="Customs Valuation and CIF",
+        explanation=(
+            "Customs valuation determines the taxable base of imported goods for duty and VAT computation. "
+            "Under the Fourth Schedule of the EACCMA and the WTO Valuation Agreement, Method 1 (Transaction Value) "
+            "is the primary basis: the price actually paid or payable, adjusted for freight, insurance, and handling "
+            "costs incurred up to the port or place of importation into the East African Community."
+        ),
+        why_it_matters=(
+            "Under-declaring invoice values or failing to provide authentic freight and insurance invoices leads "
+            "to customs value uplift, revaluation using comparative databases, and statutory penal tax under Section 249 of the EACCMA."
+        ),
+        check=(
+            "If an importer purchases machinery for $5,000 and pays $1,000 freight and $200 insurance, is duty charged on the $5,000 invoice price?",
+            "No. Customs duty is charged on the CIF (Cost, Insurance, Freight) value of $6,200 converted to UGX at the prevailing URA customs exchange rate, not on the invoice price alone.",
+        ),
+        transfer_question=(
+            "If an importer cannot provide an authentic commercial invoice or transport receipts, how does customs determine the valuation of the goods?"
+        ),
+        misconceptions=(
+            "Customs duty is not calculated on invoice price alone; international freight and transit insurance are mandatory additions to the customs base.",
+            "Depreciation allowances for used motor vehicles follow a fixed statutory schedule based on year of manufacture, not subjective vehicle condition.",
+        ),
+        prerequisites=("customs_duty",),
+        next_concepts=("filing_deadlines",),
+        example=Example(
+            scenario="An importer brings in goods with a CIF value of UGX 20,000,000 (finished goods at 25% duty).",
+            tool="calculate_customs_duty",
+            arguments={"cif_value": 20_000_000, "goods_category": "general"},
+            steps=(
+                Step("CIF value (Cost + Insurance + Freight)", "cif_value"),
+                Step("Common External Tariff duty (25%)", "duty"),
+                Step("VAT on duty-inclusive value (18%)", "vat"),
+                Step("Total landed cost", "landed_cost"),
+            ),
+        ),
+        rate_keys=("customs_duty_common", "vat_standard"),
+    ),
+    Concept(
+        key="tax_objections_appeals",
+        title="Tax Objections and Dispute Resolution",
+        explanation=(
+            "If you disagree with an assessment or tax decision issued by URA, the law gives you the right to challenge it. "
+            "Under Section 24 of the Tax Procedures Code Act, you must lodge a formal written objection within 45 days "
+            "from the date of service of the assessment notice. The Commissioner General has 90 days to render an objection decision. "
+            "If you remain aggrieved, you may appeal to the Tax Appeals Tribunal (TAT) within 30 days upon depositing 30% of the "
+            "assessed tax under Section 15 of the Tax Appeals Tribunal Act."
+        ),
+        why_it_matters=(
+            "Missing the 45-day statutory objection window renders the assessment final and conclusive, enabling URA to "
+            "commence statutory enforcement (including agency notices and bank account attachment) without further judicial review."
+        ),
+        check=(
+            "Can you appeal a tax assessment directly to the Tax Appeals Tribunal without first lodging an objection with URA?",
+            "No. The law requires you to first lodge an objection with the Commissioner General within 45 days. An appeal to the Tax Appeals Tribunal is only available after an adverse objection decision, or if the Commissioner fails to decide within 90 days.",
+        ),
+        transfer_question=(
+            "A taxpayer receives an assessment for UGX 100 million. They object within 45 days, but URA rejects the objection. To appeal to the Tax Appeals Tribunal, what financial requirement must they fulfill, and what risk do they bear?"
+        ),
+        misconceptions=(
+            "Lodging an objection does not require paying the disputed tax first; only an appeal to the Tax Appeals Tribunal requires the statutory 30% deposit.",
+            "A verbal disagreement with a tax officer or a late letter is not a valid legal objection unless a formal extension of time was granted for reasonable cause.",
+        ),
+        prerequisites=("filing_deadlines",),
+        next_concepts=(),
+    ),
+    Concept(
+        key="stamp_duty",
+        title="Stamp Duty",
+        explanation=(
+            "Stamp duty is an indirect tax charged on legal and commercial instruments (documents) specified in Schedule 2 "
+            "of the Stamp Duty Act 2014. Common instruments include land and property transfers (1% of the value), leases, "
+            "mortgage deeds, powers of attorney, and company share allotments. Stamping legalises the document, making it "
+            "legally enforceable and admissible in a court of law."
+        ),
+        why_it_matters=(
+            "An unstamped legal instrument cannot be registered at the Ministry of Lands, nor can it be admitted as evidence "
+            "in judicial proceedings until the unpaid duty and late stamping penalties are fully settled."
+        ),
+        check=(
+            "Does stamp duty on a land transfer apply to the price written on the sales agreement or the chief government valuer's assessment?",
+            "It applies to the sales consideration (agreement price) or the Chief Government Valuer's open-market valuation, whichever is higher.",
+        ),
+        transfer_question=(
+            "Why does the tax law impose stamp duty on legal documents rather than just levying a general business sales tax on contracts?"
+        ),
+        misconceptions=(
+            "Stamp duty is not a tax on the property itself; it is a tax on the legal instrument that executes the transaction.",
+            "Failing to stamp a document does not make the agreement void between the parties, but it renders it inadmissible in court and prevents official registration.",
+        ),
+        prerequisites=("tin",),
+        next_concepts=("filing_deadlines",),
+    ),
 )
 
 _BY_KEY: dict[str, Concept] = {c.key: c for c in _CONCEPTS}
@@ -695,6 +832,10 @@ _TOPIC_ALIASES: dict[str, str] = {
     "capital_gains_tax": "capital_gains",
     "customs": "customs_duty",
     "import_duty": "customs_duty",
+    "customs_duty": "customs_duty",
+    "customs_valuation": "customs_valuation",
+    "cif": "customs_valuation",
+    "valuation": "customs_valuation",
     "pay_as_you_earn": "paye",
     "salary_tax": "paye",
     "deadlines": "filing_deadlines",
@@ -708,6 +849,16 @@ _TOPIC_ALIASES: dict[str, str] = {
     "electronic_invoicing": "efris",
     "presumptive": "presumptive_tax",
     "small_business_tax": "presumptive_tax",
+    "excise": "excise_duty",
+    "excise_duty": "excise_duty",
+    "mobile_money_tax": "excise_duty",
+    "objection": "tax_objections_appeals",
+    "objections": "tax_objections_appeals",
+    "tax_disputes": "tax_objections_appeals",
+    "appeals": "tax_objections_appeals",
+    "tat": "tax_objections_appeals",
+    "stamp_duty": "stamp_duty",
+    "stamps": "stamp_duty",
 }
 
 
@@ -918,6 +1069,185 @@ def explain(
         )
     result.update(meta)
     return result
+
+
+def format_education_reply(result: dict[str, Any], reveal_answer: bool = False) -> str:
+    """Format a scaffolded tax education lesson into an engaging Markdown response."""
+    if not result.get("ok"):
+        return f"I couldn't load that tax lesson: {result.get('error', 'unknown error')}."
+
+    title = result.get("title", "")
+    explanation = result.get("explanation", "")
+    why = result.get("why_it_matters", "")
+    mistakes = result.get("common_mistakes", [])
+    example = result.get("worked_example")
+    check_q = result.get("check_question", "")
+    check_a = result.get("check_answer", "")
+    level = result.get("level", "beginner")
+    fy = result.get("fiscal_year", "")
+
+    lines = [
+        f"### 📚 Taxpayer Education: {title}",
+        "",
+        explanation,
+    ]
+
+    if why:
+        lines += [
+            "",
+            "**💡 Why It Matters:**",
+            why,
+        ]
+
+    if example:
+        lines += [
+            "",
+            "**🧮 Practical Worked Example:**",
+            f"_{example.get('scenario', '')}_",
+            "",
+        ]
+        for step in example.get("steps", []):
+            prompt = step.get("prompt", "")
+            val = step.get("value", "")
+            if step.get("to_complete"):
+                lines.append(f"- **{prompt}**: `[Your turn to calculate!]`")
+            else:
+                lines.append(f"- **{prompt}**: **{val}**")
+        if fy:
+            lines += ["", f"_Rates and figures computed from the official URA {fy} rate table._"]
+
+    if mistakes:
+        lines += [
+            "",
+            "**⚠️ Common Pitfalls to Avoid:**",
+        ]
+        for m in mistakes:
+            lines.append(f"- {m}")
+
+    if check_q:
+        lines += [
+            "",
+            "---",
+            "**🎯 Quick Knowledge Check:**",
+            f"> {check_q}",
+        ]
+        if (reveal_answer or check_a) and not result.get("answer_withheld"):
+            lines += [
+                "",
+                f"**Answer**: {check_a}",
+            ]
+        elif result.get("answer_withheld"):
+            lines += [
+                "",
+                "_Think through your answer and reply to test your understanding, or ask “show answer” to reveal it!_",
+            ]
+        elif level == "advanced":
+            lines += [
+                "",
+                "_This is a transfer scenario with multiple trade-offs. How would you approach it?_",
+            ]
+
+    if result.get("next_topics"):
+        next_names = [t.replace("_", " ").title() for t in result["next_topics"][:2]]
+        lines += [
+            "",
+            f"**Recommended next topics**: {', '.join(next_names)}.",
+        ]
+
+    return "\n".join(lines)
+
+
+_REVEAL_ASK_RE = re.compile(
+    r"\b(show|reveal|tell\s+me|give\s+me|what\s+is|what's)\s+(?:the\s+)?(?:answer|solution|check\s+answer)\b"
+    r"|\b(?:answer|solution)\s+(?:please|to\s+the\s+check)\b"
+    r"|\b(what\s+was\s+the\s+answer|tell\s+me\s+the\s+solution)\b",
+    re.IGNORECASE,
+)
+
+_EDU_ASK_RE = re.compile(
+    r"\b(what\s+(?:is|are|does)|how\s+(?:does|do)|explain|teach\s+me\s+about|"
+    r"don't\s+understand|walk\s+me\s+through|tell\s+me\s+about|give\s+me\b|"
+    r"deep\s+dive|overview\s+of|guide\s+to|"
+    r"difference\s+between|meaning\s+of|kye\s+ki|kiki|omukozi\s+wa|nnyonnyola|njigiriza|ni\s+nini|eleza|inafanyaje\s+kazi)\b",
+    re.IGNORECASE,
+)
+
+_TOPIC_DETECTION_RES: list[tuple[str, re.Pattern[str]]] = [
+    ("efris", re.compile(r"\b(efris|electronic\s+fiscal|fiscal\s+receipt|e[-\s]?invoice|e[-\s]?receipt|fdn)\b", re.IGNORECASE)),
+    ("presumptive_tax", re.compile(r"\b(presumptive(?:\s+tax)?|small\s+business\s+tax)\b", re.IGNORECASE)),
+    ("stamp_duty", re.compile(r"\b(stamp\s+duty|stempu|stampu)\b", re.IGNORECASE)),
+    ("tax_objections_appeals", re.compile(r"\b(objections?|appeals?|tat\b|tax\s+appeals\s+tribunal|pingamizi|dispute\s+assessment)\b", re.IGNORECASE)),
+    ("customs_valuation", re.compile(r"\b(customs\s+valuation|valuation\s+method|wto\s+valuation|transaction\s+value|cif\s+value)\b", re.IGNORECASE)),
+    ("customs_duty", re.compile(r"\b(customs|import\s+duty|landed\s+cost|forodha)\b", re.IGNORECASE)),
+    ("excise_duty", re.compile(r"\b(excise(?:\s+duty)?|mobile\s+money\s+tax|ushuru\s+wa\s+bidhaa)\b", re.IGNORECASE)),
+    ("capital_gains", re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
+    ("corporation_tax", re.compile(r"\b(corporation|corporate|company)\s+(?:income\s+)?tax\b|\bcit\b", re.IGNORECASE)),
+    ("rental_tax", re.compile(r"\b(rent(?:al)?\s+(?:income\s+)?tax|upangishaji|pango|obupangisa)\b", re.IGNORECASE)),
+    ("withholding_tax", re.compile(r"\b(withholding|wht|zuio)\b", re.IGNORECASE)),
+    ("progressive_taxation", re.compile(r"\b(progressive\s+(?:tax|band|bracket)|tax\s+brackets?|tax\s+bands?|marginal\s+tax|effective\s+tax)\b", re.IGNORECASE)),
+    ("paye", re.compile(r"\b(paye|pay\s+as\s+you\s+earn|salary\s+tax)\b", re.IGNORECASE)),
+    ("vat_registration", re.compile(r"\b(vat|value\s+added\s+tax)\b.*\b(registration|register)\b|\b(registration|register)\b.*\b(vat|value\s+added\s+tax)\b", re.IGNORECASE)),
+    ("vat", re.compile(r"\b(vat|value\s+added\s+tax|ongezeko\s+la\s+thamani)\b", re.IGNORECASE)),
+    ("tin", re.compile(r"\b(tin|taxpayer\s+identification(?:\s+number)?)\b", re.IGNORECASE)),
+    ("fiscal_year", re.compile(r"\b(fiscal\s+year|tax\s+year)\b", re.IGNORECASE)),
+    ("filing_deadlines", re.compile(r"\b(filing\s+deadline|due\s+date|return\s+deadline)\b", re.IGNORECASE)),
+]
+
+
+def detect_education_intent(
+    message: str,
+    previous_topic: str | None = None,
+) -> tuple[str | None, str, bool]:
+    """Detect whether *message* asks to learn, explain, or check a tax concept.
+
+    Returns:
+        (topic_key, level, reveal_answer)
+    """
+    text = (message or "").strip()
+    if not text:
+        return None, "beginner", False
+
+    # Check for explicit reveal ask
+    if _REVEAL_ASK_RE.search(text):
+        topic = previous_topic
+        for key, pat in _TOPIC_DETECTION_RES:
+            if pat.search(text):
+                topic = key
+                break
+        if topic and topic in _BY_KEY:
+            return topic, "beginner", True
+        return None, "beginner", True
+
+    from ..calculator_router import extract_amounts, plan_calculation, plan_rate_lookup
+
+    if extract_amounts(text) or plan_calculation(text):
+        return None, "beginner", False
+
+    if plan_rate_lookup(text):
+        return None, "beginner", False
+
+    has_edu_ask = bool(_EDU_ASK_RE.search(text))
+    short_inquiry = len(text.split()) <= 8
+
+    matched_topic: str | None = None
+    for key, pat in _TOPIC_DETECTION_RES:
+        if pat.search(text):
+            matched_topic = key
+            break
+
+    if not matched_topic:
+        return None, "beginner", False
+
+    if not (has_edu_ask or short_inquiry):
+        return None, "beginner", False
+
+    level = "beginner"
+    if re.search(r"\b(advanced|expert|transfer|deep\s+dive)\b", text, re.IGNORECASE):
+        level = "advanced"
+    elif re.search(r"\b(intermediate|quiz|test\s+me|practice|exercise|without\s+the\s+answer)\b", text, re.IGNORECASE):
+        level = "intermediate"
+
+    return matched_topic, level, False
 
 
 # ---------------------------------------------------------------------------

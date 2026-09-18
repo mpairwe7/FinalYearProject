@@ -109,6 +109,7 @@ _LEARN_TOPIC = re.compile(
     r"tax\s+brackets?|tax\s+bands?|progressive|marginal|"
     r"rental\s+tax|corporation\s+tax|corporate\s+tax|company\s+tax|"
     r"capital\s+gains?|customs|import\s+duty|landed\s+cost|"
+    r"excise|presumptive|stamp\s+duty|customs\s+valuation|objections?|appeals?|"
     r"fiscal\s+year|tax\s+year|filing|taxation|tax)\b",
     re.IGNORECASE,
 )

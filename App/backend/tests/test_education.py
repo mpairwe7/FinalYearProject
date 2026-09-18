@@ -301,5 +301,73 @@ class ToolContractTests(unittest.TestCase):
         self.assertIn("resident taxpayer", presumptive_res["check_answer"])
 
 
+class EducationIntentAndFormattingTests(unittest.TestCase):
+    def test_detect_education_intent_standard_topics(self) -> None:
+        from app.tools.education import detect_education_intent
+
+        for query, expected_topic in (
+            ("What is VAT?", "vat"),
+            ("How does PAYE work?", "paye"),
+            ("Explain withholding tax to me", "withholding_tax"),
+            ("What is EFRIS?", "efris"),
+            ("Explain presumptive tax", "presumptive_tax"),
+            ("What is excise duty in Uganda?", "excise_duty"),
+            ("How does customs valuation work?", "customs_valuation"),
+            ("What is stamp duty?", "stamp_duty"),
+            ("How do tax objections and appeals work?", "tax_objections_appeals"),
+            ("VAT kye ki?", "vat"),
+            ("PAYE ni nini?", "paye"),
+        ):
+            with self.subTest(query=query):
+                topic, level, reveal = detect_education_intent(query)
+                self.assertEqual(topic, expected_topic)
+                self.assertEqual(level, "beginner")
+                self.assertFalse(reveal)
+
+    def test_detect_education_intent_levels(self) -> None:
+        from app.tools.education import detect_education_intent
+
+        t_adv, lvl_adv, _ = detect_education_intent("Give me an advanced transfer deep dive on VAT")
+        self.assertEqual(t_adv, "vat")
+        self.assertEqual(lvl_adv, "advanced")
+
+        t_int, lvl_int, _ = detect_education_intent("Quiz me on PAYE with a practice exercise")
+        self.assertEqual(t_int, "paye")
+        self.assertEqual(lvl_int, "intermediate")
+
+    def test_detect_education_intent_reveal_answer(self) -> None:
+        from app.tools.education import detect_education_intent
+
+        topic, _, reveal = detect_education_intent("Show me the answer please", previous_topic="vat")
+        self.assertEqual(topic, "vat")
+        self.assertTrue(reveal)
+
+    def test_detect_education_defers_to_calculator_and_rates(self) -> None:
+        from app.tools.education import detect_education_intent
+
+        # Has an amount -> must defer to calculator
+        topic, _, _ = detect_education_intent("What is VAT on 5,000,000?")
+        self.assertIsNone(topic)
+
+        # Has rate cue -> must defer to rate lookup
+        topic, _, _ = detect_education_intent("What is the current VAT rate?")
+        self.assertIsNone(topic)
+
+    def test_format_education_reply_structure(self) -> None:
+        from app.tools.education import explain, format_education_reply
+
+        lesson = explain("vat", level="beginner")
+        formatted = format_education_reply(lesson)
+        self.assertIn("Taxpayer Education", formatted)
+        self.assertIn("Why It Matters", formatted)
+        self.assertIn("Practical Worked Example", formatted)
+        self.assertIn("Common Pitfalls", formatted)
+        self.assertIn("Quick Knowledge Check", formatted)
+        self.assertIn("Think through your answer", formatted)
+
+        revealed = format_education_reply(explain("vat", reveal_answer=True), reveal_answer=True)
+        self.assertIn("Answer", revealed)
+
+
 if __name__ == "__main__":
     unittest.main()

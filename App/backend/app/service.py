@@ -4980,6 +4980,9 @@ class ChatModel:
             or self._maybe_handle_rate_lookup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
+            or self._maybe_handle_education(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
         )
         return self._add_comparison_scope_caveat(result, message=message, rewritten=rewritten)
 
@@ -5212,6 +5215,96 @@ class ChatModel:
             },
             "next_actions": actions,
             "ticket_id": "",
+        }
+
+    def _maybe_handle_education(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Deterministic taxpayer education fast path (scaffolded explanations, not just answers).
+
+        When a taxpayer asks to understand or learn a concept ("What is VAT?", "Explain PAYE",
+        "How does withholding tax work?", "What is EFRIS?"), or asks to reveal the solution to a
+        check question, this renders a calibrated, misconception-first lesson with live URA
+        statutory figures and an interactive active-recall question.
+        """
+        from .tools.education import detect_education_intent, explain, format_education_reply
+
+        prev_topic_record = db.get_conversation_topic(thread_id)
+        prev_topic = prev_topic_record.get("topic_id") if prev_topic_record else None
+
+        topic, level, reveal_answer = detect_education_intent(message, previous_topic=prev_topic)
+        if not topic and rewritten:
+            topic, level, reveal_answer = detect_education_intent(rewritten, previous_topic=prev_topic)
+
+        if not topic:
+            return None
+
+        try:
+            lesson = explain(topic=topic, level=level, reveal_answer=reveal_answer)
+            if not lesson.get("ok"):
+                return None
+        except Exception:
+            logger.exception("education tool execution failed for topic %s", topic)
+            return None
+
+        reply_md = format_education_reply(lesson, reveal_answer=reveal_answer)
+        final_reply = self._finalize_reply(f"{reply_md}\n\n{CONTACT_FOOTER}")
+        if locale not in ("", "en"):
+            final_reply = localize_reply(final_reply, locale)
+
+        title = lesson.get("title", topic.replace("_", " ").title())
+        actions = []
+        if reveal_answer:
+            actions.append(f"Calculate {title} for my figures")
+            if lesson.get("next_topics"):
+                next_t = lesson["next_topics"][0].replace("_", " ").title()
+                actions.append(f"Learn about {next_t}")
+            actions.append("Ask another tax question")
+        else:
+            actions.append("Show the answer to the check question")
+            actions.append(f"Calculate {title}")
+            if lesson.get("next_topics"):
+                next_t = lesson["next_topics"][0].replace("_", " ").title()
+                actions.append(f"Explore {next_t}")
+
+        try:
+            db.upsert_conversation_topic(
+                conversation_id=thread_id,
+                topic_id=topic,
+                display_name=title,
+                turn_count=1,
+            )
+        except Exception:
+            pass
+
+        return {
+            "reply": final_reply,
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "education",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "tool_specialist",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["scaffolded taxpayer education"],
+                "confidence_band": "high",
+            },
+            "next_actions": actions,
+            "ticket_id": "",
+            "current_topic": topic,
         }
 
     def _maybe_handle_tin_clarification(
