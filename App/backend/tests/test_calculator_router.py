@@ -611,3 +611,54 @@ class NewRateLookupsTests(unittest.TestCase):
         reply, _actions = format_rate_reply(plan, get_table())
         self.assertIn("150,000,000", reply)
         self.assertIn("10,000,000", reply)
+
+    def test_vehicle_environmental_levy_lookup(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        plan = plan_rate_lookup("What is the environmental levy rate on imported motor vehicles aged 6 years?")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tax_type, "environmental_levy_used_vehicles_5_to_8_years")
+        reply, _actions = format_rate_reply(plan, get_table())
+        self.assertIn("35%", reply)
+
+    def test_fuel_and_telecom_excise_lookups(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        table = get_table()
+        plan_petrol = plan_rate_lookup("What is the excise duty rate on petrol?")
+        self.assertIsNotNone(plan_petrol)
+        self.assertEqual(plan_petrol.tax_type, "excise_duty_fuel_petrol_per_litre")
+        reply, _ = format_rate_reply(plan_petrol, table)
+        self.assertIn("1,450", reply)
+
+        plan_data = plan_rate_lookup("What is the excise duty rate on internet data?")
+        self.assertIsNotNone(plan_data)
+        self.assertEqual(plan_data.tax_type, "excise_duty_telecom_data")
+        reply, _ = format_rate_reply(plan_data, table)
+        self.assertIn("12%", reply)
+
+
+class ExciseAndCustomsPlanningTests(unittest.TestCase):
+    def test_mobile_money_cash_withdrawal_plan(self) -> None:
+        plan = plan_calculation("Calculate excise duty on 500,000 mobile money cash withdrawal")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_excise_duty")
+        self.assertEqual(plan.params["excise_type"], "mobile_money_withdrawal")
+        self.assertEqual(plan.params["amount"], 500_000.0)
+
+    def test_customs_raw_materials_plan(self) -> None:
+        plan = plan_calculation("Calculate customs duty on 10,000,000 raw materials CIF")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_customs_duty")
+        self.assertEqual(plan.params["goods_category"], "raw_materials")
+        self.assertEqual(plan.params["cif_value"], 10_000_000.0)
+
+    def test_customs_used_vehicle_plan(self) -> None:
+        plan = plan_calculation("Calculate import duty for a 6 years old car CIF 15m with withholding tax")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_customs_duty")
+        self.assertEqual(plan.params["goods_category"], "used_vehicle_5_to_8_years")
+        self.assertTrue(plan.params["include_wht"])
+        self.assertEqual(plan.params["cif_value"], 15_000_000.0)

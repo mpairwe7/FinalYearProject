@@ -252,7 +252,15 @@ _ALREADY_REGISTERED_RE = re.compile(
 )
 
 _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
+    ("customs", re.compile(r"\b(customs|import\s+(?:duty|tax|charges?|cost)|cif)\b", re.IGNORECASE)),
     ("withholding", re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
+    (
+        "excise",
+        re.compile(
+            r"\b(excise(?:\s+duty)?|ushuru\s+wa\s+bidhaa|mobile\s+money\s+(?:tax|duty|charge|withdrawal)|airtime\s+tax|petrol\s+tax|diesel\s+tax|fuel\s+tax)\b",
+            re.IGNORECASE,
+        ),
+    ),
     (
         "rental",
         re.compile(
@@ -265,10 +273,10 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
     (
         "paye",
         re.compile(
-            r"\b(paye|take[-\s]?home|net[-\s]?pay|gross[-\s]?pay|net[-\s]?salary|gross[-\s]?salary|salaries?\s+tax"
-            r"|pay\s+as\s+you\s+earn|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salaries?|income|earnings|pay)"
-            r"|tax\s+on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salaries?|income|earnings|pay)"
-            r"|salaries?\b.*\btax|tax\b.*\b(?:salaries?|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salaries?|income))\b",
+            r"\b(paye|take[-\s]?home|net[-\s]?pay|gross[-\s]?pay|net[-\s]?salary|gross[-\s]?salary|salar(?:y|ies)\s+tax"
+            r"|pay\s+as\s+you\s+earn|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salar(?:y|ies)|income|earnings|pay)"
+            r"|tax\s+on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salar(?:y|ies)|income|earnings|pay)"
+            r"|salar(?:y|ies)\b.*\btax|tax\b.*\b(?:salar(?:y|ies)|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salar(?:y|ies)|income))\b",
             re.IGNORECASE,
         ),
     ),
@@ -279,7 +287,6 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
             r"\b(corporation|corporate|company)\s+(?:income\s+)?tax\b", re.IGNORECASE
         ),
     ),
-    ("customs", re.compile(r"\b(customs|import\s+(?:duty|tax|charges?|cost)|cif)\b", re.IGNORECASE)),
     ("vat", re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)),
 ]
 
@@ -309,12 +316,23 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock)\b", re.IGNORECASE)),
 ]
 
+_EXCISE_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
+    ("mobile_money_withdrawal", re.compile(r"\b(mobile\s*money|momo|airtel\s*money|mtn\s*money|cash\s*withdrawal|withdraw)\b", re.IGNORECASE)),
+    ("telecom_data", re.compile(r"\b(data|internet|bundle|mb|gb|gigabytes?|megabytes?)\b", re.IGNORECASE)),
+    ("telecom_voice", re.compile(r"\b(airtime|voice|call(?:s|ing)?|minutes)\b", re.IGNORECASE)),
+    ("beer_malt", re.compile(r"\b(beer|malt|alcohol|brew)\b", re.IGNORECASE)),
+    ("fuel_petrol", re.compile(r"\b(petrol|gasoline)\b", re.IGNORECASE)),
+    ("fuel_diesel", re.compile(r"\b(diesel|gasoil)\b", re.IGNORECASE)),
+    ("fuel_kerosene", re.compile(r"\b(kerosene|paraffin)\b", re.IGNORECASE)),
+]
+
 
 #: Calculator intent -> the tool that answers it.  Used by the
 #: supervisor to route; :func:`plan_calculation` maps the same intents
 #: to a full plan with parameters.
 INTENT_TOOLS: dict[str, str] = {
     "withholding": "calculate_withholding",
+    "excise": "calculate_excise_duty",
     "paye": "calculate_paye",
     "rental": "calculate_rental_tax",
     "capital_gains": "calculate_capital_gains",
@@ -473,14 +491,55 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         ]
         if duty_pcts:
             params["duty_rate"] = duty_pcts[0] / 100
+        elif re.search(r"\b(raw\s+materials?|capital\s+goods?)\b", text, re.IGNORECASE):
+            params["goods_category"] = "raw_materials"
+            assumptions.append("EAC CET Band 1: raw materials / capital goods (0% duty)")
+        elif re.search(r"\bintermediate\b", text, re.IGNORECASE):
+            params["goods_category"] = "intermediate"
+            assumptions.append("EAC CET Band 2: intermediate goods (10% duty)")
+        elif re.search(r"\b(sensitive|sugar|rice|wheat|cement)\b", text, re.IGNORECASE):
+            params["goods_category"] = "sensitive"
+            assumptions.append("EAC CET Band 4: sensitive items (35% duty)")
+        elif re.search(r"\b(used\s+cloth\w*|second\s+hand\s+cloth\w*|worn\s+cloth\w*|mivumba|mitumba)\b", text, re.IGNORECASE):
+            params["goods_category"] = "used_clothing"
+            assumptions.append("used clothing includes 30% environmental levy on CIF")
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b|\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
+            params["goods_category"] = "used_vehicle_5_to_8_years"
+            assumptions.append("used motor vehicle 5-8 years: 35% environmental levy")
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b|\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
+            params["goods_category"] = "used_vehicle_over_8_years"
+            assumptions.append("used motor vehicle 8-15 years: 50% environmental levy (vehicles >15 yrs prohibited)")
         else:
             assumptions.append("common external tariff duty of 25% (tell me the exact rate to refine)")
+
+        if re.search(r"\b(wht|withholding)\b", text, re.IGNORECASE):
+            params["include_wht"] = True
+            assumptions.append("includes 6% commercial import withholding tax (s.119)")
+
         missing = []
         if single is not None:
             params["cif_value"] = single
         else:
             missing.append("cif_value")
         return CalcPlan("calculate_customs_duty", "calc_customs_duty", params, missing, assumptions)
+
+    if intent == "excise":
+        params, missing = {}, []
+        assumptions = []
+        excise_type = next((name for name, pat in _EXCISE_TYPE_RES if pat.search(text)), None)
+        if excise_type is not None:
+            params["excise_type"] = excise_type
+        else:
+            if re.search(r"\b(withdraw\w*|cash)\b", text, re.IGNORECASE):
+                params["excise_type"] = "mobile_money_withdrawal"
+                assumptions.append("mobile money cash withdrawal (0.5% rate)")
+            else:
+                missing.append("excise_type")
+        if single is not None:
+            params["amount"] = single
+        else:
+            missing.append("amount")
+        return CalcPlan("calculate_excise_duty", "calc_excise_duty", params, missing, assumptions)
 
     if intent == "rental":
         params = {"landlord_type": "company" if _COMPANY_RE.search(text) else "individual"}
@@ -618,6 +677,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             "- Statutory Basis: Income Tax Act",
         ]
     elif tool == "calculate_customs_duty":
+        goods_cat = str(result.get("goods_category", "general")).replace("_", " ")
         lines = [
             f"**Customs duty estimate ({fy})**",
             "",
@@ -628,12 +688,33 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             levy_pct = float(result.get("environmental_levy_rate") or 0) * 100
             lines.append(
                 f"- Environmental levy at {levy_pct:.0f}% of CIF "
-                f"(used clothing): {_ugx(result['environmental_levy'])}"
+                f"({goods_cat}): {_ugx(result['environmental_levy'])}"
             )
         if result.get("vat_included"):
             lines.append(f"- VAT on (CIF + duty + levy): {_ugx(result['vat'])}")
+        if result.get("wht_included"):
+            lines.append(f"- Commercial import WHT (6% on CIF): {_ugx(result['wht'])}")
         lines.append(f"- Estimated landed cost: **{_ugx(result['landed_cost'])}**")
         lines.append("- Statutory Basis: East African Community Customs Management Act (EACCMA)")
+    elif tool == "calculate_excise_duty":
+        excise_type = str(result.get("excise_type", "")).replace("_", " ")
+        is_specific = bool(result.get("is_specific_rate"))
+        if is_specific:
+            rate_str = f"UGX {float(result['rate']):,.0f}/litre"
+            amt_str = f"{float(result['amount']):,.0f} litres"
+        else:
+            rate_str = f"{float(result['rate']) * 100:.1f}%"
+            amt_str = _ugx(result['amount'])
+        lines = [
+            f"**Excise duty — {excise_type} ({fy})**",
+            "",
+            f"- Base: {amt_str}",
+            f"- Statutory rate: {rate_str}",
+            f"- Excise duty payable: **{_ugx(result['excise_duty'])}**",
+            "- Statutory Basis: Excise Duty Act 2014 (as amended)",
+        ]
+        if result.get("excise_type") == "mobile_money_withdrawal":
+            lines.append("- _Note: 0.5% applies to cash withdrawals only; deposits and transfers are exempt._")
     elif tool == "check_vat_registration":
         required = bool(result.get("registration_required"))
         lines = [
@@ -710,8 +791,8 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(rates?|thresholds?|bands?|allowance|days?|due|calculated|computed|kiwango|viwango|omuwendo|ekkomo|kikomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
-    r"|\b(rates?|thresholds?|bands?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
+    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|omuwendo|ekkomo|kikomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
+    r"|\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
     r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|omuwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
     r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b",
@@ -767,6 +848,92 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         re.compile(
             r"\b(mobile\s*money|cash\s*withdrawal)\b[^?]{0,50}\b(excise|duty|rate|levy)\b"
             r"|\b(excise|duty|rate|levy)\b[^?]{0,50}\b(mobile\s*money|cash\s*withdrawal)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_levy_used_clothing"),
+        re.compile(
+            r"\b(used\s+cloth\w*|second\s+hand\s+cloth\w*|worn\s+cloth\w*|mivumba|mitumba)\b[^?]{0,50}\b(levy|tax|duty|rate)\b"
+            r"|\b(environmental\s+levy|levy|duty|rate)\b[^?]{0,50}\b(used\s+cloth\w*|second\s+hand\s+cloth\w*|worn\s+cloth\w*|mivumba|mitumba)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_levy_used_vehicles_5_to_8_years"),
+        re.compile(
+            r"\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b[^?]{0,40}\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b"
+            r"|\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b[^?]{0,40}\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_levy_used_vehicles_over_8_years"),
+        re.compile(
+            r"\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b[^?]{0,40}\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b"
+            r"|\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b[^?]{0,40}\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="infrastructure_development_levy"),
+        re.compile(
+            r"\b(infrastructure(?:\s+development)?\s+levy|idl)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="commercial_import_withholding_tax"),
+        re.compile(
+            r"\b(import\s+wht|import\s+withholding(?:\s+tax)?|withholding\s+on\s+import\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_telecom_data"),
+        re.compile(
+            r"\b(data|internet|bundle)\b[^?]{0,40}\b(excise|tax|rate|duty)\b"
+            r"|\b(excise|tax|rate|duty)\b[^?]{0,40}\b(data|internet|bundle)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_telecom_voice"),
+        re.compile(
+            r"\b(airtime|voice|call(?:s)?)\b[^?]{0,40}\b(excise|tax|rate|duty)\b"
+            r"|\b(excise|tax|rate|duty)\b[^?]{0,40}\b(airtime|voice|call(?:s)?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_fuel_petrol_per_litre"),
+        re.compile(
+            r"\b(petrol|gasoline)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
+            r"|\b(excise|duty|tax|rate)\b[^?]{0,40}\b(petrol|gasoline)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_fuel_diesel_per_litre"),
+        re.compile(
+            r"\b(diesel|gasoil)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
+            r"|\b(excise|duty|tax|rate)\b[^?]{0,40}\b(diesel|gasoil)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_fuel_kerosene_per_litre"),
+        re.compile(
+            r"\b(kerosene|paraffin)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
+            r"|\b(excise|duty|tax|rate)\b[^?]{0,40}\b(kerosene|paraffin)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_beer_malt"),
+        re.compile(
+            r"\b(beer|malt\s+beer|malt)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
+            r"|\b(excise|duty|tax|rate)\b[^?]{0,40}\b(beer|malt\s+beer|malt)\b",
             re.IGNORECASE,
         ),
     ),
@@ -874,7 +1041,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     if not (_RATE_ASK_RE.search(text) or short_ask):
         # A salary-threshold question names no tax and no "rate"/"threshold",
         # so it fails the gate above while still being a rate-table question.
-        if _PAYE_THRESHOLD_ASK_RE.search(text):
+        if _PAYE_THRESHOLD_ASK_RE.search(text) and not re.search(r"\ballowances?\b", text, re.IGNORECASE):
             return RatePlan(summary="paye")
         return None
     for plan, pattern in _RATE_TYPE_RES:
@@ -1065,6 +1232,49 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "**The passenger baggage duty-free allowance is USD 500** for accompanying personal effects "
             "under the East African Community Customs Management Act ({fy})."
         ),
+        "environmental_levy_used_vehicles_5_to_8_years": (
+            "**The environmental levy on used motor vehicles aged 5 to 8 years is {pct}** of the CIF "
+            "value ({fy}) under the East African Community Customs Management Act.\n\n"
+            "- Statutory Basis: EACCMA / Traffic and Road Safety Act"
+        ),
+        "environmental_levy_used_vehicles_over_8_years": (
+            "**The environmental levy on used motor vehicles aged 8 to 15 years is {pct}** of the CIF "
+            "value ({fy}). Note: Importation of vehicles older than 15 years is prohibited under the "
+            "Traffic and Road Safety (Amendment) Act.\n\n"
+            "- Statutory Basis: EACCMA / Traffic and Road Safety Act"
+        ),
+        "infrastructure_development_levy": (
+            "**The infrastructure development levy on non-EAC imports is {pct}** of the CIF "
+            "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act"
+        ),
+        "commercial_import_withholding_tax": (
+            "**The commercial import withholding tax (WHT) is {pct}** of the CIF "
+            "value ({fy}) under Section 119 of the Income Tax Act. Taxpayers with a valid WHT exemption certificate are exempt."
+        ),
+        "excise_duty_telecom_data": (
+            "**The excise duty rate on telecommunication data/internet services is {pct}** ({fy}) "
+            "under the Excise Duty Act 2014."
+        ),
+        "excise_duty_telecom_voice": (
+            "**The excise duty rate on telecommunication airtime and voice calls is {pct}** ({fy}) "
+            "under the Excise Duty Act 2014."
+        ),
+        "excise_duty_fuel_petrol_per_litre": (
+            "**The excise duty on petrol is UGX {petrol:,.0f} per litre** ({fy}) "
+            "under the Excise Duty Act 2014 (Schedule 2)."
+        ),
+        "excise_duty_fuel_diesel_per_litre": (
+            "**The excise duty on diesel (gas oil) is UGX {diesel:,.0f} per litre** ({fy}) "
+            "under the Excise Duty Act 2014 (Schedule 2)."
+        ),
+        "excise_duty_fuel_kerosene_per_litre": (
+            "**The excise duty on illuminating kerosene is UGX {kerosene:,.0f} per litre** ({fy}) "
+            "under the Excise Duty Act 2014 (Schedule 2)."
+        ),
+        "excise_duty_beer_malt": (
+            "**The excise duty on malt beer is {pct}** (or statutory minimum per litre, whichever is higher) "
+            "({fy}) under the Excise Duty Act 2014."
+        ),
     }
     template = descriptions.get(plan.tax_type)
     rate = rates.get(plan.tax_type)
@@ -1090,6 +1300,9 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         presumptive_min=f"UGX {float(rates.get('presumptive_tax_lower_threshold', 10000000)):,.0f}",
         presumptive_max=f"UGX {float(rates.get('presumptive_tax_upper_threshold', 150000000)):,.0f}",
         late_min=f"UGX {float(rates.get('penal_tax_late_filing_minimum_ugx', 200000)):,.0f}",
+        petrol=float(rates.get("excise_duty_fuel_petrol_per_litre", 1450)),
+        diesel=float(rates.get("excise_duty_fuel_diesel_per_litre", 1130)),
+        kerosene=float(rates.get("excise_duty_fuel_kerosene_per_litre", 200)),
     )
     actions = NEXT_ACTIONS_BY_TOOL.get(
         {
@@ -1098,10 +1311,20 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "capital_gains_corporate": "calculate_capital_gains",
             "customs_duty_common": "calculate_customs_duty",
             "environmental_levy_used_clothing": "calculate_customs_duty",
+            "environmental_levy_used_vehicles_5_to_8_years": "calculate_customs_duty",
+            "environmental_levy_used_vehicles_over_8_years": "calculate_customs_duty",
+            "infrastructure_development_levy": "calculate_customs_duty",
+            "commercial_import_withholding_tax": "calculate_customs_duty",
             "rental_tax_individual": "calculate_rental_tax",
             "rental_tax_company": "calculate_rental_tax",
             "vat_registration_threshold_annual": "check_vat_registration",
-            "excise_duty_mobile_money_withdrawal": "calculate_withholding",
+            "excise_duty_mobile_money_withdrawal": "calculate_excise_duty",
+            "excise_duty_telecom_data": "calculate_excise_duty",
+            "excise_duty_telecom_voice": "calculate_excise_duty",
+            "excise_duty_fuel_petrol_per_litre": "calculate_excise_duty",
+            "excise_duty_fuel_diesel_per_litre": "calculate_excise_duty",
+            "excise_duty_fuel_kerosene_per_litre": "calculate_excise_duty",
+            "excise_duty_beer_malt": "calculate_excise_duty",
             "presumptive_tax_threshold": "calculate_corporation_tax",
             "penal_tax_late_filing": "calculate_corporation_tax",
         }.get(plan.tax_type, "calculate_withholding"),
@@ -1118,6 +1341,10 @@ NEXT_ACTIONS_BY_TOOL: dict[str, list[str]] = {
     "calculate_customs_duty": ["Estimate duty for another import", "Ask about EAC tariff classification"],
     "calculate_rental_tax": ["Calculate for a different rent", "Ask how rental tax is declared"],
     "calculate_withholding": ["Calculate WHT on another payment", "Ask when WHT applies"],
+    "calculate_excise_duty": [
+        "Calculate excise duty on another amount",
+        "Ask about excisable goods under the Excise Duty Act",
+    ],
     "check_vat_registration": [
         "Check another turnover figure",
         "Ask how to register for VAT",

@@ -686,12 +686,29 @@ class CustomsDutyCalculator(CalculatorTool):
                     },
                     "goods_category": {
                         "type": "string",
-                        "enum": ["general", "used_clothing"],
+                        "enum": [
+                            "general",
+                            "raw_materials",
+                            "intermediate",
+                            "sensitive",
+                            "used_clothing",
+                            "used_vehicle_5_to_8_years",
+                            "used_vehicle_over_8_years",
+                        ],
                         "description": (
-                            "'used_clothing' additionally applies the environmental levy "
-                            "on worn-clothing imports, charged on the CIF value."
+                            "Goods category under EAC CET & excise schedules: "
+                            "'general' (25% finished goods), 'raw_materials' (0%), "
+                            "'intermediate' (10%), 'sensitive' (35%), "
+                            "'used_clothing' (30% environmental levy), "
+                            "'used_vehicle_5_to_8_years' (35% environmental levy), "
+                            "'used_vehicle_over_8_years' (50% environmental levy)."
                         ),
                         "default": "general",
+                    },
+                    "include_wht": {
+                        "type": "boolean",
+                        "description": "Whether to include 6% commercial import withholding tax (s.119). Default false.",
+                        "default": False,
                     },
                 },
                 ["cif_value"],
@@ -707,35 +724,57 @@ class CustomsDutyCalculator(CalculatorTool):
         cif_value: Any,
         duty_rate: Any = None,
         include_vat: bool = True,
+        include_wht: bool = False,
         goods_category: str = "general",
         **_: Any,
     ) -> CalcResult:
-        if goods_category not in ("general", "used_clothing"):
+        valid_cats = (
+            "general", "raw_materials", "intermediate", "sensitive",
+            "used_clothing", "used_vehicle_5_to_8_years", "used_vehicle_over_8_years"
+        )
+        if goods_category not in valid_cats:
             return CalcResult(
                 {
                     "ok": False,
                     "error": (
-                        f"goods_category must be 'general' or 'used_clothing' "
+                        f"goods_category must be one of {valid_cats} "
                         f"(got {goods_category!r})"
                     ),
                 }
             )
         cif = to_decimal(cif_value, field="cif_value")
-        keys: list[str] = ["customs_duty_common"]
-        rate = (
-            to_rate(duty_rate, field="duty_rate")
-            if duty_rate is not None
-            else _require_scalar(table, "customs_duty_common")
-        )
+        keys: list[str] = []
+
+        # Determine duty rate
+        if duty_rate is not None:
+            rate = to_rate(duty_rate, field="duty_rate")
+        elif goods_category == "raw_materials":
+            rate = Decimal("0.0")
+        elif goods_category == "intermediate":
+            rate = Decimal("0.10")
+        elif goods_category == "sensitive":
+            rate = Decimal("0.35")
+        else:
+            rate = _require_scalar(table, "customs_duty_common")
+            keys.append("customs_duty_common")
 
         duty = cif * rate
+
+        # Environmental levy
         levy = Decimal(0)
         levy_rate = Decimal(0)
         if goods_category == "used_clothing":
             levy_rate = _require_scalar(table, "environmental_levy_used_clothing")
             levy = cif * levy_rate
             keys.append("environmental_levy_used_clothing")
+        elif goods_category == "used_vehicle_5_to_8_years":
+            levy_rate = Decimal("0.35")
+            levy = cif * levy_rate
+        elif goods_category == "used_vehicle_over_8_years":
+            levy_rate = Decimal("0.50")
+            levy = cif * levy_rate
 
+        # VAT compounding: VAT = (CIF + Duty + Levy) * 18%
         vat_rate = Decimal(0)
         vat = Decimal(0)
         if include_vat:
@@ -743,12 +782,19 @@ class CustomsDutyCalculator(CalculatorTool):
             vat = (cif + duty + levy) * vat_rate
             keys.append("vat_standard")
 
-        total = cif + duty + levy + vat
+        # Commercial Import WHT (6%)
+        wht = Decimal(0)
+        if include_wht:
+            wht = cif * Decimal("0.06")
+
+        total = cif + duty + levy + vat + wht
         parts = [f"CIF {_ugx(cif)} + duty {rate * 100:.0f}% ({_ugx(duty)})"]
         if levy > 0:
             parts.append(f" + environmental levy {levy_rate * 100:.0f}% ({_ugx(levy)})")
         if include_vat:
             parts.append(f" + {vat_rate * 100:.0f}% VAT ({_ugx(vat)})")
+        if include_wht:
+            parts.append(f" + 6% import WHT ({_ugx(wht)})")
 
         return CalcResult(
             {
@@ -760,14 +806,16 @@ class CustomsDutyCalculator(CalculatorTool):
                 "environmental_levy": to_float(levy),
                 "vat_included": include_vat,
                 "vat": to_float(vat),
+                "wht_included": include_wht,
+                "wht": to_float(wht),
                 "landed_cost": to_float(total),
                 "explanation": (
                     "".join(parts) + f" = {_ugx(total)} landed cost. "
-                    "Note: the binding duty rate is the EAC CET tariff line for the "
-                    "goods' HS code — use URA EACCustoms for exact classification."
+                    "Note: binding duty rate is the EAC CET tariff line for the "
+                    "goods' HS code. Vehicles over 15 years are prohibited under the Traffic Act."
                 ),
             },
-            rate_keys=tuple(keys),
+            rate_keys=tuple(keys) if keys else ("customs_duty_common",),
         )
 
 
@@ -981,6 +1029,94 @@ class WithholdingTaxCalculator(CalculatorTool):
         )
 
 
+class ExciseDutyCalculator(CalculatorTool):
+    """Compute statutory excise duty for mobile money, data, airtime, and fuel."""
+
+    _RATE_KEYS: dict[str, str] = {
+        "mobile_money_withdrawal": "excise_duty_mobile_money_withdrawal",
+        "telecom_data": "excise_duty_telecom_data",
+        "telecom_voice": "excise_duty_telecom_voice",
+        "beer_malt": "excise_duty_beer_malt",
+        "fuel_petrol": "excise_duty_fuel_petrol_per_litre",
+        "fuel_diesel": "excise_duty_fuel_diesel_per_litre",
+        "fuel_kerosene": "excise_duty_fuel_kerosene_per_litre",
+    }
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="calculate_excise_duty",
+            description=(
+                "Calculate Uganda statutory excise duty under the Excise Duty Act 2014: "
+                "0.5% on mobile money cash withdrawals; 12% on internet data and voice calls; "
+                "60% on malt beer; UGX 1,450 per litre on petrol; UGX 1,130 per litre on diesel. "
+                "Use when the user asks how much excise duty applies to a withdrawal, fuel, airtime, or excisable items."
+            ),
+            parameters=_schema_params(
+                {
+                    "excise_type": {
+                        "type": "string",
+                        "enum": sorted(self._RATE_KEYS),
+                        "description": "Excisable product or transaction type.",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Transaction value in UGX (or litres for fuel).",
+                    },
+                },
+                ["excise_type", "amount"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(self, table: RateTable, excise_type: str, amount: Any, **_: Any) -> CalcResult:
+        rate_key = self._RATE_KEYS.get(excise_type)
+        if rate_key is None:
+            return CalcResult(
+                {
+                    "ok": False,
+                    "error": (
+                        f"Unknown excise_type '{excise_type}'. "
+                        f"Choose one of: {', '.join(sorted(self._RATE_KEYS))}"
+                    ),
+                }
+            )
+        base = to_decimal(amount, field="amount")
+        rate = _require_scalar(table, rate_key)
+
+        is_fuel = excise_type in ("fuel_petrol", "fuel_diesel", "fuel_kerosene")
+        if is_fuel:
+            excise_tax = base * rate
+            fuel_name = excise_type.replace("fuel_", "").capitalize()
+            explanation = (
+                f"Excise duty on {base:,.0f} litres of {fuel_name} at "
+                f"UGX {rate:,.0f}/litre is {_ugx(excise_tax)}."
+            )
+        else:
+            excise_tax = base * rate
+            label = excise_type.replace("_", " ")
+            explanation = (
+                f"Excise duty on {label} of {_ugx(base)} at {rate * 100:.1f}% is {_ugx(excise_tax)}."
+            )
+            if excise_type == "mobile_money_withdrawal":
+                explanation += " Note: 0.5% applies to cash withdrawals only; deposits and transfers are exempt."
+
+        return CalcResult(
+            {
+                "excise_type": excise_type,
+                "amount": to_float(base),
+                "rate": float(rate),
+                "excise_duty": to_float(excise_tax),
+                "is_specific_rate": is_fuel,
+                "explanation": explanation,
+            },
+            rate_keys=(rate_key,),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Register everything on import
 # ---------------------------------------------------------------------------
@@ -993,6 +1129,7 @@ CALCULATOR_TOOLS: tuple[CalculatorTool, ...] = (
     CustomsDutyCalculator(),
     RentalIncomeTaxCalculator(),
     WithholdingTaxCalculator(),
+    ExciseDutyCalculator(),
 )
 
 for _tool in CALCULATOR_TOOLS:

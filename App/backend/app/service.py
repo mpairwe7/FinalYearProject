@@ -1704,11 +1704,14 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 # Pump produced nothing (breaker open or empty stream) — the
                 # tone_hint never reached a model, so the extractive fallback
                 # carries the empathy acknowledgment itself (EI parity).
-                if attachments:
-                    full_reply = self._format_attachment_fallback_reply(attachments)
+                if attachments and hasattr(model, "_format_attachment_fallback_reply"):
+                    full_reply = model._format_attachment_fallback_reply(attachments)
                 else:
                     full_reply = result.get("reply", "")
-                full_reply = self._finalize_reply(full_reply, attachments=attachments)
+                if hasattr(model, "_finalize_reply"):
+                    finalized = model._finalize_reply(full_reply, attachments=attachments)
+                    if isinstance(finalized, str):
+                        full_reply = finalized
                 if distress and full_reply:
                     full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
                 # One frame, so localize before sending rather than revising

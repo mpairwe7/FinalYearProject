@@ -102,7 +102,11 @@ in the supervisor-specialist graph.
 | `calculate_paye` | low | pure fn | Monthly PAYE on employment income (progressive bands) |
 | `calculate_corporation_tax` | low | pure fn | 30% CIT on chargeable income |
 | `calculate_capital_gains` | low | pure fn | Corporate CGT = 30% × (sale − cost) |
-| `calculate_customs_duty` | low | pure fn | CIF + duty + VAT landed cost estimator |
+| `calculate_rental_tax` | low | pure fn | Individual (12% above threshold) or corporate (30% net) rental tax |
+| `calculate_withholding` | low | pure fn | Statutory WHT at source (services, goods, dividends, royalties, etc.) |
+| `calculate_customs_duty` | low | pure fn | CIF + duty + levies + VAT landed cost estimator (EAC CET 4-band + vehicle/clothing levies) |
+| `calculate_excise_duty` | low | pure fn | Statutory excise duty (mobile money 0.5%, telecom data/voice 12%, fuel, beer) |
+| `check_vat_registration` | low | pure fn | Annual turnover evaluation against the statutory VAT threshold |
 | `get_current_date` | low | read-only | Today's date + Ugandan fiscal year + days remaining |
 | `get_next_deadlines` | low | read-only | Next N upcoming URA filing deadlines |
 | `lookup_rate` | low | read-only | Single tax rate by key (`vat_standard`, `corporation_tax`, …) |

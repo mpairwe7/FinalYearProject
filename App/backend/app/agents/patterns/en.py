@@ -140,7 +140,7 @@ _TEMPORAL = (
     ),
     (
         re.compile(
-            r"\b(next\s+deadlines?|upcoming\s+deadlines?|next\s+filing\s+(?:date|deadline)|deadlines?\s+this\s+month|upcoming\s+filing)\b",
+            r"\b(next\s+deadlines?|upcoming\s+deadlines?|filing\s+deadline|due\s+date|when\s+is.*\s+due|next\s+filing\s+(?:date|deadline)|deadlines?\s+this\s+month|upcoming\s+filing)\b",
             re.IGNORECASE,
         ),
         "Needs upcoming deadlines",
