@@ -128,6 +128,9 @@ export const sw: Partial<Dictionary> = {
   'common.retry': 'Jaribu tena',
   'common.offline':
     'Huko mtandaoni. Ujumbe utatumwa punde utakaporejesha muunganisho.',
+  'common.low_bandwidth': 'Mtandao wa kasi ya chini. Hali ya kuokoa data inatumika.',
+  'common.offline_notice': 'Huna mtandao kwa sasa. Mwongozo wa dharura na vikokotoo vya kodi vinafanya kazi.',
+  'common.offline_calculator': 'Kikokotoo cha Kodi',
 
   // Documents & Extraction ------------------------------------------------
   'documents.inspect': 'Kagua',

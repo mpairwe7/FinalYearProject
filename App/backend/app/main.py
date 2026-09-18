@@ -29,6 +29,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket
 
 # Proxy header validation — prevents IP rate-limit bypass via forged
@@ -806,6 +807,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID"],
 )
+
+# GZip compression middleware (low-bandwidth & mobile 2G/3G optimization)
+# Automatically compresses responses >= 500 bytes when client accepts gzip.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Analytics middleware (must be added after CORS)
 app.add_middleware(AnalyticsMiddleware)

@@ -130,6 +130,9 @@ export const lg: Partial<Dictionary> = {
   'common.retry': 'Ddamu ogezeeko',
   'common.offline':
     'Toli ku yintaneeti. Obubaka bujja kusindikibwa bw’oddamu okukwatagana.',
+  'common.low_bandwidth': 'Yintaneeti eri wansi. Enkozesa ya data ekendeddwa.',
+  'common.offline_notice': 'Tolina yintaneeti kaakano. Eby\'emisolo eby\'amangu n\'ebibalirwako bikola.',
+  'common.offline_calculator': 'Ekibala Emisolo',
 
   // Documents & Extraction ------------------------------------------------
   'documents.inspect': 'Kebera',

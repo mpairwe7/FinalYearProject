@@ -27,6 +27,7 @@ import {
 } from '../services/voiceService';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
@@ -311,6 +312,7 @@ export default function Page() {
   // Signed-in state drives the landing call to action; the token is verified by
   // the backend, so this is not "someone has a token in localStorage".
   const { status: identityStatus, name: identityName } = useIdentity();
+  const { isOffline: _isOffline, isLowBandwidth } = useNetworkStatus();
 
   // Document attachments awaiting the next chat turn
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -897,6 +899,19 @@ export default function Page() {
     const conversationId = activeConversationId ?? ensureActiveConversationId();
     shouldStickToBottomRef.current = true;
     setShowScrollToLatest(false);
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const offlineMsg = t('handoff.offline') || 'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.';
+      addTurns([
+        createTurn('user', text, sentAttachments.length ? { attachments: sentAttachments } : undefined),
+        createTurn('assistant', offlineMsg, { offlineMode: true }),
+      ]);
+      setMessage('');
+      setPendingAttachments([]);
+      setChatLiveStatus('Offline mode. Please reconnect to submit questions.');
+      return;
+    }
+
     addTurns([
       createTurn('user', text, sentAttachments.length ? { attachments: sentAttachments } : undefined),
       // The empty assistant turn used to be added only once the stream
@@ -917,7 +932,7 @@ export default function Page() {
     const ac = new AbortController();
     streamAbortRef.current = ac;
     userStoppedRef.current = false;
-    const timeout = setTimeout(() => ac.abort(), 120_000);
+    const timeout = setTimeout(() => ac.abort(), isLowBandwidth ? 180_000 : 120_000);
     const requestBody = JSON.stringify({
       message: text,
       conversation_id: conversationId,
@@ -1218,7 +1233,11 @@ export default function Page() {
       } else if (recovered) {
         setChatLiveStatus('URA response ready.');
       } else if (currentLast?.role === 'assistant' && !currentLast.content.trim()) {
-        updateLastTurn((t) => ({ ...t, content: 'Sorry, I could not reach the URA knowledge base. Please try again shortly.' }));
+        const isOff = typeof navigator !== 'undefined' && !navigator.onLine;
+        const fallbackText = isOff
+          ? (t('handoff.offline') || 'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.')
+          : (t('handoff.failed') || 'Sorry, I could not reach the URA knowledge base. Please try again shortly.');
+        updateLastTurn((t) => ({ ...t, content: fallbackText, offlineMode: isOff }));
       }
       if (userStoppedRef.current) {
         setChatLiveStatus('Response stopped.');
@@ -1245,7 +1264,7 @@ export default function Page() {
       }
       saveCurrentSession();
     }
-  }, [message, isLoading, locale, activeConversationId, pendingAttachments, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
+  }, [message, isLoading, locale, activeConversationId, pendingAttachments, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
@@ -1299,7 +1318,7 @@ export default function Page() {
               const tid = useChatStore.getState().chat[useChatStore.getState().chat.length - 1]?.id;
               if (r.reply_audio_base64) {
                 if (tid) { setPlayingTurnId(tid); try { await playAudioBase64(r.reply_audio_base64); } finally { setPlayingTurnId((p) => p === tid ? null : p); } }
-              } else if (autoNarrate && tid) {
+              } else if (autoNarrate && !isLowBandwidth && tid) {
                 // Server skipped inline narration (time budget) — the text is
                 // already on screen; fetch the audio as its own request.
                 void handleListenToReply(tid, r.reply);
@@ -1472,7 +1491,7 @@ export default function Page() {
     } finally {
       setIsTransitioning(false);
     }
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, armMic, disarmMic]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, isLowBandwidth, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, armMic, disarmMic]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {

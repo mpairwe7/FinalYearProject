@@ -20,13 +20,34 @@ describe('OfflineBanner', () => {
     expect(screen.getByText(/You are offline/i)).toBeDefined();
   });
 
-  it('renders nothing when network is online', () => {
+  it('renders nothing when network is online and normal bandwidth', () => {
     vi.spyOn(networkHook, 'useNetworkStatus').mockReturnValue({
       isOnline: true,
       isOffline: false,
+      isLowBandwidth: false,
+      effectiveType: '4g',
+      saveData: false,
+      downlink: 10,
+      rtt: 50,
     });
 
     const { container } = render(<OfflineBanner />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it('renders low bandwidth warning when online with isLowBandwidth', () => {
+    vi.spyOn(networkHook, 'useNetworkStatus').mockReturnValue({
+      isOnline: true,
+      isOffline: false,
+      isLowBandwidth: true,
+      effectiveType: '2g',
+      saveData: false,
+      downlink: 0.2,
+      rtt: 1500,
+    });
+
+    render(<OfflineBanner />);
+    expect(screen.getByRole('status')).toBeDefined();
+    expect(screen.getByText(/Low Bandwidth/i)).toBeDefined();
   });
 });

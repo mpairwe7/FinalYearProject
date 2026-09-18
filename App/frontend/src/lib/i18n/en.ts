@@ -155,6 +155,9 @@ export const en = {
   'common.close': 'Close',
   'common.retry': 'Try again',
   'common.offline': 'You are offline. Messages will send when you reconnect.',
+  'common.low_bandwidth': 'Low-bandwidth connection detected. Data Saver mode active.',
+  'common.offline_notice': 'You are offline. Cached emergency guidance and tax calculators are available.',
+  'common.offline_calculator': 'Offline Calculator',
 
   // Documents & Extraction ------------------------------------------------
   'documents.inspect': 'Inspect',
