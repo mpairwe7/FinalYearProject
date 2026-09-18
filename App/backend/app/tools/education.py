@@ -1168,7 +1168,7 @@ _EDU_ASK_RE = re.compile(
     r"\b(what\s+(?:is|are|does\b.*\bmean)|how\s+(?:does|do)\b.*\bwork|"
     r"explain\b|teach\s+me\s+about|"
     r"don't\s+understand|walk\s+me\s+through|tell\s+me\s+about|give\s+me\b|"
-    r"deep\s+dive|overview\s+of|guide\s+to|"
+    r"deep\s+dive|overview\s+of|guide\s+to|quiz\b|test\s+me|practice|exercise|"
     r"difference\s+between|meaning\s+of|"
     r"kye\s+ki|kiki|omukozi\s+wa|nnyonnyola|njigiriza|ni\s+nini|eleza|inafanyaje\s+kazi)\b",
     re.IGNORECASE,

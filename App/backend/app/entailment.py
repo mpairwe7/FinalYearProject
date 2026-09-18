@@ -349,10 +349,10 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
                 context_words = set(re.findall(r"\w{3,}", context.lower()))
                 shared = (claim_words & context_words) - {
                     "that", "with", "from", "this", "have", "were", "will", "your", "under",
-                    "tax", "rate", "rates", "taxes", "standard", "services", "goods", "amount", "payment",
+                    "tax", "taxes", "standard", "services", "goods", "amount", "payment",
                     "vehicle", "motor", "used", "imported", "import", "customs", "duty", "levy", "value",
                 }
-                if shared:
+                if shared or ("rate" in claim_words and "rate" in context_words):
                     return True
 
     if not _RULE_CUE_RE.search(claim):
@@ -364,21 +364,22 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
     ca_money = {a for a in model_amounts if a >= 1000.0}
     xa_money = {a for a in xa if a >= 1000.0}
     if ca_money and xa_money and ca_money.isdisjoint(xa_money):
-        def _rule_subject(text: str) -> str | None:
+        def _rule_subjects(text: str) -> set[str]:
             tl = text.lower()
+            res = set()
             if "audit" in tl or "audited" in tl or "accountant" in tl:
-                return "audit"
+                res.add("audit")
             if "vat" in tl or "value added" in tl:
-                return "vat"
+                res.add("vat")
             if "presumptive" in tl or "small business" in tl:
-                return "presumptive"
+                res.add("presumptive")
             if "paye" in tl or "salary" in tl or "wage" in tl:
-                return "paye"
-            return None
+                res.add("paye")
+            return res
 
-        cs = _rule_subject(claim)
-        xs = _rule_subject(context)
-        if cs and xs and cs != xs:
+        cs = _rule_subjects(claim)
+        xs = _rule_subjects(context)
+        if cs and xs and cs.isdisjoint(xs):
             pass  # Different legal rules (e.g. 500m audit vs 150m VAT registration)
         else:
             claim_words = set(re.findall(r"\w{3,}", claim.lower()))
