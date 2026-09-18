@@ -45,6 +45,9 @@ class AudioSignifiers {
   /** Play a gentle ascending earcon when microphone begins listening (440Hz -> 880Hz). */
   playMicStart(): void {
     if (!this.enabled) return;
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate(25); } catch {}
+    }
     const ctx = this.getContext();
     if (!ctx) return;
 
@@ -74,6 +77,9 @@ class AudioSignifiers {
   /** Play a gentle descending confirmation tone when microphone stops (880Hz -> 440Hz). */
   playMicStop(): void {
     if (!this.enabled) return;
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate([15, 30, 15]); } catch {}
+    }
     const ctx = this.getContext();
     if (!ctx) return;
 

@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
 import { formatDocType } from '../lib/attachments';
@@ -7,6 +7,7 @@ import { localeLabel } from '../lib/locales';
 import { useTranslation } from '../lib/i18n';
 import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
 import { authHeaders } from '../lib/authSession';
+import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
 import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon } from './Icons';
@@ -139,6 +140,10 @@ function ChatMessageInner({
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
   const t = useTranslation();
+  const deadlineEvent = useMemo(
+    () => (isAssistant && !isGreeting ? detectDeadlineInMessage(turn.content) : null),
+    [isAssistant, isGreeting, turn.content]
+  );
 
   return (
     <article className={`message-row message-row-${turn.role}`}>
@@ -292,6 +297,43 @@ function ChatMessageInner({
               })}
             </ol>
           </details>
+        )}
+
+        {isAssistant && !isGreeting && !phaseLabel && deadlineEvent && (
+          <div className="deadline-sync-banner" role="region" aria-label="Statutory Tax Deadline Sync">
+            <span className="deadline-sync-icon" aria-hidden="true">📅</span>
+            <div className="deadline-sync-info">
+              <span className="deadline-sync-title">{deadlineEvent.title}</span>
+              <span className="deadline-sync-date">
+                Due: {deadlineEvent.startDate.toLocaleDateString(locale === 'lg' ? 'en-UG' : locale, {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+              </span>
+            </div>
+            <div className="deadline-sync-actions">
+              <button
+                type="button"
+                className="deadline-sync-btn"
+                onClick={() => downloadCalendarEvent(deadlineEvent)}
+                title="Download iCalendar (.ics) reminder file with 1-day alert"
+                aria-label={`Download calendar reminder for ${deadlineEvent.title}`}
+              >
+                Add to Calendar (.ics)
+              </button>
+              <a
+                className="deadline-sync-link"
+                aria-label="Open in Google Calendar"
+                href={getGoogleCalendarUrl(deadlineEvent)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open in Google Calendar"
+              >
+                Google Calendar ↗
+              </a>
+            </div>
+          </div>
         )}
 
         {isAssistant && !isGreeting && !phaseLabel && turn.nextActions && turn.nextActions.length > 0 && onActionClick && (

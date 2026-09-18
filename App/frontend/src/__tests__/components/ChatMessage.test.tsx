@@ -216,4 +216,14 @@ describe("ChatMessage", () => {
     );
     expect(screen.getByText(/Verified Taxpayer Education/)).toBeInTheDocument();
   });
+
+  it("renders statutory deadline calendar sync banner when deadline is detected", () => {
+    renderMsg({
+      ...assistantTurn,
+      content: "PAYE returns and payments are due by the 15th day of each month under the Tax Procedures Code Act.",
+    });
+    expect(screen.getByLabelText(/Statutory Tax Deadline Sync/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Download calendar reminder/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open in Google Calendar/i })).toBeInTheDocument();
+  });
 });
