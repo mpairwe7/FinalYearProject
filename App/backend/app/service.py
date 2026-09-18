@@ -366,7 +366,7 @@ def _clean_passage_text(text: str) -> str:
     t = re.sub(rf"(?:{re.escape(_PARA_SENTINEL)}[ ]*)+$", "", t)  # trim trailing break
     t = t.replace(_PARA_SENTINEL, "\n\n")
     t = re.sub(r"[\s;]+\d{1,3}\s*$", "", t)  # trailing orphan page number
-    t = re.sub(r"[\s;]+\d{1,2}\.\s*$", "", t)  # trailing orphan list marker
+    t = re.sub(r"[\s;]+\d{1,2}(?:\.|\]|\[\d+\])?\s*$", "", t)  # trailing orphan list marker or chopped citation
     return t.strip()
 
 
@@ -453,7 +453,7 @@ def _build_fallback_prompt(
 # sentence or a citation marker regardless of length, so "no terminator" is
 # trusted on its own — deterministic templates/calculators never reach this
 # check (they bypass the LLM entirely), so this can't misfire on them.
-_REPLY_TERMINATORS = (".", "!", "?", '"', "'", ")", "]", "”", "’", "»")
+_REPLY_TERMINATORS = (".", "!", "?", '"', "'", ")", "]", "”", "’", "»", "`", "*", ":", ";", "~", "-", "|", ">")
 
 
 def _looks_truncated(text: str) -> bool:
@@ -2840,10 +2840,14 @@ def localize_reply(reply: str, locale: str) -> str:
             candidate, residue = mt.restore_figures(candidate, figure_map)
             if residue:
                 return None, "sentinel_residue"
+            # When figures were masked, verify every protected statutory figure
+            # made it back into the restored candidate text.
+            if not all(fig in candidate for fig in figure_map.values()):
+                return None, "figures_changed"
+        elif not mt.figures_survived(source_to_translate, candidate):
+            return None, "figures_changed"
         if not mt.length_plausible(source_to_translate, candidate):
             return None, "collapsed"
-        if not mt.figures_survived(source_to_translate, candidate):
-            return None, "figures_changed"
         if not mt.units_survived(source_to_translate, candidate):
             candidate = mt.restore_missing_units(source_to_translate, candidate)
             if not mt.units_survived(source_to_translate, candidate):
@@ -3772,6 +3776,7 @@ class ChatModel:
             # end of the excerpt ("...remit to URA. 1") — strip it. Numbers
             # BEFORE the final punctuation (amounts, hotlines) are untouched.
             excerpt = re.sub(r"(?<=[.!?)])\s+\d{1,3}\s*$", "", excerpt).rstrip()
+            excerpt = re.sub(r"[\s;]+\d{1,2}(?:\.|\]|\[\d+\])?\s*$", "", excerpt).rstrip()
             # Different handbook fiscal-year editions often carry near-identical
             # wording for the same section, so the top-ranked hits can be the
             # same passage from two editions. This gate skips a near-duplicate
@@ -5113,7 +5118,7 @@ class ChatModel:
             return None
         if _TIN_ORG_QUERY_RE.search(combined) or _TIN_INDIVIDUAL_QUERY_RE.search(combined):
             return None
-        if re.search(r"\b(whatsapp|phone|call|sms|ussd|mobile\s+app|portal|how\s+long|cost|fee|free|status|requirements?|documents?)\b", combined, re.IGNORECASE):
+        if re.search(r"\b(whatsapp|phone|call|sms|ussd|mobile\s+app|portal|how\s+long|cost|fee|free|status|requirements?|documents?|instant|online)\b", combined, re.IGNORECASE):
             return None
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
             return None

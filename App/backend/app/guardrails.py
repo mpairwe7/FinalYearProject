@@ -193,7 +193,8 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
     for p in [
         # Direct fraud/evasion requests
         r"(?:how\s+(?:to|do\s+(?:I|you|we))|explain\s+how\s+to|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to)\s+(?:evade|avoid|dodge|escape|cheat|hide|conceal|under[\-\s]?report|misreport|falsif|forge|fake|fabricat)",
-        r"(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
+        r"(?:help|teach)\s+me\s+(?:to\s+)?(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
+        r"\b(?:schemes?|tricks?|tactics?|strategies)\s+(?:to|for)\s+(?:evade|dodge|cheat\s+on)\s+(?:tax|VAT|income|revenue)",
         r"(?:forge|fake|fabricat|counterfeit|falsif)\w*\s+(?:(?:a|an|the|my|some)\s+)?"
         r"(?:fake\s+)?(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
         r"(?:under[\-\s]?report|misreport|under[\-\s]?declare)\s+(?:income|revenue|sales|earnings|profit|expenses?|VAT)",

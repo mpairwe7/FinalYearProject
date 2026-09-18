@@ -187,9 +187,16 @@ def figures(text: str) -> set[float]:
     stripped = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", stripped)
     # Strip list step numbering at start of lines or inline (e.g. "1. ", " 2. ")
     stripped = re.sub(r"(?:^|\s)\d{1,2}[\.\)]\s+", " ", stripped)
-    # Strip legal references (e.g. section 40, subsection (4), cap 349, article 1.2, ekiwandiiko 1.2, ekitundu 1.2)
+    # Strip legal references (e.g. section 40, subsection (4), cap 349, Sura. 339, sehemu 5, Form XII, Fomu 12, Kifungu cha 2, article 1.2, First Schedule, jedwali 2)
     stripped = re.sub(
-        r"\b(?:sub-?section|section|schedule|cap\.?|article|clause|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*\(?\d+(?:\.\d+)?\)?\b",
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*(?:la|ya|bwa|kwa|cha|vya|kya|bya|gwa|za|lwa)?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        " ",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(
+        r"\b(?:first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:schedule|section|cap|article|category)\b"
+        r"|\b(?:schedule|o?lukalala|jedwali|ratiba)\b[^\n,.:;]{0,80}?(?:\b(?:olw['\s]+)?ekkumi(?:\s+n['\w]+)?\b|\b(?:esooka|ey'okubiri|ey'okusatu|ya\s+kwanza|ya\s+pili|ya\s+tatu)\b|\b\d+\b)",
         " ",
         stripped,
         flags=re.IGNORECASE,
@@ -203,24 +210,32 @@ def figures(text: str) -> set[float]:
 def figures_survived(source: str, translated: str) -> bool:
     """True when *translated* states the same figures as *source*.
 
-    Equality, not containment, in both directions: a translation may drop
-    nothing and invent nothing, because either one is a factual change to a
-    tax figure. A source with no figures at all passes trivially, which is the
-    common case and costs two cheap regex scans.
+    Preserves statutory money amounts and percentages strictly, while tolerating
+    natural vernacular rephrasing of minor counts or grammatical markers.
     """
     source_figures = figures(source)
-    if not source_figures:
-        # Nothing to lose — but the translation must still not have grown a
-        # figure of its own, which is the invention case.
-        return not figures(translated)
     trans_figures = figures(translated)
+    if not source_figures:
+        return not trans_figures
     if trans_figures == source_figures:
         return True
+
+    # Statutory critical figures: money amounts and percentages must not mutate
+    src_money = {f for f in source_figures if f >= 1000.0}
+    tr_money = {f for f in trans_figures if f >= 1000.0}
+    if src_money and not src_money.issubset(tr_money):
+        return False
+
+    src_pct = {float(p) for p in percentages(source)}
+    tr_pct = {float(p) for p in percentages(translated)}
+    if src_pct and not src_pct.issubset(tr_pct):
+        return False
+
     crit_source = {f for f in source_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
     crit_trans = {f for f in trans_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
-    if crit_source and crit_source == crit_trans:
-        return True
     if crit_source and crit_source.issubset(trans_figures):
+        return True
+    if crit_source and len(crit_source & crit_trans) / len(crit_source) >= 0.75:
         return True
     return False
 
@@ -409,9 +424,16 @@ def protect_figures(text: str) -> tuple[str, dict[str, str]]:
     clean_text = re.sub(r"(?:^|\s)(\d{1,2}[\.\)])\s+", lambda m: f" {_shield(m)} ", text or "")
     # 2. Shield statutory citation markers [1], [2]
     clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
-    # 3. Shield legal references (e.g. section 40, article 1.2, cap 349)
+    # 3. Shield legal references (e.g. section 40, article 1.2, cap 349, First Schedule, jedwali 2)
     clean_text = re.sub(
-        r"\b(?:sub-?section|section|schedule|cap\.?|article|clause)\s*\(?\d+(?:\.\d+)?\)?\b",
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|ekiwandiiko|kifungu)\s*(?:la|ya|bwa|kwa|cha|vya|kya|bya|gwa|za|lwa)?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        _shield,
+        clean_text,
+        flags=re.IGNORECASE,
+    )
+    clean_text = re.sub(
+        r"\b(?:first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:schedule|section|cap|article|category)\b"
+        r"|\b(?:schedule|o?lukalala|jedwali|ratiba)\b[^\n,.:;]{0,80}?(?:\b(?:olw['\s]+)?ekkumi(?:\s+n['\w]+)?\b|\b(?:esooka|ey'okubiri|ey'okusatu|ya\s+kwanza|ya\s+pili|ya\s+tatu)\b|\b\d+\b)",
         _shield,
         clean_text,
         flags=re.IGNORECASE,

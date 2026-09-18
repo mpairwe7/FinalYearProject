@@ -149,7 +149,8 @@ _DEFINITIONAL_OPENER_RE = re.compile(
 # branch below did not list. Both have a published answer and no amount to
 # compute on.
 _INFO_ONLY_RE = re.compile(
-    r"\bhow\s+(is|are|does)\b.*\b(calculated|computed|charged|determined)\b"
+    r"\bhow\s+(is|are|does|do|can)\b.*\b(calculate|calculated|compute|computed|charge|charged|determine|determined)\b"
+    r"|\bwho\s+(?:must|should|needs?|is|are)\b.*\b(register|registered|registration|liable|eligible|pay|file)\b"
     # "how much X is exempt / tax-free / taxable / deducted" — a threshold
     # lookup. Kept narrow: "how much PAYE will I pay on 3,500,000" has no
     # "is/are + exempt", so it still reaches the calculator.
@@ -318,7 +319,7 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     against.
     """
     text = (message or "").strip()
-    if not text or _INFO_ONLY_RE.search(text):
+    if not text or _INFO_ONLY_RE.search(text) or re.search(r"^\s*who\b", text, re.IGNORECASE):
         return None
 
     # "Must I register for VAT?" is a threshold test, not a calculation,

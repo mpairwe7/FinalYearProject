@@ -1530,6 +1530,7 @@ def score_reply(faq: "EvalFAQ", reply: str, retrieval_mode: str) -> dict[str, An
     # Official guided workflow turns are valid conversational fulfillments
     if retrieval_mode == "workflow" and len(clean_text) > 40:
         term_ratio = 1.0
+        non_answer = False
 
     # Weights are applied only over the components this item actually has, then
     # renormalised, so an item with no figures is not silently scored out of

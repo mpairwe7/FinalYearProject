@@ -1239,8 +1239,8 @@ def translate_text(
     from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
 
     verdict = InputGuard().check(text)
-    if not verdict.allowed:
-        logger.warning("Prompted MT refused input (reason_length=%d)", len(verdict.reason or ""))
+    if not verdict.allowed and any(f in ("prompt_injection", "length_exceeded") for f in verdict.flags):
+        logger.warning("Prompted MT refused input (flags=%s)", verdict.flags)
         return ""
 
     _names = {"lg": "Luganda", "en": "English", "sw": "Swahili",
@@ -1296,7 +1296,7 @@ def translate_text(
         " Keep all statutory tax acronyms (such as VAT, TIN, EFRIS, DTS, PAYE, WHT, URA, TCC, EACCMA) verbatim. "
         "Preserve all citation markers (such as [1], [2], [3]) verbatim and in-place. "
         "Write all numbers, percentages, dates, and monetary amounts "
-        "using exact Arabic numerals and standard currency notation — do NOT invent or add any new numbers, percentages, or figures, and do NOT write numbers or amounts out as words."
+        "using exact Arabic numerals and standard currency notation — do NOT drop, omit, invent, or add any numbers, percentages, dates, or figures, and do NOT write numbers or amounts out as words."
     )
     glossary_hints = get_translation_glossary_hints(text, target_lang)
     if target_lang == "en":
@@ -1352,6 +1352,7 @@ def translate_text(
             raw = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", raw, flags=re.IGNORECASE)
             raw = re.sub(r"\[+([a-zA-Z_]+)\]*", r"\1", raw)
             raw = re.sub(r"\[{2,}", "", raw)
+            raw = re.sub(r"(?:\n|^)\s*(?:\*+)?(?:Note|Kumbuka|Zingatia|Tanbihi|Okulabula|Tahadhari)\s*:\s*.*$", "", raw, flags=re.IGNORECASE | re.DOTALL)
             return raw.strip()
         except Exception:  # noqa: BLE001 — MT is best-effort; caller falls through
             logger.debug("Prompted MT via vLLM failed", exc_info=True)

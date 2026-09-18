@@ -100,7 +100,7 @@ _LUGANDA_PCT_WORDS = [
 _AMOUNT_RE = re.compile(
     r"(?:ugx|ug\s?shs?|shs|shillings?|ssente|ensimbi|shilingi)?\s*"
     r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\s*"
-    r"(k|m|bn|b|thousand|million|billion|milioni|bilioni|elfu|laki|obukadde|akakadde|obuwumbi|akawumbi|emitwalo|omutwalo|enkumi|olukumi)?\b",
+    r"(k|m|bn|b|thousand|million|billion|milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?nkumi|o?lukumi)?\b",
     re.IGNORECASE,
 )
 _AMOUNT_SUFFIX = {
@@ -116,18 +116,26 @@ _AMOUNT_SUFFIX = {
     "elfu": 1_000,
     "laki": 100_000,
     "obukadde": 1_000_000,
+    "bukadde": 1_000_000,
     "akakadde": 1_000_000,
+    "kakadde": 1_000_000,
     "obuwumbi": 1_000_000_000,
+    "buwumbi": 1_000_000_000,
     "akawumbi": 1_000_000_000,
+    "kawumbi": 1_000_000_000,
     "emitwalo": 10_000,
+    "mitwalo": 10_000,
     "omutwalo": 10_000,
+    "mutwalo": 10_000,
     "enkumi": 1_000,
+    "nkumi": 1_000,
     "olukumi": 1_000,
+    "lukumi": 1_000,
 }
 
-# Multipliers placed BEFORE digits (common in Swahili & Luganda, e.g. "milioni 150", "obukadde 150", "obukadde bwa siringi 5")
+# Multipliers placed BEFORE digits (common in Swahili & Luganda, e.g. "milioni 150", "obukadde 150", "bukadde bwa siringi 5")
 _AMOUNT_PREFIX_RE = re.compile(
-    r"\b(milioni|bilioni|elfu|laki|obukadde|akakadde|obuwumbi|akawumbi|emitwalo|omutwalo|enkumi|olukumi)"
+    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?nkumi|o?lukumi)"
     r"(?:\s+(?:bwa|kwa|za|ya|nga)?\s*(?:ssente|sente|siringi|shilingi|shs|ugx)?)?\s+"
     r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\b",
     re.IGNORECASE,
@@ -138,13 +146,21 @@ _AMOUNT_PREFIX_MULTIPLIERS = {
     "elfu": 1_000,
     "laki": 100_000,
     "obukadde": 1_000_000,
+    "bukadde": 1_000_000,
     "akakadde": 1_000_000,
+    "kakadde": 1_000_000,
     "obuwumbi": 1_000_000_000,
+    "buwumbi": 1_000_000_000,
     "akawumbi": 1_000_000_000,
+    "kawumbi": 1_000_000_000,
     "emitwalo": 10_000,
+    "mitwalo": 10_000,
     "omutwalo": 10_000,
+    "mutwalo": 10_000,
     "enkumi": 1_000,
+    "nkumi": 1_000,
     "olukumi": 1_000,
+    "lukumi": 1_000,
 }
 
 #: Statements *about the rule* — a wrong amount here is a factual error about
@@ -224,8 +240,10 @@ def canonical_amounts(text: str) -> set[float]:
     # Normalize English ordinal dates (e.g. "15th", "1st", "30th") to cardinal digits
     # so statutory filing deadlines survive translation into Swahili and Luganda
     remainder = re.sub(r"\b(\d{1,2})(?:st|nd|rd|th)\b", r"\1", remainder, flags=re.IGNORECASE)
-    # Strip common non-numeric idioms containing cardinal/ordinal words (e.g. "third party", "mtu wa tatu")
+    # Strip common non-numeric idioms containing cardinal/ordinal words (e.g. "third party", "mtu wa tatu", "pande mbili")
     remainder = re.sub(r"\b(?:mtu|watu|upande|pande|chama|mtu\s+yeyote)\s+wa\s+tatu\b", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(?:pande|upande|sehemu)\s+(?:za|ya|wa)?\s*mbili\b", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(?:njuyi|enjuyi|empande)\s+(?:zombi|z'ebbiri)\b", " ", remainder, flags=re.IGNORECASE)
     remainder = re.sub(r"\bthird[-\s]part(?:y|ies)\b", " ", remainder, flags=re.IGNORECASE)
 
     # 2. Standard suffixes (e.g. "150m", "150 million", "UGX 150,000,000") and plain numbers
@@ -245,10 +263,12 @@ def canonical_amounts(text: str) -> set[float]:
         "seven": 7.0, "eight": 8.0, "nine": 9.0, "ten": 10.0,
         "twenty": 20.0, "thirty": 30.0, "forty": 40.0, "fifty": 50.0,
         # Luganda & Swahili
-        "munaana": 8.0, "minane": 8.0, "nane": 8.0, "musanvu": 7.0,
-        "mukaaga": 6.0, "sita": 6.0, "ttaano": 5.0, "taano": 5.0, "tano": 5.0,
-        "nnya": 4.0, "nne": 4.0, "ssatu": 3.0, "tatu": 3.0, "bbiri": 2.0, "mbili": 2.0,
-        "kkumi": 10.0, "kumi": 10.0, "asatu": 30.0, "thelathini": 30.0, "abiri": 20.0,
+        "munaana": 8.0, "minane": 8.0, "nane": 8.0, "omunaana": 8.0, "musanvu": 7.0, "omusanvu": 7.0,
+        "mukaaga": 6.0, "sita": 6.0, "omukaaga": 6.0, "ttaano": 5.0, "taano": 5.0, "tano": 5.0, "etaano": 5.0, "ettaano": 5.0, "ebitaano": 5.0,
+        "nnya": 4.0, "nne": 4.0, "ennya": 4.0, "bana": 4.0, "ssatu": 3.0, "essatu": 3.0, "tatu": 3.0, "esatu": 3.0, "ebisatu": 3.0,
+        "bbiri": 2.0, "ebbiri": 2.0, "mbili": 2.0, "zibiri": 2.0, "ebibiri": 2.0,
+        "mwenda": 9.0, "tisa": 9.0, "omwenda": 9.0,
+        "kkumi": 10.0, "kumi": 10.0, "ekkumi": 10.0, "asatu": 30.0, "thelathini": 30.0, "abiri": 20.0,
         "ishirini": 20.0, "ana": 40.0, "arobaini": 40.0, "ataano": 50.0, "hamsini": 50.0,
     }
     for word, val in _CARDINAL_WORDS.items():
