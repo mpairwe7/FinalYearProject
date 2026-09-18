@@ -172,4 +172,48 @@ describe("ChatMessage", () => {
     const { container } = renderMsg(userTurn);
     expect(container.querySelector("article")).toBeInTheDocument();
   });
+
+  it("renders suggested next action chips and handles clicks", () => {
+    const onActionClick = vi.fn();
+    const actionTurn: ChatTurn = {
+      ...assistantTurn,
+      nextActions: ["Calculate VAT for my figures", "Explore VAT Registration"],
+    };
+    renderMsg(actionTurn, { onActionClick });
+
+    const btn1 = screen.getByRole("button", { name: /Calculate VAT for my figures/ });
+    const btn2 = screen.getByRole("button", { name: /Explore VAT Registration/ });
+    expect(btn1).toBeInTheDocument();
+    expect(btn2).toBeInTheDocument();
+
+    fireEvent.click(btn1);
+    expect(onActionClick).toHaveBeenCalledWith("Calculate VAT for my figures");
+  });
+
+  it("renders statutory calculator and taxpayer education provenance badges", () => {
+    const { rerender } = renderMsg({
+      ...assistantTurn,
+      faithfulnessScore: null,
+      retrievalMode: "calculator",
+    });
+    expect(screen.getByText(/Official Statutory Calculator/)).toBeInTheDocument();
+
+    rerender(
+      <ChatMessage
+        turn={{
+          ...assistantTurn,
+          faithfulnessScore: null,
+          retrievalMode: "education",
+        }}
+        userQuery="What is VAT?"
+        locale="en"
+        playingTurnId={null}
+        ttsLoading={null}
+        isTransitioning={false}
+        onListen={vi.fn()}
+        conversationId="conv-1"
+      />,
+    );
+    expect(screen.getByText(/Verified Taxpayer Education/)).toBeInTheDocument();
+  });
 });

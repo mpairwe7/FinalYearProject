@@ -792,6 +792,51 @@ main {
 }
 
 /* -----------------------------------------------------------------------------
+   Suggested Next Action Chips
+   -------------------------------------------------------------------------- */
+.chat-action-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--border-subtle, rgba(255, 255, 255, 0.1));
+}
+
+.chat-action-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.85rem;
+  min-height: 36px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 9999px;
+  color: var(--text-primary, inherit);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: left;
+}
+
+.chat-action-chip:hover {
+  background: var(--ura-red-subtle, rgba(220, 38, 38, 0.1));
+  border-color: var(--ura-red, #dc2626);
+  color: var(--ura-red, #dc2626);
+  transform: translateY(-1px);
+}
+
+.chat-action-chip:active {
+  transform: translateY(0);
+}
+
+.chat-action-chip-arrow {
+  color: var(--ura-red, #dc2626);
+  font-weight: 600;
+}
+
+/* -----------------------------------------------------------------------------
    Bubble actions (listen + feedback row)
    -------------------------------------------------------------------------- */
 .bubble-actions {

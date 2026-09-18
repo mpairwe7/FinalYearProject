@@ -959,6 +959,7 @@ export default function Page() {
         retrievalMode: d.retrieval_mode ?? 'keyword',
         escalationRequired: d.escalation_required ?? false,
         escalationReason: d.escalation_reason ?? '',
+        nextActions: d.next_actions ?? [],
       };
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
@@ -1087,6 +1088,7 @@ export default function Page() {
                 retrievalMode: p.retrieval_mode ?? t.retrievalMode,
                 escalationRequired: p.escalation_required ?? t.escalationRequired,
                 escalationReason: p.escalation_reason ?? t.escalationReason,
+                nextActions: p.next_actions ?? t.nextActions,
               }));
             } catch {}
           }
@@ -1109,6 +1111,7 @@ export default function Page() {
               retrievalMode: p.retrieval_mode ?? t.retrievalMode,
               escalationRequired: p.escalation_required ?? t.escalationRequired,
               escalationReason: p.escalation_reason ?? t.escalationReason,
+              nextActions: p.next_actions ?? t.nextActions,
             }));
           } catch {}
           return;
@@ -1794,6 +1797,7 @@ export default function Page() {
                     phaseVariant={isPending ? PHASE_UI[turnPhase].variant : undefined}
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
                     onInspectAttachment={(att) => setInspectingDoc(att)}
+                    onActionClick={(action) => sendMessage(action)}
                   />
                 );
               })}

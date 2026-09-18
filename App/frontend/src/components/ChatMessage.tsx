@@ -96,6 +96,7 @@ interface ChatMessageProps {
   phaseVariant?: string;
   phaseStartedAt?: number;
   onInspectAttachment?: (attachment: ChatAttachment) => void;
+  onActionClick?: (action: string) => void;
 }
 
 /**
@@ -133,6 +134,7 @@ function ChatMessageInner({
   phaseVariant,
   phaseStartedAt,
   onInspectAttachment,
+  onActionClick,
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
@@ -229,13 +231,27 @@ function ChatMessageInner({
         {/* chatv2: grounding sits outside the citations block — a low-confidence
             answer often has no citations, and that is exactly when the reader
             most needs the warning. */}
-        {isAssistant && !isGreeting && !phaseLabel && turn.content && turn.faithfulnessScore != null && (
+        {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="grounding-row">
-            <span
-              className={`grounding-badge ${turn.faithfulnessScore >= 0.6 ? 'grounding-ok' : 'grounding-warn'}`}
-            >
-              {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
-            </span>
+            {turn.retrievalMode === 'calculator' ? (
+              <span className="grounding-badge grounding-ok" title="Deterministic arithmetic against official URA statutory rate tables">
+                ✓ Official Statutory Calculator
+              </span>
+            ) : turn.retrievalMode === 'education' ? (
+              <span className="grounding-badge grounding-ok" title="Scaffolded curriculum verified against URA taxpayer handbooks">
+                📚 Verified Taxpayer Education
+              </span>
+            ) : turn.retrievalMode === 'contact_channels' ? (
+              <span className="grounding-badge grounding-ok" title="Official URA toll-free, WhatsApp, email and portal channels">
+                📞 Official URA Helpdesk
+              </span>
+            ) : turn.faithfulnessScore != null ? (
+              <span
+                className={`grounding-badge ${turn.faithfulnessScore >= 0.6 ? 'grounding-ok' : 'grounding-warn'}`}
+              >
+                {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
+              </span>
+            ) : null}
           </div>
         )}
 
@@ -278,6 +294,23 @@ function ChatMessageInner({
           </details>
         )}
 
+        {isAssistant && !isGreeting && !phaseLabel && turn.nextActions && turn.nextActions.length > 0 && onActionClick && (
+          <div className="chat-action-chips" role="group" aria-label="Suggested follow-up actions">
+            {turn.nextActions.map((action, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="chat-action-chip"
+                onClick={() => onActionClick(action)}
+                title={`Ask: ${action}`}
+              >
+                <span className="chat-action-chip-arrow" aria-hidden="true">↳</span>
+                <span>{action}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="bubble-actions">
             <button
@@ -312,6 +345,10 @@ function attachmentSignature(attachments: ChatAttachment[] | undefined): string 
   return (attachments ?? []).map((a) => `${a.id}${a.docType ?? ''}`).join('|');
 }
 
+function actionsSignature(actions: string[] | undefined): string {
+  return (actions ?? []).join('|');
+}
+
 const ChatMessage = memo(ChatMessageInner, (prev, next) => {
   return (
     prev.turn.id === next.turn.id &&
@@ -325,6 +362,8 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&
     prev.turn.escalationReason === next.turn.escalationReason &&
+    actionsSignature(prev.turn.nextActions) === actionsSignature(next.turn.nextActions) &&
+    prev.onActionClick === next.onActionClick &&
     attachmentSignature(prev.turn.attachments) === attachmentSignature(next.turn.attachments) &&
     citationSignature(prev.turn.citations) === citationSignature(next.turn.citations) &&
     prev.userQuery === next.userQuery &&

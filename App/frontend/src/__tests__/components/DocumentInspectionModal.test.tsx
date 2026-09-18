@@ -82,7 +82,7 @@ describe('DocumentInspectionModal', () => {
     expect(screen.getAllByText(/1,180,000/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/1009876543/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/202699887766554/).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/FD9876543210/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/INV000011112222/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Value Added Tax (VAT)')).toBeDefined();
     expect(screen.getByText('Line Items')).toBeDefined();
   });

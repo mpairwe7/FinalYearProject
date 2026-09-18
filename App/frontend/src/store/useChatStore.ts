@@ -32,6 +32,8 @@ export interface ChatTurn {
   retrievalMode?: string;
   escalationRequired?: boolean;
   escalationReason?: string;
+  /** Suggested follow-up action chips offered by the assistant */
+  nextActions?: string[];
   /** Whether this turn was answered from the offline RAG pipeline */
   offlineMode?: boolean;
   /** Documents attached to this (user) turn */
