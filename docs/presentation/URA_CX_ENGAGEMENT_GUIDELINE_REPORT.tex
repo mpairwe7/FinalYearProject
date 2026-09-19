@@ -222,43 +222,46 @@ Under the government's Domestic Revenue Mobilization Strategy (DRMS), the URA is
 % =============================================================================
 \section{System Readiness \& Empirical Audit Results}
 
-OmusoloSmart has completed extensive full-stack benchmarks executed over the live public gateway (\texttt{ngrok}) on dedicated hardware (NVIDIA RTX A6000 48GB GPU). All reported metrics are verified against checkable report artifacts in the codebase.
+OmusoloSmart has completed extensive full-stack benchmarks executed over the live public gateway (\texttt{ngrok}) on dedicated sovereign hardware (NVIDIA RTX A6000 48GB GPU, GPU \#4). All reported metrics are verified against checkable report artifacts in the codebase.
 
-\subsection{Benchmark Performance Overview}
+\subsection{Flagship 2,000-FAQ Benchmark \& Empirical Comparison}
 
 \begin{table}[h!]
 \centering
 \small
-\begin{tabularx}{\textwidth}{p{45mm} c c c X}
+\begin{tabularx}{\textwidth}{p{44mm} c c c X}
 \toprule
-\textbf{Evaluation Metric} & \textbf{1,000 FAQs} & \textbf{300 FAQs} & \textbf{100 Multimodal} & \textbf{Audit Status \& Threshold} \\
+\textbf{Evaluation Metric} & \textbf{2,000 FAQs (Flagship)} & \textbf{1,000 FAQs} & \textbf{300 FAQs} & \textbf{Audit Status \& Target} \\
 \midrule
-\textbf{Overall Factual Accuracy} & \textbf{100.0\%} (1,000/1,000) & \textbf{100.0\%} (300/300) & \textbf{100.0\%} (100/100) & \textbf{PASSED} (Target $>99\%$) \\
-\textbf{English (\texttt{en}) Accuracy} & \textbf{100.0\%} (480 turns) & \textbf{100.0\%} (100 turns) & \textbf{100.0\%} (34 turns) & \textbf{PASSED} (Target $>99\%$) \\
-\textbf{Luganda (\texttt{lg}) Accuracy} & \textbf{100.0\%} (264 turns) & \textbf{100.0\%} (100 turns) & \textbf{100.0\%} (33 turns) & \textbf{PASSED} (Target $>95\%$) \\
-\textbf{Swahili (\texttt{sw}) Accuracy} & \textbf{100.0\%} (256 turns) & \textbf{100.0\%} (100 turns) & \textbf{100.0\%} (33 turns) & \textbf{PASSED} (Target $>95\%$) \\
-\textbf{Domestic Taxes Accuracy} & \textbf{100.0\%} (423 questions) & \textbf{100.0\%} (100 questions) & --- & \textbf{PASSED} (Target $>95\%$) \\
-\textbf{Customs \& Trade Accuracy} & \textbf{100.0\%} (252 questions) & \textbf{100.0\%} (100 questions) & --- & \textbf{PASSED} (Target $>95\%$) \\
-\textbf{Tax Education Accuracy} & \textbf{100.0\%} (325 questions) & \textbf{100.0\%} (100 questions) & --- & \textbf{PASSED} (Target $>95\%$) \\
-\textbf{Conversational Grade} & \textbf{98.09\%} & \textbf{99.93\%} & --- & \textbf{PASSED} (Target $>95\%$) \\
-\textbf{Emotional Intelligence (EQ)} & \textbf{95.56\%} & \textbf{99.76\%} & --- & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{Overall Factual Accuracy} & \textbf{99.85\%} (1,997/2,000) & \textbf{100.0\%} (1,000/1,000) & \textbf{100.0\%} (300/300) & \textbf{PASSED} (Target $>99\%$) \\
+\textbf{English (\texttt{en}) Accuracy} & \textbf{100.0\%} (1,529 turns) & \textbf{100.0\%} (480 turns) & \textbf{100.0\%} (100 turns) & \textbf{PASSED} (Target $>99\%$) \\
+\textbf{Luganda (\texttt{lg}) Accuracy} & \textbf{99.58\%} (238/239) & \textbf{100.0\%} (264 turns) & \textbf{100.0\%} (100 turns) & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{Swahili (\texttt{sw}) Accuracy} & \textbf{99.14\%} (230/232) & \textbf{100.0\%} (256 turns) & \textbf{100.0\%} (100 turns) & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{Domestic Taxes Accuracy} & \textbf{100.0\%} (550 queries) & \textbf{100.0\%} (423 queries) & \textbf{100.0\%} & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{Customs \& Trade Accuracy} & \textbf{100.0\%} (450 queries) & \textbf{100.0\%} (252 queries) & \textbf{100.0\%} & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{Transport \& Motor Vehicles} & \textbf{100.0\%} (350 queries) & --- & --- & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{EFRIS \& E-Invoicing} & \textbf{99.43\%} (348 queries) & --- & --- & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{Tax Education Accuracy} & \textbf{99.67\%} (299 queries) & \textbf{100.0\%} (325 queries) & \textbf{100.0\%} & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{Conversational Grade} & \textbf{99.10\%} & \textbf{98.09\%} & \textbf{99.93\%} & \textbf{PASSED} (Target $>95\%$) \\
+\textbf{Emotional Intelligence (EQ)} & \textbf{99.25\%} & \textbf{95.56\%} & \textbf{99.76\%} & \textbf{PASSED} (Target $>95\%$) \\
 \textbf{Official Contact Integrity} & \textbf{0 False Redactions} & \textbf{0 False Redactions} & \textbf{0 False Redactions} & \textbf{PASSED} (Zero over-redaction) \\
-\textbf{Speech STT (Whisper-SALT)} & \textbf{3/3 Verified} & \textbf{3/3 Verified} & \textbf{100.0\%} (0.129x RTF) & \textbf{PASSED} (Real-time speed) \\
-\textbf{Speech TTS (Spark-TTS)} & \textbf{3/3 Verified} & \textbf{3/3 Verified} & \textbf{100.0\%} & \textbf{PASSED} (Natural intonation) \\
-\textbf{HTTP Availability (200 OK)} & \textbf{100.0\%} & \textbf{100.0\%} & \textbf{100.0\%} & \textbf{PASSED} (0 server errors) \\
-\textbf{Median Latency ($p_{50}$)} & \textbf{3.72s} & \textbf{7.53s} & \textbf{3.35s} & \textbf{NOMINAL} (Across all tiers) \\
+\textbf{Speech STT (Whisper-SALT)} & \textbf{Verified (0.129x RTF)} & \textbf{3/3 Verified} & \textbf{3/3 Verified} & \textbf{PASSED} (Real-time speed) \\
+\textbf{Speech TTS (Spark-TTS)} & \textbf{Verified (Trilingual)} & \textbf{3/3 Verified} & \textbf{3/3 Verified} & \textbf{PASSED} (Natural intonation) \\
+\textbf{HTTP Availability (200 OK)} & \textbf{100.0\%} (2,000/2,000) & \textbf{100.0\%} & \textbf{100.0\%} & \textbf{PASSED} (0 server errors) \\
+\textbf{Median Latency ($p_{50}$)} & \textbf{388.2 ms (0.39s)} & \textbf{3.72s} & \textbf{7.53s} & \textbf{EXCELLENT} ($<500\text{ ms}$) \\
+\textbf{Sustained Throughput} & \textbf{2.32 QPS} & \textbf{1.02 QPS} & --- & \textbf{PASSED} (Burst: 29.4 req/s) \\
 \bottomrule
 \end{tabularx}
-\caption{Consolidated Empirical Results across 1,400 Total Audited Queries}
+\caption{Consolidated Empirical Results across 3,400 Total Audited Queries over Public Ngrok Gateway}
 \end{table}
 
-\subsection{Production Engineering Gates Passed}
+\subsection{Recent Engineering Enhancements Driving Top-Tier Accuracy (99.85\%)}
 \begin{itemize}
-  \item \textbf{Continuous Integration \& Quality Gates:} 100\% green status across all GitHub Actions workflows (\texttt{ML Pipeline CI/CD}, \texttt{Secret Scanning}, \texttt{CodeQL}, \texttt{Trivy Vulnerability Scanner}).
-  \item \textbf{Comprehensive Test Net:} \textbf{1,979 backend tests} and \textbf{279 frontend tests} passing with zero regressions and strict 40\% code coverage.
-  \item \textbf{W3C Server-Sent Events (SSE) Multiline Assembly:} Resolved frontend line-smashing where procedural steps were previously compressed into single unformatted blocks. All numbered steps now arrive as discrete Markdown \texttt{<ol>} list items.
-  \item \textbf{Sentence Splitting for Faithfulness:} Updated sentence tokenizer (\texttt{re.compile(r"[.!?]+|\textbackslash n+")}) ensuring bulleted lists and service catalogs (such as \textit{"What services does URA provide?"}) are individually grounded, raising faithfulness from 0.00 to 0.67--1.00 and eliminating false escalations.
-  \item \textbf{Privacy \& Contact Preservation:} Automated regex sanitization masks NINs, phone numbers, and bank details at the ingress boundary, while preserving official URA toll-free helplines and URLs with zero false redactions.
+  \item \textbf{Dynamic Damerau-Levenshtein Typo Correction:} Implemented length-adaptive fuzzy distance matching ($\le 2$ edit distance for terms $\ge 7$ characters, $\le 1$ for terms $4..6$ characters, and double-letter acronym squeezing: \texttt{tinn} $\rightarrow$ \texttt{tin}, \texttt{vatt} $\rightarrow$ \texttt{vat}, \texttt{pinn} $\rightarrow$ \texttt{pin}). Common taxpayer misspellings (\texttt{calculte}, \texttt{registratin}, \texttt{environmntal}, \texttt{witholdng}, \texttt{customes}, \texttt{incom}, \texttt{retun}, \texttt{objectionn}) are resolved before semantic search without altering user intent.
+  \item \textbf{Universal Currency Parsing \& Standalone Amount Execution:} Enhanced regular expression engines parse unformatted currency amounts across all regional notations (\texttt{UGX 2000000}, \texttt{2000000 ugshs}, \texttt{2000000shs}, \texttt{2000000/=}, \texttt{2m ugx}) without requiring comma delimiters. Standalone currency inputs immediately trigger verified multi-tax computations across PAYE, VAT (18\%), and WHT (6\%) under the in-force FY2026/27 rate tables.
+  \item \textbf{Citizen Procedural Routing (PRN, TCC, PWD Relief):} Ingested verified operational workflows for Payment Registration Number (PRN) generation and 21-day reactivation via mobile money (\texttt{*165\#} MTN / \texttt{*185\#} Airtel), Tax Clearance Certificate (TCC) electronic issuance, and Section 21(1)(v) Income Tax Act statutory exemptions for Persons with Disabilities (first UGX 1,460,000/month exempt).
+  \item \textbf{Low-Bandwidth Adaptations \& Emergency Offline Portal:} Engineered client-side reactive network status monitoring (W3C NetworkInformation API), GZip compression ($>500$ bytes threshold), and an offline portal fallback (\texttt{offline.html}) with client-side tax calculators to ensure continuous access in rural areas and during network outages.
+  \item \textbf{Sentence Splitting \& Contradiction Withholding Repair:} Corrected PDF OCR spacing artifacts on decimal figures (e.g. \textit{37. 5 million} $\rightarrow$ \textit{37.5 million}) and refined NLI claim verification to evaluate assertions against the full retrieved context, eliminating false contradiction withholdings.
 \end{itemize}
 
 % =============================================================================
@@ -510,6 +513,6 @@ Presenters should prepare for probing questions across all four operational, leg
 
 \vspace{4mm}
 \rule{\textwidth}{0.4pt}\\
-{\footnotesize \textbf{Report Artifact Reference:} \texttt{docs/Reports/MULTILINGUAL\_FAQS\_FULL\_STACK\_BENCHMARK\_REPORT\_2026-09-17.md} \textbullet{} Verified Codebase Commits: \texttt{8181ca3}, \texttt{d0fedc6}, \texttt{67c929f} \textbullet{} School of Computing and Informatics Technology, Makerere University.}
+{\footnotesize \textbf{Report Artifact Reference:} \texttt{docs/Reports/MULTILINGUAL\_2000\_FAQS\_EVALUATION\_REPORT.md} \textbullet{} Flagship Benchmark: 99.85\% Accuracy (1,997/2,000) \textbullet{} Verified Codebase Commits: \texttt{aaf751c}, \texttt{c209488} \textbullet{} School of Computing and Informatics Technology, Makerere University.}
 
 \end{document}
