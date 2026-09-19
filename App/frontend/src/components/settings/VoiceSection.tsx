@@ -20,6 +20,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "../../lib/queryKeys";
 import { LOCALE_OPTIONS } from "../../lib/locales";
 import {
   fetchVoiceCatalogue,
@@ -53,7 +54,7 @@ export default function VoiceSection({
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const catalogue = useQuery({
-    queryKey: ["speech-voices"],
+    queryKey: queryKeys.speech.voices(),
     queryFn: fetchVoiceCatalogue,
     staleTime: 5 * 60_000,
     retry: false,

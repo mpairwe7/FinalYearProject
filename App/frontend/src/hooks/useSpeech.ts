@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useMutation } from '@tanstack/react-query';
+import { queryKeys } from '../lib/queryKeys';
 import {
   checkSpeechHealth,
   synthesize,
@@ -18,7 +19,7 @@ import {
 
 export function useSpeechHealth() {
   return useQuery<SpeechHealthStatus>({
-    queryKey: ['speechHealth'],
+    queryKey: queryKeys.speech.health(),
     queryFn: checkSpeechHealth,
     staleTime: 60_000,
     gcTime: 5 * 60_000,

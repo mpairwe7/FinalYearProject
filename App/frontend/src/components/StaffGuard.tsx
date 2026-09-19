@@ -86,7 +86,11 @@ function signOut() {
   // The provider's logout already redirects to /signin (OIDC_POST_LOGOUT_PATH),
   // so this only lands us there when there was nothing to log out of; issuing
   // both would cancel the logout navigation with a same-tab assign.
-  if (method === "dev" || !endOidcSession()) window.location.assign("/signin");
+  if (method === "dev" || !endOidcSession()) {
+    // Top-level navigation to signin page on auth session termination
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign("/signin");
+  }
 }
 
 /**

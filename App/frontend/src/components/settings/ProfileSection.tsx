@@ -25,6 +25,7 @@ import {
   type TaxpayerType,
   type UserProfile,
 } from "../../services/accountApi";
+import { queryKeys } from "../../lib/queryKeys";
 import {
   ActionButton,
   IdentityGate,
@@ -103,7 +104,7 @@ export default function ProfileSection({ status }: { status: string }) {
   const [saved, setSaved] = useState(false);
 
   const profileQuery = useQuery<UserProfile>({
-    queryKey: ["profile"],
+    queryKey: queryKeys.auth.profile(),
     queryFn: accountApi.profile,
     enabled: signedIn,
     staleTime: 60_000,
@@ -113,7 +114,7 @@ export default function ProfileSection({ status }: { status: string }) {
   const save = useMutation({
     mutationFn: (patch: ProfilePatch) => accountApi.updateProfile(patch),
     onSuccess: (fresh) => {
-      queryClient.setQueryData(["profile"], fresh);
+      queryClient.setQueryData(queryKeys.auth.profile(), fresh);
       setEdits({});
       setSaved(true);
     },

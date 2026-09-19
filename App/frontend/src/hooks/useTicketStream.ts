@@ -3,6 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { appendAuthToken } from "../lib/authSession";
+import { queryKeys } from "../lib/queryKeys";
 
 export interface LiveEscalation {
   id: string;
@@ -58,9 +59,7 @@ export function useTicketStream(enabled: boolean): {
             priority: data.priority || "normal",
             reason: data.reason || "New escalation",
           });
-          client.invalidateQueries({ queryKey: ["ticketQueueFull"] });
-          client.invalidateQueries({ queryKey: ["ticketSla"] });
-          client.invalidateQueries({ queryKey: ["ticketStats"] });
+          client.invalidateQueries({ queryKey: queryKeys.tickets.all() });
         } catch {
           /* keepalive / malformed */
         }

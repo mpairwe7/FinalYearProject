@@ -244,12 +244,19 @@ export interface AnswerOverride {
 const BASE = "/api";
 
 async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(15000);
+  const signal = init.signal && typeof AbortSignal.any === "function"
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : (init.signal || timeoutSignal);
+
   const res = await fetch(`${BASE}${url}`, {
     ...init,
     headers: authHeaders(init.headers as Record<string, string> | undefined),
-    signal: AbortSignal.timeout(15000),
+    signal,
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 

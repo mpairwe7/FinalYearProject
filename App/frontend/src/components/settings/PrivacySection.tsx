@@ -30,6 +30,7 @@ import {
   type ConsentPurpose,
   type ConsentReceipt,
 } from "../../services/accountApi";
+import { queryKeys } from "../../lib/queryKeys";
 import type { ConfirmRequest } from "../ConfirmDialog";
 import {
   ActionButton,
@@ -136,7 +137,7 @@ export default function PrivacySection({
   const [note, setNote] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
 
   const consentsQuery = useQuery({
-    queryKey: ["consents"],
+    queryKey: queryKeys.auth.consents(),
     queryFn: accountApi.consents,
     enabled: signedIn,
     staleTime: 30_000,
@@ -158,7 +159,7 @@ export default function PrivacySection({
       if (grant) await accountApi.grantConsents([purpose]);
       else await accountApi.withdrawConsents([purpose]);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["consents"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.auth.consents() }),
   });
 
   const exportMutation = useMutation({

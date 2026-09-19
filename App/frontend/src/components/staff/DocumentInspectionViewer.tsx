@@ -113,6 +113,7 @@ export function DocumentInspectionViewer({
             style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: "top left" }}
           >
             {documentUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
               <img
                 src={documentUrl}
                 alt={`Document scan page ${currentPage}`}
