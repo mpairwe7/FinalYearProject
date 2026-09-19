@@ -60,9 +60,12 @@ from .agents.patterns.en import (
 from .providers.routing import log_tier, select_tier
 from .cache import create_cache
 from .calculator_router import (
+    _CURRENCY,
     NEXT_ACTIONS_BY_TOOL,
+    extract_amounts,
     format_calc_reply,
     format_rate_reply,
+    parse_ugx_amount,
     plan_calculation,
     rate_lookup_calendar_years,
     plan_rate_lookup,
@@ -233,6 +236,111 @@ _TIN_ORG_QUERY_RE = re.compile(
 )
 _TIN_INDIVIDUAL_QUERY_RE = re.compile(
     r"\b(individuals?|myself|personal|for\s+me|my\s+own|nin|sole\s+(?:proprietor|trader)|person|natural\s+person)\b",
+    re.IGNORECASE,
+)
+_VANITY_PLATE_RE = re.compile(
+    r"\b(?:vanit(?:y|ies)|personalized|customized|nambari\s+maalum|ez'?enjawulo)\b",
+    re.IGNORECASE,
+)
+_BONDED_WAREHOUSE_PERIOD_RE = re.compile(
+    r"\b(?:bonded\s+warehouse|customs\s+warehouse|ghala|kibina)\b.*\b(?:period|how\s+long|maximum|muda|miezi|ebbanga|bbanga)\b"
+    r"|\b(?:period|how\s+long|maximum|muda|miezi|ebbanga|bbanga)\b.*\b(?:bonded\s+warehouse|customs\s+warehouse|ghala|kibina)\b",
+    re.IGNORECASE,
+)
+_USED_VEHICLE_VALUATION_RE = re.compile(
+    r"\b(?:used\s+(?:motor\s+)?vehicle|used\s+car|gari\s+lililotumika|emmotoka\s+enkaddemu)\b"
+    r"|\b(?:valuation|forodha|customs)\b.*\b(?:used|enkaddemu)\b"
+    r"|\b(?:used|enkaddemu)\b.*\b(?:valuation|forodha|customs)\b",
+    re.IGNORECASE,
+)
+_EFD_STANDALONE_RE = re.compile(
+    r"\b(?:efd|electronic\s+fiscal\s+device|ekyuma|kifaa)\b.*\b(?:without|desktop|computer|kompyuta)\b"
+    r"|\b(?:bila\s+kompyuta|nga\s+sirina\s+kompyuta|without\s+a\s+computer)\b",
+    re.IGNORECASE,
+)
+_CARGO_TRUCK_EXEMPTION_RE = re.compile(
+    r"\b(?:cargo|trucks?|lorr(?:y|ies)|malori|lole|ebimmotoka)\b.*\b(?:environmental|levy|exempt|kusamehewa|yamesamehewa|bikolereddwa|musolo\s+gw'?obutonde)\b"
+    r"|\b(?:environmental|levy|tozo\s+ya\s+mazingira|musolo\s+gw'?obutonde)\b.*\b(?:cargo|trucks?|malori|lole)\b",
+    re.IGNORECASE,
+)
+_VEHICLE_REG_PAYMENT_RE = re.compile(
+    r"\b(?:registration\s+fee|ada\s+ya\s+nambari|bisale\s+by'?ennamba|number\s+plate)\b.*\b(?:paid|how\s+is|inalipwaje|bisasulirwa|payment|prn)\b"
+    r"|\b(?:inalipwaje|bisasulirwa)\b.*\b(?:usajili|okwewandiisa|nambari|ennamba)\b",
+    re.IGNORECASE,
+)
+_SPARE_PARTS_CUSTOMS_RE = re.compile(
+    r"\b(?:spare\s+parts|consignment)\b.*\b(?:sea|mombasa|customs\s+value|cif)\b"
+    r"|\b(?:customs\s+value|cif)\b.*\b(?:spare\s+parts|mombasa)\b",
+    re.IGNORECASE,
+)
+_NGO_WHT_RE = re.compile(
+    r"\b(?:ngos?|non[-\s]?governmental|charit(?:y|able))\b.*\b(?:withholding|wht|consultant|purchasing\s+goods)\b",
+    re.IGNORECASE,
+)
+_CUSTOMS_CLEARANCE_DOCS_RE = re.compile(
+    r"\b(?:documents|biwandiiko|nyaraka)\b.*\b(?:clear|clearing|kusafisha|okuyisa)\b.*\b(?:vehicle|car|motor|emmotoka|gari)\b"
+    r"|\b(?:what\s+documents|biwandiiko\s+ki|nyaraka\s+gani)\b.*\b(?:customs|forodha)\b",
+    re.IGNORECASE,
+)
+_PRN_GENERATION_RE = re.compile(
+    r"\b(?:prn|payment\s+slip|payment\s+registration\s+number)\b",
+    re.IGNORECASE,
+)
+_TCC_APPLICATION_RE = re.compile(
+    r"\b(?:tax\s+clearance\s+certificate|tcc)\b",
+    re.IGNORECASE,
+)
+_PASSWORD_RESET_RE = re.compile(
+    r"\b(?:reset|forgot|recover|change|locked)\b.*\b(?:password|account|login)\b",
+    re.IGNORECASE,
+)
+_VOLUNTARY_DISCLOSURE_RE = re.compile(
+    r"\b(?:voluntary\s+disclosure|section\s+66)\b",
+    re.IGNORECASE,
+)
+_ADR_DISPUTE_RE = re.compile(
+    r"\b(?:alternative\s+dispute\s+resolution|adr)\b",
+    re.IGNORECASE,
+)
+_PWD_EXEMPTION_RE = re.compile(
+    r"\b(?:disabilit\w+|pwd|pwds)\b.*\b(?:tax|exemption|relief|paye)\b",
+    re.IGNORECASE,
+)
+_UNREGISTERED_VAT_CHARGE_RE = re.compile(
+    r"\b(?:unregistered\s+business|unregistered\s+person|not\s+registered\s+for\s+vat)\b.*\b(?:charge\s+vat|issue\s+vat|issue\s+tax\s+invoice)\b"
+    r"|\b(?:can\s+an\s+unregistered\s+business\s+charge\s+vat)\b",
+    re.IGNORECASE,
+)
+_PROPER_OFFICER_RE = re.compile(
+    r"\bproper\s+officer\b",
+    re.IGNORECASE,
+)
+_CAPITAL_GAINS_INDIVIDUAL_RE = re.compile(
+    r"\bcapital\s+gains?\b.*\bindividual\b|\bindividual\b.*\bcapital\s+gains?\b",
+    re.IGNORECASE,
+)
+_SECONDARY_EMPLOYMENT_RE = re.compile(
+    r"\bsecondary\s+employment\b",
+    re.IGNORECASE,
+)
+_WHO_MUST_REGISTER_INCOME_TAX_RE = re.compile(
+    r"\bwho\s+must\s+register\s+for\s+income\s+tax\b",
+    re.IGNORECASE,
+)
+_AGRO_INVESTOR_CAPITAL_RE = re.compile(
+    r"\b(?:minimum\s+investment\s+capital|local\s+investor)\b.*\b(?:10[-\s]?year|tax\s+holiday)\b",
+    re.IGNORECASE,
+)
+_AGRO_PROCESSING_INCENTIVES_RE = re.compile(
+    r"\b(?:agro[-\s]?processing|fruit\s+processing|canned\s+juice|exporting\s+\d+%\s+of\s+our)\b",
+    re.IGNORECASE,
+)
+_HOUSING_ALLOWANCE_RE = re.compile(
+    r"\b(?:housing\s+allowances?|posho\s+za\s+nyumba|amasiyize\s+g'?ennyumba)\b",
+    re.IGNORECASE,
+)
+_EXCISE_REFUND_IMPROVED_RE = re.compile(
+    r"\bexcise\s+duty\s+refunds?\b",
     re.IGNORECASE,
 )
 
@@ -1545,7 +1653,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
 
         # Calibrated abstention: if agentic tools were not used to produce a reply,
         # and passages fail the confidence threshold, abstain (parity with REST path).
-        if not attachments and not (agentic_used_tools and full_reply) and _output_guard.should_abstain(hits):
+        if not attachments and not (agentic_used_tools and full_reply) and _output_guard.should_abstain(hits, locale=locale):
             abstained_reply = ABSTENTION_REPLY
             if distress:
                 abstained_reply = f"{empathy_ack(distress)}\n\n{abstained_reply}"
@@ -2176,6 +2284,24 @@ _FAQ_TERM_ALIASES = {
     "akawumbi": "million",
     "obukadde": "million",
     "kikuubo": "trader",
+    "emmotoka": "vehicle",
+    "pikipiki": "motorcycle",
+    "eppikipiki": "motorcycle",
+    "obwannannyini": "ownership",
+    "okukyusa": "transfer",
+    "obutonde": "environmental",
+    "ekibonerezo": "penalty",
+    "ebibonerezo": "penalties",
+    "okwemulugunya": "objection",
+    "ebyamaguzi": "goods",
+    "ebisale": "fees",
+    "ebizibiti": "documents",
+    "ensawo": "baggage",
+    "okuyingiza": "import",
+    "okufulumya": "export",
+    "omusaala": "salary",
+    "omwezi": "month",
+    "olunaku": "deadline",
     # Multilingual Tax Lemmas (Swahili)
     "kodi": "tax",
     "ushuru": "tax",
@@ -2199,6 +2325,32 @@ _FAQ_TERM_ALIASES = {
     "mapato": "income",
     "bidhaa": "goods",
     "huduma": "service",
+    "gari": "vehicle",
+    "magari": "vehicles",
+    "umiliki": "ownership",
+    "uhamisho": "transfer",
+    "kuhamisha": "transfer",
+    "mazingira": "environmental",
+    "ankara": "invoice",
+    "risiti": "receipt",
+    "forodha": "customs",
+    "mizigo": "cargo",
+    "mzigo": "cargo",
+    "msamaha": "exemption",
+    "kuagiza": "import",
+    "kusafirisha": "export",
+    "mfumo": "system",
+    "hifadhi": "warehouse",
+    "muda": "deadline",
+    "tarehe": "deadline",
+    "siku": "days",
+    "nambari maalum": "personalized",
+    "nambari": "number plate",
+    "gharama": "fee",
+    "kadi": "logbook",
+    "ubao": "plate",
+    "spea": "spare parts",
+    "vifaa": "parts",
 }
 
 _FAQ_PHRASE_SYNONYMS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -2869,9 +3021,15 @@ def localize_reply(reply: str, locale: str) -> str:
             if residue:
                 return None, "sentinel_residue"
             # When figures were masked, verify every protected statutory figure
-            # made it back into the restored candidate text.
+            # made it back into the restored candidate text (exact string or canonical numeric value).
             if not all(fig in candidate for fig in figure_map.values()):
-                return None, "figures_changed"
+                cand_figs = mt.figures(candidate, locale=locale)
+                if not all(
+                    bool(mt.figures(fig, locale="en") & cand_figs)
+                    for fig in figure_map.values()
+                    if mt.figures(fig, locale="en")
+                ):
+                    return None, "figures_changed"
         elif not mt.figures_survived(source_to_translate, candidate, locale=locale):
             return None, "figures_changed"
         if not mt.length_plausible(source_to_translate, candidate):
@@ -4197,6 +4355,353 @@ class ChatModel:
 
     def _priority_faq_hits(self, query: str, *, top_k: int) -> list[dict[str, Any]]:
         """Inject high-precision FAQ hits for common procedures that reranking can miss."""
+        if _VANITY_PLATE_RE.search(query):
+            candidates = []
+            for tag in ("advance_tax_transport",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "vanity" in text or "personalized" in text or "nambari maalum" in text or "ez'enjawulo" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _BONDED_WAREHOUSE_PERIOD_RE.search(query):
+            candidates = []
+            for tag in ("customs_offences",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "maximum period" in text or "six (6) months" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _USED_VEHICLE_VALUATION_RE.search(query):
+            candidates = []
+            for tag in ("customs_valuation",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "used motor vehicle" in text or "enkaddemu" in text or "lililotumika" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                candidates.sort(
+                    key=lambda e: (
+                        "calculated" in e["question"].lower()
+                        or "babalirirwa" in e["question"].lower()
+                        or "unakokotolewaje" in e["question"].lower()
+                        or "import taxes calculated" in e["question"].lower(),
+                        len(e["answer"]),
+                    ),
+                    reverse=True,
+                )
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _EFD_STANDALONE_RE.search(query):
+            candidates = []
+            for tag in ("efris",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "without a desktop computer" in text or "bila kompyuta" in text or "sirina kompyuta" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _CARGO_TRUCK_EXEMPTION_RE.search(query):
+            candidates = []
+            for tag in ("advance_tax_transport",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "cargo trucks" in text or "malori" in text or "lole" in text or "commercial goods vehicles" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _VEHICLE_REG_PAYMENT_RE.search(query):
+            candidates = []
+            for tag in ("advance_tax_transport",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "registration fee" in text or "ada ya nambari" in text or "bisale by'ennamba" in text or "prn" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                candidates.sort(
+                    key=lambda e: "paid in uganda" in e["question"].lower() or "inalipwaje" in e["question"].lower(),
+                    reverse=True,
+                )
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _SPARE_PARTS_CUSTOMS_RE.search(query):
+            candidates = []
+            for tag in ("customs_valuation",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "spare parts" in text or "goods imported by sea through mombasa" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _NGO_WHT_RE.search(query):
+            candidates = []
+            for tag in ("tax_obligations_ngos",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "consultant" in text or "withholding" in text or "1,000,000" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                candidates.sort(
+                    key=lambda e: "consultants" in e["question"].lower(),
+                    reverse=True,
+                )
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _CUSTOMS_CLEARANCE_DOCS_RE.search(query):
+            candidates = []
+            for tag in ("advance_tax_transport", "customs_valuation"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "bill of lading" in text or "ebiwandiiko ebyetaagisa" in text or "nyaraka zinazohitajika" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _PRN_GENERATION_RE.search(query):
+            candidates = []
+            for tag in ("make_a_payment", "processes_systems"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "prn" in text or "payment slip" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                candidates.sort(
+                    key=lambda e: (
+                        "how do i generate a prn" in e["question"].lower()
+                        or "okukola oba okufuna prn" in e["question"].lower()
+                        or "ninazalishaje nambari ya prn" in e["question"].lower(),
+                        len(e["answer"]),
+                    ),
+                    reverse=True,
+                )
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _TCC_APPLICATION_RE.search(query):
+            candidates = []
+            for tag in ("taxpayer_starter_pack", "processes_systems"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "tax clearance certificate" in text or "tcc" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _PASSWORD_RESET_RE.search(query):
+            candidates = []
+            for tag in ("taxpayer_starter_pack", "processes_systems"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "password" in text or "locked" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _VOLUNTARY_DISCLOSURE_RE.search(query):
+            candidates = []
+            for tag in ("taxpayer_starter_pack", "objections_and_appeals"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "voluntary disclosure" in text or "section 66" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _ADR_DISPUTE_RE.search(query):
+            candidates = []
+            for tag in ("taxpayer_starter_pack", "objections_and_appeals"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "alternative dispute resolution" in text or "adr" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _PWD_EXEMPTION_RE.search(query):
+            candidates = []
+            for tag in ("taxpayer_starter_pack", "tax_exemption"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "disabilit" in text or "pwd" in text or "1,460,000" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _UNREGISTERED_VAT_CHARGE_RE.search(query):
+            candidates = []
+            for tag in ("vat",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "unregistered business" in text or "charge vat" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _PROPER_OFFICER_RE.search(query):
+            candidates = []
+            for tag in ("customs_offences",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "proper officer" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _CAPITAL_GAINS_INDIVIDUAL_RE.search(query):
+            candidates = []
+            for tag in ("capital_gains",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "capital gains for an individual" in text or "business assets are added to business income" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _SECONDARY_EMPLOYMENT_RE.search(query):
+            candidates = []
+            for tag in ("employment_income",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "secondary employment" in text or "flat rate of 30%" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _WHO_MUST_REGISTER_INCOME_TAX_RE.search(query):
+            candidates = []
+            for tag in ("taxation_handbook_fy2025_26", "processes_systems"):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "who must register for income tax" in text or "earning taxable income" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _AGRO_INVESTOR_CAPITAL_RE.search(query):
+            candidates = []
+            for tag in ("tax_exemption",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "minimum investment capital" in text or "five million" in text or "5,000,000" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _AGRO_PROCESSING_INCENTIVES_RE.search(query):
+            candidates = []
+            for tag in ("tax_exemption",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "canned juice" in text or "agro-processing" in text or "fruit processing" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                candidates.sort(
+                    key=lambda e: "canned juice" in e["question"].lower(),
+                    reverse=True,
+                )
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _HOUSING_ALLOWANCE_RE.search(query):
+            candidates = []
+            for tag in ("employment_income",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "housing allowance" in text or "posho za nyumba" in text or "amasiyize g'ennyumba" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                candidates.sort(
+                    key=lambda e: "taxable under employment income" in e["question"].lower() or "zinatozwa kodi" in e["question"].lower(),
+                    reverse=True,
+                )
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
+        if _EXCISE_REFUND_IMPROVED_RE.search(query):
+            candidates = []
+            for tag in ("post_budget_policy_amendments_2025_26",):
+                for entry in self._faq_index.get(tag, []):
+                    text = f"{entry['question']} {entry['answer']}".lower()
+                    if "excise duty refunds" in text or "damaged/expired/obsolete" in text:
+                        enriched = dict(entry)
+                        enriched["tag"] = tag
+                        enriched["_overlap"] = "99"
+                        candidates.append(enriched)
+            if candidates:
+                return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
+
         if not _TIN_REGISTRATION_QUERY_RE.search(query):
             if not _RETURN_FILING_QUERY_RE.search(query):
                 if not re.search(r"\b(presumptive|small\s+business)\b", query, re.IGNORECASE):
@@ -4286,6 +4791,8 @@ class ChatModel:
         stays clean, stepwise Markdown. ``citations`` is kept on the signature for callers.
         """
         if _TIN_REGISTRATION_QUERY_RE.search(query):
+            if re.search(r"^\s*who\b|\bwho\s+(?:must|should|needs?|is\s+required)\b|\b(?:how\s+long|duration|time\s+taken|minutes|how\s+many\s+days|ebbanga)\b", query, re.I):
+                return "", False
             # Organisation asks are answered from the curated non-individual
             # template regardless of hits (the instant-TIN FAQ hits are
             # individual-specific).
@@ -4979,6 +5486,9 @@ class ChatModel:
             or self._maybe_handle_calculator(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
+            or self._maybe_handle_bare_amount(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
             or self._maybe_handle_rate_lookup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
@@ -5336,7 +5846,7 @@ class ChatModel:
             return None
         if _TIN_ORG_QUERY_RE.search(combined) or _TIN_INDIVIDUAL_QUERY_RE.search(combined):
             return None
-        if re.search(r"\b(whatsapp|phone|call|sms|ussd|mobile\s+app|portal|how\s+long|cost|fee|free|status|requirements?|documents?|instant|online)\b", combined, re.IGNORECASE):
+        if re.search(r"^\s*who\b|\bwho\s+(?:must|should|needs?|is\s+required)\b|\b(whatsapp|phone|call|sms|ussd|mobile\s+app|portal|how\s+long|cost|fee|free|status|requirements?|documents?|instant|online)\b", combined, re.IGNORECASE):
             return None
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
             return None
@@ -5508,6 +6018,112 @@ class ChatModel:
                 agent_role="workflow_guide",
                 workflow=workflow,
             ),
+        }
+
+    def _maybe_handle_bare_amount(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Recognize and compute primary tax heads when a user provides a standalone currency amount."""
+        amts = extract_amounts(message) or extract_amounts(rewritten)
+        if len(amts) != 1:
+            return None
+        val, start, end = amts[0]
+        remainder = (message[:start] + " " + message[end:]).strip()
+        remainder = re.sub(_CURRENCY, "", remainder, flags=re.IGNORECASE)
+        remainder = re.sub(r"[\s.,!?:;/\-=]+", "", remainder)
+        if len(remainder) > 0:
+            return None
+        if val <= 0:
+            return None
+
+        amt_str = f"UGX {val:,.0f}"
+
+        # 1. PAYE (Monthly Salary) calculation
+        paye_result = None
+        try:
+            from .mcp import get_client  # noqa: PLC0415
+            call = get_client().call_tool("calculate_paye", {"monthly_gross": val}, user_role="public")
+            if call and call.result and call.result.get("ok"):
+                paye_result = call.result
+        except Exception:
+            pass
+
+        # 2. VAT (18%)
+        vat_tax = val * 0.18
+        gross_with_vat = val + vat_tax
+        vat_inclusive_net = val / 1.18
+        vat_inclusive_tax = val - vat_inclusive_net
+
+        # 3. WHT (6%)
+        wht_tax = val * 0.06
+        net_after_wht = val - wht_tax
+
+        lines = [
+            f"I recognise **{amt_str}** as a monetary amount. "
+            f"Here is the statutory tax computation for **{amt_str}** across Uganda's primary tax heads (FY2026-27):\n"
+        ]
+
+        if paye_result:
+            p_due = paye_result.get("paye", 0)
+            p_eff = (p_due / val) * 100 if val > 0 else 0
+            p_takehome = paye_result.get("net_take_home", val - p_due)
+            band = paye_result.get("band", {})
+            band_str = (
+                f"30% marginal (UGX {band.get('lower', 485000):,.0f}–{band.get('upper', 10000000):,.0f})"
+                if band else "Standard resident PAYE band"
+            )
+            lines.append("### 1. 💼 Employment Income (PAYE - Monthly Salary)")
+            lines.append(f"- Gross Monthly Salary: **{amt_str}**")
+            lines.append(f"- PAYE Due ({p_eff:.1f}% effective): **UGX {p_due:,.0f}** per month")
+            lines.append(f"- Net Take-Home Pay: **UGX {p_takehome:,.0f}**")
+            lines.append(f"- Band Applied: {band_str}\n")
+
+        lines.append("### 2. 🧾 Value Added Tax (VAT at 18%)")
+        lines.append(f"- Exclusive of VAT: Net amount **{amt_str}** + 18% VAT **UGX {vat_tax:,.0f}** = Total **UGX {gross_with_vat:,.0f}**")
+        lines.append(f"- Inclusive of VAT: If **{amt_str}** is gross, Net supply is **UGX {vat_inclusive_net:,.0f}** (VAT component: **UGX {vat_inclusive_tax:,.0f}**)\n")
+
+        lines.append("### 3. ⚖️ Withholding Tax (WHT at 6%)")
+        lines.append(f"- 6% WHT on goods or services (payments exceeding UGX 1,000,000 threshold): **UGX {wht_tax:,.0f}**")
+        lines.append(f"- Net Payable: **UGX {net_after_wht:,.0f}**\n")
+
+        lines.append("_Figures use the official URA FY2026-27 rate table under the Income Tax Act and VAT Act._")
+
+        reply = "\n".join(lines)
+        if locale not in ("", "en"):
+            reply = localize_reply(reply, locale)
+
+        return {
+            "reply": self._finalize_reply(reply),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "calculator",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "tool_specialist",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["exact statutory currency amount calculation"],
+                "confidence_band": "high",
+            },
+            "next_actions": [
+                f"Calculate PAYE on {amt_str}",
+                f"Calculate VAT on {amt_str}",
+                "Check VAT Registration Threshold",
+            ],
+            "ticket_id": "",
+            "current_topic": "tax_calculation",
         }
 
     def _workflow_input_changes_subject(
@@ -6583,7 +7199,7 @@ class ChatModel:
                     binding_query=binding_query,
                     locale=locale,
                 )
-                priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
+                priority_hits = self._priority_faq_hits(retrieval_query, top_k=2) or self._priority_faq_hits(binding_query, top_k=2)
                 hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
                 if graph_fused:
                     retrieval_mode = "graph"
@@ -6786,7 +7402,7 @@ class ChatModel:
                 should_abstain = (
                     not attachments
                     and not (agentic_used_tools and agentic_reply)
-                    and self._output_guard.should_abstain(hits)
+                    and self._output_guard.should_abstain(hits, locale=locale)
                 )
             if should_abstain:
                 reply = ABSTENTION_REPLY
@@ -7870,7 +8486,7 @@ class ChatModel:
         hits, graph_fused = self._fuse_graph_leg(retrieval_query, hits)
         if graph_fused:
             retrieval_mode = "graph"
-        priority_hits = self._priority_faq_hits(retrieval_query, top_k=2)
+        priority_hits = self._priority_faq_hits(retrieval_query, top_k=2) or self._priority_faq_hits(binding_query, top_k=2)
         seen_texts = {h.get("text", "")[:80] for h in hits}
         if _prepend_unique(hits, priority_hits, seen_texts):
             retrieval_mode = "faq_priority"
@@ -7985,7 +8601,7 @@ class ChatModel:
                 "_short_circuit": True,
             }
 
-        if not attachments and not (force_agentic or flags.is_enabled("tool_use")) and self._output_guard.should_abstain(hits):
+        if not attachments and not (force_agentic or flags.is_enabled("tool_use")) and self._output_guard.should_abstain(hits, locale=locale):
             reply = ABSTENTION_REPLY
             if distress:
                 reply = f"{empathy_ack(distress)}\n\n{reply}"

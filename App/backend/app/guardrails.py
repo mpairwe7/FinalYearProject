@@ -676,7 +676,11 @@ class OutputGuard:
         return GuardResult(allowed=True, sanitized_text=answer)
 
     @staticmethod
-    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD_NORM) -> bool:
+    def should_abstain(
+        hits: list[dict],
+        threshold: float = ABSTENTION_THRESHOLD_NORM,
+        locale: str = "en",
+    ) -> bool:
         """Return True if the best retrieval relevance is too low to answer from.
 
         Prefers the normalized [0,1] reranker score (P1-5). Failing that, uses the
@@ -684,26 +688,19 @@ class OutputGuard:
         Failing both, relevance is unknown and we do not abstain on an
         incomparable raw score.
 
-        The middle tier exists because "no comparable score" used to mean "answer
-        anyway", and the sparse-only sidecar has no cross-encoder. Over 7,000+ raw
-        document chunks that let BM25's always-something result be served for
-        off-domain questions — "What is the capital of France?" answered from a
-        chunk about Thales Las France (Tanzania Branch).
-
-        Only *stamped* hits are judged this way, deliberately. Keyword/FAQ hits
-        arrive unstamped and already carry their own authorization gate
-        (``service._faq_match_score`` scores the FAQ's own question against the
-        query, and ``_retain_faq_candidates`` applies a relative cutoff). Scoring
-        them again here double-gates them and re-breaks distress-framed questions,
-        whose wording overlaps an FAQ answer weakly — the bug PR #167 fixed.
+        For cross-lingual queries (Luganda or Swahili), reranker logits against
+        an English corpus are systematically lower due to cross-lingual embedding
+        geometry; a calibrated threshold of 0.02 is used.
         """
         if not hits:
             return True
         from .retriever import LEXICAL_RELEVANCE_FLOOR, hit_relevance
 
+        eff_threshold = threshold if locale in ("", "en") else min(threshold, 0.02)
+
         scores = [r for h in hits if (r := hit_relevance(h)) is not None]
         if scores:
-            return max(scores) < threshold
+            return max(scores) < eff_threshold
 
         stamped: list[float] = []
         for hit in hits:

@@ -179,7 +179,7 @@ _model_loaded = False
 def percentages(text: str) -> set[str]:
     """Numeric values stated as percentages, e.g. {"18"} from "18%" / "asilimia 18"."""
     results: set[str] = set()
-    lowered = (text or "").lower()
+    lowered = re.sub(r"(\d+)\.\s+(\d+)", r"\1.\2", (text or "").lower())
     for m in _PCT_RE.finditer(lowered):
         val = m.group(1) or m.group(2)
         if val:
@@ -213,6 +213,7 @@ def canonical_amounts(text: str) -> set[float]:
     numerical mismatch warnings on correct translations.
     """
     clean_text = re.sub(r"<[^>]+>", " ", text or "")
+    clean_text = re.sub(r"(\d+)\.\s+(\d+)", r"\1.\2", clean_text)
     lowered = clean_text.lower()
     # Percentages are handled separately; drop them so "18%" is not read
     # as the amount 18.
@@ -335,6 +336,8 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
                     return "excise"
                 if "stamp duty" in tl:
                     return "stamp_duty"
+                if "digital service" in tl or "dst" in tl or "electronic service" in tl:
+                    return "digital_service"
                 return None
 
             ch = _tax_head(claim)
@@ -342,7 +345,7 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
             # Only compare if they are about the same tax head (or neither specifies one)
             if ch and xh and ch != xh:
                 pass
-            elif ch and not xh and model_pct.issubset({"18", "6", "15", "25", "30", "35", "50", "1.5", "2", "0.5"}):
+            elif ch and not xh and model_pct.issubset({"18", "6", "15", "25", "30", "35", "50", "5", "1.5", "2", "0.5", "0.4", "0.6", "0.7", "10", "12"}):
                 pass
             else:
                 claim_words = set(re.findall(r"\w{3,}", claim.lower()))
@@ -375,6 +378,10 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
                 res.add("presumptive")
             if "paye" in tl or "salary" in tl or "wage" in tl:
                 res.add("paye")
+            if "withholding" in tl or "wht" in tl or "withhold" in tl:
+                res.add("wht")
+            if "ngo" in tl or "non-governmental" in tl or "charit" in tl:
+                res.add("ngo")
             return res
 
         cs = _rule_subjects(claim)

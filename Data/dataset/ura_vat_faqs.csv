@@ -11,4 +11,5 @@ question,answer
 "Who is a taxable person?","Anyone registered for VAT or required to be registered (individuals, partnerships, trusts, companies, government bodies, listed institutions)." 
 "What VAT rate applies to imports and imported services?","VAT applies to imports (unless exempt) and to imported services; the importer/receiver is liable." 
 "When are VAT returns and payments due?","Within 15 days after the end of each month for VAT-registered persons." 
-"What happens if I deal only in exempt supplies?","You do not register for VAT; VAT obligations apply only to standard/zero-rated taxable supplies." 
+"What happens if I deal only in exempt supplies?","You do not register for VAT; VAT obligations apply only to standard/zero-rated taxable supplies."
+"Can an unregistered business charge VAT on its invoices?","No. Under the Value Added Tax Act, only a VAT-registered business can charge VAT or issue tax invoices. An unregistered business cannot charge VAT; doing so is an offence liable to penal tax and prosecution under the Tax Procedures Code Act." 

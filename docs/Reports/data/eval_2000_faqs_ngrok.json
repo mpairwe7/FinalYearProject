@@ -1,0 +1,851 @@
+{
+  "meta": {
+    "timestamp": "2026-09-19T21:37:49.579645+00:00",
+    "total_faqs": 2000,
+    "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat",
+    "duration_seconds": 861.92,
+    "throughput_qps": 2.32
+  },
+  "performance": {
+    "p50_ms": 490.4,
+    "p90_ms": 40024.8,
+    "p95_ms": 45475.1,
+    "p99_ms": 49384.6,
+    "mean_ms": 10311.5,
+    "min_ms": 313.1,
+    "max_ms": 114811.9
+  },
+  "accuracy": {
+    "overall_accuracy_pct": 99.85,
+    "accurate_count": 1997,
+    "total_count": 2000
+  },
+  "resilience": {
+    "http_200_count": 2000,
+    "http_availability_pct": 100.0,
+    "structured_formatting_pct": 84.65,
+    "emotional_intelligence_pct": 100.0,
+    "zero_false_redactions": true
+  },
+  "retrieval_modes": {
+    "education": 240,
+    "faq_priority": 320,
+    "hybrid": 1213,
+    "false_premise_rejected": 65,
+    "calculator": 153,
+    "out_of_jurisdiction": 2,
+    "contact_channels": 6,
+    "workflow": 1
+  },
+  "languages": {
+    "en": {
+      "count": 1529,
+      "accuracy_pct": 100.0,
+      "figure_fidelity_pct": 83.98,
+      "mean_latency_ms": 11131.3,
+      "p50_latency_ms": 451.0,
+      "status_200_pct": 100.0
+    },
+    "lg": {
+      "count": 239,
+      "accuracy_pct": 99.58,
+      "figure_fidelity_pct": 61.92,
+      "mean_latency_ms": 8895.7,
+      "p50_latency_ms": 1272.3,
+      "status_200_pct": 100.0
+    },
+    "sw": {
+      "count": 232,
+      "accuracy_pct": 99.14,
+      "figure_fidelity_pct": 60.78,
+      "mean_latency_ms": 6366.5,
+      "p50_latency_ms": 699.9,
+      "status_200_pct": 100.0
+    }
+  },
+  "domains": {
+    "customs": {
+      "count": 450,
+      "accuracy_pct": 100.0,
+      "mean_latency_ms": 13733.1,
+      "p50_latency_ms": 442.3
+    },
+    "domestic": {
+      "count": 550,
+      "accuracy_pct": 100.0,
+      "mean_latency_ms": 10127.5,
+      "p50_latency_ms": 443.9
+    },
+    "efris": {
+      "count": 350,
+      "accuracy_pct": 99.43,
+      "mean_latency_ms": 4146.6,
+      "p50_latency_ms": 413.7
+    },
+    "tax_education": {
+      "count": 300,
+      "accuracy_pct": 99.67,
+      "mean_latency_ms": 20066.4,
+      "p50_latency_ms": 12929.5
+    },
+    "transport": {
+      "count": 350,
+      "accuracy_pct": 100.0,
+      "mean_latency_ms": 4004.7,
+      "p50_latency_ms": 430.5
+    }
+  },
+  "gpu_telemetry": {
+    "pre_benchmark": {
+      "gpu_index": 4,
+      "name": "NVIDIA RTX A6000",
+      "memory_total_mb": 49140.0,
+      "memory_used_mb": 37012.0,
+      "memory_free_mb": 11663.0,
+      "utilization_pct": 0.0,
+      "temperature_c": 50.0,
+      "power_draw_w": 74.59
+    },
+    "post_benchmark": {
+      "gpu_index": 4,
+      "name": "NVIDIA RTX A6000",
+      "memory_total_mb": 49140.0,
+      "memory_used_mb": 41562.0,
+      "memory_free_mb": 7113.0,
+      "utilization_pct": 0.0,
+      "temperature_c": 81.0,
+      "power_draw_w": 195.1
+    }
+  },
+  "sample_evaluations": [
+    {
+      "faq_id": "FAQ2K-1097",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "Can an EFRIS invoice be cancelled after issuance, and what is the procedure?",
+      "status_code": 200,
+      "latency_s": 0.6901584789156914,
+      "reply_text": "### \ud83d\udcda Taxpayer Education: Electronic Fiscal Receipting and Invoicing Solution (EFRIS)\n\nEFRIS is URA's automated system for recording business sales transactions in real time. VAT-registered businesses must issue an e-receipt or e-invoice carrying a Fiscal Document Number (FDN) and QR code for each transaction.\n\n**\ud83d\udca1 Why It Matters:**\nInvoices issued outside EFRIS cannot be claimed for input tax credit by business buyers, and failure to use EFRIS attracts severe statutory penalties.\n\n**\u26a0\ufe0f Common Pitfalls to Avoid:**\n- EFRIS is not a new tax \u2014 it is an electronic receipting compliance tool.\n\n- EFRIS does not require dedicated expensive hardware; it can be used via the free URA web portal or mobile app.\n\n---\n**\ud83c\udfaf Quick Knowledge Check:**\n> Does every small non-VAT registered retail kiosk need an EFRIS machine?\n\n_Think through your answer and reply to test your understanding, or ask \u201cshow answer\u201d to reveal it!_\n\n**Recommended next topics**: Vat Registration.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "efris",
+        "invoice"
+      ],
+      "missing_kws": [
+        "credit note",
+        "cancel",
+        "approval",
+        "debit note"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1109",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "What is the difference between an e-invoice and an e-receipt under EFRIS?",
+      "status_code": 200,
+      "latency_s": 0.8998210355639458,
+      "reply_text": "### \ud83d\udcda Taxpayer Education: Electronic Fiscal Receipting and Invoicing Solution (EFRIS)\n\nEFRIS is URA's automated system for recording business sales transactions in real time. VAT-registered businesses must issue an e-receipt or e-invoice carrying a Fiscal Document Number (FDN) and QR code for each transaction.\n\n**\ud83d\udca1 Why It Matters:**\nInvoices issued outside EFRIS cannot be claimed for input tax credit by business buyers, and failure to use EFRIS attracts severe statutory penalties.\n\n**\u26a0\ufe0f Common Pitfalls to Avoid:**\n- EFRIS is not a new tax \u2014 it is an electronic receipting compliance tool.\n\n- EFRIS does not require dedicated expensive hardware; it can be used via the free URA web portal or mobile app.\n\n---\n**\ud83c\udfaf Quick Knowledge Check:**\n> Does every small non-VAT registered retail kiosk need an EFRIS machine?\n\n_Think through your answer and reply to test your understanding, or ask \u201cshow answer\u201d to reveal it!_\n\n**Recommended next topics**: Vat Registration.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "invoice",
+        "receipt",
+        "invoice",
+        "receipt",
+        "efris"
+      ],
+      "missing_kws": [
+        "b2b",
+        "b2c",
+        "ankara",
+        "risiti"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1115",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "How does system-to-system integration work for EFRIS ERP software?",
+      "status_code": 200,
+      "latency_s": 1.317251406610012,
+      "reply_text": "### \ud83d\udcda Taxpayer Education: Electronic Fiscal Receipting and Invoicing Solution (EFRIS)\n\nEFRIS is URA's automated system for recording business sales transactions in real time. VAT-registered businesses must issue an e-receipt or e-invoice carrying a Fiscal Document Number (FDN) and QR code for each transaction.\n\n**\ud83d\udca1 Why It Matters:**\nInvoices issued outside EFRIS cannot be claimed for input tax credit by business buyers, and failure to use EFRIS attracts severe statutory penalties.\n\n**\u26a0\ufe0f Common Pitfalls to Avoid:**\n- EFRIS is not a new tax \u2014 it is an electronic receipting compliance tool.\n\n- EFRIS does not require dedicated expensive hardware; it can be used via the free URA web portal or mobile app.\n\n---\n**\ud83c\udfaf Quick Knowledge Check:**\n> Does every small non-VAT registered retail kiosk need an EFRIS machine?\n\n_Think through your answer and reply to test your understanding, or ask \u201cshow answer\u201d to reveal it!_\n\n**Recommended next topics**: Vat Registration.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "does",
+        "system",
+        "system",
+        "efris"
+      ],
+      "missing_kws": [
+        "api",
+        "system-to-system",
+        "erp",
+        "integration",
+        "mfumo"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1103",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "What is the penalty for failing to issue an EFRIS fiscal invoice or receipt?",
+      "status_code": 200,
+      "latency_s": 1.474007099866867,
+      "reply_text": "I know deadlines can be stressful, so here's the quickest way forward.\n\n### \ud83d\udcda Taxpayer Education: Electronic Fiscal Receipting and Invoicing Solution (EFRIS)\n\nEFRIS is URA's automated system for recording business sales transactions in real time. VAT-registered businesses must issue an e-receipt or e-invoice carrying a Fiscal Document Number (FDN) and QR code for each transaction.\n\n**\ud83d\udca1 Why It Matters:**\nInvoices issued outside EFRIS cannot be claimed for input tax credit by business buyers, and failure to use EFRIS attracts severe statutory penalties.\n\n**\u26a0\ufe0f Common Pitfalls to Avoid:**\n- EFRIS is not a new tax \u2014 it is an electronic receipting compliance tool.\n\n- EFRIS does not require dedicated expensive hardware; it can be used via the free URA web portal or mobile app.\n\n---\n**\ud83c\udfaf Quick Knowledge Check:**\n> Does every small non-VAT registered retail kiosk need an EFRIS machine?\n\n_Think through your answer and reply to test your understanding, or ask \u201cshow answer\u201d to reveal it!_\n\n**Recommended next topics**: Vat Registration.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "penalty",
+        "penalty",
+        "failing",
+        "issue",
+        "efris",
+        "fiscal",
+        "invoice",
+        "receipt"
+      ],
+      "missing_kws": [
+        "penal",
+        "fine",
+        "currency points",
+        "tax avoided",
+        "adhabu",
+        "ekibonerezo"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1094",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "Can I use an Electronic Fiscal Device (EFD) without a desktop computer for EFRIS?",
+      "status_code": 200,
+      "latency_s": 10.138077646493912,
+      "reply_text": "Yes, you can use an Electronic Fiscal Device (EFD) without a desktop computer for EFRIS. An EFD is a standalone electronic device with an inbuilt fiscal memory, keypad, receipt printer, and SIM/data module that connects directly to URA servers without requiring a desktop computer. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: Can a business claim input VAT on an invoice without an EFRIS fiscal document number?",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "efd",
+        "device",
+        "standalone",
+        "electronic",
+        "fiscal",
+        "device",
+        "without",
+        "desktop",
+        "computer",
+        "efris"
+      ],
+      "missing_kws": [
+        "mobile",
+        "pos",
+        "ekyuma",
+        "akuma",
+        "kifaa",
+        "simu",
+        "essimu"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1121",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "What is EFRIS and who is mandated to use it?",
+      "status_code": 200,
+      "latency_s": 0.34942757338285446,
+      "reply_text": "### \ud83d\udcda Taxpayer Education: Electronic Fiscal Receipting and Invoicing Solution (EFRIS)\n\nEFRIS is URA's automated system for recording business sales transactions in real time. VAT-registered businesses must issue an e-receipt or e-invoice carrying a Fiscal Document Number (FDN) and QR code for each transaction.\n\n**\ud83d\udca1 Why It Matters:**\nInvoices issued outside EFRIS cannot be claimed for input tax credit by business buyers, and failure to use EFRIS attracts severe statutory penalties.\n\n**\u26a0\ufe0f Common Pitfalls to Avoid:**\n- EFRIS is not a new tax \u2014 it is an electronic receipting compliance tool.\n\n- EFRIS does not require dedicated expensive hardware; it can be used via the free URA web portal or mobile app.\n\n---\n**\ud83c\udfaf Quick Knowledge Check:**\n> Does every small non-VAT registered retail kiosk need an EFRIS machine?\n\n_Think through your answer and reply to test your understanding, or ask \u201cshow answer\u201d to reveal it!_\n\n**Recommended next topics**: Vat Registration.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "efris",
+        "electronic",
+        "invoicing",
+        "vat",
+        "receipt",
+        "efris"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1106",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "What should a trader do when EFRIS is offline during a power or internet blackout?",
+      "status_code": 200,
+      "latency_s": 11.745009623467922,
+      "reply_text": "When the Electronic Fiscal Receipting and Invoicing System (EFRIS) is offline due to a power or internet blackout, a trader should:\n\n1. Continue sales using offline EFRIS devices or desktop client software.\n2. Issue offline invoices.\n3. Ensure all offline transactions are synchronized and transmitted to URA within 24 hours once connectivity is restored. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "offline",
+        "24",
+        "should",
+        "trader",
+        "when",
+        "efris",
+        "offline",
+        "power",
+        "internet",
+        "blackout"
+      ],
+      "missing_kws": [
+        "sync",
+        "record",
+        "reconnect"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1100",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "Is EFRIS applicable to small businesses not registered for VAT?",
+      "status_code": 200,
+      "latency_s": 13.313943810760975,
+      "reply_text": "The Electronic Fiscal Receipting and Invoicing System (EFRIS) is not applicable to small businesses that are not registered for Value Added Tax (VAT). [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What tax applies to small businesses?",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "efris",
+        "applicable",
+        "small",
+        "businesses",
+        "registered"
+      ],
+      "missing_kws": [
+        "voluntary",
+        "not mandatory",
+        "vat threshold",
+        "encouraged",
+        "hiari"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1124",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "Can I use an Electronic Fiscal Device (EFD) without a desktop computer for EFRIS?",
+      "status_code": 200,
+      "latency_s": 0.3399682939052582,
+      "reply_text": "Yes, you can use an Electronic Fiscal Device (EFD) without a desktop computer for EFRIS. An EFD is a standalone electronic device with an inbuilt fiscal memory, keypad, receipt printer, and SIM/data module that connects directly to URA servers without requiring a desktop computer. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: Can a business claim input VAT on an invoice without an EFRIS fiscal document number?",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "efd",
+        "device",
+        "standalone",
+        "electronic",
+        "fiscal",
+        "device",
+        "without",
+        "desktop",
+        "computer",
+        "efris"
+      ],
+      "missing_kws": [
+        "mobile",
+        "pos",
+        "ekyuma",
+        "akuma",
+        "kifaa",
+        "simu",
+        "essimu"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1112",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "Must a VAT-registered taxpayer issue electronic fiscal receipts through EFRIS?",
+      "status_code": 200,
+      "latency_s": 16.399166636168957,
+      "reply_text": "Here's the most relevant guidance I found in official URA sources:\n\nAll VAT-registered taxpayers must use EFRIS to issue e-invoices or e-receipts for all business transactions. No tax credit is allowed or claimable on purchases unless they are supported by e-invoices or e-receipts\n\nThe Electronic Fiscal Receipting and Invoicing Solution (EFRIS) is a new smart business solution used to record business transactions and share the information with URA in real time.\n\nAn e-invoice or e-receipt is an electronic document that is required to be issued by a VAT registered person upon making a taxable supply. It shows that a sale has occurred through EFRIS.\n\nAll VAT-registered taxpayers must issue e-invoices/e-receipts through EFRIS; they should also buy from suppliers who issue e-invoices when VAT applies. Non-VAT taxpayers may use EFRIS voluntarily (issuing e-receipts).\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": false,
+      "eq_ok": true,
+      "matched_kws": [
+        "vat",
+        "receipt",
+        "efris",
+        "registered",
+        "taxpayer",
+        "issue",
+        "electronic",
+        "fiscal",
+        "receipts",
+        "through",
+        "efris"
+      ],
+      "missing_kws": [
+        "mandatory",
+        "compulsory"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1118",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "How do buyers verify if a tax invoice is authentic using EFRIS?",
+      "status_code": 200,
+      "latency_s": 16.731124132871628,
+      "reply_text": "Buyers can verify the authenticity of a tax invoice issued via the Electronic Fiscal Receipting and Invoicing System (EFRIS) by scanning the QR code printed on the invoice using the URA Kakasa mobile app, checking the 20-digit Fiscal Document Number (FDN) on the official URA web portal at ura.go.ug, or verifying the unique verification code. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: How do I check if my tax payment has reflected after paying using a PRN?",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "qr code",
+        "verify",
+        "fdn",
+        "buyers",
+        "verify",
+        "invoice",
+        "authentic",
+        "using",
+        "efris"
+      ],
+      "missing_kws": [
+        "authentication",
+        "thibitisha"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1127",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "Can an EFRIS invoice be cancelled after issuance, and what is the procedure?",
+      "status_code": 200,
+      "latency_s": 0.33946821838617325,
+      "reply_text": "### \ud83d\udcda Taxpayer Education: Electronic Fiscal Receipting and Invoicing Solution (EFRIS)\n\nEFRIS is URA's automated system for recording business sales transactions in real time. VAT-registered businesses must issue an e-receipt or e-invoice carrying a Fiscal Document Number (FDN) and QR code for each transaction.\n\n**\ud83d\udca1 Why It Matters:**\nInvoices issued outside EFRIS cannot be claimed for input tax credit by business buyers, and failure to use EFRIS attracts severe statutory penalties.\n\n**\u26a0\ufe0f Common Pitfalls to Avoid:**\n- EFRIS is not a new tax \u2014 it is an electronic receipting compliance tool.\n\n- EFRIS does not require dedicated expensive hardware; it can be used via the free URA web portal or mobile app.\n\n---\n**\ud83c\udfaf Quick Knowledge Check:**\n> Does every small non-VAT registered retail kiosk need an EFRIS machine?\n\n_Think through your answer and reply to test your understanding, or ask \u201cshow answer\u201d to reveal it!_\n\n**Recommended next topics**: Vat Registration.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "efris",
+        "invoice"
+      ],
+      "missing_kws": [
+        "credit note",
+        "cancel",
+        "approval",
+        "debit note"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1102",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "sw",
+      "query": "Je, mlipakodi aliyesajiliwa kwa VAT lazima atoe risiti za kielektroniki kupitia EFRIS?",
+      "status_code": 200,
+      "latency_s": 20.434062600135803,
+      "reply_text": "Chini ya sheria za sasa za kodi nchini Uganda na kanuni za Mamlaka ya Mapato ya Uganda (URA), hakuna \"mlipakodi aliyesajiliwa kwa kodi ya ongezeko la thamani\" rasmi. Mamlaka ya Mapato ya Uganda haitoi au kuweka kodi hiyo au ushuru wa aina hiyo.\n\nKichwa halali cha kodi kinachosimamiwa na Mamlaka ya Mapato ya Uganda ni pamoja na Kodi ya Mapato (PAYE, Kodi ya Mapato ya Kampuni, Kodi ya Mapato ya Dhana), Kodi ya Ongezeko la Thamani (VAT), Kodi ya Kukamatwa (WHT), Kodi ya Nyumba, Stamps Duty, na Kodi yaForces na Excise. Tafadhali wasiliana na miongozo rasmi ya URA au ofisa wa kodi aliyeidhinishwa kwa mahitaji ya kisheria.",
+      "retrieval_mode": "false_premise_rejected",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": false,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "kodi",
+        "vat"
+      ],
+      "missing_kws": [
+        "mandatory",
+        "compulsory",
+        "receipt",
+        "efris"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1120",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "sw",
+      "query": "Je, EFRIS inatumika kwa biashara ndogo zisizosajiliwa kwa VAT?",
+      "status_code": 200,
+      "latency_s": 22.235261261463165,
+      "reply_text": "Chini ya sheria za sasa za kodi nchini Uganda na kanuni za Mamlaka ya Mapato ya Uganda (URA), hakuna \"Ndogo Zisizosajiliwa Kwa Kodi ya Ongezeko la Thamani\" rasmi. Mamlaka ya Mapato ya Uganda haiongozi wala haiweki kodi hiyo au ushuru huo.\n\nKichwa halali cha kodi kinachosimamiwa na Mamlaka ya Mapato ya Uganda ni pamoja na Kodi ya Mapato (PAYE, Kodi ya Mapato ya Kampuni, Kodi ya Mapato ya Makadirio), Kodi ya Ongezeko la Thamani (VAT), Kodi ya Kukamatwa (WHT), Kodi ya Nyumba, Stamps Duty, na Kodi ya Fora na Excise. Tafadhali wasiliana na maelekezo rasmi ya URA au ofisa wa kodi aliyehakikiwa kwa mahitaji ya kisheria.",
+      "retrieval_mode": "false_premise_rejected",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": false,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "kodi",
+        "vat threshold"
+      ],
+      "missing_kws": [
+        "not mandatory"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1130",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "Is EFRIS applicable to small businesses not registered for VAT?",
+      "status_code": 200,
+      "latency_s": 0.34826211631298065,
+      "reply_text": "The Electronic Fiscal Receipting and Invoicing System (EFRIS) is not applicable to small businesses that are not registered for Value Added Tax (VAT). [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What tax applies to small businesses?",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "efris",
+        "applicable",
+        "small",
+        "businesses",
+        "registered"
+      ],
+      "missing_kws": [
+        "voluntary",
+        "not mandatory",
+        "vat threshold",
+        "encouraged",
+        "hiari"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1104",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "lg",
+      "query": "Nsobola okukozesa ekyuma kya EFD nga sirina kompyuta?",
+      "status_code": 200,
+      "latency_s": 26.265389069914818,
+      "reply_text": "Yee, osobola okukozesa ekyuma kya Electronic Fiscal Device (EFD) nga tolina kompyuta ya mmeeza ku EFRIS. EFD kyuma ekikolera ku bwakyo ekirina ebijjukizo by'omusolo, akasumuluzo, ekyuma ekikuba lisiiti, n'ekitundu ekirimu obubaka ekisobola okuyunga butereevu ku kompyuta za URA nga tekikozesezza kompyuta ya mmeeza. [1]\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.\n\nOyinz'okwagala okumanya: Nedda, tosobola kukozesa kyuma kya EFD awatali kompyuta ku EFRIS.",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo",
+        "device"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1132",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "sw",
+      "query": "Je, mlipakodi aliyesajiliwa kwa VAT lazima atoe risiti za kielektroniki kupitia EFRIS?",
+      "status_code": 200,
+      "latency_s": 1.0007848888635635,
+      "reply_text": "Chini ya sheria za sasa za kodi nchini Uganda na kanuni za Mamlaka ya Mapato ya Uganda (URA), hakuna \"mlipakodi aliyesajiliwa kwa kodi ya ongezeko la thamani\" rasmi. Mamlaka ya Mapato ya Uganda haitoi au kuweka kodi hiyo au ushuru wa aina hiyo.\n\nKichwa halali cha kodi kinachosimamiwa na Mamlaka ya Mapato ya Uganda ni pamoja na Kodi ya Mapato (PAYE, Kodi ya Mapato ya Kampuni, Kodi ya Mapato ya Dhana), Kodi ya Ongezeko la Thamani (VAT), Kodi ya Kukamatwa (WHT), Kodi ya Nyumba, Stamps Duty, na Kodi yaForces na Excise. Tafadhali wasiliana na miongozo rasmi ya URA au ofisa wa kodi aliyeidhinishwa kwa mahitaji ya kisheria.",
+      "retrieval_mode": "false_premise_rejected",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": false,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "kodi",
+        "vat"
+      ],
+      "missing_kws": [
+        "mandatory",
+        "compulsory",
+        "receipt",
+        "efris"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1133",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "What is the penalty for failing to issue an EFRIS fiscal invoice or receipt?",
+      "status_code": 200,
+      "latency_s": 0.33126093447208405,
+      "reply_text": "I know deadlines can be stressful, so here's the quickest way forward.\n\n### \ud83d\udcda Taxpayer Education: Electronic Fiscal Receipting and Invoicing Solution (EFRIS)\n\nEFRIS is URA's automated system for recording business sales transactions in real time. VAT-registered businesses must issue an e-receipt or e-invoice carrying a Fiscal Document Number (FDN) and QR code for each transaction.\n\n**\ud83d\udca1 Why It Matters:**\nInvoices issued outside EFRIS cannot be claimed for input tax credit by business buyers, and failure to use EFRIS attracts severe statutory penalties.\n\n**\u26a0\ufe0f Common Pitfalls to Avoid:**\n- EFRIS is not a new tax \u2014 it is an electronic receipting compliance tool.\n\n- EFRIS does not require dedicated expensive hardware; it can be used via the free URA web portal or mobile app.\n\n---\n**\ud83c\udfaf Quick Knowledge Check:**\n> Does every small non-VAT registered retail kiosk need an EFRIS machine?\n\n_Think through your answer and reply to test your understanding, or ask \u201cshow answer\u201d to reveal it!_\n\n**Recommended next topics**: Vat Registration.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "penalty",
+        "penalty",
+        "failing",
+        "issue",
+        "efris",
+        "fiscal",
+        "invoice",
+        "receipt"
+      ],
+      "missing_kws": [
+        "penal",
+        "fine",
+        "currency points",
+        "tax avoided",
+        "adhabu",
+        "ekibonerezo"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1114",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "sw",
+      "query": "Je, ninaweza kutumia kifaa cha EFD bila kompyuta kwa ajili ya EFRIS?",
+      "status_code": 200,
+      "latency_s": 28.930906414985657,
+      "reply_text": "Ndiyo, unaweza kutumia kifaa cha kielektroniki cha ushuru (Electronic Fiscal Device (EFD)) bila kompyuta ya meza kwa ajili ya EFRIS. EFD ni kifaa cha kielektroniki kilichojitegemea chenye kumbukumbu ya kodi, vibonye, chapa risiti, na moduli ya data/ SIM ambayo hujihusisha moja kwa moja na seva za URA bila kuweka kompyuta ya meza. [1]\n\nIkiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000.\n\nUnaweza pia kutaka kujua: Je, posho za nyumba zinazotolewa kwa wafanyakazi zinatozwa kodi chini ya mapato ya ajira?",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "kodi",
+        "device"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1134",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "lg",
+      "query": "Nsobola okukozesa ekyuma kya EFD nga sirina kompyuta?",
+      "status_code": 200,
+      "latency_s": 1.567942626774311,
+      "reply_text": "Yee, osobola okukozesa ekyuma kya Electronic Fiscal Device (EFD) nga tolina kompyuta ya mmeeza ku EFRIS. EFD kyuma ekikolera ku bwakyo ekirina ebijjukizo by'omusolo, akasumuluzo, ekyuma ekikuba lisiiti, n'ekitundu ekirimu obubaka ekisobola okuyunga butereevu ku kompyuta za URA nga tekikozesezza kompyuta ya mmeeza. [1]\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.\n\nOyinz'okwagala okumanya: Nedda, tosobola kukozesa kyuma kya EFD nga tolina kompyuta okusasula omusolo gwa EFRIS.",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo",
+        "device"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1136",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "en",
+      "query": "What should a trader do when EFRIS is offline during a power or internet blackout?",
+      "status_code": 200,
+      "latency_s": 0.3468608409166336,
+      "reply_text": "When the Electronic Fiscal Receipting and Invoicing System (EFRIS) is offline due to a power or internet blackout, a trader should:\n\n1. Continue sales using offline EFRIS devices or desktop client software.\n2. Issue offline invoices.\n3. Ensure all offline transactions are synchronized and transmitted to URA within 24 hours once connectivity is restored. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "offline",
+        "24",
+        "should",
+        "trader",
+        "when",
+        "efris",
+        "offline",
+        "power",
+        "internet",
+        "blackout"
+      ],
+      "missing_kws": [
+        "sync",
+        "record",
+        "reconnect"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1110",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "lg",
+      "query": "EFRIS ekwata ku bizinensi entono ezitali za VAT?",
+      "status_code": 200,
+      "latency_s": 31.348965167999268,
+      "reply_text": "Enkola y'Okufuna n'Okuwa Obusoloobyo ku Mpeereza z'Ebyensimbi eya EFRIS nkola ya bizinensi empya ekozesebwa okuwandiika ebikolebwa mu bizinensi n'okubunyisa obubaka eri URA mu budde obutuufu.\n\nKya tteeka buli musasuzi wa musolo gwa VAT okuwa obusoloobyo ku mpeereza za e-invoice oba e-receipt kubanga tewali kusonyiyibwa misolo ku bintu ebiguliddwa okuggyako nga biriko obusoloobyo ku mpeereza za e-invoice oba e-receipt. [1]\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.\n\nOyinz'okwagala okumanya: Okusasula omusolo gwa EFRIS kya kyeyagalire eri abo abatasasula musolo gwa VAT?",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo",
+        "not mandatory"
+      ],
+      "missing_kws": [
+        "vat threshold"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1105",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "sw",
+      "query": "Uunganishaji wa mifumo (system-to-system) unafanyaje kazi katika EFRIS?",
+      "status_code": 200,
+      "latency_s": 31.37549376487732,
+      "reply_text": "### \ud83d\udcda Elimu ya Walipa Kodi: Suluhisho la Kielektroniki la Risiti na Faktura (EFRIS)\n\nEFRIS ni mfumo wa URA unaoitwa Electronic Fiscal Receipting and Invoicing Solution (EFRIS). Biashara ambazo zimejisajili kulipa kodi ya ongezeko la thamani lazima ziweke alama ya elektroniki au faini eletroniki yenye nambari ya kielektroniki (FDN) na kode ya QR kwa kila shughuli.\n\n**\ud83d\udca1 Kwa Nini Ni Muhimu?**\n\nInvoisi zilizotolewa nje ya mfumo wa EFRIS haziruhusiwi kudaiwa kama malipo ya kodi na wateja wa biashara, na kutumia mfumo wa EFRIS kunaweza kusababisha adhabu kali za kisheria.\n\n**\u26a0\ufe0f Makosa ya Kawaida ya Kuepuka:**\n\n- EFRIS si ushuru mpya - ni zana ya utii wa risiti za kielektroniki.\n\n- EFRIS haipaswi kutumia vifaa maalumu ghali; inaweza kutumiwa kupitia tovuti ya URA bila malipo au programu ya simu ya mkononi.\n\n---\n\n**\ud83c\udfaf Jaribu Kujua Haraka:**\n\n> Je, kila duka dogo lisilojisajili kwa VAT linahitaji mashine ya EFRIS?\n\n*Fikiria jibu lako na ujibu ili kujaribu uelewa wako, au tuma \"onyesha jibu\" ili kufunua jibu!*\n\n**Mada Zinazopendekezwa Zifuatazo**: Usajili wa VAT.\n\nIkiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "kodi"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1111",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "sw",
+      "query": "EFRIS ni nini na ni nani anayelazimika kuitumia kisheria?",
+      "status_code": 200,
+      "latency_s": 31.50852134823799,
+      "reply_text": "### \ud83d\udcda Elimu ya Walipa Kodi: Suluhisho la Kielektroniki la Risiti na Faktura (EFRIS)\n\nEFRIS ni mfumo wa URA unaoitwa Electronic Fiscal Receipting and Invoicing Solution (EFRIS). Biashara ambazo zimejisajili kulipa kodi ya ongezeko la thamani lazima ziweke alama ya elektroniki au faini eletroniki yenye nambari ya kielektroniki (FDN) na kode ya QR kwa kila shughuli.\n\n**\ud83d\udca1 Kwa Nini Ni Muhimu?**\n\nInvoisi zilizotolewa nje ya mfumo wa EFRIS haziruhusiwi kudaiwa kama malipo ya kodi na wateja wa biashara, na kutumia mfumo wa EFRIS kunaweza kusababisha adhabu kali za kisheria.\n\n**\u26a0\ufe0f Makosa ya Kawaida ya Kuepukwa:**\n\n- EFRIS si kodi mpya - ni zana ya utii wa risiti za kielektroniki.\n\n- EFRIS haipaswi kutumia vifaa maalum vya bei ghali; inaweza kutumika kupitia tovuti ya URA bila malipo au programu ya simu ya mkononi.\n\n---\n\n**\ud83c\udfaf Jaribu Kujua Haraka:**\n\n> Je, kila duka dogo lisilojisajili kwa kodi ya ongezeko la thamani linahitaji mashine ya EFRIS?\n\n*Fikiria jibu lako na ujibu ili kujaribu uelewa wako, au tuma \"onyesha jibu\" ili kufunua jibu!*\n\n**Mada Zinazopendekezwa Zifuatazo**: Usajili wa VAT.\n\nIkiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "kodi",
+        "efris",
+        "invoicing",
+        "vat",
+        "receipt"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1099",
+      "domain": "efris",
+      "topic": "efris_invoicing",
+      "locale": "sw",
+      "query": "Kuna tofauti gani kati ya e-invoice na e-receipt katika EFRIS?",
+      "status_code": 200,
+      "latency_s": 31.57323131710291,
+      "reply_text": "### \ud83d\udcda Elimu ya Walipa Kodi: Suluhisho la Kielektroniki la Risiti na Faktura (EFRIS)\n\nEFRIS ni mfumo wa URA unaoitwa Electronic Fiscal Receipting and Invoicing Solution (EFRIS). Biashara ambazo zimejisajili kulipa kodi ya ongezeko la thamani lazima ziweke alama ya elektroniki au faini eletroniki yenye nambari ya kielektroniki (FDN) na kode ya QR kwa kila shughuli.\n\n**\ud83d\udca1 Kwa Nini Ni Muhimu?**\n\nInvoisi zilizotolewa nje ya mfumo wa EFRIS haziruhusiwi kudaiwa kama malipo ya kodi na wateja wa biashara, na kutumia mfumo wa EFRIS kunaweza kusababisha adhabu kali za kisheria.\n\n**\u26a0\ufe0f Makosa ya Kawaida ya Kuepukwa:**\n\n- EFRIS si kodi mpya - ni zana ya utii wa risiti za kielektroniki.\n\n- EFRIS haipaswi kutumia vifaa maalumu ghali; inaweza kutumiwa kupitia tovuti ya URA bila malipo au programu ya simu ya mkononi.\n\n---\n\n**\ud83c\udfaf Jaribu Kujua Haraka:**\n\n> Je, kila duka dogo lisilojisajili kwa VAT linahitaji mashine ya EFRIS?\n\n*Fikiria jibu lako na ujibu ili kujaribu uelewa wako, au taja \"onyesha jibu\" ili kufunua jibu!*\n\n**Mada Zinazopendekezwa Zifuatazo**: Usajili wa VAT.\n\nIkiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000.",
+      "retrieval_mode": "education",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "kodi",
+        "invoice",
+        "receipt"
+      ],
+      "missing_kws": []
+    }
+  ]
+}

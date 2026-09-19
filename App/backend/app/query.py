@@ -428,6 +428,41 @@ _CORRECTIONS: dict[str, str] = {
     "pleeease": "please",
     "heeeelp": "help",
     "soooo": "so",
+    "tinn": "tin",
+    "pinn": "tin",
+    "vatt": "vat",
+    "efriss": "efris",
+    "e-fris": "efris",
+    "efrist": "efris",
+    "vehcle": "vehicle",
+    "vehical": "vehicle",
+    "motr": "motor",
+    "registratin": "registration",
+    "regstration": "registration",
+    "regstraton": "registration",
+    "registr": "register",
+    "penalti": "penalty",
+    "penalites": "penalties",
+    "retun": "return",
+    "retuns": "returns",
+    "incom": "income",
+    "customes": "customs",
+    "costoms": "customs",
+    "witholdng": "withholding",
+    "witholding": "withholding",
+    "with-holding": "withholding",
+    "environmntal": "environmental",
+    "environmetal": "environmental",
+    "enviromental": "environmental",
+    "presumptve": "presumptive",
+    "transacion": "transaction",
+    "assesment": "assessment",
+    "assesments": "assessments",
+    "objectionn": "objection",
+    "clearanc": "clearance",
+    "calculte": "calculate",
+    "calclate": "calculate",
+    "drawbak": "drawback",
 }
 
 
@@ -451,13 +486,24 @@ _TAX_DOMAIN_VOCAB: frozenset[str] = frozenset({
     "taxpayer", "taxpayers", "individual", "individuals", "organisation", "organization", "organisations", "organizations",
     "company", "companies", "corporate", "corporation",
     "withholding", "customs", "clearance", "assessment", "assessments", "assessed", "dispute", "disputes", "objection", "objections",
-    "appeal", "appeals", "invoicing", "receipting", "document", "documents", "application", "applications",
+    "appeal", "appeals", "invoicing", "receipting", "receipt", "receipts", "clarify", "clarification", "document", "documents", "application", "applications",
     "apply", "threshold", "thresholds", "compulsory", "voluntary", "higher", "lower", "purchase", "purchases", "invoice", "invoices",
     "resident", "residents", "residence", "salary", "employment", "turnover", "penalty", "penalties",
     "provisional", "exemption", "exemptions", "exempt", "deadline", "deadlines", "declaration", "declarations",
     "electronic", "online", "statement", "statements", "payment", "payments", "business", "commercial", "import", "imports", "export", "exports",
-    "compute", "computation", "calculate", "calculation", "return", "returns", "filing",
+    "compute", "computation", "calculate", "calculation", "return", "returns", "filing", "late",
     "compliance", "certificate", "certificates", "presumptive", "income", "rental", "refund", "refunds",
+    "tin", "pin", "nin", "prn", "fdn", "brn", "paye", "vat",
+    "motor", "vehicle", "vehicles", "car", "cars", "motorcycle", "motorcycles", "truck", "trucks", "lorry", "lorries",
+    "bus", "buses", "taxi", "taxis", "logbook", "plate", "plates", "numberplate", "ownership", "duplicate", "inspection",
+    "environmental", "levy", "levies", "excise", "stamp", "duty", "duties",
+    "transaction", "valuation", "freight", "insurance", "cif", "fob", "consignment", "manifest",
+    "bonded", "warehouse", "warehousing", "transit", "cargo", "drawback", "forfeiture", "seizure", "smuggling", "offence", "offences",
+    "efris", "efd", "device", "devices", "fiscal", "kakasa", "stock", "inventory", "offline", "sync",
+    "tribunal", "court", "ruling", "rulings", "commissioner", "audit", "audited", "audits",
+    "ngo", "ngos", "charity", "charities", "charitable", "religious", "church", "churches", "mosque", "mosques",
+    "institution", "institutions", "dividend", "dividends", "interest", "royalty", "royalties", "consultant", "consultants",
+    "wage", "wages", "earnings", "allowance", "allowances", "housing", "bonus", "deduction", "deductions", "takehome",
 })
 
 _COMMON_ENGLISH_WORDS: frozenset[str] = frozenset({
@@ -475,16 +521,28 @@ _COMMON_ENGLISH_WORDS: frozenset[str] = frozenset({
     "good", "well", "great", "please", "thanks", "thank",
 })
 
-_LOCAL_LANGUAGE_WORDS: frozenset[str] = frozenset({
+_LUGANDA_WORDS: frozenset[str] = frozenset({
+    "omusolo", "buli", "okufuna", "ebitundu", "ssente", "alipoota", "abakozi",
+    "waggulu", "basasula", "bwe", "era", "kye", "bye", "kampuni", "emisolo",
+    "okwewandiisa", "okuwandiisa", "nkola", "ntya", "wandiisa", "musanyufu", "ebisaanyizo", "enkola", "omusaala", "abakozesa", "ekitongole",
+    "gyebaleko", "webale", "yee", "nedda", "nsaba", "sente", "gwa", "bbeeyi", "guli",
+    "emmotoka", "pikipiki", "eppikipiki", "obwannannyini", "okukyusa", "obutonde",
+    "ekibonerezo", "ebibonerezo", "okwemulugunya", "ebyamaguzi", "ebisale",
+    "ebiwandiiko", "lole", "tulakita", "obupangisa", "mayumba", "nnyumba", "kyuma", "ekyuma",
+})
+
+_SWAHILI_WORDS: frozenset[str] = frozenset({
     "kodi", "kwa", "katika", "kujisajili", "asilimia", "thamani", "ushuru",
     "marejesho", "huduma", "wafanyakazi", "mapato", "nchini", "binafsi",
     "kazi", "mwaka", "mwezi", "kutoa", "kulipa", "zaidi", "kiwango", "viwango",
     "habari", "jambo", "karibu", "asante", "shukrani", "ndiyo", "hapana",
-    "omusolo", "buli", "okufuna", "ebitundu", "ssente", "alipoota", "abakozi",
-    "waggulu", "basasula", "bwe", "era", "kye", "bye", "kampuni", "emisolo",
-    "okwewandiisa", "musanyufu", "ebisaanyizo", "enkola", "omusaala", "abakozesa", "ekitongole",
-    "gyebaleko", "webale", "yee", "nedda", "nsaba", "sente",
+    "gari", "magari", "umiliki", "uhamisho", "kuhamisha", "mazingira", "ankara",
+    "risiti", "forodha", "mizigo", "mzigo", "msamaha", "kuagiza", "kusafirisha",
+    "mfumo", "hifadhi", "pingamizi", "adhabu", "je", "malori", "yamesamehewa",
+    "kusamehewa", "tozo", "kifaa", "inalipwaje",
 })
+
+_LOCAL_LANGUAGE_WORDS = _LUGANDA_WORDS | _SWAHILI_WORDS
 
 
 _GENERAL_ENGLISH_VOCAB: frozenset[str] = frozenset({
@@ -499,7 +557,7 @@ _GENERAL_ENGLISH_VOCAB: frozenset[str] = frozenset({
     "maintenance", "reference", "similar", "receive", "receiving", "received",
     "separate", "believe", "believing", "occurred", "occurring", "definitely",
     "category", "recommend", "recommended", "familiar", "difficulty", "difficult",
-    "password", "passwords",
+    "password", "passwords", "objective", "objectives",
 })
 
 _ALL_CORRECTABLE_VOCAB = _TAX_DOMAIN_VOCAB | _GENERAL_ENGLISH_VOCAB
@@ -526,12 +584,10 @@ def _damerau_levenshtein(s1: str, s2: str) -> int:
     return d[len1][len2]
 
 
-@functools.lru_cache(maxsize=4096)
+@functools.lru_cache(maxsize=8192)
 def _fuzzy_correct_word(word: str) -> str:
     """Fuzzy match an unrecognized token against tax and general English vocabulary."""
     low = word.lower()
-    if len(low) < 4:
-        return word
     if low in _ALL_CORRECTABLE_VOCAB or low in _COMMON_ENGLISH_WORDS or low in _LOCAL_LANGUAGE_WORDS:
         return word
     if word.isupper() or any(ch.isdigit() for ch in word):
@@ -541,7 +597,18 @@ def _fuzzy_correct_word(word: str) -> str:
     if word.startswith("xx") or word.endswith("xx"):
         return word
 
-    max_dist = 1
+    # 1. Squeeze doubled final letters for short words (e.g. tinn -> tin, vatt -> vat, pinn -> pin)
+    if len(low) == 4 and low[2] == low[3] and low[:3] in _ALL_CORRECTABLE_VOCAB:
+        cand = low[:3]
+        return cand.capitalize() if word.istitle() else cand
+
+    if len(low) < 4:
+        return word
+
+    # 2. Dynamic Damerau-Levenshtein threshold (SymSpell / Lucene standard):
+    # Length >= 7 allows distance 2 (e.g. "environmntal" -> "environmental", "witholdng" -> "withholding")
+    # Length 4..6 allows distance 1 (e.g. "motr" -> "motor", "vehcle" -> "vehicle", "penalti" -> "penalty")
+    max_dist = 2 if len(low) >= 7 else 1
     best_candidate = None
     best_dist = max_dist + 1
 
@@ -877,8 +944,8 @@ def detect_language(text: str, default_lang: str = "en") -> str:
 
     # 1. Lexical markers for English, Luganda, and Swahili
     en_hits = len(words & _COMMON_ENGLISH_WORDS) + len(words & _TAX_DOMAIN_VOCAB)
-    lg_hits = len(words & _LOCAL_LANGUAGE_WORDS)
-    sw_hits = len(_SW_MARKERS.findall(cleaned))
+    lg_hits = len(words & _LUGANDA_WORDS)
+    sw_hits = len(words & _SWAHILI_WORDS) + len(_SW_MARKERS.findall(cleaned))
 
     # A misspelled or noisy English query (e.g. "wat is the vat rat?",
     # "How do I pay assessmnt witholding tax?") resolves to English tokens and
@@ -887,9 +954,13 @@ def detect_language(text: str, default_lang: str = "en") -> str:
         return default_lang
 
     # 2. Strong lexical signals for supported Ugandan / East African locales
-    if sw_hits >= 2 or (sw_hits >= 1 and en_hits == 0):
+    if sw_hits > lg_hits and (sw_hits >= 2 or (sw_hits >= 1 and en_hits == 0)):
         return "sw"
-    if lg_hits >= 2 or (lg_hits >= 1 and en_hits == 0):
+    if lg_hits > sw_hits and (lg_hits >= 2 or (lg_hits >= 1 and en_hits == 0)):
+        return "lg"
+    if sw_hits >= 2 and lg_hits == 0:
+        return "sw"
+    if lg_hits >= 2 and sw_hits == 0:
         return "lg"
 
     # Consult statistical detector (lingua) on the corrected text

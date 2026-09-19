@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Amount extraction
 # ---------------------------------------------------------------------------
-_CURRENCY = r"(?:ugx|ug\s?shs?|shs|shillings?|ssente|ensimbi|shilingi)"
+_CURRENCY = r"(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|shilingi|ssente|sente|ensimbi|/=|/-\b)"
 _AMOUNT_PREFIX_RE = re.compile(
     r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?nkumi|o?lukumi)\s+"
     r"(\d{1,3}(?:[,\s]\d{3})*|\d+(?:\.\d+)?)\b",
@@ -42,11 +42,10 @@ _AMOUNT_PREFIX_MULTIPLIERS = {
 }
 _AMOUNT_RE = re.compile(
     rf"""
-    (?P<currency>{_CURRENCY}\.?\s*)?              # optional currency prefix
-    (?P<number>\d{{1,3}}(?:[,\s]\d{{3}})+          # 1,000,000 / 1 000 000
-       |\d+(?:\.\d+)?)                             # 1500000 / 1.5
-    \s*
-    (?P<suffix>k|m|bn|b|thousand|million|billion)?\b
+    (?P<prefix_curr>{_CURRENCY}\s*)?
+    (?P<number>\d{{1,3}}(?:[,\s]\d{{3}})+(?:\.\d+)?|\d+(?:\.\d+)?)
+    (?:\s*(?P<suffix>k|m|bn|b|thousand|million|billion)\b)?
+    (?:\s*(?P<suffix_curr>{_CURRENCY}\b|/=|/-))?
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -85,7 +84,7 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
         except ValueError:
             continue
 
-    # 2. Suffix matches
+    # 2. Suffix matches and standard numbers (with or without commas / currency)
     for m in _AMOUNT_RE.finditer(text or ""):
         if any(s <= m.start("number") and m.end("number") <= e for s, e in seen_spans):
             continue
@@ -93,12 +92,17 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
         digits = raw.replace(",", "").replace(" ", "")
         if any(s <= m.start("number") < e or s < m.end("number") <= e for s, e in percent_spans):
             continue
-        if _YEAR_RE.match(digits) and not (m.group("currency") or m.group("suffix")):
+        curr = (m.group("prefix_curr") or m.group("suffix_curr") or "").strip()
+        suf = (m.group("suffix") or "").strip().lower()
+        if _YEAR_RE.match(digits) and not (curr or suf):
             continue
         if digits.startswith("0") and len(digits) >= 9:  # phone-shaped
             continue
-        value = float(digits) * _MULTIPLIERS.get((m.group("suffix") or "").lower(), 1)
-        if value < 1000 and not (m.group("currency") or m.group("suffix")):
+        try:
+            value = float(digits) * _MULTIPLIERS.get(suf, 1)
+        except ValueError:
+            continue
+        if value < 1000 and not (curr or suf):
             continue
         found.append((value, m.start(), m.end()))
     return found
@@ -178,7 +182,9 @@ _DEFINITIONAL_OPENER_RE = re.compile(
 # compute on.
 _INFO_ONLY_RE = re.compile(
     r"\bhow\s+(is|are|does|do|can)\b.*\b(calculate|calculated|compute|computed|charge|charged|determine|determined)\b"
-    r"|\bwho\s+(?:must|should|needs?|is|are)\b.*\b(register|registered|registration|liable|eligible|pay|file)\b"
+    r"|\b(?:who|when)\s+(?:must|should|needs?|is|are|does)\b.*\b(register|registered|registration|liable|eligible|pay|file)\b"
+    r"|\b(?:religious|church|mosque|charit\w*)\b"
+    r"|\b(?:escape|escape\s+wht|avoid\s+wht|do\s+amounts)\b"
     # "how much X is exempt / tax-free / taxable / deducted" — a threshold
     # lookup. Kept narrow: "how much PAYE will I pay on 3,500,000" has no
     # "is/are + exempt", so it still reaches the calculator.
@@ -247,7 +253,11 @@ _ALREADY_REGISTERED_RE = re.compile(
     # registered for VAT" — so allow a bounded run rather than one token.
     + r"|\b(?:i|we|my(?:\s+\w+){1,3}|our(?:\s+\w+){1,3})\s+"
     r"(?:am|are|is|was|were|have|has|had)\s+"
-    r"(?:already\s+|now\s+)?(?:be(?:en)?\s+)?" + _REGISTERED_FOR_VAT,
+    r"(?:already\s+|now\s+)?(?:be(?:en)?\s+)?" + _REGISTERED_FOR_VAT
+    + r"|\b" + _REGISTERED_FOR_VAT + r"\s+(?:taxpayer|person|business|company|entity|dealer|trader|vendor)s?\b"
+    + r"|\b(?:efris|electronic\s+fiscal|e-?invoice|e-?receipt|risiti|ankara)\b"
+    + r"|\b(?:non[-\s]?resident\s+supplier|electronic\s+services|digital\s+services)\b"
+    + r"|\b(?:alijesajiliwa|waliosajiliwa|aliyesajiliwa)\s+(?:kwa\s+)?(?:vat|kodi)\b",
     re.IGNORECASE,
 )
 
@@ -276,7 +286,8 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
             r"\b(paye|take[-\s]?home|net[-\s]?pay|gross[-\s]?pay|net[-\s]?salary|gross[-\s]?salary|salar(?:y|ies)\s+tax"
             r"|pay\s+as\s+you\s+earn|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salar(?:y|ies)|income|earnings|pay)"
             r"|tax\s+on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salar(?:y|ies)|income|earnings|pay)"
-            r"|salar(?:y|ies)\b.*\btax|tax\b.*\b(?:salar(?:y|ies)|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salar(?:y|ies)|income))\b",
+            r"|salar(?:y|ies)\b.*\btax|tax\b.*\b(?:salar(?:y|ies)|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salar(?:y|ies)|income)"
+            r"|(?:what\s+(?:is|'s)\s+(?:the\s+)?|how\s+much\s+)?tax\s+(?:due\s+|payable\s+|is\s+there\s+)?(?:on|for)\s+(?:(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|ssente)\s*)?\d+(?:\s*(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|ssente|/=|/-))?)\b",
             re.IGNORECASE,
         ),
     ),
@@ -395,7 +406,10 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
             return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])
 
     if not _CALC_VERB_RE.search(text) and not (
-        _DEFINITIONAL_OPENER_RE.search(text) and has_money_amount(text)
+        has_money_amount(text) and (
+            _DEFINITIONAL_OPENER_RE.search(text)
+            or detect_calculator_intent(text) is not None
+        )
     ):
         return None
 

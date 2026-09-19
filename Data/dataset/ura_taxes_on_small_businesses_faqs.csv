@@ -2,4 +2,5 @@ question,answer
 "What is a small business for tax purposes?","A business with annual sales between UGX 10,000,000 and UGX 150,000,000 (about UGX 27,500+ per day)." 
 "What tax applies to small businesses?","The presumptive tax charged by URA on operators within the small-business turnover band." 
 "Who pays this tax?","Owners of small businesses within the presumptive turnover range." 
-"Does every business in that band pay presumptive tax?","No. Professionals such as medical, dental, engineering, accounting, and architectural practices (among others) are excluded from this tax." 
+"Does every business in that band pay presumptive tax?","No. Professionals such as medical, dental, engineering, accounting, and architectural practices (among others) are excluded from this tax."
+"Does a small retail shop or grocery with annual sales of 35 million UGX pay standard corporation tax?","No. A small business or retail grocery with gross annual sales between UGX 10,000,000 and UGX 150,000,000 pays presumptive tax under Section 4 of the Income Tax Act rather than standard 30% corporation tax. For annual turnover between UGX 30M and UGX 50M, the simplified presumptive tax is fixed at UGX 200,000 per year (or 0.5% of turnover if simplified books of account are kept)." 

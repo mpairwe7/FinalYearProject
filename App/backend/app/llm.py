@@ -1254,10 +1254,10 @@ def translate_text(
     from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
 
     verdict = InputGuard().check(text)
-    if not verdict.allowed and ("prompt_injection" in verdict.flags or "length_exceeded" in verdict.flags):
+    if not verdict.allowed and "prompt_injection" in verdict.flags:
         logger.warning("Prompted MT refused input (flags=%s)", verdict.flags)
         return ""
-    if len(text) > 8000:
+    if len(text) > 3500:
         logger.warning("Prompted MT refused input: text too long (%d chars)", len(text))
         return ""
 

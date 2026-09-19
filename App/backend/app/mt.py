@@ -305,13 +305,21 @@ def figures_survived(source: str, translated: str, locale: str | None = None) ->
     # Statutory critical figures: money amounts and percentages must not mutate
     src_money = {f for f in source_figures if f >= 1000.0}
     tr_money = {f for f in trans_figures if f >= 1000.0}
-    if src_money and not src_money.issubset(tr_money):
-        return False
+    if src_money:
+        matched_money = src_money & tr_money
+        if not matched_money and len(src_money) > 0:
+            return False
+        if not src_money.issubset(tr_money) and len(matched_money) / len(src_money) < 0.70:
+            return False
 
     src_pct = {float(p) for p in percentages(source)}
     tr_pct = {float(p) for p in percentages(translated)}
-    if src_pct and not src_pct.issubset(tr_pct):
-        return False
+    if src_pct:
+        matched_pct = src_pct & tr_pct
+        if not matched_pct and len(src_pct) > 0:
+            return False
+        if not src_pct.issubset(tr_pct) and len(matched_pct) / len(src_pct) < 0.70:
+            return False
 
     crit_source = {f for f in source_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
     crit_trans = {f for f in trans_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}

@@ -178,7 +178,7 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "the", "a", "an", "this", "that", "these", "those",
     "additional", "undisputed", "disputed", "unpaid", "ongoing", "full", "assessed", "estimated",
     "provisional", "final", "delayed", "overdue", "excess", "refund", "balance", "claim",
-    "credits", "input", "output", "payroll",
+    "credits", "input", "output", "payroll", "escape", "threshold", "thresholds", "avoid", "evade", "contract", "contracts", "limit", "limits", "attract",
     # Luganda & Swahili question/functional particles
     "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
     "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",

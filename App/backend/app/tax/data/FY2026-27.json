@@ -97,7 +97,14 @@
     "stamp_duty_property_transfer": 0.01,
     "objection_timeline_days": 45,
     "paye_due_date_monthly": 15,
-    "passenger_baggage_allowance_usd": 500
+    "passenger_baggage_allowance_usd": 500,
+    "efris_penalty_failure_to_issue_invoice": 6000000,
+    "efris_offline_sync_window_hours": 24,
+    "motor_vehicle_transfer_fee": 100000,
+    "motor_vehicle_duplicate_logbook_fee": 50000,
+    "motor_vehicle_personalized_plate_fee": 20000000,
+    "motor_vehicle_advance_tax_passenger_per_seat": 20000,
+    "motor_vehicle_advance_tax_goods_per_tonne": 50000
   },
   "unverified": [
     "vat_registration_threshold_annual",

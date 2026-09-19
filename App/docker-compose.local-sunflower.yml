@@ -49,7 +49,7 @@ services:
       - --max-model-len
       - "${SUNFLOWER_MAX_MODEL_LEN:-4096}"
       - --gpu-memory-utilization
-      - "${SUNFLOWER_GPU_MEM_UTIL:-0.70}"
+      - "${SUNFLOWER_GPU_MEM_UTIL:-0.52}"
       - --max-num-seqs
       - "64"
       - --enable-auto-tool-choice

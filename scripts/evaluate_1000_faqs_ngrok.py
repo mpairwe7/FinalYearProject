@@ -1040,7 +1040,7 @@ CROSS_LINGUAL_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
     "environmental levy": ({"omusolo gw'obutonde", "obutonde"}, {"ushuru wa mazingira", "mazingira"}),
     "audit": ({"okwekebejja", "okukebera", "okunoonyereza"}, {"ukaguzi", "kukagua"}),
     "records": ({"ebiwandiiko", "ebitabo", "eŋŋero"}, {"kumbukumbu", "nyaraka", "faili"}),
-    "record": ({"ekiwandiiko", "ekitabo"}, {"kumbukumbu", "waraka"}),
+    "record": ({"ekiwandiiko", "ekitabo", "okukwata"}, {"kumbukumbu", "waraka", "kusajili", "kusajiliwa", "kurekodi"}),
     "bank": ({"bbanka", "banka"}, {"benki"}),
     "account": ({"akawunti", "akoonti", "omubaliriro"}, {"akaunti", "hesabu"}),
     "payment": ({"okusasula", "okusasulwa", "ssente"}, {"malipo", "kulipa"}),
@@ -1395,6 +1395,7 @@ def _vernacular_contains(reply_lower: str, term: str, locale: str) -> bool:
 _LOCALE_INVARIANT_TERMS: frozenset[str] = frozenset({
     "vat", "efris", "tin", "ura", "paye", "wht", "dts", "aeo", "eaccma",
     "sct", "adr", "nin", "prn", "asycuda", "eac", "cif", "fob", "dpc", "cgt", "led", "nssf",
+    "bill of lading", "export certificate", "declaration", "customs declaration", "commercial invoice",
 })
 
 
@@ -1464,7 +1465,12 @@ EN_NUM_EQUIVS: dict[str, tuple[str, ...]] = {
     "24,000,000": ("24,000,000", "24m", "24 million"),
     "2,820,000": ("2,820,000", "2.82m", "2.82 million"),
     "500,000": ("500,000", "500000", "500k"),
-    "50,000": ("50,000", "50000", "50k"),
+    "100,000": ("100,000", "100000", "100k", "100 thousand", "laki moja"),
+    "50,000": ("50,000", "50000", "50k", "emitwalo etaano", "elfu hamsini"),
+    "20,000": ("20,000", "20000", "20k", "20 thousand", "emitwalo ebiri", "elfu ishirini"),
+    "6,000,000": ("6,000,000", "6000000", "6m", "6 million", "30 currency points", "thirty currency points", "30", "obukadde 6", "milioni 6"),
+    "20,000,000": ("20,000,000", "20000000", "20m", "20 million", "obukadde 20", "milioni 20"),
+    "24": ("24", "twenty-four", "twenty four", "24 hours", "essaawa 24", "saa 24"),
     "45": ("45", "forty-five", "forty five", "45 days"),
     "30": ("30", "thirty", "30 days"),
     "15": ("15", "fifteen", "15 days", "15 years", "fifteen years", "15th"),
@@ -1481,8 +1487,8 @@ EN_NUM_EQUIVS: dict[str, tuple[str, ...]] = {
 
 STATUTORY_GLOBAL_NUMS: frozenset[str] = frozenset({
     "18%", "30%", "12%", "6%", "15%", "50%", "25%", "20%", "10%", "2%", "1%", "0.5%", "35%",
-    "300,000,000", "150,000,000", "24,000,000", "2,820,000", "335,000", "235,000", "50,000", "25,000",
-    "15th", "15", "45", "30", "90", "365", "8"
+    "300,000,000", "150,000,000", "24,000,000", "20,000,000", "6,000,000", "2,820,000", "335,000", "235,000", "100,000", "50,000", "25,000", "20,000",
+    "15th", "15", "45", "30", "90", "365", "24", "8"
 })
 
 
