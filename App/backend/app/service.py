@@ -49,11 +49,33 @@ from .agents.evaluator import RevisionBudget, evaluate
 from .analytics import metrics
 from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.patterns.en import (
-    _FAREWELL_PHRASES,
-    _GRATITUDE_PHRASES,
-    _GREETING_PHRASES,
-    _GREETING_WORDS,
+    _FAREWELL_PHRASES as _EN_FAREWELL_PHRASES,
+    _GRATITUDE_PHRASES as _EN_GRATITUDE_PHRASES,
+    _GREETING_PHRASES as _EN_GREETING_PHRASES,
+    _GREETING_WORDS as _EN_GREETING_WORDS,
 )
+from .agents.patterns.lg import (
+    _FAREWELL_PHRASES as _LG_FAREWELL_PHRASES,
+    _GRATITUDE_PHRASES as _LG_GRATITUDE_PHRASES,
+    _GREETING_PHRASES as _LG_GREETING_PHRASES,
+    _GREETING_WORDS as _LG_GREETING_WORDS,
+)
+from .agents.patterns.sw import (
+    _FAREWELL_PHRASES as _SW_FAREWELL_PHRASES,
+    _GRATITUDE_PHRASES as _SW_GRATITUDE_PHRASES,
+    _GREETING_PHRASES as _SW_GREETING_PHRASES,
+    _GREETING_WORDS as _SW_GREETING_WORDS,
+)
+
+_GREETING_WORDS = _EN_GREETING_WORDS | _LG_GREETING_WORDS | _SW_GREETING_WORDS
+_GREETING_PHRASES = _EN_GREETING_PHRASES | _LG_GREETING_PHRASES | _SW_GREETING_PHRASES
+_GRATITUDE_PHRASES = (
+    _EN_GRATITUDE_PHRASES | _LG_GRATITUDE_PHRASES | _SW_GRATITUDE_PHRASES
+)
+_FAREWELL_PHRASES = (
+    _EN_FAREWELL_PHRASES | _LG_FAREWELL_PHRASES | _SW_FAREWELL_PHRASES
+)
+from .conversational import handle_conversational_turn
 # Tier selection is pure policy over the supervisor's decision — no cloud
 # SDK, no key, no network — so unlike the rest of ``providers`` it is safe
 # to import at module scope.
@@ -102,6 +124,10 @@ from .text_signals import (
     GREETING_REPLY,
     GROUNDED_REVISION_PREAMBLE,
     NO_HITS_REPLY,
+    get_greeting_reply,
+    get_gratitude_reply,
+    get_farewell_reply,
+    get_greeting_next_actions,
     detect_comparison_jurisdiction,
     detect_foreign_jurisdiction,
     detect_local_government_tax,
@@ -2085,7 +2111,26 @@ def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) ->
     return payload
 
 
-def _closing_courtesy_reply(message: str) -> str:
+def _resolve_courtesy_locale(message: str, current_locale: str = "en") -> str:
+    """Identify the locale for a greeting or courtesy phrase."""
+    text = message.strip().lower().strip("!.?, ")
+    words = set(text.split())
+    if (
+        words & _SW_GREETING_WORDS
+        or words & _SW_GRATITUDE_PHRASES
+        or any(p in text for p in _SW_GREETING_PHRASES | _SW_FAREWELL_PHRASES)
+    ):
+        return "sw"
+    if (
+        words & _LG_GREETING_WORDS
+        or words & _LG_GRATITUDE_PHRASES
+        or any(p in text for p in _LG_GREETING_PHRASES | _LG_FAREWELL_PHRASES)
+    ):
+        return "lg"
+    return current_locale or "en"
+
+
+def _closing_courtesy_reply(message: str, locale: str = "en") -> str:
     """Reply for a gratitude/farewell turn, or "" when *message* is neither.
 
     Exact-phrase matching (max four words) on purpose: mixed messages like
@@ -2095,10 +2140,11 @@ def _closing_courtesy_reply(message: str) -> str:
     text = message.strip().lower().strip("!.?, ")
     if len(text.split()) > 4:
         return ""
+    effective_loc = _resolve_courtesy_locale(message, locale)
     if text in _GRATITUDE_PHRASES:
-        return GRATITUDE_REPLY
+        return get_gratitude_reply(effective_loc)
     if text in _FAREWELL_PHRASES:
-        return FAREWELL_REPLY
+        return get_farewell_reply(effective_loc)
     return ""
 
 
@@ -6745,30 +6791,27 @@ class ChatModel:
                 return delivered
 
             # 1a2. Greeting detection — always active, independent of agentic_mode
-            _q_lower = message.strip().lower().strip("!.?,")
+            _q_lower = message.strip().lower().strip("!.?, ")
             _q_words = message.strip().split()
-            if len(_q_words) <= 3 and (
+            if len(_q_words) <= 4 and (
                 _q_lower in _GREETING_WORDS
                 or _q_lower in _GREETING_PHRASES
                 or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in _q_words)
             ):
+                effective_loc = _resolve_courtesy_locale(message, locale)
                 greeted = {
-                    "reply": GREETING_REPLY,
+                    "reply": get_greeting_reply(effective_loc),
                     "sources": [],
                     "citations": [],
                     "faithfulness_score": None,
                     "retrieval_mode": "greeting",
                     "model": self.name,
                     "conversation_id": thread_id,
-                    "locale": locale,
+                    "locale": effective_loc,
                     "escalation_required": False,
                     "escalation_reason": "",
                     "agent_role": "greeting_agent",
-                    "next_actions": [
-                        "Ask about TIN registration",
-                        "Learn about VAT",
-                        "File a tax return",
-                    ],
+                    "next_actions": get_greeting_next_actions(effective_loc),
                 }
                 self._audit_turn(
                     message=message,
@@ -6780,8 +6823,9 @@ class ChatModel:
 
             # 1a3. Gratitude / farewell — closing courtesy, same always-on
             # short-circuit as greetings (no retrieval, never scored).
-            closing_reply = _closing_courtesy_reply(message)
+            closing_reply = _closing_courtesy_reply(message, locale)
             if closing_reply:
+                effective_loc = _resolve_courtesy_locale(message, locale)
                 closing = {
                     "reply": closing_reply,
                     "sources": [],
@@ -6790,15 +6834,11 @@ class ChatModel:
                     "retrieval_mode": "greeting",
                     "model": self.name,
                     "conversation_id": thread_id,
-                    "locale": locale,
+                    "locale": effective_loc,
                     "escalation_required": False,
                     "escalation_reason": "",
                     "agent_role": "greeting_agent",
-                    "next_actions": [
-                        "Ask about TIN registration",
-                        "Learn about VAT",
-                        "File a tax return",
-                    ],
+                    "next_actions": get_greeting_next_actions(effective_loc),
                 }
                 self._audit_turn(
                     message=message,
@@ -6807,6 +6847,33 @@ class ChatModel:
                     trace_ctx=trace_ctx,
                 )
                 return closing
+
+            # 1a3b. Multilingual Natural Conversational & Civic Intelligence Fast-Path
+            # Handles civic philosophy ("why do we pay taxes?"), identity, business empathy,
+            # and natural small-talk across EN, LG, and SW without deviating from URA role.
+            conv_res = handle_conversational_turn(message, locale)
+            if conv_res is not None:
+                conv_payload = {
+                    "reply": conv_res.reply,
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "conversational",
+                    "model": self.name,
+                    "conversation_id": thread_id,
+                    "locale": conv_res.locale,
+                    "escalation_required": False,
+                    "escalation_reason": "",
+                    "agent_role": "conversational_agent",
+                    "next_actions": conv_res.next_actions,
+                }
+                self._audit_turn(
+                    message=message,
+                    result=conv_payload,
+                    session_id=session_id,
+                    trace_ctx=trace_ctx,
+                )
+                return conv_payload
 
             # 1a4. General URA Contact & Helpdesk Fast-Path
             # Returns official URA support channels immediately with 1.0 confidence,
@@ -8147,37 +8214,35 @@ class ChatModel:
             }
 
         # Greeting detection — always active (streaming path)
-        _q_lower_s = message.strip().lower().strip("!.?,")
+        _q_lower_s = message.strip().lower().strip("!.?, ")
         _q_words_s = message.strip().split()
-        if len(_q_words_s) <= 3 and (
+        if len(_q_words_s) <= 4 and (
             _q_lower_s in _GREETING_WORDS
             or _q_lower_s in _GREETING_PHRASES
             or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in _q_words_s)
         ):
+            effective_loc_s = _resolve_courtesy_locale(message, locale)
             return {
-                "reply": GREETING_REPLY,
+                "reply": get_greeting_reply(effective_loc_s),
                 "sources": [],
                 "citations": [],
                 "faithfulness_score": None,
                 "retrieval_mode": "greeting",
                 "model": self.name,
                 "conversation_id": thread_id,
-                "locale": locale,
+                "locale": effective_loc_s,
                 "escalation_required": False,
                 "escalation_reason": "",
                 "agent_role": "greeting_agent",
-                "next_actions": [
-                    "Ask about TIN registration",
-                    "Learn about VAT",
-                    "File a tax return",
-                ],
+                "next_actions": get_greeting_next_actions(effective_loc_s),
                 "_hits": [],
                 "_history": [],
             }
 
         # Gratitude / farewell — parity with the REST path.
-        closing_reply = _closing_courtesy_reply(message)
+        closing_reply = _closing_courtesy_reply(message, locale)
         if closing_reply:
+            effective_loc_s = _resolve_courtesy_locale(message, locale)
             return {
                 "reply": closing_reply,
                 "sources": [],
@@ -8186,15 +8251,11 @@ class ChatModel:
                 "retrieval_mode": "greeting",
                 "model": self.name,
                 "conversation_id": thread_id,
-                "locale": locale,
+                "locale": effective_loc_s,
                 "escalation_required": False,
                 "escalation_reason": "",
                 "agent_role": "greeting_agent",
-                "next_actions": [
-                    "Ask about TIN registration",
-                    "Learn about VAT",
-                    "File a tax return",
-                ],
+                "next_actions": get_greeting_next_actions(effective_loc_s),
                 "_hits": [],
                 "_history": [],
             }
@@ -8270,9 +8331,29 @@ class ChatModel:
                         agent_role="clarification_agent",
                         suspended_workflow=self._get_suspended_workflow_name(thread_id),
                     ),
-                    "_hits": [],
-                    "_history": [],
-                }
+                "_hits": [],
+                "_history": [],
+            }
+
+        # Multilingual Natural Conversational & Civic Intelligence Fast-Path (streaming)
+        conv_res_s = handle_conversational_turn(message, locale)
+        if conv_res_s is not None:
+            return {
+                "reply": conv_res_s.reply,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "conversational",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": conv_res_s.locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "conversational_agent",
+                "next_actions": conv_res_s.next_actions,
+                "_hits": [],
+                "_history": [],
+            }
             if route_decision.route == AgentRoute.ESCALATE:
                 ticket_id = ""
                 handoff = None

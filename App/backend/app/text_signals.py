@@ -62,8 +62,12 @@ _CHANNEL_STRIP_RE = re.compile(
 _COURTESY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p)
     for p in (
-        # -- greetings / thanks / apologies ------------------------------
+        # -- greetings / thanks / apologies (English, Swahili, Luganda) --
         r"^(hello|hi there|hi|hey|greetings|good (morning|afternoon|evening|day))\b",
+        r"^(habari|hujambo|jambo|mambo|shikamoo|salaam|asante|ahsante|shukrani|karibu|kwaheri|tutaonana)\b",
+        r"\b(habari\s+(yako|za\s+asubuhi|za\s+mchana|za\s+jioni|gani|za\s+leo)|mambo\s+vipi|asante\s+sana|karibu\s+sana)\b",
+        r"^(oli\s+otya|wasuze\s+otya|osiibye\s+otya|mwasuze\s+mutya|ki\s+kati|gyebale|gyebaleko|weebale|webale|neeyanzizza|weraba|tunaalabagana)\b",
+        r"\b(weebale\s+nnyo|webale\s+nyo|tukwanirizza\s+nnyo)\b",
         r"^thank(s| you)\b",
         r"\bthank you for (asking|reaching out|your patience|getting in touch)\b",
         r"^(i am|i'm|we are|we're) (sorry|glad|happy|here)\b",
@@ -496,15 +500,147 @@ GREETING_REPLY = (
     "I help you today?"
 )
 
+GREETING_REPLY_BY_LOCALE: dict[str, str] = {
+    "en": GREETING_REPLY,
+    "sw": (
+        "Habari, na karibu! Mimi ni Msaidizi wa Kidijitali wa URA. Ninaweza kukusaidia "
+        "kuhusu usajili wa kodi, kuwasilisha marejesho, malipo, forodha, na zaidi — "
+        "ninawezaje kukusaidia leo?"
+    ),
+    "lg": (
+        "Nkulamusizza, era nkwanirizza! Nze Muyambi wa Digito owa URA. Nnyinza okukuyamba "
+        "ku by'okwewandiisa ku musolo, okuwaayo alipoota z'omusolo, okusasula, eby'omusolo "
+        "gw'oku mwalo, n'ebirala — nnyinza kukuyamba ntya leero?"
+    ),
+}
+
 GRATITUDE_REPLY = (
     "You're welcome — I'm glad I could help! Is there anything else you'd "
     "like to know about URA services?"
 )
 
+GRATITUDE_REPLY_BY_LOCALE: dict[str, str] = {
+    "en": GRATITUDE_REPLY,
+    "sw": (
+        "Karibu sana — ninafurahi nimeweza kukusaidia! Je, kuna jambo lingine "
+        "ungependa kujua kuhusu huduma za URA?"
+    ),
+    "lg": (
+        "Tukwanirizza nnyo — nsomedde nti nnyinzizza okuyamba! Waliwo ekirala "
+        "ky'oyagala okumanya ku mpeereza za URA?"
+    ),
+}
+
 FAREWELL_REPLY = (
     "Thank you for chatting with the URA Digital Assistant — goodbye for "
     "now! Feel free to reach out any time, or visit https://ura.go.ug."
 )
+
+FAREWELL_REPLY_BY_LOCALE: dict[str, str] = {
+    "en": FAREWELL_REPLY,
+    "sw": (
+        "Asante kwa kuzungumza na Msaidizi wa Kidijitali wa URA — kwaheri kwa sasa! "
+        "Jisikie huru kuwasiliana nasi wakati wowote, au tembelea https://ura.go.ug."
+    ),
+    "lg": (
+        "Weebale kwogera n'Omuyambi wa Digito owa URA — weraba kwa kati! "
+        "Weeraba okutuukirira buli w'oyagalira, oba genda ku https://ura.go.ug."
+    ),
+}
+
+NEXT_ACTIONS_GREETING_BY_LOCALE: dict[str, list[str]] = {
+    "en": [
+        "Ask about TIN registration",
+        "Learn about VAT",
+        "File a tax return",
+    ],
+    "sw": [
+        "Uliza kuhusu usajili wa TIN",
+        "Jifunze kuhusu VAT",
+        "Wasilisha marejesho ya kodi",
+    ],
+    "lg": [
+        "Buuza ku kwewandiisa ku TIN",
+        "Yiga ku musolo gwa VAT",
+        "Waayo alipoota y'omusolo",
+    ],
+}
+
+
+def get_greeting_reply(locale: str = "en") -> str:
+    """Return localized greeting string."""
+    loc = (locale or "en").strip().lower()[:2]
+    return GREETING_REPLY_BY_LOCALE.get(loc, GREETING_REPLY)
+
+
+def get_gratitude_reply(locale: str = "en") -> str:
+    """Return localized gratitude response."""
+    loc = (locale or "en").strip().lower()[:2]
+    return GRATITUDE_REPLY_BY_LOCALE.get(loc, GRATITUDE_REPLY)
+
+
+def get_farewell_reply(locale: str = "en") -> str:
+    """Return localized farewell response."""
+    loc = (locale or "en").strip().lower()[:2]
+    return FAREWELL_REPLY_BY_LOCALE.get(loc, FAREWELL_REPLY)
+
+
+def get_greeting_next_actions(locale: str = "en") -> list[str]:
+    """Return localized next-action suggestions for a greeting turn."""
+    loc = (locale or "en").strip().lower()[:2]
+    return NEXT_ACTIONS_GREETING_BY_LOCALE.get(loc, NEXT_ACTIONS_GREETING_BY_LOCALE["en"])
+
+
+_SW_GREETING_WORDS = frozenset({
+    "habari", "hujambo", "jambo", "mambo", "shikamoo", "salaam", "salama",
+    "alamsiki", "marahaba", "hallow", "halo",
+})
+_SW_GREETING_PHRASES = frozenset({
+    "habari yako", "habari za asubuhi", "habari za mchana", "habari za jioni",
+    "habari gani", "mambo vipi", "shikamoo sana", "uhali gani", "habari za leo",
+    "hujambo bwana", "hujambo bibi", "jambo sana", "habari za kazi", "habari ya leo", "habari za kutwa",
+})
+_SW_GRATITUDE_PHRASES = frozenset({
+    "asante", "asante sana", "shukrani", "shukrani sana", "nashukuru",
+    "ahsante", "ahsante sana", "asante kwa msaada", "asante mno",
+})
+_SW_FAREWELL_PHRASES = frozenset({
+    "kwaheri", "kwaheri ya kuonana", "tutaonana", "baadaye", "usiku mwema",
+    "mchana mwema", "kwaheri sana", "siku njema", "tuonane", "kwa heri",
+})
+
+_LG_GREETING_WORDS = frozenset({"gyebale", "gyebaleko", "mwasuze"})
+_LG_GREETING_PHRASES = frozenset({
+    "oli otya", "oli otya nno", "wasuze otya", "wasuze otya nno",
+    "osiibye otya", "osiibye otya nno", "mwasuze mutya", "mwasiibye mutya",
+    "ki kati", "agafayo",
+})
+_LG_GRATITUDE_PHRASES = frozenset({
+    "webale nyo", "weebale nnyo", "weebale nyo", "webale nnyo",
+    "mwebale", "mwebale nyo", "webale ky'okoze", "neeyanzizza",
+})
+_LG_FAREWELL_PHRASES = frozenset({
+    "weeraba", "tunaalabagana", "siiba bulungi", "sula bulungi", "mpaka",
+})
+
+
+def _resolve_courtesy_locale(message: str, current_locale: str = "en") -> str:
+    """Identify the locale for a greeting or courtesy phrase."""
+    text = (message or "").strip().lower().strip("!.?, ")
+    words = set(text.split())
+    if (
+        words & _SW_GREETING_WORDS
+        or words & _SW_GRATITUDE_PHRASES
+        or any(p in text for p in _SW_GREETING_PHRASES | _SW_FAREWELL_PHRASES)
+    ):
+        return "sw"
+    if (
+        words & _LG_GREETING_WORDS
+        or words & _LG_GRATITUDE_PHRASES
+        or any(p in text for p in _LG_GREETING_PHRASES | _LG_FAREWELL_PHRASES)
+    ):
+        return "lg"
+    return current_locale or "en"
 
 CLARIFICATION_PROMPT = (
     "Of course — I'd be happy to help. Could you share a little more detail? "

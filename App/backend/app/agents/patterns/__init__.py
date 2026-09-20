@@ -158,8 +158,9 @@ def _load_extensions() -> dict[str, LocalePatterns]:
     from .ach import ACH_PATTERNS
     from .lg import LG_PATTERNS
     from .nyn import NYN_PATTERNS
+    from .sw import SW_PATTERNS
 
-    return {p.locale: p for p in (LG_PATTERNS, NYN_PATTERNS, ACH_PATTERNS)}
+    return {p.locale: p for p in (LG_PATTERNS, NYN_PATTERNS, ACH_PATTERNS, SW_PATTERNS)}
 
 
 _EXTENSIONS: dict[str, LocalePatterns] = _load_extensions()
