@@ -194,7 +194,14 @@ _INFO_ONLY_RE = re.compile(
     # or hypothetical rate is still a question about the rate.
     r"|\bwhat\s+(is|are|was|were|will|would|'s)\b.*"
     r"\b(rates?|thresholds?|percentages?|bands?)\b"
-    r"|\b(rates?|thresholds?)\s+(of|for)\b",
+    r"|\b(rates?|thresholds?)\s+(of|for)\b"
+    # Complex comparative, dispute, secondary employment, or statutory edge cases
+    r"|\bdiffer(?:ence|s)?\s+(between|from)\b"
+    r"|\b(secondary\s+employment|secondary\s+employer|omulimu\s+ogw'okubiri)\b"
+    r"|\b(deduct|withhold)\s+both\b|\bboth\s+(the\s+)?(6%|tax|wht|vat)\b"
+    r"|\b(objection|dispute|okuwakanya|nnaku\s+mmeka)\b"
+    r"|\b(?:import|clear|bring)\s+(?:a\s+)?(19\d\d|20\d\d)\b"
+    r"|\b(apportion|apportionment|mixed\s+supplies)\b",
     re.IGNORECASE,
 )
 
@@ -280,6 +287,13 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
             re.IGNORECASE,
         ),
     ),
+    ("capital_gains", re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
+    (
+        "corporation",
+        re.compile(
+            r"\b(corporation|corporate|company)\s+(?:income\s+)?tax\b", re.IGNORECASE
+        ),
+    ),
     (
         "paye",
         re.compile(
@@ -289,13 +303,6 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
             r"|salar(?:y|ies)\b.*\btax|tax\b.*\b(?:salar(?:y|ies)|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salar(?:y|ies)|income)"
             r"|(?:what\s+(?:is|'s)\s+(?:the\s+)?|how\s+much\s+)?tax\s+(?:due\s+|payable\s+|is\s+there\s+)?(?:on|for)\s+(?:(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|ssente)\s*)?\d+(?:\s*(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|ssente|/=|/-))?)\b",
             re.IGNORECASE,
-        ),
-    ),
-    ("capital_gains", re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
-    (
-        "corporation",
-        re.compile(
-            r"\b(corporation|corporate|company)\s+(?:income\s+)?tax\b", re.IGNORECASE
         ),
     ),
     ("vat", re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)),
@@ -809,7 +816,9 @@ _RATE_ASK_RE = re.compile(
     r"|\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
     r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|omuwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
     r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
-    r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b",
+    r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
+    r"|\b(?:can|is|are)\b[^?]*\b(?:cleared|exempt|allowed|duty[-\s]?free|concession)\b"
+    r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential)\b",
     re.IGNORECASE,
 )
 
@@ -968,6 +977,14 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         ),
     ),
     (
+        RatePlan(tax_type="efris_penalty_failure_to_issue_invoice"),
+        re.compile(
+            r"\b(efris|fiscal\s+receipt|fiscal\s+invoice|e[-\s]?invoice|e[-\s]?receipt)\b[^?]{0,60}\b(penalt(?:y|ies)|fine|fines|fail(?:ure)?|adhabu|kibonerezo)\b"
+            r"|\b(penalt(?:y|ies)|fine|fines|fail(?:ure)?|adhabu|kibonerezo)\b[^?]{0,60}\b(efris|fiscal\s+receipt|fiscal\s+invoice|e[-\s]?invoice|e[-\s]?receipt)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
         RatePlan(tax_type="stamp_duty_property_transfer"),
         re.compile(
             r"\b(stamp\s*duty|stempu|stampu)\b[^?]{0,50}\b(transfer|property|land|ettaka|ardhi|ekyapa|kikyusa)\b"
@@ -996,6 +1013,21 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         re.compile(
             r"\b(baggage|passenger|abagenyi|abasaabaze|abiria|mizigo)\b[^?]{0,60}\b(allowance|duty[-\s]?free|bitasasulwako|isiyotozwa)\b"
             r"|\b(allowance|duty[-\s]?free|bitasasulwako|isiyotozwa)\b[^?]{0,60}\b(baggage|passenger|abagenyi|abasaabaze|abiria|mizigo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_valuation_hierarchy"),
+        re.compile(
+            r"\b(valuation\s+method|valuation\s+hierarchy|method\s+[1-6]|transaction\s+value|identical\s+goods|similar\s+goods|deductive\s+value|computed\s+value|fallback\s+method)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="digital_services_tax_non_resident"),
+        re.compile(
+            r"\b(digital\s+services?|electronic\s+services?|streaming|netflix|spotify|dst)\b[^?]{0,60}\b(tax|rates?|percentage|kiwango)\b"
+            r"|\b(tax|rates?|percentage|kiwango)\b[^?]{0,60}\b(digital\s+services?|electronic\s+services?|streaming|netflix|spotify|dst)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1078,8 +1110,18 @@ def rate_lookup_calendar_years(message: str) -> tuple[int, ...]:
     refuse to project a rate beyond the latest official table instead of
     silently substituting today's figure for a future one.
     """
+    text = message or ""
+    # Vehicle manufacture years (e.g. "2008 Toyota Premio") or vehicle age inquiries
+    # are not requests for historical/prospective fiscal year tax tables.
+    if re.search(
+        r"\b(?:car|cars|vehicle|vehicles|motor|toyota|premio|model|manufactur\w*|aged?)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return ()
+
     years: list[int] = []
-    for match in _RATE_CALENDAR_YEAR_RE.finditer(message or ""):
+    for match in _RATE_CALENDAR_YEAR_RE.finditer(text):
         start = int(match.group("start"))
         years.append(start)
         end = match.group("end")
@@ -1230,13 +1272,18 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "{pct} of the tax payable per month** (or part of a month) that the return "
             "remains unfiled, whichever is higher, under Section 49 of the Tax Procedures Code Act."
         ),
+        "efris_penalty_failure_to_issue_invoice": (
+            "**The statutory penalty for failure to issue an EFRIS fiscal receipt or invoice is UGX 6,000,000 "
+            "or double the tax evaded**, whichever is higher, per invoice under Section 19B of the Tax Procedures Code Act ({fy})."
+        ),
         "stamp_duty_property_transfer": (
             "**The stamp duty rate on transfer of property (land or buildings) is {pct}** ({fy}) "
             "under the Stamp Duty Act."
         ),
         "objection_timeline_days": (
             "**A taxpayer has 45 days to lodge an objection** against a tax assessment from the date of service "
-            "of the notice under Section 24 of the Tax Procedures Code Act ({fy})."
+            "of the notice under Section 24 of the Tax Procedures Code Act ({fy}). Under Section 24(2), the taxpayer "
+            "must pay **30% of the tax assessed** (or the undisputed amount, whichever is greater) before the objection can be entertained."
         ),
         "paye_due_date_monthly": (
             "**PAYE returns and payments are due by the 15th day of each month** following the payroll period "
@@ -1244,7 +1291,19 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "passenger_baggage_allowance": (
             "**The passenger baggage duty-free allowance is USD 500** for accompanying personal effects "
-            "under the East African Community Customs Management Act ({fy})."
+            "under the East African Community Customs Management Act ({fy}). Goods imported for commercial resale, "
+            "trade, or in commercial quantities do not qualify for this passenger concession and are subject to full customs duty."
+        ),
+        "digital_services_tax_non_resident": (
+            "**The digital services tax (DST) rate on non-resident electronic service providers is {pct}** ({fy}) "
+            "of the gross revenue derived from supplying digital services to individuals in Uganda under Section 86A of the Income Tax Act."
+        ),
+        "customs_valuation_hierarchy": (
+            "**Customs valuation follows a strict sequential hierarchy of 6 methods** under the Fourth Schedule "
+            "of the East African Community Customs Management Act (EACCMA): Method 1 (Transaction Value), "
+            "Method 2 (Identical Goods), Method 3 (Similar Goods), Method 4 (Deductive Value), "
+            "Method 5 (Computed Value), and Method 6 (Fallback Method). Customs officers cannot skip or jump ahead "
+            "to Method 6 without sequentially exhausting earlier methods."
         ),
         "environmental_levy_used_vehicles_5_to_8_years": (
             "**The environmental levy on used motor vehicles aged 5 to 8 years is {pct}** of the CIF "

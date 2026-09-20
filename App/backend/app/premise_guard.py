@@ -137,6 +137,18 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "provisional tax",
     "final",
     "final tax",
+    "agro processing",
+    "agro-processing",
+    "agricultural",
+    "digital service",
+    "digital services",
+    "electronic service",
+    "electronic services",
+    "mixed supply",
+    "mixed supplies",
+    "exempt supply",
+    "exempt supplies",
+    "secondary employment",
 })
 
 # Words that indicate actions, grammar, prepositions, and conversational intent
@@ -183,7 +195,10 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
     "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
     "wa", "ya", "za", "ni", "asilimia", "ngapi", "kulipa", "kujisajili", "katika",
-    "nchini", "jinsi", "mu",
+    "nchini", "jinsi", "mu", "yangu", "yako", "yetu", "zao", "inauza", "kuuza",
+    "bidhaa", "zenye", "zote", "kila", "wetu", "wangu", "hawawezi", "wanaweza",
+    "kampuni", "ambayo", "hapa", "gwange", "gyange", "bizinensi", "waffe", "lwawo",
+    "ebbaluwa", "ebaluwa", "omulimu", "ogusooka",
 })
 
 _CANDIDATE_PATTERNS = (
@@ -271,6 +286,31 @@ def check_false_premise(
     for clean_mod, kind in candidates:
         # Check against legitimate taxes
         if clean_mod in _LEGITIMATE_TAX_MODIFIERS:
+            continue
+
+        # If the candidate ends with a known legitimate statutory base
+        # (e.g. "agro-processing corporate income" ends with "corporate income"),
+        # it is a sector qualification of a legitimate tax, not an invented tax.
+        if any(
+            clean_mod.endswith(legit)
+            for legit in (
+                "corporate income",
+                "company income",
+                "individual income",
+                "employment income",
+                "business income",
+                "rental income",
+                "income",
+                "vat",
+                "value added",
+                "paye",
+                "rental",
+                "withholding",
+                "excise",
+                "customs",
+                "stamp duty",
+            )
+        ):
             continue
 
         # Check whether the exact concept phrase appears

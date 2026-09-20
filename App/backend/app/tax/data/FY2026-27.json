@@ -104,7 +104,9 @@
     "motor_vehicle_duplicate_logbook_fee": 50000,
     "motor_vehicle_personalized_plate_fee": 20000000,
     "motor_vehicle_advance_tax_passenger_per_seat": 20000,
-    "motor_vehicle_advance_tax_goods_per_tonne": 50000
+    "motor_vehicle_advance_tax_goods_per_tonne": 50000,
+    "digital_services_tax_non_resident": 0.05,
+    "customs_valuation_hierarchy": 6
   },
   "unverified": [
     "vat_registration_threshold_annual",
@@ -153,7 +155,9 @@
     "presumptive_tax_lower_threshold": "Income Tax Act (Cap 338), s.4(5) and Second Schedule",
     "presumptive_tax_upper_threshold": "Income Tax Act (Cap 338), s.4(5) and Second Schedule",
     "penal_tax_late_filing_monthly_rate": "Tax Procedures Code Act (Cap 343), s.49(1)",
-    "penal_tax_late_filing_minimum_ugx": "Tax Procedures Code Act (Cap 343), s.49(1)"
+    "penal_tax_late_filing_minimum_ugx": "Tax Procedures Code Act (Cap 343), s.49(1)",
+    "digital_services_tax_non_resident": "Income Tax Act (Cap 338), s.86A",
+    "customs_valuation_hierarchy": "East African Community Customs Management Act, Fourth Schedule"
   },
   "notes": {
     "excise_duty_mobile_money_withdrawal": "Excise duty of 0.5% applies to cash withdrawals from mobile money. Transfers and deposits are not charged this 0.5% withdrawal duty.",

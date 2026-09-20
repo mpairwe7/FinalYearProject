@@ -1,0 +1,320 @@
+[
+  {
+    "case_id": "SEC-001",
+    "title": "PAYE Primary vs Secondary Employment",
+    "locale": "en",
+    "domain": "Domestic Taxes (PAYE)",
+    "statute": "Income Tax Act, Third Schedule",
+    "status_code": 200,
+    "latency_s": 0.496,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "paye",
+      "threshold"
+    ],
+    "missing_concepts": [
+      "income tax"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Under the , for secondary employment (a second job or concurrent employment contract), the employer must deduct PAYE at a flat statutory rate of 30% on the entire gross earnings without applying the monthly tax-free threshold (UGX 2",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-002",
+    "title": "Section 21 Agro-Processing 10-Year Holiday Local Content Ratio",
+    "locale": "en",
+    "domain": "Income Tax Exemptions",
+    "statute": "Income Tax Act, Section 21(1)(y)",
+    "status_code": 200,
+    "latency_s": 0.344,
+    "retrieval_mode": "faq_priority",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "80%",
+      "10-year",
+      "exemption"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "I drafted an answer to this, but the figures in it disagreed with the URA documents I was reading \u2014 so I have not shown it, because a wrong figure here is worse than no figure. The passages I found are listed below; a URA officer has been asked to give you a definitive answer. You can also call URA ",
+    "notes": "Missing: ['80%', '10-year', 'exemption']"
+  },
+  {
+    "case_id": "SEC-003",
+    "title": "VAT Apportionment for Mixed Supplies (Taxable vs Exempt)",
+    "locale": "en",
+    "domain": "Value Added Tax",
+    "statute": "VAT Act, Section 28",
+    "status_code": 200,
+    "latency_s": 0.344,
+    "retrieval_mode": "education",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "vat",
+      "input",
+      "supplies"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "### \ud83d\udcda Taxpayer Education: Value Added Tax (VAT)  VAT is charged on taxable supplies of goods and services. A registered business adds VAT to what it sells (output tax) and reclaims the VAT it paid on business purchases (input tax), remitting only the difference. That is why it is called value *added",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-004",
+    "title": "Dual WHT Interaction: Withholding VAT (6%) vs Income WHT (6%)",
+    "locale": "en",
+    "domain": "Withholding Taxes",
+    "statute": "VAT Act s.5A & Income Tax Act s.119",
+    "status_code": 200,
+    "latency_s": 0.341,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "withholding",
+      "6%",
+      "agent"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  This tax is deducted by a designated WHT agent from any supply received by a pharmacy whose transaction value exceeds One Million Shillings (Ugx 1,000,000), provided these items are not exempted from Income tax  3/4  Click here for ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-005",
+    "title": "Section 24 TPCA Objection Notice: 45 Days & 30% Payment Rule",
+    "locale": "en",
+    "domain": "Tax Disputes & Procedure",
+    "statute": "Tax Procedures Code Act, Section 24",
+    "status_code": 200,
+    "latency_s": 0.322,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "45 days",
+      "objection"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "The statutory deadline to lodge a formal objection with the Commissioner General is within 45 days from the date of receipt of the notice of assessment. [1]  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-006",
+    "title": "EFRIS Non-Issuance Penalty under TPCA Section 19B",
+    "locale": "en",
+    "domain": "EFRIS Compliance",
+    "statute": "Tax Procedures Code Act, Section 19B",
+    "status_code": 200,
+    "latency_s": 0.325,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "6,000,000",
+      "penalty",
+      "double"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "I know deadlines can be stressful, so here's the quickest way forward.  **The statutory penalty for failure to issue an EFRIS fiscal receipt or invoice is UGX 6,000,000 or double the tax evaded**, whichever is higher, per invoice under Section 19B of the Tax Procedures Code Act (FY2026-27).  That co",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-007",
+    "title": "Rental Income Tax: Individual vs Corporate Rules",
+    "locale": "en",
+    "domain": "Domestic Taxes (Rental)",
+    "statute": "Income Tax Act, Section 5",
+    "status_code": 200,
+    "latency_s": 0.34,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "12%",
+      "2,820,000",
+      "30%",
+      "expenses"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Rental income tax is tax charged on every person who has rental income for every year the person has earned rental income and is computed separately regardless of whether the person is an individual or a company.  Rental income is t",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-008",
+    "title": "Environmental Levy on Imported Used Vehicles & 15-Year Ban",
+    "locale": "en",
+    "domain": "Customs & Motor Vehicle",
+    "statute": "Excise Tariff / Traffic & Road Safety Act",
+    "status_code": 200,
+    "latency_s": 0.327,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15 years",
+      "prohibited",
+      "environmental levy",
+      "50%"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The environmental levy on used motor vehicles aged 8 to 15 years is 50%** of the CIF value (FY2026-27). Note: Importation of vehicles older than 15 years is prohibited under the Traffic and Road Safety (Amendment) Act.  - Statutory Basis: EACCMA / Traffic and Road Safety Act  That comes from the o",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-009",
+    "title": "Local Excise Duty (LED) Raw Material Credit Offset",
+    "locale": "en",
+    "domain": "Excise Duty",
+    "statute": "Excise Duty Act, Section 14",
+    "status_code": 200,
+    "latency_s": 0.324,
+    "retrieval_mode": "education",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "excise duty",
+      "act",
+      "rates"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "### \ud83d\udcda Taxpayer Education: Excise Duty  Excise duty is a tax on specified locally manufactured goods, imported commodities, and services (such as telecommunication airtime, internet data, and mobile money cash withdrawals) under the Excise Duty Act 2014. It is charged either as a percentage of value ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-010",
+    "title": "EAC Customs Valuation Hierarchy (Method 1 to 6)",
+    "locale": "en",
+    "domain": "Customs Valuation",
+    "statute": "EAC-CMA, Fourth Schedule",
+    "status_code": 200,
+    "latency_s": 0.342,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "hierarchy",
+      "method 1",
+      "method 2",
+      "fallback"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Customs valuation follows a strict sequential hierarchy of 6 methods** under the Fourth Schedule of the East African Community Customs Management Act (EACCMA): Method 1 (Transaction Value), Method 2 (Identical Goods), Method 3 (Similar Goods), Method 4 (Deductive Value), Method 5 (Computed Value),",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-011",
+    "title": "Digital Services Tax on Non-Resident Providers (Section 86A)",
+    "locale": "en",
+    "domain": "International Taxation",
+    "statute": "Income Tax Act, Section 86A",
+    "status_code": 200,
+    "latency_s": 0.331,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "5%",
+      "digital services tax",
+      "non-resident",
+      "section 86a"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The digital services tax (DST) rate on non-resident electronic service providers is 5%** (FY2026-27) of the gross revenue derived from supplying digital services to individuals in Uganda under Section 86A of the Income Tax Act.  That comes from the official URA FY2026-27 rate table.  If you get st",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-012",
+    "title": "Passenger Baggage Concession vs Commercial Goods ($500 limit)",
+    "locale": "en",
+    "domain": "Customs Baggage",
+    "statute": "EAC-CMA, Fifth Schedule",
+    "status_code": 200,
+    "latency_s": 0.334,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "500",
+      "passenger baggage",
+      "commercial",
+      "customs duty"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The passenger baggage duty-free allowance is USD 500** for accompanying personal effects under the East African Community Customs Management Act (FY2026-27). Goods imported for commercial resale, trade, or in commercial quantities do not qualify for this passenger concession and are subject to ful",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-013",
+    "title": "PAYE Employment Rules in Luganda (Vernacular Edge Case)",
+    "locale": "lg",
+    "domain": "Domestic Taxes (PAYE)",
+    "statute": "Income Tax Act, Third Schedule",
+    "status_code": 200,
+    "latency_s": 0.331,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "paye",
+      "omusaala",
+      "omusolo"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Emisolo gya PAYE ku bakozi ababeera mu ggwanga (FY2026-27, omusaala ogwa buli mwezi):**  - UGX 0 \u2013 UGX 335,000: **0%** - UGX 335,000 \u2013 UGX 410,000: **20%** - UGX 410,000 \u2013 UGX 4851](#009_Chapter.  1. xhtml#page_54),000: **25%** - UGX 485,000 \u2013 UGX 10,000,000: **30%** - Okusinga UGX 10,000,000: **4",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-014",
+    "title": "Section 24 TPCA Formal Objection Procedure in Luganda",
+    "locale": "lg",
+    "domain": "Tax Disputes (Luganda)",
+    "statute": "Tax Procedures Code Act, Section 24",
+    "status_code": 200,
+    "latency_s": 0.917,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "ura",
+      "misolo"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Bw'oba nga tokkiriziganya na misolo egiragibwa mu bitabo byo, kikulu okutuukirira URA amangu ddala osobole okutabagana nayo. Kino kijja kukuyamba okulaba ng'obutakkaanya bwonna bukolebwako mu budde osobole okufuna obuyambi bwonna bwe weetaaga. [1]  Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-015",
+    "title": "VAT Rates and Corporation Tax in Swahili (Vernacular Edge Case)",
+    "locale": "sw",
+    "domain": "Value Added Tax (Swahili)",
+    "statute": "VAT Act & ITA",
+    "status_code": 200,
+    "latency_s": 0.33,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "18%",
+      "ushuru"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni 18%** (FY2026-27). Ushuru wa Thamani unatozwa kwa 18% kwenye bidhaa na huduma zinazoweza kutozwa ushuru; biashara zilizosajiliwa kwa ushuru huo hukusanya kutoka kwa wateja na kupeleka kwa URA.  - Sheria ya msingi: Sheria ya Ushuru wa Thama",
+    "notes": "Passed statutory rigor"
+  }
+]
