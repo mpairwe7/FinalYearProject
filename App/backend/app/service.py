@@ -128,6 +128,7 @@ from .text_signals import (
     get_gratitude_reply,
     get_farewell_reply,
     get_greeting_next_actions,
+    strip_conversational_prefix,
     detect_comparison_jurisdiction,
     detect_foreign_jurisdiction,
     detect_local_government_tax,
@@ -2133,17 +2134,33 @@ def _resolve_courtesy_locale(message: str, current_locale: str = "en") -> str:
 def _closing_courtesy_reply(message: str, locale: str = "en") -> str:
     """Reply for a gratitude/farewell turn, or "" when *message* is neither.
 
-    Exact-phrase matching (max four words) on purpose: mixed messages like
+    Exact-phrase matching (max six words) on purpose: mixed messages like
     "thanks, but it still fails" must fall through to distress detection
     and retrieval rather than end the conversation on a sign-off.
     """
     text = message.strip().lower().strip("!.?, ")
-    if len(text.split()) > 4:
+    if len(text.split()) > 6:
         return ""
     effective_loc = _resolve_courtesy_locale(message, locale)
-    if text in _GRATITUDE_PHRASES:
+    if (
+        text in _GRATITUDE_PHRASES
+        or any(p in text for p in _GRATITUDE_PHRASES)
+        or "asante" in text
+        or "weebale" in text
+        or "webale" in text
+        or "thank you" in text
+        or "thanks" in text
+    ):
         return get_gratitude_reply(effective_loc)
-    if text in _FAREWELL_PHRASES:
+    if (
+        text in _FAREWELL_PHRASES
+        or any(p in text for p in _FAREWELL_PHRASES)
+        or "kwaheri" in text
+        or "weraba" in text
+        or "weeraba" in text
+        or "goodbye" in text
+        or "bye" in text
+    ):
         return get_farewell_reply(effective_loc)
     return ""
 
@@ -6736,8 +6753,16 @@ class ChatModel:
             # 1a1b. Deterministic tax calculator — instant when the message
             #       carries the figures, guided elicitation when it doesn't.
             with trace_stage("calculator_router", timings=timings):
+                core_msg = strip_conversational_prefix(message) or message
                 calc_result = None
-                if message != router_message:
+                if core_msg != router_message:
+                    calc_result = self._maybe_handle_fast_paths(
+                        message=core_msg,
+                        rewritten=rewritten,
+                        thread_id=thread_id,
+                        locale=locale,
+                    )
+                if not calc_result and message != router_message:
                     calc_result = self._maybe_handle_fast_paths(
                         message=message,
                         rewritten=rewritten,
@@ -6791,14 +6816,15 @@ class ChatModel:
                 return delivered
 
             # 1a2. Greeting detection — always active, independent of agentic_mode
-            _q_lower = message.strip().lower().strip("!.?, ")
-            _q_words = message.strip().split()
-            if len(_q_words) <= 4 and (
+            _q_lower = core_msg.strip().lower().strip("!.?, ")
+            _q_words = core_msg.strip().split()
+            if len(_q_words) <= 5 and (
                 _q_lower in _GREETING_WORDS
                 or _q_lower in _GREETING_PHRASES
+                or any(p in _q_lower for p in _GREETING_PHRASES)
                 or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in _q_words)
             ):
-                effective_loc = _resolve_courtesy_locale(message, locale)
+                effective_loc = _resolve_courtesy_locale(core_msg, locale)
                 greeted = {
                     "reply": get_greeting_reply(effective_loc),
                     "sources": [],
@@ -6823,9 +6849,9 @@ class ChatModel:
 
             # 1a3. Gratitude / farewell — closing courtesy, same always-on
             # short-circuit as greetings (no retrieval, never scored).
-            closing_reply = _closing_courtesy_reply(message, locale)
+            closing_reply = _closing_courtesy_reply(core_msg, locale)
             if closing_reply:
-                effective_loc = _resolve_courtesy_locale(message, locale)
+                effective_loc = _resolve_courtesy_locale(core_msg, locale)
                 closing = {
                     "reply": closing_reply,
                     "sources": [],
@@ -6851,7 +6877,7 @@ class ChatModel:
             # 1a3b. Multilingual Natural Conversational & Civic Intelligence Fast-Path
             # Handles civic philosophy ("why do we pay taxes?"), identity, business empathy,
             # and natural small-talk across EN, LG, and SW without deviating from URA role.
-            conv_res = handle_conversational_turn(message, locale)
+            conv_res = handle_conversational_turn(core_msg, locale)
             if conv_res is not None:
                 conv_payload = {
                     "reply": conv_res.reply,
@@ -8195,12 +8221,20 @@ class ChatModel:
 
         # Deterministic tax calculator (parity with generate()) — instant
         # answer or guided elicitation, both as a single bundled payload.
+        core_msg_s = strip_conversational_prefix(message) or message
         calc_result = self._maybe_handle_fast_paths(
-            message=message,
+            message=core_msg_s,
             rewritten=rewritten,
             thread_id=thread_id,
             locale=locale,
         )
+        if not calc_result and core_msg_s != message:
+            calc_result = self._maybe_handle_fast_paths(
+                message=message,
+                rewritten=rewritten,
+                thread_id=thread_id,
+                locale=locale,
+            )
         if calc_result:
             if distress and calc_result.get("reply"):
                 calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
@@ -8214,14 +8248,15 @@ class ChatModel:
             }
 
         # Greeting detection — always active (streaming path)
-        _q_lower_s = message.strip().lower().strip("!.?, ")
-        _q_words_s = message.strip().split()
-        if len(_q_words_s) <= 4 and (
+        _q_lower_s = core_msg_s.strip().lower().strip("!.?, ")
+        _q_words_s = core_msg_s.strip().split()
+        if len(_q_words_s) <= 5 and (
             _q_lower_s in _GREETING_WORDS
             or _q_lower_s in _GREETING_PHRASES
+            or any(p in _q_lower_s for p in _GREETING_PHRASES)
             or all(w.lower().strip("!.?,") in _GREETING_WORDS for w in _q_words_s)
         ):
-            effective_loc_s = _resolve_courtesy_locale(message, locale)
+            effective_loc_s = _resolve_courtesy_locale(core_msg_s, locale)
             return {
                 "reply": get_greeting_reply(effective_loc_s),
                 "sources": [],
@@ -8240,9 +8275,9 @@ class ChatModel:
             }
 
         # Gratitude / farewell — parity with the REST path.
-        closing_reply = _closing_courtesy_reply(message, locale)
+        closing_reply = _closing_courtesy_reply(core_msg_s, locale)
         if closing_reply:
-            effective_loc_s = _resolve_courtesy_locale(message, locale)
+            effective_loc_s = _resolve_courtesy_locale(core_msg_s, locale)
             return {
                 "reply": closing_reply,
                 "sources": [],
@@ -8256,6 +8291,26 @@ class ChatModel:
                 "escalation_reason": "",
                 "agent_role": "greeting_agent",
                 "next_actions": get_greeting_next_actions(effective_loc_s),
+                "_hits": [],
+                "_history": [],
+            }
+
+        # Multilingual Natural Conversational & Civic Intelligence Fast-Path (streaming)
+        conv_res_s = handle_conversational_turn(core_msg_s, locale)
+        if conv_res_s is not None:
+            return {
+                "reply": conv_res_s.reply,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "conversational",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": conv_res_s.locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "conversational_agent",
+                "next_actions": conv_res_s.next_actions,
                 "_hits": [],
                 "_history": [],
             }

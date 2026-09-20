@@ -812,14 +812,14 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|limits?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
-    r"|\b(rates?|thresholds?|limits?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
+    r"\b(what(?:'s|\s+is|\s+are)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
+    r"|\b(rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
     r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
     r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
     r"|\b(?:can|is|are)\b[^?]*\b(?:cleared|exempt|allowed|duty[-\s]?free|concession)\b"
-    r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential)\b"
-    r"|\b(?:voluntary\s+disclosure|agency\s+notice|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|primary\s+private\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax)\b",
+    r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential|method\s+[1-6]|fallback\s+method|transaction\s+value)\b"
+    r"|\b(?:voluntary\s+disclosure|agency\s+notice|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|primary\s+private\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax|mixed\s+supplies|zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt)\b",
     re.IGNORECASE,
 )
 
@@ -888,6 +888,20 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         RatePlan(tax_type="vat_international_transport_zero_rating"),
         re.compile(
             r"\b(international\s+transport|transport\s+of\s+passengers\s+or\s+commercial\s+cargo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_mixed_supplies_apportionment"),
+        re.compile(
+            r"\b(mixed\s+supplies|input\s+vat\s+on\s+overheads|apportion(?:ment)?\s+of\s+input\s+vat)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_zero_rated_vs_exempt"),
+        re.compile(
+            r"\b(zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt|difference\s+between\s+zero[-\s]?rated)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1219,6 +1233,42 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
             re.IGNORECASE,
         ),
     ),
+    (
+        RatePlan(tax_type="motor_vehicle_transfer_fee"),
+        re.compile(
+            r"\b(transfer\s+fee|transfer\s+ownership|kyusa\s+ekyapa\s+kya\s+mmotoka)\b[^?]{0,50}\b(vehicle|car|motor|mmotoka|gari)\b"
+            r"|\b(vehicle|car|motor|mmotoka|gari)\b[^?]{0,50}\b(transfer\s+fee|transfer\s+ownership|kugikyusa)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="motor_vehicle_duplicate_logbook_fee"),
+        re.compile(
+            r"\b(duplicate\s+logbook|lost\s+logbook|replacement\s+logbook|logbook\s+fee|funa\s+logbook\s+endala)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="motor_vehicle_personalized_plate_fee"),
+        re.compile(
+            r"\b(personalized\s+(?:plate|number)|customized\s+(?:plate|number)|cherished\s+number|puleeti\s+ey'erinnya)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="nssf_employee_contribution"),
+        re.compile(
+            r"\b(nssf|national\s+social\s+security\s+fund)\b[^?]{0,50}\b(rate|contribution|percentage|employee)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_levy_used_clothing"),
+        re.compile(
+            r"\b(used\s+cloth\w*|second[-\s]?hand\s+cloth\w*|mivumba|nguo\s+za\s+mitumba)\b",
+            re.IGNORECASE,
+        ),
+    ),
     (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht|zuio|dividends?|migabo|interest|riba|magoba)\b", re.IGNORECASE)),
     (
         RatePlan(tax_type="rental_tax_company"),
@@ -1440,9 +1490,34 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "{threshold_vat}** ({fy}). Below that, registration is voluntary.\n\n"
             "- Statutory Basis: Value Added Tax Act"
         ),
+        "vat_mixed_supplies_apportionment": (
+            "**Under Section 28 of the Value Added Tax Act, input tax on general overhead expenses for mixed supplies must be apportioned**. "
+            "A taxpayer cannot claim 100% of input VAT when expenses relate to both taxable supplies (standard 18%) and exempt supplies. "
+            "Input tax directly attributable to exempt supplies cannot be credited ({fy})."
+        ),
+        "vat_zero_rated_vs_exempt": (
+            "**The fundamental difference between zero-rated and exempt supplies under the Value Added Tax Act ({fy}):**\n\n"
+            "- **Zero-Rated Supplies (0% VAT)**: Tax is charged at 0% (e.g. exports of goods, international transport), and the supplier **is entitled to claim a full refund of input VAT** incurred.\n"
+            "- **Exempt Supplies**: No VAT is charged (e.g. unprocessed agricultural produce, financial services), and the supplier **cannot claim or deduct any input VAT** on purchases."
+        ),
         "environmental_levy_used_clothing": (
             "**The environmental levy on imported used clothing is {pct}** of the CIF "
             "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act (EACCMA)"
+        ),
+        "motor_vehicle_transfer_fee": (
+            "**The official URA fee for transfer of motor vehicle ownership is UGX 100,000** ({fy}), "
+            "in addition to statutory stamp duty of UGX 15,000."
+        ),
+        "motor_vehicle_duplicate_logbook_fee": (
+            "**The statutory fee for a duplicate or replacement motor vehicle logbook is UGX 50,000** ({fy}) "
+            "following a police report and gazetted notice."
+        ),
+        "motor_vehicle_personalized_plate_fee": (
+            "**The official fee for personalized (customized) motor vehicle registration number plates is UGX 20,000,000** ({fy})."
+        ),
+        "nssf_employee_contribution": (
+            "**The standard employee NSSF contribution rate is 5%** of gross wages ({fy}), while the employer "
+            "contributes 10%, making a total monthly social security contribution of 15%."
         ),
         "excise_duty_mobile_money_withdrawal": (
             "**The excise duty rate on mobile money cash withdrawals is {pct}** ({fy}) "
@@ -1681,6 +1756,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "wht_exemption_certificate_criteria",
             "dta_treaty_precedence",
             "vat_international_transport_zero_rating",
+            "vat_mixed_supplies_apportionment",
+            "vat_zero_rated_vs_exempt",
             "customs_transit_goods_security",
             "customs_diplomatic_exemption",
             "rental_monthly_provisional_option",

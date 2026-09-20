@@ -642,6 +642,39 @@ def _resolve_courtesy_locale(message: str, current_locale: str = "en") -> str:
         return "lg"
     return current_locale or "en"
 
+
+_CONVERSATIONAL_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"please(?:\s+tell\s+me|\s+explain|\s+clarify)?|"
+    r"could\s+you(?:\s+please)?(?:\s+tell\s+me|\s+explain|\s+clarify)?|"
+    r"can\s+you(?:\s+please)?(?:\s+tell\s+me|\s+explain|\s+clarify)?|"
+    r"i\s+(?:would\s+like|want|need)\s+to\s+know|"
+    r"i\s+need\s+to\s+understand|"
+    r"help\s+me\s+understand|"
+    r"kindly(?:\s+explain|\s+clarify|\s+tell\s+me)?|"
+    r"as\s+a\s+taxpayer|"
+    r"tell\s+me|"
+    r"bambi(?:\s+[ŋn]ŋamba|\s+mbulira)?|"
+    r"mwattu(?:\s+nnyonnyola|\s+[ŋn]ŋamba)?|"
+    r"nsaba(?:\s+onnyonnyole|\s+umbulire)?|"
+    r"njagala(?:\s+okumanya|\s+kumanya)?|"
+    r"mbadde(?:\s+njagala\s+okubuuza|\s+njagala\s+kumanya)?|"
+    r"tafadhali(?:\s+nijuze|\s+nieleze|\s+niambie)?|"
+    r"naomba(?:\s+kujua|\s+msaada|\s+kuelewa|\s+unijuze)?|"
+    r"ninataka(?:\s+kujua|\s+kuelewa)?|"
+    r"ningependa(?:\s+kujua|\s+kuelewa)?|"
+    r"nieleze\s+wazi|"
+    r"samahani(?:\s+naomba)?"
+    r")\s*[:,\-—]?\s*",
+    re.IGNORECASE,
+)
+
+
+def strip_conversational_prefix(text: str) -> str:
+    """Strip leading polite preambles and interrogative framing across EN, LG, and SW."""
+    cleaned = (text or "").strip()
+    return _CONVERSATIONAL_PREFIX_RE.sub("", cleaned).strip()
+
 CLARIFICATION_PROMPT = (
     "Of course — I'd be happy to help. Could you share a little more detail? "
     "For example, are you asking about VAT, PAYE, customs, registration, or "
