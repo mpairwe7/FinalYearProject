@@ -26,6 +26,7 @@ import {
   fetchVoiceCatalogue,
   playVoiceSample,
   voiceDisplayName,
+  voicePersonaInfo,
   type VoiceOption,
 } from "../../lib/voices";
 import { useChatStore } from "../../store/useChatStore";
@@ -179,6 +180,7 @@ export default function VoiceSection({
                     const key = `${language.value}:${voice.id}`;
                     const isChosen = chosen ? chosen === voice.id : voice.default;
                     const name = voiceDisplayName(language.value, voice, index);
+                    const persona = voicePersonaInfo(voice.id);
                     return (
                       <div
                         key={voice.id}
@@ -201,9 +203,9 @@ export default function VoiceSection({
                         >
                           <span className="setv2-voice-name">{name}</span>
                           <span className="setv2-voice-meta">
-                            {voice.default && "Default"}
-                            {voice.default && voice.native && " · "}
-                            {voice.native && "Native speaker"}
+                            {persona && <span className="setv2-voice-tone">{persona.tone} · </span>}
+                            {voice.default && "Default · "}
+                            {voice.native ? "Native speaker" : "Neural synthesis"}
                             {!voice.available && " · unavailable here"}
                           </span>
                         </button>
