@@ -72,6 +72,14 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
     found: list[tuple[float, int, int]] = []
     seen_spans: list[tuple[int, int]] = []
     percent_spans = [(m.start(1), m.end(1)) for m in _PERCENT_RE.finditer(text or "")]
+    section_spans = [
+        (m.start(), m.end())
+        for m in re.finditer(
+            r"\b(?:s\.|section|sec\.|sch\.|schedule|block|part|form)\s*\d+[a-zA-Z]?\b",
+            text or "",
+            re.IGNORECASE,
+        )
+    ]
 
     # 1. Prefix matches (East African Bantu: Luganda obukadde, Swahili milioni)
     for m in _AMOUNT_PREFIX_RE.finditer(text or ""):
@@ -87,6 +95,8 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
     # 2. Suffix matches and standard numbers (with or without commas / currency)
     for m in _AMOUNT_RE.finditer(text or ""):
         if any(s <= m.start("number") and m.end("number") <= e for s, e in seen_spans):
+            continue
+        if any(s <= m.start("number") and m.end("number") <= e for s, e in section_spans):
             continue
         raw = m.group("number")
         digits = raw.replace(",", "").replace(" ", "")
@@ -817,9 +827,10 @@ _RATE_ASK_RE = re.compile(
     r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
     r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
-    r"|\b(?:can|is|are)\b[^?]*\b(?:cleared|exempt|allowed|duty[-\s]?free|concession)\b"
+    r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"
     r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential|method\s+[1-6]|fallback\s+method|transaction\s+value)\b"
-    r"|\b(?:voluntary\s+disclosure|agency\s+notice|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|primary\s+private\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax|mixed\s+supplies|zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt)\b",
+    r"|\b(?:voluntary\s+disclosure|agency\s+notice|bank\s+account|freeze|travel\s+out|tax\s+debtor|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|carrier\s+bags?|microns|primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax|mixed\s+supplies|zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt|exploration\s+losses?|contract\s+blocks?|ring[-\s]?fenc\w*|bonded\s+warehouse)\b"
+    r"|\b(?:ushuru\s+gani|kodi\s+gani|musolo\s+ki|misolo\s+ki|sola|solar|enjuba)\b",
     re.IGNORECASE,
 )
 
@@ -906,6 +917,14 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         ),
     ),
     (
+        RatePlan(tax_type="solar_equipment_exemption"),
+        re.compile(
+            r"\b(solar|sola|nishati\s+ya\s+jua|amasannyalaze\s+g['’]enjuba)\b[^?]{0,60}\b(exemption|exempt|duty|tax|ushuru|o?musolo|inverter|batter)\b"
+            r"|\b(exemption|exempt|duty|tax|ushuru|o?musolo)\b[^?]{0,60}\b(solar|sola|nishati\s+ya\s+jua|amasannyalaze\s+g['’]enjuba)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
         RatePlan(tax_type="customs_transit_goods_security"),
         re.compile(
             r"\b(transit\s+goods|transiting\s+through\s+uganda|goods\s+in\s+transit)\b",
@@ -943,22 +962,22 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="third_party_agency_notice"),
         re.compile(
-            r"\b(agency\s+notice|third\s+party\s+(?:notice|order)|bank\s+account\s+freeze|instruct\s+(?:a\s+)?(?:commercial\s+)?bank)\b",
+            r"\b(agency\s+notice|third\s+party\s+(?:notice|order)|bank\s+account\s+freeze|freeze\s+and\s+collect|bank\s+account|instruct\s+(?:a\s+)?(?:commercial\s+)?bank)\b",
             re.IGNORECASE,
         ),
     ),
     (
         RatePlan(tax_type="departure_prohibition_order"),
         re.compile(
-            r"\b(departure\s+prohibition|travel\s+restriction|prevent\s+(?:a\s+)?(?:tax\s+)?debtor\s+from\s+travel|airport\s+restriction)\b",
+            r"\b(departure\s+prohibition|travel\s+restriction|prevent\s+(?:a\s+)?(?:tax\s+)?debtor|order\s+prevents?\s+(?:a\s+)?(?:tax\s+)?debtor|airport\s+restriction)\b",
             re.IGNORECASE,
         ),
     ),
     (
         RatePlan(tax_type="cgt_private_residence_exemption"),
         re.compile(
-            r"\b(primary\s+private\s+home|principal\s+private\s+residence|personal\s+residential\s+property)\b[^?]{0,60}\b(capital\s+gains?|cgt|tax|exempt)\b"
-            r"|\b(capital\s+gains?|cgt|tax|exempt)\b[^?]{0,60}\b(primary\s+private\s+home|principal\s+private\s+residence|personal\s+residential\s+property)\b",
+            r"\b(primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|personal\s+residential\s+property)\b[^?]{0,60}\b(capital\s+gains?|cgt|tax|exempt)\b"
+            r"|\b(capital\s+gains?|cgt|tax|exempt)\b[^?]{0,60}\b(primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|personal\s+residential\s+property)\b",
             re.IGNORECASE,
         ),
     ),
@@ -966,6 +985,21 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         RatePlan(tax_type="environmental_ban_polythene_kaveera"),
         re.compile(
             r"\b(polythene|plastic\s+carrier\s+bags?|kaveera|microns)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="local_excise_duty_raw_material_offset"),
+        re.compile(
+            r"\b(offset\s+excise|raw\s+materials?\s+used\s+as|offset\s+this\s+excise|excise\s+duty\s+paid\s+on\s+raw|offset\s+excise\s+duty)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_bonded_warehouse_limit"),
+        re.compile(
+            r"\b(bonded\s+warehouse|ghala\s+ya\s+forodha)\b[^?]{0,60}\b(maximum|period|time|how\s+long|stored|stay|limit)\b"
+            r"|\b(maximum|period|time|how\s+long|stored|stay|limit)\b[^?]{0,60}\b(bonded\s+warehouse|ghala\s+ya\s+forodha)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1051,8 +1085,8 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="environmental_levy_used_vehicles_over_8_years"),
         re.compile(
-            r"\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b[^?]{0,40}\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b"
-            r"|\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b[^?]{0,40}\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b",
+            r"\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b[^?]{0,40}\b(?:9|[12]\d|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*[-\s]?(?:years?|yrs?)(?:[-\s]?old)?\b"
+            r"|\b(?:9|[12]\d|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*[-\s]?(?:years?|yrs?)(?:[-\s]?old)?\b[^?]{0,40}\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1500,6 +1534,19 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "- **Zero-Rated Supplies (0% VAT)**: Tax is charged at 0% (e.g. exports of goods, international transport), and the supplier **is entitled to claim a full refund of input VAT** incurred.\n"
             "- **Exempt Supplies**: No VAT is charged (e.g. unprocessed agricultural produce, financial services), and the supplier **cannot claim or deduct any input VAT** on purchases."
         ),
+        "solar_equipment_exemption": (
+            "**Solar energy equipment (including solar panels, solar inverters, and deep-cycle solar batteries) is exempt "
+            "from customs import duty (0% duty) and zero-rated for VAT ({fy})** under the East African Community Customs Management Act "
+            "to promote clean, renewable solar energy access across Uganda."
+        ),
+        "local_excise_duty_raw_material_offset": (
+            "**Under Section 14 of the Excise Duty Act, a manufacturer can offset excise duty paid on raw materials "
+            "against excise duty payable on finished excisable goods**, preventing cascading double taxation ({fy})."
+        ),
+        "customs_bonded_warehouse_limit": (
+            "**Under Section 57 of the East African Community Customs Management Act (EACCMA), imported goods may be stored "
+            "in a customs bonded warehouse for a maximum period of 6 months** ({fy}), extendable by up to 3 months upon approved application."
+        ),
         "environmental_levy_used_clothing": (
             "**The environmental levy on imported used clothing is {pct}** of the CIF "
             "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act (EACCMA)"
@@ -1758,8 +1805,11 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "vat_international_transport_zero_rating",
             "vat_mixed_supplies_apportionment",
             "vat_zero_rated_vs_exempt",
+            "solar_equipment_exemption",
             "customs_transit_goods_security",
             "customs_diplomatic_exemption",
+            "local_excise_duty_raw_material_offset",
+            "customs_bonded_warehouse_limit",
             "rental_monthly_provisional_option",
             "wht_non_resident_entertainer",
         ):

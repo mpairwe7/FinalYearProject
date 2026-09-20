@@ -40,7 +40,7 @@ _CIVIC_PHILOSOPHY_RE = re.compile(
     r"|purpose\s+of\s+tax\w*|importance\s+of\s+tax\w*|what\s+does\s+(?:ura|government)\s+do\s+with\s+(?:our\s+)?tax\w*"
     r"|where\s+does\s+(?:the\s+)?tax\s+money\s+go|is\s+taxation\s+(?:fair|theft|necessary|good)"
     r"|lwaki\s+tusasula\s+omusolo|omusolo\s+gugasa\s+ki|omugaso\s+gw['’]omusolo|gavumenti\s+ekozesa\s+ki\s+ssente\s+z['’]omusolo"
-    r"|kwa\s+nini\s+tunalipa\s+kodi|kodi\s+inasaidia\s+nini|faida\s+ya\s+kodi|serikali\s+inafanya\s+nini\s+na\s+kodi)\b",
+    r"|kwa\s+nini\s+(?:wananchi\s+|watu\s+)?(?:tunalipa|wanalipa|kulipa)\s+kodi|kodi\s+inasaidia\s+nini|faida\s+ya\s+kodi|serikali\s+inafanya\s+nini\s+na\s+kodi)\b",
     re.IGNORECASE,
 )
 
@@ -89,7 +89,7 @@ _STATUS_SMALLTALK_RE = re.compile(
 
 _CREATIVE_POEM_RE = re.compile(
     r"\b(write\s+(?:a\s+)?poem\s+about\s+tax\w*|tell\s+me\s+a\s+tax\s+joke|joke\s+about\s+tax\w*"
-    r"|wandiika\s+ekitontome|kichekesho\s+kuhusu\s+kodi)\b",
+    r"|wandiika\s+ekitontome|kichekesho\s+kuhusu\s+kodi|andika\s+(?:shairi|utungo)|shairi\s+kuhusu\s+kodi|shairi\s+fupi)\b",
     re.IGNORECASE,
 )
 

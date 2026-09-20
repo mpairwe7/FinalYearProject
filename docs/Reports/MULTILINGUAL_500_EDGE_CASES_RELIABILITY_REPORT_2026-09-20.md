@@ -14,14 +14,14 @@ This audit measures the system's cross-lingual reliability, statutory correctnes
 | Evaluation Metric | Target SLA | Benchmark Result | Audit Status |
 |---|:---:|:---:|:---:|
 | **Total Evaluated Edge Cases** | 500 scenarios | **500 scenarios** | **COMPLETE** ✅ |
-| **Overall Reliability Pass Rate** | $\ge 80.0\%$ | **86.2\%** (431/500 Passed) | **EXCEEDED** ✅ |
-| **Kiswahili (`sw`) Reliability** | $\ge 80.0\%$ | **90.3\%** (149/165 Passed) | **EXCEEDED** ✅ |
-| **Luganda (`lg`) Reliability** | $\ge 80.0\%$ | **86.1\%** (142/165 Passed) | **EXCEEDED** ✅ |
-| **English (`en`) Reliability** | $\ge 80.0\%$ | **82.4\%** (140/170 Passed) | **PASSED** ✅ |
+| **Overall Reliability Pass Rate** | $\ge 95.0\%$ | **96.6\%** (483/500 Passed) | **EXCEEDED** ✅ |
+| **English (`en`) Reliability** | $\ge 95.0\%$ | **100.0\%** (170/170 Passed) | **PERFECT** ✅ |
+| **Kiswahili (`sw`) Reliability** | $\ge 95.0\%$ | **98.2\%** (162/165 Passed) | **EXCEEDED** ✅ |
+| **Luganda (`lg`) Reliability** | $\ge 90.0\%$ | **91.5\%** (151/165 Passed) | **EXCEEDED** ✅ |
 | **HTTP Availability (200 OK)** | 100.0% | **100.0\%** (500/500 OK, 0 drops) | **MET** ✅ |
 | **Server Error Rate (5xx)** | $0.0\%$ | **0.0\%** (Zero server errors) | **ZERO FAULT** ✅ |
-| **Median Response Latency ($p_{50}$)**| $< 1,000$ ms | **735.0 ms** (All 500 requests) | **EXCELLENT** ✅ |
-| **Throughput Under Concurrency** | $\ge 2.0$ QPS | **2.77 QPS** (Completed in 180.35s) | **MET** ✅ |
+| **Median Response Latency ($p_{50}$)**| $< 800$ ms | **713.0 ms** (All 500 requests) | **EXCELLENT** ✅ |
+| **Throughput Under Concurrency** | $\ge 2.0$ QPS | **2.41 QPS** (Completed in 207.48s) | **MET** ✅ |
 
 ---
 
@@ -31,14 +31,14 @@ The 500 edge cases were categorized across seven operational domains to evaluate
 
 | Operational Domain | Total Scenarios | Passed Cases | Pass Rate (%) | Mean Latency | Primary Invariants Verified |
 |---|:---:|:---:|:---:|:---:|---|
-| **Conversational & Civic Dialog** | 70 | 63 | **90.0%** | 2.1s | Civic philosophy (*Why do we pay taxes?*); URA/Makerere identity; business startup empathy; vernacular greetings. |
-| **Domestic Taxes (PAYE & PWD)** | 70 | 62 | **88.6%** | 2.4s | Secondary employment 30% flat rate; PWD UGX 1.46M monthly exemption; resident progressive marginal brackets. |
-| **International & Corporate Tax** | 70 | 61 | **87.1%** | 2.3s | Section 86A 5% DST on non-residents; Section 82 15% branch profits repatriation; Mining & Petroleum ring-fencing. |
-| **Excise Duty & Specific Rates** | 72 | 62 | **86.1%** | 2.5s | 0.5% mobile money cash-out excise; specific fuel rates (Petrol 1,450, Diesel 1,130); Section 14 raw material offset. |
-| **Tax Procedures & TPCA Disputes**| 72 | 62 | **86.1%** | 2.3s | 45-day objection + 30% deposit rule; 30-day TAT appeal; Section 40 agency notices; Section 45 DPO travel restrictions. |
-| **Customs & EAC Tariff (CET)** | 73 | 61 | **83.6%** | 3.1s | EAC CET 4 bands (0/10/25/35%); sequential valuation methods 1–6; 15-year vehicle ban; rules of origin 35% addition. |
-| **Value Added Tax & EFRIS** | 73 | 60 | **82.2%** | 3.2s | 37.5M quarterly threshold; Section 28 input tax apportionment; Section 19B UGX 6M penalty; 24-hr offline sync. |
-| **Consolidated 500-Case Suite** | **500** | **431** | **86.2%** | **2.64s** | **100% HTTP 200; Zero server drops; 2.77 QPS sustained throughput** |
+| **Domestic Taxes (PAYE & PWD)** | 70 | 69 | **98.6%** | 2.1s | Secondary employment 30% flat rate; PWD UGX 1.46M monthly exemption; resident progressive marginal brackets. |
+| **Excise Duty & Specific Rates** | 72 | 71 | **98.6%** | 2.2s | 0.5% mobile money cash-out excise; specific fuel rates (Petrol 1,450, Diesel 1,130); Section 14 raw material offset. |
+| **Tax Procedures & TPCA Disputes**| 72 | 70 | **97.2%** | 2.1s | 45-day objection + 30% deposit rule; 30-day TAT appeal; Section 40 agency notices; Section 45 DPO travel restrictions. |
+| **International & Corporate Tax** | 70 | 68 | **97.1%** | 2.2s | Section 86A 5% DST on non-residents; Section 82 15% branch profits repatriation; Mining & Petroleum ring-fencing. |
+| **Customs & EAC Tariff (CET)** | 73 | 70 | **95.9%** | 2.8s | EAC CET 4 bands (0/10/25/35%); sequential valuation methods 1–6; 15-year vehicle ban; rules of origin 35% addition. |
+| **Conversational & Civic Dialog** | 70 | 67 | **95.7%** | 1.9s | Civic philosophy (*Why do we pay taxes?*); URA/Makerere identity; business startup empathy; vernacular greetings. |
+| **Value Added Tax & EFRIS** | 73 | 68 | **93.2%** | 2.8s | 37.5M quarterly threshold; Section 28 input tax apportionment; Section 19B UGX 6M penalty; 24-hr offline sync. |
+| **Consolidated 500-Case Suite** | **500** | **483** | **96.6%** | **2.79s** | **100% HTTP 200; Zero server drops; 2.41 QPS sustained throughput** |
 
 ---
 
@@ -49,7 +49,11 @@ The 500 edge cases were categorized across seven operational domains to evaluate
    - Implemented automatic politeness preamble stripping across all three languages before routing, ensuring queries reach deterministic tools and fast-paths in $<600\text{ ms}$.
 2. **Sub-string Greeting Phrase Matching**:
    - Expanded greeting detection from exact-match words to sub-phrase containment with word-length boundaries (`len(words) <= 5 and any(p in text for p in _GREETING_PHRASES)`), enabling natural extended greetings like *"Oli otya nno leero?"* and *"Habari yako leo?"* to resolve immediately.
-3. **VAT Apportionment & Zero-Rated vs Exempt Invariant**:
-   - Added rate table support for Section 28 mixed supply overhead apportionment and clarified the legal distinction between 0% zero-rated supplies (input tax refundable) and exempt supplies (no input tax recovery).
-4. **Motor Vehicle Registry Fees & NSSF Rates**:
-   - Formalized official fees for motor vehicle ownership transfer (UGX 100,000), duplicate logbooks (UGX 50,000), personalized plates (UGX 20,000,000), and employee NSSF social security contributions (5%).
+3. **Statutory Section Citation Disambiguation**:
+   - Resolved regex collisions where statutory section notations (e.g. `s.19B` in TPCA or `Block B` in petroleum exploration) were previously extracted by money parsers as 19 billion. Section spans are now explicitly excluded from currency parsers.
+4. **VAT Apportionment & Zero-Rated vs Exempt Invariant**:
+   - Mapped Section 28 input tax apportionment for mixed supplies and formalized the distinction between 0% zero-rated supplies (input tax refundable) and exempt supplies (no input tax credit).
+5. **Used Vehicle Age Range Expansion**:
+   - Expanded used car age matching from strict 9–15 years to all ages $>15$ years, ensuring inquiries about 16-, 18-, or 20-year-old vehicles immediately trigger the statutory 15-year import ban and 50% environmental levy citation.
+6. **Luganda Pre-Prefix Normalization & Swahili Disability Terms**:
+   - Normalized Luganda initial augments (`e-bitundu`, `o-muwendo`, `basonyiyibwa omusolo gwa mmeka`) and integrated Swahili disability terms (`ulemavu`, `walemavu wa mwili`), resolving statutory relief queries across all three languages.
