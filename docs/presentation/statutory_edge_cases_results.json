@@ -6,7 +6,7 @@
     "domain": "Domestic Taxes (PAYE)",
     "statute": "Income Tax Act, Third Schedule",
     "status_code": 200,
-    "latency_s": 0.496,
+    "latency_s": 0.844,
     "retrieval_mode": "faq_priority",
     "passed": true,
     "score": 66.7,
@@ -28,19 +28,20 @@
     "domain": "Income Tax Exemptions",
     "statute": "Income Tax Act, Section 21(1)(y)",
     "status_code": 200,
-    "latency_s": 0.344,
-    "retrieval_mode": "faq_priority",
-    "passed": false,
-    "score": 0.0,
-    "matched_concepts": [],
-    "missing_concepts": [
+    "latency_s": 0.859,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
       "80%",
-      "10-year",
+      "10-year"
+    ],
+    "missing_concepts": [
       "exemption"
     ],
     "hallucination_detected": false,
-    "reply_snippet": "I drafted an answer to this, but the figures in it disagreed with the URA documents I was reading \u2014 so I have not shown it, because a wrong figure here is worse than no figure. The passages I found are listed below; a URA officer has been asked to give you a definitive answer. You can also call URA ",
-    "notes": "Missing: ['80%', '10-year', 'exemption']"
+    "reply_snippet": "**Under Section 21(1)(y) of the Income Tax Act, agro-processing enterprises qualify for a 10-year income tax holiday provided at least 80% of raw materials used are locally produced** in Uganda (FY2026-27). If local sourcing drops below 80% (e.g. to 70%), the enterprise does not meet statutory eligi",
+    "notes": "Passed statutory rigor"
   },
   {
     "case_id": "SEC-003",
@@ -49,7 +50,7 @@
     "domain": "Value Added Tax",
     "statute": "VAT Act, Section 28",
     "status_code": 200,
-    "latency_s": 0.344,
+    "latency_s": 0.859,
     "retrieval_mode": "education",
     "passed": true,
     "score": 100.0,
@@ -70,7 +71,7 @@
     "domain": "Withholding Taxes",
     "statute": "VAT Act s.5A & Income Tax Act s.119",
     "status_code": 200,
-    "latency_s": 0.341,
+    "latency_s": 0.862,
     "retrieval_mode": "hybrid",
     "passed": true,
     "score": 100.0,
@@ -91,7 +92,7 @@
     "domain": "Tax Disputes & Procedure",
     "statute": "Tax Procedures Code Act, Section 24",
     "status_code": 200,
-    "latency_s": 0.322,
+    "latency_s": 0.375,
     "retrieval_mode": "hybrid",
     "passed": true,
     "score": 100.0,
@@ -111,7 +112,7 @@
     "domain": "EFRIS Compliance",
     "statute": "Tax Procedures Code Act, Section 19B",
     "status_code": 200,
-    "latency_s": 0.325,
+    "latency_s": 0.503,
     "retrieval_mode": "calculator",
     "passed": true,
     "score": 100.0,
@@ -132,7 +133,7 @@
     "domain": "Domestic Taxes (Rental)",
     "statute": "Income Tax Act, Section 5",
     "status_code": 200,
-    "latency_s": 0.34,
+    "latency_s": 0.514,
     "retrieval_mode": "hybrid",
     "passed": true,
     "score": 100.0,
@@ -154,7 +155,7 @@
     "domain": "Customs & Motor Vehicle",
     "statute": "Excise Tariff / Traffic & Road Safety Act",
     "status_code": 200,
-    "latency_s": 0.327,
+    "latency_s": 0.505,
     "retrieval_mode": "calculator",
     "passed": true,
     "score": 100.0,
@@ -176,7 +177,7 @@
     "domain": "Excise Duty",
     "statute": "Excise Duty Act, Section 14",
     "status_code": 200,
-    "latency_s": 0.324,
+    "latency_s": 0.342,
     "retrieval_mode": "education",
     "passed": true,
     "score": 100.0,
@@ -197,7 +198,7 @@
     "domain": "Customs Valuation",
     "statute": "EAC-CMA, Fourth Schedule",
     "status_code": 200,
-    "latency_s": 0.342,
+    "latency_s": 0.908,
     "retrieval_mode": "calculator",
     "passed": true,
     "score": 100.0,
@@ -219,7 +220,7 @@
     "domain": "International Taxation",
     "statute": "Income Tax Act, Section 86A",
     "status_code": 200,
-    "latency_s": 0.331,
+    "latency_s": 0.976,
     "retrieval_mode": "calculator",
     "passed": true,
     "score": 100.0,
@@ -241,7 +242,7 @@
     "domain": "Customs Baggage",
     "statute": "EAC-CMA, Fifth Schedule",
     "status_code": 200,
-    "latency_s": 0.334,
+    "latency_s": 0.94,
     "retrieval_mode": "calculator",
     "passed": true,
     "score": 100.0,
@@ -263,7 +264,7 @@
     "domain": "Domestic Taxes (PAYE)",
     "statute": "Income Tax Act, Third Schedule",
     "status_code": 200,
-    "latency_s": 0.331,
+    "latency_s": 15.617,
     "retrieval_mode": "calculator",
     "passed": true,
     "score": 100.0,
@@ -284,7 +285,7 @@
     "domain": "Tax Disputes (Luganda)",
     "statute": "Tax Procedures Code Act, Section 24",
     "status_code": 200,
-    "latency_s": 0.917,
+    "latency_s": 3.924,
     "retrieval_mode": "hybrid",
     "passed": true,
     "score": 100.0,
@@ -304,7 +305,7 @@
     "domain": "Value Added Tax (Swahili)",
     "statute": "VAT Act & ITA",
     "status_code": 200,
-    "latency_s": 0.33,
+    "latency_s": 4.499,
     "retrieval_mode": "calculator",
     "passed": true,
     "score": 100.0,
@@ -315,6 +316,1076 @@
     "missing_concepts": [],
     "hallucination_detected": false,
     "reply_snippet": "**Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni 18%** (FY2026-27). Ushuru wa Thamani unatozwa kwa 18% kwenye bidhaa na huduma zinazoweza kutozwa ushuru; biashara zilizosajiliwa kwa ushuru huo hukusanya kutoka kwa wateja na kupeleka kwa URA.  - Sheria ya msingi: Sheria ya Ushuru wa Thama",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-016",
+    "title": "PWD Employment Exemption Threshold",
+    "locale": "en",
+    "domain": "Domestic Taxes (Exemptions)",
+    "statute": "Income Tax Act, Section 21(1)(v)",
+    "status_code": 200,
+    "latency_s": 0.355,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "1,460,000",
+      "pwd",
+      "exempt"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Under Section 21(1)(v) of the Income Tax Act, the employment income of a Person with Disability (PWD) is exempt up to UGX 1,460,000 per month** (FY2026-27). Employment income earned above this threshold is subject to progressive PAYE.  That comes from the official URA FY2026-27 rate table.  If you",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-017",
+    "title": "Branch Profits Repatriation Tax Rate",
+    "locale": "en",
+    "domain": "International Taxation",
+    "statute": "Income Tax Act, Section 82",
+    "status_code": 200,
+    "latency_s": 0.42,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15%",
+      "repatriat",
+      "branch"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**A tax of 15% is charged on the repatriated income of a non-resident company branch** in Uganda under Section 82 of the Income Tax Act (FY2026-27), payable in addition to standard 30% corporate income tax.  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-018",
+    "title": "Quarterly VAT Registration Threshold",
+    "locale": "en",
+    "domain": "Value Added Tax",
+    "statute": "VAT Act, Section 7",
+    "status_code": 200,
+    "latency_s": 0.365,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "37,500,000",
+      "consecutive",
+      "vat"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**VAT registration is mandatory once taxable turnover exceeds UGX 37,500,000 in three consecutive calendar months**, or UGX 150,000,000 annually, under Section 7 of the Value Added Tax Act (FY2026-27).  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-019",
+    "title": "Tax Appeals Tribunal (TAT) Statutory Deadline",
+    "locale": "en",
+    "domain": "Tax Disputes & Procedure",
+    "statute": "Tax Appeals Tribunal Act, Section 16",
+    "status_code": 200,
+    "latency_s": 0.329,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "30 days",
+      "tax appeals tribunal",
+      "appeal"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**A taxpayer has 30 days from the date of service of an objection decision to lodge an appeal with the Tax Appeals Tribunal (TAT)** under Section 16 of the Tax Appeals Tribunal Act and Section 26 of the Tax Procedures Code Act (FY2026-27).  That comes from the official URA FY2026-27 rate table.  If ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-020",
+    "title": "Presumptive Tax Turnover Eligibility Limits",
+    "locale": "en",
+    "domain": "Small Business Taxation",
+    "statute": "Income Tax Act, Section 4(5)",
+    "status_code": 200,
+    "latency_s": 0.366,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "10,000,000",
+      "150,000,000",
+      "presumptive"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The turnover threshold for small businesses using presumptive tax is between UGX 10,000,000 and UGX 150,000,000** annual gross turnover (FY2026-27). Businesses below UGX 10,000,000 are exempt, while those with turnover exceeding UGX 150,000,000 must file standard income tax returns.  That comes fr",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-021",
+    "title": "Mining and Petroleum Exploration Ring-Fencing",
+    "locale": "en",
+    "domain": "Extractive Industries",
+    "statute": "Income Tax Act, Part IXA",
+    "status_code": 200,
+    "latency_s": 0.369,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "ring-fenc",
+      "contract area",
+      "cannot offset"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "The resident corporation income tax rate is 30% on taxable business profits.  --- *Note: This response may not be fully supported by the retrieved documents. Please verify with official URA sources at https://ura.go.ug.* [1]  If you get stuck at any step, URA is happy to help: visit https://ura.go.u",
+    "notes": "Missing: ['ring-fenc', 'contract area', 'cannot offset']"
+  },
+  {
+    "case_id": "SEC-022",
+    "title": "Customs Export Cess on Raw Hides and Skins",
+    "locale": "en",
+    "domain": "Customs & Export",
+    "statute": "EAC-CMA / Export Levy Schedule",
+    "status_code": 200,
+    "latency_s": 0.335,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "export",
+      "hides",
+      "skins",
+      "duty"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "I drafted an answer to this, but the figures in it disagreed with the URA documents I was reading \u2014 so I have not shown it, because a wrong figure here is worse than no figure. The passages I found are listed below; a URA officer has been asked to give you a definitive answer. You can also call URA ",
+    "notes": "Missing: ['export', 'hides', 'skins', 'duty']"
+  },
+  {
+    "case_id": "SEC-023",
+    "title": "Tax Clearance Certificate (TCC) Validity",
+    "locale": "en",
+    "domain": "Tax Administration",
+    "statute": "Tax Procedures Code Act",
+    "status_code": 200,
+    "latency_s": 0.333,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "tax clearance certificate",
+      "ura"
+    ],
+    "missing_concepts": [
+      "valid"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To apply for a Tax Clearance Certificate (TCC) on the URA portal:  1. Log in to your e-Tax portal account at ura.go.ug. 2. Go to Tax Clearance > Apply for Tax Clearance Certificate. 3. Select the purpose of the TCC (e.g. government tender/bidding, immigration/work permit, license renewal, or vehicle",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-024",
+    "title": "EFRIS Offline Transaction Sync Window",
+    "locale": "en",
+    "domain": "EFRIS Compliance",
+    "statute": "Tax Procedures Code Regulations (EFRIS)",
+    "status_code": 200,
+    "latency_s": 0.373,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "24",
+      "offline"
+    ],
+    "missing_concepts": [
+      "sync"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  No. A taxpayer specified in the gazette, for whom it shall be mandatory to use EFRIS, is required to issue e-receipts or e-invoices for each transaction between the business and the customers. However, the gazette taxpayer may issue",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-025",
+    "title": "Withholding Tax Exemption Certificate Criteria",
+    "locale": "en",
+    "domain": "Withholding Taxes",
+    "statute": "Income Tax Act, Section 119(5)",
+    "status_code": 200,
+    "latency_s": 0.364,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "exemption certificate",
+      "filing",
+      "compliant"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  - Withholding tax on Interest: A resident person who pays interest to another resident person is required to withhold tax at 15% of the gross amount of the interest paid. Withholding tax is, however, not applicable where interest is",
+    "notes": "Missing: ['exemption certificate', 'filing', 'compliant']"
+  },
+  {
+    "case_id": "SEC-026",
+    "title": "Voluntary Disclosure Programme (VDP) Penalties Waiver",
+    "locale": "en",
+    "domain": "Tax Compliance",
+    "statute": "Tax Procedures Code Act, Section 66",
+    "status_code": 200,
+    "latency_s": 5.169,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "voluntary disclosure",
+      "waiver",
+      "penalty"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  In a bid to improve compliance with rental income tax and enhance understanding of the taxes that apply to the real estate sector, the Uganda Revenue Authority has commenced engagements with landlords at parish level. The activity, ",
+    "notes": "Missing: ['voluntary disclosure', 'waiver', 'penalty']"
+  },
+  {
+    "case_id": "SEC-027",
+    "title": "Third-Party Agency Notice (Bank Account Freeze)",
+    "locale": "en",
+    "domain": "Tax Enforcement",
+    "statute": "Tax Procedures Code Act, Section 40",
+    "status_code": 200,
+    "latency_s": 0.351,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "bank",
+      "remit",
+      "taxes"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "The Uganda Revenue Authority (URA) can instruct a commercial bank to remit money from a debtor's account to settle outstanding taxes under the Income Tax Act, 2000, specifically Section 139, which allows the U [1].  --- *Note: This response may not be fully supported by the retrieved documents. Plea",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-028",
+    "title": "Departure Prohibition Order (DPO) Travel Restriction",
+    "locale": "en",
+    "domain": "Tax Enforcement",
+    "statute": "Tax Procedures Code Act, Section 45",
+    "status_code": 200,
+    "latency_s": 0.437,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "commissioner",
+      "immigration",
+      "prevent"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "The Commissioner may issue a certificate containing particulars of the tax payable to the officer responsible for immigration control and request the Commissioner for Immigration to prevent that person from leaving Uganda until that person:  (a) Makes payment of the tax in full; or  (b) Executes a f",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-029",
+    "title": "Advance Tax on Passenger and Goods Vehicles",
+    "locale": "en",
+    "domain": "Motor Vehicle Tax",
+    "statute": "Income Tax Act, Second Schedule",
+    "status_code": 200,
+    "latency_s": 0.335,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "20,000",
+      "50,000",
+      "advance tax"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "The advance tax rates payable are:  * **UGX 50,000 per tonne** on goods cargo trucks (for loads \u2265 2 tons). * **UGX 20,000 per seat** on commercial passenger vans. [1]  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 /",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-030",
+    "title": "Principal Private Residence Capital Gains Exclusion",
+    "locale": "en",
+    "domain": "Capital Gains Tax",
+    "statute": "Income Tax Act, Section 21 & 130",
+    "status_code": 200,
+    "latency_s": 0.345,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "exempt",
+      "private residence",
+      "home"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Capital gains derived from the disposal of an individual's principal private residence (family home) are exempt from income tax** under Section 21 and Section 130 of the Income Tax Act (FY2026-27). Capital gains tax on non-business assets applies to secondary investment properties.  That comes fro",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-031",
+    "title": "Withholding Tax on Sports Betting Winnings",
+    "locale": "en",
+    "domain": "Gaming & Betting",
+    "statute": "Income Tax Act, Section 118C",
+    "status_code": 200,
+    "latency_s": 0.359,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15%",
+      "betting",
+      "winnings"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**WHT on betting winnings is 15%** (FY2026-27), withheld at source by the operator.  - Statutory Basis: Income Tax Act  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 1",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-032",
+    "title": "Deceased Taxpayer Estate Tax Liability",
+    "locale": "en",
+    "domain": "Estate Taxation",
+    "statute": "Income Tax Act, Section 71",
+    "status_code": 200,
+    "latency_s": 0.353,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "executor",
+      "estate",
+      "assets"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "The executor of a deceased taxpayer's estate are personally liable for unpaid taxes beyond the value of estate assets. This means they must settle any outstanding tax liabilities, including unpaid taxes, penalties, and costs incurred during the administration of the estate. [1]  --- *Note: This resp",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-033",
+    "title": "Double Taxation Agreement (DTA) Treaty Precedence",
+    "locale": "en",
+    "domain": "International Taxation",
+    "statute": "Income Tax Act, Section 88",
+    "status_code": 200,
+    "latency_s": 0.379,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 25.0,
+    "matched_concepts": [
+      "10%"
+    ],
+    "missing_concepts": [
+      "treaty",
+      "dta",
+      "prevail"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  - Payments on dividends: A resident company which pays a dividend to a resident shareholder is required to withhold tax at 15% of the gross amount of the dividend paid, except where the dividend income is exempt from tax in the hand",
+    "notes": "Missing: ['treaty', 'dta', 'prevail']"
+  },
+  {
+    "case_id": "SEC-034",
+    "title": "Customs Bonded Warehouse Statutory Retention Limit",
+    "locale": "en",
+    "domain": "Customs Warehousing",
+    "statute": "EAC-CMA, Section 57",
+    "status_code": 200,
+    "latency_s": 0.341,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "bonded warehouse",
+      "customs"
+    ],
+    "missing_concepts": [
+      "6 months"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  For Customs Purposes, the clearance of goods is regulated under the , 2004 (As Amended), Uganda being a member of the E.A Customs Union  Importation of goods means to bring or cause to be brought into the Partner States ( ) from a f",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-035",
+    "title": "Environmental Ban on Polythene Bags (Kaveera)",
+    "locale": "en",
+    "domain": "Environmental Levies",
+    "statute": "Finance Act / NEMA & Customs Regulations",
+    "status_code": 200,
+    "latency_s": 1.931,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "ban",
+      "polythene",
+      "microns",
+      "kaveera"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "The resident corporation income tax rate is 30% on taxable business income.  --- *Note: This response may not be fully supported by the retrieved documents. Please verify with official URA sources at https://ura.go.ug.* [1]  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug",
+    "notes": "Missing: ['ban', 'polythene', 'microns', 'kaveera']"
+  },
+  {
+    "case_id": "SEC-036",
+    "title": "Stamp Duty on Land and Property Transfers",
+    "locale": "en",
+    "domain": "Stamp Duty",
+    "statute": "Stamp Duty Act",
+    "status_code": 200,
+    "latency_s": 0.372,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "1%",
+      "stamp duty",
+      "transfer"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The stamp duty rate on transfer of property (land or buildings) is 1%** (FY2026-27) under the Stamp Duty Act.  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-037",
+    "title": "Excise Duty on Mobile Money Cash Withdrawals",
+    "locale": "en",
+    "domain": "Excise Duty",
+    "statute": "Excise Duty Act, Schedule 2",
+    "status_code": 200,
+    "latency_s": 0.377,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0.5%",
+      "withdrawal",
+      "mobile money"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The excise duty rate on mobile money cash withdrawals is 0.5%** (FY2026-27) of the transaction value under the Excise Duty Act. Deposits and transfers are not subject to this withdrawal levy.  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to hel",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-038",
+    "title": "Zero-Rated vs Exempt Supplies Input VAT Recovery",
+    "locale": "en",
+    "domain": "Value Added Tax",
+    "statute": "VAT Act, Section 24 & 28",
+    "status_code": 200,
+    "latency_s": 0.386,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 75.0,
+    "matched_concepts": [
+      "zero-rated",
+      "exempt",
+      "input tax"
+    ],
+    "missing_concepts": [
+      "refund"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To help you better, I'll explain some key terms related to Value Added Tax (VAT):  * **Taxable Person**: Someone who is registered for VAT or should be registered because they deal in taxable supplies. * **Output Tax**: VAT charged on sales of goods or services. * **Input Tax**: VAT paid on purchase",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-039",
+    "title": "International Transport Zero-Rating",
+    "locale": "en",
+    "domain": "Value Added Tax",
+    "statute": "VAT Act, Third Schedule",
+    "status_code": 200,
+    "latency_s": 0.374,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "zero-rated",
+      "0%",
+      "international"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Under the Third Schedule of the Value Added Tax Act, international transport of passengers and commercial cargo** from Uganda to a destination outside Uganda is **zero-rated (0% VAT)**, allowing full input tax recovery.  That comes from the official URA FY2026-27 rate table.  If you get stuck at a",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-040",
+    "title": "Excise Duty on Telecommunication Voice and Data",
+    "locale": "en",
+    "domain": "Excise Duty",
+    "statute": "Excise Duty Act, Schedule 2",
+    "status_code": 200,
+    "latency_s": 0.346,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "12%",
+      "telecom"
+    ],
+    "missing_concepts": [
+      "data"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**The excise duty rate on telecommunication airtime and voice calls is 12%** (FY2026-27) under the Excise Duty Act 2014.  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-041",
+    "title": "Petroleum Specific Excise Duty Rates",
+    "locale": "en",
+    "domain": "Excise Duty (Energy)",
+    "statute": "Excise Duty Act, Schedule 2",
+    "status_code": 200,
+    "latency_s": 0.341,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "1,450",
+      "1,130",
+      "petrol",
+      "diesel"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Excise duty rates on petroleum fuels (FY2026-27):**  - Petrol: **UGX 1,450 per litre** - Diesel: **UGX 1,130 per litre** - Kerosene: **UGX 200 per litre**  - Statutory Basis: Excise Duty Act 2014, Schedule 2  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-042",
+    "title": "Presumptive Tax Fixed Band Amounts Without Records",
+    "locale": "en",
+    "domain": "Small Business Taxation",
+    "statute": "Income Tax Act, Second Schedule",
+    "status_code": 200,
+    "latency_s": 0.365,
+    "retrieval_mode": "faq_priority",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "presumptive",
+      "turnover",
+      "bands"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "A small business for tax purposes is defined as a business with annual sales between UGX 10,000,000 and UGX 150,000,000 (about UGX 27,500+ per day). This excludes certain sectors like medical, legal, construction, and entertainment services. [1]  If you get stuck at any step, URA is happy to help: v",
+    "notes": "Missing: ['presumptive', 'turnover', 'bands']"
+  },
+  {
+    "case_id": "SEC-043",
+    "title": "Monthly Return Filing Deadline (15th Day)",
+    "locale": "en",
+    "domain": "Tax Compliance Calendar",
+    "statute": "TPCA s.16 & VAT Act s.31",
+    "status_code": 200,
+    "latency_s": 0.326,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15th",
+      "month",
+      "due"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**PAYE returns and payments are due by the 15th day of each month** following the payroll period under the Tax Procedures Code Act and Income Tax Act (FY2026-27).  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, ema",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-044",
+    "title": "Annual Corporation Tax Return Statutory Filing Period",
+    "locale": "en",
+    "domain": "Corporate Taxation",
+    "statute": "Income Tax Act, Section 92",
+    "status_code": 200,
+    "latency_s": 0.392,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "6 months",
+      "return"
+    ],
+    "missing_concepts": [
+      "accounting year"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To file your annual tax return:  1. Login ura.go.ug with TIN/password \u2192 e-services \u2192 e-returns \u2192 select return type and download template 2. Enable macros, fill without renaming or copy/paste 3. Validate to generate upload file 4. Back to e-returns upload file with return period and captcha 5. Submi",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-045",
+    "title": "Interest on Late Payment of Tax under TPCA",
+    "locale": "en",
+    "domain": "Tax Procedure (Penalties)",
+    "statute": "Tax Procedures Code Act, Section 39",
+    "status_code": 200,
+    "latency_s": 0.489,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "2%",
+      "interest",
+      "unpaid"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "I know deadlines can be stressful, so here's the quickest way forward.  **Interest on late payment of tax is 2% per month** (simple interest) on the unpaid tax balance under Section 39 of the Tax Procedures Code Act (FY2026-27).  That comes from the official URA FY2026-27 rate table.  If you get stu",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-046",
+    "title": "Private Ruling Binding Effect on Commissioner General",
+    "locale": "en",
+    "domain": "Tax Procedures Code Act",
+    "statute": "Tax Procedures Code Act, Section 20",
+    "status_code": 200,
+    "latency_s": 0.457,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "binding",
+      "private ruling",
+      "commissioner general"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Yes, a formal Private Ruling issued by the Commissioner General is binding on the Uganda Revenue Authority (URA) if the taxpayer made full and true disclosure. [1]  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 08",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-047",
+    "title": "Temporary Importation Procedure under EAC-CMA",
+    "locale": "en",
+    "domain": "Customs Procedures",
+    "statute": "EAC-CMA, Section 117",
+    "status_code": 200,
+    "latency_s": 0.364,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 75.0,
+    "matched_concepts": [
+      "security",
+      "bond",
+      "re-export"
+    ],
+    "missing_concepts": [
+      "temporary importation"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  - a) Items are warehousable for a period of six months (180 days), with a  - period extension of 3months maximum, granted on request. This means  - that importer should request for the extension if it\u2019s required.  - b) The only exce",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-048",
+    "title": "Transit Goods Security and Exemption from Domestic Duty",
+    "locale": "en",
+    "domain": "Customs & Transit",
+    "statute": "EAC-CMA, Part VIII",
+    "status_code": 200,
+    "latency_s": 0.357,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 25.0,
+    "matched_concepts": [
+      "exempt"
+    ],
+    "missing_concepts": [
+      "transit",
+      "bond",
+      "customs"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To determine if your goods are eligible for exemption from import duties, you need to establish whether they fall under the categories of items exempted by the Uganda Revenue Authority (URA). Here\u2019s a breakdown of the key points:  ### **Import Duty Exemptions**  1. **Used Vehicles**: Used vehicles o",
+    "notes": "Missing: ['transit', 'bond', 'customs']"
+  },
+  {
+    "case_id": "SEC-049",
+    "title": "Common External Tariff (CET) 4-Band Structure",
+    "locale": "en",
+    "domain": "EAC Customs Tariff",
+    "statute": "EAC Common External Tariff 2022",
+    "status_code": 200,
+    "latency_s": 0.401,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0%",
+      "10%",
+      "25%",
+      "35%"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The East African Community Common External Tariff (EAC CET) has 4 primary tariff bands (FY2026-27):**  - Band 1: **0%** (Raw materials and capital machinery) - Band 2: **10%** (Intermediate goods) - Band 3: **25%** (Finished consumer goods) - Band 4: **35%** (Sensitive goods manufactured locally i",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-050",
+    "title": "EAC Rules of Origin Value Addition Requirement",
+    "locale": "en",
+    "domain": "EAC Regional Trade",
+    "statute": "EAC Rules of Origin 2015",
+    "status_code": 200,
+    "latency_s": 0.392,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "35%",
+      "rules of origin",
+      "value addition"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The EAC Rules of Origin require a minimum of 35% local value addition** (or wholly produced criteria) for goods to qualify for duty-free preferential tariff treatment across East African Community partner states (FY2026-27).  That comes from the official URA FY2026-27 rate table.  If you get stuck",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-051",
+    "title": "Diplomatic Privilege Duty-Free Clearance",
+    "locale": "en",
+    "domain": "Customs Exemptions",
+    "statute": "EAC-CMA, Fifth Schedule",
+    "status_code": 200,
+    "latency_s": 0.367,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "diplomatic",
+      "duty-free",
+      "privilege"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To help you calculate the total import cost, I'll need some details about the goods you're importing. Could you please provide:  * The CIF value (cost, insurance, freight) of the goods * The estimated customs duty rate (this varies depending on the product and its origin) * Whether you want to inclu",
+    "notes": "Missing: ['diplomatic', 'duty-free', 'privilege']"
+  },
+  {
+    "case_id": "SEC-052",
+    "title": "Bad Debt Relief for VAT Output Tax",
+    "locale": "en",
+    "domain": "Value Added Tax",
+    "statute": "VAT Act, Section 31",
+    "status_code": 200,
+    "latency_s": 0.334,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "bad debt",
+      "insolven",
+      "refund",
+      "2 years"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Under Section 31 of the Value Added Tax Act, a registered taxpayer can claim a VAT bad debt refund** on output tax paid if at least **2 years** have elapsed from the date of supply and the debtor has become legally insolvent or bankrupt.  That comes from the official URA FY2026-27 rate table.  If ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-053",
+    "title": "Monthly Provisional Return Option for Rental Tax",
+    "locale": "en",
+    "domain": "Rental Tax Procedure",
+    "statute": "Income Tax Act, Section 124(1a)",
+    "status_code": 200,
+    "latency_s": 0.343,
+    "retrieval_mode": "faq_priority",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "monthly",
+      "provisional",
+      "rental"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To file your annual tax return:  1. Login ura.go.ug with TIN/password \u2192 e-services \u2192 e-returns \u2192 select return type and download template 2. Enable macros, fill without renaming or copy/paste 3. Validate to generate upload file 4. Back to e-returns upload file with return period and captcha 5. Submi",
+    "notes": "Missing: ['monthly', 'provisional', 'rental']"
+  },
+  {
+    "case_id": "SEC-054",
+    "title": "Penalties for Tampering with EFRIS Fiscal Devices",
+    "locale": "en",
+    "domain": "EFRIS Enforcement",
+    "statute": "Tax Procedures Code Act",
+    "status_code": 200,
+    "latency_s": 0.388,
+    "retrieval_mode": "blocked",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "penalty",
+      "imprisonment",
+      "tampering"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "I cannot provide guidance on illegal activities. For legitimate tax questions, please visit https://ura.go.ug or contact the URA Contact Centre.",
+    "notes": "Missing: ['penalty', 'imprisonment', 'tampering']"
+  },
+  {
+    "case_id": "SEC-055",
+    "title": "Withholding Tax on Non-Resident Public Entertainers",
+    "locale": "en",
+    "domain": "Withholding Taxes",
+    "statute": "Income Tax Act, Section 84",
+    "status_code": 200,
+    "latency_s": 0.41,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "15%",
+      "withholding",
+      "entertainer"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Evergreen Hotel is required to withhold 6% of the gross amount of payment made to a Ugandan local musician performing at their concert. This tax is paid to URA. [1]  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0",
+    "notes": "Missing: ['15%', 'withholding', 'entertainer']"
+  },
+  {
+    "case_id": "SEC-056",
+    "title": "PWD Employment Tax Exemption in Luganda",
+    "locale": "lg",
+    "domain": "Tax Exemptions (Luganda)",
+    "statute": "Income Tax Act, Section 21(1)(v)",
+    "status_code": 200,
+    "latency_s": 4.971,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "1,460,000",
+      "omusolo",
+      "omusaala"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Okusinziira ku Kawaayiro 21 (1)(v) ak'etteeka ly'emisolo, omusaala gw'omuntu alina obulemu (PWD) tegukkirizibwa kusasulirwa musolo okutuuka ku UGX 1,460,000 buli mwezi** (FY2026-27). Omusaala ogufunibwa okusinga ku mutemwa guno gusasulirwa omusolo gwa PAYE ogw'enkizo.  Kino kiva mu lukalala lwa UR",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-057",
+    "title": "Advance Tax on Taxis in Luganda",
+    "locale": "lg",
+    "domain": "Motor Vehicle Tax (Luganda)",
+    "statute": "Income Tax Act, Second Schedule",
+    "status_code": 200,
+    "latency_s": 3.983,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "280,000",
+      "omusolo"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Omusolo ogw'omu maaso ku bbaasi ya sitenseni 14 gwa UGX 280,000 buli mwaka. [1]  Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsAp",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-058",
+    "title": "Mobile Money Cash-out Tax in Luganda",
+    "locale": "lg",
+    "domain": "Excise Duty (Luganda)",
+    "statute": "Excise Duty Act 2014",
+    "status_code": 200,
+    "latency_s": 4.619,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 33.3,
+    "matched_concepts": [
+      "omusolo"
+    ],
+    "missing_concepts": [
+      "0.5%",
+      "mobile money"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Kkooti Enkulu yasalawo nti omuwawaabirwa (omuweereza) avunaanyizibwa okusasula omusolo ku nsimbi eziva mu kusindika ssente ku masimu, ng'ekyokulabirako kiraga nti ebigambo ebikwata ku musolo nga VAT, TIN, EFRIS, DTS, PAYE, WHT, URA, TCC, EACCMA birina okukozesebwa butereevu. [1]  Bw'oba ng'osanze ob",
+    "notes": "Missing: ['0.5%', 'mobile money']"
+  },
+  {
+    "case_id": "SEC-059",
+    "title": "EFRIS Offline Sync Timeline in Luganda",
+    "locale": "lg",
+    "domain": "EFRIS (Luganda)",
+    "statute": "TPCA Regulations",
+    "status_code": 200,
+    "latency_s": 14.357,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 33.3,
+    "matched_concepts": [
+      "efris"
+    ],
+    "missing_concepts": [
+      "24",
+      "invoice"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Enkola ya EFRIS y'engeri eya digito eziyamba bizinensi okuwandiika obusuubuzi bwazo, okukola lisi z'ebyamaguzi n'ebiwandiiko ebirala, n'okwogerezeganya ne Uganda Revenue Authority (URA) mu budde obutuufu. Enkola eno bw'eti bw'ekolamu:  * **Mu Bizinensi Entono**: App ya EFRIS (esangibwa ku masimu aga",
+    "notes": "Missing: ['24', 'invoice']"
+  },
+  {
+    "case_id": "SEC-060",
+    "title": "15-Year Vehicle Ban in Luganda",
+    "locale": "lg",
+    "domain": "Customs (Luganda)",
+    "statute": "Traffic and Road Safety Act",
+    "status_code": 200,
+    "latency_s": 10.35,
+    "retrieval_mode": "faq_priority",
+    "passed": false,
+    "score": 33.3,
+    "matched_concepts": [
+      "mmotoka"
+    ],
+    "missing_concepts": [
+      "15",
+      "tekikkirizibwa"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Okubalirira emisolo ku mmotoka ezikoleddwa mu mawanga amalala eziyingizibwa mu Uganda:  1. **Omugatte gw'ebbeeyi y'emmotoka eyingiziddwa (CIF)**: Guno gusinziira ku kibanja kya URA ekya Used Motor Vehicle Valuation Database.   2. **Omusolo ogw'okuyingiza ebintu mu ggwanga**: Gusasulwa ebitundu 25% e",
+    "notes": "Missing: ['15', 'tekikkirizibwa']"
+  },
+  {
+    "case_id": "SEC-061",
+    "title": "PWD Employment Tax Exemption in Swahili",
+    "locale": "sw",
+    "domain": "Tax Exemptions (Swahili)",
+    "statute": "Income Tax Act, Section 21(1)(v)",
+    "status_code": 200,
+    "latency_s": 14.325,
+    "retrieval_mode": "calculator",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "1,460,000",
+      "msamaha",
+      "kodi"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Viwango vya PAYE kwa wafanyakazi wenyeji (FY2026-27, mapato ya kila mwezi):**  - UGX 0 \u2013 UGX 335,000: **0%** - UGX 335,000 \u2013 UGX 410,000: **20%** - UGX 410,000 \u2013 UGX 485,0000: **25%** - UGX 485,000 \u2013 UGX 10,000,000: **30%** - Zaidi ya UGX 10,000,000: **40%** (bandi ya juu)  Wafanyakazi wasio raia ",
+    "notes": "Missing: ['1,460,000', 'msamaha', 'kodi']"
+  },
+  {
+    "case_id": "SEC-062",
+    "title": "Mobile Money Withdrawal Excise in Swahili",
+    "locale": "sw",
+    "domain": "Excise Duty (Swahili)",
+    "statute": "Excise Duty Act",
+    "status_code": 200,
+    "latency_s": 3.667,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0.5%",
+      "ushuru",
+      "pesa"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Kiwango cha ushuru wa kutoa pesa kwa njia ya simu ni 0.5%** (FY2026-27) ya thamani ya shughuli chini ya Sheria ya Ushuru wa Bidhaa. Amana na uhamishaji hazina ushuru huu wa kutoa pesa.  Hii inatoka kwenye jedwali rasmi la kiwango cha URA FY2026-27.  Ikiwa utakabiliwa na changamoto yoyote katika ha",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-063",
+    "title": "Quarterly VAT Registration Threshold in Swahili",
+    "locale": "sw",
+    "domain": "Value Added Tax (Swahili)",
+    "statute": "VAT Act, Section 7",
+    "status_code": 200,
+    "latency_s": 4.024,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "37,500,000",
+      "vat",
+      "miezi"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Usajili wa VAT ni wa lazima mara tu mapato yanayolipiwa kodi yafikapo UGX 37,500,000 katika miezi mitatu mfululizo ya kalenda**, au UGX 150,000,000 kila mwaka, chini ya Sehemu ya 7 ya Sheria ya Kodi ya Ongezeko la Thamani (FY2026-27). Hiyo inatoka kwenye jedwali rasmi la kiwango cha URA FY2026-27.",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-064",
+    "title": "TAT Appeal Deadline in Swahili",
+    "locale": "sw",
+    "domain": "Tax Appeals (Swahili)",
+    "statute": "Tax Appeals Tribunal Act",
+    "status_code": 200,
+    "latency_s": 4.52,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "30",
+      "rufaa",
+      "siku"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Mlipa kodi ana siku 30 tangu tarehe ya kutumwa uamuzi wa pingamizi ili kuwasilisha rufaa kwenye Baraza la Rufani za Kodi (TAT)** chini ya Kifungu cha 16 cha Sheria ya Baraza la Rufani za Kodi na Kifungu cha 26 cha Sheria ya Taratibu za Kodi (FY2026-27). Hiyo inatoka kwenye jedwali rasmi la kiwango",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "SEC-065",
+    "title": "15-Year Vehicle Ban in Swahili",
+    "locale": "sw",
+    "domain": "Customs (Swahili)",
+    "statute": "Traffic and Road Safety Act",
+    "status_code": 200,
+    "latency_s": 4.271,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15",
+      "marufuku",
+      "gari"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Kodi ya mazingira kwa magari yaliyotumika yenye umri wa miaka 8 hadi 15 ni 50%** ya thamani ya CIF (FY2026-27).   > Kumbuka: Kuagiza magari zaidi ya miaka 15 ni marufuku chini ya Sheria ya Usalama Barabarani na Marekebisho.  - Misingi ya kisheria: EACCMA / Sheria ya Usalama Barabarani  Ikiwa utaka",
     "notes": "Passed statutory rigor"
   }
 ]

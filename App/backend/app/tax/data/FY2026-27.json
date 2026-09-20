@@ -94,6 +94,7 @@
     "presumptive_tax_upper_threshold": 150000000,
     "penal_tax_late_filing_monthly_rate": 0.02,
     "penal_tax_late_filing_minimum_ugx": 200000,
+    "late_payment_interest_monthly_rate": 0.02,
     "stamp_duty_property_transfer": 0.01,
     "objection_timeline_days": 45,
     "paye_due_date_monthly": 15,
@@ -106,7 +107,13 @@
     "motor_vehicle_advance_tax_passenger_per_seat": 20000,
     "motor_vehicle_advance_tax_goods_per_tonne": 50000,
     "digital_services_tax_non_resident": 0.05,
-    "customs_valuation_hierarchy": 6
+    "customs_valuation_hierarchy": 6,
+    "paye_secondary_employment_rate": 0.3,
+    "agro_processing_local_raw_material_ratio": 0.8,
+    "disability_income_tax_threshold_monthly": 1460000,
+    "branch_repatriation_tax_rate": 0.15,
+    "vat_quarterly_registration_threshold": 37500000,
+    "tax_appeals_tribunal_deadline_days": 30
   },
   "unverified": [
     "vat_registration_threshold_annual",
@@ -156,8 +163,15 @@
     "presumptive_tax_upper_threshold": "Income Tax Act (Cap 338), s.4(5) and Second Schedule",
     "penal_tax_late_filing_monthly_rate": "Tax Procedures Code Act (Cap 343), s.49(1)",
     "penal_tax_late_filing_minimum_ugx": "Tax Procedures Code Act (Cap 343), s.49(1)",
+    "late_payment_interest_monthly_rate": "Tax Procedures Code Act (Cap 343), s.39",
     "digital_services_tax_non_resident": "Income Tax Act (Cap 338), s.86A",
-    "customs_valuation_hierarchy": "East African Community Customs Management Act, Fourth Schedule"
+    "customs_valuation_hierarchy": "East African Community Customs Management Act, Fourth Schedule",
+    "paye_secondary_employment_rate": "Income Tax Act (Cap 338), Third Schedule",
+    "agro_processing_local_raw_material_ratio": "Income Tax Act (Cap 338), s.21(1)(y)",
+    "disability_income_tax_threshold_monthly": "Income Tax Act (Cap 338), s.21(1)(v)",
+    "branch_repatriation_tax_rate": "Income Tax Act (Cap 338), s.82",
+    "vat_quarterly_registration_threshold": "Value Added Tax Act (Cap 349), s.7",
+    "tax_appeals_tribunal_deadline_days": "Tax Appeals Tribunal Act (Cap 345), s.16"
   },
   "notes": {
     "excise_duty_mobile_money_withdrawal": "Excise duty of 0.5% applies to cash withdrawals from mobile money. Transfers and deposits are not charged this 0.5% withdrawal duty.",

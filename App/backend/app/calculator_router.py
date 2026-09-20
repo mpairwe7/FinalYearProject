@@ -812,13 +812,14 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|omuwendo|ekkomo|kikomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
+    r"\b(what(?:'s|\s+is)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|omuwendo|ekkomo|kikomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
     r"|\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
     r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|omuwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
     r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
     r"|\b(?:can|is|are)\b[^?]*\b(?:cleared|exempt|allowed|duty[-\s]?free|concession)\b"
-    r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential)\b",
+    r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential)\b"
+    r"|\b(?:voluntary\s+disclosure|agency\s+notice|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|primary\s+private\s+home|principal\s+private\s+residence)\b",
     re.IGNORECASE,
 )
 
@@ -855,6 +856,149 @@ _PAYE_THRESHOLD_ASK_RE = re.compile(
 )
 
 _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
+    (
+        RatePlan(tax_type="mining_petroleum_ring_fencing"),
+        re.compile(
+            r"\b(mining|petroleum|exploration\s+losses?|contract\s+area|contract\s+block|block\s+[a-z0-9]|ring[-\s]?fenc\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_export_cess_hides_skins"),
+        re.compile(
+            r"\b(hides\s+and\s+skins|raw\s+hides|unprocessed\s+skins|export\s+cess)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="wht_exemption_certificate_criteria"),
+        re.compile(
+            r"\b(wht\s+exemption\s+certificate|withholding\s+tax\s+exemption\s+certificate|exemption\s+from\s+6%\s+withholding)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="dta_treaty_precedence"),
+        re.compile(
+            r"\b(double\s+taxation\s+agreement|dta|tax\s+treaty|treaty\s+precedence|which\s+rate\s+prevails)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_international_transport_zero_rating"),
+        re.compile(
+            r"\b(international\s+transport|transport\s+of\s+passengers\s+or\s+commercial\s+cargo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_transit_goods_security"),
+        re.compile(
+            r"\b(transit\s+goods|transiting\s+through\s+uganda|goods\s+in\s+transit)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_diplomatic_exemption"),
+        re.compile(
+            r"\b(diplomatic\s+missions?|foreign\s+diplomatic|diplomats?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="rental_monthly_provisional_option"),
+        re.compile(
+            r"\b(provisional\s+rental\s+tax\s+returns?\s+on\s+a\s+monthly\s+basis|monthly\s+basis\s+instead\s+of\s+annually)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="wht_non_resident_entertainer"),
+        re.compile(
+            r"\b(foreign\s+musician|foreign\s+artist|non[-\s]?resident\s+public\s+entertainer|concert\s+promoter)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="voluntary_disclosure_programme"),
+        re.compile(
+            r"\b(voluntary\s+disclosure|voluntarily\s+disclose|vdp)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="third_party_agency_notice"),
+        re.compile(
+            r"\b(agency\s+notice|third\s+party\s+(?:notice|order)|bank\s+account\s+freeze|instruct\s+(?:a\s+)?(?:commercial\s+)?bank)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="departure_prohibition_order"),
+        re.compile(
+            r"\b(departure\s+prohibition|travel\s+restriction|prevent\s+(?:a\s+)?(?:tax\s+)?debtor\s+from\s+travel|airport\s+restriction)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="cgt_private_residence_exemption"),
+        re.compile(
+            r"\b(primary\s+private\s+home|principal\s+private\s+residence|personal\s+residential\s+property)\b[^?]{0,60}\b(capital\s+gains?|cgt|tax|exempt)\b"
+            r"|\b(capital\s+gains?|cgt|tax|exempt)\b[^?]{0,60}\b(primary\s+private\s+home|principal\s+private\s+residence|personal\s+residential\s+property)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_ban_polythene_kaveera"),
+        re.compile(
+            r"\b(polythene|plastic\s+carrier\s+bags?|kaveera|microns)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_bad_debt_relief"),
+        re.compile(
+            r"\b(bad\s+debt|bad\s+debts)\b[^?]{0,60}\b(vat|relief|refund|claim)\b"
+            r"|\b(vat|relief|refund|claim)\b[^?]{0,60}\b(bad\s+debt|bad\s+debts)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="efris_tampering_penalty"),
+        re.compile(
+            r"\b(tamper\w*|alter\w*|falsif\w*)\b[^?]{0,60}\b(efris|fiscal\s+device|efd|fiscal\s+record)\b"
+            r"|\b(efris|fiscal\s+device|efd|fiscal\s+record)\b[^?]{0,60}\b(tamper\w*|alter\w*|falsif\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="eac_cet_tariff_bands"),
+        re.compile(
+            r"\b(eac\s+cet|common\s+external\s+tariff|cet\s+bands?|tariff\s+bands?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="eac_rules_of_origin_value_addition"),
+        re.compile(
+            r"\b(rules\s+of\s+origin|preferential\s+origin|value\s+addition)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="tax_appeals_tribunal_deadline_days"),
+        re.compile(
+            r"\b(tax\s+appeals\s+tribunal|tat)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_quarterly_registration_threshold"),
+        re.compile(
+            r"\b(quarterly|three\s+consecutive(?:\s+calendar)?\s+months?|3\s+consecutive(?:\s+calendar)?\s+months?|miezi\s+mitatu\s+mfululizo)\b",
+            re.IGNORECASE,
+        ),
+    ),
     # "VAT threshold" is a question about the registration threshold, not
     # about the 18% rate — so it must be matched before the generic VAT
     # pattern below, which would otherwise answer with the standard rate.
@@ -929,6 +1073,14 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         ),
     ),
     (
+        RatePlan(tax_type="excise_duty_fuel_summary"),
+        re.compile(
+            r"\b(petrol\b.*\bdiesel|diesel\b.*\bpetrol|fuel\s+rates?|petroleum\s+rates?|fuels?\s+excise)\b"
+            r"|\b(fuel|petroleum)\b[^?]{0,60}\b(excise|rates?|duty|per\s+litre)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
         RatePlan(tax_type="excise_duty_fuel_petrol_per_litre"),
         re.compile(
             r"\b(petrol|gasoline)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
@@ -985,6 +1137,14 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         ),
     ),
     (
+        RatePlan(tax_type="late_payment_interest_monthly_rate"),
+        re.compile(
+            r"\b(interest|unpaid\s+tax|overdue|late\s+payment)\b[^?]{0,60}\b(rate|percentage|per\s+month|applied|charged)\b"
+            r"|\b(rate|percentage|per\s+month)\b[^?]{0,60}\b(interest|unpaid\s+tax|overdue|late\s+payment)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
         RatePlan(tax_type="stamp_duty_property_transfer"),
         re.compile(
             r"\b(stamp\s*duty|stempu|stampu)\b[^?]{0,50}\b(transfer|property|land|ettaka|ardhi|ekyapa|kikyusa)\b"
@@ -1003,8 +1163,8 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="paye_due_date_monthly"),
         re.compile(
-            r"\b(paye|pay\s+as\s+you\s+earn)\b[^?]{0,60}\b(due\s+date|deadline|when|schedule|ebiseera|mwisho|tarehe|ddi|lini)\b"
-            r"|\b(due\s+date|deadline|when|schedule|ebiseera|mwisho|tarehe|ddi|lini)\b[^?]{0,60}\b(paye|pay\s+as\s+you\s+earn)\b",
+            r"\b(paye|vat|excise|returns?|pay\s+as\s+you\s+earn)\b[^?]{0,60}\b(due\s+date|deadline|when|by\s+what\s+day|day\s+of\s+the\s+month|schedule|due|ebiseera|mwisho|tarehe|ddi|lini)\b"
+            r"|\b(due\s+date|deadline|when|by\s+what\s+day|day\s+of\s+the\s+month|schedule)\b[^?]{0,60}\b(paye|vat|excise|returns?|pay\s+as\s+you\s+earn)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1013,6 +1173,34 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         re.compile(
             r"\b(baggage|passenger|abagenyi|abasaabaze|abiria|mizigo)\b[^?]{0,60}\b(allowance|duty[-\s]?free|bitasasulwako|isiyotozwa)\b"
             r"|\b(allowance|duty[-\s]?free|bitasasulwako|isiyotozwa)\b[^?]{0,60}\b(baggage|passenger|abagenyi|abasaabaze|abiria|mizigo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="paye_secondary_employment_rate"),
+        re.compile(
+            r"\b(secondary\s+employment|secondary\s+job|second\s+job|secondary\s+role|secondary\s+income|omulimu\s+ogw'okubiri)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="agro_processing_local_raw_material_ratio"),
+        re.compile(
+            r"\b(agro[-\s]?processing|fruit\s+processing|grain\s+processing)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="disability_income_tax_threshold_monthly"),
+        re.compile(
+            r"\b(pwd|disabilit(?:y|ies)|disabled|persons?\s+with\s+disabilit\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="branch_repatriation_tax_rate"),
+        re.compile(
+            r"\b(repatriat\w*|branch\s+profits?|branch\s+tax)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1261,6 +1449,13 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "of the transaction value under the Excise Duty Act. Deposits and transfers "
             "are not subject to this withdrawal levy."
         ),
+        "excise_duty_fuel_summary": (
+            "**Excise duty rates on petroleum fuels ({fy}):**\n\n"
+            "- Petrol: **UGX 1,450 per litre**\n"
+            "- Diesel: **UGX 1,130 per litre**\n"
+            "- Kerosene: **UGX 200 per litre**\n\n"
+            "- Statutory Basis: Excise Duty Act 2014, Schedule 2"
+        ),
         "presumptive_tax_threshold": (
             "**The turnover threshold for small businesses using presumptive tax is between "
             "{presumptive_min} and {presumptive_max}** annual gross turnover ({fy}). "
@@ -1272,9 +1467,117 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "{pct} of the tax payable per month** (or part of a month) that the return "
             "remains unfiled, whichever is higher, under Section 49 of the Tax Procedures Code Act."
         ),
+        "late_payment_interest_monthly_rate": (
+            "**Interest on late payment of tax is 2% per month** (simple interest) on the unpaid tax balance "
+            "under Section 39 of the Tax Procedures Code Act ({fy})."
+        ),
         "efris_penalty_failure_to_issue_invoice": (
             "**The statutory penalty for failure to issue an EFRIS fiscal receipt or invoice is UGX 6,000,000 "
             "or double the tax evaded**, whichever is higher, per invoice under Section 19B of the Tax Procedures Code Act ({fy})."
+        ),
+        "paye_secondary_employment_rate": (
+            "**Secondary employment is taxed at a flat rate of {pct}** ({fy}) from the first shilling "
+            "under the Third Schedule of the Income Tax Act. The statutory tax-free threshold (first UGX 235,000/335,000) "
+            "can only be claimed once by the primary employer."
+        ),
+        "agro_processing_local_raw_material_ratio": (
+            "**Under Section 21(1)(y) of the Income Tax Act, agro-processing enterprises qualify for a 10-year income tax holiday "
+            "provided at least {pct} of raw materials used are locally produced** in Uganda ({fy}). If local sourcing drops below {pct} "
+            "(e.g. to 70%), the enterprise does not meet statutory eligibility and standard corporate income tax (30%) applies for that year."
+        ),
+        "disability_income_tax_threshold_monthly": (
+            "**Under Section 21(1)(v) of the Income Tax Act, the employment income of a Person with Disability (PWD) is exempt "
+            "up to UGX 1,460,000 per month** ({fy}). Employment income earned above this threshold is subject to progressive PAYE."
+        ),
+        "branch_repatriation_tax_rate": (
+            "**A tax of {pct} is charged on the repatriated income of a non-resident company branch** in Uganda under Section 82 "
+            "of the Income Tax Act ({fy}), payable in addition to standard 30% corporate income tax."
+        ),
+        "vat_quarterly_registration_threshold": (
+            "**VAT registration is mandatory once taxable turnover exceeds UGX 37,500,000 in three consecutive calendar months**, "
+            "or UGX 150,000,000 annually, under Section 7 of the Value Added Tax Act ({fy})."
+        ),
+        "tax_appeals_tribunal_deadline_days": (
+            "**A taxpayer has 30 days from the date of service of an objection decision to lodge an appeal with the Tax Appeals Tribunal (TAT)** "
+            "under Section 16 of the Tax Appeals Tribunal Act and Section 26 of the Tax Procedures Code Act ({fy})."
+        ),
+        "voluntary_disclosure_programme": (
+            "**Under Section 66 of the Tax Procedures Code Act, the Voluntary Disclosure Programme (VDP) grants a 100% waiver of penal tax, "
+            "penalties, and interest** if a taxpayer voluntarily discloses previously undisclosed tax liabilities before a URA audit or investigation begins, "
+            "provided the principal tax is paid."
+        ),
+        "third_party_agency_notice": (
+            "**Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party Agency Notice** "
+            "to any person or commercial bank holding funds on behalf of a tax debtor to remit the money directly to URA to settle outstanding unpaid taxes."
+        ),
+        "departure_prohibition_order": (
+            "**Under Section 45 of the Tax Procedures Code Act**, the Commissioner General may issue a **Departure Prohibition Order (DPO)** "
+            "preventing a tax debtor from traveling out of Uganda through immigration control at Entebbe Airport or border points until taxes are settled."
+        ),
+        "cgt_private_residence_exemption": (
+            "**Capital gains derived from the disposal of an individual's principal private residence (family home) are exempt from income tax** "
+            "under Section 21 and Section 130 of the Income Tax Act ({fy}). Capital gains tax on non-business assets applies to secondary investment properties."
+        ),
+        "environmental_ban_polythene_kaveera": (
+            "**The manufacture, importation, and distribution of plastic carrier bags (kaveera) under 30 microns is strictly prohibited and banned** "
+            "under Ugandan environmental laws and the Finance Act. Permitted packaging materials remain subject to statutory environmental levies and VAT."
+        ),
+        "vat_bad_debt_relief": (
+            "**Under Section 31 of the Value Added Tax Act, a registered taxpayer can claim a VAT bad debt refund** on output tax paid if at least "
+            "**2 years** have elapsed from the date of supply and the debtor has become legally insolvent or bankrupt."
+        ),
+        "efris_tampering_penalty": (
+            "**Under the Tax Procedures Code Act, tampering with or altering an EFRIS electronic fiscal device or fiscal records attracts "
+            "a penalty fine not exceeding UGX 10,000,000 or imprisonment not exceeding 5 years**, or both, in addition to paying the full tax evaded."
+        ),
+        "eac_cet_tariff_bands": (
+            "**The East African Community Common External Tariff (EAC CET) has 4 primary tariff bands ({fy}):**\n\n"
+            "- Band 1: **0%** (Raw materials and capital machinery)\n"
+            "- Band 2: **10%** (Intermediate goods)\n"
+            "- Band 3: **25%** (Finished consumer goods)\n"
+            "- Band 4: **35%** (Sensitive goods manufactured locally in the EAC)\n\n"
+            "- Statutory Basis: EAC Common External Tariff 2022"
+        ),
+        "eac_rules_of_origin_value_addition": (
+            "**The EAC Rules of Origin require a minimum of 35% local value addition** (or wholly produced criteria) "
+            "for goods to qualify for duty-free preferential tariff treatment across East African Community partner states ({fy})."
+        ),
+        "mining_petroleum_ring_fencing": (
+            "**Under Part IXA of the Income Tax Act, mining and petroleum operations are subject to strict ring-fencing**. "
+            "Exploration and development expenditures incurred in one contract area (license block) cannot be offset against "
+            "revenues or taxable profits derived from another contract area ({fy})."
+        ),
+        "customs_export_cess_hides_skins": (
+            "**Under the East African Community Customs Management Act and Export Levy Schedules**, raw unprocessed hides and skins "
+            "are subject to an export duty of **100% of the FOB value or USD 0.80 per kilogram**, whichever is higher, to encourage local leather processing."
+        ),
+        "wht_exemption_certificate_criteria": (
+            "**Under Section 119(5) of the Income Tax Act**, a taxpayer qualifies for a Withholding Tax Exemption Certificate if they have "
+            "a compliant tax filing history, maintain audited financial statements, have no outstanding tax arrears, and are up to date with returns."
+        ),
+        "dta_treaty_precedence": (
+            "**Under Section 88 of the Income Tax Act, ratified Double Taxation Agreements (DTAs) take precedence** over domestic tax legislation. "
+            "Where a DTA specifies a lower withholding tax rate (e.g. 10% on dividends), the treaty rate prevails over the standard domestic statutory rate."
+        ),
+        "vat_international_transport_zero_rating": (
+            "**Under the Third Schedule of the Value Added Tax Act, international transport of passengers and commercial cargo** "
+            "from Uganda to a destination outside Uganda is **zero-rated (0% VAT)**, allowing full input tax recovery."
+        ),
+        "customs_transit_goods_security": (
+            "**Under Part VIII of the East African Community Customs Management Act (EACCMA), goods in transit through Uganda are exempt** "
+            "from domestic customs duty and VAT, provided they move under customs bond and electronic cargo tracking."
+        ),
+        "customs_diplomatic_exemption": (
+            "**Under the Fifth Schedule of the East African Community Customs Management Act (EACCMA), diplomatic missions, foreign embassies, "
+            "and accredited diplomats enjoy duty-free privileges** for official motor vehicles and supplies under international conventions."
+        ),
+        "rental_monthly_provisional_option": (
+            "**Under Section 124(1a) of the Income Tax Act (inserted by recent amendments), an individual landlord liable to rental tax "
+            "may elect to file provisional returns on a monthly basis** instead of annually, providing flexibility in cash flow management."
+        ),
+        "wht_non_resident_entertainer": (
+            "**Under Section 84 of the Income Tax Act, a concert promoter or payer must withhold 15% tax** from the gross performance fees "
+            "paid to a non-resident public entertainer, musician, or sportsperson performing in Uganda."
         ),
         "stamp_duty_property_transfer": (
             "**The stamp duty rate on transfer of property (land or buildings) is {pct}** ({fy}) "
@@ -1362,6 +1665,28 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             rate = rates.get("paye_due_date_monthly", 15)
         elif plan.tax_type == "passenger_baggage_allowance":
             rate = rates.get("passenger_baggage_allowance_usd", 500)
+        elif plan.tax_type in (
+            "excise_duty_fuel_summary",
+            "voluntary_disclosure_programme",
+            "third_party_agency_notice",
+            "departure_prohibition_order",
+            "cgt_private_residence_exemption",
+            "environmental_ban_polythene_kaveera",
+            "vat_bad_debt_relief",
+            "efris_tampering_penalty",
+            "eac_cet_tariff_bands",
+            "eac_rules_of_origin_value_addition",
+            "mining_petroleum_ring_fencing",
+            "customs_export_cess_hides_skins",
+            "wht_exemption_certificate_criteria",
+            "dta_treaty_precedence",
+            "vat_international_transport_zero_rating",
+            "customs_transit_goods_security",
+            "customs_diplomatic_exemption",
+            "rental_monthly_provisional_option",
+            "wht_non_resident_entertainer",
+        ):
+            rate = 1
     if template is None or rate is None:
         return "", []
     reply = template.format(

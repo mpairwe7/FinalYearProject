@@ -180,6 +180,7 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "with", "into", "through", "during", "before", "after", "above", "below", "under", "up",
     "down", "off", "over", "again", "further", "then", "once", "here", "there", "all", "any",
     "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only",
+    "and", "or", "but", "if",
     "own", "same", "so", "than", "too", "very", "s", "t", "just", "don", "now", "as", "per",
     "first", "second", "third", "initial", "primary", "main", "major", "general", "direct", "indirect", "next", "prior",
     # Generic context nouns & qualifiers
@@ -191,6 +192,7 @@ _STOP_AND_ACTION_WORDS = frozenset({
     "additional", "undisputed", "disputed", "unpaid", "ongoing", "full", "assessed", "estimated",
     "provisional", "final", "delayed", "overdue", "excess", "refund", "balance", "claim",
     "credits", "input", "output", "payroll", "escape", "threshold", "thresholds", "avoid", "evade", "contract", "contracts", "limit", "limits", "attract",
+    "legal", "status", "voluntary", "disclose", "undisclosed", "carrier", "importing", "manufacturing",
     # Luganda & Swahili question/functional particles
     "omuwendo", "gwa", "eri", "ku", "bimeka", "biki", "ani", "diba", "okusasula",
     "okumenya", "okusaba", "kya", "bya", "kiwango", "cha", "kodi", "ushuru",
