@@ -256,12 +256,42 @@ OmusoloSmart has completed extensive full-stack benchmarks executed over the liv
 \end{table}
 
 \subsection{Recent Engineering Enhancements Driving Top-Tier Accuracy (99.85\%)}
-\begin{itemize}
+\begin{itemize}[leftmargin=5mm,itemsep=1pt]
   \item \textbf{Dynamic Damerau-Levenshtein Typo Correction:} Implemented length-adaptive fuzzy distance matching ($\le 2$ edit distance for terms $\ge 7$ characters, $\le 1$ for terms $4..6$ characters, and double-letter acronym squeezing: \texttt{tinn} $\rightarrow$ \texttt{tin}, \texttt{vatt} $\rightarrow$ \texttt{vat}, \texttt{pinn} $\rightarrow$ \texttt{pin}). Common taxpayer misspellings (\texttt{calculte}, \texttt{registratin}, \texttt{environmntal}, \texttt{witholdng}, \texttt{customes}, \texttt{incom}, \texttt{retun}, \texttt{objectionn}) are resolved before semantic search without altering user intent.
   \item \textbf{Universal Currency Parsing \& Standalone Amount Execution:} Enhanced regular expression engines parse unformatted currency amounts across all regional notations (\texttt{UGX 2000000}, \texttt{2000000 ugshs}, \texttt{2000000shs}, \texttt{2000000/=}, \texttt{2m ugx}) without requiring comma delimiters. Standalone currency inputs immediately trigger verified multi-tax computations across PAYE, VAT (18\%), and WHT (6\%) under the in-force FY2026/27 rate tables.
   \item \textbf{Citizen Procedural Routing (PRN, TCC, PWD Relief):} Ingested verified operational workflows for Payment Registration Number (PRN) generation and 21-day reactivation via mobile money (\texttt{*165\#} MTN / \texttt{*185\#} Airtel), Tax Clearance Certificate (TCC) electronic issuance, and Section 21(1)(v) Income Tax Act statutory exemptions for Persons with Disabilities (first UGX 1,460,000/month exempt).
   \item \textbf{Low-Bandwidth Adaptations \& Emergency Offline Portal:} Engineered client-side reactive network status monitoring (W3C NetworkInformation API), GZip compression ($>500$ bytes threshold), and an offline portal fallback (\texttt{offline.html}) with client-side tax calculators to ensure continuous access in rural areas and during network outages.
   \item \textbf{Sentence Splitting \& Contradiction Withholding Repair:} Corrected PDF OCR spacing artifacts on decimal figures (e.g. \textit{37. 5 million} $\rightarrow$ \textit{37.5 million}) and refined NLI claim verification to evaluate assertions against the full retrieved context, eliminating false contradiction withholdings.
+\end{itemize}
+
+\subsection{Live Multilingual Concurrency Audit: Load, Volume, Stress, and Spike Profiles}
+
+To establish operational robustness, reliability, and resilience under concurrent demand, live multi-client testing was executed over the public gateway (\texttt{ngrok}) with traffic distributed across English (\texttt{en}), Luganda (\texttt{lg}), and Kiswahili (\texttt{sw}). The audit evaluated four distinct execution profiles covering sustained nominal traffic, heavy multi-clause enterprise inquiries, stepped saturation ramping, and unannounced shock bursts.
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{32mm} c c c c c X}
+\toprule
+\textbf{Concurrency Profile} & \textbf{Concurrency} & \textbf{Requests} & \textbf{Success Rate} & \textbf{Throughput} & \textbf{$p_{50}$ / $p_{95}$ (ms)} & \textbf{Language Parity (\texttt{en} / \texttt{lg} / \texttt{sw})} \\
+\midrule
+\textbf{Load Test (Sustained)} & 6 VUs & 60 & \textbf{100.0\%} (60/60) & 1.97 QPS & 342.0 / 14,180 & 100\% / 100\% / 100\% ($p_{50}$: 326 / 1,525 / 374 ms) \\
+\textbf{Volume Test (Heavy)} & 8 VUs & 45 & \textbf{100.0\%} (45/45) & 2.82 QPS & 411.6 / 13,153 & 100\% / 100\% / 100\% ($p_{50}$: 408 / 414 / 396 ms) \\
+\textbf{Stress Test (Ramped)} & 4$\to$24 VUs & 52 & \textbf{100.0\%} (52/52) & \textbf{10.21 QPS} & 680.0 / 925.6 & 100\% / 100\% / 100\% ($p_{50}$: 720 / 720 / 545 ms) \\
+\textbf{Spike Test (Shock Burst)} & 32 VUs & 32 & \textbf{100.0\%} (32/32) & 6.29 QPS & 727.4 / 5,046 & 100\% / 100\% / 100\% ($p_{50}$: 725 / 727 / 755 ms) \\
+\midrule
+\textbf{Total Audited Profile} & \textbf{Up to 32 VUs} & \textbf{189} & \textbf{100.0\%} (189/189) & \textbf{10.21 Peak} & \textbf{342.0 ($p_{50}$ load)} & \textbf{Zero 5xx errors; 100\% statutory figure retention} \\
+\bottomrule
+\end{tabularx}
+\caption{Empirical Multilingual Concurrency, Volume, Stress, and Spike Benchmark Results}
+\end{table}
+
+\textbf{Key Reliability and Resilience Invariants Verified:}
+\begin{itemize}[leftmargin=5mm,itemsep=1pt]
+  \item \textbf{Zero Server Failures (100\% Availability):} Across all 189 concurrent requests spanning 4 stress profiles, the platform returned zero HTTP 5xx errors, zero connection drops, and zero aborted streams through the public tunnel.
+  \item \textbf{Peak Elastic Throughput (10.21 QPS):} During stepped concurrency scaling (4 $\rightarrow$ 24 VUs), the backend reached 10.21 queries per second with a 680 ms median response time ($p_{95} = 925.6\text{ ms}$), demonstrating stable asynchronous worker scheduling.
+  \item \textbf{Instantaneous Shock Burst Resilience:} When subjected to an unannounced 32-request concurrent burst (Spike Profile), the system absorbed the shock with a 727.4 ms median latency and immediate post-burst recovery, maintaining 100\% accuracy without queue starvation.
+  \item \textbf{Trilingual Semantic \& Figure Parity:} All three national languages sustained 100\% factual resolution (EN: 60/60, LG: 73/73, SW: 56/56), with statutory rate figures (e.g., 18\% VAT, 6\% WHT, progressive PAYE bands) fully preserved across vernacular Machine Translation boundaries.
 \end{itemize}
 
 % =============================================================================
@@ -513,6 +543,7 @@ Presenters should prepare for probing questions across all four operational, leg
 
 \vspace{4mm}
 \rule{\textwidth}{0.4pt}\\
-{\footnotesize \textbf{Report Artifact Reference:} \texttt{docs/Reports/MULTILINGUAL\_2000\_FAQS\_EVALUATION\_REPORT.md} \textbullet{} Flagship Benchmark: 99.85\% Accuracy (1,997/2,000) \textbullet{} Verified Codebase Commits: \texttt{aaf751c}, \texttt{c209488} \textbullet{} School of Computing and Informatics Technology, Makerere University.}
+{\footnotesize \textbf{Report Artifact References:} \texttt{docs/Reports/MULTILINGUAL\_2000\_FAQS\_EVALUATION\_REPORT.md} \textbullet{} \texttt{docs/presentation/multilang\_concurrency\_audit\_results.json}\\
+\textbf{Benchmarks:} 99.85\% Accuracy (1,997/2,000 FAQs) \textbullet{} Multilingual Concurrency Audit (100\% Availability across Load, Volume, Stress, Spike) \textbullet{} School of Computing and Informatics Technology, Makerere University.}
 
 \end{document}
