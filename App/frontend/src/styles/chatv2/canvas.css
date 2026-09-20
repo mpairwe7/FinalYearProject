@@ -25,9 +25,14 @@
  * ------------------------------------------------------------------------- */
 .chatv2,
 .app-shell.chatv2,
-.chatv2 .app-main-col,
+.chatv2 .app-main-col {
+  background: transparent;
+}
 .chatv2 .app-content {
   background: transparent;
+  max-width: 1920px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 /* The header is no longer a bar at all — see shell.css. It has no background

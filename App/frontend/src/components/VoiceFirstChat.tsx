@@ -32,6 +32,7 @@ import {
 import { useVoiceStore } from "@/store/useVoiceStore";
 import { useChatStore } from "@/store/useChatStore";
 import { authHeaders } from "@/lib/authSession";
+import { audioSignifiers } from "@/lib/audioSignifiers";
 import { LOCALE_OPTIONS, localeLabel } from "@/lib/locales";
 
 /* ---------- Types ---------- */
@@ -275,8 +276,10 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
 
       setIsRecording(true);
       setVoicePhase("listening");
+      audioSignifiers.playMicStart();
     } catch (err) {
       console.error("Microphone access denied:", err);
+      audioSignifiers.playError();
       setVoicePhase("error");
     }
   }, [setVoicePhase, updateWaveform]);
@@ -284,6 +287,7 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
   /* Stop recording */
   const stopRecording = useCallback(() => {
     haptic();
+    audioSignifiers.playMicStop();
     cancelAnimationFrame(animFrameRef.current);
     setWaveformData([]);
 
@@ -303,7 +307,7 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
   const handleAudioComplete = useCallback(
     async (audio: Uint8Array) => {
       try {
-        const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+        const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
         const params = new URLSearchParams({
           language: locale,
           tts_enabled: "true",
@@ -330,6 +334,7 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
         if (!res.ok) throw new Error(`Voice chat failed: ${res.status}`);
 
         const data = await res.json();
+        audioSignifiers.playSuccess();
 
         // Add turns to chat
         if (data.transcript) {
@@ -380,6 +385,7 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
         setVoicePhase("idle");
       } catch (err) {
         console.error("Voice chat error:", err);
+        audioSignifiers.playError();
 
         // Offline fallback: use browser SpeechRecognition if available
         if (!navigator.onLine) {
@@ -520,7 +526,7 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
 
         <VoiceOrb phase={phase} onTap={handleOrbTap} waveformData={waveformData} />
 
-        <p className="vfc-phase-label">{config.label}</p>
+        <p className="vfc-phase-label" aria-live="polite">{config.label}</p>
 
         {streamingReply && (
           <div className="vfc-card vfc-card-reply">

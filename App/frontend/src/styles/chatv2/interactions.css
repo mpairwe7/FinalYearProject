@@ -63,7 +63,7 @@
  *    where the effective hit area is worse than the spec area. Enforce 44 on
  *    coarse pointers only, so the desktop layout keeps its tighter rhythm.
  * ------------------------------------------------------------------------- */
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 640px) {
   /* Height is free: growing a control vertically cannot overflow a row, so it
      is applied broadly. */
   .chatv2 button,
