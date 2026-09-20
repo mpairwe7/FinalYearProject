@@ -670,9 +670,27 @@ _CONVERSATIONAL_PREFIX_RE = re.compile(
 )
 
 
+def normalize_social_media_slang(text: str) -> str:
+    """Expand common WhatsApp and social media SMS abbreviations."""
+    t = " " + (text or "").strip() + " "
+    t = re.sub(r"\bhw\b", "how", t, flags=re.I)
+    t = re.sub(r"\bwat\b", "what", t, flags=re.I)
+    t = re.sub(r"\b(where|whr|wer|how|who|what|why)\s+a\s+(u|you)\b", r"\1 are you", t, flags=re.I)
+    t = re.sub(r"\b(where|whr|wer|how|who|what|why)\s+r\s+(u|you)\b", r"\1 are you", t, flags=re.I)
+    t = re.sub(r"\b(r|a)\s+(u|you)\b", r"are you", t, flags=re.I)
+    t = re.sub(r"\b(whr|wer)\s+(?:are\s+)?(you|u)\b", r"where are you", t, flags=re.I)
+    t = re.sub(r"\b(wat|wht)\s+(?:r|a|are)\s+(you|u)\b", r"what are you", t, flags=re.I)
+    t = re.sub(r"\bwho\s+(?:r|a)\s+(you|u)\b", r"who are you", t, flags=re.I)
+    t = re.sub(r"\bu\s+there\b", r"are you there", t, flags=re.I)
+    t = re.sub(r"\bur\b", r"your", t, flags=re.I)
+    t = re.sub(r"\bu\b", r"you", t, flags=re.I)
+    t = re.sub(r"\bgwe\s+ani\b", r"ggwe ani", t, flags=re.I)
+    return " ".join(t.split()).strip()
+
+
 def strip_conversational_prefix(text: str) -> str:
     """Strip leading polite preambles and interrogative framing across EN, LG, and SW."""
-    cleaned = (text or "").strip()
+    cleaned = normalize_social_media_slang(text)
     return _CONVERSATIONAL_PREFIX_RE.sub("", cleaned).strip()
 
 CLARIFICATION_PROMPT = (

@@ -101,3 +101,29 @@ class TestConversationalIntelligenceEngine:
         assert handle_conversational_turn("Calculate PAYE for salary 2,500,000") is None
         assert handle_conversational_turn("How do I register for a TIN?") is None
         assert handle_conversational_turn("Customs import duty on solar batteries") is None
+
+    @pytest.mark.parametrize(
+        "query,locale,expected_intent",
+        [
+            ("where a u from?", "en", "identity_capability"),
+            ("where r u from?", "en", "identity_capability"),
+            ("who r u?", "en", "identity_capability"),
+            ("u there?", "en", "presence_check"),
+            ("hw r u?", "en", "status_smalltalk"),
+            ("r u a human?", "en", "identity_capability"),
+            ("wat can u do?", "en", "identity_capability"),
+            ("gwe ani?", "lg", "identity_capability"),
+            ("ova wa?", "lg", "identity_capability"),
+            ("unatoka wapi?", "sw", "identity_capability"),
+            ("uko wapi?", "sw", "identity_capability"),
+            ("upo?", "sw", "presence_check"),
+        ],
+    )
+    def test_social_media_slang_conversational_queries(
+        self, query: str, locale: str, expected_intent: str
+    ):
+        from app.text_signals import strip_conversational_prefix
+        core = strip_conversational_prefix(query)
+        res = handle_conversational_turn(core, locale)
+        assert res is not None
+        assert res.intent_type == expected_intent

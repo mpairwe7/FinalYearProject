@@ -45,14 +45,28 @@ _CIVIC_PHILOSOPHY_RE = re.compile(
 )
 
 _IDENTITY_ORIGINS_RE = re.compile(
-    r"\b(who\s+(?:are\s+you|made\s+you|created\s+you|built\s+you|developed\s+you)"
-    r"|what\s+(?:are\s+you|is\s+your\s+name|can\s+you\s+do)"
-    r"|are\s+you\s+(?:human|a\s+robot|an?\s+ai|real|a\s+person)"
+    r"\b(who\s+(?:are\s+you|are\s+u|a\s+u|r\s+u|made\s+you|created\s+you|built\s+you|developed\s+you)"
+    r"|where\s+(?:are\s+you|are\s+u|a\s+u|r\s+u|do\s+you\s+come)\s+(?:from|located|based|live)"
+    r"|where\s+(?:is\s+your\s+office|are\s+your\s+offices|is\s+ura\s+located|are\s+you\s+located|is\s+ura\s+headquarters)"
+    r"|where\s+(?:are\s+you|r\s+u|a\s+u)|whr\s+r\s+u|wer\s+r\s+u"
+    r"|what\s+(?:are\s+you|are\s+u|a\s+u|r\s+u|is\s+your\s+name|can\s+you\s+do)"
+    r"|are\s+you\s+(?:(?:a\s+)?(?:human|robot|bot|person)|an?\s+ai|real)"
     r"|(?:can\s+you|do\s+you)\s+(?:speak|understand)\s+(?:luganda|swahili|kiswahili|runyankole|acholi|english)"
-    r"|ggwe\s+ani|oli\s+(?:muntu|kyuma|mukazi|musajja)|ani\s+yakukola|ani\s+yakutonda"
+    r"|(?:gwe|ggwe)\s+ani|oli\s+(?:muntu|kyuma|mukazi|musajja)|ani\s+yakukola|ani\s+yakutonda"
+    r"|ova\s+wa|ova\s+ludda\s+wa|ofisi\s+zo\s+ziri\s+wa"
     r"|osobola\s+(?:okwogera|okutegeera|okukozesa)\b[^?]{0,30}\b(?:oluganda|oluswayiri|olungereza)"
     r"|wewe\s+ni\s+nani|je\s+wewe\s+ni\s+(?:binadamu|roboti)|nani\s+alikuunda|nani\s+aliyekutengeneza"
+    r"|wewe\s+watoka\s+wapi|unatoka\s+wapi|unapatikana\s+wapi|ofisi\s+zako\s+ziko\s+wapi|uko\s+wapi"
     r"|unaweza\s+(?:kuongea|kuzungumza)\s+(?:kiswahili|kiingereza|kiganda)|unajua\s+nini)\b",
+    re.IGNORECASE,
+)
+
+_PRESENCE_CHECK_RE = re.compile(
+    r"\b((?:are\s+you|r\s+u|a\s+u|u)\s+there"
+    r"|anyone\s+there|you\s+there|anybody\s+there"
+    r"|(?:are\s+you|r\s+u|a\s+u|u)\s+(?:online|available|listening|awake)"
+    r"|oli\s+awo|muli\s+awo|oliyo"
+    r"|upo|uko\s+hapo)\b",
     re.IGNORECASE,
 )
 
@@ -128,17 +142,19 @@ _CIVIC_RESPONSES = {
 _IDENTITY_RESPONSES = {
     "en": (
         "**I am OmusoloSmart, the official AI-powered Taxpayer Assistant for the Uganda Revenue Authority (URA).**\n\n"
-        "I was developed in Uganda through a collaboration between Makerere University School of Computing and "
-        "Informatics Technology, Sunbird AI, and the Uganda Revenue Authority. \n\n"
+        "I was created in Uganda through a collaboration between Makerere University School of Computing and "
+        "Informatics Technology, Sunbird AI, and the Uganda Revenue Authority.\n\n"
+        "- **Where I Am Located**: As a digital assistant, I operate on URA's secure servers and cloud network, "
+        "while URA's physical headquarters is located at URA Tower, Plot 40 Nakawa Industrial Area, Kampala, with stations across Uganda.\n"
         "- **Languages I Speak**: English, Luganda (`Oluganda`), and Kiswahili, with native support for Runyankole and Acholi.\n"
         "- **What I Can Do**: I provide 24/7 instant guidance on tax registration (TIN), calculating your taxes "
         "(PAYE, VAT, Rental Income, Withholding Tax), filing deadlines, customs tariffs, and official URA compliance procedures.\n\n"
         "I am always grounded in verified URA laws and rate tables — how can I assist you with your taxes today?"
     ),
     "lg": (
-        "**Nze OmusoloSmart, Omuyambi ow'Enkizo owa Digito ow'ekitongole kya Uganda Revenue Authority (URA) akozesa akasolya k'amagezi ag'obwengula (AI).**\n\n"
-        "Nnakolebwa wano mu Uganda abanoonyereza n'abayiiya okuva mu Makerere University (School of Computing) "
-        "nga bakolagana wamu ne Sunbird AI ssaako URA.\n\n"
+        "**Nze OmusoloSmart, Omuyambi ow'Enkizo owa Digito ow'ekitongole kya Uganda Revenue Authority (URA) akozesa amagezi ag'obwengula (AI).**\n\n"
+        "Nva wano mu Uganda, era nnakolebwa mu Makerere University (School of Computing) ne Sunbird AI wamu ne URA.\n\n"
+        "- **Gye Nsanyukira Okubeera**: Nze ndi muyambi wa digito ku mutimbagano, naye ofisi enkulu eya URA esangibwa ku URA Tower e Nakawa mu Kampala, wamu n'amatabi ag'omu bitundu byonna ebya Uganda.\n"
         "- **Ennimi ze Ntegeera**: Oluganda, Olungereza, n'Oluswayiri, nga nnina n'obukugu mu Runyankole n'Acholi.\n"
         "- **Kye Nnyinza Okukukolera**: Ndi wano essaawa 24/7 okukuyamba ku by'okufuna TIN, okubalira emisolo gyo (PAYE, VAT, Omusolo gw'Ennyumba, WHT), "
         "obudde bw'okuwaayo alipoota, n'engeri y'okukolaganamu ne URA mu mateeka.\n\n"
@@ -146,12 +162,27 @@ _IDENTITY_RESPONSES = {
     ),
     "sw": (
         "**Mimi ni OmusoloSmart, Msaidizi Rasmi wa Kidijitali wa Mamlaka ya Mapato ya Uganda (URA) ninayetumia Akili Mnemba (AI).**\n\n"
-        "Niliundwa nchini Uganda kupitia ushirikiano kati ya Chuo Kikuu cha Makerere (Shule ya Kompyuta), "
-        "Sunbird AI, na Mamlaka ya Mapato ya Uganda (URA).\n\n"
+        "Ninatoka nchini Uganda, niliundwa kupitia ushirikiano kati ya Chuo Kikuu cha Makerere (Shule ya Kompyuta), Sunbird AI, na URA.\n\n"
+        "- **Mahali Nilipo**: Kama msaidizi wa kidijitali ninapatikana mtandaoni, lakini makao makuu ya URA yapo URA Tower, Nakawa Industrial Area mjini Kampala, pamoja na ofisi za forodha na kodi kote Uganda.\n"
         "- **Lugha Ninazozungumza**: Kiswahili, Kiingereza, na Kiganda, nikiwa na uwezo pia katika Runyankole na Acholi.\n"
         "- **Huduma Ninazotoa**: Ninakusaidia saa 24/7 kupata namba ya TIN, kukokotoa kodi zako (PAYE, VAT, Kodi ya Pango, Kodi ya Zuio), "
         "kujua tarehe za mwisho za kuwasilisha marejesho, ushuru wa forodha, na taratibu zote rasmi za URA.\n\n"
         "Majibu yangu yanatokana moja kwa moja na sheria na majedwali rasmi ya URA — ninawezaje kukusaidia leo?"
+    ),
+}
+
+_PRESENCE_RESPONSES = {
+    "en": (
+        "Yes, I'm here and ready to help! I'm OmusoloSmart, your official URA AI Taxpayer Assistant. "
+        "What can I assist you with today — tax registration, return filing, payments, or customs?"
+    ),
+    "lg": (
+        "Weeri, nange we ndi era mwetegefu bulungi okukuyamba! Nze OmusoloSmart, Omuyambi wo owa Digito owa URA. "
+        "Nkuyambe ku ki leero — okufuna TIN, okusasula omusolo, oba eby'oku mwalo?"
+    ),
+    "sw": (
+        "Ndio, nipo hapa na niko tayari kabisa kukusaidia! Mimi ni OmusoloSmart, Msaidizi wako Rasmi wa URA wa Akili Mnemba. "
+        "Nikusaidie na nini leo — usajili wa TIN, kuwasilisha marejesho, malipo, au forodha?"
     ),
 }
 
@@ -284,7 +315,7 @@ def handle_conversational_turn(message: str, locale: str = "en") -> Conversation
             actions = ["Jifunze kuhusu VAT", "PAYE inafanya kazi vipi?", "Pata namba ya TIN"]
         return ConversationalResult(reply, eff_loc, "civic_philosophy", actions)
 
-    # 2. Identity / Origin / Multilingual abilities ("Who made you?", "Can you speak Luganda?")
+    # 2. Identity / Origin / Location / Multilingual abilities ("Who made you?", "Where are you from?", "Can you speak Luganda?")
     if _IDENTITY_ORIGINS_RE.search(text):
         reply = _IDENTITY_RESPONSES.get(eff_loc, _IDENTITY_RESPONSES["en"])
         actions = [
@@ -297,6 +328,20 @@ def handle_conversational_turn(message: str, locale: str = "en") -> Conversation
         elif eff_loc == "sw":
             actions = ["Usajili wa TIN", "Kukokotoa kodi", "Wasiliana na URA"]
         return ConversationalResult(reply, eff_loc, "identity_capability", actions)
+
+    # 2b. Presence check ("Are you there?", "U there?", "Oli awo?", "Upo?")
+    if _PRESENCE_CHECK_RE.search(text):
+        reply = _PRESENCE_RESPONSES.get(eff_loc, _PRESENCE_RESPONSES["en"])
+        actions = [
+            "Ask about TIN registration",
+            "Calculate income tax",
+            "Contact URA Contact Centre",
+        ]
+        if eff_loc == "lg":
+            actions = ["Okwewandiisa ku TIN", "Okubalirira omusolo", "Tuukirira URA"]
+        elif eff_loc == "sw":
+            actions = ["Usajili wa TIN", "Kukokotoa kodi", "Wasiliana na URA"]
+        return ConversationalResult(reply, eff_loc, "presence_check", actions)
 
     # 3. Emotional distress / Startup business fear ("I'm scared of starting a business")
     if _EMPATHY_BUSINESS_STRESS_RE.search(text):
