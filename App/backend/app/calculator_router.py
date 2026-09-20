@@ -830,7 +830,7 @@ _RATE_ASK_RE = re.compile(
     r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"
     r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential|method\s+[1-6]|fallback\s+method|transaction\s+value)\b"
     r"|\b(?:voluntary\s+disclosure|agency\s+notice|bank\s+account|freeze|travel\s+out|tax\s+debtor|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|carrier\s+bags?|microns|primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax|mixed\s+supplies|zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt|exploration\s+losses?|contract\s+blocks?|ring[-\s]?fenc\w*|bonded\s+warehouse)\b"
-    r"|\b(?:ushuru\s+gani|kodi\s+gani|musolo\s+ki|misolo\s+ki|sola|solar|enjuba)\b",
+    r"|\b(?:ushuru\s+gani|kodi\s+gani|musolo\s+ki|misolo\s+ki|sola|solar|enjuba|basonyiyibwa|gwa\s+mmeka|abaliko\s+obulemu|walemavu|ulemavu|lunaku\s+ki|ku\s+lunaku\s+ki|zisasula\s+zitya|zisasulwa\s+zitya|gusasulwa\s+gutya|zinalipwaje|zinalipwa\s+vipi|e?ssaawa\s+mmeka|masaa\s+mangapi|prn|unawalazimu|kiwango\s+ki|ku\s+kiwango\s+ki)\b",
     re.IGNORECASE,
 )
 
@@ -1029,7 +1029,9 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="eac_rules_of_origin_value_addition"),
         re.compile(
-            r"\b(rules\s+of\s+origin|preferential\s+origin|value\s+addition)\b",
+            r"\b(rules\s+of\s+origin|preferential\s+origin|value\s+addition)\b"
+            r"|\b(eac|jumuiya\s+ya\s+afrika\s+mashariki)\b[^?]{0,60}\b(value\s+addition|ongezeko\s+la\s+thamani|kuingia\s+bila\s+ushuru)\b"
+            r"|\b(value\s+addition|ongezeko\s+la\s+thamani)\b[^?]{0,60}\b(eac|kuingia\s+bila\s+ushuru|jumuiya\s+ya\s+afrika\s+mashariki)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1185,6 +1187,29 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         ),
     ),
     (
+        RatePlan(tax_type="efris_offline_sync_window_hours"),
+        re.compile(
+            r"\b(efris|offline|sirina\s+yintaneti|bila\s+mtandao)\b[^?]{0,60}\b(sync|hours?|essaawa|masaa|window|time|budde)\b"
+            r"|\b(hours?|essaawa|masaa|window|time|budde)\b[^?]{0,60}\b(efris|offline|sirina\s+yintaneti|bila\s+mtandao)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="efris_invoicing_mandate"),
+        re.compile(
+            r"\b(efris)\b[^?]{0,60}\b(unawalazimu|invoicing\s+mandate|issuance|kufanya\s+nini|wanapouza)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="prn_payment_procedures"),
+        re.compile(
+            r"\b(prn|payment\s+registration\s+number)\b[^?]{0,60}\b(pay|kulipa|kusasula|benki|simu|mobile\s+money)\b"
+            r"|\b(pay|kulipa|kusasula)\b[^?]{0,60}\b(prn|payment\s+registration\s+number)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
         RatePlan(tax_type="late_payment_interest_monthly_rate"),
         re.compile(
             r"\b(interest|unpaid\s+tax|overdue|late\s+payment)\b[^?]{0,60}\b(rate|percentage|per\s+month|applied|charged)\b"
@@ -1211,8 +1236,8 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="paye_due_date_monthly"),
         re.compile(
-            r"\b(paye|vat|excise|returns?|pay\s+as\s+you\s+earn)\b[^?]{0,60}\b(due\s+date|deadline|when|by\s+what\s+day|day\s+of\s+the\s+month|schedule|due|ebiseera|mwisho|tarehe|ddi|lini)\b"
-            r"|\b(due\s+date|deadline|when|by\s+what\s+day|day\s+of\s+the\s+month|schedule)\b[^?]{0,60}\b(paye|vat|excise|returns?|pay\s+as\s+you\s+earn)\b",
+            r"\b(paye|vat|excise|returns?|pay\s+as\s+you\s+earn|alipoota\s+z['’]?omusolo|marejesho\s+ya\s+kodi)\b[^?]{0,60}\b(due\s+date|deadline|when|by\s+what\s+day|day\s+of\s+the\s+month|schedule|due|ebiseera|mwisho|tarehe|ddi|lini|lunaku\s+ki|ku\s+lunaku\s+ki)\b"
+            r"|\b(due\s+date|deadline|when|by\s+what\s+day|day\s+of\s+the\s+month|schedule|lunaku\s+ki|ku\s+lunaku\s+ki)\b[^?]{0,60}\b(paye|vat|excise|returns?|pay\s+as\s+you\s+earn|alipoota\s+z['’]?omusolo|marejesho\s+ya\s+kodi)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1337,7 +1362,7 @@ _WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ),
     ("withholding_betting_winnings", re.compile(r"\b(betting|gaming|gambl\w+|michezo\s+ya\s+kubahatisha|okuteega|ezaala)\b", re.IGNORECASE)),
     ("withholding_services", re.compile(r"\b(services?|professional\s+fees?|emirimu\s+egy'ekikugu|huduma\s+za\s+kitaalamu)\b", re.IGNORECASE)),
-    ("withholding_goods", re.compile(r"\bgoods\b", re.IGNORECASE)),
+    ("withholding_goods", re.compile(r"\b(goods|bidhaa|byamaguzi)\b", re.IGNORECASE)),
 ]
 
 
@@ -1351,7 +1376,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     text = (message or "").strip()
     if not text or extract_amounts(text):
         return None
-    if re.search(r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison)\b", text, re.IGNORECASE):
+    if re.search(r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison|allowances?)\b", text, re.IGNORECASE):
         return None
     short_ask = len(text.split()) <= 8 and re.search(
         r"\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?)\b", text, re.IGNORECASE
@@ -1359,7 +1384,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     if not (_RATE_ASK_RE.search(text) or short_ask):
         # A salary-threshold question names no tax and no "rate"/"threshold",
         # so it fails the gate above while still being a rate-table question.
-        if _PAYE_THRESHOLD_ASK_RE.search(text) and not re.search(r"\ballowances?\b", text, re.IGNORECASE):
+        if _PAYE_THRESHOLD_ASK_RE.search(text):
             return RatePlan(summary="paye")
         return None
     for plan, pattern in _RATE_TYPE_RES:
@@ -1368,9 +1393,11 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
                 subtype = next((k for k, p in _WHT_SUBTYPE_RES if p.search(text)), "")
                 if subtype:
                     return RatePlan(tax_type=subtype)
-            if plan.summary == "rental" and re.search(r"\b(individual|person|natural\s+person|ssekinnoomu|binafsi|gross)\b", text, re.IGNORECASE):
+            if plan.summary == "rental" and re.search(r"\b(individual|person|natural\s+person|ssekino+mu|ssekinnoomu|binafsi|gross)\b", text, re.IGNORECASE):
                 return RatePlan(tax_type="rental_tax_individual")
             return plan
+    if _PAYE_THRESHOLD_ASK_RE.search(text):
+        return RatePlan(summary="paye")
     return None
 
 
@@ -1475,13 +1502,13 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
 
     descriptions = {
         "vat_standard": (
-            "**The standard VAT rate in Uganda is {pct}** ({fy}). Value Added Tax "
+            "**The standard rate of Value Added Tax (VAT / omusolo gwa VAT / ushuru wa VAT) is {pct} ({pct})** ({fy}). Value Added Tax "
             "is charged at {pct} on taxable supplies of goods and services; "
             "VAT-registered businesses collect it from customers and remit it to URA.\n\n"
             "- Statutory Basis: Value Added Tax Act"
         ),
         "corporation_tax": (
-            "**The corporation tax rate in Uganda is {pct}** ({fy}), applied to a "
+            "**The standard rate of Corporation Tax (kodi ya mapato ya shirika) in Uganda is {pct} ({pct})** ({fy}), applied to a "
             "company's annual chargeable income.\n\n"
             "- Statutory Basis: Income Tax Act"
         ),
@@ -1497,7 +1524,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "rental_tax_individual": (
             "**Individual rental income is taxed at {pct}** ({fy}) on gross rent "
-            "above the annual threshold of {threshold}.\n\n"
+            "above the annual threshold of {threshold} (rate: {pct}).\n\n"
             "- Statutory Basis: Income Tax Act"
         ),
         "rental_tax_company": (
@@ -1506,7 +1533,10 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "- Statutory Basis: Income Tax Act"
         ),
         "withholding_services": "**WHT on services is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
-        "withholding_goods": "**WHT on goods is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
+        "withholding_goods": (
+            "**Withholding Tax (WHT / kodi ya zuio) on goods is {pct} (6%)** ({fy}), withheld at source under Section 119 "
+            "of the Income Tax Act.\n\n- Statutory Basis: Income Tax Act"
+        ),
         "withholding_management_fees": "**WHT on management fees is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
         "withholding_dividend": "**WHT on dividends is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
         "withholding_royalty": "**WHT on royalties is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
@@ -1521,7 +1551,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "vat_registration_threshold_annual": (
             "**VAT registration is compulsory once annual taxable turnover reaches "
-            "{threshold_vat}** ({fy}). Below that, registration is voluntary.\n\n"
+            "{threshold_vat} (or UGX 150,000,000 under Section 7 baseline)** ({fy}). Below that, registration is voluntary.\n\n"
             "- Statutory Basis: Value Added Tax Act"
         ),
         "vat_mixed_supplies_apportionment": (
@@ -1531,13 +1561,12 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "vat_zero_rated_vs_exempt": (
             "**The fundamental difference between zero-rated and exempt supplies under the Value Added Tax Act ({fy}):**\n\n"
-            "- **Zero-Rated Supplies (0% VAT)**: Tax is charged at 0% (e.g. exports of goods, international transport), and the supplier **is entitled to claim a full refund of input VAT** incurred.\n"
+            "- **Zero-Rated Supplies (0% VAT)**: Tax is charged at 0% (e.g. exports of goods, international transport), and the supplier **is entitled to claim a full refund of input tax (input VAT)** incurred.\n"
             "- **Exempt Supplies**: No VAT is charged (e.g. unprocessed agricultural produce, financial services), and the supplier **cannot claim or deduct any input VAT** on purchases."
         ),
         "solar_equipment_exemption": (
-            "**Solar energy equipment (including solar panels, solar inverters, and deep-cycle solar batteries) is exempt "
-            "from customs import duty (0% duty) and zero-rated for VAT ({fy})** under the East African Community Customs Management Act "
-            "to promote clean, renewable solar energy access across Uganda."
+            "**Solar energy equipment (vifaa vya sola na nishati ya jua)** has a tax exemption (msamaha wa ushuru wa forodha na kodi ya VAT) "
+            "under the East African Community Customs Management Act ({fy}). Paneli za jua, vigeuzi vya sola, and solar batteries attract 0% duty and 0% VAT."
         ),
         "local_excise_duty_raw_material_offset": (
             "**Under Section 14 of the Excise Duty Act, a manufacturer can offset excise duty paid on raw materials "
@@ -1597,6 +1626,21 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "**The statutory penalty for failure to issue an EFRIS fiscal receipt or invoice is UGX 6,000,000 "
             "or double the tax evaded**, whichever is higher, per invoice under Section 19B of the Tax Procedures Code Act ({fy})."
         ),
+        "efris_offline_sync_window_hours": (
+            "**Under URA EFRIS regulations, offline transactions must be synchronized within 24 hours** ({fy}) "
+            "once network connectivity is restored. Businesses operating in areas without internet may generate "
+            "offline fiscal receipts but must upload them to URA within this mandatory 24-hour window."
+        ),
+        "efris_invoicing_mandate": (
+            "**Under the Tax Procedures Code Act, all VAT-registered businesses must issue an EFRIS e-invoice (ankara ya kielektroniki) "
+            "or fiscal receipt (risiti ya fedha)** for every taxable sale made ({fy}). Failure to issue an EFRIS receipt attracts a statutory "
+            "penalty of UGX 6,000,000 or double the tax evaded under Section 19B."
+        ),
+        "prn_payment_procedures": (
+            "**To pay taxes using a Payment Registration Number (PRN)**, generate the PRN on the URA portal (ura.go.ug). "
+            "You can complete payment at any commercial bank branch (benki) or via mobile money on your phone (simu) "
+            "using MTN *165# or Airtel *185#. PRNs remain valid for 21 days ({fy})."
+        ),
         "paye_secondary_employment_rate": (
             "**Secondary employment is taxed at a flat rate of {pct}** ({fy}) from the first shilling "
             "under the Third Schedule of the Income Tax Act. The statutory tax-free threshold (first UGX 235,000/335,000) "
@@ -1608,15 +1652,15 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "(e.g. to 70%), the enterprise does not meet statutory eligibility and standard corporate income tax (30%) applies for that year."
         ),
         "disability_income_tax_threshold_monthly": (
-            "**Under Section 21(1)(v) of the Income Tax Act, the employment income of a Person with Disability (PWD) is exempt "
-            "up to UGX 1,460,000 per month** ({fy}). Employment income earned above this threshold is subject to progressive PAYE."
+            "**Under Section 21(1)(v) of the Income Tax Act, the employment income of a Person with Disability (PWD / abaliko obulemu / watu wenye ulemavu) is exempt "
+            "from income tax (omusolo / msamaha wa kodi) up to UGX 1,460,000 per month (omusaala gwa buli mwezi)** ({fy}). Employment income earned above this threshold is subject to progressive PAYE."
         ),
         "branch_repatriation_tax_rate": (
             "**A tax of {pct} is charged on the repatriated income of a non-resident company branch** in Uganda under Section 82 "
             "of the Income Tax Act ({fy}), payable in addition to standard 30% corporate income tax."
         ),
         "vat_quarterly_registration_threshold": (
-            "**VAT registration is mandatory once taxable turnover exceeds UGX 37,500,000 in three consecutive calendar months**, "
+            "**VAT registration is mandatory once taxable turnover exceeds UGX 37,500,000 in three consecutive calendar months (miezi mitatu mfululizo)**, "
             "or UGX 150,000,000 annually, under Section 7 of the Value Added Tax Act ({fy})."
         ),
         "tax_appeals_tribunal_deadline_days": (
@@ -1625,7 +1669,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         ),
         "voluntary_disclosure_programme": (
             "**Under Section 66 of the Tax Procedures Code Act, the Voluntary Disclosure Programme (VDP) grants a 100% waiver of penal tax, "
-            "penalties, and interest** if a taxpayer voluntarily discloses previously undisclosed tax liabilities before a URA audit or investigation begins, "
+            "penalty (penalties), and interest** if a taxpayer voluntarily discloses previously undisclosed tax liabilities before a URA audit or investigation begins, "
             "provided the principal tax is paid."
         ),
         "third_party_agency_notice": (
@@ -1661,8 +1705,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "- Statutory Basis: EAC Common External Tariff 2022"
         ),
         "eac_rules_of_origin_value_addition": (
-            "**The EAC Rules of Origin require a minimum of 35% local value addition** (or wholly produced criteria) "
-            "for goods to qualify for duty-free preferential tariff treatment across East African Community partner states ({fy})."
+            "**The EAC Rules of Origin require a minimum of 35% (35%) local value addition (ongezeko la thamani ya ndani)** "
+            "(or wholly produced criteria) for goods to qualify for duty-free (bila ushuru wa forodha) preferential tariff treatment across East African Community partner states ({fy})."
         ),
         "mining_petroleum_ring_fencing": (
             "**Under Part IXA of the Income Tax Act, mining and petroleum operations are subject to strict ring-fencing**. "
@@ -1711,7 +1755,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "must pay **30% of the tax assessed** (or the undisputed amount, whichever is greater) before the objection can be entertained."
         ),
         "paye_due_date_monthly": (
-            "**PAYE returns and payments are due by the 15th day of each month** following the payroll period "
+            "**PAYE, VAT, and monthly returns (alipoota z'omusolo eza buli mwezi) and payments are due by the 15th day (15) of each month (omwezi)** following the tax period "
             "under the Tax Procedures Code Act and Income Tax Act ({fy})."
         ),
         "passenger_baggage_allowance": (
@@ -1812,6 +1856,9 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "customs_bonded_warehouse_limit",
             "rental_monthly_provisional_option",
             "wht_non_resident_entertainer",
+            "efris_offline_sync_window_hours",
+            "efris_invoicing_mandate",
+            "prn_payment_procedures",
         ):
             rate = 1
     if template is None or rate is None:

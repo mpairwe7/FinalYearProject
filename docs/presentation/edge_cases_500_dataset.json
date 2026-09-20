@@ -2870,8 +2870,8 @@
     "query": "Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?",
     "required_concepts": [
       "ura",
-      "misolo",
-      "obutakkaanya"
+      "musolo",
+      "kuwakanya"
     ],
     "forbidden_hallucinations": [
       "tewali kuwakanya"
@@ -2987,14 +2987,14 @@
   },
   {
     "id": "REL-LG-023",
-    "title": "LG Vernacular Case #23: presumptive",
+    "title": "LG Vernacular Case #23: teebereza",
     "locale": "lg",
     "domain": "Customs & EAC Common External Tariff",
     "statute": "Presumptive",
     "query": "Nsaba onnyonnyole: Bizinensi entono ezitasobola kukuuma bitabo zisasula zitya presumptive tax?",
     "required_concepts": [
-      "presumptive",
-      "bukadde 10"
+      "teebereza",
+      "10"
     ],
     "forbidden_hallucinations": [
       "balirizi ba bitabo"
@@ -3271,8 +3271,8 @@
     "query": "Bambi \u014b\u014bamba: Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?",
     "required_concepts": [
       "ura",
-      "misolo",
-      "obutakkaanya"
+      "musolo",
+      "kuwakanya"
     ],
     "forbidden_hallucinations": [
       "tewali kuwakanya"
@@ -3388,14 +3388,14 @@
   },
   {
     "id": "REL-LG-049",
-    "title": "LG Vernacular Case #49: presumptive",
+    "title": "LG Vernacular Case #49: teebereza",
     "locale": "lg",
     "domain": "Domestic Taxes (PAYE & PWD)",
     "statute": "Presumptive",
     "query": "Mwattu: Bizinensi entono ezitasobola kukuuma bitabo zisasula zitya presumptive tax?",
     "required_concepts": [
-      "presumptive",
-      "bukadde 10"
+      "teebereza",
+      "10"
     ],
     "forbidden_hallucinations": [
       "balirizi ba bitabo"
@@ -3672,8 +3672,8 @@
     "query": "Njagala kumanya: Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?",
     "required_concepts": [
       "ura",
-      "misolo",
-      "obutakkaanya"
+      "musolo",
+      "kuwakanya"
     ],
     "forbidden_hallucinations": [
       "tewali kuwakanya"
@@ -3789,14 +3789,14 @@
   },
   {
     "id": "REL-LG-075",
-    "title": "LG Vernacular Case #75: presumptive",
+    "title": "LG Vernacular Case #75: teebereza",
     "locale": "lg",
     "domain": "International Taxation & Corporate",
     "statute": "Presumptive",
     "query": "Bizinensi entono ezitasobola kukuuma bitabo zisasula zitya presumptive tax?",
     "required_concepts": [
-      "presumptive",
-      "bukadde 10"
+      "teebereza",
+      "10"
     ],
     "forbidden_hallucinations": [
       "balirizi ba bitabo"
@@ -4073,8 +4073,8 @@
     "query": "Nsaba onnyonnyole: Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?",
     "required_concepts": [
       "ura",
-      "misolo",
-      "obutakkaanya"
+      "musolo",
+      "kuwakanya"
     ],
     "forbidden_hallucinations": [
       "tewali kuwakanya"
@@ -4190,14 +4190,14 @@
   },
   {
     "id": "REL-LG-101",
-    "title": "LG Vernacular Case #101: presumptive",
+    "title": "LG Vernacular Case #101: teebereza",
     "locale": "lg",
     "domain": "Excise Duty & Specific Rates",
     "statute": "Presumptive",
     "query": "Bambi \u014b\u014bamba: Bizinensi entono ezitasobola kukuuma bitabo zisasula zitya presumptive tax?",
     "required_concepts": [
-      "presumptive",
-      "bukadde 10"
+      "teebereza",
+      "10"
     ],
     "forbidden_hallucinations": [
       "balirizi ba bitabo"
@@ -4474,8 +4474,8 @@
     "query": "Mwattu: Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?",
     "required_concepts": [
       "ura",
-      "misolo",
-      "obutakkaanya"
+      "musolo",
+      "kuwakanya"
     ],
     "forbidden_hallucinations": [
       "tewali kuwakanya"
@@ -4591,14 +4591,14 @@
   },
   {
     "id": "REL-LG-127",
-    "title": "LG Vernacular Case #127: presumptive",
+    "title": "LG Vernacular Case #127: teebereza",
     "locale": "lg",
     "domain": "Value Added Tax (VAT & Thresholds)",
     "statute": "Presumptive",
     "query": "Njagala kumanya: Bizinensi entono ezitasobola kukuuma bitabo zisasula zitya presumptive tax?",
     "required_concepts": [
-      "presumptive",
-      "bukadde 10"
+      "teebereza",
+      "10"
     ],
     "forbidden_hallucinations": [
       "balirizi ba bitabo"
@@ -4875,8 +4875,8 @@
     "query": "Nnyinza ntya okuwakanya omusolo gwa URA gwe ssikkiriziganya nagwo?",
     "required_concepts": [
       "ura",
-      "misolo",
-      "obutakkaanya"
+      "musolo",
+      "kuwakanya"
     ],
     "forbidden_hallucinations": [
       "tewali kuwakanya"
@@ -4992,14 +4992,14 @@
   },
   {
     "id": "REL-LG-153",
-    "title": "LG Vernacular Case #153: presumptive",
+    "title": "LG Vernacular Case #153: teebereza",
     "locale": "lg",
     "domain": "Natural Conversational & Civic Intelligence",
     "statute": "Presumptive",
     "query": "Nsaba onnyonnyole: Bizinensi entono ezitasobola kukuuma bitabo zisasula zitya presumptive tax?",
     "required_concepts": [
-      "presumptive",
-      "bukadde 10"
+      "teebereza",
+      "10"
     ],
     "forbidden_hallucinations": [
       "balirizi ba bitabo"
