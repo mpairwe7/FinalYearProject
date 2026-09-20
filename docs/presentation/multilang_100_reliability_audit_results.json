@@ -1,0 +1,2108 @@
+[
+  {
+    "case_id": "REL-001",
+    "title": "PAYE Secondary Employment Flat Rate",
+    "locale": "en",
+    "domain": "Domestic Taxes (PAYE)",
+    "statute": "Income Tax Act, Third Schedule",
+    "status_code": 200,
+    "latency_s": 0.891,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "secondary employment",
+      "30%",
+      "first shilling"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Secondary employment is taxed at a flat rate of 30%** (FY2026-27) from the first shilling under the Third Schedule of the Income Tax Act. The statutory tax-free threshold (first UGX 235,000/335,000) can only be claimed once by the primary employer.  That comes from the official",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-002",
+    "title": "Section 21 Agro-Processing 80% Local Raw Material Ratio",
+    "locale": "en",
+    "domain": "Income Tax Exemptions",
+    "statute": "Income Tax Act, Section 21(1)(y)",
+    "status_code": 200,
+    "latency_s": 0.694,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "80%",
+      "local",
+      "agro-processing"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Under Section 21(1)(y) of the Income Tax Act, agro-processing enterprises qualify for a 10-year income tax holiday provided at least 80% of raw materials used are locally produced** in Uganda (FY2026-27). If local sourcing drops below 80% (e.g. to 70%), the enterprise does not ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-003",
+    "title": "VAT Mixed Supply Input Tax Apportionment",
+    "locale": "en",
+    "domain": "Value Added Tax",
+    "statute": "VAT Act, Section 28",
+    "status_code": 200,
+    "latency_s": 0.913,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 33.3,
+    "matched_concepts": [
+      "exempt"
+    ],
+    "missing_concepts": [
+      "apportion",
+      "mixed supplies"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  VAT is an indirect tax on goods and services that is paid by the fi nal consumer (One who will not sell the goods or services again). Not all goods or services attract VAT for example exempt supplies like unproce",
+    "notes": "Missing: ['apportion', 'mixed supplies']"
+  },
+  {
+    "case_id": "REL-004",
+    "title": "Dual WHT: 6% Withholding VAT vs 6% Income WHT",
+    "locale": "en",
+    "domain": "Withholding Taxes",
+    "statute": "VAT Act s.5A & Income Tax Act s.119",
+    "status_code": 200,
+    "latency_s": 0.918,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "6%",
+      "withholding",
+      "agent"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  - Where an NGO is a designated Withholding tax agent, then they are required to withhold 6% on any payment on supplies for goods and services exceeding one million shillings to any person in Uganda. _This tax is ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-005",
+    "title": "Section 24 TPCA Formal Objection 45-Day Rule",
+    "locale": "en",
+    "domain": "Tax Disputes & Procedure",
+    "statute": "Tax Procedures Code Act, Section 24",
+    "status_code": 200,
+    "latency_s": 0.333,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "45 days",
+      "30%",
+      "objection"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "I know deadlines can be stressful, so here's the quickest way forward.  **A taxpayer has 45 days to lodge an objection** against a tax assessment from the date of service of the notice under Section 24 of the Tax Procedures Code Act (FY2026-27). Under Section 24(2), the taxpayer ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-006",
+    "title": "EFRIS Non-Issuance Statutory Penalty (TPCA s.19B)",
+    "locale": "en",
+    "domain": "EFRIS Compliance",
+    "statute": "Tax Procedures Code Act, Section 19B",
+    "status_code": 200,
+    "latency_s": 0.372,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "6,000,000",
+      "penalty",
+      "double"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "I know deadlines can be stressful, so here's the quickest way forward.  **The statutory penalty for failure to issue an EFRIS fiscal receipt or invoice is UGX 6,000,000 or double the tax evaded**, whichever is higher, per invoice under Section 19B of the Tax Procedures Code Act (",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-007",
+    "title": "Rental Income Tax: Individual (12%) vs Corporate (30%)",
+    "locale": "en",
+    "domain": "Domestic Taxes (Rental)",
+    "statute": "Income Tax Act, Section 5",
+    "status_code": 200,
+    "latency_s": 0.381,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "30%",
+      "expenses"
+    ],
+    "missing_concepts": [
+      "12%",
+      "2,820,000"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Company rental income is taxed at 30%** (FY2026-27) on chargeable income, with expenses deductible up to 50% of gross rent.  - Statutory Basis: Income Tax Act  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to help: visit http",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-008",
+    "title": "Environmental Levy on Used Cars & 15-Year Ban",
+    "locale": "en",
+    "domain": "Customs & Motor Vehicle",
+    "statute": "EACCMA / Traffic & Road Safety Act",
+    "status_code": 200,
+    "latency_s": 0.372,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "50%",
+      "15 years",
+      "prohibited"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The environmental levy on used motor vehicles aged 8 to 15 years is 50%** of the CIF value (FY2026-27). Note: Importation of vehicles older than 15 years is prohibited under the Traffic and Road Safety (Amendment) Act.  - Statutory Basis: EACCMA / Traffic and Road Safety Act  T",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-009",
+    "title": "Local Excise Duty Raw Material Offset Mechanism",
+    "locale": "en",
+    "domain": "Excise Duty",
+    "statute": "Excise Duty Act, Section 14",
+    "status_code": 200,
+    "latency_s": 0.344,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "offset",
+      "excise"
+    ],
+    "missing_concepts": [
+      "raw material"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Businesses can apply to offset excise paid on damaged/expired/obsolete goods against other tax liabilities (or other taxes if elected) upon proof.  If you get stuck at any step, URA is happy to help: visit https:",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-010",
+    "title": "EAC Customs Valuation Hierarchy Sequential Rule",
+    "locale": "en",
+    "domain": "Customs Valuation",
+    "statute": "EAC-CMA, Fourth Schedule",
+    "status_code": 200,
+    "latency_s": 0.624,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "hierarchy",
+      "sequential",
+      "method 2"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To calculate the customs duty for goods being imported into Uganda, we use the formula:  $$ \\text{Total Cost} = \\text{CIF Value} + (\\text{CIF Value} \\times \\text{Duty Rate}) + (\\text{CIF Value} + \\text{Duty}) \\times 18\\% $$  Where:  - CIF Value is the Cost, Insurance, and Freight",
+    "notes": "Missing: ['hierarchy', 'sequential', 'method 2']"
+  },
+  {
+    "case_id": "REL-011",
+    "title": "Digital Services Tax on Non-Resident Providers (5%)",
+    "locale": "en",
+    "domain": "International Taxation",
+    "statute": "Income Tax Act, Section 86A",
+    "status_code": 200,
+    "latency_s": 0.601,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "5%",
+      "digital services tax",
+      "non-resident"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The digital services tax (DST) rate on non-resident electronic service providers is 5%** (FY2026-27) of the gross revenue derived from supplying digital services to individuals in Uganda under Section 86A of the Income Tax Act.  That comes from the official URA FY2026-27 rate t",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-012",
+    "title": "Passenger Baggage Concession vs Commercial Goods ($500 limit)",
+    "locale": "en",
+    "domain": "Customs Baggage",
+    "statute": "EAC-CMA, Fifth Schedule",
+    "status_code": 200,
+    "latency_s": 0.607,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "500",
+      "commercial",
+      "passenger baggage"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The passenger baggage duty-free allowance is USD 500** for accompanying personal effects under the East African Community Customs Management Act (FY2026-27). Goods imported for commercial resale, trade, or in commercial quantities do not qualify for this passenger concession an",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-013",
+    "title": "Persons with Disabilities (PWD) Income Tax Exemption",
+    "locale": "en",
+    "domain": "Domestic Taxes (Exemptions)",
+    "statute": "Income Tax Act, Section 21(1)(v)",
+    "status_code": 200,
+    "latency_s": 0.533,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "1,460,000",
+      "disability",
+      "exempt"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Under Section 21(1)(v) of the Income Tax Act, the employment income of a Person with Disability (PWD) is exempt up to UGX 1,460,000 per month** (FY2026-27). Employment income earned above this threshold is subject to progressive PAYE.  That comes from the official URA FY2026-27",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-014",
+    "title": "Branch Profits Repatriation Tax (15%)",
+    "locale": "en",
+    "domain": "International Taxation",
+    "statute": "Income Tax Act, Section 82",
+    "status_code": 200,
+    "latency_s": 0.344,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15%",
+      "repatriat",
+      "branch"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**A tax of 15% is charged on the repatriated income of a non-resident company branch** in Uganda under Section 82 of the Income Tax Act (FY2026-27), payable in addition to standard 30% corporate income tax.  That comes from the official URA FY2026-27 rate table.  If you get stuck",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-015",
+    "title": "Quarterly Rolling VAT Registration Threshold (37.5M)",
+    "locale": "en",
+    "domain": "Value Added Tax",
+    "statute": "VAT Act, Section 7",
+    "status_code": 200,
+    "latency_s": 0.459,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "37,500,000",
+      "consecutive",
+      "vat"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**VAT registration is mandatory once taxable turnover exceeds UGX 37,500,000 in three consecutive calendar months**, or UGX 150,000,000 annually, under Section 7 of the Value Added Tax Act (FY2026-27).  That comes from the official URA FY2026-27 rate table.  If you get stuck at a",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-016",
+    "title": "Tax Appeals Tribunal (TAT) 30-Day Appeal Deadline",
+    "locale": "en",
+    "domain": "Tax Disputes & Procedure",
+    "statute": "Tax Appeals Tribunal Act, Section 16",
+    "status_code": 200,
+    "latency_s": 0.379,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "30 days",
+      "tax appeals tribunal",
+      "appeal"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**A taxpayer has 30 days from the date of service of an objection decision to lodge an appeal with the Tax Appeals Tribunal (TAT)** under Section 16 of the Tax Appeals Tribunal Act and Section 26 of the Tax Procedures Code Act (FY2026-27).  That comes from the official URA FY2026",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-017",
+    "title": "Presumptive Tax Turnover Eligibility Limits",
+    "locale": "en",
+    "domain": "Small Business Taxation",
+    "statute": "Income Tax Act, Section 4(5)",
+    "status_code": 200,
+    "latency_s": 0.386,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "10,000,000",
+      "150,000,000",
+      "presumptive"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The turnover threshold for small businesses using presumptive tax is between UGX 10,000,000 and UGX 150,000,000** annual gross turnover (FY2026-27). Businesses below UGX 10,000,000 are exempt, while those with turnover exceeding UGX 150,000,000 must file standard income tax ret",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-018",
+    "title": "Mining and Petroleum Contract Area Ring-Fencing",
+    "locale": "en",
+    "domain": "Extractive Industries",
+    "statute": "Income Tax Act, Part IXA",
+    "status_code": 200,
+    "latency_s": 0.371,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "ring-fencing",
+      "contract area"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "The tax is computed on the basis of a GROSS TURNOVER; and is a final tax. No deductions are allowed in respect of any expenditure or loss. No tax credit is allowed to be offset against the final tax except in the following cases:  - A tax credit arising out of withholding on rece",
+    "notes": "Missing: ['ring-fencing', 'contract area']"
+  },
+  {
+    "case_id": "REL-019",
+    "title": "Export Duty / Cess on Raw Hides and Skins",
+    "locale": "en",
+    "domain": "Customs Export",
+    "statute": "EAC-CMA Export Levy Schedule",
+    "status_code": 200,
+    "latency_s": 0.447,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "hides and skins",
+      "export",
+      "fob"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To calculate the total import cost for goods being imported into Uganda, we use the formula:  $$ \\text{Total Cost} = \\text{CIF Value} + (\\text{CIF Value} \\times \\text{Duty Rate}) + (\\text{CIF Value} + (\\text{CIF Value} \\times \\text{Duty Rate}) \\times 18\\%) + (\\text{CIF Value} + (",
+    "notes": "Missing: ['hides and skins', 'export', 'fob']"
+  },
+  {
+    "case_id": "REL-020",
+    "title": "Third-Party Agency Notice under TPCA Section 40",
+    "locale": "en",
+    "domain": "Tax Enforcement",
+    "statute": "Tax Procedures Code Act, Section 40",
+    "status_code": 200,
+    "latency_s": 0.433,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "section 40",
+      "agency notice",
+      "bank"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "I'm sorry you're going through this \u2014 let's look at what options you have.  **Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party Agency Notice** to any person or commercial bank holding funds on behalf of a tax debtor to remit th",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-021",
+    "title": "Departure Prohibition Order (DPO) Travel Restriction",
+    "locale": "en",
+    "domain": "Tax Enforcement",
+    "statute": "Tax Procedures Code Act, Section 45",
+    "status_code": 200,
+    "latency_s": 0.403,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "departure prohibition",
+      "commissioner general",
+      "travel"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "To import goods into Uganda, you must:  1. **Declare Goods**: Present your luggage to customs officials upon arrival at a border point, airport, or port. If goods exceed your allowed baggage allowance, you'll be required to declare them. Declarations must be made accurately to av",
+    "notes": "Missing: ['departure prohibition', 'commissioner general', 'travel']"
+  },
+  {
+    "case_id": "REL-022",
+    "title": "Advance Tax on Passenger and Goods Vehicles",
+    "locale": "en",
+    "domain": "Motor Vehicle Tax",
+    "statute": "Income Tax Act, Second Schedule",
+    "status_code": 200,
+    "latency_s": 0.341,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "20,000",
+      "50,000",
+      "advance tax"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "The advance tax rates payable are:  * **UGX 50,000 per tonne** on goods cargo trucks (for loads \u2265 2 tons) [1] * **UGX 20,000 per seat** on commercial passenger vans [1]  These rates apply annually and are part of the advance income tax levied by the Uganda Revenue Authority (URA)",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-023",
+    "title": "Principal Private Residence Capital Gains Exclusion",
+    "locale": "en",
+    "domain": "Capital Gains Tax",
+    "statute": "Income Tax Act, Section 21 & 130",
+    "status_code": 200,
+    "latency_s": 0.45,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "exempt",
+      "principal private residence",
+      "home"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Capital gains derived from the disposal of an individual's principal private residence (family home) are exempt from income tax** under Section 21 and Section 130 of the Income Tax Act (FY2026-27). Capital gains tax on non-business assets applies to secondary investment propert",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-024",
+    "title": "Sports Betting Winnings Withholding Tax (15%)",
+    "locale": "en",
+    "domain": "Gaming & Betting",
+    "statute": "Income Tax Act, Section 118C",
+    "status_code": 200,
+    "latency_s": 0.404,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15%",
+      "betting",
+      "winnings"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**WHT on betting winnings is 15%** (FY2026-27), withheld at source by the operator.  - Statutory Basis: Income Tax Act  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, c",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-025",
+    "title": "Deceased Taxpayer Estate Tax Liability",
+    "locale": "en",
+    "domain": "Estate Taxation",
+    "statute": "Income Tax Act, Section 71",
+    "status_code": 200,
+    "latency_s": 0.437,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "executor",
+      "estate",
+      "assets"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "The executor of a deceased taxpayer's estate are personally liable for unpaid taxes beyond the value of the estate assets. This means they must settle any outstanding tax liabilities, including unpaid taxes, penalties, and costs incurred during the administration of the estate. [",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-026",
+    "title": "Double Taxation Agreement (DTA) Treaty Precedence",
+    "locale": "en",
+    "domain": "International Taxation",
+    "statute": "Income Tax Act, Section 88",
+    "status_code": 200,
+    "latency_s": 0.383,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "treaty",
+      "dta",
+      "precedence"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "I drafted an answer to this, but the figures in it disagreed with the URA documents I was reading \u2014 so I have not shown it, because a wrong figure here is worse than no figure. The passages I found are listed below; a URA officer has been asked to give you a definitive answer. Yo",
+    "notes": "Missing: ['treaty', 'dta', 'precedence']"
+  },
+  {
+    "case_id": "REL-027",
+    "title": "Customs Bonded Warehouse 6-Month Storage Limit",
+    "locale": "en",
+    "domain": "Customs Warehousing",
+    "statute": "EAC-CMA, Section 57",
+    "status_code": 200,
+    "latency_s": 3.926,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "bonded warehouse"
+    ],
+    "missing_concepts": [
+      "6 months"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Under Section 59 of the (EACCMA), dutiable goods may remain in a bonded warehouse for a maximum period of six (6) months from the date of warehousing. The Commissioner may grant an extension for an additional per",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-028",
+    "title": "Environmental Ban on Polythene Bags Under 30 Microns",
+    "locale": "en",
+    "domain": "Environmental Levies",
+    "statute": "Finance Act & Environmental Law",
+    "status_code": 200,
+    "latency_s": 0.488,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "banned",
+      "kaveera",
+      "30 microns"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The manufacture, importation, and distribution of plastic carrier bags (kaveera) under 30 microns is strictly prohibited and banned** under Ugandan environmental laws and the Finance Act. Permitted packaging materials remain subject to statutory environmental levies and VAT.  T",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-029",
+    "title": "Stamp Duty on Land Transfer (1%)",
+    "locale": "en",
+    "domain": "Stamp Duty",
+    "statute": "Stamp Duty Act",
+    "status_code": 200,
+    "latency_s": 0.526,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "1%",
+      "stamp duty",
+      "transfer"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The stamp duty rate on transfer of property (land or buildings) is 1%** (FY2026-27) under the Stamp Duty Act.  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call tol",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-030",
+    "title": "Excise Duty on Mobile Money Cash Withdrawals (0.5%)",
+    "locale": "en",
+    "domain": "Excise Duty",
+    "statute": "Excise Duty Act, Schedule 2",
+    "status_code": 200,
+    "latency_s": 0.415,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0.5%",
+      "withdrawal",
+      "mobile money"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**The excise duty rate on mobile money cash withdrawals is 0.5%** (FY2026-27) of the transaction value under the Excise Duty Act. Deposits and transfers are not subject to this withdrawal levy.  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step,",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-031",
+    "title": "Petroleum Specific Fuel Rates (Petrol, Diesel, Kerosene)",
+    "locale": "en",
+    "domain": "Excise Duty (Energy)",
+    "statute": "Excise Duty Act, Schedule 2",
+    "status_code": 200,
+    "latency_s": 0.336,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "1,450",
+      "1,130",
+      "petrol",
+      "diesel"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Excise duty rates on petroleum fuels (FY2026-27):**  - Petrol: **UGX 1,450 per litre** - Diesel: **UGX 1,130 per litre** - Kerosene: **UGX 200 per litre**  - Statutory Basis: Excise Duty Act 2014, Schedule 2  That comes from the official URA FY2026-27 rate table.  If you get st",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-032",
+    "title": "Monthly Return Filing Deadline (15th Day)",
+    "locale": "en",
+    "domain": "Tax Compliance Calendar",
+    "statute": "TPCA s.16 & VAT Act s.31",
+    "status_code": 200,
+    "latency_s": 0.323,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15th",
+      "month",
+      "due"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**PAYE returns and payments are due by the 15th day of each month** following the payroll period under the Tax Procedures Code Act and Income Tax Act (FY2026-27).  That comes from the official URA FY2026-27 rate table.  If you get stuck at any step, URA is happy to help: visit ht",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-033",
+    "title": "Interest on Late Payment of Tax (2% Monthly)",
+    "locale": "en",
+    "domain": "Tax Procedures (Interest)",
+    "statute": "Tax Procedures Code Act, Section 39",
+    "status_code": 200,
+    "latency_s": 0.347,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "2%",
+      "interest",
+      "unpaid"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "I know deadlines can be stressful, so here's the quickest way forward.  **Interest on late payment of tax is 2% per month** (simple interest) on the unpaid tax balance under Section 39 of the Tax Procedures Code Act (FY2026-27).  That comes from the official URA FY2026-27 rate ta",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-034",
+    "title": "Civic Tax Philosophy: Why Do Citizens Pay Taxes?",
+    "locale": "en",
+    "domain": "Civic & Natural Intelligence",
+    "statute": "Constitution & URA Mandate",
+    "status_code": 200,
+    "latency_s": 0.335,
+    "retrieval_mode": "conversational",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "sovereignty",
+      "infrastructure",
+      "roads",
+      "hospitals",
+      "education"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Taxes are the foundation of Uganda's national development and sovereignty.**  When citizens and businesses contribute their fair share, URA channels these domestic revenues into:  - **Public Infrastructure**: Paved highways, bridges, and community access roads constructed by UN",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-035",
+    "title": "Luganda Greeting: Habari / Oli otya",
+    "locale": "lg",
+    "domain": "Conversational Greeting",
+    "statute": "URA Tone & Localization Guidelines",
+    "status_code": 200,
+    "latency_s": 0.54,
+    "retrieval_mode": "greeting",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "nkulamusizza",
+      "muyambi",
+      "ura"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Nkulamusizza, era nkwanirizza! Nze Muyambi wa Digito owa URA. Nnyinza okukuyamba ku by'okwewandiisa ku musolo, okuwaayo alipoota z'omusolo, okusasula, eby'omusolo gw'oku mwalo, n'ebirala \u2014 nnyinza kukuyamba ntya leero?",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-036",
+    "title": "Luganda Morning Greeting: Wasuze otya",
+    "locale": "lg",
+    "domain": "Conversational Greeting",
+    "statute": "URA Tone & Localization Guidelines",
+    "status_code": 200,
+    "latency_s": 0.582,
+    "retrieval_mode": "greeting",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "nkulamusizza",
+      "ura"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Nkulamusizza, era nkwanirizza! Nze Muyambi wa Digito owa URA. Nnyinza okukuyamba ku by'okwewandiisa ku musolo, okuwaayo alipoota z'omusolo, okusasula, eby'omusolo gw'oku mwalo, n'ebirala \u2014 nnyinza kukuyamba ntya leero?",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-037",
+    "title": "Luganda Informal Greeting: Ki kati",
+    "locale": "lg",
+    "domain": "Conversational Greeting",
+    "statute": "URA Tone & Localization Guidelines",
+    "status_code": 200,
+    "latency_s": 0.529,
+    "retrieval_mode": "greeting",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "nkulamusizza",
+      "ura"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Nkulamusizza, era nkwanirizza! Nze Muyambi wa Digito owa URA. Nnyinza okukuyamba ku by'okwewandiisa ku musolo, okuwaayo alipoota z'omusolo, okusasula, eby'omusolo gw'oku mwalo, n'ebirala \u2014 nnyinza kukuyamba ntya leero?",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-038",
+    "title": "Luganda Work Greeting: Gyebaleko",
+    "locale": "lg",
+    "domain": "Conversational Greeting",
+    "statute": "URA Tone & Localization Guidelines",
+    "status_code": 200,
+    "latency_s": 6.452,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "nkulamusizza"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Uganda Revenue Authority (URA) ekoze bulungi mu kuku\u014b\u014baanya omusolo, ng'etuuse ku bitundu 14% ebya GDP mu myezi etaano egyasooka mu mwaka gw'ebyensimbi guno. Kino kyeyoleka nti waliwo okweyongera kw'omuwendo gw'ensimbi ezikung'aanyizibwa, newankubadde nga waliwo obukadde bwa siri",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-039",
+    "title": "Luganda Identity: Ggwe ani era okozi ki?",
+    "locale": "lg",
+    "domain": "Conversational Identity",
+    "statute": "URA Tone Guidelines",
+    "status_code": 200,
+    "latency_s": 0.64,
+    "retrieval_mode": "conversational",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "omusolosmart",
+      "omuyambi",
+      "ura",
+      "makerere"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Nze OmusoloSmart, Omuyambi ow'Enkizo owa Digito ow'ekitongole kya Uganda Revenue Authority (URA) akozesa akasolya k'amagezi ag'obwengula (AI).**  Nnakolebwa wano mu Uganda abanoonyereza n'abayiiya okuva mu Makerere University (School of Computing) nga bakolagana wamu ne Sunbird",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-040",
+    "title": "Luganda Language Ability: Osobola okwogera Oluganda?",
+    "locale": "lg",
+    "domain": "Multilingual Capability",
+    "statute": "Language Policy",
+    "status_code": 200,
+    "latency_s": 0.745,
+    "retrieval_mode": "conversational",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "oluganda",
+      "ura"
+    ],
+    "missing_concepts": [
+      "nsobola"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Nze OmusoloSmart, Omuyambi ow'Enkizo owa Digito ow'ekitongole kya Uganda Revenue Authority (URA) akozesa akasolya k'amagezi ag'obwengula (AI).**  Nnakolebwa wano mu Uganda abanoonyereza n'abayiiya okuva mu Makerere University (School of Computing) nga bakolagana wamu ne Sunbird",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-041",
+    "title": "Luganda Civic Philosophy: Lwaki tusasula omusolo?",
+    "locale": "lg",
+    "domain": "Civic Tax Philosophy",
+    "statute": "URA Mandate",
+    "status_code": 200,
+    "latency_s": 0.838,
+    "retrieval_mode": "conversational",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "enguudo",
+      "amalwaliro",
+      "amasomero",
+      "eggwanga"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Omusolo gwe mugongo n'omusingi gw'enkulaakulana n'obwetwaze bw'eggwanga lyaffe Uganda.**  Buli munnayuganda n'obusuubuzi bwonna bwe basasula omusolo mu bwesimbu, ssente zino zikola ebikulu bino:  - **Enguudo n'Entindo**: Enguudo ennene ez'amayinja n'ez'olukale ezizimbibwa ekito",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-042",
+    "title": "Luganda Business Empathy: Ntya okutandika bizinensi",
+    "locale": "lg",
+    "domain": "Business Empathy",
+    "statute": "Taxpayer Education",
+    "status_code": 200,
+    "latency_s": 0.886,
+    "retrieval_mode": "conversational",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "magoba",
+      "bukadde 10",
+      "bizinensi"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Ntegeera nnyo obulumi n'okusoomoozebwa kw'olina. Okutandika n'okukwasaganya bizinensi kyetaagisa obuvumu, era kutegeerekeka okutya emisolo ku ntandikwa.**  Naye luno lwe lusalira olunaakuyamba okussa ekikkowe:  1. **Tebakusoloozaako nga Tonnafuna Magoba**: Omusolo gw'ensimbi ez",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-043",
+    "title": "Luganda Status Check: Oli otya leero?",
+    "locale": "lg",
+    "domain": "Conversational Status",
+    "statute": "Tone Guidelines",
+    "status_code": 200,
+    "latency_s": 13.162,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "bulungi"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Dr. Gaalya Micah, the Ag. Assistant Commissioner Tax Education, revealed to young people how the government uses tax revenue to fund key social services that take the form of benefits and facilities such as quali",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-044",
+    "title": "Luganda Gratitude: Weebale nnyo",
+    "locale": "lg",
+    "domain": "Conversational Courtesy",
+    "statute": "Tone Guidelines",
+    "status_code": 200,
+    "latency_s": 43.038,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "tukwanirizza"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  _(The numbers refer to the line numbers or boxes in Section A)_  1) Title \u2013 You may enter your formal title. If the box is left blank we will assume \u201cMr.\u201d for males and \u201cMs.\u201d for females.  2-8) Name \u2013 Enter the r",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-045",
+    "title": "Luganda Farewell: Weeraba",
+    "locale": "lg",
+    "domain": "Conversational Courtesy",
+    "statute": "Tone Guidelines",
+    "status_code": 200,
+    "latency_s": 4.362,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "weebale",
+      "weraba"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Woofiisi y'Okubunyisa Obubaka ewa obuyambi ku nsonga z'emisolo, gamba ng'okumanya emisolo egirina okusasulwa, okufuna olukusa, n'okutegeera ebikendeeza ku misolo. Okufuna obuweereza bwabwe, osobola okubakubira essimu, okubawandiikira email, oba okugenda mu woofiisi yaabwe esangib",
+    "notes": "Missing: ['weebale', 'weraba']"
+  },
+  {
+    "case_id": "REL-046",
+    "title": "Luganda Creative: Wandiika ekitontome ku musolo",
+    "locale": "lg",
+    "domain": "Creative Expression",
+    "statute": "Cultural Resonance",
+    "status_code": 200,
+    "latency_s": 0.659,
+    "retrieval_mode": "conversational",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "ensimbi",
+      "eggwanga",
+      "uganda"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Ensimbi y'Eggwanga (Ekitontome ky'Omusolo)**  _Okuva ku nsozi z'e Mbale okutuuka mu katale k'e Nakasero,_ _Buli kisingo kye tusasula kisaanyawo omugugu gw'eggwanga lyaffe._ _Kizimba amasa\u014b\u014banzira agasaabaza ebyamaguzi by'abasuubuzi,_ _Kiwa abasawo baffe ebyuma ebiwonya obulamu ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-047",
+    "title": "Luganda PAYE Salary Calculation Rules",
+    "locale": "lg",
+    "domain": "Domestic Taxes (PAYE)",
+    "statute": "Income Tax Act, Third Schedule",
+    "status_code": 200,
+    "latency_s": 13.728,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "paye",
+      "omusaala",
+      "omusolo"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Emisolo gya PAYE ku bakozi ababeera mu ggwanga (FY2026-27, omusaala ogwa buli mwezi):**  - UGX 0 \u2013 UGX 335,000: **0%** - UGX 335,000 \u2013 UGX 410,000: **20%** - UGX 410,000 \u2013 UGX 4851](#009_Chapter.  1. xhtml#page_54),000: **25%** - UGX 485,000 \u2013 UGX 10,000,000: **30%** - Okusinga",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-048",
+    "title": "Luganda PWD Exemption: Abantu abaliko obulemu",
+    "locale": "lg",
+    "domain": "Tax Exemptions (Luganda)",
+    "statute": "Income Tax Act, Section 21(1)(v)",
+    "status_code": 200,
+    "latency_s": 5.021,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "1,460,000",
+      "omusolo",
+      "omusaala"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Okusinziira ku Kawaayiro 21 (1)(v) ak'etteeka ly'emisolo, omusaala gw'omuntu alina obulemu (PWD) tegukkirizibwa kusasulirwa musolo okutuuka ku UGX 1,460,000 buli mwezi** (FY2026-27). Omusaala ogufunibwa okusinga ku mutemwa guno gusasulirwa omusolo gwa PAYE ogw'enkana.  Kino kiv",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-049",
+    "title": "Luganda Tax Objection: Nnyinza ntya okuwakanya omusolo?",
+    "locale": "lg",
+    "domain": "Tax Disputes (Luganda)",
+    "statute": "Tax Procedures Code Act, Section 24",
+    "status_code": 200,
+    "latency_s": 3.999,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "ura",
+      "misolo",
+      "obutakkaanya"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Bw'oba nga tokkiriziganya na misolo egiragibwa mu bitabo byo, kikulu okutuukirira URA amangu ddala osobole okutabagana nayo. Kino kijja kukuyamba okulaba ng'obutakkaanya bwonna bukolebwako mu budde osobole okufuna obuyambi bwonna bwe weetaaga. [1]  Bw'oba ng'osanze obuzibu bwonna",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-050",
+    "title": "Luganda Advance Tax on Taxis: Omusolo ku ntebe",
+    "locale": "lg",
+    "domain": "Motor Vehicle Tax (Luganda)",
+    "statute": "Income Tax Act, Second Schedule",
+    "status_code": 200,
+    "latency_s": 0.847,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "20,000",
+      "omusolo"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Omukisa ogw\u2019okufuna omusolo gwa \u2018advance tax\u2019 ku takisi ezitikka abasaabaze guli ebitundu 20,000/- buli ntebe buli mwaka.  --- *Okulabula: Eky'okuddamu kino kiyinza obutaba nga kiwagirwa mu bujjuvu ebiwandiiko ebikozeseddwa. Kakasa n'ensonda za URA entongole ku https://ura.go.ug.",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-051",
+    "title": "Luganda Mobile Money Cash-out Tax: Okuggyako ssente",
+    "locale": "lg",
+    "domain": "Excise Duty (Luganda)",
+    "statute": "Excise Duty Act 2014",
+    "status_code": 200,
+    "latency_s": 4.348,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "0.5%",
+      "omusolo"
+    ],
+    "missing_concepts": [
+      "mobile money"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Omugatte gw'omusolo oguggyibwa ku ssente ezisindikibwa n'okuggyayo guli ebitundu 0.5% (FY2026-27) ebya ssente zonna eziba ziweerezebwa okusinziira ku tteeka ly'emisolo. Okuteekamu ssente n'okusindika tebirina kuggibwako musolo guno.  Omusolo guno guva mu lukalala lwa URA olwa FY2",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-052",
+    "title": "Luganda EFRIS 24-Hour Offline Sync",
+    "locale": "lg",
+    "domain": "EFRIS (Luganda)",
+    "statute": "TPCA Regulations",
+    "status_code": 200,
+    "latency_s": 14.988,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "efris"
+    ],
+    "missing_concepts": [
+      "24"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Business Platform How It WorksShops / Mobile THE EFRIS APP Download the app from AppStore or Play Store and install it on yourDistributors / (On Mobile phone. Set up the app with your goods or services and start ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-053",
+    "title": "Luganda 15-Year Vehicle Ban: Emmotoka ey'emyaka 16",
+    "locale": "lg",
+    "domain": "Customs (Luganda)",
+    "statute": "Traffic and Road Safety Act",
+    "status_code": 200,
+    "latency_s": 0.861,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "mmotoka"
+    ],
+    "missing_concepts": [
+      "15"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  Okubalirira emisolo ku mmotoka enkaddemu:  1. Omuwendo gw'emmotoka (CIF) gugyibwa mu lukalala lwa URA olwa Used Motor Vehicle Valuation Database;  2. Omusolo gw'okuyingiza (import duty) guli ebitundu 25%;  3. VAT",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-054",
+    "title": "Luganda VAT Standard Rate: Omusolo gwa VAT mu Uganda",
+    "locale": "lg",
+    "domain": "Value Added Tax (Luganda)",
+    "statute": "VAT Act Cap 349",
+    "status_code": 200,
+    "latency_s": 5.127,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "18%",
+      "vat",
+      "omusolo"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Omusolo gwa VAT mu Uganda guli ku bitundu 18%** (FY2026-27). Omusolo ogwongerwako ku mutindo gw'ebintu (VAT) guwoozebwa ku bitundu 18% ku bintu n'obuweereza ebisabibwa omusolo; bizinensi ezoogera VAT zikungaanya ssente okuva ku bakasitoma era ne bazizzaayo eri URA.  - **Etteeka",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-055",
+    "title": "Luganda TIN Registration: Nnyinza ntya okufuna TIN?",
+    "locale": "lg",
+    "domain": "Registration (Luganda)",
+    "statute": "TPCA Registration",
+    "status_code": 200,
+    "latency_s": 0.982,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "tin"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Omusolo gw'Okwongera ku Muwendo (VAT) mu Uganda guli ebitundu 18% ku bintu ebikolebwa mu ggwanga. Guno gwe musolo ogusinga obunene oguggyibwa ku bintu nga tebinaggyibwa ku katale.  --- *Okulabula: Eky'okuddamu kino kiyinza obutaba nga kiwagirwa mu bujjuvu ebiwandiiko ebikozeseddw",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-056",
+    "title": "Luganda Rental Income Tax: Omusolo gw'ennyumba ez'obupangisa",
+    "locale": "lg",
+    "domain": "Rental Tax (Luganda)",
+    "statute": "Income Tax Act, s.5",
+    "status_code": 200,
+    "latency_s": 4.221,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 33.3,
+    "matched_concepts": [
+      "omusolo"
+    ],
+    "missing_concepts": [
+      "12%",
+      "2,820,000"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**PAYE (PAYE)** musolo oguggyibwa ku musaala gw'abakozi abafuna omusaala ogusukka UGX 235,000 buli mwezi. Abakozesa baguku\u014b\u014baanya era ne bakutwalira URA nga 15 Ogwomusanvu. Guno gwe musolo gw'omukozi ku musaala gw'emirimu. [1]  Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna,",
+    "notes": "Missing: ['12%', '2,820,000']"
+  },
+  {
+    "case_id": "REL-057",
+    "title": "Luganda Presumptive Tax: Bizinensi entono zisasula zitya?",
+    "locale": "lg",
+    "domain": "Small Business (Luganda)",
+    "statute": "Income Tax Act, Second Schedule",
+    "status_code": 200,
+    "latency_s": 0.821,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "presumptive",
+      "omusolo"
+    ],
+    "missing_concepts": [
+      "bukadde 10"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Bizinensi entono ezitakola bitabo bisuffu zisasula omusolo gwa **presumptive tax** nga zikozesa ebitundu ku musolo oguteekeddwa okusasulibwa okusinziira ku nnyingiza yaazo. Okugeza, bizinensi eziri wansi wa UGX 150,000,000 mu mwaka zisasula ebitundu 3% ku nnyingiza yaazo, ate ezi",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-058",
+    "title": "Luganda Monthly Return Deadline: 15th Day",
+    "locale": "lg",
+    "domain": "Compliance Calendar (Luganda)",
+    "statute": "TPCA s.16",
+    "status_code": 200,
+    "latency_s": 4.528,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15",
+      "omwezi"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Okuddiza n'okusasula omusolo gwa PAYE kuteekeddwa okukolebwa ku lunaku olw'omwezi 15 mu buli mwezi oluvannyuma lw'okumaliriza emisaala nga bwe kirambikiddwa mu tteeka erifuga enkola y'emisolo ne mu tteeka ly'emisolo ku nnyingiza (FY2026-27).  Kino kiva mu lukalala lwa URA olw'emi",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-059",
+    "title": "Luganda Toll-Free Helplines: Nnamba z'essimu za URA",
+    "locale": "lg",
+    "domain": "Contact Details (Luganda)",
+    "statute": "Citizen Access",
+    "status_code": 200,
+    "latency_s": 6.704,
+    "retrieval_mode": "contact_channels",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0800 117 000",
+      "0800 217 000"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Osobola okutuukirira Uganda Revenue Authority (URA) ng'oyita mu mikutu gino wammanga:  1. **Toll-Free Phone**: Kuba 0800 117 000 oba 0800 217 000 (okuva ku Bbalaza okutuuka ku Lwokutaano, 8:00 AM \u2013 5:00 PM). 2. **WhatsApp Support**: Weereza obubaka ku 0772 140 000 okufuna obuyamb",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-060",
+    "title": "Luganda Stamp Duty on Land: Omusolo ku ttaka",
+    "locale": "lg",
+    "domain": "Stamp Duty (Luganda)",
+    "statute": "Stamp Duty Act",
+    "status_code": 200,
+    "latency_s": 3.661,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "1%"
+    ],
+    "missing_concepts": [
+      "stamp duty"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Omusolo oguteekebwa ku ttaka oba ebizimbe guli ebitundu 1% (FY2026-27) okusinziira ku tteeka ly'omusolo gw'ebintu ebikozesebwa mu ggwanga.  Ekyo kiva mu lukalala lwa URA olwa FY2026-27.  Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-061",
+    "title": "Luganda Customs Duty: Omusolo gw'okuyingiza ebyamaguzi",
+    "locale": "lg",
+    "domain": "Customs (Luganda)",
+    "statute": "EAC-CMA",
+    "status_code": 200,
+    "latency_s": 4.287,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "customs",
+      "omusolo"
+    ],
+    "missing_concepts": [
+      "cif"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Omugatte gw'omusolo ogw'ebweru ku bintu ebikoleddwa guli ebitundu 25% (FY2026-27). Omusolo omutuufu gukwatagana n'engeri y'okutereka emisolo eya EAC ku bintu ebyo.  - Etteeka erifuga: East African Community Customs Management Act (EACCMA)  Omusolo ogwo guva mu tterekero lya URA e",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-062",
+    "title": "Luganda Withholding Tax on Goods: WHT ku bintu",
+    "locale": "lg",
+    "domain": "Withholding (Luganda)",
+    "statute": "Income Tax Act, s.119",
+    "status_code": 200,
+    "latency_s": 8.452,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "6%"
+    ],
+    "missing_concepts": [
+      "withholding"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Omusolo ku bintu gwa bitundu 6%** (FY2026-27), ogukuumibwa mu kifo we guva.  - Ensibuko y'Amateeka: Etteeka ly'Omusolo gw'Ennyingiza  Ekyo kiva mu lukalala lwa URA olw'omusolo gwa FY2026-27.  Bw'oba ng'osanze obiuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-063",
+    "title": "Luganda Late Filing Penalty: Okulwawo okuwaayo",
+    "locale": "lg",
+    "domain": "Penalties (Luganda)",
+    "statute": "TPCA Section 49",
+    "status_code": 200,
+    "latency_s": 5.527,
+    "retrieval_mode": "faq_priority",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "200,000",
+      "kibonerezo"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Okusobola okuwaayo omusolo gwo, yingira ku ura.go.ug ng'okozesa nnamba yo ey'omusolo ne akasumuluzo ko, oluvannyuma ogende ku E-Services > E-Returns. Londako ekika ky'omusolo gw'oyagala okuwaayo, wansi waayo oteekemu ebikukwatako, wekakase nti bye wateekamu bituufu, era oteekeyo ",
+    "notes": "Missing: ['200,000', 'kibonerezo']"
+  },
+  {
+    "case_id": "REL-064",
+    "title": "Luganda Solar Equipment Exemption",
+    "locale": "lg",
+    "domain": "Renewable Energy (Luganda)",
+    "statute": "VAT & Customs Incentives",
+    "status_code": 200,
+    "latency_s": 19.549,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "enjuba"
+    ],
+    "missing_concepts": [
+      "omusolo"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Bino bye biragiro ebisinga okuba eby'omugaso bye nazuula mu nsibuko za URA entongole:  1. **Speed Governors**      L.N. No. 2 nga Ssebutemba 15, 2005    1. **Computer Software**      L.N. No. 2 nga Ssebutemba 15, Ebintu byonna ebirimu sofutiweya wa kompyuta; 2005    1. **Electric",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-065",
+    "title": "Luganda PRN Payment: Nsasula ntya n'akakwate ka PRN?",
+    "locale": "lg",
+    "domain": "Payments (Luganda)",
+    "statute": "Payment Procedures",
+    "status_code": 200,
+    "latency_s": 22.479,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "prn",
+      "bbanka",
+      "mobile money"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Bino bye biragiro ebisinga okuba eby'omugaso bye nazuula mu nsibuko za URA entongole:  - Okufuna ennamba y'okusasulirako omusolo (Payment Registration Number - PRN) ku mukutu gwa URA ogwa intaneeti (ura.go.ug):  1. Genda ku e-Services > Okusasula > Funa Olupapula lw'Okusasulirako",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-066",
+    "title": "Luganda Tax Whistleblowing: Okuloopa obulyake",
+    "locale": "lg",
+    "domain": "Anti-Corruption",
+    "statute": "Whistleblower Protection",
+    "status_code": 200,
+    "latency_s": 8.619,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0800 117 000",
+      "ura"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Okuloopa okukusa ebintu, tuukirira abakulira ebitundu mu URA oba omumyuka w'omukungu akola ku kuteeka amateeka mu nkola. Bw'oba n'obubaka bw'osobola okuwa obuyinza okuzuula emisolo egibbiddwa, osobola okufuna ekirabo nga bwe kirambikiddwa mu kitundu 242 EACCMA. [1]  Bw'oba ng'osa",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-067",
+    "title": "Luganda Tax Exemption for Raw Materials",
+    "locale": "lg",
+    "domain": "Manufacturing Incentives",
+    "statute": "EAC CET Band 1",
+    "status_code": 200,
+    "latency_s": 7.073,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "0%",
+      "customs"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Omusolo oguteekebwa ku bintu ebiva mu nsi endala nga biyingizibwa mu Uganda guli ebitundu 35%, so si 25%. Kino kikwata ku biti eby'enjawulo omuli ssabbuuni, ennyama, ne bbiisiiti. [1]  Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ur",
+    "notes": "Missing: ['0%', 'customs']"
+  },
+  {
+    "case_id": "REL-068",
+    "title": "Swahili Greeting: Habari / Jambo",
+    "locale": "sw",
+    "domain": "Conversational Greeting",
+    "statute": "URA Localization Guidelines",
+    "status_code": 200,
+    "latency_s": 26.686,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "habari",
+      "ura"
+    ],
+    "missing_concepts": [
+      "msaidizi"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Mchakato wa usajili wa nambari ya kitambulisho cha kulipa kodi (TIN) unahusisha hatua zifuatazo:  1.  **Uombaji**: Watu binafsi wanajaza fomu za maombi kupitia tovuti ya URA au wawakilishi waliochaguliwa.   2.  **Uthibitishaji**: Waombaji lazima waonyeshe hati halali za utambulis",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-069",
+    "title": "Swahili Short Greeting: Jambo / Hujambo",
+    "locale": "sw",
+    "domain": "Conversational Greeting",
+    "statute": "URA Localization Guidelines",
+    "status_code": 200,
+    "latency_s": 0.585,
+    "retrieval_mode": "greeting",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "habari",
+      "ura"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Habari, na karibu! Mimi ni Msaidizi wa Kidijitali wa URA. Ninaweza kukusaidia kuhusu usajili wa kodi, kuwasilisha marejesho, malipo, forodha, na zaidi \u2014 ninawezaje kukusaidia leo?",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-070",
+    "title": "Swahili Respectful Greeting: Shikamoo",
+    "locale": "sw",
+    "domain": "Conversational Greeting",
+    "statute": "URA Localization Guidelines",
+    "status_code": 200,
+    "latency_s": 0.785,
+    "retrieval_mode": "greeting",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "habari",
+      "ura"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Habari, na karibu! Mimi ni Msaidizi wa Kidijitali wa URA. Ninaweza kukusaidia kuhusu usajili wa kodi, kuwasilisha marejesho, malipo, forodha, na zaidi \u2014 ninawezaje kukusaidia leo?",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-071",
+    "title": "Swahili Informal Greeting: Mambo vipi",
+    "locale": "sw",
+    "domain": "Conversational Greeting",
+    "statute": "URA Localization Guidelines",
+    "status_code": 200,
+    "latency_s": 22.968,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "habari",
+      "ura"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Hapa kuna mwongozo muhimu niliopata kutoka kwa vyanzo rasmi vya URA:  - (1) Bidhaa zote ambazo uagizaji wake unadhibitiwa chini ya Sheria hii au sheria yoyote iliyopo wakati huo katika nchi mwanachama.  - (2) Mashine za posta isipokuwa na kulingana na masharti ya leseni iliyoandi",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-072",
+    "title": "Swahili Identity: Wewe ni nani na kazi yako ni nini?",
+    "locale": "sw",
+    "domain": "Conversational Identity",
+    "statute": "URA Identity Guidelines",
+    "status_code": 200,
+    "latency_s": 1.189,
+    "retrieval_mode": "conversational",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "omusolosmart",
+      "msaidizi",
+      "ura",
+      "makerere"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Mimi ni OmusoloSmart, Msaidizi Rasmi wa Kidijitali wa Mamlaka ya Mapato ya Uganda (URA) ninayetumia Akili Mnemba (AI).**  Niliundwa nchini Uganda kupitia ushirikiano kati ya Chuo Kikuu cha Makerere (Shule ya Kompyuta), Sunbird AI, na Mamlaka ya Mapato ya Uganda (URA).  - **Lugh",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-073",
+    "title": "Swahili Language Ability: Unaweza kuongea Kiswahili?",
+    "locale": "sw",
+    "domain": "Multilingual Capability",
+    "statute": "Language Policy",
+    "status_code": 200,
+    "latency_s": 22.197,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "kiswahili"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  KUHESABU KODI YA UAGIZAJI (IMPORT DUTY) Amua thamani ya Forodha ya kifaa (item), hii ni jumla ya malipo, bima na mzigo hadi bandari (port) ya uagizaji/kuleta bidhaa hadi EAC kama Mombasa, Der es Salaam.  1. Badil",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-074",
+    "title": "Swahili Civic Philosophy: Kwa nini tunalipa kodi?",
+    "locale": "sw",
+    "domain": "Civic Tax Philosophy",
+    "statute": "URA Mandate",
+    "status_code": 200,
+    "latency_s": 8.056,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 25.0,
+    "matched_concepts": [
+      "uganda"
+    ],
+    "missing_concepts": [
+      "barabara",
+      "hospitali",
+      "elimu"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Uganda inatoza kodi mbalimbali za serikali kama vile kodi ya mapato (income tax), kodi ya ongezeko la thamani (VAT), kodi ya miamala ya kielektroniki (electronic transactions), kodi ya majengo, kodi ya leseni, na kodi ya uchimbaji madini. Kila kodi hutumika kwa malengo maalumu ya",
+    "notes": "Missing: ['barabara', 'hospitali', 'elimu']"
+  },
+  {
+    "case_id": "REL-075",
+    "title": "Swahili Business Empathy: Nina hofu ya kuanza biashara",
+    "locale": "sw",
+    "domain": "Business Empathy",
+    "statute": "Taxpayer Education",
+    "status_code": 200,
+    "latency_s": 8.159,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 33.3,
+    "matched_concepts": [
+      "biashara"
+    ],
+    "missing_concepts": [
+      "faida",
+      "milioni 10"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Kama mfanyabiashara mpya, unaweza kupata msaada wa URA katika kituo chochote cha huduma ili kuelewa jinsi ya kujisajili kwa ajili ya kodi, kulipa kodi, na kuhakikisha utii wako. Kwenye kituo chetu cha Huduma za Wateja, tutakuwezesha kufanya mazoezi ya kuwasilisha mapato yako na k",
+    "notes": "Missing: ['faida', 'milioni 10']"
+  },
+  {
+    "case_id": "REL-076",
+    "title": "Swahili Status Check: Uko salama leo?",
+    "locale": "sw",
+    "domain": "Conversational Status",
+    "statute": "Tone Guidelines",
+    "status_code": 200,
+    "latency_s": 19.244,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "salama"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Mamlaka ya Mapato ya Uganda (URA) ina matawi 16 nchini kote, ikiwemo tawi kuu lililo katika eneo la Ploti 70, Old Port Bell Road jijini Kampala. Matawi haya yamepangwa vizuri ili kuwatumikia walipa ushuru katika maeneo mbalimbali nchini Uganda.  ---  *Tahadhari: Jibu hili huenda ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-077",
+    "title": "Swahili Gratitude: Asante sana",
+    "locale": "sw",
+    "domain": "Conversational Courtesy",
+    "statute": "Tone Guidelines",
+    "status_code": 200,
+    "latency_s": 20.786,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "karibu"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Nilipanga jibu kwa hili, lakini tarakimu zilizomo hazikupatana na hati za URA nilizokuwa nikiisoma \u2014 kwa hiyo sijaonyesha, kwa sababu tarakimu mbaya hapa ni mbaya kuliko kutokuwepo kabisa. Vifungu nilivyopata vimeorodheshwa chini; afisa wa URA ameombwa kukupa jibu la mwisho. Unaw",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-078",
+    "title": "Swahili Farewell: Kwaheri ya kuonana",
+    "locale": "sw",
+    "domain": "Conversational Courtesy",
+    "statute": "Tone Guidelines",
+    "status_code": 200,
+    "latency_s": 38.522,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "asante",
+      "kwaheri"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Hapa kuna mwongozo muhimu zaidi niliyopata kutoka vyanzo rasmi vya URA:  **KUHESABU KODI YA UAGIZAJI ( IMPORT DUTY)**  * **Determine the Customs Value of the Item**, this is the total cost, insurance and freight to the EAC port of entry such as Mombasa, Dar es Salaam.  1. ** Conv",
+    "notes": "Missing: ['asante', 'kwaheri']"
+  },
+  {
+    "case_id": "REL-079",
+    "title": "Swahili Creative: Ushairi wa kodi ya ujenzi wa taifa",
+    "locale": "sw",
+    "domain": "Creative Expression",
+    "statute": "Cultural Resonance",
+    "status_code": 200,
+    "latency_s": 20.964,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 33.3,
+    "matched_concepts": [
+      "uganda"
+    ],
+    "missing_concepts": [
+      "shilingi",
+      "taifa"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Uganda, Kenya, na Tanzania zilisaidiana kwa mapato ya kodi kupitia mpango wa ushuru wa forodha ambapo Uganda ilikusanya ushuru wa thamani wa 5% kwenye bidhaa zinazoingia Afrika Mashariki kupitia bandari zilizoelekezwa Uganda. Hii ilijenga mapato makubwa kwa Uganda, ikionyesha uhu",
+    "notes": "Missing: ['shilingi', 'taifa']"
+  },
+  {
+    "case_id": "REL-080",
+    "title": "Swahili Standard VAT Rate: Kiwango cha kodi ya VAT",
+    "locale": "sw",
+    "domain": "Value Added Tax (Swahili)",
+    "statute": "VAT Act Cap 349",
+    "status_code": 200,
+    "latency_s": 4.653,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "18%",
+      "ushuru"
+    ],
+    "missing_concepts": [
+      "vat"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni 18%** (FY2026-27). Ushuru wa Thamani unatozwa kwa 18% kwenye bidhaa na huduma zinazoweza kutozwa ushuru; biashara zilizosajiliwa kwa ushuru huo hukusanya kutoka kwa wateja na kupeleka kwa URA.  - Sheria ya msingi: Sheri",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-081",
+    "title": "Swahili Corporate Income Tax Rate (30%)",
+    "locale": "sw",
+    "domain": "Corporate Tax (Swahili)",
+    "statute": "Income Tax Act",
+    "status_code": 200,
+    "latency_s": 2.785,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "30%"
+    ],
+    "missing_concepts": [
+      "shirika"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Kiwango cha ushuru wa kampuni nchini Uganda ni 30%** (FY2026-27), kinachotumika kwa mapato ya kila mwaka yanayolipishwa na kampuni.  - Sheria ya msingi: Sheria ya Kodi ya Mapato  Ikiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari kukusaidia: tembelea htt",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-082",
+    "title": "Swahili PWD Exemption: Watu wenye ulemavu",
+    "locale": "sw",
+    "domain": "Tax Exemptions (Swahili)",
+    "statute": "Income Tax Act, Section 21(1)(v)",
+    "status_code": 200,
+    "latency_s": 5.308,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "1,460,000",
+      "kodi"
+    ],
+    "missing_concepts": [
+      "msamaha"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Chini ya Sehemu ya 21 (1)(v) ya Sheria ya Kodi ya Mapato, mapato ya ajira ya Mtu aliye na Ulemavu (PWD) yanaweza kuepukwa hadi UGX 1,460,000 kila mwezi** (FY2026-27). Mapato ya ajira yanayopatikana zaidi ya kiwango hiki yanaweza kulipishwa kodi ya PAYE yenye hatua nyingi.  Hilo",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-083",
+    "title": "Swahili Mobile Money Withdrawal Tax (0.5%)",
+    "locale": "sw",
+    "domain": "Excise Duty (Swahili)",
+    "statute": "Excise Duty Act",
+    "status_code": 200,
+    "latency_s": 3.998,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0.5%",
+      "ushuru",
+      "pesa"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Kiwango cha ushuru wa kutoa pesa kwa njia ya simu ni 0.5%** (FY2026-27) ya thamani ya shughuli chini ya Sheria ya Ushuru wa Bidhaa. Amana na uhamishaji hazina ushuru huu wa kutoa pesa.  Hii inatoka kwenye jedwali rasmi la kiwango cha URA FY2026-27.  Ikiwa utakabiliwa na changam",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-084",
+    "title": "Swahili Quarterly VAT Threshold (37.5M)",
+    "locale": "sw",
+    "domain": "Value Added Tax (Swahili)",
+    "statute": "VAT Act, Section 7",
+    "status_code": 200,
+    "latency_s": 4.412,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "37,500,000",
+      "vat",
+      "miezi"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Usajili wa VAT ni wa lazima mara tu mapato yanayolipiwa kodi yafikapo UGX 37,500,000 katika miezi mitatu mfululizo ya kalenda**, au UGX 150,000,000 kila mwaka, chini ya Sehemu ya 7 ya Sheria ya Kodi ya Ongezeko la Thamani (FY2026-27). Hiyo inatoka kwenye jedwali rasmi la kiwang",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-085",
+    "title": "Swahili TAT Appeal Deadline: Mahakama ya Rufaa za Kodi",
+    "locale": "sw",
+    "domain": "Tax Appeals (Swahili)",
+    "statute": "Tax Appeals Tribunal Act",
+    "status_code": 200,
+    "latency_s": 5.52,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "30",
+      "rufaa",
+      "siku"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Mlipa kodi ana siku 30 kutoka tarehe ya utumishi wa uamuzi wa pingamizi kuwasilisha rufaa kwa Baraza la Rufani za Kodi (TAT)** chini ya Kifungu cha 16 cha Sheria ya Baraza la Rufani za Kodi na Kifungu cha 26 cha Sheria ya Taratibu za Kodi (FY2026-27). Hiyo inatokana na jedwali ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-086",
+    "title": "Swahili 15-Year Vehicle Ban: Kuagiza gari la zamani",
+    "locale": "sw",
+    "domain": "Customs (Swahili)",
+    "statute": "Traffic and Road Safety Act",
+    "status_code": 200,
+    "latency_s": 5.272,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "15",
+      "marufuku",
+      "gari"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Kodi ya mazingira kwa magari yaliyotumika yenye umri wa miaka 8 hadi 15 ni 50%** ya thamani ya CIF (FY2026-27).   > Kumbuka: Kuagiza magari zaidi ya miaka 15 ni marufuku chini ya Sheria ya Usalama Barabarani na Marekebisho.  - Misingi ya kisheria: EACCMA / Sheria ya Usalama Bar",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-087",
+    "title": "Swahili TIN Registration: Ninawezaje kupata TIN?",
+    "locale": "sw",
+    "domain": "Registration (Swahili)",
+    "statute": "TPCA Registration",
+    "status_code": 200,
+    "latency_s": 9.938,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "tin"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Kiwango cha kawaida cha kodi ya ongezeko la thamani (VAT) nchini Uganda ni 18% kwenye usambazaji wa bidhaa unaolipishwa kodi. Hii inamaanisha kuwa kila unapouza bidhaa au huduma, lazima ulipe kodi ya VAT kwa kiwango hiki cha 18%. Kwa mfano, ikiwa biashara yako imefanya mauzo ya s",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-088",
+    "title": "Swahili Rental Tax: Kodi ya pango kwa mtu binafsi",
+    "locale": "sw",
+    "domain": "Rental Tax (Swahili)",
+    "statute": "Income Tax Act, s.5",
+    "status_code": 200,
+    "latency_s": 5.773,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "12%",
+      "2,820,000",
+      "kodi"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Viwango vya kodi ya mapato ya kukodisha (FY2026-27):**  - Watu binafsi: **12%** ya kodi ya jumla juu ya UGX 2,820,000 kwa mwaka - Makampuni: **30%** ya mapato yanayolipishwa (gharama zinazoweza kuondolewa hadi 50% ya kodi ya jumla)  Hii inatoka kwenye jedwali rasmi la URA la FY",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-089",
+    "title": "Swahili Presumptive Tax: Kodi ya makadirio kwa biashara ndogo",
+    "locale": "sw",
+    "domain": "Small Business (Swahili)",
+    "statute": "Income Tax Act, Second Schedule",
+    "status_code": 200,
+    "latency_s": 24.238,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "kodi"
+    ],
+    "missing_concepts": [
+      "milioni 10"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Hapa kuna mwongozo muhimu niliopata kutoka vyanzo rasmi vya URA:  Mchakato rahisi unaoitwa Kukadiria Kodi ya Mapato (Biashara ndogo) ulibuniwa ili kuwezesha usajili wa malipo na kufa kwa kurudisha mapato kwa walipa kodi katika kategoria hii.  Mwaka wa Ukaguzi ni kipindi cha miezi",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-090",
+    "title": "Swahili Monthly Return Deadline (15th Day)",
+    "locale": "sw",
+    "domain": "Compliance Calendar (Swahili)",
+    "statute": "TPCA s.16",
+    "status_code": 0,
+    "latency_s": 45.004,
+    "retrieval_mode": "exception",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "15",
+      "mwezi"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "",
+    "notes": "Exception: ReadTimeout"
+  },
+  {
+    "case_id": "REL-091",
+    "title": "Swahili Toll-Free Numbers: Nambari za bure za URA",
+    "locale": "sw",
+    "domain": "Contact Details (Swahili)",
+    "statute": "Citizen Access",
+    "status_code": 200,
+    "latency_s": 8.468,
+    "retrieval_mode": "contact_channels",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0800 117 000",
+      "0800 217 000"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Unaweza kufikia Mamlaka ya Mapato ya Uganda (URA) kupitia njia zifuatazo rasmi:  1. **Simu Bure**: Piga 0800 117 000 au 0800 217 000 (Jumatatu hadi Ijumaa, 8:00 AM \u2013 5:00 PM). 2. **Msaada wa WhatsApp**: Tuma ujumbe kwa 0772 140 000 kwa maswali ya haraka ya rununu. 3. **Kituo cha ",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-092",
+    "title": "Swahili Stamp Duty: Ushuru wa stempu kwa ununuzi wa ardhi",
+    "locale": "sw",
+    "domain": "Stamp Duty (Swahili)",
+    "statute": "Stamp Duty Act",
+    "status_code": 200,
+    "latency_s": 3.638,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "1%"
+    ],
+    "missing_concepts": [
+      "stamp duty"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Kiwango cha ushuru wa muhuri kwa uhamishaji mali (aridhi au majengo) ni 1%** (FY2026-27) chini ya Sheria ya Usimamizi wa Muhuri.  Hicho kinatoka katika jedwali rasmi la kiwango cha URA FY2026-27.  Ikiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari kukusa",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-093",
+    "title": "Swahili Withholding Tax on Goods (6%)",
+    "locale": "sw",
+    "domain": "Withholding (Swahili)",
+    "statute": "Income Tax Act, s.119",
+    "status_code": 200,
+    "latency_s": 5.119,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "6%"
+    ],
+    "missing_concepts": [
+      "zuio"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "**Viwango vya kodi ya kutoa (WHT) (FY2026-27):**  - Huduma: **6%** - Bidhaa: **6%** - Ada za usimamizi: **15%** - Dividends: **15%** - Malipo kwa wasanii wa umma: **6%** - Shinda za kamari: **15%** - Riba iliyolipwa kwa wakopeshaji wasio wakaazi: **#NMBJ#%**  Ikiwa utakabiliwa na",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-094",
+    "title": "Swahili EAC Common External Tariff Bands",
+    "locale": "sw",
+    "domain": "Customs Tariff (Swahili)",
+    "statute": "EAC CET 2022",
+    "status_code": 200,
+    "latency_s": 15.777,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "0%",
+      "10%",
+      "25%",
+      "35%"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Sharti la Jumuiya ya Afrika Mashariki la Kodi ya Nje (EAC CET) lina vikundi vinne vikuu vya kodi (FY2026-27):**  - Kundi 1: **0%** (Malighafi na mashine za uwekezaji) - Kundi 2: **10%** (Bidhaa za kati) - Kundi 3: **25%** (Bidhaa zilizomalizika za matumizi ya mwisho) - Kundi 4:",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-095",
+    "title": "Swahili EAC Rules of Origin 35% Value Addition",
+    "locale": "sw",
+    "domain": "Regional Trade (Swahili)",
+    "statute": "EAC Rules of Origin",
+    "status_code": 200,
+    "latency_s": 32.7,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "thamani"
+    ],
+    "missing_concepts": [
+      "35%"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Hapa kuna mwongozo muhimu zaidi niliyopata kutoka vyanzo rasmi vya URA:  Hii ni ushuru unaolipwa juu ya bidhaa au huduma zinazouzwa nchini ambazo zimeagizwa kutoka nje au zimetengenezwa ndani ya nchi. Mwanzoni Ushuru wa Ongezeko la Thamani ulikusudiwa kwa ajili ya \"vitu vya anasa",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-096",
+    "title": "Swahili EFRIS Electronic Invoicing Requirement",
+    "locale": "sw",
+    "domain": "EFRIS (Swahili)",
+    "statute": "TPCA s.19B",
+    "status_code": 200,
+    "latency_s": 19.475,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 66.7,
+    "matched_concepts": [
+      "efris",
+      "risiti"
+    ],
+    "missing_concepts": [
+      "ankara"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Hapa kuna mwongozo muhimu niliopata kutoka vyanzo rasmi vya URA:  Wananchi wote walioandikishwa kulipa ushuru wa thamani (VAT) wanapaswa kujiandikisha na EFRIS na kutoa risiti za kielektroniki. Suluhisho la Kielektroniki la Pato la Fidia na Risiti (EFRIS) ni suluhisho bora la bia",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-097",
+    "title": "Swahili Solar Equipment Exemption",
+    "locale": "sw",
+    "domain": "Renewable Energy (Swahili)",
+    "statute": "VAT & Customs Act",
+    "status_code": 200,
+    "latency_s": 35.078,
+    "retrieval_mode": "hybrid",
+    "passed": false,
+    "score": 0.0,
+    "matched_concepts": [],
+    "missing_concepts": [
+      "jua",
+      "ushuru"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Here's the most relevant guidance I found in official URA sources:  MANUFACTURING SECTOR Item Description Tax incentiveRaw materials for the \u2022 Duty remission to 0% formanufacture of sanitary inputs used by manufacturerstowels and tampons of sanitary towels andtamponsInputs used f",
+    "notes": "Missing: ['jua', 'ushuru']"
+  },
+  {
+    "case_id": "REL-098",
+    "title": "Swahili PRN Bank / Mobile Money Payments",
+    "locale": "sw",
+    "domain": "Payments (Swahili)",
+    "statute": "Payment Procedures",
+    "status_code": 200,
+    "latency_s": 13.177,
+    "retrieval_mode": "faq_priority",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "prn",
+      "benki",
+      "simu"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "Kulipa kodi kwa kutumia pesa za rununu na nambari ya malipo ya kielektroniki (PRN):   1. Nenda kwenye Ura Portal > Fanya Malipo > Chagua aina ya kodi (k.m., Kodi ya Mapato, VAT, Gari, Forodha, au Kodi ya Stamps);   2. Ingiza kiasi cha kulipia katika UGX;   3. Bonyeza Tuma/Tengene",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-099",
+    "title": "Swahili Customs Baggage USD 500 Allowance",
+    "locale": "sw",
+    "domain": "Customs Baggage (Swahili)",
+    "statute": "EAC-CMA 5th Schedule",
+    "status_code": 200,
+    "latency_s": 6.538,
+    "retrieval_mode": "calculator",
+    "passed": true,
+    "score": 100.0,
+    "matched_concepts": [
+      "500",
+      "dola"
+    ],
+    "missing_concepts": [],
+    "hallucination_detected": false,
+    "reply_snippet": "**Ruhusa ya mzigo wa abiria bila ushuru ni dola za Marekani 500** kwa mizigo ya kibinafsi chini ya Sheria ya Usimamizi wa Forodha ya Jumuiya ya Afrika Mashariki (FY2026-27). Bidhaa zinazoingizwa nchini kwa ajili ya uuzaji, biashara, au kwa wingi mkubwa hazistahili kupata ruhusa h",
+    "notes": "Passed statutory rigor"
+  },
+  {
+    "case_id": "REL-100",
+    "title": "Swahili Reporting Tax Fraud / Whistleblowing",
+    "locale": "sw",
+    "domain": "Anti-Corruption (Swahili)",
+    "statute": "Whistleblower Protection",
+    "status_code": 200,
+    "latency_s": 8.648,
+    "retrieval_mode": "hybrid",
+    "passed": true,
+    "score": 50.0,
+    "matched_concepts": [
+      "ura"
+    ],
+    "missing_concepts": [
+      "0800 117 000"
+    ],
+    "hallucination_detected": false,
+    "reply_snippet": "Kuwasilisha biashara zisizotii kwa URA, unaweza kutumia njia zifuatazo:  1.  Tembelea ofisi ya karibu ya URA. 2.  **Barua pepe**: huduma@ura.go.ug 3.  **Piga simu za bure**: 0800117000 na 0800217000  4.  **Tumia WhatsApp**: REDACTED_UG PHONE] [1]",
+    "notes": "Passed statutory rigor"
+  }
+]

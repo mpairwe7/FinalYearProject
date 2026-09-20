@@ -35,7 +35,7 @@ class ConversationalResult:
 # ---------------------------------------------------------------------------
 
 _CIVIC_PHILOSOPHY_RE = re.compile(
-    r"\b(why\s+(?:do\s+we|must\s+we|should\s+we|people|citizens)\s+pay\s+tax\w*"
+    r"\b(why\s+(?:do\s+)?(?:we|must\s+we|should\s+we|people|citizens|taxpayers)\s+pay\s+tax\w*"
     r"|why\s+(?:is\s+tax\w*|does\s+uganda\s+collect|does\s+ura\s+collect|does\s+government\s+(?:collect|need)\s+tax\w*)"
     r"|purpose\s+of\s+tax\w*|importance\s+of\s+tax\w*|what\s+does\s+(?:ura|government)\s+do\s+with\s+(?:our\s+)?tax\w*"
     r"|where\s+does\s+(?:the\s+)?tax\s+money\s+go|is\s+taxation\s+(?:fair|theft|necessary|good)"
@@ -50,7 +50,7 @@ _IDENTITY_ORIGINS_RE = re.compile(
     r"|are\s+you\s+(?:human|a\s+robot|an?\s+ai|real|a\s+person)"
     r"|(?:can\s+you|do\s+you)\s+(?:speak|understand)\s+(?:luganda|swahili|kiswahili|runyankole|acholi|english)"
     r"|ggwe\s+ani|oli\s+(?:muntu|kyuma|mukazi|musajja)|ani\s+yakukola|ani\s+yakutonda"
-    r"|osobola\s+okwogera\s+(?:oluganda|oluswayiri|olungereza)"
+    r"|osobola\s+(?:okwogera|okutegeera|okukozesa)\b[^?]{0,30}\b(?:oluganda|oluswayiri|olungereza)"
     r"|wewe\s+ni\s+nani|je\s+wewe\s+ni\s+(?:binadamu|roboti)|nani\s+alikuunda|nani\s+aliyekutengeneza"
     r"|unaweza\s+(?:kuongea|kuzungumza)\s+(?:kiswahili|kiingereza|kiganda)|unajua\s+nini)\b",
     re.IGNORECASE,

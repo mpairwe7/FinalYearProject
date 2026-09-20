@@ -812,14 +812,14 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|omuwendo|bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|omuwendo|ekkomo|kikomo|bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
-    r"|\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|omuwendo|ekkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
-    r"|\b(bitundu\s+bimeka|asilimia\s+ngapi|omuwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|omuwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
+    r"\b(what(?:'s|\s+is)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|limits?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
+    r"|\b(rates?|thresholds?|limits?|bands?|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
+    r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
     r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
     r"|\b(?:can|is|are)\b[^?]*\b(?:cleared|exempt|allowed|duty[-\s]?free|concession)\b"
     r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential)\b"
-    r"|\b(?:voluntary\s+disclosure|agency\s+notice|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|primary\s+private\s+home|principal\s+private\s+residence)\b",
+    r"|\b(?:voluntary\s+disclosure|agency\s+notice|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|primary\s+private\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax)\b",
     re.IGNORECASE,
 )
 
@@ -1179,7 +1179,7 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="paye_secondary_employment_rate"),
         re.compile(
-            r"\b(secondary\s+employment|secondary\s+job|second\s+job|secondary\s+role|secondary\s+income|omulimu\s+ogw'okubiri)\b",
+            r"\b(?:second(?:ary)?)\b[^?]{0,30}\b(?:employment|job|role|income|employer)\b|\b(?:omulimu\s+ogw'okubiri)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1193,7 +1193,7 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
     (
         RatePlan(tax_type="disability_income_tax_threshold_monthly"),
         re.compile(
-            r"\b(pwd|disabilit(?:y|ies)|disabled|persons?\s+with\s+disabilit\w*)\b",
+            r"\b(pwd|disabilit(?:y|ies)|disabled|persons?\s+with\s+disabilit\w*|ulemavu|walemavu|abaliko\s+obulemu)\b",
             re.IGNORECASE,
         ),
     ),
