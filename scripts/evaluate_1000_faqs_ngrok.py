@@ -1060,8 +1060,8 @@ CROSS_LINGUAL_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
     "deduction": ({"okuggyako", "okukendeeza", "ensaasaanya", "ebikendeezebwako"}, {"makato", "gharama", "kupunguza", "kupunguzwa"}),
     "allowable": ({"ekikkirizibwa", "ekikola"}, {"inayoruhusiwa", "halali", "inayokubalika"}),
     "taxable": ({"ekiwoozebwako", "omusolo"}, {"inayotozwa", "kodi", "ushuru"}),
-    "supply": ({"ebitundibwa", "empeereza"}, {"ugavi", "huduma", "bidhaa"}),
-    "supplies": ({"ebitundibwa", "empeereza"}, {"ugavi", "huduma", "bidhaa"}),
+    "supply": ({"ebitundibwa", "empeereza", "okugaba", "okuwaayo", "ebyamaguzi"}, {"ugavi", "huduma", "bidhaa"}),
+    "supplies": ({"ebitundibwa", "empeereza", "okugaba", "okuwaayo", "ebyamaguzi"}, {"ugavi", "huduma", "bidhaa"}),
     "transit": ({"okuyitawo", "transit"}, {"kusafirishwa", "njiani", "transit"}),
     "cargo": ({"emigugu", "ebyamaguzi"}, {"mizigo", "shehena"}),
     "origin": ({"gyekiva", "ensibuko"}, {"asili", "inapotoka"}),
@@ -1079,7 +1079,7 @@ CROSS_LINGUAL_CONCEPT_MAP: dict[str, tuple[set[str], set[str]]] = {
     "device": ({"ekyuma", "kyuma"}, {"kifaa", "mashine"}),
     "changes": ({"enkyukakyuka", "ebikyuse"}, {"mabadiliko"}),
     "schedule": ({"olukalala", "essuula"}, {"ratiba", "jedwali"}),
-    "procedure": ({"emitendera", "enkola"}, {"utaratibu", "mchakato"}),
+    "procedure": ({"emitendera", "enkola", "omutendera"}, {"utaratibu", "taratibu", "mchakato"}),
     "institution": ({"ekitongole", "ekibiina"}, {"taasisi", "shirika"}),
     "period": ({"ekiseera", "olunaku"}, {"kipindi", "muda"}),
     "value": ({"omuwendo", "ebbeeyi", "ssente"}, {"thamani", "bei", "kiasi"}),
@@ -1426,6 +1426,10 @@ def _number_matched(num_str: str, reply_lower: str, locale: str) -> bool:
     clean_num = num_str.lower().strip()
     if _contains_term(reply_lower, clean_num):
         return True
+    if clean_num.startswith("0800") or clean_num.startswith("0772"):
+        digits = "".join(c for c in clean_num if c.isdigit())
+        if digits and digits in "".join(c for c in reply_lower if c.isdigit()):
+            return True
     if "%" in clean_num:
         bare_pct = clean_num.replace("%", "").strip()
         if _contains_term(reply_lower, f"{bare_pct} percent") or _contains_term(reply_lower, f"{bare_pct}%"):

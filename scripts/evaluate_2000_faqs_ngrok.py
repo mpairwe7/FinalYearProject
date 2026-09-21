@@ -150,6 +150,21 @@ VERNACULAR_TRANSLATIONS = {
         "How are dividends handled?": "Amagoba ku migabo (dividends) gasolozebwako musolo gutya mu Uganda?",
         "What must a tax objection contain?": "Okukuba ebiwandiiko by'okwemulugunya ku musolo kuteekwa kubaamu ki?",
         "If the Commissioner rejects my objection, which tribunal or court do I appeal to?": "Kaminsona bw'agaana okwemulugunya kwange, nkuba apilu mu kitongole ki oba kkooti ki?",
+        "What is the penalty for failing to issue a fiscalised invoice through EFRIS?": "Kibonerezo ki ekiriwo olw'obutawaayo lisiiti ya EFRIS ey'omusolo?",
+        "Can a VAT-registered business claim input tax on fuel and telephone expenses?": "Bizinensi erina VAT esobola okusaba omusolo gwa input tax ku mafuta n'essimu?",
+        "What happens if my output VAT is less than my input VAT in a tax period?": "Kiki ekigwawo singa output VAT eba ntono okusinga input VAT mu kiseera ky'omusolo?",
+        "What is the VAT treatment of raw agricultural supplies produced in Uganda?": "Ebyamaguzi by'obulimi ebibisi ebikolebwa mu Uganda bikwatibwako bitya mu musolo gwa VAT?",
+        "How does a taxpayer apply for a VAT refund for excess input tax credits?": "Omusasuzi w'omusolo asaba atya okuddizibwa ssente za VAT ez'ensusso ku input tax?",
+        "What is the difference between an exempt supply and a zero-rated supply for VAT?": "Njawukana ki eri wakati w'ebintu ebisonyiyiddwa omusolo n'ebiri ku kigero kya zero (zero-rated) mu VAT?",
+        "When must a non-resident supplier of electronic services register for VAT in Uganda?": "Ddi omusuubuzi atali mutuuze awa empeereza z'ekikugu ku mutimbagano lw'ateekwa okwewandiisa ku VAT mu Uganda?",
+        "What records must be kept by a taxpayer claiming an input tax credit on purchases?": "Biwandiiko ki ebirina okukuumibwa omusasuzi ayagala okufuna input tax credit ku bintu bye yaguze?",
+        "Can an unregistered business charge VAT on its invoices?": "Bizinensi eteewandiisizza ku VAT esobola okuteekako omusolo gwa VAT ku ffectuulo zaayo?",
+        "How is VAT accounted for on hire purchase transactions and leases?": "VAT ebalibwa etya ku bintu eby'okupangisa n'okugula mu bitundu (hire purchase ne lease)?",
+        "What is the withholding tax rate on dividends paid to resident individuals?": "Kiwango ki eky'omusolo gwa withholding tax ku magoba g'emigabo (dividends) agasasulwa abantu abatuuze?",
+        "Are severance pay and redundancy packages subject to PAYE in Uganda?": "Ensimbi ez'okusiibula omukozi (severance pay) zisasulirwako omusolo gwa PAYE mu Uganda?",
+        "How is benefit in kind (BIK) calculated for a company-provided vehicle?": "Emiganyulo gy'emmotoka ya kkampuni (benefit in kind) gibalibwa gutya mu musolo?",
+        "What is the threshold for withholding tax on professional fees?": "Ekkomo ly'ensimbi z'abakugu ezisasulirwako withholding tax liri ku ssente mmeka?",
+        "Is withholding tax a final tax for professional service providers?": "Withholding tax gwe musolo ogusembayo ku bantu abawa empeereza ez'ekikugu?",
     },
     # Swahili mappings
     "sw": {
@@ -187,6 +202,21 @@ VERNACULAR_TRANSLATIONS = {
         "How are dividends handled?": "Je, gawio (dividends) linatozwa kodi vipi nchini Uganda?",
         "What must a tax objection contain?": "Je, barua ya pingamizi ya kodi inapaswa kuwa na nini?",
         "If the Commissioner rejects my objection, which tribunal or court do I appeal to?": "Kamishna akikataa pingamizi langu, ninakata rufaa kwa baraza gani au mahakama gani?",
+        "What is the penalty for failing to issue a fiscalised invoice through EFRIS?": "Ni adhabu gani inayotozwa kwa kushindwa kutoa ankara ya kielektroniki ya EFRIS?",
+        "Can a VAT-registered business claim input tax on fuel and telephone expenses?": "Je, biashara iliyosajiliwa kwa VAT inaweza kudai kodi ya pembejeo (input tax) kwa mafuta na simu?",
+        "What happens if my output VAT is less than my input VAT in a tax period?": "Nini kinatokea ikiwa output VAT ni ndogo kuliko input VAT katika kipindi cha kodi?",
+        "What is the VAT treatment of raw agricultural supplies produced in Uganda?": "Mazao yasiyosindikwa ya kilimo yanayozalishwa Uganda yanatendewaje chini ya VAT?",
+        "How does a taxpayer apply for a VAT refund for excess input tax credits?": "Mlipakodi anaombaje kurejeshewa kodi ya ziada ya pembejeo ya VAT (refund)?",
+        "What is the difference between an exempt supply and a zero-rated supply for VAT?": "Kuna tofauti gani kati ya bidhaa zilizosamehewa na zile za kiwango cha sifuri (zero-rated) kwa VAT?",
+        "When must a non-resident supplier of electronic services register for VAT in Uganda?": "Ni lini msambazaji asiye mkazi wa huduma za kielektroniki anapaswa kujisajili kwa VAT nchini Uganda?",
+        "What records must be kept by a taxpayer claiming an input tax credit on purchases?": "Kumbukumbu gani lazima zitunzwe na mlipakodi anayedai kodi ya pembejeo kwenye ununuzi?",
+        "Can an unregistered business charge VAT on its invoices?": "Je, biashara isiyosajiliwa inaweza kutoza VAT kwenye ankara zake?",
+        "How is VAT accounted for on hire purchase transactions and leases?": "Kodi ya VAT inakokotolewaje kwenye mikataba ya kukodisha na kulipa kidogo kidogo (hire purchase)?",
+        "What is the withholding tax rate on dividends paid to resident individuals?": "Kiwango cha kodi ya zuio (WHT) kwa gawio linalolipwa kwa watu binafsi wakaazi ni asilimia ngapi?",
+        "Are severance pay and redundancy packages subject to PAYE in Uganda?": "Je, malipo ya kuachishwa kazi (severance pay) yanatozwa kodi ya PAYE nchini Uganda?",
+        "How is benefit in kind (BIK) calculated for a company-provided vehicle?": "Manufaa yasiyo ya pesa taslimu (BIK) kwa gari linalotolewa na kampuni yanakokotolewaje?",
+        "What is the threshold for withholding tax on professional fees?": "Kiwango cha chini cha kutoza kodi ya zuio kwa ada za kitaalamu ni kiasi gani?",
+        "Is withholding tax a final tax for professional service providers?": "Je, kodi ya zuio ni kodi ya mwisho kwa watoa huduma za kitaalamu?",
     }
 }
 
@@ -293,14 +323,7 @@ def build_2000_faqs_dataset() -> list[EvalFAQ]:
                 q_loc = loc
             else:
                 actual_query = q_text
-                from app.query import detect_language
-                detected = detect_language(actual_query)
-                if detected in ("lg", "sw"):
-                    q_loc = detected
-                    loc = detected
-                else:
-                    q_loc = "en"
-                    loc = "en"
+                q_loc = "en"
 
             vern_anchors = list(VERNACULAR_ANCHORS.get(loc, ()))
             if loc == "lg" and "omusolo" not in vern_anchors:
@@ -464,28 +487,49 @@ class URAEvaluationEngine2000:
         t_start = time.perf_counter()
         
         results: list[TurnResult] = []
+        completed_ids: set[str] = set()
+        ckpt_path = Path("Results/metrics/2000_faqs_ngrok_evaluation_report.json")
+        if ckpt_path.exists():
+            try:
+                with open(ckpt_path, "r", encoding="utf-8") as cf:
+                    existing_data = json.load(cf)
+                    for r in existing_data.get("all_evaluations", []):
+                        tr = TurnResult(**r)
+                        results.append(tr)
+                        completed_ids.add(tr.faq_id)
+                print(f"📦 Resuming from checkpoint: {len(results)} FAQs already evaluated")
+            except Exception as e:
+                print(f"⚠️ Could not load checkpoint: {e}")
+
+        pending_faqs = [f for f in faqs if f.faq_id not in completed_ids]
+        print(f"   Remaining FAQs to evaluate: {len(pending_faqs)}")
+
         limits = httpx.Limits(max_connections=64, max_keepalive_connections=32)
         
         async with httpx.AsyncClient(limits=limits, timeout=60.0) as client:
-            tasks = [self.evaluate_turn(client, f) for f in faqs]
-            completed = 0
+            tasks = [self.evaluate_turn(client, f) for f in pending_faqs]
+            completed = len(results)
+            session_completed = 0
             for fut in asyncio.as_completed(tasks):
                 res = await fut
                 results.append(res)
                 completed += 1
+                session_completed += 1
                 if completed % 100 == 0 or completed == len(faqs):
                     elapsed_so_far = time.perf_counter() - t_start
-                    qps = completed / elapsed_so_far if elapsed_so_far > 0 else 0
+                    qps = session_completed / elapsed_so_far if elapsed_so_far > 0 else 0
                     acc = sum(1 for r in results if r.is_accurate) / completed * 100
                     p50 = statistics.median(r.latency_s for r in results) * 1000
                     print(f"[{completed:04d}/{len(faqs)}] Progress: {(completed/len(faqs))*100:.1f}% | QPS: {qps:.2f} | Latency p50: {p50:.0f}ms | Accuracy: {acc:.1f}%", flush=True)
-                if completed % 100 == 0:
+                if completed % 50 == 0 or completed == len(faqs):
                     try:
-                        interm = self._compile_report(faqs[:completed], results, time.perf_counter() - t_start, gpu_pre, get_gpu_telemetry(4))
+                        interm = self._compile_report(faqs, results, time.perf_counter() - t_start, gpu_pre, get_gpu_telemetry(4))
                         with open("Results/metrics/2000_faqs_ngrok_evaluation_report.json", "w") as cf:
                             json.dump(interm, cf, indent=2)
                         with open("docs/Reports/data/eval_2000_faqs_ngrok.json", "w") as mf:
-                            json.dump(interm, mf, indent=2)
+                            summary_interm = {k: v for k, v in interm.items() if k != "all_evaluations"}
+                            summary_interm["sample_evaluations"] = interm.get("all_evaluations", [])[:20]
+                            json.dump(summary_interm, mf, indent=2)
                     except Exception:
                         pass
 

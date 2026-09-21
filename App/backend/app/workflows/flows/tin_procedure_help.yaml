@@ -11,6 +11,12 @@ trigger_phrases: []
 
 steps:
   - id: ask_kind
-    question: "Are you registering as an **individual** or an **organisation** (company, NGO, partnership)?"
+    question: >-
+      To register for a TIN with URA in Uganda:
+      1. Visit the official URA web portal at https://ura.go.ug
+      2. Navigate to **eServices** > **TIN Registration**
+      3. Complete the online application form and submit.
+
+      Are you registering as an **individual** (requires your National ID/NIN) or an **organisation** (requires Certificate of Incorporation)?
     slot: taxpayer_kind
     validator: "enum[individual,organisation]"

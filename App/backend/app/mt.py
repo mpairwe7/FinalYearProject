@@ -204,6 +204,14 @@ def figures(text: str, locale: str | None = None) -> set[float]:
     # Strip religious tithe phrases (sehemu za kumi, fungu la kumi, ebitundu eby'ekkumi, tithes) so tithes are not parsed as tax rate 10
     stripped = re.sub(r"\b(?:sehemu\s+za\s+kumi|fungu\s+la\s+kumi|ebitundu\s+eby['\s]+ekkumi|tithes?)\b", " ", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r"\(\d+\)", " ", stripped)
+    # Strip bare page numbers from OCR
+    stripped = re.sub(r"(?m)^\s*\d{1,3}\s*$", " ", stripped)
+    # Strip fiscal years (e.g. FY2026-27, FY2025/26, 2026-27) and calendar/statute years (1900-2099)
+    stripped = re.sub(r"\b(?:FY\s*)?(?:19|20)\d{2}(?:[-/]\d{2,4})?\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"(?i)\bfy\d{2,4}(?:[-/]\d{2,4})?\b", " ", stripped)
+    stripped = re.sub(r"\b(?:19|20)\d{2}\b", " ", stripped)
+    # Strip tariff chapter references (Chapters 84 and 85, Sura 84)
+    stripped = re.sub(r"\b(?:chapters?|sura|essuula)\s+\d+(?:\s*(?:and|ne|na|&)\s*\d+)?\b", " ", stripped, flags=re.IGNORECASE)
     values = canonical_amounts(stripped)
     values |= {float(value) for value in percentages(stripped)}
     stripped_lower = stripped.lower()
@@ -298,7 +306,13 @@ def figures_survived(source: str, translated: str, locale: str | None = None) ->
     source_figures = figures(source, locale="en")
     trans_figures = figures(translated, locale=locale)
     if not source_figures:
-        return not trans_figures or trans_figures.issubset({1.0})
+        # Non-monetary counts, dates, and years in translation do not contradict a source with no figures.
+        # Reject only if an actual tax money amount (>= 10,000) or tax percentage was invented.
+        invented = {
+            f for f in trans_figures
+            if (f >= 10000.0 and not (1900 <= f <= 2099))
+        } | {float(p) for p in percentages(translated)}
+        return not invented
     if trans_figures == source_figures:
         return True
 

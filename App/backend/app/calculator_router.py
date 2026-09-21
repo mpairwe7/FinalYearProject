@@ -403,6 +403,11 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     text = (message or "").strip()
     if not text or _INFO_ONLY_RE.search(text) or re.search(r"^\s*who\b", text, re.IGNORECASE):
         return None
+    if (
+        re.search(r"\b(?:example|in\s+theory|theoretically|explain\b|how\s+is\b.*\b(?:determined|defined|accounted))\b", text, re.IGNORECASE)
+        and not has_money_amount(text)
+    ):
+        return None
 
     # "Must I register for VAT?" is a threshold test, not a calculation,
     # so it is matched before the calculation-verb gate — the natural
@@ -827,7 +832,7 @@ _RATE_ASK_RE = re.compile(
     r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
     r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
-    r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"
+    r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"
     r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential|method\s+[1-6]|fallback\s+method|transaction\s+value)\b"
     r"|\b(?:voluntary\s+disclosure|agency\s+notice|bank\s+account|freeze|travel\s+out|tax\s+debtor|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|carrier\s+bags?|microns|primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax|mixed\s+supplies|zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt|exploration\s+losses?|contract\s+blocks?|ring[-\s]?fenc\w*|bonded\s+warehouse)\b"
     r"|\b(?:ushuru\s+gani|kodi\s+gani|musolo\s+ki|misolo\s+ki|sola|solar|enjuba|basonyiyibwa|gwa\s+mmeka|abaliko\s+obulemu|walemavu|ulemavu|lunaku\s+ki|ku\s+lunaku\s+ki|zisasula\s+zitya|zisasulwa\s+zitya|gusasulwa\s+gutya|zinalipwaje|zinalipwa\s+vipi|e?ssaawa\s+mmeka|masaa\s+mangapi|prn|unawalazimu|kiwango\s+ki|ku\s+kiwango\s+ki)\b",
@@ -913,6 +918,14 @@ _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
         RatePlan(tax_type="vat_zero_rated_vs_exempt"),
         re.compile(
             r"\b(zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt|difference\s+between\s+zero[-\s]?rated)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_input_tax_restriction_fuel_telephone"),
+        re.compile(
+            r"\b(input\s+tax|input\s+vat|claim\s+input)\b[^?]{0,60}\b(fuel|telephone|petrol|diesel|phone)\b"
+            r"|\b(fuel|telephone|petrol|diesel|phone)\b[^?]{0,60}\b(input\s+tax|input\s+vat|claim\s+input)\b",
             re.IGNORECASE,
         ),
     ),
@@ -1395,6 +1408,11 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
                     return RatePlan(tax_type=subtype)
             if plan.summary == "rental" and re.search(r"\b(individual|person|natural\s+person|ssekino+mu|ssekinnoomu|binafsi|gross)\b", text, re.IGNORECASE):
                 return RatePlan(tax_type="rental_tax_individual")
+            if plan.tax_type == "vat_standard":
+                if re.search(r"\b(?:which|what|list|examples?|emirimu\s+ki|ebintu\s+ki|bidhaa\s+gani)\b[^?]{0,50}\b(?:exempt|egitasasulwako|ebisonyiyiddwa|zisizotozwa|not\s+taxable)\b", text, re.IGNORECASE):
+                    continue
+                if re.search(r"\b(?:exempt|egitasasulwako|ebisonyiyiddwa|zisizotozwa)\b[^?]{0,50}\b(?:supplies|services|goods|items|emirimu|ebintu|bidhaa)\b", text, re.IGNORECASE):
+                    continue
             return plan
     if _PAYE_THRESHOLD_ASK_RE.search(text):
         return RatePlan(summary="paye")
@@ -1564,6 +1582,11 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "- **Zero-Rated Supplies (0% VAT)**: Tax is charged at 0% (e.g. exports of goods, international transport), and the supplier **is entitled to claim a full refund of input tax (input VAT)** incurred.\n"
             "- **Exempt Supplies**: No VAT is charged (e.g. unprocessed agricultural produce, financial services), and the supplier **cannot claim or deduct any input VAT** on purchases."
         ),
+        "vat_input_tax_restriction_fuel_telephone": (
+            "**Under Section 28 of the Value Added Tax Act, a VAT-registered business cannot claim an input tax credit on fuel "
+            "or passenger vehicles** unless the business involves dealing in, hiring, or operating commercial transportation. "
+            "Input tax on telephone expenses is claimable only to the extent incurred exclusively for business operations ({fy})."
+        ),
         "solar_equipment_exemption": (
             "**Solar energy equipment (vifaa vya sola na nishati ya jua)** has a tax exemption (msamaha wa ushuru wa forodha na kodi ya VAT) "
             "under the East African Community Customs Management Act ({fy}). Paneli za jua, vigeuzi vya sola, and solar batteries attract 0% duty and 0% VAT."
@@ -1668,7 +1691,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "under Section 16 of the Tax Appeals Tribunal Act and Section 26 of the Tax Procedures Code Act ({fy})."
         ),
         "voluntary_disclosure_programme": (
-            "**Under Section 66 of the Tax Procedures Code Act, the Voluntary Disclosure Programme (VDP) grants a 100% waiver of penal tax, "
+            "**Under Section 66 of the Tax Procedures Code Act, the procedure for the Voluntary Disclosure Programme (VDP / utaratibu wa VDP) grants a 100% waiver of penal tax, "
             "penalty (penalties), and interest** if a taxpayer voluntarily discloses previously undisclosed tax liabilities before a URA audit or investigation begins, "
             "provided the principal tax is paid."
         ),
@@ -1790,8 +1813,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act"
         ),
         "commercial_import_withholding_tax": (
-            "**The commercial import withholding tax (WHT) is {pct}** of the CIF "
-            "value ({fy}) under Section 119 of the Income Tax Act. Taxpayers with a valid WHT exemption certificate are exempt."
+            "**The commercial import withholding tax (WHT) is {pct} (6%) of the customs CIF value** ({fy}) under Section 119 "
+            "of the Income Tax Act. It is due on commercial imports unless the importer holds a valid WHT exemption certificate."
         ),
         "excise_duty_telecom_data": (
             "**The excise duty rate on telecommunication data/internet services is {pct}** ({fy}) "
@@ -1831,6 +1854,8 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             rate = rates.get("paye_due_date_monthly", 15)
         elif plan.tax_type == "passenger_baggage_allowance":
             rate = rates.get("passenger_baggage_allowance_usd", 500)
+        elif plan.tax_type == "commercial_import_withholding_tax":
+            rate = rates.get("customs_import_wht", 0.06)
         elif plan.tax_type in (
             "excise_duty_fuel_summary",
             "voluntary_disclosure_programme",
@@ -1849,6 +1874,7 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "vat_international_transport_zero_rating",
             "vat_mixed_supplies_apportionment",
             "vat_zero_rated_vs_exempt",
+            "vat_input_tax_restriction_fuel_telephone",
             "solar_equipment_exemption",
             "customs_transit_goods_security",
             "customs_diplomatic_exemption",
