@@ -799,13 +799,25 @@ def rewrite_with_history(
             return "calculate PAYE for a resident"
 
     # 3. Multi-turn pronoun / coreference resolution
+    # Anaphoric verb infix resolution (e.g. okukifuna / okugifuna -> okufuna [subject])
+    anaphoric_verb_m = re.search(r"\b(?:oku|ku)(?:ki|gi|bi|ga)(funa|kwata|kola)\b", q, re.IGNORECASE)
+    if anaphoric_verb_m and entities.active_subject:
+        sub = _ABBREVIATIONS.get(entities.active_subject.lower(), entities.active_subject)
+        q = q.replace(anaphoric_verb_m.group(0), f"okufuna {sub}")
+
+    # History amount reference (e.g. "omuwendo gwe nkulaze waggulu", "kiasi nilichotaja hapo juu")
+    if re.search(r"\b(?:omuwendo\b.*\bwaggulu|kiasi\b.*\bhapo\s+juu|the\s+amount\b.*\babove)\b", q, re.IGNORECASE) and entities.amounts:
+        last_amt = entities.amounts[-1]
+        q = f"{q} (annual turnover: {last_amt})"
+
     # Negative lookahead ensures demonstrative determiners before nouns ("this year",
     # "this month", "that period", "if this is my first time") are not treated as referent pronouns.
     determiner_lookahead = (
         r"(?!\s+(?:year|month|week|day|time|period|date|case|turnover|income|figure|number|amount|slip|form|stage|step|office|branch|category|is\s+(?:my|our|the)\s+first))"
     )
     pronoun_pattern = re.compile(
-        rf"\b(it|they|them|the above|the same|(?:this|that|those|these){determiner_lookahead}|its|their)\b",
+        rf"\b(it|they|them|the above|the same|(?:this|that|those|these){determiner_lookahead}|its|their"
+        r"|kye|kyo|ebyo|kino|ekyo|ogwo|eyo|hicho|hiyo|hizo|chake|yake|zao|kodi\s+hiyo|msamaha\s+huo)\b",
         re.IGNORECASE,
     )
 

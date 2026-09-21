@@ -350,11 +350,14 @@ _FOREIGN_JURISDICTION_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     for name, pattern in _FOREIGN_JURISDICTIONS
 )
 
-_UGANDA_RE = re.compile(r"\bugandan?\b|\bura\b|\bkampala\b", re.IGNORECASE)
+_UGANDA_RE = re.compile(
+    r"\bugandan?\b|\bura\b|\bkampala\b|\bennttebe\b|\bentebbe\b|\bbusia\b|\bmalaba\b|\bjinja\b|\bmbale\b|\bmbarara\b|\bgulu\b|\bmasaka\b|\bmutukula\b|\bkatuna\b|\belegu\b",
+    re.IGNORECASE,
+)
 
 
 _EXPORT_TO_FOREIGN_RE = re.compile(
-    r"\b(?:export(?:s|ing|ed)?|import(?:s|ing|ed)?)\b.*?\b(?:to|from)\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|china|japan|uae|dubai|india|uk|usa|us)\b",
+    r"\b(?:\w*export\w*|\w*import\w*|\w*agiza\w*|\w*safirisha\w*|\w*ingiza\w*|\w*fulumya\w*)\b.*?\b(?:to|from|kutoka|okuva(?:\s+mu)?)\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|china|japan|uae|dubai|india|uk|usa|us)\b",
     re.IGNORECASE,
 )
 _PURE_FOREIGN_TAX_RE = re.compile(

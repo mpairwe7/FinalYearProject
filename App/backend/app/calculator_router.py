@@ -232,7 +232,10 @@ _NO_VAT_RE = re.compile(r"\b(without|excluding|no|minus)\s+vat\b", re.IGNORECASE
 _DUTY_KW_RE = re.compile(r"\bduty\b", re.IGNORECASE)
 
 _VAT_WORD_RE = re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)
-_REGISTER_WORD_RE = re.compile(r"\bregister(?:ed|ing|ation)?\b", re.IGNORECASE)
+_REGISTER_WORD_RE = re.compile(
+    r"\b(?:register(?:ed|ing|ation)?|usajili|kujisajili|jisajili|okwewandiisa|kwewandiisa|gunteeka|nteekwa|nilazimika)\b",
+    re.IGNORECASE,
+)
 # Obligation cues that make "…register for VAT" a question about *this*
 # taxpayer rather than about the rule.  "What is the VAT registration
 # threshold?" carries none of them and is answered as a rate question.
@@ -421,8 +424,9 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         if turnover_amounts or _OBLIGATION_RE.search(text):
             params: dict[str, object] = {}
             missing: list[str] = []
-            if len(turnover_amounts) == 1:
-                params["annual_turnover"] = turnover_amounts[0][0]
+            unique_turnover = list(dict.fromkeys(val for val, *_ in turnover_amounts))
+            if len(unique_turnover) == 1:
+                params["annual_turnover"] = unique_turnover[0]
             else:
                 missing.append("annual_turnover")
             return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])

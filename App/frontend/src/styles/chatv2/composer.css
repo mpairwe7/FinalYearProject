@@ -29,11 +29,12 @@
 }
 
 .chatv2 .cmpv2 .input {
+  box-sizing: border-box;
   width: 100%;
   flex: none;
-  min-height: 24px;
+  min-height: 44px;
   max-height: 200px;
-  padding: 13px 16px 4px;
+  padding: 11px 16px 4px;
   font-size: 15px;
   line-height: 1.5;
   color: var(--text-0);

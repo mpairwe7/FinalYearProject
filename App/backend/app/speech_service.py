@@ -1087,15 +1087,36 @@ class SpeechModel:
         token_id = SALT_LANGUAGE_TOKEN_IDS.get(language or "")
         forced_language = processor.tokenizer.decode([token_id]) if token_id is not None else None
 
+        # Domain prompt conditioning to anchor Whisper onto official URA tax acronyms and terms
+        prompt_text = (
+            "URA, EFRIS, VAT, TIN, PAYE, customs duty, withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."
+            if (language or "en") == "en"
+            else (
+                "URA, EFRIS, VAT, TIN, PAYE, omusolo, omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."
+                if language == "lg"
+                else "URA, EFRIS, VAT, TIN, PAYE, kodi, ushuru, forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."
+            )
+        )
+        prompt_ids = None
+        if hasattr(processor, "get_prompt_ids"):
+            try:
+                prompt_ids = processor.get_prompt_ids(prompt_text, return_tensors="pt").to(model.device)
+            except Exception:
+                prompt_ids = None
+
+        gen_kwargs: dict[str, Any] = {"max_new_tokens": 225}
+        if forced_language is not None:
+            gen_kwargs["language"] = forced_language
+        if prompt_ids is not None:
+            gen_kwargs["prompt_ids"] = prompt_ids
+
         # See the matching comment on _transcribe_whisper_peft: this is
         # Whisper ASR fed a mel spectrogram (input_features), not user text —
         # there is no prompt for LLM01 to inject into. The transcript IS
         # guarded downstream, at service.generate()'s InputGuard.check(message).
         with torch.no_grad():
             # nosemgrep: ura-llm01-raw-user-input-to-llm
-            predicted_ids = model.generate(
-                input_features, language=forced_language, forced_decoder_ids=None, max_new_tokens=225,
-            )
+            predicted_ids = model.generate(input_features, **gen_kwargs)
         text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
 
         latency = time.perf_counter() - t0
@@ -1154,7 +1175,10 @@ class SpeechModel:
                         )
             whisper_lang = {"lg": None, "en": "en"}.get(language or "en", language)
             segments, info = self._faster_whisper.transcribe(
-                tmp_path, language=whisper_lang, beam_size=3,
+                tmp_path,
+                language=whisper_lang,
+                beam_size=3,
+                initial_prompt="URA, EFRIS, VAT, TIN, PAYE, customs duty, withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority.",
             )
             text = " ".join(seg.text.strip() for seg in segments)
             latency = time.perf_counter() - t0
@@ -1774,10 +1798,26 @@ class SpeechModel:
             return self._pcm_bytes_to_float(audio_bytes)
 
     def _decode_container(self, audio_bytes: bytes, target_sr: int = 16000):
-        """Decode WebM/OGG/MP3 via ffmpeg or pydub, falling back to raw PCM."""
+        """Decode WebM/OGG/MP3 via soundfile, ffmpeg or pydub, falling back to raw PCM."""
         import numpy as np
 
-        # Try ffmpeg (subprocess — most reliable for WebM/Opus)
+        # 1. Try soundfile (libsndfile — native in Python, supports MP3, OGG, WAV, FLAC without external binaries)
+        try:
+            import io
+            import soundfile as sf
+            data, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            if sr != target_sr:
+                from scipy import signal
+                num_target_samples = int(len(data) * target_sr / sr)
+                data = signal.resample(data, num_target_samples).astype(np.float32)
+            if len(data) > 0:
+                return data
+        except Exception:
+            pass
+
+        # 2. Try ffmpeg (subprocess — for WebM/Opus when ffmpeg is available)
         try:
             import subprocess
             import tempfile

@@ -211,7 +211,9 @@ _WORKFLOW_FREE_TEXT_VALIDATORS = {"", "text"}
 #: with the validator rather than diverting it.
 _WORKFLOW_NEW_QUESTION_RE = re.compile(
     r"^\s*(?:what|when|where|why|how|which|who|can|could|do|does|did|is|are|"
-    r"should|must|will|would|give|tell|explain|show|provide|list|i\s+(?:need|want|wish)|help\s+with)\b",
+    r"should|must|will|would|give|tell|explain|show|provide|list|i\s+(?:need|want|wish)|help\s+with|"
+    r"je|ni\s+nini|lini|wapi|kwanini|vipi|mbona|ninawezaje|tunawezaje|tafadhali|naomba|nipe|eleza|ongeza|si\s+ulisema|"
+    r"kiki|ani|ddi|wa|lwaki|otya|nnyinza|tusobola|nsobola|bwe\s+mba|nsaba|mwattu|bambi|mpaayo|wandiika|laga)\b",
     re.IGNORECASE,
 )
 #: Minimum words before a trailing "?" is read as a question rather than an
@@ -6219,6 +6221,9 @@ class ChatModel:
             if step.validator and step.validator.startswith("enum[") and len(user_input.split()) >= 4:
                 is_valid, _, _ = validate_slot(user_input, step.validator, None)
                 if not is_valid:
+                    return True
+            if step.validator and any(v in step.validator.lower() for v in ("amount", "money", "number", "ugx")) and len(user_input.split()) >= 3:
+                if not has_money_amount(user_input):
                     return True
             return False
         if step.validator.strip() in _WORKFLOW_FREE_TEXT_VALIDATORS:

@@ -133,7 +133,8 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
     active_subject = ""
 
     amount_re = re.compile(
-        r"\b(?:ugx|ug\s?shs?|shs)?\s*(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:m|k|bn|million|thousand|billion))\b",
+        r"\b(?:ugx|ug\s?shs?|shs|bukadde|emitwalo|milioni|shilingi)?\s*(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:m|k|bn|million|thousand|billion|bukadde|mitwalo))\b"
+        r"|\b(?:bukadde|emitwalo|milioni|shilingi)\s+\d+(?:,\d{3})*(?:\.\d+)?\b",
         re.I,
     )
     ref_re = re.compile(

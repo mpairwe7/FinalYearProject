@@ -306,6 +306,7 @@ a:hover { color: var(--ura-teal-light); }
    -------------------------------------------------------------------------- */
 main {
   position: relative;
+  max-width: 100%;
 }
 
 /* Legacy card-based layout (analytics pages) */
