@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // (not from the browser).  The rewrite below proxies /api/* to this URL
 // so the browser only ever talks to the frontend origin — no CORS, no
 // hardcoded host:port baked into the client bundle.
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL || "http://127.0.0.1:8887";
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL || "http://ura-app-api:8000";
 const isDev = process.env.NODE_ENV !== "production";
 
 // Origin of the OIDC provider, if one is configured.
