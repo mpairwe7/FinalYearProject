@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { TicketQueueItem } from "../../services/analyticsApi";
-import { ticketRef, topicLabel, waitingFor, waitTone } from "../../lib/ticketUi";
+import { isRecentTicket, ticketRef, topicLabel, waitingFor, waitTone } from "../../lib/ticketUi";
 import "./staffTickets.css";
 
 /**
@@ -20,12 +20,13 @@ export function QueueRow({
   const tone = waitTone(ticket.created_at, ticket.first_response_at, ticket.reply_at);
   const waitClass = tone === "ok" ? "" : ` is-${tone}`;
   const ref = ticketRef(ticket.id);
+  const isRecent = isRecentTicket(ticket.created_at);
 
   return (
     <div
       role="button"
       tabIndex={0}
-      className={`st-row${selected ? " is-selected" : ""}`}
+      className={`st-row${selected ? " is-selected" : ""}${isRecent ? " is-recent-escalation" : ""}`}
       onClick={() => onSelect(ticket.id)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -36,7 +37,10 @@ export function QueueRow({
       aria-pressed={selected}
     >
       <div className="st-row-badge-col">
-        <span className={`st-pri st-pri-${ticket.priority}`}>{ticket.priority}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span className={`st-pri st-pri-${ticket.priority}`}>{ticket.priority}</span>
+          {isRecent ? <span className="st-new-badge">✨ NEW</span> : null}
+        </div>
         <button
           type="button"
           className="st-ref-pill"

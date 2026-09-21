@@ -1015,7 +1015,7 @@ def list_tickets(
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
         "   WHEN 'normal' THEN 2 ELSE 3 END,"
-        " created_at ASC LIMIT %s OFFSET %s"
+        " created_at DESC LIMIT %s OFFSET %s"
     )
     params.extend([limit, offset])
     with pool.connection() as conn, conn.cursor() as cur:

@@ -50,6 +50,10 @@ export function waitingSeconds(createdAt: number, now = Date.now()): number {
   return Math.max(0, now / 1000 - createdAt);
 }
 
+export function isRecentTicket(createdAt: number, maxAgeSeconds = 1800): boolean {
+  return waitingSeconds(createdAt) < maxAgeSeconds;
+}
+
 export function waitingFor(createdAt: number, now = Date.now()): string {
   const seconds = waitingSeconds(createdAt, now);
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
@@ -123,7 +127,7 @@ export function sortQueue(tickets: TicketQueueItem[]): TicketQueueItem[] {
   return [...tickets].sort(
     (a, b) =>
       (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) ||
-      a.created_at - b.created_at,
+      b.created_at - a.created_at,
   );
 }
 

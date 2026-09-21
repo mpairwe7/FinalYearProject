@@ -144,6 +144,15 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
               <strong>{awaiting}</strong> awaiting first reply
             </span>
           ) : null}
+          <button
+            type="button"
+            className="ops-btn is-ghost is-sm"
+            onClick={() => refetch()}
+            title="Refresh queue"
+            aria-label="Refresh queue"
+          >
+            🔄 Refresh
+          </button>
         </div>
       }
     >

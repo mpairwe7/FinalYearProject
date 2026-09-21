@@ -43,6 +43,7 @@ import {
   PRIORITIES,
   QUEUE_STATUSES,
   STATUS_LABEL,
+  sortQueue,
   ticketMatchesQuery,
   useQueueHotkeys,
   useQueueView,
@@ -61,7 +62,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
   const update = useUpdateTicket();
 
   const tickets = useMemo(() => {
-    const rows = queue?.tickets ?? [];
+    const rows = sortQueue(queue?.tickets ?? []);
     return rows.filter((ticket) => ticketMatchesQuery(ticket, view.q));
   }, [queue, view.q]);
 
@@ -254,6 +255,15 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
             </>
           )}
         </span>
+        <button
+          type="button"
+          className="ops-btn is-ghost is-sm tickets-refresh-btn"
+          onClick={() => refetch()}
+          title="Refresh ticket queue"
+          aria-label="Refresh ticket queue"
+        >
+          🔄 Refresh
+        </button>
         {narrowed ? (
           <button
             type="button"

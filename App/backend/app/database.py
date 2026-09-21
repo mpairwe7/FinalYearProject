@@ -1515,7 +1515,7 @@ def list_tickets(
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
         "   WHEN 'normal' THEN 2 ELSE 3 END,"
-        " created_at ASC LIMIT ? OFFSET ?"
+        " created_at DESC LIMIT ? OFFSET ?"
     )
     params.extend([limit, offset])
     rows = conn.execute(sql, params).fetchall()

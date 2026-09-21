@@ -60,9 +60,9 @@ export function useTicketQueueFull(
   return useQuery({
     queryKey: queryKeys.tickets.queueFull(status, priority, team, limit),
     queryFn: () => analyticsApi.tickets(status, limit, priority, team),
-    staleTime: 10_000,
+    staleTime: 3_000,
     gcTime: 5 * 60_000,
-    refetchInterval: 20_000,
+    refetchInterval: 5_000,
     retry: 1,
   });
 }
@@ -73,8 +73,8 @@ export function useTicket(id: string | null) {
     queryKey: queryKeys.tickets.detail(id || ""),
     queryFn: () => analyticsApi.ticket(id as string),
     enabled: Boolean(id),
-    staleTime: 5_000,
-    refetchInterval: 10_000,
+    staleTime: 2_000,
+    refetchInterval: 5_000,
     retry: 1,
   });
 }

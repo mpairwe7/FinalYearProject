@@ -59,6 +59,35 @@
   border-color: var(--ops-line-strong);
 }
 
+.st-row.is-recent-escalation {
+  background: rgba(16, 185, 129, 0.05);
+  border-left: 3px solid #10b981;
+}
+
+.st-new-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.35);
+  animation: st-pulse-glow 2.5s infinite ease-in-out;
+}
+
+@keyframes st-pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(16, 185, 129, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.7);
+  }
+}
+
 .st-row:focus-visible,
 .st-chip:focus-visible,
 .st-field textarea:focus-visible,
