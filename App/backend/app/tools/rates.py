@@ -125,18 +125,23 @@ def _authority_payload() -> tuple[bool, dict[str, Any]]:
 
 def _scalar_row(key: str, value: float) -> dict[str, Any]:
     """One rate/threshold as an output row, formatted for what it is."""
+    val = float(value)
+    is_amount = key in _AMOUNT_KEYS or val > 1.0
     row: dict[str, Any] = {
         "tax_type": key,
         "display_name": display_name(key),
-        "value": float(value),
-        "kind": "amount" if key in _AMOUNT_KEYS else "rate",
+        "value": val,
+        "kind": "amount" if is_amount else "rate",
     }
-    if key in _AMOUNT_KEYS:
-        row["formatted"] = f"UGX {float(value):,.0f}"
+    if is_amount:
+        if key.endswith("_days") or key.endswith("_hours") or key.endswith("_hierarchy"):
+            row["formatted"] = f"{val:,.0f}"
+        else:
+            row["formatted"] = f"UGX {val:,.0f}"
     else:
-        row["rate"] = float(value)
-        row["rate_pct"] = round(float(value) * 100, 2)
-        row["formatted"] = f"{float(value) * 100:g}%"
+        row["rate"] = val
+        row["rate_pct"] = round(val * 100, 2)
+        row["formatted"] = f"{val * 100:g}%"
     return row
 
 
