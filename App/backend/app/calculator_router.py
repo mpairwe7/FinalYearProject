@@ -1393,7 +1393,7 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     text = (message or "").strip()
     if not text or extract_amounts(text):
         return None
-    if re.search(r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison|allowances?)\b", text, re.IGNORECASE):
+    if re.search(r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison|allowances?|customs\s+valuation|valuation\s+method)\b", text, re.IGNORECASE):
         return None
     short_ask = len(text.split()) <= 8 and re.search(
         r"\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?)\b", text, re.IGNORECASE

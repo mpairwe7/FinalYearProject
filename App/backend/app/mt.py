@@ -306,13 +306,7 @@ def figures_survived(source: str, translated: str, locale: str | None = None) ->
     source_figures = figures(source, locale="en")
     trans_figures = figures(translated, locale=locale)
     if not source_figures:
-        # Non-monetary counts, dates, and years in translation do not contradict a source with no figures.
-        # Reject only if an actual tax money amount (>= 10,000) or tax percentage was invented.
-        invented = {
-            f for f in trans_figures
-            if (f >= 10000.0 and not (1900 <= f <= 2099))
-        } | {float(p) for p in percentages(translated)}
-        return not invented
+        return not trans_figures
     if trans_figures == source_figures:
         return True
 

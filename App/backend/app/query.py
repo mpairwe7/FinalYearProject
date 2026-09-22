@@ -518,12 +518,12 @@ _COMMON_ENGLISH_WORDS: frozenset[str] = frozenset({
     "much", "many", "more", "most", "some", "any", "no", "not", "all", "both", "half", "each", "every", "other", "another",
     "want", "need", "like", "know", "tell", "give", "take", "make", "get", "find", "check", "help",
     "pay", "paid", "paying", "rate", "rates", "year", "years", "month", "months", "day", "days", "date", "dates", "time", "times",
-    "good", "well", "great", "please", "thanks", "thank",
+    "good", "well", "great", "please", "thanks", "thank", "bye", "goodbye",
 })
 
 _LUGANDA_WORDS: frozenset[str] = frozenset({
     "omusolo", "buli", "okufuna", "ebitundu", "ssente", "alipoota", "abakozi",
-    "waggulu", "basasula", "bwe", "era", "kye", "bye", "kampuni", "emisolo",
+    "waggulu", "basasula", "bwe", "era", "kye", "kampuni", "emisolo",
     "okwewandiisa", "okuwandiisa", "nkola", "ntya", "wandiisa", "musanyufu", "ebisaanyizo", "enkola", "omusaala", "abakozesa", "ekitongole",
     "gyebaleko", "webale", "yee", "nedda", "nsaba", "sente", "gwa", "bbeeyi", "guli",
     "emmotoka", "pikipiki", "eppikipiki", "obwannannyini", "okukyusa", "obutonde",

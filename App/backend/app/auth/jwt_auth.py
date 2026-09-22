@@ -299,11 +299,12 @@ class JWTVerifier:
         header, _, _, _ = _decode_unverified(token)
         token_alg = (header.get("alg") or "").upper()
 
-        if token_alg == "RS256":
+        if token_alg != self.alg:
+            raise JWTAuthError(f"unexpected alg: {token_alg}")
+
+        if self.alg == "RS256":
             claims = self._rs256_verify(token)
-        elif token_alg == "HS256" and self.dev_secret and (os.getenv("APP_ENV") or "").lower() != "production":
-            claims = _hs256_verify(token, self.dev_secret)
-        elif self.alg == "HS256" and token_alg == "HS256":
+        elif self.alg == "HS256" and self.dev_secret:
             claims = _hs256_verify(token, self.dev_secret)
         else:
             raise JWTAuthError(f"unexpected alg: {token_alg}")
